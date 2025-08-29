@@ -1,0 +1,5 @@
+protobuf
+pillow
+google
+google.genai
+PySide6
