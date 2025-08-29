@@ -6,6 +6,8 @@
 
 Welcome! LelandGreenGenAI is a simple desktop app and CLI to generate images and text using Google’s Gemini API. It stores your API key securely in your per‑user configuration directory and works on Windows, macOS, and Linux.
 
+Note: Google Nano Banana is Gemini
+
 ![LelandGreenGenAI Screenshot](screenshot.png)
 
 This guide covers:
@@ -20,6 +22,7 @@ This guide covers:
 ## 1) Requirements
 - A Google account.
 - A Gemini API key (see below).
+- You *may* be able to use Gemini
 - Python 3.9+ recommended.
 - Internet access.
 

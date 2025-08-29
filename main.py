@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 from typing import Optional, Tuple
 import webbrowser
+from datetime import datetime
 
 from google import genai
 from google.genai import types
@@ -33,6 +34,7 @@ try:
         QListWidget,
         QListWidgetItem,
         QFormLayout,
+        QSizePolicy,
     )
 except Exception:
     # If PySide6 isn't installed yet, CLI will still work.
@@ -192,6 +194,43 @@ def generate_any(client: genai.Client, model: str, prompt: str):
     return texts, images
 
 
+def images_output_dir() -> Path:
+    """Directory where generated images are auto-saved."""
+    d = user_config_dir() / "generated"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def detect_image_extension(data: bytes) -> str:
+    """Guess file extension from image bytes. Defaults to .png."""
+    try:
+        if data.startswith(b"\x89PNG\r\n\x1a\n"):
+            return ".png"
+        if data.startswith(b"\xff\xd8"):
+            return ".jpg"
+        if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+            return ".gif"
+        if data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
+            return ".webp"
+    except Exception:
+        pass
+    return ".png"
+
+
+def auto_save_images(images: list, base_stub: str = "gen") -> list:
+    """Auto-save all images to the images_output_dir(). Returns list of absolute Paths."""
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = images_output_dir()
+    saved = []
+    for idx, data in enumerate(images, start=1):
+        ext = detect_image_extension(data if isinstance(data, (bytes, bytearray)) else bytes(data))
+        name = f"{base_stub}_{ts}_{idx}{ext}"
+        p = out_dir / name
+        p.write_bytes(data)
+        saved.append(p.resolve())
+    return saved
+
+
 # ---------------------------
 # CLI
 # ---------------------------
@@ -245,11 +284,24 @@ def run_cli(args) -> int:
             # Print texts
             for t in texts:
                 print(t)
-            # Save first image if requested
+            # Auto-save images
             if images:
-                out = args.out or str(Path.cwd() / "generated_image.png")
-                Path(out).write_bytes(images[0])
-                print(f"Saved image to {out}")
+                if args.out:
+                    first_out = Path(args.out).expanduser().resolve()
+                    first_out.parent.mkdir(parents=True, exist_ok=True)
+                    first_out.write_bytes(images[0])
+                    print(f"Saved image to {first_out}")
+                    # Save remaining images alongside the first with numbered suffixes
+                    stem = first_out.stem
+                    for i, data in enumerate(images[1:], start=2):
+                        ext2 = first_out.suffix if first_out.suffix else detect_image_extension(data)
+                        p = first_out.with_name(f"{stem}_{i}{ext2}")
+                        p.write_bytes(data)
+                        print(f"Saved image to {p}")
+                else:
+                    saved_paths = auto_save_images(images, base_stub="cli")
+                    for p in saved_paths:
+                        print(f"Saved image to {p}")
             return 0
         except Exception as e:
             print(f"Generation failed: {e}")
@@ -365,6 +417,16 @@ class MainWindow(QMainWindow):
             "Describe what to generate... (image or text)."
         )
         self.prompt_edit.setAcceptRichText(False)
+        # Make the prompt area visually about 3 lines tall and fixed vertically
+        try:
+            fm = self.prompt_edit.fontMetrics()
+            line_h = fm.lineSpacing() if fm else 18
+            self.prompt_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.prompt_edit.setFixedHeight(int(line_h * 3 + 12))
+            # Allow scrolling if user types more than 3 lines
+            self.prompt_edit.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        except Exception:
+            pass
         form.addRow("Prompt:", self.prompt_edit)
 
         v.addLayout(form)
@@ -382,10 +444,23 @@ class MainWindow(QMainWindow):
         self.output_image_label = QLabel()
         self.output_image_label.setAlignment(Qt.AlignCenter)
         self.output_image_label.setMinimumHeight(300)
+        # Allow the image label to expand and fill available space
+        self.output_image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
+        # Make the output text area visually about 3 lines tall and fixed vertically
+        try:
+            fm2 = self.output_text.fontMetrics()
+            line_h2 = fm2.lineSpacing() if fm2 else 18
+            self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            self.output_text.setFixedHeight(int(line_h2 * 3 + 12))
+            self.output_text.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        except Exception:
+            pass
 
-        v.addWidget(self.output_image_label)
+        # Give the image area dominant space in the layout
+        v.addWidget(self.output_image_label, 10)
         v.addWidget(QLabel("Output Text:"))
         v.addWidget(self.output_text)
 
@@ -458,6 +533,20 @@ class MainWindow(QMainWindow):
     def _init_help(self):
         v = QVBoxLayout(self.tab_help)
         self.help_browser = QTextBrowser()
+        # Make help text larger and improve image layout
+        try:
+            # Increase base font size for the help viewer
+            self.help_browser.setStyleSheet("QTextBrowser { font-size: 13pt; }")
+            # Center images and add spacing; also bump heading sizes
+            doc = self.help_browser.document()
+            doc.setDefaultStyleSheet(
+                "body { font-size: 13pt; line-height: 1.4; }\n"
+                "h1 { font-size: 20pt; }\n"
+                "h2 { font-size: 16pt; }\n"
+                "img { display: block; margin: 12px auto; max-width: 100%; height: auto; }\n"
+            )
+        except Exception:
+            pass
         md = read_readme_text()
         try:
             self.help_browser.setMarkdown(md)
@@ -511,9 +600,35 @@ class MainWindow(QMainWindow):
             self.status_label.setText("Error")
             QMessageBox.critical(self, APP_NAME, error)
             return
-        # Display text
-        if texts:
-            self.output_text.setPlainText("\n\n".join(texts))
+        # Auto-save any images
+        saved_paths = []
+        if images:
+            try:
+                saved_paths = auto_save_images(images, base_stub="img")
+            except Exception as e:
+                # Saving failed; we still show the image and indicate error
+                saved_paths = []
+                QMessageBox.warning(self, APP_NAME, f"Auto-save failed: {e}")
+        # Prepare output text with absolute filename on second line when image exists
+        if images:
+            lines = []
+            first_line = (texts[0].strip() if texts else "Done (image generated)").strip()
+            lines.append(first_line)
+            if saved_paths:
+                lines.append(str(saved_paths[0]))  # absolute path on second line
+            # Optional third line info
+            if len(saved_paths) > 1:
+                lines.append(f"Saved {len(saved_paths)} images to {images_output_dir()}")
+            elif not saved_paths:
+                lines.append("(Auto-save failed)")
+            # Set output text (limit to up to 3 lines to keep UI compact)
+            self.output_text.setPlainText("\n".join(lines[:3]))
+        else:
+            # No images: retain original behavior of showing all texts
+            if texts:
+                self.output_text.setPlainText("\n\n".join(texts))
+            else:
+                self.output_text.setPlainText("Done")
         # Display first image
         self.last_image_bytes = None
         if images:
