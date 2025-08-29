@@ -11,12 +11,13 @@ from datetime import datetime
 from google import genai
 from google.genai import types
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
+PROVIDER_NAME = "google"
 
 # UI imports are optional until --gui is requested
 try:
     from PySide6.QtCore import Qt, QThread, Signal, QObject
-    from PySide6.QtGui import QPixmap, QAction
+    from PySide6.QtGui import QPixmap, QAction, QGuiApplication
     from PySide6.QtWidgets import (
         QApplication,
         QMainWindow,
@@ -37,6 +38,7 @@ try:
         QListWidgetItem,
         QFormLayout,
         QSizePolicy,
+        QCheckBox,
     )
 except Exception:
     # If PySide6 isn't installed yet, CLI will still work.
@@ -203,6 +205,21 @@ def images_output_dir() -> Path:
     return d
 
 
+def sidecar_path(image_path: Path) -> Path:
+    """Return the path of the JSON sidecar for a given image path."""
+    return image_path.with_suffix(image_path.suffix + ".json")
+
+
+def write_image_sidecar(image_path: Path, meta: dict) -> None:
+    """Write human-readable JSON beside the image. Avoid secrets, use indent=2."""
+    try:
+        p = sidecar_path(image_path)
+        # Ensure only simple types are stored
+        p.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
 def detect_image_extension(data: bytes) -> str:
     """Guess file extension from image bytes. Defaults to .png."""
     try:
@@ -219,6 +236,37 @@ def detect_image_extension(data: bytes) -> str:
     return ".png"
 
 
+def sanitize_stub_from_prompt(prompt: str, max_len: int = 60) -> str:
+    """Create a safe filename stub from the prompt. Collapses whitespace, removes unsafe chars,
+    limits length, and falls back to 'gen' if empty."""
+    try:
+        s = (prompt or "").strip()
+        # use only first line to avoid huge names
+        s = s.splitlines()[0] if s else ""
+        # Replace separators with spaces, keep alnum, space, dash, underscore
+        allowed = []
+        for ch in s:
+            if ch.isalnum() or ch in (" ", "-", "_"):
+                allowed.append(ch)
+            else:
+                # convert other separators to space
+                allowed.append(" ")
+        s = "".join(allowed)
+        # collapse whitespace to single underscore
+        s = "_".join([t for t in s.strip().split() if t])
+        if not s:
+            s = "gen"
+        # trim length
+        if len(s) > max_len:
+            s = s[:max_len].rstrip("_-")
+        # Ensure doesn't start with dot to avoid hidden files on some OS
+        if s.startswith("."):
+            s = s.lstrip(".") or "gen"
+        return s
+    except Exception:
+        return "gen"
+
+
 def auto_save_images(images: list, base_stub: str = "gen") -> list:
     """Auto-save all images to the images_output_dir(). Returns list of absolute Paths."""
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -231,6 +279,52 @@ def auto_save_images(images: list, base_stub: str = "gen") -> list:
         p.write_bytes(data)
         saved.append(p.resolve())
     return saved
+
+
+def read_image_sidecar(image_path: Path) -> Optional[dict]:
+    try:
+        sp = sidecar_path(image_path)
+        if sp.exists():
+            return json.loads(sp.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return None
+
+
+def scan_disk_history(max_items: int = 500) -> list[Path]:
+    """Scan generated dir for images and return sorted list by mtime desc."""
+    try:
+        out_dir = images_output_dir()
+        exts = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+        items = [p for p in out_dir.iterdir() if p.is_file() and p.suffix.lower() in exts]
+        items.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return items[:max_items]
+    except Exception:
+        return []
+
+
+def find_cached_demo(prompt: str) -> Optional[Path]:
+    """If prompt is one of the examples and a sidecar matches prompt+provider, return newest image path."""
+    try:
+        if prompt not in getattr(ExamplesDialog, "EXAMPLES", []):
+            return None
+        matches: list[tuple[float, Path]] = []
+        for img in scan_disk_history(1000):
+            meta = read_image_sidecar(img)
+            if not meta:
+                continue
+            if meta.get("prompt") == prompt and meta.get("provider") == PROVIDER_NAME:
+                try:
+                    mtime = img.stat().st_mtime
+                except Exception:
+                    mtime = 0.0
+                matches.append((mtime, img))
+        if matches:
+            matches.sort(key=lambda t: t[0], reverse=True)
+            return matches[0][1]
+    except Exception:
+        return None
+    return None
 
 
 # ---------------------------
@@ -301,7 +395,8 @@ def run_cli(args) -> int:
                         p.write_bytes(data)
                         print(f"Saved image to {p}")
                 else:
-                    saved_paths = auto_save_images(images, base_stub="cli")
+                    stub = sanitize_stub_from_prompt(args.prompt)
+                    saved_paths = auto_save_images(images, base_stub=stub)
                     for p in saved_paths:
                         print(f"Saved image to {p}")
             return 0
@@ -387,12 +482,43 @@ class MainWindow(QMainWindow):
         self.tab_generate = QWidget()
         self.tab_settings = QWidget()
         self.tab_help = QWidget()
+        self.tab_history = QWidget()
         self.tabs.addTab(self.tab_generate, "Generate")
         self.tabs.addTab(self.tab_settings, "Settings")
+        # Insert History before Help
         self.tabs.addTab(self.tab_help, "Help")
+
+        # Session state
+        self.history_paths: list[Path] = scan_disk_history()
+        self.current_prompt: str = ""
+        self.current_model: str = DEFAULT_MODEL
+        try:
+            cfg = load_config()
+            self.auto_copy_filename: bool = bool(cfg.get("auto_copy_filename", False))
+            # Restore window geometry if present
+            try:
+                geo = cfg.get("window_geometry") if isinstance(cfg, dict) else None
+                if isinstance(geo, dict):
+                    x = int(geo.get("x", self.x()))
+                    y = int(geo.get("y", self.y()))
+                    w = int(geo.get("w", self.width()))
+                    h = int(geo.get("h", self.height()))
+                    self.move(x, y)
+                    self.resize(w, h)
+            except Exception:
+                pass
+        except Exception:
+            self.auto_copy_filename = False
 
         self._init_generate()
         self._init_settings()
+        self._init_history()
+        # Place History before Help
+        idx_help = self.tabs.indexOf(self.tab_help)
+        if idx_help != -1:
+            self.tabs.insertTab(idx_help, self.tab_history, "History")
+        else:
+            self.tabs.addTab(self.tab_history, "History")
         self._init_help()
         self._init_menu()
 
@@ -434,7 +560,7 @@ class MainWindow(QMainWindow):
         v.addLayout(form)
         hb = QHBoxLayout()
         self.btn_examples = QPushButton("Examples")
-        self.btn_generate = QPushButton("Generate")
+        self.btn_generate = QPushButton("Regenerate")
         hb.addWidget(self.btn_examples)
         hb.addStretch(1)
         hb.addWidget(self.btn_generate)
@@ -483,6 +609,14 @@ class MainWindow(QMainWindow):
         self.storage_path_label = QLabel(str(config_path()))
         form.addRow("Stored at:", self.storage_path_label)
 
+        # Options
+        self.chk_auto_copy = QCheckBox("Auto copy saved filename to clipboard")
+        try:
+            self.chk_auto_copy.setChecked(bool(self.auto_copy_filename))
+        except Exception:
+            pass
+        form.addRow(self.chk_auto_copy)
+
         v.addLayout(form)
         hb = QHBoxLayout()
         self.btn_browse = QPushButton("Load from file…")
@@ -494,6 +628,7 @@ class MainWindow(QMainWindow):
         hb.addWidget(self.btn_save_test)
         v.addLayout(hb)
 
+        self.chk_auto_copy.toggled.connect(self._toggle_auto_copy)
         self.btn_browse.clicked.connect(self._browse_key)
         self.btn_get_key.clicked.connect(self._open_api_key_page)
         self.btn_save_test.clicked.connect(self._save_and_test)
@@ -501,6 +636,18 @@ class MainWindow(QMainWindow):
         v.addStretch(1)
 
     # -------- settings handlers --------
+
+    def _toggle_auto_copy(self, checked: bool):
+        try:
+            self.auto_copy_filename = bool(checked)
+            cfg = load_config()
+            if not isinstance(cfg, dict):
+                cfg = {}
+            cfg["auto_copy_filename"] = self.auto_copy_filename
+            save_config(cfg)
+        except Exception:
+            # Silently ignore config save errors
+            pass
 
     def _browse_key(self):
         fn, _ = QFileDialog.getOpenFileName(self, "Select API Key File", str(Path.home()))
@@ -560,6 +707,135 @@ class MainWindow(QMainWindow):
             pass
         v.addWidget(self.help_browser)
 
+    def _init_history(self):
+        v = QVBoxLayout(self.tab_history)
+        # List of files
+        self.list_history = QListWidget()
+        self.list_history.itemSelectionChanged.connect(self._on_history_selection_changed)
+        v.addWidget(QLabel("Generated Images:"))
+        v.addWidget(self.list_history)
+        # Preview area
+        self.history_preview_label = QLabel()
+        self.history_preview_label.setAlignment(Qt.AlignCenter)
+        self.history_preview_label.setMinimumHeight(240)
+        self.history_preview_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        v.addWidget(QLabel("Preview:"))
+        v.addWidget(self.history_preview_label, 10)
+        # Buttons
+        hb = QHBoxLayout()
+        self.btn_history_save = QPushButton("Save As…")
+        self.btn_history_save.clicked.connect(self._history_save_as)
+        hb.addStretch(1)
+        hb.addWidget(self.btn_history_save)
+        v.addLayout(hb)
+        # Populate if any
+        self._refresh_history_list()
+
+    def _refresh_history_list(self):
+        try:
+            self.list_history.clear()
+            for p in self.history_paths:
+                item = QListWidgetItem(os.path.basename(str(p)))
+                # Store full path in item data
+                item.setData(Qt.UserRole, str(p))
+                # Tooltip with full path
+                item.setToolTip(str(p))
+                self.list_history.addItem(item)
+        except Exception:
+            pass
+
+    def _on_history_selection_changed(self):
+        try:
+            items = self.list_history.selectedItems()
+            if not items:
+                self.history_preview_label.clear()
+                return
+            item = items[0]
+            full_path = item.data(Qt.UserRole)
+            if not full_path:
+                self.history_preview_label.clear()
+                return
+            p = Path(full_path)
+            if not p.exists():
+                self.history_preview_label.setText("File not found.")
+                return
+            data = p.read_bytes()
+            # Update History preview
+            pix_hist = QPixmap()
+            if pix_hist.loadFromData(data):
+                self.history_preview_label.setPixmap(pix_hist.scaled(
+                    self.history_preview_label.width(),
+                    self.history_preview_label.height(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                ))
+            else:
+                self.history_preview_label.setText("Preview unavailable.")
+            # Reload into Generate tab: prompt/model and main preview
+            meta = read_image_sidecar(p)
+            if isinstance(meta, dict):
+                pr = meta.get("prompt")
+                if isinstance(pr, str) and pr:
+                    self.prompt_edit.setPlainText(pr)
+                    self.current_prompt = pr
+                mdl = meta.get("model")
+                if isinstance(mdl, str) and mdl:
+                    idx = self.model_combo.findText(mdl)
+                    if idx >= 0:
+                        self.model_combo.setCurrentIndex(idx)
+                    else:
+                        # Ensure model is selectable
+                        self.model_combo.addItem(mdl)
+                        self.model_combo.setCurrentText(mdl)
+                    self.current_model = mdl
+            # Update main preview
+            self.last_image_bytes = data
+            pix_main = QPixmap()
+            if pix_main.loadFromData(data):
+                self.output_image_label.setPixmap(pix_main.scaled(
+                    self.output_image_label.width(),
+                    self.output_image_label.height(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                ))
+            try:
+                self.status_label.setText("Loaded from history")
+            except Exception:
+                pass
+            # Switch to Generate tab for editing/regeneration
+            try:
+                self.tabs.setCurrentWidget(self.tab_generate)
+            except Exception:
+                pass
+        except Exception:
+            self.history_preview_label.setText("Error loading preview.")
+
+    def _history_save_as(self):
+        try:
+            items = self.list_history.selectedItems()
+            if not items:
+                QMessageBox.information(self, APP_NAME, "No history item selected.")
+                return
+            item = items[0]
+            full_path = item.data(Qt.UserRole)
+            if not full_path:
+                QMessageBox.warning(self, APP_NAME, "Missing file path.")
+                return
+            src = Path(full_path)
+            if not src.exists():
+                QMessageBox.warning(self, APP_NAME, "File does not exist on disk.")
+                return
+            # Suggest same name in Save As dialog
+            fn, _ = QFileDialog.getSaveFileName(self, "Save Image As", str(Path.home() / src.name), "Images (*.png *.jpg *.jpeg *.gif *.webp);;All Files (*.*)")
+            if fn:
+                try:
+                    Path(fn).write_bytes(src.read_bytes())
+                    QMessageBox.information(self, APP_NAME, f"Saved: {fn}")
+                except Exception as e:
+                    QMessageBox.critical(self, APP_NAME, f"Save failed: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, APP_NAME, f"Error: {e}")
+
     # -------- generate handlers --------
 
     def _open_examples(self):
@@ -574,12 +850,45 @@ class MainWindow(QMainWindow):
         if not prompt:
             QMessageBox.warning(self, APP_NAME, "Please enter a prompt.")
             return
+        # Remember current prompt for naming and clipboard
+        self.current_prompt = prompt
+        model = self.model_combo.currentText().strip() or DEFAULT_MODEL
+        self.current_model = model
+
+        # Demo cache: if prompt is one of the examples and a cached image exists for this provider, load it
+        cached = find_cached_demo(prompt)
+        if cached and cached.exists():
+            try:
+                data = cached.read_bytes()
+                self.last_image_bytes = data
+                pix = QPixmap()
+                pix.loadFromData(data)
+                self.output_image_label.setPixmap(pix.scaled(
+                    self.output_image_label.width(),
+                    self.output_image_label.height(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
+                ))
+                # Output text: show first line with status and absolute path on second line
+                self.output_text.setPlainText("Loaded cached demo\n" + str(cached.resolve()))
+                self.status_label.setText("Loaded cached demo")
+                # Ensure item is in history list
+                try:
+                    if cached not in self.history_paths:
+                        self.history_paths.insert(0, cached)
+                        self._refresh_history_list()
+                except Exception:
+                    pass
+                return
+            except Exception:
+                # fallback to normal generation if cache load fails
+                pass
+
         api_key = self.current_api_key or self.api_key_edit.text().strip()
         if not api_key:
             QMessageBox.warning(self, APP_NAME, "No API key configured. Go to Settings to save one.")
             self.tabs.setCurrentWidget(self.tab_settings)
             return
-        model = self.model_combo.currentText().strip() or DEFAULT_MODEL
 
         self.btn_generate.setEnabled(False)
         self.status_label.setText("Generating…")
@@ -606,7 +915,41 @@ class MainWindow(QMainWindow):
         saved_paths = []
         if images:
             try:
-                saved_paths = auto_save_images(images, base_stub="img")
+                stub = sanitize_stub_from_prompt(self.current_prompt)
+                saved_paths = auto_save_images(images, base_stub=stub)
+                # Update in-session history
+                try:
+                    self.history_paths.extend(saved_paths)
+                    self._refresh_history_list()
+                except Exception:
+                    pass
+                # Write sidecar JSON for each saved image
+                try:
+                    first_line = (texts[0].strip() if texts else "")
+                    meta_base = {
+                        "prompt": self.current_prompt,
+                        "model": getattr(self, "current_model", self.model_combo.currentText().strip() or DEFAULT_MODEL),
+                        "provider": PROVIDER_NAME,
+                        "created_at": datetime.now().isoformat(timespec="seconds"),
+                        "app_version": __version__,
+                        "output_text": first_line,
+                        "settings": {
+                            "auto_copy_filename": bool(getattr(self, "auto_copy_filename", False)),
+                        },
+                    }
+                    for pth in saved_paths:
+                        write_image_sidecar(Path(pth), dict(meta_base))
+                except Exception:
+                    pass
+                # Optionally copy filename (without path) to clipboard
+                try:
+                    if getattr(self, "auto_copy_filename", False) and saved_paths:
+                        fname = os.path.basename(str(saved_paths[0]))
+                        cb = QGuiApplication.clipboard()
+                        if cb:
+                            cb.setText(fname)
+                except Exception:
+                    pass
             except Exception as e:
                 # Saving failed; we still show the image and indicate error
                 saved_paths = []
@@ -650,7 +993,7 @@ class MainWindow(QMainWindow):
     def resizeEvent(self, event):
         super().resizeEvent(event)
         # Rescale image on resize
-        if self.last_image_bytes and not self.output_image_label.pixmap().isNull():
+        if self.last_image_bytes:
             pix = QPixmap()
             pix.loadFromData(self.last_image_bytes)
             self.output_image_label.setPixmap(pix.scaled(
@@ -659,6 +1002,25 @@ class MainWindow(QMainWindow):
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation,
             ))
+
+    def closeEvent(self, event):
+        try:
+            cfg = load_config()
+            if not isinstance(cfg, dict):
+                cfg = {}
+            cfg["window_geometry"] = {
+                "x": int(self.x()),
+                "y": int(self.y()),
+                "w": int(self.width()),
+                "h": int(self.height()),
+            }
+            save_config(cfg)
+        except Exception:
+            pass
+        try:
+            super().closeEvent(event)
+        except Exception:
+            event.accept()
 
     def _save_image_as(self):
         if not self.last_image_bytes:

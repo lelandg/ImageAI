@@ -1,5 +1,4 @@
 protobuf
 pillow
-google
-google.genai
+google-genai
 PySide6

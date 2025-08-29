@@ -21,10 +21,11 @@ This guide covers:
 
 ## 1) Requirements
 - A Google account.
-- A Gemini API key (see below).
-- You *may* be able to use Gemini
+- A Gemini API key (see below). 
+  - At the time of writing, Gemini is in Preview mode and is free.
 - Python 3.9+ recommended.
 - Internet access.
+- Dependencies (installed via requirements.txt): google-genai, PySide6 (for GUI), protobuf, pillow.
 
 
 ## 2) Get your Gemini API key and enable billing
@@ -117,21 +118,33 @@ Run without arguments to open the GUI.
 
 ## 7) Using the GUI
 - Generate tab:
-  - Choose a model (e.g., gemini-2.5-flash-image-preview).
+  - Choose a model (e.g., gemini-2.5-flash-image-preview). This is the default in the app.
   - Enter a prompt. Click Examples for curated prompts.
-  - Click Generate. If an image is returned, use “Save Image As…” from the File menu.
+  - Click Generate. If an image is returned, it will be auto-saved to your per-user Generated folder (see Section 8). You can also use “Save Image As…” from the File menu to choose a location.
 
 - Settings tab:
   - View the config file location.
   - “Load from file…” to read a key from a text file.
   - “Save & Test” to store the key and validate with a quick call.
+  - Optional: enable “Copy filename to clipboard” to automatically copy the saved image filename.
   - “Get API key” opens the AI Studio API keys page in your browser.
 
 - Help tab:
   - Displays this README as formatted documentation.
 
 
-## 8) Example prompts
+## 8) Image saving, history, and metadata
+- Auto-save location: images are automatically saved to your per-user folder:
+  - Windows: %APPDATA%\LelandGreenGenAI\generated
+  - macOS: ~/Library/Application Support/LelandGreenGenAI/generated
+  - Linux: $XDG_CONFIG_HOME/LelandGreenGenAI/generated or ~/.config/LelandGreenGenAI/generated
+- Filenames are derived from the first line of your prompt and sanitized; long names are trimmed.
+- Alongside each image, a .json “sidecar” file is written with metadata:
+  - prompt, model, provider, created_at, app_version, optional output_text, and basic settings flags.
+- The GUI keeps an in-session History list of recently saved image paths for quick access.
+- You can optionally copy the saved image filename to the clipboard automatically (Settings).
+
+## 9) Example prompts
 - A whimsical city made of candy canes and gumdrops at sunset, ultra‑detailed, 8k
 - A photorealistic glass terrarium containing a micro jungle with tiny glowing fauna
 - Retro‑futuristic poster of a rocket‑powered bicycle racing across neon clouds
@@ -142,7 +155,9 @@ More inspiration:
 - Cookbook quickstarts (Gemini): https://colab.research.google.com/github/google-gemini/cookbook/blob/main/quickstarts/Image_out.ipynb
 
 
-## 9) Troubleshooting / FAQ
+
+
+## 10) Troubleshooting / FAQ
 - I get an authentication error:
   - Ensure your API key is correct and active in https://aistudio.google.com/apikey
   - If required, enable billing and check quotas: https://ai.google.dev/pricing
@@ -158,11 +173,35 @@ More inspiration:
 - Where is my config stored?
   - See the paths listed above in Section 5.
 
+- Module not found: google.genai
+  - Install the correct package name: pip install google-genai (requirements.txt already includes it).
 
-## 10) License and acknowledgements
+## 11) License and acknowledgements
 - Uses Google’s Gemini API and the google‑genai Python SDK.
 - Prompts and examples inspired by the official docs.
 
+## 12) Changelog
+- 0.3.0 (2025-08-29):
+  - Added comprehensive README with GUI/CLI, auto-save, and sidecar docs.
+  - requirements.txt now uses the correct package name google-genai.
+
+## 13) Future Plans
+
+- Additional Image Generation Providers:
+    - OpenAI DALL-E integration
+    - Stability AI integration
+    - RunwayML integration
+    - Adobe Firefly integration
+- Open Source Image Generators:
+    - Stable Diffusion integration
+    - Local model support for offline generation
+    - Custom model loading capability
+- Enhanced Features:
+    - Provider comparison view
+    - Batch processing
+    - Image editing and manipulation
+    - Prompt templating and history
+    - Export/import of settings and history
 
 ## Appendix: Minimal example (CLI)
 ```
