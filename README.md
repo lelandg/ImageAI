@@ -181,12 +181,16 @@ More inspiration:
 - Uses Google’s Gemini API and the google‑genai Python SDK.
 - Prompts and examples inspired by the official docs.
 
-## 12) Changelog
+## 12) Credits
+- Templates and inspiration reference: https://ai.google.dev/gemini-api/docs/image-generation
+- Developed with JetBrains PyCharm and Junie.
+
+## 13) Changelog
 - 0.3.0 (2025-08-29):
   - Added comprehensive README with GUI/CLI, auto-save, and sidecar docs.
   - requirements.txt now uses the correct package name google-genai.
 
-## 13) Future Plans
+## 14) Future Plans
 
 - Additional Image Generation Providers:
     - OpenAI DALL-E integration

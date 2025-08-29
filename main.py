@@ -11,7 +11,7 @@ from datetime import datetime
 from google import genai
 from google.genai import types
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 PROVIDER_NAME = "google"
 
 # UI imports are optional until --gui is requested
@@ -347,6 +347,136 @@ def find_cached_demo(prompt: str) -> Optional[Path]:
 
 
 # ---------------------------
+# Gemini image generation doc templates
+# ---------------------------
+
+def get_gemini_doc_templates():
+    """Return a shared list of prompt templates adapted from
+    https://ai.google.dev/gemini-api/docs/image-generation
+    Names and placeholder fields are curated to be concise and editable.
+    Each entry also includes 'defaults' with concrete example values to pre-fill forms.
+    """
+    return [
+        {
+            "name": "Photorealistic product shot",
+            "template": "A high-resolution studio photograph of [product] on a [background] background, [lighting] lighting, shot with a [camera] lens, [style] style, [mood] mood",
+            "defaults": {
+                "product": "wireless earbuds",
+                "background": "matte black",
+                "lighting": "soft diffused",
+                "camera": "85mm portrait",
+                "style": "ultra-detailed 8k",
+                "mood": "premium"
+            },
+        },
+        {
+            "name": "Cinematic landscape",
+            "template": "A cinematic wide-angle shot of [environment] with [weather] at [time of day], [style] style, featuring [details], volumetric lighting",
+            "defaults": {
+                "environment": "mountain valley",
+                "weather": "low fog",
+                "time of day": "sunrise",
+                "style": "cinematic",
+                "details": "river winding through the meadow"
+            },
+        },
+        {
+            "name": "Architectural visualization",
+            "template": "Photorealistic render of [building type] in [environment], [time of day], [materials], [lighting] lighting, ultra-detailed",
+            "defaults": {
+                "building type": "modern glass house",
+                "environment": "pine forest",
+                "time of day": "golden hour",
+                "materials": "concrete and glass",
+                "lighting": "soft"
+            },
+        },
+        {
+            "name": "Character portrait",
+            "template": "Portrait of [character], [age], wearing [clothing], [expression] expression, [style] style, [mood] mood, highly detailed",
+            "defaults": {
+                "character": "astronaut",
+                "age": "young adult",
+                "clothing": "sleek space suit",
+                "expression": "confident",
+                "style": "digital painting",
+                "mood": "heroic"
+            },
+        },
+        {
+            "name": "Anime character sheet",
+            "template": "Character sheet of [character] in anime style, poses: [poses], outfit: [outfit], color palette: [palette], clean line art",
+            "defaults": {
+                "character": "apprentice witch",
+                "poses": "standing, running, casting spell",
+                "outfit": "school uniform with cape",
+                "palette": "pastel purple and gold"
+            },
+        },
+        {
+            "name": "Isometric room diorama",
+            "template": "Isometric cutaway of a [room type] with [furnishings] and [props], cozy lighting, pixel-perfect details",
+            "defaults": {
+                "room type": "cozy reading nook",
+                "furnishings": "bookshelves and armchair",
+                "props": "teapot and stack of books"
+            },
+        },
+        {
+            "name": "3D product render",
+            "template": "Octane render of [product] on a [surface] surface, [materials], studio lighting, soft shadows, high detail",
+            "defaults": {
+                "product": "sports watch",
+                "surface": "matte stone",
+                "materials": "brushed steel and rubber"
+            },
+        },
+        {
+            "name": "Flat icon / logo",
+            "template": "Flat vector icon of [subject], [color palette], [style] style, [background] background, minimal, scalable",
+            "defaults": {
+                "subject": "chat bubble",
+                "color palette": "teal and white",
+                "style": "flat",
+                "background": "transparent"
+            },
+        },
+        {
+            "name": "Sticker illustration",
+            "template": "Cute sticker illustration of [subject], white outline, bold colors, simple shading, kawaii style",
+            "defaults": {
+                "subject": "shiba inu holding boba"
+            },
+        },
+        {
+            "name": "Blueprint / schematic",
+            "template": "Blueprint drawing of [object], white lines on [blueprint color] background, labeled parts: [labels], technical style",
+            "defaults": {
+                "object": "retro camera",
+                "blueprint color": "navy blue",
+                "labels": "lens, shutter, viewfinder"
+            },
+        },
+        {
+            "name": "Low-poly 3D render",
+            "template": "Low-poly 3D render of [subject], pastel colors, simple geometry, soft lighting",
+            "defaults": {
+                "subject": "small island with palm tree"
+            },
+        },
+        {
+            "name": "Cyberpunk cityscape",
+            "template": "Neon cyberpunk cityscape at [time of day], rainy streets, reflections, [camera angle] angle, [details]",
+            "defaults": {
+                "time of day": "night",
+                "camera angle": "low angle",
+                "details": "neon signs and rain reflections"
+            },
+        },
+    ]
+
+
+# ---------------------------
 # CLI
 # ---------------------------
 
@@ -512,6 +642,23 @@ class ExamplesDialog(QDialog):
         tab_templates = QWidget()
         v_t = QVBoxLayout(tab_templates)
         v_t.addWidget(QLabel("Select a template and fill in any attributes (all optional):"))
+        # Credits / source link for templates inspiration
+        try:
+            credit = QLabel('Templates inspired by the Gemini Image Generation docs: <br><a href="https://ai.google.dev/gemini-api/docs/image-generation">ai.google.dev/gemini-api/docs/image-generation</a><br/>'
+                            'I also used this page to help develop the app.')
+            credit.setOpenExternalLinks(True)
+            credit.setTextFormat(Qt.RichText)
+            credit.setWordWrap(True)
+            credit.setStyleSheet("color: gray; font-size: 9pt;")
+            v_t.addWidget(credit)
+        except Exception:
+            pass
+        # Load official templates list shared across app
+        try:
+            self.TEMPLATES = get_gemini_doc_templates()
+        except Exception:
+            # Fallback to built-in class list if helper unavailable
+            self.TEMPLATES = list(getattr(self, "TEMPLATES", []))
         self.template_combo = QComboBox()
         self.template_combo.addItems([t["name"] for t in self.TEMPLATES])
         v_t.addWidget(self.template_combo)
@@ -576,11 +723,23 @@ class ExamplesDialog(QDialog):
         # Create line edits
         self._template_fields = {}
         prev_vals = self._last_values.get(name, {}) if hasattr(self, "_last_values") else {}
+        # Resolve defaults for the current template if provided
+        defaults = {}
+        try:
+            idx = self.template_combo.currentIndex() if hasattr(self, "template_combo") else -1
+            if 0 <= idx < len(self.TEMPLATES):
+                tmpl_entry = self.TEMPLATES[idx]
+                if isinstance(tmpl_entry, dict):
+                    defaults = tmpl_entry.get("defaults", {}) or {}
+        except Exception:
+            defaults = {}
         for key in ordered:
             le = QLineEdit()
             le.setPlaceholderText(f"[{key}]")
             if isinstance(prev_vals, dict) and prev_vals.get(key):
                 le.setText(str(prev_vals.get(key)))
+            elif isinstance(defaults, dict) and defaults.get(key):
+                le.setText(str(defaults.get(key)))
             else:
                 le.setText(f"[{key}]")
             try:
@@ -886,28 +1045,33 @@ class MainWindow(QMainWindow):
     def _init_templates(self):
         v = QVBoxLayout(self.tab_templates)
         # Templates data moved from Examples dialog
-        self.tmpl_templates = [
-            {
-                "name": "Photorealistic product shot",
-                "template": "A high-resolution studio photograph of [product] on a [background] background, [lighting] lighting, [camera] lens, [style] style, [mood] mood",
-            },
-            {
-                "name": "Character concept art",
-                "template": "Concept art of [character], [age], wearing [clothing], in a [pose] pose, in [environment], [style] style, [mood] mood, highly detailed",
-            },
-            {
-                "name": "Landscape matte painting",
-                "template": "A wide-angle [environment] landscape with [weather], [time of day], [style] style, [details]",
-            },
-            {
-                "name": "Isometric game asset",
-                "template": "Isometric pixel art of [object], using a [palette] palette, at [scale] scale, with [details] on a transparent background",
-            },
-            {
-                "name": "Flat icon / logo",
-                "template": "A flat vector icon of [subject], [color palette], [style] style, [background] background, minimal, scalable",
-            },
-        ]
+        # Load official templates list shared across app
+        try:
+            self.tmpl_templates = get_gemini_doc_templates()
+        except Exception:
+            # Fallback to prior static list if helper unavailable
+            self.tmpl_templates = [
+                {
+                    "name": "Photorealistic product shot",
+                    "template": "A high-resolution studio photograph of [product] on a [background] background, [lighting] lighting, [camera] lens, [style] style, [mood] mood",
+                },
+                {
+                    "name": "Character concept art",
+                    "template": "Concept art of [character], [age], wearing [clothing], in a [pose] pose, in [environment], [style] style, [mood] mood, highly detailed",
+                },
+                {
+                    "name": "Landscape matte painting",
+                    "template": "A wide-angle [environment] landscape with [weather], [time of day], [style] style, [details]",
+                },
+                {
+                    "name": "Isometric game asset",
+                    "template": "Isometric pixel art of [object], using a [palette] palette, at [scale] scale, with [details] on a transparent background",
+                },
+                {
+                    "name": "Flat icon / logo",
+                    "template": "A flat vector icon of [subject], [color palette], [style] style, [background] background, minimal, scalable",
+                },
+            ]
         v.addWidget(QLabel("Select a template and fill in any attributes (all optional):"))
         self.tmpl_combo = QComboBox()
         self.tmpl_combo.addItems([t["name"] for t in self.tmpl_templates])
@@ -972,11 +1136,23 @@ class MainWindow(QMainWindow):
         # Create line edits
         self._tmpl_fields = {}
         prev_vals = self._tmpl_last_values.get(name, {}) if hasattr(self, "_tmpl_last_values") else {}
+        # Resolve defaults for the current template if provided
+        defaults = {}
+        try:
+            idx = self.tmpl_combo.currentIndex() if hasattr(self, "tmpl_combo") else -1
+            if 0 <= idx < len(self.tmpl_templates):
+                tmpl_entry = self.tmpl_templates[idx]
+                if isinstance(tmpl_entry, dict):
+                    defaults = tmpl_entry.get("defaults", {}) or {}
+        except Exception:
+            defaults = {}
         for key in ordered:
             le = QLineEdit()
             le.setPlaceholderText(f"[{key}]")
             if isinstance(prev_vals, dict) and prev_vals.get(key):
                 le.setText(str(prev_vals.get(key)))
+            elif isinstance(defaults, dict) and defaults.get(key):
+                le.setText(str(defaults.get(key)))
             else:
                 le.setText(f"[{key}]")
             try:
@@ -1300,6 +1476,14 @@ class MainWindow(QMainWindow):
                         self.model_combo.addItem(mdl)
                         self.model_combo.setCurrentText(mdl)
                     self.current_model = mdl
+                # Restore templates tab from sidecar template context if present
+                try:
+                    tctx = meta.get("template")
+                    if isinstance(tctx, dict):
+                        self._last_template_context = dict(tctx)
+                        self._restore_template_from_context(tctx)
+                except Exception:
+                    pass
             # Update main preview
             self.last_image_bytes = data
             pix_main = QPixmap()
