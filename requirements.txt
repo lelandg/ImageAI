@@ -2,3 +2,4 @@ protobuf
 pillow
 google-genai
 PySide6
+openai

@@ -10,8 +10,15 @@ from datetime import datetime
 
 from google import genai
 from google.genai import types
+from base64 import b64decode
+try:
+    import importlib
+    OpenAIClient = importlib.import_module("openai").OpenAI  # type: ignore
+except Exception:
+    OpenAIClient = None  # type: ignore
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
+# Active provider; can be changed at runtime via CLI/UI
 PROVIDER_NAME = "google"
 
 # UI imports are optional until --gui is requested
@@ -46,7 +53,12 @@ except Exception:
 
 APP_NAME = "LelandGreenGenAI"
 DEFAULT_MODEL = "gemini-2.5-flash-image-preview"
-API_KEY_URL = "https://aistudio.google.com/apikey"
+# Default key pages per provider
+def get_api_key_url(provider: str) -> str:
+    p = (provider or "google").strip().lower()
+    if p == "openai":
+        return "https://platform.openai.com/api-keys"
+    return "https://aistudio.google.com/apikey"
 
 
 # ---------------------------
@@ -134,10 +146,9 @@ def read_readme_text() -> str:
         pass
     # Fallback minimal help
     return (
-        "Google Gemini API setup:\n"
-        "1) Visit AI Studio and create an API key: " + API_KEY_URL + "\n"
-        "2) Enable billing if required: https://ai.google.dev/pricing\n"
-        "3) Save your key in the app Settings or via CLI -s with -k/-K.\n"
+        "API key setup:\n"
+        f"1) Get a provider API key:\n   - Google AI Studio: {get_api_key_url('google')}\n   - OpenAI: {get_api_key_url('openai')}\n"
+        "2) Save your key in the app Settings or via CLI -s with -k/-K.\n"
     )
 
 
@@ -161,9 +172,11 @@ def extract_api_key_help(md: str) -> str:
 # API key resolution
 # ---------------------------
 
-def resolve_api_key(cli_key: Optional[str], cli_key_file: Optional[str]) -> Tuple[Optional[str], str]:
-    """Return (api_key, source). Precedence: CLI key > CLI key file > stored config > env GOOGLE_API_KEY.
+def resolve_api_key(cli_key: Optional[str], cli_key_file: Optional[str], provider: Optional[str] = None) -> Tuple[Optional[str], str]:
+    """Return (api_key, source) for the given provider.
+    Precedence: CLI key > CLI key file > stored config (per provider) > env (GOOGLE_API_KEY/OPENAI_API_KEY).
     """
+    prov = (provider or PROVIDER_NAME or "google").strip().lower()
     if cli_key:
         return cli_key.strip(), "cli"
     if cli_key_file:
@@ -172,42 +185,106 @@ def resolve_api_key(cli_key: Optional[str], cli_key_file: Optional[str]) -> Tupl
             k = read_key_file(p)
             if k:
                 return k, f"file:{p}"
-    cfg = load_config()
-    if isinstance(cfg, dict) and cfg.get("api_key"):
-        return str(cfg["api_key"]).strip(), "stored"
-    env_k = os.getenv("GOOGLE_API_KEY")
-    if env_k:
-        return env_k.strip(), "env:GOOGLE_API_KEY"
+    cfg = load_config() or {}
+    # Prefer per-provider key map
+    keys = cfg.get("keys") if isinstance(cfg, dict) else None
+    if isinstance(keys, dict) and keys.get(prov):
+        return str(keys[prov]).strip(), "stored"
+    # Backward compatibility for older configs (google only)
+    if prov == "google" and isinstance(cfg, dict) and cfg.get("api_key"):
+        return str(cfg["api_key"]).strip(), "stored(legacy)"
+    # Environment variables
+    env_var = "GOOGLE_API_KEY" if prov == "google" else ("OPENAI_API_KEY" if prov == "openai" else None)
+    if env_var:
+        env_k = os.getenv(env_var)
+        if env_k:
+            return env_k.strip(), f"env:{env_var}"
     return None, "none"
 
 
-def store_api_key(key: str) -> None:
+def store_api_key(key: str, provider: Optional[str] = None) -> None:
     cfg = load_config()
-    cfg["api_key"] = key.strip()
+    if not isinstance(cfg, dict):
+        cfg = {}
+    prov = (provider or PROVIDER_NAME or "google").strip().lower()
+    keys = cfg.get("keys") if isinstance(cfg, dict) else None
+    if not isinstance(keys, dict):
+        keys = {}
+    keys[prov] = key.strip()
+    cfg["keys"] = keys
+    # Maintain legacy field for Google for backward compatibility
+    if prov == "google":
+        cfg["api_key"] = key.strip()
     save_config(cfg)
 
+
+# ---------------------------
+# Provider helpers
+# ---------------------------
+
+def default_model_for_provider(p: Optional[str]) -> str:
+    p = (p or "google").strip().lower()
+    if p == "openai":
+        return "dall-e-3"
+    return DEFAULT_MODEL
 
 # ---------------------------
 # Google GenAI helpers
 # ---------------------------
 
-def make_client(api_key: str) -> genai.Client:
+def make_client(api_key: str, provider: Optional[str] = None):
+    """Create a client for the selected provider."""
+    prov = (provider or PROVIDER_NAME or "google").strip().lower()
+    if prov == "openai":
+        if OpenAIClient is None:
+            raise ImportError("The 'openai' package is not installed. Please run: pip install openai")
+        return OpenAIClient(api_key=api_key)
+    # default: google
     return genai.Client(api_key=api_key)
 
 
-def generate_any(client: genai.Client, model: str, prompt: str):
-    """Call generate_content. Returns (texts, image_bytes_list)."""
+def generate_any(client, model: str, prompt: str, provider: Optional[str] = None):
+    """Generate content using the appropriate provider.
+    Returns (texts, image_bytes_list).
+    """
+    prov = (provider or PROVIDER_NAME or "google").strip().lower()
+    texts: list[str] = []
+    images: list[bytes] = []
+    if prov == "openai":
+        # OpenAI image generation via Images API (DALL·E / GPT-Image models)
+        # Only images expected; no text output typically
+        try:
+            # Request base64 to ensure we can save the image bytes locally
+            resp = client.images.generate(
+                model=model,
+                prompt=prompt,
+                size="1024x1024",
+                quality="standard",
+                response_format="b64_json",
+            )
+            data_items = getattr(resp, "data", []) or []
+            for item in data_items:
+                b64 = getattr(item, "b64_json", None)
+                if b64:
+                    try:
+                        images.append(b64decode(b64))
+                    except Exception:
+                        pass
+            if not images:
+                # Surface a clear error so the UI/CLI shows something actionable
+                raise RuntimeError("OpenAI returned no images. Check model name, content policy, or quota.")
+        except Exception as e:
+            raise
+        return texts, images
+    # Default: Google Gemini
     response = client.models.generate_content(
         model=model,
         contents=prompt,
     )
-    texts = []
-    images = []
     if response and response.candidates:
         cand = response.candidates[0]
         if getattr(cand, "content", None) and getattr(cand.content, "parts", None):
             for part in cand.content.parts:
-                # part.text or part.inline_data
                 if getattr(part, "text", None):
                     texts.append(part.text)
                 elif getattr(part, "inline_data", None) is not None:
@@ -481,13 +558,18 @@ def get_gemini_doc_templates():
 # ---------------------------
 
 def run_cli(args) -> int:
+    # Determine provider (default google) and set global active provider
+    provider = (getattr(args, "provider", None) or "google").strip().lower()
+    global PROVIDER_NAME
+    PROVIDER_NAME = provider
+
     # Print API key setup help and exit, if requested
     if getattr(args, "help_api_key", False):
         md = read_readme_text()
         section = extract_api_key_help(md)
         print(section)
         return 0
-    key, source = resolve_api_key(args.api_key, args.api_key_file)
+    key, source = resolve_api_key(args.api_key, args.api_key_file, provider=provider)
     if args.set_key:
         # Persist either provided key or from file
         set_key = args.api_key
@@ -497,25 +579,31 @@ def run_cli(args) -> int:
         if not set_key:
             print("No API key provided to --set-key. Use --api-key or --api-key-file.")
             return 2
-        store_api_key(set_key)
+        store_api_key(set_key, provider=provider)
         print(f"API key saved to {config_path()}")
         # Also use it for this invocation
         key = set_key
         source = "stored"
+
+    def default_model_for_provider(p: str) -> str:
+        p = (p or "google").lower()
+        if p == "openai":
+            return "dall-e-3"
+        return DEFAULT_MODEL
 
     if args.test:
         if not key:
             print("No API key found. Provide with --api-key/--api-key-file or set via --set-key.")
             return 2
         try:
-            client = make_client(key)
-            # Light call: list models OR tiny generation attempt
-            # The SDK may not have list; do a minimal generation with a tiny prompt
-            generate_any(client, args.model or DEFAULT_MODEL, "Hello from test")
-            print(f"API key appears valid (source={source}).")
+            client = make_client(key, provider=provider)
+            # Minimal generation attempt per provider
+            model = args.model or default_model_for_provider(provider)
+            generate_any(client, model, "Hello from test", provider=provider)
+            print(f"API key appears valid for provider '{provider}' (source={source}).")
             return 0
         except Exception as e:
-            print(f"API key test failed: {e}")
+            print(f"API key test failed for provider '{provider}': {e}")
             return 3
 
     if args.prompt:
@@ -523,9 +611,9 @@ def run_cli(args) -> int:
             print("No API key. Use --api-key/--api-key-file or --set-key.")
             return 2
         try:
-            client = make_client(key)
-            model = args.model or DEFAULT_MODEL
-            texts, images = generate_any(client, model, args.prompt)
+            client = make_client(key, provider=provider)
+            model = args.model or default_model_for_provider(provider)
+            texts, images = generate_any(client, model, args.prompt, provider=provider)
             # Print texts
             for t in texts:
                 print(t)
@@ -550,7 +638,7 @@ def run_cli(args) -> int:
                         print(f"Saved image to {p}")
             return 0
         except Exception as e:
-            print(f"Generation failed: {e}")
+            print(f"Generation failed for provider '{provider}': {e}")
             return 4
 
     # If nothing else, suggest usage
@@ -565,16 +653,17 @@ def run_cli(args) -> int:
 class GenWorker(QObject):
     finished = Signal(list, list, str)  # texts, images(bytes), error
 
-    def __init__(self, api_key: str, model: str, prompt: str):
+    def __init__(self, api_key: str, model: str, prompt: str, provider: str):
         super().__init__()
         self.api_key = api_key
         self.model = model
         self.prompt = prompt
+        self.provider = (provider or "google").strip().lower()
 
     def run(self):
         try:
-            client = make_client(self.api_key)
-            texts, images = generate_any(client, self.model, self.prompt)
+            client = make_client(self.api_key, provider=self.provider)
+            texts, images = generate_any(client, self.model, self.prompt, provider=self.provider)
             self.finished.emit(texts, images, "")
         except Exception as e:
             self.finished.emit([], [], str(e))
@@ -904,11 +993,23 @@ class ExamplesDialog(QDialog):
 
 class MainWindow(QMainWindow):
     def __init__(self):
+        global PROVIDER_NAME
         super().__init__()
         self.setWindowTitle(APP_NAME)
         self.resize(900, 650)
 
-        self.current_api_key, _ = resolve_api_key(None, None)
+        # Load provider preference and resolve key for it
+        try:
+            cfg = load_config()
+            self.current_provider: str = str(cfg.get("provider", PROVIDER_NAME)).strip().lower() if isinstance(cfg, dict) else PROVIDER_NAME
+        except Exception:
+            self.current_provider = PROVIDER_NAME
+        # ensure global reflects current GUI provider
+        try:
+            PROVIDER_NAME = self.current_provider
+        except Exception:
+            pass
+        self.current_api_key, _ = resolve_api_key(None, None, provider=self.current_provider)
 
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
@@ -973,11 +1074,18 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(self.tab_generate)
         form = QFormLayout()
         self.model_combo = QComboBox()
-        self.model_combo.addItems([
-            DEFAULT_MODEL,
-            "gemini-2.0-flash-lite-preview-02-05",
-            "gemini-2.0-flash-thinking-exp-01-21",
-        ])
+        # Start with defaults for the current provider
+        if self.current_provider == "openai":
+            self.model_combo.addItems([
+                "dall-e-3",
+                "dall-e-2",
+            ])
+        else:
+            self.model_combo.addItems([
+                DEFAULT_MODEL,
+                "gemini-2.0-flash-lite-preview-02-05",
+                "gemini-2.0-flash-thinking-exp-01-21",
+            ])
         form.addRow("Model:", self.model_combo)
 
         self.prompt_edit = QTextEdit()
@@ -1284,6 +1392,18 @@ class MainWindow(QMainWindow):
     def _init_settings(self):
         v = QVBoxLayout(self.tab_settings)
         form = QFormLayout()
+
+        # Provider selection
+        self.provider_combo = QComboBox()
+        self.provider_combo.addItems(["google", "openai"])
+        try:
+            idx = max(0, self.provider_combo.findText(self.current_provider))
+            self.provider_combo.setCurrentIndex(idx)
+        except Exception:
+            pass
+        form.addRow("Provider:", self.provider_combo)
+
+        # API key field for selected provider
         self.api_key_edit = QLineEdit()
         if self.current_api_key:
             self.api_key_edit.setText(self.current_api_key)
@@ -1316,6 +1436,7 @@ class MainWindow(QMainWindow):
         self.btn_browse.clicked.connect(self._browse_key)
         self.btn_get_key.clicked.connect(self._open_api_key_page)
         self.btn_save_test.clicked.connect(self._save_and_test)
+        self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
 
         v.addStretch(1)
 
@@ -1348,20 +1469,64 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, APP_NAME, "Please enter an API key.")
             return
         try:
-            store_api_key(key)
+            store_api_key(key, provider=self.current_provider)
             self.current_api_key = key
-            # quick test
-            client = make_client(key)
-            generate_any(client, DEFAULT_MODEL, "Hello from UI test")
-            QMessageBox.information(self, APP_NAME, f"API key saved and tested.\nLocation: {config_path()}")
+            # quick test for the selected provider
+            client = make_client(key, provider=self.current_provider)
+            model = default_model_for_provider(self.current_provider)
+            generate_any(client, model, "Hello from UI test", provider=self.current_provider)
+            QMessageBox.information(self, APP_NAME, f"API key saved and tested for provider '{self.current_provider}'.\nLocation: {config_path()}")
         except Exception as e:
             QMessageBox.critical(self, APP_NAME, f"API key test failed: {e}")
 
     def _open_api_key_page(self):
         try:
-            webbrowser.open(API_KEY_URL)
+            webbrowser.open(get_api_key_url(getattr(self, "current_provider", PROVIDER_NAME)))
         except Exception as e:
             QMessageBox.warning(self, APP_NAME, f"Could not open browser: {e}")
+
+    def _on_provider_changed(self, provider: str):
+        global PROVIDER_NAME
+        try:
+            self.current_provider = (provider or "google").strip().lower()
+        except Exception:
+            self.current_provider = "google"
+        # Persist selected provider to config
+        try:
+            cfg = load_config()
+            if not isinstance(cfg, dict):
+                cfg = {}
+            cfg["provider"] = self.current_provider
+            save_config(cfg)
+        except Exception:
+            pass
+        # Update API key field for the selected provider
+        try:
+            key, _ = resolve_api_key(None, None, provider=self.current_provider)
+            self.current_api_key = key
+            if hasattr(self, "api_key_edit") and self.api_key_edit is not None:
+                self.api_key_edit.setText(key or "")
+        except Exception:
+            pass
+        # Update model list according to provider
+        try:
+            if hasattr(self, "model_combo") and self.model_combo is not None:
+                self.model_combo.clear()
+                if self.current_provider == "openai":
+                    self.model_combo.addItems(["dall-e-3", "dall-e-2"])
+                else:
+                    self.model_combo.addItems([
+                        DEFAULT_MODEL,
+                        "gemini-2.0-flash-lite-preview-02-05",
+                        "gemini-2.0-flash-thinking-exp-01-21",
+                    ])
+        except Exception:
+            pass
+        # Keep global in sync for any helpers using it
+        try:
+            PROVIDER_NAME = self.current_provider
+        except Exception:
+            pass
 
     def _init_help(self):
         v = QVBoxLayout(self.tab_help)
@@ -1717,7 +1882,7 @@ class MainWindow(QMainWindow):
         self.output_image_label.clear()
 
         self.thread = QThread(self)
-        self.worker = GenWorker(api_key, model, prompt)
+        self.worker = GenWorker(api_key, model, prompt, self.current_provider)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.finished.connect(self._on_generated)
@@ -1754,7 +1919,7 @@ class MainWindow(QMainWindow):
                     meta_base = {
                         "prompt": self.current_prompt,
                         "model": getattr(self, "current_model", self.model_combo.currentText().strip() or DEFAULT_MODEL),
-                        "provider": PROVIDER_NAME,
+                        "provider": getattr(self, "current_provider", PROVIDER_NAME),
                         "created_at": datetime.now().isoformat(timespec="seconds"),
                         "app_version": __version__,
                         "output_text": first_line,
@@ -1872,7 +2037,7 @@ class MainWindow(QMainWindow):
 
 def build_arg_parser():
     p = argparse.ArgumentParser(
-        description="LelandGreenGenAI: CLI for Gemini image/text generation. Run without arguments to open the GUI.")
+        description="LelandGreenGenAI: CLI for Google Gemini and OpenAI image/text generation. Run without arguments to open the GUI.")
     p.add_argument("-k", "--api-key", dest="api_key", help="API key string (takes precedence)")
     p.add_argument("-K", "--api-key-file", dest="api_key_file", help="Path to a file containing the API key.")
     p.add_argument("-s", "--set-key", action="store_true", help="Persist the provided key to user config.")
@@ -1880,7 +2045,8 @@ def build_arg_parser():
     p.add_argument("-p", "--prompt", help="Prompt to generate from (CLI mode).")
     p.add_argument("-m", "--model", help=f"Model to use (default: {DEFAULT_MODEL}).")
     p.add_argument("-o", "--out", help="Output path for the first generated image (CLI mode).")
-    p.add_argument("-H", "--help-api-key", action="store_true", help="Print API key setup and billing instructions and exit.")
+    p.add_argument("--provider", choices=["google", "openai"], default="google", help="Provider to use: google or openai (default: google)")
+    p.add_argument("-H", "--help-api-key", action="store_true", help="Print API key setup instructions and exit.")
     return p
 
 
