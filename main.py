@@ -11,6 +11,8 @@ from datetime import datetime
 from google import genai
 from google.genai import types
 
+__version__ = "0.2.0"
+
 # UI imports are optional until --gui is requested
 try:
     from PySide6.QtCore import Qt, QThread, Signal, QObject

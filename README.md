@@ -8,7 +8,7 @@ Welcome! LelandGreenGenAI is a simple desktop app and CLI to generate images and
 
 Note: Google Nano Banana is Gemini
 
-![LelandGreenGenAI Screenshot](screenshot.png)
+![LelandGreenGenAI Screenshot](screenshot2.png)
 
 This guide covers:
 - What you need
