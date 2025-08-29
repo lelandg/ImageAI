@@ -9,6 +9,7 @@ Golden Rule (must follow)
 - Whenever you add, change, or remove a feature, you must:
   1) Update README.md (usage, options, screenshots, any changed behavior), and
   2) Update requirements.txt (add/remove/pin versions as needed).
+  3) Always increment the __version__ in main.py.
 - PRs that change features but do not update both README.md and requirements.txt will not be accepted.
 
 Environment & Setup

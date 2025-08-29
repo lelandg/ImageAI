@@ -11,7 +11,7 @@ from datetime import datetime
 from google import genai
 from google.genai import types
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 PROVIDER_NAME = "google"
 
 # UI imports are optional until --gui is requested
