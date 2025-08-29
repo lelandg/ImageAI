@@ -109,7 +109,7 @@ Where your key is stored (per user):
 - -s, --set-key             Persist the provided key to user config
 - -t, --test                Test that the resolved API key works
 - -p, --prompt TEXT         Prompt to generate from (CLI mode)
-- -m, --model TEXT          Model to use (default shown in -h)
+- -m, --model TEXT          Model to use (default: gemini-2.5-flash-image-preview)
 - -o, --out PATH            Output path for the first generated image (if any)
 - -H, --help-api-key        Print API key setup help and exit
 
@@ -119,7 +119,8 @@ Run without arguments to open the GUI.
 ## 7) Using the GUI
 - Generate tab:
   - Choose a model (e.g., gemini-2.5-flash-image-preview). This is the default in the app.
-  - Enter a prompt. Click Examples for curated prompts.
+  - Enter a prompt. Click Examples for curated prompts (opens the Examples & Templates dialog).
+  - Templates: In the Examples & Templates dialog, switch to the Templates tab to fill in optional placeholders that are substituted into the prompt. You can check "Append to current prompt instead of replacing" to append the generated text to your existing prompt.
   - Click Generate. If an image is returned, it will be auto-saved to your per-user Generated folder (see Section 8). You can also use “Save Image As…” from the File menu to choose a location.
 
 - Settings tab:
@@ -140,7 +141,7 @@ Run without arguments to open the GUI.
   - Linux: $XDG_CONFIG_HOME/LelandGreenGenAI/generated or ~/.config/LelandGreenGenAI/generated
 - Filenames are derived from the first line of your prompt and sanitized; long names are trimmed.
 - Alongside each image, a .json “sidecar” file is written with metadata:
-  - prompt, model, provider, created_at, app_version, optional output_text, and basic settings flags.
+  - prompt, model, provider, created_at, app_version, optional output_text, basic settings flags, and optional template context (when using Templates).
 - The GUI keeps an in-session History list of recently saved image paths for quick access.
 - You can optionally copy the saved image filename to the clipboard automatically (Settings).
 

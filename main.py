@@ -88,6 +88,25 @@ def save_config(cfg: dict) -> None:
     cfg_file.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
 
+# ---------------------------
+# Details (templates) persistence
+# ---------------------------
+
+def details_path() -> Path:
+    d = user_config_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    return d / "details.jsonl"
+
+
+def save_details_record(details: dict) -> None:
+    try:
+        p = details_path()
+        with p.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(details, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
 def read_key_file(path: Path) -> Optional[str]:
     try:
         # Read first non-empty line as key
@@ -443,16 +462,76 @@ class ExamplesDialog(QDialog):
         "Macro shot of dew drops forming constellations on a leaf under moonlight",
     ]
 
+    # Simple set of templates inspired by Gemini image generation docs
+    TEMPLATES = [
+        {
+            "name": "Photorealistic product shot",
+            "template": "A high-resolution studio photograph of [product] on a [background] background, [lighting] lighting, [camera] lens, [style] style, [mood] mood"
+        },
+        {
+            "name": "Character concept art",
+            "template": "Concept art of [character], [age], wearing [clothing], in a [pose] pose, in [environment], [style] style, [mood] mood, highly detailed"
+        },
+        {
+            "name": "Landscape matte painting",
+            "template": "A wide-angle [environment] landscape with [weather], [time of day], [style] style, [details]"
+        },
+        {
+            "name": "Isometric game asset",
+            "template": "Isometric pixel art of [object], using a [palette] palette, at [scale] scale, with [details] on a transparent background"
+        },
+        {
+            "name": "Flat icon / logo",
+            "template": "A flat vector icon of [subject], [color palette], [style] style, [background] background, minimal, scalable"
+        },
+    ]
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Example Prompts")
-        self.resize(520, 360)
+        self.setWindowTitle("Examples & Templates")
+        self.resize(620, 440)
+
+        self.append_to_prompt: bool = False
+        self._last_values: dict[str, dict[str, str]] = {}
+
         v = QVBoxLayout(self)
+        # Tabs: Examples and Templates
+        self.tabs = QTabWidget()
+
+        # --- Examples tab ---
+        tab_examples = QWidget()
+        v_ex = QVBoxLayout(tab_examples)
         self.listw = QListWidget()
         for ex in self.EXAMPLES:
             QListWidgetItem(ex, self.listw)
-        v.addWidget(QLabel("Choose an example to insert into the prompt:"))
-        v.addWidget(self.listw)
+        v_ex.addWidget(QLabel("Choose an example to insert into the prompt:"))
+        v_ex.addWidget(self.listw)
+        self.tabs.addTab(tab_examples, "Examples")
+
+        # --- Templates tab (dynamic, like main Templates) ---
+        tab_templates = QWidget()
+        v_t = QVBoxLayout(tab_templates)
+        v_t.addWidget(QLabel("Select a template and fill in any attributes (all optional):"))
+        self.template_combo = QComboBox()
+        self.template_combo.addItems([t["name"] for t in self.TEMPLATES])
+        v_t.addWidget(self.template_combo)
+        # Dynamic form container
+        self.template_form = QFormLayout()
+        self.template_form_holder = QWidget()
+        self.template_form_holder.setLayout(self.template_form)
+        v_t.addWidget(self.template_form_holder)
+        # Signals and initial form build
+        self.template_combo.currentIndexChanged.connect(self._rebuild_template_form)
+        self._rebuild_template_form()
+        self.tabs.addTab(tab_templates, "Templates")
+
+        v.addWidget(self.tabs)
+
+        # Options
+        self.chkAppend = QCheckBox("Append to current prompt instead of replacing")
+        v.addWidget(self.chkAppend)
+
+        # Buttons
         btns = QHBoxLayout()
         self.btnInsert = QPushButton("Insert")
         self.btnClose = QPushButton("Close")
@@ -460,12 +539,208 @@ class ExamplesDialog(QDialog):
         btns.addWidget(self.btnInsert)
         btns.addWidget(self.btnClose)
         v.addLayout(btns)
-        self.btnInsert.clicked.connect(self.accept)
+
+        # Signals
+        self.btnInsert.clicked.connect(self._on_insert)
         self.btnClose.clicked.connect(self.reject)
+        # No dynamic template form in dialog anymore
+
+    def _current_template(self) -> Tuple[str, str]:
+        idx = self.template_combo.currentIndex() if hasattr(self, "template_combo") else -1
+        if 0 <= idx < len(self.TEMPLATES):
+            t = self.TEMPLATES[idx]
+            return t["name"], t["template"]
+        return "", ""
+
+    def _rebuild_template_form(self):
+        # Clear existing rows
+        while self.template_form.rowCount():
+            self.template_form.removeRow(0)
+        # Build from placeholders in template
+        name, tmpl = self._current_template()
+        if not tmpl:
+            return
+        import re
+        placeholders = []
+        try:
+            placeholders = [p for p in re.findall(r"\[([^\[\]]+)\]", tmpl)]
+        except Exception:
+            placeholders = []
+        # Deduplicate preserving order
+        seen = set()
+        ordered = []
+        for p in placeholders:
+            if p not in seen:
+                seen.add(p)
+                ordered.append(p)
+        # Create line edits
+        self._template_fields = {}
+        prev_vals = self._last_values.get(name, {}) if hasattr(self, "_last_values") else {}
+        for key in ordered:
+            le = QLineEdit()
+            le.setPlaceholderText(f"[{key}]")
+            if isinstance(prev_vals, dict) and prev_vals.get(key):
+                le.setText(str(prev_vals.get(key)))
+            else:
+                le.setText(f"[{key}]")
+            try:
+                le.textChanged.connect(self._on_field_changed)
+            except Exception:
+                pass
+            self._template_fields[key] = le
+            self.template_form.addRow(QLabel(key + ":"), le)
+        # After rebuilding, autosave current state
+        try:
+            self._autosave_template_state()
+        except Exception:
+            pass
+
+    def _collect_template_fields(self) -> dict:
+        vals: dict[str, str] = {}
+        if hasattr(self, "_template_fields"):
+            for key, le in self._template_fields.items():
+                vals[key] = (le.text() or "").strip()
+        return vals
+
+    def _assemble_preview(self) -> str:
+        # Non-persisting assembler used for autosave preview
+        name, tmpl = self._current_template()
+        if not tmpl:
+            return ""
+        filled_raw = self._collect_template_fields()
+        # Treat bracketed values as empty
+        filled: dict[str, str] = {}
+        for k, v in filled_raw.items():
+            if v.startswith("[") and v.endswith("]"):
+                filled[k] = ""
+            else:
+                filled[k] = v
+        import re as _re
+        segments = [s.strip() for s in tmpl.split(',')]
+        out_segments = []
+        for seg in segments:
+            phs = _re.findall(r"\[([^\[\]]+)\]", seg)
+            seg_out = seg
+            # Replace or remove placeholders
+            for p in phs:
+                val = filled.get(p, "")
+                if val:
+                    seg_out = seg_out.replace(f"[{p}]", val)
+                else:
+                    # remove common preposition/article + placeholder or bare placeholder
+                    patterns = [
+                        rf"\b(?:a|an|the)\s*\[{_re.escape(p)}\]",
+                        rf"\b(?:in|on|with|using|at|of|for|to)\s*\[{_re.escape(p)}\]",
+                        rf"\[{_re.escape(p)}\]",
+                    ]
+                    for pat in patterns:
+                        seg_out = _re.sub(pat, "", seg_out)
+            # Cleanup repeated spaces and dangling connectors
+            seg_out = _re.sub(r"\s{2,}", " ", seg_out).strip()
+            seg_out = _re.sub(r"^(?:and|with|in|on|using|at|of|for|to)\b[,\s]*", "", seg_out, flags=_re.IGNORECASE)
+            seg_out = _re.sub(r"[,\s]*(?:and|with|in|on|using|at|of|for|to)$", "", seg_out, flags=_re.IGNORECASE)
+            if seg_out:
+                out_segments.append(seg_out)
+        out = ", ".join([s for s in out_segments if s]).strip()
+        out = _re.sub(r"\s+,\s+", ", ", out)
+        out = out.strip().strip(',').strip()
+        out = _re.sub(r"\s{2,}", " ", out).strip()
+        return out
+
+    def _autosave_template_state(self):
+        try:
+            name, tmpl = self._current_template()
+            fields_now = self._collect_template_fields()
+            # Update in-session cache of last values
+            if hasattr(self, "_last_values"):
+                self._last_values[name] = dict(fields_now)
+            details = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "template_name": name,
+                "template_string": tmpl,
+                "fields": fields_now,
+                "assembled_preview": self._assemble_preview(),
+                "event": "template_autosave",
+            }
+            save_details_record(details)
+        except Exception:
+            pass
+
+    def _on_field_changed(self, *_):
+        try:
+            self._autosave_template_state()
+        except Exception:
+            pass
+
+    def _assemble_from_template(self) -> Optional[str]:
+        name, tmpl = self._current_template()
+        if not tmpl:
+            return None
+        out = self._assemble_preview()
+        # Persist assembled on explicit insert
+        try:
+            details = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "template_name": name,
+                "template_string": tmpl,
+                "fields": self._collect_template_fields(),
+                "assembled_prompt": out,
+                "event": "template_insert",
+            }
+            save_details_record(details)
+        except Exception:
+            pass
+        return out if out else None
+
+    def _on_insert(self):
+        # Determine which tab is active and collect text
+        self.append_to_prompt = bool(self.chkAppend.isChecked())
+        if self.tabs.currentIndex() == 1:  # Templates tab (dynamic)
+            out = None
+            try:
+                # Assemble using the same logic as _assemble_preview, and persist details
+                name, tmpl = self._current_template()
+                out = self._assemble_preview()
+                details = {
+                    "timestamp": datetime.now().isoformat(timespec="seconds"),
+                    "template_name": name,
+                    "template_string": tmpl,
+                    "fields": self._collect_template_fields(),
+                    "assembled_prompt": out,
+                    "event": "template_insert_examples",
+                }
+                save_details_record(details)
+            except Exception:
+                pass
+            if out:
+                self._selected = out
+                # Provide full template context back to MainWindow
+                try:
+                    self.selected_template_context = {
+                        "name": name,
+                        "template": tmpl,
+                        "fields": dict(self._collect_template_fields()),
+                        "assembled_prompt": out,
+                        "append": self.append_to_prompt,
+                        "source": "examples_dialog_templates_tab",
+                    }
+                except Exception:
+                    self.selected_template_context = None
+                self.accept()
+            else:
+                QMessageBox.information(self, APP_NAME, "Please fill in template fields or select a template.")
+        else:  # Examples tab
+            item = self.listw.currentItem()
+            if item:
+                self._selected = item.text()
+                # Clear any template context for plain examples
+                self.selected_template_context = None
+                self.accept()
+            else:
+                QMessageBox.information(self, APP_NAME, "Please select an example.")
 
     def selected_text(self) -> Optional[str]:
-        item = self.listw.currentItem()
-        return item.text() if item else None
+        return getattr(self, "_selected", None)
 
 
 class MainWindow(QMainWindow):
@@ -480,10 +755,12 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.tabs)
 
         self.tab_generate = QWidget()
+        self.tab_templates = QWidget()
         self.tab_settings = QWidget()
         self.tab_help = QWidget()
         self.tab_history = QWidget()
         self.tabs.addTab(self.tab_generate, "Generate")
+        self.tabs.addTab(self.tab_templates, "Templates")
         self.tabs.addTab(self.tab_settings, "Settings")
         # Insert History before Help
         self.tabs.addTab(self.tab_help, "Help")
@@ -511,6 +788,7 @@ class MainWindow(QMainWindow):
             self.auto_copy_filename = False
 
         self._init_generate()
+        self._init_templates()
         self._init_settings()
         self._init_history()
         # Place History before Help
@@ -521,6 +799,9 @@ class MainWindow(QMainWindow):
             self.tabs.addTab(self.tab_history, "History")
         self._init_help()
         self._init_menu()
+        # Template context tracking for history sidecar embedding
+        self._last_template_context: Optional[dict] = None
+        self._suppress_dirty_clear_template: bool = False
 
     def _init_menu(self):
         mb = self.menuBar()
@@ -560,7 +841,7 @@ class MainWindow(QMainWindow):
         v.addLayout(form)
         hb = QHBoxLayout()
         self.btn_examples = QPushButton("Examples")
-        self.btn_generate = QPushButton("Regenerate")
+        self.btn_generate = QPushButton("Generate")
         hb.addWidget(self.btn_examples)
         hb.addStretch(1)
         hb.addWidget(self.btn_generate)
@@ -594,8 +875,235 @@ class MainWindow(QMainWindow):
 
         self.btn_examples.clicked.connect(self._open_examples)
         self.btn_generate.clicked.connect(self._on_generate)
+        try:
+            self.prompt_edit.textChanged.connect(self._mark_dirty)
+            self.model_combo.currentTextChanged.connect(self._mark_dirty)
+        except Exception:
+            pass
 
         self.last_image_bytes: Optional[bytes] = None
+
+    def _init_templates(self):
+        v = QVBoxLayout(self.tab_templates)
+        # Templates data moved from Examples dialog
+        self.tmpl_templates = [
+            {
+                "name": "Photorealistic product shot",
+                "template": "A high-resolution studio photograph of [product] on a [background] background, [lighting] lighting, [camera] lens, [style] style, [mood] mood",
+            },
+            {
+                "name": "Character concept art",
+                "template": "Concept art of [character], [age], wearing [clothing], in a [pose] pose, in [environment], [style] style, [mood] mood, highly detailed",
+            },
+            {
+                "name": "Landscape matte painting",
+                "template": "A wide-angle [environment] landscape with [weather], [time of day], [style] style, [details]",
+            },
+            {
+                "name": "Isometric game asset",
+                "template": "Isometric pixel art of [object], using a [palette] palette, at [scale] scale, with [details] on a transparent background",
+            },
+            {
+                "name": "Flat icon / logo",
+                "template": "A flat vector icon of [subject], [color palette], [style] style, [background] background, minimal, scalable",
+            },
+        ]
+        v.addWidget(QLabel("Select a template and fill in any attributes (all optional):"))
+        self.tmpl_combo = QComboBox()
+        self.tmpl_combo.addItems([t["name"] for t in self.tmpl_templates])
+        v.addWidget(self.tmpl_combo)
+        # Dynamic form container
+        self.tmpl_form = QFormLayout()
+        self.tmpl_form_holder = QWidget()
+        self.tmpl_form_holder.setLayout(self.tmpl_form)
+        v.addWidget(self.tmpl_form_holder)
+        # Options
+        self.chkAppendTemplate = QCheckBox("Append to current prompt instead of replacing")
+        v.addWidget(self.chkAppendTemplate)
+        # Buttons
+        hb = QHBoxLayout()
+        self.btn_insert_template = QPushButton("Insert into Prompt")
+        hb.addStretch(1)
+        hb.addWidget(self.btn_insert_template)
+        v.addLayout(hb)
+        # Signals
+        self.tmpl_combo.currentIndexChanged.connect(self._tmpl_rebuild_template_form)
+        try:
+            self.chkAppendTemplate.toggled.connect(self._tmpl_autosave_template_state)
+        except Exception:
+            pass
+        self.btn_insert_template.clicked.connect(self._on_insert_template_to_prompt)
+        # State holders
+        self._tmpl_last_values: dict[str, dict[str, str]] = {}
+        # Build initial form
+        self._tmpl_rebuild_template_form()
+        try:
+            self._tmpl_autosave_template_state()
+        except Exception:
+            pass
+
+    def _tmpl_current_template(self) -> Tuple[str, str]:
+        idx = self.tmpl_combo.currentIndex() if hasattr(self, "tmpl_combo") else -1
+        if 0 <= idx < len(self.tmpl_templates):
+            t = self.tmpl_templates[idx]
+            return t["name"], t["template"]
+        return "", ""
+
+    def _tmpl_rebuild_template_form(self):
+        # Clear existing rows
+        while self.tmpl_form.rowCount():
+            self.tmpl_form.removeRow(0)
+        # Build from placeholders in template
+        name, tmpl = self._tmpl_current_template()
+        if not tmpl:
+            return
+        import re
+        try:
+            placeholders = [p for p in re.findall(r"\[([^\[\]]+)\]", tmpl)]
+        except Exception:
+            placeholders = []
+        # Deduplicate preserving order
+        seen = set()
+        ordered = []
+        for p in placeholders:
+            if p not in seen:
+                seen.add(p)
+                ordered.append(p)
+        # Create line edits
+        self._tmpl_fields = {}
+        prev_vals = self._tmpl_last_values.get(name, {}) if hasattr(self, "_tmpl_last_values") else {}
+        for key in ordered:
+            le = QLineEdit()
+            le.setPlaceholderText(f"[{key}]")
+            if isinstance(prev_vals, dict) and prev_vals.get(key):
+                le.setText(str(prev_vals.get(key)))
+            else:
+                le.setText(f"[{key}]")
+            try:
+                le.textChanged.connect(self._tmpl_on_field_changed)
+            except Exception:
+                pass
+            self._tmpl_fields[key] = le
+            self.tmpl_form.addRow(QLabel(key + ":"), le)
+        # After rebuilding, autosave current state
+        try:
+            self._tmpl_autosave_template_state()
+        except Exception:
+            pass
+
+    def _tmpl_collect_fields(self) -> dict:
+        vals: dict[str, str] = {}
+        if hasattr(self, "_tmpl_fields"):
+            for key, le in self._tmpl_fields.items():
+                vals[key] = (le.text() or "").strip()
+        return vals
+
+    def _tmpl_assemble_preview(self) -> str:
+        name, tmpl = self._tmpl_current_template()
+        if not tmpl:
+            return ""
+        filled_raw = self._tmpl_collect_fields()
+        filled: dict[str, str] = {}
+        for k, v in filled_raw.items():
+            if v.startswith("[") and v.endswith("]"):
+                filled[k] = ""
+            else:
+                filled[k] = v
+        import re as _re
+        segments = [s.strip() for s in tmpl.split(',')]
+        out_segments = []
+        for seg in segments:
+            phs = _re.findall(r"\[([^\[\]]+)\]", seg)
+            seg_out = seg
+            for p in phs:
+                val = filled.get(p, "")
+                if val:
+                    seg_out = seg_out.replace(f"[{p}]", val)
+                else:
+                    patterns = [
+                        rf"\b(?:a|an|the)\s*\[{_re.escape(p)}\]",
+                        rf"\b(?:in|on|with|using|at|of|for|to)\s*\[{_re.escape(p)}\]",
+                        rf"\[{_re.escape(p)}\]",
+                    ]
+                    for pat in patterns:
+                        seg_out = _re.sub(pat, "", seg_out)
+            seg_out = _re.sub(r"\s{2,}", " ", seg_out).strip()
+            seg_out = _re.sub(r"^(?:and|with|in|on|using|at|of|for|to)\b[,\s]*", "", seg_out, flags=_re.IGNORECASE)
+            seg_out = _re.sub(r"[,\s]*(?:and|with|in|on|using|at|of|for|to)$", "", seg_out, flags=_re.IGNORECASE)
+            if seg_out:
+                out_segments.append(seg_out)
+        out = ", ".join([s for s in out_segments if s]).strip()
+        out = _re.sub(r"\s+,\s+", ", ", out)
+        out = out.strip().strip(',').strip()
+        out = _re.sub(r"\s{2,}", " ", out).strip()
+        return out
+
+    def _tmpl_autosave_template_state(self):
+        try:
+            name, tmpl = self._tmpl_current_template()
+            fields_now = self._tmpl_collect_fields()
+            if hasattr(self, "_tmpl_last_values"):
+                self._tmpl_last_values[name] = dict(fields_now)
+            details = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "template_name": name,
+                "template_string": tmpl,
+                "fields": fields_now,
+                "assembled_preview": self._tmpl_assemble_preview(),
+                "event": "template_autosave_main",
+            }
+            save_details_record(details)
+        except Exception:
+            pass
+
+    def _tmpl_on_field_changed(self, *_):
+        try:
+            self._tmpl_autosave_template_state()
+        except Exception:
+            pass
+
+    def _on_insert_template_to_prompt(self):
+        txt = self._tmpl_assemble_preview()
+        if not txt:
+            QMessageBox.information(self, APP_NAME, "Please select a template or fill in fields (optional).")
+            return
+        name, tmpl = self._tmpl_current_template()
+        fields = self._tmpl_collect_fields()
+        append = bool(self.chkAppendTemplate.isChecked())
+        # Track context for sidecar embedding
+        self._last_template_context = {
+            "name": name,
+            "template": tmpl,
+            "fields": dict(fields),
+            "assembled_prompt": txt,
+            "append": append,
+            "source": "main_templates_tab",
+        }
+        try:
+            details = {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "template_name": name,
+                "template_string": tmpl,
+                "fields": fields,
+                "assembled_prompt": txt,
+                "event": "template_insert_main",
+            }
+            save_details_record(details)
+        except Exception:
+            pass
+        existing = (self.prompt_edit.toPlainText() or "").strip()
+        try:
+            self._suppress_dirty_clear_template = True
+            if append and existing:
+                self.prompt_edit.setPlainText(existing + " " + txt)
+            else:
+                self.prompt_edit.setPlainText(txt)
+        finally:
+            self._suppress_dirty_clear_template = False
+        try:
+            self._mark_dirty()
+        except Exception:
+            pass
 
     def _init_settings(self):
         v = QVBoxLayout(self.tab_settings)
@@ -712,6 +1220,10 @@ class MainWindow(QMainWindow):
         # List of files
         self.list_history = QListWidget()
         self.list_history.itemSelectionChanged.connect(self._on_history_selection_changed)
+        try:
+            self.list_history.itemDoubleClicked.connect(self._on_history_item_double_clicked)
+        except Exception:
+            pass
         v.addWidget(QLabel("Generated Images:"))
         v.addWidget(self.list_history)
         # Preview area
@@ -802,6 +1314,11 @@ class MainWindow(QMainWindow):
                 self.status_label.setText("Loaded from history")
             except Exception:
                 pass
+            # Mark dirty since prompt/model changed via history
+            try:
+                self._mark_dirty()
+            except Exception:
+                pass
             # Switch to Generate tab for editing/regeneration
             try:
                 self.tabs.setCurrentWidget(self.tab_generate)
@@ -809,6 +1326,84 @@ class MainWindow(QMainWindow):
                 pass
         except Exception:
             self.history_preview_label.setText("Error loading preview.")
+
+    def _on_history_item_double_clicked(self, item):
+        try:
+            if not item:
+                return
+            full_path = item.data(Qt.UserRole)
+            if not full_path:
+                return
+            p = Path(full_path)
+            meta = read_image_sidecar(p)
+            if isinstance(meta, dict):
+                tctx = meta.get("template")
+                if isinstance(tctx, dict):
+                    # Keep context for next generation
+                    self._last_template_context = dict(tctx)
+                    try:
+                        self._restore_template_from_context(tctx)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def _restore_template_from_context(self, ctx: dict):
+        try:
+            if not isinstance(ctx, dict):
+                return
+            name = ctx.get("name")
+            tmpl = ctx.get("template")
+            fields = ctx.get("fields") if isinstance(ctx.get("fields"), dict) else {}
+            # Find or add template by name or by template string
+            idx = -1
+            if name:
+                for i, t in enumerate(self.tmpl_templates):
+                    if t.get("name") == name:
+                        idx = i
+                        break
+            if idx == -1 and tmpl:
+                for i, t in enumerate(self.tmpl_templates):
+                    if t.get("template") == tmpl:
+                        idx = i
+                        break
+            if idx == -1 and name and tmpl:
+                # Add unknown template so we can restore
+                self.tmpl_templates.append({"name": name, "template": tmpl})
+                try:
+                    self.tmpl_combo.addItem(name)
+                except Exception:
+                    pass
+                idx = len(self.tmpl_templates) - 1
+            if idx >= 0:
+                try:
+                    self.tmpl_combo.setCurrentIndex(idx)
+                except Exception:
+                    pass
+                # Rebuild form to ensure fields exist
+                try:
+                    self._tmpl_rebuild_template_form()
+                except Exception:
+                    pass
+                # Populate fields
+                try:
+                    for k, v in fields.items():
+                        le = self._tmpl_fields.get(k) if hasattr(self, "_tmpl_fields") else None
+                        if le is not None:
+                            le.setText(str(v))
+                except Exception:
+                    pass
+                try:
+                    self._tmpl_autosave_template_state()
+                except Exception:
+                    pass
+            # Switch to Templates tab
+            try:
+                self.tabs.setCurrentWidget(self.tab_templates)
+            except Exception:
+                pass
+        except Exception:
+            pass
 
     def _history_save_as(self):
         try:
@@ -842,8 +1437,42 @@ class MainWindow(QMainWindow):
         dlg = ExamplesDialog(self)
         if dlg.exec() == QDialog.Accepted:
             txt = dlg.selected_text()
+            ctx = getattr(dlg, "selected_template_context", None)
+            if ctx and txt:
+                # Capture context for sidecar embedding
+                self._last_template_context = dict(ctx)
+                # Also pre-populate Templates tab with chosen template and fields
+                try:
+                    self._restore_template_from_context(ctx)
+                except Exception:
+                    pass
             if txt:
-                self.prompt_edit.setPlainText(txt)
+                append = bool(getattr(dlg, "append_to_prompt", False))
+                existing = (self.prompt_edit.toPlainText() or "").strip()
+                try:
+                    self._suppress_dirty_clear_template = True
+                    if append and existing:
+                        self.prompt_edit.setPlainText(existing + " " + txt)
+                    else:
+                        self.prompt_edit.setPlainText(txt)
+                finally:
+                    self._suppress_dirty_clear_template = False
+            try:
+                self._mark_dirty()
+            except Exception:
+                pass
+
+    def _mark_dirty(self, *args):
+        try:
+            self.btn_generate.setText("Generate")
+        except Exception:
+            pass
+        # Clear last template context on user edits unless suppressed
+        try:
+            if not getattr(self, "_suppress_dirty_clear_template", False):
+                self._last_template_context = None
+        except Exception:
+            pass
 
     def _on_generate(self):
         prompt = self.prompt_edit.toPlainText().strip()
@@ -872,6 +1501,10 @@ class MainWindow(QMainWindow):
                 # Output text: show first line with status and absolute path on second line
                 self.output_text.setPlainText("Loaded cached demo\n" + str(cached.resolve()))
                 self.status_label.setText("Loaded cached demo")
+                try:
+                    self.btn_generate.setText("Regenerate")
+                except Exception:
+                    pass
                 # Ensure item is in history list
                 try:
                     if cached not in self.history_paths:
@@ -891,6 +1524,10 @@ class MainWindow(QMainWindow):
             return
 
         self.btn_generate.setEnabled(False)
+        try:
+            self.btn_generate.setText("Generating…")
+        except Exception:
+            pass
         self.status_label.setText("Generating…")
         self.output_text.clear()
         self.output_image_label.clear()
@@ -907,6 +1544,10 @@ class MainWindow(QMainWindow):
 
     def _on_generated(self, texts, images, error: str):
         self.btn_generate.setEnabled(True)
+        try:
+            self.btn_generate.setText("Regenerate")
+        except Exception:
+            pass
         if error:
             self.status_label.setText("Error")
             QMessageBox.critical(self, APP_NAME, error)
@@ -938,7 +1579,13 @@ class MainWindow(QMainWindow):
                         },
                     }
                     for pth in saved_paths:
-                        write_image_sidecar(Path(pth), dict(meta_base))
+                        meta = dict(meta_base)
+                        try:
+                            if getattr(self, "_last_template_context", None):
+                                meta["template"] = dict(self._last_template_context)
+                        except Exception:
+                            pass
+                        write_image_sidecar(Path(pth), meta)
                 except Exception:
                     pass
                 # Optionally copy filename (without path) to clipboard
