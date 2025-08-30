@@ -17,7 +17,7 @@ try:
 except Exception:
     OpenAIClient = None  # type: ignore
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 # Active provider; can be changed at runtime via CLI/UI
 PROVIDER_NAME = "google"
 
@@ -1256,13 +1256,22 @@ class MainWindow(QMainWindow):
             defaults = {}
         for key in ordered:
             le = QLineEdit()
-            le.setPlaceholderText(f"[{key}]")
+            # Show current (remembered or default) values as a tooltip, but keep the field blank
+            tooltip_val = ""
             if isinstance(prev_vals, dict) and prev_vals.get(key):
-                le.setText(str(prev_vals.get(key)))
+                tooltip_val = str(prev_vals.get(key))
             elif isinstance(defaults, dict) and defaults.get(key):
-                le.setText(str(defaults.get(key)))
-            else:
-                le.setText(f"[{key}]")
+                tooltip_val = str(defaults.get(key))
+            # Placeholder remains the bracketed key to hint what goes here
+            le.setPlaceholderText(f"[{key}]")
+            # Keep the visible text empty per requirement
+            le.setText("")
+            # If we have a value, present it as a tooltip
+            if tooltip_val:
+                try:
+                    le.setToolTip(tooltip_val)
+                except Exception:
+                    pass
             try:
                 le.textChanged.connect(self._tmpl_on_field_changed)
             except Exception:
