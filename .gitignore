@@ -1,4 +1,5 @@
 # JetBrains (PyCharm)
+Debug
 .idea/
 *.iml
 out/
@@ -132,4 +133,48 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# Project-specific
+# User configuration and generated images
+config.json
+generated/
+
+# API keys and credentials
+*.key
+*.json.key
+google_key.txt
+openai_key.txt
+api_key.txt
+*_api_key.txt
+
+# Google Cloud credentials
+application_default_credentials.json
+gcloud/
+.gcloud/
+
+# VSCode
+.vscode/
+*.code-workspace
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Test outputs
+test_output/
+test_*.png
+test_*.jpg
 

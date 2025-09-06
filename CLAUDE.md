@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**LelandGreenGenAI** - A Python desktop GUI and CLI application for AI image generation using Google Gemini and OpenAI (DALL·E) APIs. The application securely stores API keys and provides both a Qt-based GUI interface and a command-line interface for generating images.
+**ImageAI** - A Python desktop GUI and CLI application for AI image generation using Google Gemini and OpenAI (DALL·E) APIs. The application securely stores API keys and provides both a Qt-based GUI interface and a command-line interface for generating images.
 
 ## Key Commands
 
@@ -91,3 +91,9 @@ Configuration and generated images are stored in platform-specific user director
 - API keys are never committed to source control
 - Images auto-save with sanitized filenames based on prompts
 - Template system supports placeholder substitution for prompt generation
+
+## Future Development Plans
+
+The `Plans/` directory contains documentation for upcoming features:
+- **GoogleCloudAuth.md**: Implementation plan for Google Cloud authentication via Application Default Credentials
+- **NewProviders.md**: Comprehensive plan for adding additional AI image providers (Stability AI, Adobe Firefly, etc.) and features like image editing, masking, and upscaling

@@ -1,5 +1,6 @@
-protobuf
+protobuf>=3.20.3,<6.0.0
 pillow
 google-genai
+google-cloud-aiplatform
 PySide6
 openai

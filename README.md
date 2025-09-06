@@ -1,256 +1,611 @@
-# LelandGreenGenAI — User Manual
+# ImageAI — Advanced AI Image Generation
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
-#### Created with _JetBrains **PyCharm**_ and _Junie_ with just a few prompts on the first day Google Nano Banana was available to the public.
-###### So I should share it, right? 😉 Shared the first day, too. Enjoy!  
+#### Created with _JetBrains **PyCharm**_ and AI assistance
+###### Enterprise-ready with multiple authentication methods and provider support  
 
-Welcome! LelandGreenGenAI is a simple desktop app and CLI to generate images and text using Google’s Gemini API and OpenAI’s image models (DALL·E‑3, DALL·E‑2). It stores your API keys securely in your per‑user configuration directory and works on Windows, macOS, and Linux.
+## Overview
 
-Note: Google Nano Banana is Gemini
+**ImageAI** is a powerful desktop application and CLI tool for AI image generation using Google's Gemini API (gemini-2.5-flash-image-preview and earlier) and OpenAI's image models (DALL·E-3, DALL·E-2). It features enterprise-grade authentication options, secure credential management, and works seamlessly across Windows, macOS, and Linux.
 
-![LelandGreenGenAI Screenshot](screenshot2.png)
+![ImageAI Screenshot](screenshot_20250906.jpg)
 
-This guide covers:
-- What you need
-- How to get your Google AI/Gemini API key and enable billing (and optional OpenAI API key)
-- Installing and running the app (GUI and CLI)
-- Storing and managing your API key
-- Example prompts and usage
-- Troubleshooting and FAQs
+## Key Features
 
+### 🎨 Multi-Provider Support
+- **Google Gemini** - Access to latest Gemini models for image generation
+- **OpenAI DALL·E** - Support for DALL·E-3 and DALL·E-2 models
+- Easy provider switching in both GUI and CLI
+- More models are coming soon!
+
+### 🔐 Flexible Authentication
+- **API Key Authentication** - Simple setup for individual users
+- **Google Cloud Authentication** - Enterprise-ready with Application Default Credentials
+- Secure credential storage in platform-specific directories
+- Environment variable support for CI/CD integration
+
+### 💻 Dual Interface
+- **Modern GUI** - User-friendly desktop interface built with Qt/PySide6
+- **Powerful CLI** - Full-featured command-line interface for automation
+- Cross-platform support (Windows, macOS, Linux)
+
+### 📁 Smart Features
+- Auto-save generated images with metadata sidecars
+- Template system with placeholder substitution
+- In-session history tracking
+- Customizable output paths and filenames
+- Batch generation support
+
+## Table of Contents
+- [Requirements](#1-requirements)
+- [Authentication Setup](#2-authentication-setup)
+- [Installation](#3-installation)
+- [Running the Application](#4-running-the-application)
+- [Authentication Management](#5-authentication-management)
+- [CLI Reference](#6-cli-reference)
+- [GUI Features](#7-gui-features)
+- [Image Management](#8-image-management)
+- [Examples & Templates](#9-examples--templates)
+- [Troubleshooting](#10-troubleshooting)
+- [API Reference](#11-api-reference)
+- [Development](#12-development)
+- [Changelog](#13-changelog)
 
 ## 1) Requirements
-- A Google account.
-- A Gemini API key (see below).
-  - At the time of writing, Gemini is in Preview mode and is free.
-- Optional: An OpenAI account and API key (for DALL·E models).
-- Python 3.9+ recommended.
-- Internet access.
-- Dependencies (installed via requirements.txt): google-genai, PySide6 (for GUI), protobuf, pillow, openai.
 
+- Python 3.9+ (3.9 to 3.13 supported)
+- Internet connection
+- Google account (for Gemini) or OpenAI account (for DALL·E)
+- Dependencies (auto-installed via requirements.txt):
+  - `google-genai` - Google Gemini API client
+  - `google-cloud-aiplatform` - Google Cloud authentication support
+  - `openai` - OpenAI API client
+  - `PySide6` - GUI framework (optional for CLI-only usage)
+  - `pillow` - Image processing
+  - `protobuf` - Protocol buffer support
 
-## 2) Get your Gemini API key and enable billing
-The Gemini API for developers is provided by Google AI for Developers. Follow these steps:
+## 2) Authentication Setup
 
-1. Review the docs and terms:
-   - Gemini API overview: https://ai.google.dev/
-   - Quickstarts and guides: https://ai.google.dev/docs
-   - Pricing and quotas: https://ai.google.dev/pricing
-   - Safety policies: https://ai.google.dev/gemini-api/docs/safety
+### Google Gemini Authentication
 
-2. Create or sign in to your Google account.
+You have two options for authenticating with Google's Gemini API:
 
-3. Obtain an API key:
-   - Go to Google AI Studio API Keys: https://aistudio.google.com/apikey
-   - If prompted, follow on‑screen steps to create a new API key.
-   - Copy the API key (keep it secret).
+#### Option A: API Key (Recommended for Individual Users)
 
-4. Set up billing if required:
-   - Some regions/models require billing to be enabled before the API works.
-   - If you see prompts about billing in AI Studio, follow the instructions to add a valid payment method.
-   - See pricing and quotas: https://ai.google.dev/pricing
+1. **Get your API key**:
+   - Visit [Google AI Studio](https://aistudio.google.com/apikey)
+   - Create a new API key or use an existing one
+   - Copy the key (keep it secure!)
 
-5. Keep your API key safe. Do not commit it to source control.
+2. **Review documentation**:
+   - [Gemini API Overview](https://ai.google.dev/)
+   - [Pricing and Quotas](https://ai.google.dev/pricing)
+   - [Safety Policies](https://ai.google.dev/gemini-api/docs/safety)
 
-### OpenAI API key (optional)
-If you want to use OpenAI’s image models (DALL·E‑3, DALL·E‑2):
-- Create/sign in to your OpenAI account: https://platform.openai.com/
-- Create an API key: https://platform.openai.com/api-keys
-- Review pricing and quotas: https://platform.openai.com/docs/guides/rate-limits and https://openai.com/pricing
-- Keep your API key secret and never commit it to source control.
+3. **Enable billing if required**:
+   - Some regions/models require billing
+   - Visit [Google AI Pricing](https://ai.google.dev/pricing)
 
+#### Option B: Google Cloud Account (Enterprise/Advanced Users)
+
+1. **Install Google Cloud CLI**:
+   - Download from [Google Cloud SDK](https://cloud.google.com/sdk/docs/install)
+   - Windows: Use the interactive installer
+   - macOS: `brew install google-cloud-sdk`
+   - Linux: Follow distribution-specific instructions
+
+2. **Set up Google Cloud project**:
+   - Create/select project at [Cloud Console](https://console.cloud.google.com/projectcreate)
+   - Note your Project ID
+
+3. **Authenticate**:
+   ```bash
+   # Login to Google account
+   gcloud auth application-default login
+   
+   # Set your project
+   gcloud config set project YOUR_PROJECT_ID
+   
+   # Verify authentication
+   gcloud auth list
+   ```
+
+4. **Enable required APIs**:
+   ```bash
+   gcloud services enable aiplatform.googleapis.com
+   gcloud services enable cloudresourcemanager.googleapis.com
+   ```
+   Or enable via [Cloud Console](https://console.cloud.google.com/apis/library)
+
+5. **Enable billing**:
+   - Visit [Cloud Billing](https://console.cloud.google.com/billing)
+   - New accounts may have free credits
+
+### OpenAI Authentication
+
+1. **Get your API key**:
+   - Sign in at [OpenAI Platform](https://platform.openai.com/)
+   - Create API key at [API Keys page](https://platform.openai.com/api-keys)
+
+2. **Review documentation**:
+   - [Rate Limits](https://platform.openai.com/docs/guides/rate-limits)
+   - [Pricing](https://openai.com/pricing)
 
 ## 3) Installation
-1. Create and activate a virtual environment (recommended).
-2. Install dependencies from requirements.txt:
 
-   Windows PowerShell:
-   - python -m venv .venv
-   - .\.venv\Scripts\Activate.ps1
-   - pip install -r requirements.txt
+### Quick Setup
 
-   macOS/Linux (bash/zsh):
-   - python3 -m venv .venv
-   - source .venv/bin/activate
-   - pip install -r requirements.txt
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/ImageAI.git
+cd ImageAI
 
-If you plan to use the GUI, ensure PySide6 is installed (it’s in requirements.txt).
+# Create virtual environment (recommended)
+python -m venv .venv
 
+# Activate virtual environment
+# Windows PowerShell:
+.\.venv\Scripts\Activate.ps1
+# Windows Command Prompt:
+.venv\Scripts\activate.bat
+# macOS/Linux:
+source .venv/bin/activate
 
-## 4) Running the app
-- GUI (default):
-  - python main.py
+# Install dependencies
+pip install -r requirements.txt
+```
 
-- CLI (any argument triggers CLI mode, including -h):
-  - Show help: python main.py -h
-  - Print API key setup help: python main.py -H  (or --help-api-key)
-  - Test your key (Google by default): python main.py -t
-  - Test OpenAI key: python main.py --provider openai -t
-  - Generate (Google): python main.py -p "A whimsical city of candy at sunset" -o generated.png
-  - Generate (OpenAI DALL·E‑3): python main.py --provider openai -m dall-e-3 -p "Isometric cutaway of a treehouse library with glowing lanterns" -o treehouse.png
+### Platform-Specific Notes
 
+- **Windows**: Ensure Python is added to PATH during installation
+- **macOS**: You may need to install Xcode Command Line Tools
+- **Linux**: Install python3-venv if not present: `sudo apt install python3-venv`
 
-## 5) Managing your API key
-You can provide keys per provider via command line, a file, environment variable, or the GUI Settings tab. Precedence (per provider): CLI key > CLI key file > stored config > environment variable (GOOGLE_API_KEY or OPENAI_API_KEY).
+## 4) Running the Application
 
-- One‑time save (persist to user config, per provider):
-  - Google from file: python main.py -s -K "C:\\path\\to\\google_key.txt"
-  - Google from value: python main.py -s -k "YOUR_GOOGLE_KEY"
-  - OpenAI from file: python main.py --provider openai -s -K "C:\\path\\to\\openai_key.txt"
-  - OpenAI from value: python main.py --provider openai -s -k "YOUR_OPENAI_KEY"
+### GUI Mode (Default)
 
-- Environment variables (session only):
-  - Google:
-    - Windows PowerShell: $env:GOOGLE_API_KEY = "YOUR_GOOGLE_KEY"
-    - macOS/Linux: export GOOGLE_API_KEY="YOUR_GOOGLE_KEY"
-  - OpenAI:
-    - Windows PowerShell: $env:OPENAI_API_KEY = "YOUR_OPENAI_KEY"
-    - macOS/Linux: export OPENAI_API_KEY="YOUR_OPENAI_KEY"
+```bash
+# Launch the graphical interface
+python main.py
+```
 
-- GUI:
-  - Open Settings tab.
-  - Paste your API key and click “Save & Test”.
-  - Or click “Load from file…” to select a text file containing the key on the first non‑empty line.
-  - Use “Get API key” to open the AI Studio key page.
+### CLI Mode
 
-Where your key is stored (per user):
-- Windows: %APPDATA%\LelandGreenGenAI\config.json
-- macOS: ~/Library/Application Support/LelandGreenGenAI/config.json
-- Linux: $XDG_CONFIG_HOME/LelandGreenGenAI/config.json or ~/.config/LelandGreenGenAI/config.json
+```bash
+# Show help
+python main.py -h
 
+# Quick examples
+python main.py -p "A majestic mountain landscape at sunset" -o mountain.png
+python main.py --provider openai -m dall-e-3 -p "Futuristic cityscape" -o city.png
+```
 
-## 6) CLI reference
-- -k, --api-key TEXT        API key string (takes precedence)
-- -K, --api-key-file PATH   Path to a file containing the API key
-- -s, --set-key             Persist the provided key to user config
-- -t, --test                Test that the resolved API key works
-- -p, --prompt TEXT         Prompt to generate from (CLI mode)
-- -m, --model TEXT          Model to use (default depends on provider; Google: gemini-2.5-flash-image-preview, OpenAI: dall-e-3)
-- -o, --out PATH            Output path for the first generated image (if any)
--     --provider {google|openai}  Provider to use (default: google)
-- -H, --help-api-key        Print API key setup help and exit
+### Authentication Examples
 
-Run without arguments to open the GUI.
+#### Using API Keys
 
+```bash
+# Google Gemini with API key
+python main.py -s -k "YOUR_GOOGLE_API_KEY"  # Save key
+python main.py -p "Beautiful ocean sunset" -o ocean.png  # Generate
 
-## 7) Using the GUI
-- Generate tab:
-  - Choose a model:
-    - Google: gemini-2.5-flash-image-preview (default) and other listed Gemini models.
-    - OpenAI: dall-e-3, dall-e-2.
-  - Enter a prompt. Click Examples for curated prompts (opens the Examples & Templates dialog).
-  - Templates: In the Examples & Templates dialog, switch to the Templates tab to fill in optional placeholders that are substituted into the prompt. You can check "Append to current prompt instead of replacing" to append the generated text to your existing prompt.
-  - Click Generate. If an image is returned, it will be auto-saved to your per-user Generated folder (see Section 8). You can also use “Save Image As…” from the File menu to choose a location.
+# OpenAI with API key
+python main.py --provider openai -s -k "YOUR_OPENAI_API_KEY"  # Save key
+python main.py --provider openai -m dall-e-3 -p "Abstract art" -o art.png  # Generate
 
-- Settings tab:
-  - Provider: choose google or openai. The model list updates accordingly.
-    - API Key field applies to the selected provider; switching providers shows the saved key for that provider (if any).
-  - View the config file location.
-  - “Load from file…” to read a key from a text file.
-  - “Save & Test” to store the key and validate with a quick call.
-  - Optional: enable “Copy filename to clipboard” to automatically copy the saved image filename.
-  - “Get API key” opens the API key page for the selected provider (Google AI Studio or OpenAI).
+# Using environment variables
+export GOOGLE_API_KEY="YOUR_KEY"  # Linux/macOS
+$env:GOOGLE_API_KEY = "YOUR_KEY"  # Windows PowerShell
+python main.py -p "Mountain landscape"  # Uses env variable
+```
 
-- Help tab:
-  - Displays this README as formatted documentation.
+#### Using Google Cloud Authentication
 
+```bash
+# First-time setup
+gcloud auth application-default login
+gcloud config set project YOUR_PROJECT_ID
 
-## 8) Image saving, history, and metadata
-- Auto-save location: images are automatically saved to your per-user folder:
-  - Windows: %APPDATA%\LelandGreenGenAI\generated
-  - macOS: ~/Library/Application Support/LelandGreenGenAI/generated
-  - Linux: $XDG_CONFIG_HOME/LelandGreenGenAI/generated or ~/.config/LelandGreenGenAI/generated
-- Filenames are derived from the first line of your prompt and sanitized; long names are trimmed.
-- Alongside each image, a .json “sidecar” file is written with metadata:
-  - prompt, model, provider, created_at, app_version, optional output_text, basic settings flags, and optional template context (when using Templates).
-- The GUI keeps an in-session History list of recently saved image paths for quick access.
-- You can optionally copy the saved image filename to the clipboard automatically (Settings).
+# Generate images
+python main.py --auth-mode gcloud -p "Tropical paradise" -o paradise.png
 
-## 9) Example prompts
-- A whimsical city made of candy canes and gumdrops at sunset, ultra‑detailed, 8k
-- A photorealistic glass terrarium containing a micro jungle with tiny glowing fauna
-- Retro‑futuristic poster of a rocket‑powered bicycle racing across neon clouds
-- An isometric diorama of a tiny island with waterfalls flowing into space
+# Test authentication
+python main.py --auth-mode gcloud -t
+```
 
-More inspiration:
-- Gemini image generation docs: https://ai.google.dev/gemini-api/docs/image-generation
-- Cookbook quickstarts (Gemini): https://colab.research.google.com/github/google-gemini/cookbook/blob/main/quickstarts/Image_out.ipynb
+#### Loading Keys from Files
 
+```bash
+# Save key from file
+python main.py -s -K /path/to/key.txt
 
+# Use key file directly (one-time)
+python main.py -K /path/to/key.txt -p "Desert oasis" -o oasis.png
+```
 
+## 5) Authentication Management
 
-## 10) Troubleshooting / FAQ
-- I get an authentication error (Google):
-  - Ensure your API key is correct and active in https://aistudio.google.com/apikey
-  - If required, enable billing and check quotas: https://ai.google.dev/pricing
-  - Try: python main.py -t to validate the key.
+### Key Storage Locations
 
-- I get an authentication error (OpenAI):
-  - Ensure your API key is created at https://platform.openai.com/api-keys
-  - Check rate limits/quotas and billing: https://platform.openai.com/docs/guides/rate-limits and https://openai.com/pricing
-  - Try: python main.py --provider openai -t
+Configuration and keys are stored in platform-specific directories:
 
-- The GUI doesn’t start:
-  - Ensure PySide6 is installed (pip install PySide6).
-  - Run from a virtual environment with the dependencies installed.
+- **Windows**: `%APPDATA%\ImageAI\config.json`
+- **macOS**: `~/Library/Application Support/ImageAI/config.json`
+- **Linux**: `~/.config/ImageAI/config.json`
 
-- No image saved from CLI (Google):
-  - Some prompts return text only. Try a more image‑forward prompt.
+### Authentication Precedence
 
-- No image generated with OpenAI provider:
-  - Use a supported model (e.g., -m dall-e-3).
-  - Check your OpenAI quota and content policy restrictions; some prompts may be blocked.
-  - Try a more descriptive prompt. If an error dialog appears, read the message for quota/policy details.
+For each provider, the authentication order is:
+1. Command-line key (`-k` or `-K` flags)
+2. Stored configuration
+3. Environment variables (`GOOGLE_API_KEY`, `OPENAI_API_KEY`)
+4. Google Cloud ADC (for Google provider with `--auth-mode gcloud`)
 
-- Where is my config stored?
-  - See the paths listed above in Section 5.
+### Security Best Practices
 
-- Module not found: google.genai
-  - Install the correct package name: pip install google-genai (requirements.txt already includes it).
-- Module not found: openai
-  - Install: pip install openai (requirements.txt already includes it).
+- Never commit API keys to version control
+- Use environment variables for CI/CD
+- Rotate keys regularly
+- Use Google Cloud authentication for enterprise deployments
+- Store keys in secure password managers
 
-## 11) License and acknowledgements
-- Uses Google’s Gemini API (google-genai) and OpenAI’s Images API (openai) when the OpenAI provider is selected.
-- Prompts and examples inspired by the official docs.
+## 6) CLI Reference
 
-## 12) Credits
-- Templates and inspiration reference: https://ai.google.dev/gemini-api/docs/image-generation
-- Developed with JetBrains PyCharm and Junie.
+### Core Arguments
+
+```
+-h, --help              Show help message
+-p, --prompt TEXT       Prompt for image generation
+-o, --out PATH          Output path for generated image
+-m, --model TEXT        Model to use (provider-specific)
+-t, --test              Test authentication
+```
+
+### Authentication Arguments
+
+```
+-k, --api-key TEXT      API key string
+-K, --api-key-file PATH Path to file containing API key
+-s, --set-key           Save the provided key
+--auth-mode {api-key|gcloud}  Google auth mode (default: api-key)
+```
+
+### Provider Arguments
+
+```
+--provider {google|openai}  Provider to use (default: google)
+```
+
+### Model Defaults
+
+- **Google**: `gemini-2.5-flash-image-preview`
+- **OpenAI**: `dall-e-3`
+
+### Complete Examples
+
+```bash
+# Test authentication
+python main.py -t
+python main.py --provider openai -t
+python main.py --auth-mode gcloud -t
+
+# Generate with different providers
+python main.py -p "Sunset over mountains" -o sunset.png
+python main.py --provider openai -m dall-e-2 -p "Abstract art" -o abstract.png
+python main.py --auth-mode gcloud -p "Space station" -o space.png
+
+# Save and use API keys
+python main.py -s -k "YOUR_KEY"  # Save to config
+python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
+```
+
+## 7) GUI Features
+
+### Main Interface
+
+#### Generate Tab
+- **Model Selection**: Dropdown with provider-specific models
+- **Prompt Input**: Multi-line text area for detailed prompts
+- **Generate Button**: Start image generation
+- **Image Display**: Preview generated images
+- **Output Text**: View generation status and file paths
+- **Examples Button**: Access curated prompts
+
+#### Settings Tab
+- **Provider Selection**: Switch between Google and OpenAI
+- **Authentication Mode** (Google only):
+  - API Key mode with key input field
+  - Google Cloud Account mode with status display
+- **Helper Buttons**:
+  - Get API Key - Opens provider's key page
+  - Load from File - Import key from text file
+  - Check Status - Verify Google Cloud auth
+  - Cloud Console - Open Google Cloud Console
+- **Auto-save Options**: Configure clipboard and file handling
+
+#### Templates Tab
+- Predefined prompt templates with placeholders
+- Variable substitution system
+- Append or replace current prompt
+- Custom template creation
+
+#### Help Tab
+- Embedded documentation
+- Quick reference guide
+- Keyboard shortcuts
+
+### Menu System
+
+#### File Menu
+- Save Image As... (Ctrl+S)
+- Exit (Ctrl+Q)
+
+#### Edit Menu
+- Copy prompt
+- Paste prompt
+- Clear all
+
+#### View Menu
+- History panel
+- Full screen mode
+
+## 8) Image Management
+
+### Auto-Save System
+
+Generated images are automatically saved to:
+- **Windows**: `%APPDATA%\ImageAI\generated\`
+- **macOS**: `~/Library/Application Support/ImageAI/generated/`
+- **Linux**: `~/.config/ImageAI/generated/`
+
+### File Naming
+
+- Filenames derived from prompt (sanitized)
+- Timestamp added for uniqueness
+- Format: `prompt_words_YYYYMMDD_HHMMSS.png`
+
+### Metadata Sidecars
+
+Each image gets a `.json` sidecar file containing:
+```json
+{
+  "prompt": "User's prompt text",
+  "model": "Model used",
+  "provider": "Provider name",
+  "created_at": "ISO timestamp",
+  "app_version": "Version number",
+  "output_text": "Any text output",
+  "template": "Template data if used"
+}
+```
+
+### History Tracking
+
+- In-session history of generated images
+- Persistent history across sessions
+- Quick access to recent generations
+- Metadata search and filtering
+
+## 9) Examples & Templates
+
+### Example Prompts
+
+#### Artistic Styles
+```
+"Oil painting of a serene mountain lake at golden hour, impressionist style"
+"Cyberpunk street scene with neon lights and rain reflections, ultra-detailed"
+"Watercolor portrait of a wise owl in autumn forest, soft pastels"
+```
+
+#### Photorealistic
+```
+"Professional photograph of a modern minimalist living room, magazine quality"
+"Macro shot of dewdrops on a spider web at sunrise, shallow depth of field"
+"Aerial view of tropical islands with crystal clear water, drone photography"
+```
+
+#### Creative Concepts
+```
+"Steampunk airship floating above Victorian London, brass and copper details"
+"Bioluminescent underwater cave with glowing creatures, fantasy art"
+"Isometric cutaway of a cozy treehouse library with magical elements"
+```
+
+### Template System
+
+Built-in templates with placeholders:
+
+```
+"[style] painting of [subject] in [setting], [mood] lighting"
+"Photograph of [object] with [effect], [camera] angle, [quality]"
+"[character] in [action] at [location], [art_style] style"
+```
+
+Variables are replaced with user input or defaults.
+
+## 10) Troubleshooting
+
+### Common Issues
+
+#### Authentication Errors
+
+**Google API Key Issues**:
+- Verify key at [AI Studio](https://aistudio.google.com/apikey)
+- Check billing is enabled
+- Ensure API is not restricted by IP
+
+**Google Cloud Auth Issues**:
+```bash
+# Verify authentication
+gcloud auth list
+gcloud auth application-default print-access-token
+
+# Enable required APIs
+gcloud services enable aiplatform.googleapis.com
+gcloud services enable cloudresourcemanager.googleapis.com
+
+# Check project
+gcloud config get-value project
+```
+
+**OpenAI Issues**:
+- Verify key at [OpenAI Platform](https://platform.openai.com/api-keys)
+- Check rate limits and quotas
+- Ensure billing is active
+
+#### Installation Problems
+
+**Windows PowerShell**:
+```powershell
+# If scripts are blocked
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+
+# If gcloud not found
+$env:PATH += ";C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin"
+```
+
+**Module Import Errors**:
+```bash
+# Reinstall specific package
+pip install --upgrade google-genai
+pip install --upgrade PySide6
+
+# Clear pip cache
+pip cache purge
+```
+
+#### GUI Issues
+
+**PySide6 not loading**:
+```bash
+# Install with specific version
+pip install PySide6==6.5.3
+
+# Linux: Install system dependencies
+sudo apt-get install python3-pyside6
+```
+
+**Display scaling issues**:
+```bash
+# Set Qt scaling
+export QT_AUTO_SCREEN_SCALE_FACTOR=1
+export QT_SCALE_FACTOR=1.25
+```
+
+### Error Messages
+
+| Error | Solution |
+|-------|----------|
+| "API key not found" | Set key via Settings or use `-s -k YOUR_KEY` |
+| "Quota exceeded" | Check billing and quotas in provider console |
+| "Invalid prompt" | Avoid restricted content, check provider policies |
+| "Module not found" | Run `pip install -r requirements.txt` |
+| "gcloud not found" | Install Google Cloud SDK or use API key mode |
+
+## 11) API Reference
+
+### Provider Specifications
+
+#### Google Gemini Models
+- `gemini-2.5-flash-image-preview` (default)
+- `gemini-2.0-flash-lite-preview-02-05`
+- `gemini-2.0-flash-thinking-exp-01-21`
+
+#### OpenAI Models
+- `dall-e-3` (default) - Best quality, 1024x1024
+- `dall-e-2` - Good quality, multiple sizes
+
+### Rate Limits
+
+| Provider | Requests/Min | Daily Limit | Notes |
+|----------|-------------|-------------|--------|
+| Google (Free) | 60 | 1,500 | Varies by region |
+| Google (Paid) | 360 | Unlimited | Billing required |
+| OpenAI | Varies | By tier | Check dashboard |
+
+### Response Formats
+
+Both providers return images as base64-encoded PNG data, automatically decoded and saved by the application.
+
+## 12) Development
+
+### Project Structure
+
+```
+ImageAI/
+├── main.py                 # Main application (single file)
+├── requirements.txt        # Python dependencies
+├── README.md              # This file
+├── CLAUDE.md              # Claude AI guidance
+├── GEMINI.md              # Gemini setup guide
+├── Plans/                 # Future development plans
+│   ├── GoogleCloudAuth.md
+│   └── NewProviders.md
+├── .gitignore             # Git ignore rules
+└── screenshot2.png        # Application screenshot
+```
+
+### Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests if applicable
+5. Submit a pull request
+
+### Future Plans
+
+- Additional providers (Stability AI, Midjourney API)
+- Image editing capabilities (inpainting, outpainting)
+- Batch processing improvements
+- Plugin system for custom providers
+- Web interface option
+- Mobile app companion
 
 ## 13) Changelog
-- 0.6.0 (2025-08-29):
-  - Added OpenAI provider with DALL·E‑3 and DALL·E‑2 image generation.
-  - Per‑provider API keys, OPENAI_API_KEY support, and --provider CLI flag.
-  - Updated GUI Settings for provider switching; README updated.
-- 0.3.0 (2025-08-29):
-  - Added comprehensive README with GUI/CLI, auto-save, and sidecar docs.
-  - requirements.txt now uses the correct package name google-genai.
 
-## 14) Future Plans
+### v0.7.0 (2025-09-06)
+- Added Google Cloud authentication support (Application Default Credentials)
+- New `--auth-mode` CLI flag for authentication method selection
+- Enhanced GUI Settings with auth mode selector and helper buttons
+- Improved Windows/PowerShell compatibility
+- Added comprehensive API enablement documentation
+- Project renamed to ImageAI
 
-- Additional Image Generation Providers:
-    - Stability AI integration
-    - RunwayML integration
-    - Adobe Firefly integration
-- Open Source Image Generators:
-    - Stable Diffusion integration
-    - Local model support for offline generation
-    - Custom model loading capability
-- Enhanced Features:
-    - Provider comparison view
-    - Batch processing
-    - Image editing and manipulation
-    - Prompt templating and history
-    - Export/import of settings and history
+### v0.6.0 (2025-08-29)
+- Added OpenAI provider with DALL·E-3 and DALL·E-2 support
+- Per-provider API key management
+- Provider switching in GUI and CLI
+- Enhanced error messages and guidance
 
-## Appendix: Minimal example (CLI)
-```
-# Google (Gemini)
-python main.py --provider google -s -k "YOUR_GOOGLE_API_KEY"
-python main.py -p "A whimsical city of candy at sunset" -o candy.png
+### v0.3.0 (2025-08-29)
+- Initial public release
+- Google Gemini integration
+- GUI and CLI interfaces
+- Auto-save with metadata sidecars
+- Template system
 
-# OpenAI (DALL·E‑3)
-python main.py --provider openai -s -k "YOUR_OPENAI_API_KEY"
-python main.py --provider openai -m dall-e-3 -p "Isometric cutaway of a treehouse library with glowing lanterns" -o treehouse.png
-```
+## Credits
+
+Created by Leland Green | [LelandGreen.com](https://www.lelandgreen.com)
+
+Built with:
+- JetBrains PyCharm
+- PySide6/Qt Framework
+- Google Gemini API
+- OpenAI API
+
+## License
+
+See LICENSE file for details.
+
+## Support
+
+For issues, feature requests, or questions:
+- GitHub Issues: [Create an issue](https://github.com/yourusername/ImageAI/issues)
+- Email: support@lelandgreen.com
+
+---
+
+**Happy Creating!** 🎨

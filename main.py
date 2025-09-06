@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import platform
+import subprocess
 import sys
 from pathlib import Path
 from typing import Optional, Tuple
@@ -16,6 +17,18 @@ try:
     OpenAIClient = importlib.import_module("openai").OpenAI  # type: ignore
 except Exception:
     OpenAIClient = None  # type: ignore
+
+# Google Cloud AI Platform imports (optional)
+try:
+    from google.cloud import aiplatform
+    from google.auth import default as google_auth_default
+    from google.auth.exceptions import DefaultCredentialsError
+    GCLOUD_AVAILABLE = True
+except ImportError:
+    aiplatform = None  # type: ignore
+    google_auth_default = None  # type: ignore
+    DefaultCredentialsError = Exception  # type: ignore
+    GCLOUD_AVAILABLE = False
 
 __version__ = "0.7.0"
 # Active provider; can be changed at runtime via CLI/UI
@@ -51,7 +64,7 @@ except Exception:
     # If PySide6 isn't installed yet, CLI will still work.
     QApplication = None  # type: ignore
 
-APP_NAME = "LelandGreenGenAI"
+APP_NAME = "ImageAI"
 DEFAULT_MODEL = "gemini-2.5-flash-image-preview"
 # Default key pages per provider
 def get_api_key_url(provider: str) -> str:
@@ -146,15 +159,26 @@ def read_readme_text() -> str:
         pass
     # Fallback minimal help
     return (
-        "API key setup:\n"
-        f"1) Get a provider API key:\n   - Google AI Studio: {get_api_key_url('google')}\n   - OpenAI: {get_api_key_url('openai')}\n"
-        "2) Save your key in the app Settings or via CLI -s with -k/-K.\n"
+        "Authentication Setup:\n\n"
+        "OPTION A: API Key (Simple)\n"
+        f"1) Get a provider API key:\n"
+        f"   - Google AI Studio: {get_api_key_url('google')}\n"
+        f"   - OpenAI: {get_api_key_url('openai')}\n"
+        "2) Save your key in the app Settings or via CLI -s with -k/-K.\n\n"
+        "OPTION B: Google Cloud Account (Advanced)\n"
+        "1) Install Google Cloud CLI:\n"
+        "   https://cloud.google.com/sdk/docs/install\n"
+        "2) Authenticate:\n"
+        "   gcloud auth application-default login\n"
+        "3) Use --auth-mode gcloud in CLI or select in GUI Settings\n\n"
+        "For detailed instructions, see the README.md file.\n"
     )
 
 
 def extract_api_key_help(md: str) -> str:
     # Extract the section starting at the API key/billing header until the next top-level header (## )
-    start_header = "## 2) Get your Gemini API key and enable billing"
+    # Updated to match new header
+    start_header = "## 2) Get your Gemini API key OR set up Google Cloud authentication"
     if start_header in md:
         start = md.index(start_header)
         # Find next section header after start
@@ -162,6 +186,16 @@ def extract_api_key_help(md: str) -> str:
         next_idx = remainder.find("\n## ")
         if next_idx != -1:
             return start_header + remainder[:next_idx]
+        else:
+            return md[start:]
+    # Fallback to old header format
+    old_header = "## 2) Get your Gemini API key and enable billing"
+    if old_header in md:
+        start = md.index(old_header)
+        remainder = md[start + len(old_header):]
+        next_idx = remainder.find("\n## ")
+        if next_idx != -1:
+            return old_header + remainder[:next_idx]
         else:
             return md[start:]
     # If not found, return entire README
@@ -232,18 +266,238 @@ def default_model_for_provider(p: Optional[str]) -> str:
 # Google GenAI helpers
 # ---------------------------
 
-def make_client(api_key: str, provider: Optional[str] = None):
-    """Create a client for the selected provider."""
+def find_gcloud_command() -> Optional[str]:
+    """Find the gcloud command on various platforms."""
+    import subprocess
+    import platform
+    import os
+    
+    system = platform.system()
+    
+    # On Windows, try where.exe first
+    if system == "Windows":
+        try:
+            result = subprocess.run(
+                ["where.exe", "gcloud"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                paths = result.stdout.strip().split('\n')
+                if paths and paths[0]:
+                    return paths[0]  # Return first found path
+        except Exception:
+            pass
+        
+        # Try common Windows installation paths
+        common_paths = [
+            r"C:\Program Files\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd",
+            r"C:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd",
+            os.path.expanduser(r"~\AppData\Local\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.cmd"),
+        ]
+        for path in common_paths:
+            if os.path.exists(path):
+                return path
+    
+    # On WSL, check for both Linux gcloud and Windows gcloud
+    elif "microsoft" in platform.uname().release.lower():
+        # First try Linux gcloud
+        try:
+            result = subprocess.run(
+                ["which", "gcloud"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+        
+        # Then try Windows gcloud from WSL
+        wsl_paths = [
+            "/mnt/c/Program Files/Google/Cloud SDK/google-cloud-sdk/bin/gcloud.cmd",
+            "/mnt/c/Program Files (x86)/Google/Cloud SDK/google-cloud-sdk/bin/gcloud.cmd",
+        ]
+        # Also check user directories
+        if os.path.exists("/mnt/c/Users/"):
+            for user_dir in os.listdir("/mnt/c/Users/"):
+                user_gcloud = f"/mnt/c/Users/{user_dir}/AppData/Local/Google/Cloud SDK/google-cloud-sdk/bin/gcloud.cmd"
+                if os.path.exists(user_gcloud):
+                    wsl_paths.append(user_gcloud)
+        
+        for path in wsl_paths:
+            if os.path.exists(path):
+                return path
+    
+    # Default Unix/Linux/Mac
+    else:
+        try:
+            result = subprocess.run(
+                ["which", "gcloud"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                return result.stdout.strip()
+        except Exception:
+            pass
+    
+    return None
+
+
+def get_gcloud_project_id() -> Optional[str]:
+    """Get the current Google Cloud project ID."""
+    if not GCLOUD_AVAILABLE:
+        return None
+    try:
+        import subprocess
+        
+        gcloud_cmd = find_gcloud_command()
+        if not gcloud_cmd:
+            return None
+        
+        result = subprocess.run(
+            [gcloud_cmd, "config", "get-value", "project"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            shell=(platform.system() == "Windows")  # Use shell on Windows for .cmd files
+        )
+        if result.returncode == 0:
+            project_id = result.stdout.strip()
+            if project_id and project_id != "(unset)":
+                return project_id
+    except Exception:
+        pass
+    return None
+
+
+def check_gcloud_auth_status() -> Tuple[bool, str]:
+    """Check if gcloud is authenticated. Returns (is_authenticated, status_message)."""
+    if not GCLOUD_AVAILABLE:
+        return False, "Google Cloud AI Platform library not installed. Run: pip install google-cloud-aiplatform"
+    
+    try:
+        import subprocess
+        import platform
+        
+        gcloud_cmd = find_gcloud_command()
+        if not gcloud_cmd:
+            system = platform.system()
+            if system == "Windows":
+                return False, ("Google Cloud CLI not found. Please:\n"
+                              "1. Install from: https://cloud.google.com/sdk/docs/install\n"
+                              "2. Restart your terminal/PowerShell\n"
+                              "3. Run: gcloud auth application-default login")
+            elif "microsoft" in platform.uname().release.lower():
+                return False, ("Google Cloud CLI not found. Either:\n"
+                              "1. Install in WSL: sudo snap install google-cloud-cli --classic\n"
+                              "2. Or run from PowerShell where gcloud is installed")
+            else:
+                return False, "Google Cloud CLI not installed. Visit: https://cloud.google.com/sdk/docs/install"
+        
+        # Check authentication status
+        result = subprocess.run(
+            [gcloud_cmd, "auth", "application-default", "print-access-token"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            shell=(platform.system() == "Windows")  # Use shell on Windows for .cmd files
+        )
+        
+        if result.returncode == 0:
+            # Also check if APIs are enabled
+            project_id = get_gcloud_project_id()
+            if project_id:
+                return True, f"Authenticated with Google Cloud (Project: {project_id})"
+            else:
+                return True, "Authenticated with Google Cloud (No project set)"
+        else:
+            # Parse error message for better guidance
+            error_output = result.stderr.lower() if result.stderr else ""
+            if "quota" in error_output or "api" in error_output:
+                return False, ("Authentication found but APIs may not be enabled.\n"
+                              "Please enable required APIs in Cloud Console:\n"
+                              "1. Visit: https://console.cloud.google.com/apis/library\n"
+                              "2. Enable: Vertex AI API\n"
+                              "3. Enable: Cloud Resource Manager API")
+            else:
+                return False, ("Not authenticated. Please run:\n"
+                              "gcloud auth application-default login\n\n"
+                              "This will open your browser to authenticate.")
+    except subprocess.TimeoutExpired:
+        return False, "Timeout checking authentication. gcloud may be updating or slow."
+    except Exception as e:
+        return False, f"Error checking authentication: {str(e)}"
+
+
+def make_client(api_key: Optional[str] = None, provider: Optional[str] = None, auth_mode: str = "api-key"):
+    """Create a client for the selected provider and auth mode.
+    
+    Args:
+        api_key: API key for authentication (used when auth_mode is 'api-key')
+        provider: Provider name ('google' or 'openai')
+        auth_mode: Authentication mode ('api-key' or 'gcloud', only applies to Google)
+    """
     prov = (provider or PROVIDER_NAME or "google").strip().lower()
+    
     if prov == "openai":
         if OpenAIClient is None:
             raise ImportError("The 'openai' package is not installed. Please run: pip install openai")
+        if not api_key:
+            raise ValueError("OpenAI requires an API key")
         return OpenAIClient(api_key=api_key)
-    # default: google
-    return genai.Client(api_key=api_key)
+    
+    # Google provider
+    if auth_mode == "gcloud":
+        if not GCLOUD_AVAILABLE:
+            raise ImportError("Google Cloud AI Platform not installed. Run: pip install google-cloud-aiplatform")
+        
+        # Initialize with Application Default Credentials
+        try:
+            # For Google Cloud, we'll use the generative AI client with ADC
+            # First check if credentials are available
+            credentials, project = google_auth_default()
+            if not project:
+                project = get_gcloud_project_id()
+            if not project:
+                raise ValueError("No Google Cloud project found. Set a project with: gcloud config set project YOUR_PROJECT_ID")
+            
+            # Initialize aiplatform
+            aiplatform.init(project=project, location="us-central1")
+            
+            # For now, we'll return a special marker that indicates gcloud auth
+            # The actual generation will need to handle this differently
+            return {"type": "gcloud", "project": project, "credentials": credentials}
+        except DefaultCredentialsError as e:
+            raise RuntimeError(
+                f"Google Cloud authentication failed.\n\n"
+                f"Please complete the setup:\n"
+                f"1. Install Google Cloud CLI from:\n"
+                f"   https://cloud.google.com/sdk/docs/install\n"
+                f"2. Run in terminal/PowerShell:\n"
+                f"   gcloud auth application-default login\n"
+                f"3. Set your project:\n"
+                f"   gcloud config set project YOUR_PROJECT_ID\n"
+                f"4. Enable required APIs at:\n"
+                f"   https://console.cloud.google.com/apis/library\n"
+                f"   - Vertex AI API\n"
+                f"   - Cloud Resource Manager API\n\n"
+                f"Error details: {e}"
+            )
+        except Exception as e:
+            raise RuntimeError(f"Failed to initialize Google Cloud client: {e}")
+    else:
+        # API key mode (default)
+        if not api_key:
+            raise ValueError("Google API key required when using api-key auth mode")
+        return genai.Client(api_key=api_key)
 
 
-def generate_any(client, model: str, prompt: str, provider: Optional[str] = None):
+def generate_any(client, model: str, prompt: str, provider: Optional[str] = None, auth_mode: str = "api-key"):
     """Generate content using the appropriate provider.
     Returns (texts, image_bytes_list).
     """
@@ -277,10 +531,32 @@ def generate_any(client, model: str, prompt: str, provider: Optional[str] = None
             raise
         return texts, images
     # Default: Google Gemini
-    response = client.models.generate_content(
-        model=model,
-        contents=prompt,
-    )
+    # Check if using Google Cloud authentication
+    if isinstance(client, dict) and client.get("type") == "gcloud":
+        # Using Google Cloud AI Platform with Application Default Credentials
+        if not GCLOUD_AVAILABLE:
+            raise RuntimeError("Google Cloud AI Platform not available")
+        
+        try:
+            # Use the Google GenAI client with Application Default Credentials
+            # Create a client using the credentials from the gcloud auth
+            from google import genai as gcloud_genai
+            
+            # The genai library can use Application Default Credentials
+            gcloud_client = gcloud_genai.Client()
+            response = gcloud_client.models.generate_content(
+                model=model,
+                contents=prompt,
+            )
+        except Exception as e:
+            raise RuntimeError(f"Google Cloud generation failed: {e}")
+    else:
+        # Standard API key authentication
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+        )
+    
     if response and response.candidates:
         cand = response.candidates[0]
         if getattr(cand, "content", None) and getattr(cand.content, "parts", None):
@@ -560,6 +836,7 @@ def get_gemini_doc_templates():
 def run_cli(args) -> int:
     # Determine provider (default google) and set global active provider
     provider = (getattr(args, "provider", None) or "google").strip().lower()
+    auth_mode = getattr(args, "auth_mode", "api-key")
     global PROVIDER_NAME
     PROVIDER_NAME = provider
 
@@ -569,7 +846,29 @@ def run_cli(args) -> int:
         section = extract_api_key_help(md)
         print(section)
         return 0
-    key, source = resolve_api_key(args.api_key, args.api_key_file, provider=provider)
+    
+    # Handle authentication based on mode
+    key = None
+    source = "none"
+    
+    if provider == "openai" and auth_mode == "gcloud":
+        print("Warning: --auth-mode=gcloud is only supported for Google provider. Using api-key mode for OpenAI.")
+        auth_mode = "api-key"
+    
+    if auth_mode == "gcloud" and provider == "google":
+        # Check gcloud authentication status
+        is_auth, status_msg = check_gcloud_auth_status()
+        if not is_auth:
+            print(f"Google Cloud authentication error: {status_msg}")
+            return 2
+        print(f"Using Google Cloud authentication: {status_msg}")
+        source = "gcloud"
+        # For gcloud auth, we don't need an API key
+        if args.api_key or args.api_key_file:
+            print("Warning: --api-key and --api-key-file are ignored when using --auth-mode=gcloud")
+    else:
+        # Standard API key resolution
+        key, source = resolve_api_key(args.api_key, args.api_key_file, provider=provider)
     if args.set_key:
         # Persist either provided key or from file
         set_key = args.api_key
@@ -592,28 +891,31 @@ def run_cli(args) -> int:
         return DEFAULT_MODEL
 
     if args.test:
-        if not key:
+        if auth_mode == "api-key" and not key:
             print("No API key found. Provide with --api-key/--api-key-file or set via --set-key.")
             return 2
         try:
-            client = make_client(key, provider=provider)
+            client = make_client(key, provider=provider, auth_mode=auth_mode)
             # Minimal generation attempt per provider
             model = args.model or default_model_for_provider(provider)
-            generate_any(client, model, "Hello from test", provider=provider)
-            print(f"API key appears valid for provider '{provider}' (source={source}).")
+            generate_any(client, model, "Hello from test", provider=provider, auth_mode=auth_mode)
+            if auth_mode == "gcloud":
+                print(f"Google Cloud authentication successful for provider '{provider}' (source={source}).")
+            else:
+                print(f"API key appears valid for provider '{provider}' (source={source}).")
             return 0
         except Exception as e:
-            print(f"API key test failed for provider '{provider}': {e}")
+            print(f"Authentication test failed for provider '{provider}' (auth_mode={auth_mode}): {e}")
             return 3
 
     if args.prompt:
-        if not key:
+        if auth_mode == "api-key" and not key:
             print("No API key. Use --api-key/--api-key-file or --set-key.")
             return 2
         try:
-            client = make_client(key, provider=provider)
+            client = make_client(key, provider=provider, auth_mode=auth_mode)
             model = args.model or default_model_for_provider(provider)
-            texts, images = generate_any(client, model, args.prompt, provider=provider)
+            texts, images = generate_any(client, model, args.prompt, provider=provider, auth_mode=auth_mode)
             # Print texts
             for t in texts:
                 print(t)
@@ -653,17 +955,18 @@ def run_cli(args) -> int:
 class GenWorker(QObject):
     finished = Signal(list, list, str)  # texts, images(bytes), error
 
-    def __init__(self, api_key: str, model: str, prompt: str, provider: str):
+    def __init__(self, api_key: Optional[str], model: str, prompt: str, provider: str, auth_mode: str = "api-key"):
         super().__init__()
         self.api_key = api_key
         self.model = model
         self.prompt = prompt
         self.provider = (provider or "google").strip().lower()
+        self.auth_mode = auth_mode
 
     def run(self):
         try:
-            client = make_client(self.api_key, provider=self.provider)
-            texts, images = generate_any(client, self.model, self.prompt, provider=self.provider)
+            client = make_client(self.api_key, provider=self.provider, auth_mode=self.auth_mode)
+            texts, images = generate_any(client, self.model, self.prompt, provider=self.provider, auth_mode=self.auth_mode)
             self.finished.emit(texts, images, "")
         except Exception as e:
             self.finished.emit([], [], str(e))
@@ -1412,12 +1715,69 @@ class MainWindow(QMainWindow):
             pass
         form.addRow("Provider:", self.provider_combo)
 
+        # Auth mode for Google (only shown when Google is selected)
+        self.auth_mode_combo = QComboBox()
+        self.auth_mode_combo.addItems(["API Key", "Google Cloud Account"])
+        # Load saved auth mode from config
+        try:
+            cfg = load_config()
+            saved_auth_mode = cfg.get("auth_mode", "api-key")
+            if saved_auth_mode == "gcloud":
+                self.auth_mode_combo.setCurrentIndex(1)
+            else:
+                self.auth_mode_combo.setCurrentIndex(0)
+            self.current_auth_mode = saved_auth_mode
+        except Exception:
+            self.current_auth_mode = "api-key"
+            pass
+        self.auth_mode_label = QLabel("Auth Mode:")
+        form.addRow(self.auth_mode_label, self.auth_mode_combo)
+
+        # Google Cloud Project ID (shown when using gcloud auth)
+        self.gcloud_project_label = QLabel("Project ID:")
+        self.gcloud_project_value = QLabel("Not detected")
+        form.addRow(self.gcloud_project_label, self.gcloud_project_value)
+        
+        # Google Cloud status and check button
+        self.gcloud_status_label = QLabel("Status:")
+        self.gcloud_status_value = QLabel("Not checked")
+        form.addRow(self.gcloud_status_label, self.gcloud_status_value)
+        
+        # Google Cloud setup instructions
+        self.gcloud_help_label = QLabel("Setup Help:")
+        self.gcloud_help_text = QLabel()
+        self.gcloud_help_text.setText(
+            "<html><body style='font-size: 10pt;'>"
+            "<b>Quick Setup:</b><br>"
+            "1. Install Google Cloud CLI<br>"
+            "2. Run: <code>gcloud auth application-default login</code><br>"
+            "3. Click 'Check Status' below"
+            "</body></html>"
+        )
+        self.gcloud_help_text.setWordWrap(True)
+        self.gcloud_help_text.setOpenExternalLinks(True)
+        form.addRow(self.gcloud_help_label, self.gcloud_help_text)
+        
+        # Google Cloud action buttons
+        self.gcloud_buttons_layout = QHBoxLayout()
+        self.btn_check_gcloud = QPushButton("Check Status")
+        self.btn_gcloud_install = QPushButton("Get gcloud CLI")
+        self.btn_gcloud_console = QPushButton("Cloud Console")
+        self.btn_gcloud_login_help = QPushButton("Login Help")
+        
+        self.gcloud_buttons_layout.addWidget(self.btn_check_gcloud)
+        self.gcloud_buttons_layout.addWidget(self.btn_gcloud_install)
+        self.gcloud_buttons_layout.addWidget(self.btn_gcloud_console)
+        self.gcloud_buttons_layout.addWidget(self.btn_gcloud_login_help)
+        form.addRow("", self.gcloud_buttons_layout)
+
         # API key field for selected provider
+        self.api_key_label = QLabel("API Key:")
         self.api_key_edit = QLineEdit()
         if self.current_api_key:
             self.api_key_edit.setText(self.current_api_key)
         self.api_key_edit.setEchoMode(QLineEdit.Password)
-        form.addRow("API Key:", self.api_key_edit)
+        form.addRow(self.api_key_label, self.api_key_edit)
 
         self.storage_path_label = QLabel(str(config_path()))
         form.addRow("Stored at:", self.storage_path_label)
@@ -1446,6 +1806,14 @@ class MainWindow(QMainWindow):
         self.btn_get_key.clicked.connect(self._open_api_key_page)
         self.btn_save_test.clicked.connect(self._save_and_test)
         self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
+        self.auth_mode_combo.currentTextChanged.connect(self._on_auth_mode_changed)
+        self.btn_check_gcloud.clicked.connect(self._check_gcloud_status)
+        self.btn_gcloud_install.clicked.connect(self._open_gcloud_install_page)
+        self.btn_gcloud_console.clicked.connect(self._open_gcloud_console)
+        self.btn_gcloud_login_help.clicked.connect(self._show_gcloud_login_help)
+        
+        # Update visibility based on current selections
+        self._update_auth_ui_visibility()
 
         v.addStretch(1)
 
@@ -1473,20 +1841,39 @@ class MainWindow(QMainWindow):
                 QMessageBox.warning(self, APP_NAME, "Could not read an API key from the selected file.")
 
     def _save_and_test(self):
-        key = self.api_key_edit.text().strip()
-        if not key:
-            QMessageBox.warning(self, APP_NAME, "Please enter an API key.")
-            return
-        try:
-            store_api_key(key, provider=self.current_provider)
-            self.current_api_key = key
-            # quick test for the selected provider
-            client = make_client(key, provider=self.current_provider)
-            model = default_model_for_provider(self.current_provider)
-            generate_any(client, model, "Hello from UI test", provider=self.current_provider)
-            QMessageBox.information(self, APP_NAME, f"API key saved and tested for provider '{self.current_provider}'.\nLocation: {config_path()}")
-        except Exception as e:
-            QMessageBox.critical(self, APP_NAME, f"API key test failed: {e}")
+        auth_mode = getattr(self, "current_auth_mode", "api-key")
+        
+        if auth_mode == "gcloud" and self.current_provider == "google":
+            # Test Google Cloud authentication
+            try:
+                is_auth, status_msg = check_gcloud_auth_status()
+                if not is_auth:
+                    QMessageBox.warning(self, APP_NAME, f"Google Cloud authentication not configured:\n{status_msg}")
+                    return
+                
+                # Test generation with gcloud auth
+                client = make_client(None, provider=self.current_provider, auth_mode="gcloud")
+                model = default_model_for_provider(self.current_provider)
+                generate_any(client, model, "Hello from UI test", provider=self.current_provider, auth_mode="gcloud")
+                QMessageBox.information(self, APP_NAME, f"Google Cloud authentication successful!\n{status_msg}")
+            except Exception as e:
+                QMessageBox.critical(self, APP_NAME, f"Google Cloud authentication test failed: {e}")
+        else:
+            # Standard API key test
+            key = self.api_key_edit.text().strip()
+            if not key:
+                QMessageBox.warning(self, APP_NAME, "Please enter an API key.")
+                return
+            try:
+                store_api_key(key, provider=self.current_provider)
+                self.current_api_key = key
+                # quick test for the selected provider
+                client = make_client(key, provider=self.current_provider, auth_mode="api-key")
+                model = default_model_for_provider(self.current_provider)
+                generate_any(client, model, "Hello from UI test", provider=self.current_provider, auth_mode="api-key")
+                QMessageBox.information(self, APP_NAME, f"API key saved and tested for provider '{self.current_provider}'.\nLocation: {config_path()}")
+            except Exception as e:
+                QMessageBox.critical(self, APP_NAME, f"API key test failed: {e}")
 
     def _open_api_key_page(self):
         try:
@@ -1534,6 +1921,171 @@ class MainWindow(QMainWindow):
         # Keep global in sync for any helpers using it
         try:
             PROVIDER_NAME = self.current_provider
+        except Exception:
+            pass
+        # Update auth UI visibility
+        self._update_auth_ui_visibility()
+    
+    def _on_auth_mode_changed(self, text: str):
+        """Handle auth mode change for Google provider."""
+        try:
+            if text == "Google Cloud Account":
+                self.current_auth_mode = "gcloud"
+                
+                # Show first-time setup message
+                cfg = load_config()
+                if not cfg.get("gcloud_intro_shown", False):
+                    intro_msg = (
+                        "Google Cloud Authentication Selected\n\n"
+                        "This method uses your Google Cloud account instead of an API key.\n\n"
+                        "Benefits:\n"
+                        "• No API key management\n"
+                        "• Works with enterprise accounts\n"
+                        "• Integrates with existing GCP projects\n\n"
+                        "Requirements:\n"
+                        "1. Google Cloud CLI must be installed\n"
+                        "2. You must authenticate with 'gcloud auth application-default login'\n\n"
+                        "Click the helper buttons below to:\n"
+                        "• 'Get gcloud CLI' - Download installer\n"
+                        "• 'Cloud Console' - Manage projects\n"
+                        "• 'Login Help' - Detailed instructions\n"
+                        "• 'Check Status' - Verify authentication"
+                    )
+                    QMessageBox.information(self, "Google Cloud Setup", intro_msg)
+                    
+                    # Mark as shown
+                    cfg["gcloud_intro_shown"] = True
+                    save_config(cfg)
+            else:
+                self.current_auth_mode = "api-key"
+            
+            # Save to config
+            cfg = load_config()
+            if not isinstance(cfg, dict):
+                cfg = {}
+            cfg["auth_mode"] = self.current_auth_mode
+            save_config(cfg)
+            
+            # Update UI visibility
+            self._update_auth_ui_visibility()
+            
+            # If switching to gcloud, check status
+            if self.current_auth_mode == "gcloud":
+                self._check_gcloud_status()
+        except Exception:
+            pass
+    
+    def _check_gcloud_status(self):
+        """Check Google Cloud authentication status."""
+        try:
+            if self.current_auth_mode == "gcloud":
+                is_auth, status_msg = check_gcloud_auth_status()
+                self.gcloud_status_value.setText(status_msg)
+                
+                # Update project ID
+                project_id = get_gcloud_project_id()
+                if project_id:
+                    self.gcloud_project_value.setText(project_id)
+                else:
+                    self.gcloud_project_value.setText("Not detected")
+                
+                # Change button text based on status
+                if is_auth:
+                    self.gcloud_status_value.setStyleSheet("color: green;")
+                    # Update help text for authenticated state
+                    self.gcloud_help_text.setText(
+                        "<html><body style='font-size: 10pt;'>"
+                        "<b>✓ Authenticated!</b><br>"
+                        f"Project: {project_id or 'Default'}<br>"
+                        "You're ready to generate images."
+                        "</body></html>"
+                    )
+                else:
+                    self.gcloud_status_value.setStyleSheet("color: red;")
+                    # Show detailed setup instructions
+                    self.gcloud_help_text.setText(
+                        "<html><body style='font-size: 10pt;'>"
+                        "<b>Setup Required:</b><br>"
+                        "1. Click 'Get gcloud CLI' to download<br>"
+                        "2. After install, run in terminal:<br>"
+                        "&nbsp;&nbsp;<code>gcloud auth application-default login</code><br>"
+                        "3. Click 'Check Status' to verify"
+                        "</body></html>"
+                    )
+        except Exception as e:
+            self.gcloud_status_value.setText(f"Error: {str(e)}")
+    
+    def _open_gcloud_install_page(self):
+        """Open Google Cloud CLI installation page."""
+        try:
+            webbrowser.open("https://cloud.google.com/sdk/docs/install")
+        except Exception as e:
+            QMessageBox.warning(self, APP_NAME, f"Could not open browser: {e}")
+    
+    def _open_gcloud_console(self):
+        """Open Google Cloud Console."""
+        try:
+            webbrowser.open("https://console.cloud.google.com/")
+        except Exception as e:
+            QMessageBox.warning(self, APP_NAME, f"Could not open browser: {e}")
+    
+    def _show_gcloud_login_help(self):
+        """Show detailed Google Cloud login instructions."""
+        help_text = (
+            "Google Cloud Authentication Setup\n\n"
+            "STEP 1: Install Google Cloud CLI\n"
+            "• Windows: Download installer from cloud.google.com/sdk\n"
+            "• macOS: Run 'brew install google-cloud-sdk'\n"
+            "• Linux: Follow your distribution's instructions\n\n"
+            "STEP 2: Authenticate\n"
+            "Open a terminal/command prompt and run:\n"
+            "  gcloud auth application-default login\n\n"
+            "This will open your browser to sign in with Google.\n\n"
+            "STEP 3: Set Project (Optional)\n"
+            "If you have multiple projects:\n"
+            "  gcloud config set project YOUR_PROJECT_ID\n\n"
+            "STEP 4: Verify\n"
+            "Click 'Check Status' in this app to verify authentication.\n\n"
+            "Troubleshooting:\n"
+            "• Make sure billing is enabled for your project\n"
+            "• Visit console.cloud.google.com to manage projects\n"
+            "• Run 'gcloud auth list' to see active accounts"
+        )
+        QMessageBox.information(self, "Google Cloud Setup Help", help_text)
+    
+    def _update_auth_ui_visibility(self):
+        """Update visibility of auth-related UI elements based on provider and auth mode."""
+        try:
+            is_google = self.current_provider == "google"
+            is_gcloud = is_google and self.current_auth_mode == "gcloud"
+            
+            # Auth mode is only relevant for Google
+            self.auth_mode_label.setVisible(is_google)
+            self.auth_mode_combo.setVisible(is_google)
+            
+            # Google Cloud elements only visible when using gcloud auth
+            self.gcloud_project_label.setVisible(is_gcloud)
+            self.gcloud_project_value.setVisible(is_gcloud)
+            self.gcloud_status_label.setVisible(is_gcloud)
+            self.gcloud_status_value.setVisible(is_gcloud)
+            self.gcloud_help_label.setVisible(is_gcloud)
+            self.gcloud_help_text.setVisible(is_gcloud)
+            self.btn_check_gcloud.setVisible(is_gcloud)
+            self.btn_gcloud_install.setVisible(is_gcloud)
+            self.btn_gcloud_console.setVisible(is_gcloud)
+            self.btn_gcloud_login_help.setVisible(is_gcloud)
+            
+            # API key elements hidden when using gcloud auth
+            show_api_key = not is_gcloud
+            self.api_key_label.setVisible(show_api_key)
+            self.api_key_edit.setVisible(show_api_key)
+            self.btn_browse.setVisible(show_api_key)
+            
+            # Adjust Save & Test button text
+            if is_gcloud:
+                self.btn_save_test.setText("Test Connection")
+            else:
+                self.btn_save_test.setText("Save & Test")
         except Exception:
             pass
 
@@ -1875,11 +2427,24 @@ class MainWindow(QMainWindow):
                 # fallback to normal generation if cache load fails
                 pass
 
-        api_key = self.current_api_key or self.api_key_edit.text().strip()
-        if not api_key:
-            QMessageBox.warning(self, APP_NAME, "No API key configured. Go to Settings to save one.")
-            self.tabs.setCurrentWidget(self.tab_settings)
-            return
+        auth_mode = getattr(self, "current_auth_mode", "api-key")
+        
+        # Check authentication requirements
+        if auth_mode == "gcloud" and self.current_provider == "google":
+            # Check gcloud authentication
+            is_auth, status_msg = check_gcloud_auth_status()
+            if not is_auth:
+                QMessageBox.warning(self, APP_NAME, f"Google Cloud authentication not configured:\n{status_msg}\n\nGo to Settings to configure authentication.")
+                self.tabs.setCurrentWidget(self.tab_settings)
+                return
+            api_key = None  # Not needed for gcloud auth
+        else:
+            # Standard API key authentication
+            api_key = self.current_api_key or self.api_key_edit.text().strip()
+            if not api_key:
+                QMessageBox.warning(self, APP_NAME, "No API key configured. Go to Settings to save one.")
+                self.tabs.setCurrentWidget(self.tab_settings)
+                return
 
         self.btn_generate.setEnabled(False)
         try:
@@ -1891,7 +2456,7 @@ class MainWindow(QMainWindow):
         self.output_image_label.clear()
 
         self.thread = QThread(self)
-        self.worker = GenWorker(api_key, model, prompt, self.current_provider)
+        self.worker = GenWorker(api_key, model, prompt, self.current_provider, auth_mode)
         self.worker.moveToThread(self.thread)
         self.thread.started.connect(self.worker.run)
         self.worker.finished.connect(self._on_generated)
@@ -2046,7 +2611,7 @@ class MainWindow(QMainWindow):
 
 def build_arg_parser():
     p = argparse.ArgumentParser(
-        description="LelandGreenGenAI: CLI for Google Gemini and OpenAI image/text generation. Run without arguments to open the GUI.")
+        description="ImageAI: CLI for Google Gemini and OpenAI image/text generation. Run without arguments to open the GUI.")
     p.add_argument("-k", "--api-key", dest="api_key", help="API key string (takes precedence)")
     p.add_argument("-K", "--api-key-file", dest="api_key_file", help="Path to a file containing the API key.")
     p.add_argument("-s", "--set-key", action="store_true", help="Persist the provided key to user config.")
@@ -2055,6 +2620,7 @@ def build_arg_parser():
     p.add_argument("-m", "--model", help=f"Model to use (default: {DEFAULT_MODEL}).")
     p.add_argument("-o", "--out", help="Output path for the first generated image (CLI mode).")
     p.add_argument("--provider", choices=["google", "openai"], default="google", help="Provider to use: google or openai (default: google)")
+    p.add_argument("--auth-mode", choices=["api-key", "gcloud"], default="api-key", help="Google authentication mode: api-key or gcloud (default: api-key)")
     p.add_argument("-H", "--help-api-key", action="store_true", help="Print API key setup instructions and exit.")
     return p
 
