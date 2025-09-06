@@ -47,6 +47,8 @@ def resolve_api_key(
     env_vars = {
         "google": ["GOOGLE_API_KEY", "GEMINI_API_KEY"],
         "openai": ["OPENAI_API_KEY"],
+        "stability": ["STABILITY_KEY", "STABILITY_API_KEY"],
+        "local_sd": [],  # No API key needed
     }
     
     for var in env_vars.get(provider, []):
@@ -86,9 +88,9 @@ def run_cli(args) -> int:
         return 0
     
     # Validate auth mode for provider
-    if provider == "openai" and auth_mode == "gcloud":
-        print("Warning: --auth-mode=gcloud is only supported for Google provider.")
-        print("Using api-key mode for OpenAI.")
+    if provider != "google" and auth_mode == "gcloud":
+        print(f"Warning: --auth-mode=gcloud is only supported for Google provider.")
+        print(f"Using api-key mode for {provider}.")
         auth_mode = "api-key"
     
     # Resolve API key
@@ -123,7 +125,7 @@ def run_cli(args) -> int:
     
     # Handle --test
     if args.test:
-        if auth_mode == "api-key" and not key:
+        if auth_mode == "api-key" and not key and provider != "local_sd":
             print("No API key found. Provide with --api-key/--api-key-file or set via --set-key.")
             return 2
         
@@ -146,7 +148,7 @@ def run_cli(args) -> int:
     
     # Handle --prompt
     if args.prompt:
-        if auth_mode == "api-key" and not key:
+        if auth_mode == "api-key" and not key and provider != "local_sd":
             print("No API key. Use --api-key/--api-key-file or --set-key.")
             return 2
         

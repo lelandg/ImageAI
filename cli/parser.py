@@ -20,7 +20,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     # Provider selection
     parser.add_argument(
         "--provider",
-        choices=["google", "openai"],
+        choices=["google", "openai", "stability", "local_sd"],
         default="google",
         help="AI provider to use (default: google)"
     )

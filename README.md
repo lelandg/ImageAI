@@ -6,7 +6,7 @@
 
 ## Overview
 
-**ImageAI** is a powerful desktop application and CLI tool for AI image generation using Google's Gemini API (gemini-2.5-flash-image-preview and earlier) and OpenAI's image models (DALL·E-3, DALL·E-2). It features enterprise-grade authentication options, secure credential management, and works seamlessly across Windows, macOS, and Linux.
+**ImageAI** is a powerful desktop application and CLI tool for AI image generation supporting multiple providers including Google's Gemini API, OpenAI's DALL·E models, Stability AI's Stable Diffusion, and local Stable Diffusion models. It features enterprise-grade authentication options, secure credential management, and works seamlessly across Windows, macOS, and Linux.
 
 ![ImageAI Screenshot](screenshot_20250906.jpg)
 
@@ -15,8 +15,10 @@
 ### 🎨 Multi-Provider Support
 - **Google Gemini** - Access to latest Gemini models for image generation
 - **OpenAI DALL·E** - Support for DALL·E-3 and DALL·E-2 models
+- **Stability AI** - Stable Diffusion XL, SD 2.1, and more via API
+- **Local Stable Diffusion** - Run models locally without API keys (GPU recommended)
 - Easy provider switching in both GUI and CLI
-- More models are coming soon!
+- Support for custom Hugging Face models
 
 ### 🔐 Flexible Authentication
 - **API Key Authentication** - Simple setup for individual users
@@ -151,8 +153,16 @@ python -m venv .venv
 # macOS/Linux:
 source .venv/bin/activate
 
-# Install dependencies
+# Install core dependencies
 pip install -r requirements.txt
+
+# Optional: Install Local Stable Diffusion support
+# For CPU-only:
+pip install -r requirements-local-sd.txt
+
+# For GPU support (CUDA):
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements-local-sd.txt
 ```
 
 ### Platform-Specific Notes
@@ -274,13 +284,15 @@ For each provider, the authentication order is:
 ### Provider Arguments
 
 ```
---provider {google|openai}  Provider to use (default: google)
+--provider {google|openai|stability|local_sd}  Provider to use (default: google)
 ```
 
 ### Model Defaults
 
 - **Google**: `gemini-2.5-flash-image-preview`
 - **OpenAI**: `dall-e-3`
+- **Stability AI**: `stable-diffusion-xl-1024-v1-0`
+- **Local SD**: `stabilityai/stable-diffusion-2-1`
 
 ### Complete Examples
 
@@ -288,15 +300,20 @@ For each provider, the authentication order is:
 # Test authentication
 python main.py -t
 python main.py --provider openai -t
+python main.py --provider stability -t
+python main.py --provider local_sd -t  # Check if ML deps installed
 python main.py --auth-mode gcloud -t
 
 # Generate with different providers
 python main.py -p "Sunset over mountains" -o sunset.png
 python main.py --provider openai -m dall-e-2 -p "Abstract art" -o abstract.png
+python main.py --provider stability -p "Fantasy landscape" -o fantasy.png
+python main.py --provider local_sd -p "Cyberpunk city" -o cyber.png
 python main.py --auth-mode gcloud -p "Space station" -o space.png
 
 # Save and use API keys
 python main.py -s -k "YOUR_KEY"  # Save to config
+python main.py --provider stability -s -k "YOUR_STABILITY_KEY"
 python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
 ```
 
@@ -516,6 +533,19 @@ export QT_SCALE_FACTOR=1.25
 - `dall-e-3` (default) - Best quality, 1024x1024
 - `dall-e-2` - Good quality, multiple sizes
 
+#### Stability AI Models
+- `stable-diffusion-xl-1024-v1-0` (default) - SDXL, best quality
+- `stable-diffusion-v1-6` - SD 1.6, balanced
+- `stable-diffusion-512-v2-1` - SD 2.1, faster
+- `stable-diffusion-xl-beta-v2-2-2` - SDXL beta
+
+#### Local SD Models (Hugging Face)
+- `stabilityai/stable-diffusion-2-1` (default)
+- `runwayml/stable-diffusion-v1-5` - Popular SD 1.5
+- `stabilityai/stable-diffusion-xl-base-1.0` - SDXL base
+- `segmind/SSD-1B` - Fast SDXL variant
+- Custom models from Hugging Face Hub
+
 ### Rate Limits
 
 | Provider | Requests/Min | Daily Limit | Notes |
@@ -523,10 +553,12 @@ export QT_SCALE_FACTOR=1.25
 | Google (Free) | 60 | 1,500 | Varies by region |
 | Google (Paid) | 360 | Unlimited | Billing required |
 | OpenAI | Varies | By tier | Check dashboard |
+| Stability AI | 150 | By credits | Pay per generation |
+| Local SD | Unlimited | Unlimited | Limited by hardware |
 
 ### Response Formats
 
-Both providers return images as base64-encoded PNG data, automatically decoded and saved by the application.
+All API providers return images as base64-encoded PNG data or URLs, automatically decoded and saved by the application. Local SD generates images directly as PIL Image objects.
 
 ## 12) Development
 
@@ -534,16 +566,27 @@ Both providers return images as base64-encoded PNG data, automatically decoded a
 
 ```
 ImageAI/
-├── main.py                 # Main application (single file)
-├── requirements.txt        # Python dependencies
-├── README.md              # This file
-├── CLAUDE.md              # Claude AI guidance
-├── GEMINI.md              # Gemini setup guide
-├── Plans/                 # Future development plans
+├── main.py                   # Main entry point
+├── cli/                      # CLI interface
+├── gui/                      # GUI interface
+├── core/                     # Core functionality
+├── providers/                # Provider implementations
+│   ├── base.py              # Base provider interface
+│   ├── google.py            # Google Gemini provider
+│   ├── openai.py            # OpenAI DALL-E provider
+│   ├── stability.py         # Stability AI provider
+│   └── local_sd.py          # Local Stable Diffusion
+├── templates/                # Prompt templates
+├── requirements.txt          # Core dependencies
+├── requirements-local-sd.txt # Local SD dependencies
+├── README.md                 # This file
+├── CLAUDE.md                 # Claude AI guidance
+├── GEMINI.md                 # Gemini setup guide
+├── Plans/                    # Future development plans
 │   ├── GoogleCloudAuth.md
-│   └── NewProviders.md
-├── .gitignore             # Git ignore rules
-└── screenshot2.png        # Application screenshot
+│   ├── NewProviders.md
+│   └── ProviderIntegration.md
+└── .gitignore                # Git ignore rules
 ```
 
 ### Contributing
@@ -556,10 +599,13 @@ ImageAI/
 
 ### Future Plans
 
-- Additional providers (Stability AI, Midjourney API)
-- Image editing capabilities (inpainting, outpainting)
+- ✅ Stability AI integration (completed)
+- ✅ Local Stable Diffusion support (completed)
+- Image editing capabilities (inpainting, outpainting) - Partially implemented
+- Local model management GUI (Phase 3 in progress)
 - Batch processing improvements
 - Plugin system for custom providers
+- Additional providers (Midjourney API, Adobe Firefly, etc.)
 - Web interface option
 - Mobile app companion
 

@@ -11,11 +11,8 @@ def launch_gui():
     except ImportError:
         raise ImportError("PySide6 is required for GUI mode. Install with: pip install PySide6")
     
-    # Use the original MainWindow for now to preserve all functionality
-    # This ensures 100% compatibility while we gradually refactor
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from main_original import MainWindow
+    # Use the modular MainWindow
+    from .main_window import MainWindow
     
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("ImageAI")

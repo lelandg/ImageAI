@@ -25,6 +25,26 @@ def _get_providers() -> Dict[str, Type[ImageProvider]]:
             _PROVIDERS["openai"] = OpenAIProvider
         except ImportError:
             pass
+        
+        # Try to import Stability AI provider
+        try:
+            from .stability import StabilityProvider
+            _PROVIDERS["stability"] = StabilityProvider
+        except (ImportError, AttributeError) as e:
+            # AttributeError can occur with protobuf conflicts
+            import logging
+            logging.debug(f"Could not load Stability provider: {e}")
+            pass
+        
+        # Try to import Local SD provider
+        try:
+            from .local_sd import LocalSDProvider
+            _PROVIDERS["local_sd"] = LocalSDProvider
+        except (ImportError, AttributeError) as e:
+            # AttributeError can occur with protobuf/TensorFlow conflicts
+            import logging
+            logging.debug(f"Could not load Local SD provider: {e}")
+            pass
     
     return _PROVIDERS
 

@@ -1,0 +1,15 @@
+# Requirements for Local Stable Diffusion support
+# Install with: pip install -r requirements-local-sd.txt
+
+# Core ML dependencies
+torch>=2.0.0  # For CPU-only: torch>=2.0.0 --index-url https://download.pytorch.org/whl/cpu
+diffusers>=0.24.0
+transformers>=4.35.0
+accelerate>=0.24.0
+safetensors>=0.4.0
+
+# System monitoring
+psutil>=5.9.0
+
+# Note: For GPU support, install PyTorch with CUDA:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121

@@ -23,6 +23,19 @@ PROVIDER_MODELS = {
         "dall-e-3": "DALL·E 3",
         "dall-e-2": "DALL·E 2",
     },
+    "stability": {
+        "stable-diffusion-xl-1024-v1-0": "Stable Diffusion XL 1.0",
+        "stable-diffusion-v1-6": "Stable Diffusion 1.6",
+        "stable-diffusion-512-v2-1": "Stable Diffusion 2.1",
+        "stable-diffusion-xl-beta-v2-2-2": "Stable Diffusion XL Beta",
+    },
+    "local_sd": {
+        "stabilityai/stable-diffusion-2-1": "Stable Diffusion 2.1",
+        "runwayml/stable-diffusion-v1-5": "Stable Diffusion 1.5",
+        "stabilityai/stable-diffusion-xl-base-1.0": "SDXL Base 1.0",
+        "segmind/SSD-1B": "SSD-1B (Fast SDXL)",
+        "CompVis/stable-diffusion-v1-4": "Stable Diffusion 1.4",
+    },
 }
 
 # Provider API key URLs
@@ -30,6 +43,7 @@ PROVIDER_KEY_URLS = {
     "google": "https://aistudio.google.com/apikey",
     "openai": "https://platform.openai.com/api-keys",
     "stability": "https://platform.stability.ai/account/keys",
+    "local_sd": "",  # No API key needed for local models
 }
 
 # File paths

@@ -46,11 +46,15 @@ class MainWindow(QMainWindow):
         
         # Session state
         self.history_paths: List[Path] = scan_disk_history()
+        self.history = []  # Initialize empty history list
         self.current_prompt: str = ""
         self.gen_thread: Optional[QThread] = None
         self.gen_worker: Optional[GenWorker] = None
         self.current_image_data: Optional[bytes] = None
         self._last_template_context: Optional[dict] = None
+        
+        # Load history from disk
+        self._load_history_from_disk()
         
         # Create UI
         self._init_ui()
@@ -59,6 +63,30 @@ class MainWindow(QMainWindow):
         # Restore window geometry
         self._restore_geometry()
     
+    def _load_history_from_disk(self):
+        """Load history from disk into memory."""
+        for path in self.history_paths:
+            try:
+                # Try to read sidecar file for metadata
+                sidecar = read_image_sidecar(path)
+                if sidecar:
+                    self.history.append({
+                        'path': path,
+                        'prompt': sidecar.get('prompt', ''),
+                        'timestamp': sidecar.get('timestamp', path.stat().st_mtime),
+                        'model': sidecar.get('model', ''),
+                        'provider': sidecar.get('provider', '')
+                    })
+                else:
+                    # No sidecar, just add path
+                    self.history.append({
+                        'path': path,
+                        'prompt': path.stem.replace('_', ' '),
+                        'timestamp': path.stat().st_mtime
+                    })
+            except Exception:
+                pass
+    
     def _init_ui(self):
         """Initialize the user interface."""
         self.tabs = QTabWidget()
@@ -66,16 +94,26 @@ class MainWindow(QMainWindow):
         
         # Create tabs
         self.tab_generate = QWidget()
+        self.tab_templates = QWidget()
         self.tab_settings = QWidget()
         self.tab_help = QWidget()
+        self.tab_history = QWidget()
         
         self.tabs.addTab(self.tab_generate, "Generate")
+        self.tabs.addTab(self.tab_templates, "Templates")
         self.tabs.addTab(self.tab_settings, "Settings")
         self.tabs.addTab(self.tab_help, "Help")
         
+        # Add History tab if there's history
+        if self.history:
+            self.tabs.addTab(self.tab_history, "History")
+        
         self._init_generate_tab()
+        self._init_templates_tab()
         self._init_settings_tab()
         self._init_help_tab()
+        if self.history:
+            self._init_history_tab()
     
     def _init_menu(self):
         """Initialize menu bar."""
@@ -136,9 +174,22 @@ class MainWindow(QMainWindow):
         self.output_text.setMaximumHeight(100)
         v.addWidget(self.output_text)
         
+        # Output actions
+        hb_output = QHBoxLayout()
+        self.btn_save_image = QPushButton("Save Image")
+        self.btn_copy_image = QPushButton("Copy to Clipboard")
+        self.btn_save_image.setEnabled(False)
+        self.btn_copy_image.setEnabled(False)
+        hb_output.addWidget(self.btn_save_image)
+        hb_output.addWidget(self.btn_copy_image)
+        hb_output.addStretch()
+        v.addLayout(hb_output)
+        
         # Connect signals
         self.btn_examples.clicked.connect(self._open_examples)
         self.btn_generate.clicked.connect(self._generate)
+        self.btn_save_image.clicked.connect(self._save_image_as)
+        self.btn_copy_image.clicked.connect(self._copy_image_to_clipboard)
     
     def _init_settings_tab(self):
         """Initialize the Settings tab."""
@@ -147,14 +198,28 @@ class MainWindow(QMainWindow):
         # Provider selection
         form = QFormLayout()
         self.provider_combo = QComboBox()
-        self.provider_combo.addItems(["google", "openai"])
-        self.provider_combo.setCurrentText(self.current_provider)
+        # Get available providers dynamically
+        available_providers = list_providers()
+        self.provider_combo.addItems(available_providers)
+        if self.current_provider in available_providers:
+            self.provider_combo.setCurrentText(self.current_provider)
+        elif available_providers:
+            self.current_provider = available_providers[0]
+            self.provider_combo.setCurrentText(self.current_provider)
         form.addRow("Provider:", self.provider_combo)
         
         # API key
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.Password)
-        self.api_key_edit.setPlaceholderText("Enter API key...")
+        
+        # Set placeholder and enabled state based on provider
+        if self.current_provider == "local_sd":
+            self.api_key_edit.setPlaceholderText("No API key needed for Local SD")
+            self.api_key_edit.setEnabled(False)
+        else:
+            self.api_key_edit.setPlaceholderText("Enter API key...")
+            self.api_key_edit.setEnabled(True)
+            
         if self.current_api_key:
             self.api_key_edit.setText(self.current_api_key)
         form.addRow("API Key:", self.api_key_edit)
@@ -207,6 +272,8 @@ class MainWindow(QMainWindow):
         <ul>
         <li><b>Google Gemini</b> - Advanced image generation</li>
         <li><b>OpenAI DALL-E</b> - Creative image generation</li>
+        <li><b>Stability AI</b> - Stable Diffusion models (API)</li>
+        <li><b>Local SD</b> - Run Stable Diffusion locally (no API key needed)</li>
         </ul>
         
         <h3>Tips</h3>
@@ -220,18 +287,103 @@ class MainWindow(QMainWindow):
         self.help_browser.setHtml(help_text)
         v.addWidget(self.help_browser)
     
+    def _init_templates_tab(self):
+        """Initialize templates tab."""
+        v = QVBoxLayout(self.tab_templates)
+        
+        # Template selection
+        h = QHBoxLayout()
+        h.addWidget(QLabel("Template:"))
+        self.template_combo = QComboBox()
+        self.template_combo.addItems([
+            "Photorealistic Portrait",
+            "Fantasy Landscape", 
+            "Sci-Fi Scene",
+            "Abstract Art",
+            "Product Photography",
+            "Architectural Render",
+            "Character Design",
+            "Logo Design"
+        ])
+        h.addWidget(self.template_combo, 1)
+        self.btn_apply_template = QPushButton("Apply Template")
+        h.addWidget(self.btn_apply_template)
+        v.addLayout(h)
+        
+        # Template preview
+        self.template_preview = QTextEdit()
+        self.template_preview.setReadOnly(True)
+        self.template_preview.setPlaceholderText("Template preview will appear here...")
+        v.addWidget(self.template_preview)
+        
+        # Connect signals
+        self.template_combo.currentTextChanged.connect(self._on_template_changed)
+        self.btn_apply_template.clicked.connect(self._apply_template)
+        
+        # Load initial template
+        self._on_template_changed(self.template_combo.currentText())
+    
+    def _init_history_tab(self):
+        """Initialize history tab."""
+        v = QVBoxLayout(self.tab_history)
+        
+        # History list
+        self.history_list = QListWidget()
+        self.history_list.setAlternatingRowColors(True)
+        
+        # Add history items
+        for item in self.history:
+            if isinstance(item, dict):
+                display_text = f"{item.get('timestamp', 'Unknown time')} - {item.get('prompt', 'No prompt')[:50]}..."
+            else:
+                display_text = str(item)
+            self.history_list.addItem(display_text)
+        
+        v.addWidget(QLabel(f"History ({len(self.history)} items):"))
+        v.addWidget(self.history_list)
+        
+        # Buttons
+        h = QHBoxLayout()
+        self.btn_load_history = QPushButton("Load Selected")
+        self.btn_clear_history = QPushButton("Clear History")
+        h.addWidget(self.btn_load_history)
+        h.addStretch()
+        h.addWidget(self.btn_clear_history)
+        v.addLayout(h)
+        
+        # Connect signals
+        self.history_list.itemDoubleClicked.connect(self._load_history_item)
+        self.btn_load_history.clicked.connect(self._load_selected_history)
+        self.btn_clear_history.clicked.connect(self._clear_history)
+    
     def _update_model_list(self):
         """Update model combo box based on current provider."""
         self.model_combo.clear()
         
-        if self.current_provider == "openai":
-            self.model_combo.addItems(["dall-e-3", "dall-e-2"])
-        else:
-            self.model_combo.addItems([
-                "gemini-2.5-flash-image-preview",
-                "gemini-2.5-flash",
-                "gemini-2.5-pro"
-            ])
+        try:
+            # Get provider instance to fetch available models
+            provider = get_provider(self.current_provider, {"api_key": ""})
+            models = provider.get_models()
+            
+            # Add model IDs to the combo box
+            if models:
+                self.model_combo.addItems(list(models.keys()))
+                
+                # Set default model
+                default_model = provider.get_default_model()
+                if default_model in models:
+                    self.model_combo.setCurrentText(default_model)
+        except Exception as e:
+            # Fallback to some basic models if provider fails to load
+            print(f"Error loading models for {self.current_provider}: {e}")
+            if self.current_provider == "google":
+                self.model_combo.addItems(["gemini-2.5-flash-image-preview"])
+            elif self.current_provider == "openai":
+                self.model_combo.addItems(["dall-e-3"])
+            elif self.current_provider == "stability":
+                self.model_combo.addItems(["stable-diffusion-xl-1024-v1-0"])
+            elif self.current_provider == "local_sd":
+                self.model_combo.addItems(["stabilityai/stable-diffusion-2-1"])
     
     def _on_provider_changed(self, provider: str):
         """Handle provider change."""
@@ -243,6 +395,14 @@ class MainWindow(QMainWindow):
         self.current_api_key = self.config.get_api_key(self.current_provider)
         self.api_key_edit.setText(self.current_api_key or "")
         
+        # Update placeholder text based on provider
+        if self.current_provider == "local_sd":
+            self.api_key_edit.setPlaceholderText("No API key needed for Local SD")
+            self.api_key_edit.setEnabled(False)
+        else:
+            self.api_key_edit.setPlaceholderText("Enter API key...")
+            self.api_key_edit.setEnabled(True)
+        
         # Update model list
         self._update_model_list()
     
@@ -250,15 +410,29 @@ class MainWindow(QMainWindow):
         """Open API key documentation page."""
         from core import get_api_key_url
         url = get_api_key_url(self.current_provider)
-        try:
-            webbrowser.open(url)
-        except Exception as e:
-            QMessageBox.warning(self, APP_NAME, f"Could not open browser: {e}")
+        
+        if self.current_provider == "local_sd":
+            QMessageBox.information(self, APP_NAME, 
+                "Local SD doesn't require an API key.\n\n"
+                "To use Local SD, install the dependencies:\n"
+                "pip install -r requirements-local-sd.txt")
+        elif url:
+            try:
+                webbrowser.open(url)
+            except Exception as e:
+                QMessageBox.warning(self, APP_NAME, f"Could not open browser: {e}")
+        else:
+            QMessageBox.warning(self, APP_NAME, 
+                f"No API key URL available for {self.current_provider}")
     
     def _save_and_test(self):
         """Save API key and test connection."""
         key = self.api_key_edit.text().strip()
-        if not key:
+        
+        # Local SD doesn't need an API key
+        if self.current_provider == "local_sd":
+            key = ""
+        elif not key:
             QMessageBox.warning(self, APP_NAME, "Please enter an API key.")
             return
         
@@ -305,14 +479,17 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, APP_NAME, "Please enter a prompt.")
             return
         
-        if not self.current_api_key:
+        if not self.current_api_key and self.current_provider != "local_sd":
             QMessageBox.warning(self, APP_NAME, "Please set an API key in Settings.")
             return
         
-        # Disable generate button
+        # Disable/reset buttons
         self.btn_generate.setEnabled(False)
+        self.btn_save_image.setEnabled(False)
+        self.btn_copy_image.setEnabled(False)
         self.status_label.setText("Generating...")
         self.output_text.clear()
+        self.output_image_label.clear()
         self.current_image_data = None
         
         # Get current model
@@ -379,6 +556,10 @@ class MainWindow(QMainWindow):
             self.current_image_data = images[0]
             self._display_image(images[0])
             
+            # Enable save/copy buttons
+            self.btn_save_image.setEnabled(True)
+            self.btn_copy_image.setEnabled(True)
+            
             # Update history
             self.history_paths = scan_disk_history()
             
@@ -436,6 +617,24 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, APP_NAME, f"Error saving image:\n{e}")
     
+    def _copy_image_to_clipboard(self):
+        """Copy current image to clipboard."""
+        if not self.current_image_data:
+            QMessageBox.warning(self, APP_NAME, "No image to copy.")
+            return
+        
+        try:
+            from PySide6.QtGui import QClipboard
+            pixmap = QPixmap()
+            pixmap.loadFromData(self.current_image_data)
+            
+            clipboard = QApplication.clipboard()
+            clipboard.setPixmap(pixmap)
+            
+            self.status_label.setText("Image copied to clipboard.")
+        except Exception as e:
+            QMessageBox.critical(self, APP_NAME, f"Error copying image:\n{e}")
+    
     def _cleanup_thread(self):
         """Clean up worker thread."""
         if self.gen_thread and self.gen_thread.isRunning():
@@ -474,5 +673,53 @@ class MainWindow(QMainWindow):
         
         # Clean up thread if running
         self._cleanup_thread()
+    
+    def _on_template_changed(self, template_name: str):
+        """Handle template selection change."""
+        templates = {
+            "Photorealistic Portrait": "Ultra-realistic portrait of {subject}, professional photography, studio lighting, 8K resolution, highly detailed",
+            "Fantasy Landscape": "Epic fantasy landscape with {feature}, magical atmosphere, vibrant colors, detailed environment, concept art style",
+            "Sci-Fi Scene": "Futuristic {scene} with advanced technology, cyberpunk aesthetic, neon lights, detailed sci-fi environment",
+            "Abstract Art": "Abstract {concept} artwork, modern art style, bold colors, dynamic composition, artistic interpretation",
+            "Product Photography": "Professional product photo of {product}, white background, studio lighting, commercial photography",
+            "Architectural Render": "Architectural visualization of {building}, photorealistic render, modern design, detailed materials",
+            "Character Design": "Character design of {character}, concept art, detailed costume, full body view, professional illustration",
+            "Logo Design": "Minimalist logo design for {company}, vector style, clean lines, professional branding"
+        }
         
-        event.accept()
+        template_text = templates.get(template_name, "")
+        self.template_preview.setPlainText(template_text)
+    
+    def _apply_template(self):
+        """Apply selected template to prompt."""
+        template_text = self.template_preview.toPlainText()
+        if template_text:
+            self.prompt_edit.setPlainText(template_text)
+            self.tabs.setCurrentWidget(self.tab_generate)
+    
+    def _load_history_item(self, item):
+        """Load a history item."""
+        index = self.history_list.row(item)
+        if 0 <= index < len(self.history):
+            history_item = self.history[index]
+            if isinstance(history_item, dict):
+                prompt = history_item.get('prompt', '')
+                self.prompt_edit.setPlainText(prompt)
+                self.tabs.setCurrentWidget(self.tab_generate)
+    
+    def _load_selected_history(self):
+        """Load the selected history item."""
+        current_item = self.history_list.currentItem()
+        if current_item:
+            self._load_history_item(current_item)
+    
+    def _clear_history(self):
+        """Clear history."""
+        reply = QMessageBox.question(
+            self, APP_NAME, 
+            "Clear all history?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.Yes:
+            self.history.clear()
+            self.history_list.clear()

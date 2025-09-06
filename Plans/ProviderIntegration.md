@@ -21,6 +21,7 @@ This plan outlines the integration of missing providers from ImageGenToolkit int
   - Cross-platform config storage
 
 ### ImageGenToolkit (Source Project)
+- **Location**: `/mnt/d/Documents/Code/GitHub/ImageGenToolkit`
 - **Architecture**: Modular CLI with provider system
 - **UI**: CLI-only with argparse
 - **Available Providers**:

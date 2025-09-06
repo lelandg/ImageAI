@@ -4,3 +4,13 @@ google-genai
 google-cloud-aiplatform
 PySide6
 openai
+requests  # For Stability AI REST API
+
+# Optional dependencies for Local Stable Diffusion
+# Uncomment these lines to enable local SD support:
+# torch>=2.0.0  # Note: Use CUDA version for GPU support
+# diffusers>=0.24.0
+# transformers>=4.35.0
+# accelerate>=0.24.0
+# safetensors>=0.4.0
+# psutil>=5.9.0
