@@ -1,9 +1,9 @@
-Project Guidelines — LelandGreenGenAI
+Project Guidelines — ImageAI
 
 Last updated: 2025-08-29
 
 Overview
-- LelandGreenGenAI is a Python 3.9+ CLI/GUI app that generates images and text via Google’s Gemini API (google-genai). GUI features are optional and require PySide6. Cross‑platform: Windows, macOS, Linux.
+- ImageAI is a Python 3.9+ CLI/GUI app that generates images and text via Google’s Gemini API (google-genai). GUI features are optional and require PySide6. Cross‑platform: Windows, macOS, Linux.
 
 Golden Rule (must follow)
 - Whenever you add, change, or remove a feature, you must:
@@ -25,9 +25,9 @@ Environment & Setup
 
 API Keys & Configuration
 - Never commit secrets. The app uses per‑user config:
-  - Windows: %APPDATA%\LelandGreenGenAI\config.json
-  - macOS: ~/Library/Application Support/LelandGreenGenAI/config.json
-  - Linux: $XDG_CONFIG_HOME/LelandGreenGenAI/config.json or ~/.config/LelandGreenGenAI/config.json
+  - Windows: %APPDATA%\ImageAI\config.json
+  - macOS: ~/Library/Application Support/ImageAI/config.json
+  - Linux: $XDG_CONFIG_HOME/ImageAI/config.json or ~/.config/ImageAI/config.json
 - Preserve existing resolution order (CLI > file > stored config > env var) unless you have a compelling reason to change it. If changed, document in README.md.
 
 Coding Style & Quality

@@ -66,9 +66,9 @@ python main.py --provider openai -m dall-e-3 -p "Your prompt" -o output.png
 ### Data Storage Locations
 
 Configuration and generated images are stored in platform-specific user directories:
-- **Windows**: `%APPDATA%\LelandGreenGenAI\`
-- **macOS**: `~/Library/Application Support/LelandGreenGenAI/`
-- **Linux**: `~/.config/LelandGreenGenAI/`
+- **Windows**: `%APPDATA%\ImageAI\`
+- **macOS**: `~/Library/Application Support/ImageAI/`
+- **Linux**: `~/.config/ImageAI/`
 
 ### Provider-Specific Implementation
 
