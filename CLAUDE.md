@@ -97,3 +97,4 @@ Configuration and generated images are stored in platform-specific user director
 The `Plans/` directory contains documentation for upcoming features:
 - **GoogleCloudAuth.md**: Implementation plan for Google Cloud authentication via Application Default Credentials
 - **NewProviders.md**: Comprehensive plan for adding additional AI image providers (Stability AI, Adobe Firefly, etc.) and features like image editing, masking, and upscaling
+- When implementing new features, keep file sizes reasonable for your use.

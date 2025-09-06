@@ -139,6 +139,9 @@ cython_debug/
 config.json
 generated/
 
+# Backup files from refactoring
+main_original.py
+
 # API keys and credentials
 *.key
 *.json.key

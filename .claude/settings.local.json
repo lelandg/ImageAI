@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//mnt/d/Documents/Code/GitHub/ImageGenToolkit/**)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}
