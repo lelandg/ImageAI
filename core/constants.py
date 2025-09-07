@@ -4,7 +4,12 @@ from pathlib import Path
 
 # Application metadata
 APP_NAME = "ImageAI"
-VERSION = "0.7.0"
+VERSION = "0.8.0"
+__version__ = VERSION
+__author__ = "Leland Green"
+__email__ = "contact@lelandgreen.com"
+__license__ = "MIT"
+__copyright__ = "Copyright 2025 Leland Green"
 
 # Default provider settings
 DEFAULT_PROVIDER = "google"

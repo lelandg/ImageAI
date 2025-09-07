@@ -1,7 +1,7 @@
 """Argument parser for ImageAI CLI."""
 
 import argparse
-from core.constants import VERSION
+from core.constants import VERSION, __author__, __email__, __copyright__
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -14,7 +14,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"%(prog)s {VERSION}"
+        version=f"%(prog)s {VERSION}\n{__copyright__}\nAuthor: {__author__} <{__email__}>"
     )
     
     # Provider selection

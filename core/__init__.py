@@ -4,6 +4,11 @@ from .config import ConfigManager, get_api_key_url
 from .constants import (
     APP_NAME,
     VERSION,
+    __version__,
+    __author__,
+    __email__,
+    __license__,
+    __copyright__,
     DEFAULT_MODEL,
     DEFAULT_PROVIDER,
     PROVIDER_MODELS,
@@ -26,11 +31,23 @@ from .utils import (
     default_model_for_provider,
 )
 
+# Export metadata at package level
+__version__ = __version__
+__author__ = __author__
+__email__ = __email__
+__license__ = __license__
+__copyright__ = __copyright__
+
 __all__ = [
     "ConfigManager",
     "get_api_key_url",
     "APP_NAME",
     "VERSION",
+    "__version__",
+    "__author__",
+    "__email__",
+    "__license__",
+    "__copyright__",
     "DEFAULT_MODEL",
     "DEFAULT_PROVIDER",
     "PROVIDER_MODELS",

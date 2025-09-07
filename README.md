@@ -1,5 +1,7 @@
 # ImageAI — Advanced AI Image Generation
 
+**Version 0.8.0**
+
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance
 ###### Enterprise-ready with multiple authentication methods and provider support  
@@ -8,7 +10,21 @@
 
 **ImageAI** is a powerful desktop application and CLI tool for AI image generation supporting multiple providers including Google's Gemini API, OpenAI's DALL·E models, Stability AI's Stable Diffusion, and local Stable Diffusion models. It features enterprise-grade authentication options, secure credential management, and works seamlessly across Windows, macOS, and Linux.
 
-![ImageAI Screenshot](screenshot_20250906.jpg)
+## Table of Contents
+- [Requirements](#1-requirements)
+- [Authentication Setup](#2-authentication-setup)
+- [Installation](#3-installation)
+- [Running the Application](#4-running-the-application)
+- [Authentication Management](#5-authentication-management)
+- [CLI Reference](#6-cli-reference)
+- [GUI Features](#7-gui-features)
+- [Image Management](#8-image-management)
+- [Examples & Templates](#9-examples--templates)
+- [Advanced Features](#10-advanced-features)
+- [Frequently Asked Questions](#11-frequently-asked-questions)
+- [API Reference](#12-api-reference)
+- [Development](#13-development)
+- [Changelog](#14-changelog)
 
 ## Key Features
 
@@ -38,21 +54,7 @@
 - Customizable output paths and filenames
 - Batch generation support
 
-## Table of Contents
-- [Requirements](#1-requirements)
-- [Authentication Setup](#2-authentication-setup)
-- [Installation](#3-installation)
-- [Running the Application](#4-running-the-application)
-- [Authentication Management](#5-authentication-management)
-- [CLI Reference](#6-cli-reference)
-- [GUI Features](#7-gui-features)
-- [Image Management](#8-image-management)
-- [Examples & Templates](#9-examples--templates)
-- [Advanced Features](#10-advanced-features)
-- [Frequently Asked Questions](#11-frequently-asked-questions)
-- [API Reference](#12-api-reference)
-- [Development](#13-development)
-- [Changelog](#14-changelog)
+![ImageAI Screenshot](screenshot_20250906.jpg)
 
 ## 1. Requirements
 
@@ -887,6 +889,13 @@ ImageAI/
 - Mobile app companion
 
 ## 14. Changelog
+
+### v0.8.0 (2025-09-07)
+- Added version metadata tags (__version__, __author__, __email__, __license__, __copyright__)
+- Display version in GUI title bar as "ImageAI v0.8.0"
+- Enhanced CLI --version output with copyright and author information
+- Improved package-level metadata access
+- Version number now prominently displayed in README
 
 ### v0.7.0 (2025-09-06)
 - Added Google Cloud authentication support (Application Default Credentials)

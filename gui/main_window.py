@@ -44,7 +44,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.config = ConfigManager()
-        self.setWindowTitle(APP_NAME)
+        self.setWindowTitle(f"{APP_NAME} v{VERSION}")
         self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         
         # Initialize provider
@@ -123,6 +123,9 @@ class MainWindow(QMainWindow):
         self._init_help_tab()
         if self.history:
             self._init_history_tab()
+        
+        # Connect tab change signal to handle help tab rendering
+        self.tabs.currentChanged.connect(self._on_tab_changed)
     
     def _init_menu(self):
         """Initialize menu bar."""
@@ -382,7 +385,10 @@ class MainWindow(QMainWindow):
             self.btn_help_back.setEnabled(False)
             self.btn_help_forward.setEnabled(False)
             
-            print("Help tab using QWebEngineView - emojis will render properly!")
+            # Trigger initial render with minimal scroll (for QWebEngineView)
+            from PySide6.QtCore import QTimer
+            QTimer.singleShot(100, lambda: self.help_browser.page().runJavaScript("window.scrollBy(0, 1); window.scrollBy(0, -1);"))
+            
             return  # Exit early if WebEngine works
             
         except ImportError:
@@ -593,6 +599,10 @@ class MainWindow(QMainWindow):
         self.help_browser.setOpenExternalLinks(False)
         
         v.addWidget(self.help_browser)
+        
+        # Trigger initial render with minimal scroll
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(100, self._trigger_help_render)
     
     def _load_readme_content(self, replace_emojis=True) -> str:
         """Load and process README.md content for help display."""
@@ -1561,3 +1571,20 @@ For more detailed information, please refer to the full documentation.
         if reply == QMessageBox.Yes:
             self.history.clear()
             self.history_list.clear()
+    
+    def _on_tab_changed(self, index):
+        """Handle tab change events."""
+        # If switching to help tab, trigger a minimal scroll to fix rendering
+        if self.tabs.widget(index) == self.tab_help:
+            self._trigger_help_render()
+    
+    def _trigger_help_render(self):
+        """Trigger rendering by doing a minimal scroll."""
+        if hasattr(self, 'help_browser') and hasattr(self.help_browser, 'verticalScrollBar'):
+            try:
+                # Do a minimal scroll down then back up to trigger rendering
+                scrollbar = self.help_browser.verticalScrollBar()
+                scrollbar.setValue(1)
+                scrollbar.setValue(0)
+            except Exception:
+                pass
