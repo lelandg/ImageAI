@@ -36,6 +36,18 @@ try:
     from gui.local_sd_widget import LocalSDWidget
 except ImportError:
     LocalSDWidget = None
+try:
+    from gui.settings_widgets import (
+        AspectRatioSelector, ResolutionSelector, QualitySelector,
+        BatchSelector, AdvancedSettingsPanel, CostEstimator
+    )
+except ImportError:
+    AspectRatioSelector = None
+    ResolutionSelector = None
+    QualitySelector = None
+    BatchSelector = None
+    AdvancedSettingsPanel = None
+    CostEstimator = None
 
 
 class MainWindow(QMainWindow):
@@ -159,41 +171,90 @@ class MainWindow(QMainWindow):
         form.addRow("Prompt:", self.prompt_edit)
         v.addLayout(form)
         
-        # Advanced settings group (collapsible)
-        advanced_group = QGroupBox("Advanced Settings")
-        advanced_layout = QFormLayout()
+        # Basic Settings Group
+        basic_group = QGroupBox("Image Settings")
+        basic_layout = QVBoxLayout(basic_group)
         
-        # Resolution dropdown
-        self.resolution_combo = QComboBox()
-        self.resolution_combo.addItems([
-            "Auto (based on model)",
-            "512x512 (SD 1.x/2.x)",
-            "768x768 (SD 1.x/2.x HQ)",
-            "1024x1024 (SDXL)"
-        ])
-        self.resolution_combo.setCurrentIndex(0)  # Default to Auto
-        advanced_layout.addRow("Resolution:", self.resolution_combo)
+        # Aspect Ratio Selector
+        if AspectRatioSelector:
+            aspect_label = QLabel("Aspect Ratio:")
+            aspect_label.setStyleSheet("font-weight: bold;")
+            basic_layout.addWidget(aspect_label)
+            
+            self.aspect_selector = AspectRatioSelector()
+            self.aspect_selector.ratioChanged.connect(self._on_aspect_ratio_changed)
+            basic_layout.addWidget(self.aspect_selector)
+        else:
+            self.aspect_selector = None
         
-        # Steps spinner (for Local SD)
-        self.steps_spin = QSpinBox()
-        self.steps_spin.setRange(1, 50)
-        self.steps_spin.setValue(20)  # Default to 20 for better balance
-        self.steps_spin.setToolTip("Number of inference steps (1-4 for Turbo models, 20-50 for regular)")
-        advanced_layout.addRow("Steps:", self.steps_spin)
+        # Resolution and Quality
+        settings_form = QFormLayout()
         
-        # Guidance scale
-        self.guidance_spin = QDoubleSpinBox()
-        self.guidance_spin.setRange(0.0, 20.0)
-        self.guidance_spin.setSingleStep(0.5)
-        self.guidance_spin.setValue(7.5)
-        self.guidance_spin.setToolTip("Guidance scale (0.0 for Turbo models, 7-8 for regular)")
-        advanced_layout.addRow("Guidance:", self.guidance_spin)
+        if ResolutionSelector:
+            self.resolution_selector = ResolutionSelector(self.current_provider)
+            self.resolution_selector.resolutionChanged.connect(self._on_resolution_changed)
+            settings_form.addRow("Resolution:", self.resolution_selector)
+        else:
+            # Fallback to old resolution combo
+            self.resolution_selector = None
+            self.resolution_combo = QComboBox()
+            self.resolution_combo.addItems([
+                "Auto (based on model)",
+                "512x512 (SD 1.x/2.x)",
+                "768x768 (SD 1.x/2.x HQ)",
+                "1024x1024 (SDXL)"
+            ])
+            self.resolution_combo.setCurrentIndex(0)
+            settings_form.addRow("Resolution:", self.resolution_combo)
         
-        advanced_group.setLayout(advanced_layout)
-        v.addWidget(advanced_group)
+        if QualitySelector:
+            self.quality_selector = QualitySelector(self.current_provider)
+            self.quality_selector.settingsChanged.connect(self._on_quality_settings_changed)
+            settings_form.addRow(self.quality_selector)
+        else:
+            self.quality_selector = None
         
-        # Hide advanced settings for non-local providers initially
-        self.advanced_group = advanced_group
+        if BatchSelector:
+            self.batch_selector = BatchSelector()
+            self.batch_selector.batchChanged.connect(self._update_cost_estimate)
+            settings_form.addRow("Batch:", self.batch_selector)
+        else:
+            self.batch_selector = None
+        
+        basic_layout.addLayout(settings_form)
+        v.addWidget(basic_group)
+        
+        # Advanced Settings (collapsible)
+        if AdvancedSettingsPanel:
+            self.advanced_panel = AdvancedSettingsPanel(self.current_provider)
+            self.advanced_panel.settingsChanged.connect(self._on_advanced_settings_changed)
+            v.addWidget(self.advanced_panel)
+        else:
+            # Fallback to old advanced settings
+            advanced_group = QGroupBox("Advanced Settings")
+            advanced_layout = QFormLayout()
+            
+            # Steps spinner (for Local SD)
+            self.steps_spin = QSpinBox()
+            self.steps_spin.setRange(1, 50)
+            self.steps_spin.setValue(20)
+            self.steps_spin.setToolTip("Number of inference steps (1-4 for Turbo models, 20-50 for regular)")
+            advanced_layout.addRow("Steps:", self.steps_spin)
+            
+            # Guidance scale
+            self.guidance_spin = QDoubleSpinBox()
+            self.guidance_spin.setRange(0.0, 20.0)
+            self.guidance_spin.setSingleStep(0.5)
+            self.guidance_spin.setValue(7.5)
+            self.guidance_spin.setToolTip("Guidance scale (0.0 for Turbo models, 7-8 for regular)")
+            advanced_layout.addRow("Guidance:", self.guidance_spin)
+            
+            advanced_group.setLayout(advanced_layout)
+            v.addWidget(advanced_group)
+            self.advanced_group = advanced_group
+            self.advanced_panel = None
+        
+        # Update visibility based on provider
         self._update_advanced_visibility()
         
         # Buttons
@@ -1087,7 +1148,11 @@ For more detailed information, please refer to the full documentation.
     
     def _update_advanced_visibility(self):
         """Show/hide advanced settings based on provider."""
-        if hasattr(self, 'advanced_group'):
+        # Update new advanced panel if available
+        if hasattr(self, 'advanced_panel') and self.advanced_panel:
+            self.advanced_panel.update_provider(self.current_provider)
+        # Update old advanced group for fallback
+        elif hasattr(self, 'advanced_group'):
             # Only show for local_sd provider
             self.advanced_group.setVisible(self.current_provider == "local_sd")
     
@@ -1110,9 +1175,69 @@ For more detailed information, please refer to the full documentation.
         self.config.set("provider", self.current_provider)
         self.config.save()
         
+        # Update new widgets if available
+        if hasattr(self, 'resolution_selector') and self.resolution_selector:
+            self.resolution_selector.update_provider(self.current_provider)
+        if hasattr(self, 'quality_selector') and self.quality_selector:
+            self.quality_selector.update_provider(self.current_provider)
+        if hasattr(self, 'advanced_panel') and self.advanced_panel:
+            self.advanced_panel.update_provider(self.current_provider)
+        
+        # Update cost estimate
+        self._update_cost_estimate()
+        
         # Update API key field
         self.current_api_key = self.config.get_api_key(self.current_provider)
         self.api_key_edit.setText(self.current_api_key or "")
+    
+    def _on_aspect_ratio_changed(self, ratio: str):
+        """Handle aspect ratio change."""
+        # Store for use in generation
+        self.current_aspect_ratio = ratio
+        # Could update resolution options based on aspect ratio
+        self._update_cost_estimate()
+    
+    def _on_resolution_changed(self, resolution: str):
+        """Handle resolution change."""
+        self.current_resolution = resolution
+        self._update_cost_estimate()
+    
+    def _on_quality_settings_changed(self, settings: dict):
+        """Handle quality/style settings change."""
+        self.quality_settings = settings
+        self._update_cost_estimate()
+    
+    def _on_advanced_settings_changed(self, settings: dict):
+        """Handle advanced settings change."""
+        self.advanced_settings = settings
+    
+    def _update_cost_estimate(self, num_images: int = None):
+        """Update cost estimate display."""
+        if not CostEstimator or not hasattr(self, 'batch_selector'):
+            return
+        
+        # Gather all settings
+        settings = {}
+        
+        # Get number of images
+        if num_images is None and self.batch_selector:
+            num_images = self.batch_selector.get_num_images()
+        settings["num_images"] = num_images or 1
+        
+        # Get resolution
+        if hasattr(self, 'resolution_selector') and self.resolution_selector:
+            settings["resolution"] = self.resolution_selector.get_resolution()
+        
+        # Get quality settings
+        if hasattr(self, 'quality_settings'):
+            settings.update(self.quality_settings)
+        
+        # Calculate cost
+        cost = CostEstimator.calculate(self.current_provider, settings)
+        
+        # Update batch selector display
+        if self.batch_selector:
+            self.batch_selector.set_cost_per_image(cost / settings["num_images"])
         
         # Show/hide appropriate widgets based on provider
         if self.current_provider == "local_sd":
@@ -1244,10 +1369,18 @@ For more detailed information, please refer to the full documentation.
         # Get current model
         model = self.model_combo.currentText()
         
-        # Get advanced parameters for Local SD
+        # Gather all generation parameters
         kwargs = {}
-        if self.current_provider == "local_sd":
-            # Get resolution
+        
+        # Get resolution settings
+        if hasattr(self, 'resolution_selector') and self.resolution_selector:
+            resolution = self.resolution_selector.get_resolution()
+            if resolution and 'x' in resolution:
+                width, height = map(int, resolution.split('x'))
+                kwargs['width'] = width
+                kwargs['height'] = height
+        elif hasattr(self, 'resolution_combo'):
+            # Fallback to old resolution combo
             resolution_text = self.resolution_combo.currentText()
             if "512x512" in resolution_text:
                 kwargs['width'] = 512
@@ -1258,11 +1391,32 @@ For more detailed information, please refer to the full documentation.
             elif "1024x1024" in resolution_text:
                 kwargs['width'] = 1024
                 kwargs['height'] = 1024
-            # else Auto - let provider decide
-            
-            # Get steps and guidance
-            kwargs['steps'] = self.steps_spin.value()
-            kwargs['cfg_scale'] = self.guidance_spin.value()
+        
+        # Get aspect ratio (for providers that support it)
+        if hasattr(self, 'aspect_selector') and self.aspect_selector:
+            aspect_ratio = self.aspect_selector.get_ratio()
+            kwargs['aspect_ratio'] = aspect_ratio
+        
+        # Get quality/style settings
+        if hasattr(self, 'quality_selector') and self.quality_selector:
+            quality_settings = self.quality_selector.get_settings()
+            kwargs.update(quality_settings)
+        
+        # Get batch settings
+        if hasattr(self, 'batch_selector') and self.batch_selector:
+            num_images = self.batch_selector.get_num_images()
+            kwargs['num_images'] = num_images
+        
+        # Get advanced settings
+        if hasattr(self, 'advanced_panel') and self.advanced_panel:
+            advanced_settings = self.advanced_panel.get_settings()
+            kwargs.update(advanced_settings)
+        elif self.current_provider == "local_sd":
+            # Fallback to old advanced settings for local_sd
+            if hasattr(self, 'steps_spin'):
+                kwargs['steps'] = self.steps_spin.value()
+            if hasattr(self, 'guidance_spin'):
+                kwargs['cfg_scale'] = self.guidance_spin.value()
         
         # Create worker thread
         self.gen_thread = QThread()

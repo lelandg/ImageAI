@@ -123,7 +123,7 @@ class GoogleProvider(ImageProvider):
         model: Optional[str] = None,
         **kwargs
     ) -> Tuple[List[str], List[bytes]]:
-        """Generate images using Google Gemini."""
+        """Generate images using Google Gemini/Imagen 3."""
         if not self.client:
             if self.auth_mode == "gcloud":
                 self._init_gcloud_client()
@@ -134,24 +134,84 @@ class GoogleProvider(ImageProvider):
         texts: List[str] = []
         images: List[bytes] = []
         
+        # Build generation config with Imagen 3 parameters
+        config = {}
+        
+        # Handle aspect ratio (Imagen 3 supports: 1:1, 3:4, 4:3, 9:16, 16:9)
+        aspect_ratio = kwargs.get('aspect_ratio', '1:1')
+        if aspect_ratio in ['1:1', '3:4', '4:3', '9:16', '16:9']:
+            config['aspect_ratio'] = aspect_ratio
+        
+        # Handle resolution (1K or 2K for Imagen 3)
+        resolution = kwargs.get('resolution', '1024x1024')
+        if '2048' in str(resolution) or '2K' in str(resolution).upper():
+            config['sample_image_size'] = '2K'
+        else:
+            config['sample_image_size'] = '1K'
+        
+        # Number of images (1-4 for Imagen 3)
+        num_images = kwargs.get('num_images', 1)
+        if 1 <= num_images <= 4:
+            config['number_of_images'] = num_images
+        
+        # Advanced settings
+        if kwargs.get('enable_prompt_rewriting') is not None:
+            config['enable_prompt_rewriting'] = kwargs['enable_prompt_rewriting']
+        
+        if kwargs.get('safety_filter'):
+            config['safety_filter_level'] = kwargs['safety_filter']
+        
+        if kwargs.get('person_generation') is not None:
+            config['person_generation'] = 'allow' if kwargs['person_generation'] else 'dont_allow'
+        
+        if kwargs.get('seed') is not None:
+            config['seed'] = kwargs['seed']
+        
         try:
-            response = self.client.models.generate_content(
-                model=model,
-                contents=prompt,
-            )
+            # Try to use generation_config parameter if supported
+            if config:
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    generation_config=config
+                )
+            else:
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                )
             
             if response and response.candidates:
-                cand = response.candidates[0]
-                if getattr(cand, "content", None) and getattr(cand.content, "parts", None):
-                    for part in cand.content.parts:
-                        if getattr(part, "text", None):
-                            texts.append(part.text)
-                        elif getattr(part, "inline_data", None) is not None:
-                            data = getattr(part.inline_data, "data", None)
-                            if isinstance(data, (bytes, bytearray)):
-                                images.append(bytes(data))
+                # Process all candidates (for multiple images)
+                for cand in response.candidates:
+                    if getattr(cand, "content", None) and getattr(cand.content, "parts", None):
+                        for part in cand.content.parts:
+                            if getattr(part, "text", None):
+                                texts.append(part.text)
+                            elif getattr(part, "inline_data", None) is not None:
+                                data = getattr(part.inline_data, "data", None)
+                                if isinstance(data, (bytes, bytearray)):
+                                    images.append(bytes(data))
         except Exception as e:
-            raise RuntimeError(f"Google generation failed: {e}")
+            # Fallback to basic generation if advanced config fails
+            try:
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                )
+                
+                if response and response.candidates:
+                    cand = response.candidates[0]
+                    if getattr(cand, "content", None) and getattr(cand.content, "parts", None):
+                        for part in cand.content.parts:
+                            if getattr(part, "text", None):
+                                texts.append(part.text)
+                            elif getattr(part, "inline_data", None) is not None:
+                                data = getattr(part.inline_data, "data", None)
+                                if isinstance(data, (bytes, bytearray)):
+                                    images.append(bytes(data))
+            except Exception as e2:
+                raise RuntimeError(f"Google generation failed: {e2}")
         
         return texts, images
     

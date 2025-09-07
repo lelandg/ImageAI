@@ -46,32 +46,119 @@ class OpenAIProvider(ImageProvider):
         n: int = 1,
         **kwargs
     ) -> Tuple[List[str], List[bytes]]:
-        """Generate images using OpenAI DALL-E."""
+        """Generate images using OpenAI DALL-E with enhanced settings."""
         self._ensure_client()
         
         model = model or self.get_default_model()
         texts: List[str] = []
         images: List[bytes] = []
         
+        # Handle new settings from UI
+        # Size/resolution mapping for DALL-E 3
+        if model == "dall-e-3":
+            # Map resolution or aspect ratio to DALL-E 3 sizes
+            resolution = kwargs.get('resolution', kwargs.get('width', size))
+            aspect_ratio = kwargs.get('aspect_ratio', '1:1')
+            
+            if isinstance(resolution, str) and 'x' in resolution:
+                # Direct resolution provided
+                width, height = map(int, resolution.split('x'))
+                if width > height:
+                    size = "1792x1024"  # Landscape
+                elif height > width:
+                    size = "1024x1792"  # Portrait
+                else:
+                    size = "1024x1024"  # Square
+            elif aspect_ratio:
+                # Map aspect ratio to DALL-E 3 sizes
+                if aspect_ratio in ['16:9', '4:3']:
+                    size = "1792x1024"  # Landscape
+                elif aspect_ratio in ['9:16', '3:4']:
+                    size = "1024x1792"  # Portrait
+                else:
+                    size = "1024x1024"  # Square (default)
+        
+        # Quality setting (standard or hd)
+        quality = kwargs.get('quality', quality)
+        if quality not in ['standard', 'hd']:
+            quality = 'standard'
+        
+        # Style setting (vivid or natural) - DALL-E 3 only
+        style = kwargs.get('style', 'vivid')
+        if style not in ['vivid', 'natural']:
+            style = 'vivid'
+        
+        # Number of images (DALL-E 3 only supports n=1)
+        num_images = kwargs.get('num_images', n)
+        if model == "dall-e-3":
+            num_images = 1  # DALL-E 3 limitation
+        
+        # Response format
+        response_format = kwargs.get('response_format', 'b64_json')
+        if response_format == 'base64_json':
+            response_format = 'b64_json'
+        elif response_format == 'url':
+            response_format = 'url'
+        
         try:
-            # Request base64 to ensure we can save the image bytes locally
-            response = self.client.images.generate(
-                model=model,
-                prompt=prompt,
-                size=size,
-                quality=quality,
-                n=n,
-                response_format="b64_json",
-            )
+            # Build generation parameters
+            gen_params = {
+                "model": model,
+                "prompt": prompt,
+                "size": size,
+                "quality": quality,
+                "n": num_images,
+                "response_format": response_format,
+            }
+            
+            # Add style parameter for DALL-E 3
+            if model == "dall-e-3":
+                gen_params["style"] = style
+            
+            # Generate images
+            response = self.client.images.generate(**gen_params)
             
             data_items = getattr(response, "data", []) or []
             for item in data_items:
-                b64 = getattr(item, "b64_json", None)
-                if b64:
+                if response_format == "b64_json":
+                    b64 = getattr(item, "b64_json", None)
+                    if b64:
+                        try:
+                            images.append(b64decode(b64))
+                        except Exception:
+                            pass
+                elif response_format == "url":
+                    # For URL response, we need to download the image
+                    url = getattr(item, "url", None)
+                    if url:
+                        try:
+                            import requests
+                            resp = requests.get(url, timeout=30)
+                            if resp.status_code == 200:
+                                images.append(resp.content)
+                        except Exception:
+                            pass
+            
+            # Handle multiple images for DALL-E 3 (generate multiple times)
+            if model == "dall-e-3" and kwargs.get('num_images', 1) > 1:
+                for _ in range(kwargs.get('num_images', 1) - 1):
                     try:
-                        images.append(b64decode(b64))
+                        response = self.client.images.generate(**gen_params)
+                        data_items = getattr(response, "data", []) or []
+                        for item in data_items:
+                            if response_format == "b64_json":
+                                b64 = getattr(item, "b64_json", None)
+                                if b64:
+                                    images.append(b64decode(b64))
+                            elif response_format == "url":
+                                url = getattr(item, "url", None)
+                                if url:
+                                    import requests
+                                    resp = requests.get(url, timeout=30)
+                                    if resp.status_code == 200:
+                                        images.append(resp.content)
                     except Exception:
-                        pass
+                        pass  # Continue even if one generation fails
             
             if not images:
                 raise RuntimeError(
