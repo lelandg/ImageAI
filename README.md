@@ -35,24 +35,65 @@
 - **Local Stable Diffusion** - Run models locally without API keys (GPU recommended)
 - Easy provider switching in both GUI and CLI
 - Support for custom Hugging Face models
+- Model browser and downloader for Local SD models
+- Popular model recommendations with descriptions
 
 ### 🔐 Flexible Authentication
 - **API Key Authentication** - Simple setup for individual users
 - **Google Cloud Authentication** - Enterprise-ready with Application Default Credentials
+- **Hugging Face Authentication** - Built-in token management for model downloads
 - Secure credential storage in platform-specific directories
 - Environment variable support for CI/CD integration
+- Per-provider API key management
 
 ### 💻 Dual Interface
 - **Modern GUI** - User-friendly desktop interface built with Qt/PySide6
 - **Powerful CLI** - Full-featured command-line interface for automation
 - Cross-platform support (Windows, macOS, Linux)
+- Responsive layout with resizable panels
 
-### 📁 Smart Features
+### 🎯 Advanced Generation Controls
+- **Visual Aspect Ratio Selector** - Interactive preview rectangles for aspect ratios
+- **Smart Resolution Presets** - Provider-optimized resolution settings
+- **Quality & Style Options** - Standard/HD quality, style presets for different looks
+- **Batch Generation** - Generate multiple variations at once
+- **Cost Estimation** - Real-time cost calculation for all providers
+- **Advanced Settings Panel** - Fine-tune generation parameters:
+  - Inference steps (1-50)
+  - Guidance scale (CFG 0-20)
+  - Scheduler selection
+  - Seed control for reproducibility
+  - Negative prompts
+  - Prompt rewriting/enhancement
+
+### 📊 Enhanced History & Tracking
+- **Detailed History Table** - View all generations with:
+  - Date and time stamps
+  - Provider and model used
+  - Resolution information
+  - Cost tracking
+  - Original prompts
+- **Session Persistence** - All UI settings saved between sessions
+- **Metadata Sidecars** - JSON files with complete generation details
+- **Disk History Scanning** - Automatically finds previous generations
+- **Quick History Access** - Click to reload prompts and settings
+
+### 🖼️ Smart Features
 - Auto-save generated images with metadata sidecars
 - Template system with placeholder substitution
-- In-session history tracking
 - Customizable output paths and filenames
-- Batch generation support
+- Auto-copy filename to clipboard option
+- Smart filename generation from prompts
+- Image format detection and optimization
+- Preview scaling with aspect ratio preservation
+
+### 🔧 Developer Features
+- Modular architecture with provider abstraction
+- Worker threads for non-blocking generation
+- Comprehensive error handling and recovery
+- Progress tracking and status updates
+- Event-driven architecture with Qt signals
+- Extensible provider system for new services
 
 ![ImageAI Screenshot](screenshot_20250906.jpg)
 
@@ -327,48 +368,116 @@ python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
 #### Generate Tab
 - **Model Selection**: Dropdown with provider-specific models
 - **Prompt Input**: Multi-line text area for detailed prompts
-- **Generate Button**: Start image generation
-- **Image Display**: Preview generated images
-- **Output Text**: View generation status and file paths
-- **Examples Button**: Access curated prompts
+- **Generate Button**: Start image generation with progress tracking
+- **Image Display**: High-quality preview with automatic scaling
+- **Generation Controls**:
+  - Aspect ratio selector with visual previews
+  - Resolution selector with provider-optimized presets
+  - Quality settings (Standard/HD)
+  - Batch size selector (1-4 images)
+  - Cost estimator showing real-time pricing
+- **Advanced Settings** (collapsible panel):
+  - Inference steps slider (1-50)
+  - Guidance scale (CFG) control
+  - Scheduler selection
+  - Seed input for reproducibility
+  - Negative prompt field
+  - Prompt rewriting toggle
+- **Output Text**: Live generation status and file paths
+- **Examples Button**: Access curated prompts library
 
 #### Settings Tab
-- **Provider Selection**: Switch between Google and OpenAI
+- **Provider Selection**: Switch between Google, OpenAI, Stability AI, and Local SD
 - **Authentication Mode** (Google only):
   - API Key mode with key input field
   - Google Cloud Account mode with status display
 - **Helper Buttons**:
   - Get API Key - Opens provider's key page
   - Load from File - Import key from text file
-  - Check Status - Verify Google Cloud auth
-  - Cloud Console - Open Google Cloud Console
-- **Auto-save Options**: Configure clipboard and file handling
+  - Check Status - Verify authentication
+  - Cloud Console - Open Google Cloud Console (Google only)
+- **Auto-save Options**: 
+  - Auto-save generated images toggle
+  - Copy filename to clipboard option
+  - Custom output directory selection
+- **Local SD Settings** (when selected):
+  - Model browser and downloader
+  - Hugging Face authentication
+  - Cache directory management
+  - GPU/CPU device selection
 
 #### Templates Tab
 - Predefined prompt templates with placeholders
-- Variable substitution system
+- Variable substitution system with live preview
+- Template categories:
+  - Art Style
+  - Photography
+  - Design
+  - Character
+  - Scene
+  - Product
+  - Marketing
 - Append or replace current prompt
-- Custom template creation
+- Custom template creation and saving
+
+#### History Tab
+- **Detailed History Table** with columns:
+  - Date and time
+  - Provider used
+  - Model name
+  - Resolution
+  - Cost (when applicable)
+  - Original prompt
+- **Quick Actions**:
+  - Click to reload prompt and settings
+  - Open image file location
+  - View metadata sidecar
+- **Search and Filter**:
+  - Filter by provider
+  - Search by prompt text
+  - Sort by date, cost, or model
 
 #### Help Tab
-- Embedded documentation
+- Embedded README documentation
 - Quick reference guide
 - Keyboard shortcuts
+- Provider-specific tips
+- Troubleshooting guide
 
 ### Menu System
 
 #### File Menu
+- New Generation (Ctrl+N)
 - Save Image As... (Ctrl+S)
+- Open Output Directory
+- Recent Files
 - Exit (Ctrl+Q)
 
 #### Edit Menu
-- Copy prompt
-- Paste prompt
-- Clear all
+- Copy Prompt (Ctrl+C)
+- Paste Prompt (Ctrl+V)
+- Clear All (Ctrl+Shift+C)
+- Copy Image to Clipboard
+- Copy Filename
 
 #### View Menu
-- History panel
-- Full screen mode
+- Show/Hide History Panel
+- Show/Hide Advanced Settings
+- Full Screen Mode (F11)
+- Reset Layout
+- Zoom In/Out
+
+#### Tools Menu
+- Model Browser (Local SD)
+- Batch Generator
+- Template Editor
+- Settings Manager
+
+#### Help Menu
+- Documentation (F1)
+- Keyboard Shortcuts
+- Check for Updates
+- About ImageAI
 
 ## 8. Image Management
 
@@ -573,21 +682,34 @@ When using Local SD provider, advanced settings are available:
 - More steps = better quality but slower
 - Turbo models: 1-4 steps
 - Standard models: 20-50 steps
+- Real-time preview of step count impact
 
 **Guidance Scale (CFG)**: How closely to follow prompt (0-20)
 - Lower (1-5): More creative/artistic
 - Medium (7-8): Balanced
 - Higher (10-15): More literal prompt following
+- Visual indicator shows optimal range per model
 
 **Resolution**: Output image dimensions
 - SD 1.5/2.1: 512x512 optimal
 - SDXL: 1024x1024 optimal
 - Custom sizes supported but may affect quality
+- Aspect ratio preservation with smart presets
 
 **Scheduler**: Sampling algorithm
-- DPM++ 2M: Good balance
+- DPM++ 2M Karras: Good balance
 - Euler A: Fast, good for most cases
-- DPM++ SDE: Higher quality, slower
+- DPM++ SDE Karras: Higher quality, slower
+- DDIM: Deterministic, good for reproducibility
+- LMS: Classic scheduler
+- PNDM: Fast convergence
+
+**Additional Controls**:
+- **Seed**: Set specific seed for reproducible results
+- **Negative Prompt**: Specify what to avoid in generation
+- **VAE Selection**: Choose different VAE models for style
+- **Attention Slicing**: Memory optimization for large images
+- **CPU Offload**: Move models to CPU when not in use
 
 ### Hugging Face Model Management
 
