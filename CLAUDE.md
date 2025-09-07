@@ -98,3 +98,4 @@ The `Plans/` directory contains documentation for upcoming features:
 - **GoogleCloudAuth.md**: Implementation plan for Google Cloud authentication via Application Default Credentials
 - **NewProviders.md**: Comprehensive plan for adding additional AI image providers (Stability AI, Adobe Firefly, etc.) and features like image editing, masking, and upscaling
 - When implementing new features, keep file sizes reasonable for your use.
+- For testing Python code use 'source /mnt/d/Documents/Code/GitHub/ImageAI/.venv/bin/activate' first

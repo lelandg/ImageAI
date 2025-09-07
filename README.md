@@ -48,12 +48,13 @@
 - [GUI Features](#7-gui-features)
 - [Image Management](#8-image-management)
 - [Examples & Templates](#9-examples--templates)
-- [Troubleshooting](#10-troubleshooting)
-- [API Reference](#11-api-reference)
-- [Development](#12-development)
-- [Changelog](#13-changelog)
+- [Advanced Features](#10-advanced-features)
+- [Frequently Asked Questions](#11-frequently-asked-questions)
+- [API Reference](#12-api-reference)
+- [Development](#13-development)
+- [Changelog](#14-changelog)
 
-## 1) Requirements
+## 1. Requirements
 
 - Python 3.9+ (3.9 to 3.13 supported)
 - Internet connection
@@ -66,7 +67,7 @@
   - `pillow` - Image processing
   - `protobuf` - Protocol buffer support
 
-## 2) Authentication Setup
+## 2. Authentication Setup
 
 ### Google Gemini Authentication
 
@@ -133,7 +134,7 @@ You have two options for authenticating with Google's Gemini API:
    - [Rate Limits](https://platform.openai.com/docs/guides/rate-limits)
    - [Pricing](https://openai.com/pricing)
 
-## 3) Installation
+## 3. Installation
 
 ### Quick Setup
 
@@ -171,7 +172,7 @@ pip install -r requirements-local-sd.txt
 - **macOS**: You may need to install Xcode Command Line Tools
 - **Linux**: Install python3-venv if not present: `sudo apt install python3-venv`
 
-## 4) Running the Application
+## 4. Running the Application
 
 ### GUI Mode (Default)
 
@@ -234,7 +235,7 @@ python main.py -s -K /path/to/key.txt
 python main.py -K /path/to/key.txt -p "Desert oasis" -o oasis.png
 ```
 
-## 5) Authentication Management
+## 5. Authentication Management
 
 ### Key Storage Locations
 
@@ -260,7 +261,7 @@ For each provider, the authentication order is:
 - Use Google Cloud authentication for enterprise deployments
 - Store keys in secure password managers
 
-## 6) CLI Reference
+## 6. CLI Reference
 
 ### Core Arguments
 
@@ -317,7 +318,7 @@ python main.py --provider stability -s -k "YOUR_STABILITY_KEY"
 python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
 ```
 
-## 7) GUI Features
+## 7. GUI Features
 
 ### Main Interface
 
@@ -367,7 +368,7 @@ python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
 - History panel
 - Full screen mode
 
-## 8) Image Management
+## 8. Image Management
 
 ### Auto-Save System
 
@@ -404,7 +405,7 @@ Each image gets a `.json` sidecar file containing:
 - Quick access to recent generations
 - Metadata search and filtering
 
-## 9) Examples & Templates
+## 9. Examples & Templates
 
 ### Example Prompts
 
@@ -431,19 +432,203 @@ Each image gets a `.json` sidecar file containing:
 
 ### Template System
 
-Built-in templates with placeholders:
+The template system allows you to create consistent, reusable prompts with variable placeholders.
 
+#### Using Templates
+
+1. **Select a Template**: Choose from the dropdown in the Templates tab
+2. **Fill Placeholders**: Enter values for each variable field (optional)
+3. **Preview**: See the assembled prompt update in real-time
+4. **Insert**: Click "Insert into Prompt" to use the template
+5. **Append Option**: Check "Append to existing" to add to current prompt
+
+#### Built-in Templates
+
+**Portrait Photography**:
 ```
-"[style] painting of [subject] in [setting], [mood] lighting"
-"Photograph of [object] with [effect], [camera] angle, [quality]"
-"[character] in [action] at [location], [art_style] style"
+"[style] portrait of [subject] with [expression], [lighting] lighting, [background] background"
 ```
 
-Variables are replaced with user input or defaults.
+**Landscape Scene**:
+```
+"[time_of_day] landscape of [location] with [features], [weather] weather, [style] style"
+```
 
-## 10) Troubleshooting
+**Product Shot**:
+```
+"Product photography of [item] on [surface], [lighting] lighting, [angle] angle, commercial quality"
+```
 
-### Common Issues
+**Fantasy Art**:
+```
+"[character] [action] in [setting], [magic_effect], [art_style] fantasy art style"
+```
+
+**Architectural**:
+```
+"[building_type] in [architectural_style] style, [time_of_day], [weather], [perspective] view"
+```
+
+#### Template Variables
+
+- Variables are defined with square brackets: `[variable_name]`
+- Leaving a field empty removes it from the final prompt
+- Multiple instances of the same variable use the same value
+- Commas are automatically managed when variables are empty
+
+### Tips for Better Results
+
+**Be Specific**: Instead of "a cat", try "a fluffy orange tabby cat sitting on a windowsill"
+
+**Include Style**: Add artistic style like "oil painting", "photorealistic", "cartoon style"
+
+**Describe Mood**: Include lighting and atmosphere like "golden hour", "dramatic lighting", "cozy"
+
+**Add Details**: More details generally produce better results
+
+**Composition Tips**:
+- Use camera angles: "aerial view", "close-up", "wide angle"
+- Specify perspective: "first-person view", "isometric", "side profile"
+- Include depth: "shallow depth of field", "bokeh background", "infinite focus"
+
+**Quality Modifiers**:
+- "highly detailed", "ultra-realistic", "4K", "HD"
+- "professional photography", "award-winning"
+- "trending on artstation", "masterpiece"
+
+## 10. Advanced Features
+
+### Keyboard Shortcuts
+
+**GUI Mode**:
+- **Ctrl+Enter**: Generate image
+- **Ctrl+S**: Save current image as...
+- **Ctrl+Q**: Quit application
+- **Ctrl+N**: Clear prompt
+- **Ctrl+A**: Select all text
+- **Ctrl+C/V/X**: Copy/Paste/Cut
+- **Tab**: Switch between tabs
+- **F1**: Show help
+
+### Batch Generation
+
+Generate multiple images with variations:
+
+```bash
+# Generate 3 variations of the same prompt
+for i in {1..3}; do python main.py -p "Sunset landscape" -o "sunset_$i.png"; done
+
+# Generate from a list of prompts
+while read prompt; do
+  python main.py -p "$prompt" -o "${prompt// /_}.png"
+done < prompts.txt
+```
+
+### Using Environment Variables
+
+```bash
+# Set default provider
+export IMAGEAI_PROVIDER="openai"
+export OPENAI_API_KEY="your-key"
+
+# Set default model
+export IMAGEAI_MODEL="dall-e-3"
+
+# Set output directory
+export IMAGEAI_OUTPUT_DIR="/path/to/images"
+```
+
+### Custom Configuration
+
+Edit config file directly:
+- **Windows**: `%APPDATA%\ImageAI\config.json`
+- **macOS**: `~/Library/Application Support/ImageAI/config.json`
+- **Linux**: `~/.config/ImageAI/config.json`
+
+Example config:
+```json
+{
+  "provider": "google",
+  "google_api_key": "your-key",
+  "openai_api_key": "your-key",
+  "stability_api_key": "your-key",
+  "auto_save": true,
+  "output_format": "png",
+  "jpeg_quality": 95,
+  "default_model": {
+    "google": "gemini-2.5-flash-image-preview",
+    "openai": "dall-e-3",
+    "stability": "stable-diffusion-xl-1024-v1-0"
+  }
+}
+```
+
+### Local Stable Diffusion Settings
+
+When using Local SD provider, advanced settings are available:
+
+**Inference Steps**: Number of denoising steps (1-50)
+- More steps = better quality but slower
+- Turbo models: 1-4 steps
+- Standard models: 20-50 steps
+
+**Guidance Scale (CFG)**: How closely to follow prompt (0-20)
+- Lower (1-5): More creative/artistic
+- Medium (7-8): Balanced
+- Higher (10-15): More literal prompt following
+
+**Resolution**: Output image dimensions
+- SD 1.5/2.1: 512x512 optimal
+- SDXL: 1024x1024 optimal
+- Custom sizes supported but may affect quality
+
+**Scheduler**: Sampling algorithm
+- DPM++ 2M: Good balance
+- Euler A: Fast, good for most cases
+- DPM++ SDE: Higher quality, slower
+
+### Hugging Face Model Management
+
+**Using Custom Models**:
+```bash
+# Download a specific model
+python main.py --provider local_sd -m "runwayml/stable-diffusion-v1-5" -p "Test" -o test.png
+
+# Use downloaded model (cached)
+python main.py --provider local_sd -m "runwayml/stable-diffusion-v1-5" -p "Art" -o art.png
+```
+
+**Popular Models**:
+- `stabilityai/stable-diffusion-2-1`: Balanced quality/speed
+- `runwayml/stable-diffusion-v1-5`: Classic, widely compatible
+- `stabilityai/stable-diffusion-xl-base-1.0`: High quality, 1024x1024
+- `segmind/SSD-1B`: Fast SDXL variant
+- `stabilityai/sdxl-turbo`: Ultra-fast 1-4 step generation
+
+**Model Cache Location**:
+- Default: `~/.cache/huggingface/hub/`
+- Size: Models range from 2GB to 7GB
+- First use downloads the model
+- Subsequent uses load from cache
+
+### Performance Optimization
+
+**GPU Acceleration** (Local SD only):
+```bash
+# Install CUDA support
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+# Verify GPU is detected
+python -c "import torch; print(torch.cuda.is_available())"
+```
+
+**Memory Management**:
+- Close other applications when using Local SD
+- Use smaller models for limited VRAM (< 6GB)
+- Enable attention slicing for large images
+- Reduce batch size if out of memory
+
+### Troubleshooting Common Issues
 
 #### Authentication Errors
 
@@ -520,7 +705,99 @@ export QT_SCALE_FACTOR=1.25
 | "Module not found" | Run `pip install -r requirements.txt` |
 | "gcloud not found" | Install Google Cloud SDK or use API key mode |
 
-## 11) API Reference
+## 11. Frequently Asked Questions
+
+### General Questions
+
+**Q: Which provider should I use?**
+A: It depends on your needs:
+- **Google Gemini**: Best for general purpose, good quality, reliable
+- **OpenAI DALL-E**: Best for creative/artistic images
+- **Stability AI**: Best for photorealistic and detailed images
+- **Local SD**: Best for privacy, unlimited generation, customization
+
+**Q: Can I use multiple providers?**
+A: Yes! You can switch providers anytime in Settings or via CLI `--provider` flag.
+
+**Q: Are my prompts and images private?**
+A: 
+- API providers (Google, OpenAI, Stability) process prompts on their servers
+- Local SD runs entirely on your machine - fully private
+- Generated images are saved locally only
+
+**Q: How much does it cost?**
+A:
+- Google: Free tier available, paid plans for higher usage
+- OpenAI: Pay per generation, typically $0.02-0.04 per image
+- Stability AI: Credit-based, around $0.01-0.02 per image
+- Local SD: Free after initial setup (electricity costs only)
+
+### Setup Issues
+
+**Q: "API key not found" error**
+A: 
+1. Make sure you've entered the key in Settings
+2. Click "Save & Test" to save it
+3. Check the key is valid on provider's website
+
+**Q: "Module not found" error**
+A: Run `pip install -r requirements.txt` in your terminal
+
+**Q: GUI won't start on Linux**
+A: Install system Qt libraries: `sudo apt-get install python3-pyside6`
+
+**Q: Local SD says "No module named 'diffusers'"**
+A: Install Local SD dependencies: `pip install -r requirements-local-sd.txt`
+
+### Image Generation Issues
+
+**Q: "Safety filter triggered" or "Blocked" message**
+A: Your prompt may contain restricted content. Try:
+- Rephrasing your prompt
+- Avoiding violence, explicit content, or real people's names
+- Using more general terms
+
+**Q: Images are low quality**
+A: 
+- Add quality modifiers: "high quality", "detailed", "4K"
+- Try different models (DALL-E 3, SDXL)
+- For Local SD: increase steps and guidance scale
+
+**Q: Generation is very slow**
+A: 
+- API providers: Network speed dependent, typically 5-20 seconds
+- Local SD on CPU: Can take 2-10 minutes
+- Local SD on GPU: Usually 10-60 seconds
+- Use turbo models for faster generation
+
+**Q: "Out of memory" with Local SD**
+A:
+- Use smaller models (SD 1.5 instead of SDXL)
+- Reduce image resolution
+- Close other applications
+- Consider upgrading GPU VRAM
+
+### Feature Questions
+
+**Q: Can I edit existing images?**
+A: Not yet in current version. Planned features include inpainting and image-to-image.
+
+**Q: Can I generate multiple images at once?**
+A: Currently one at a time in GUI. Use CLI with shell scripts for batch generation.
+
+**Q: Can I use my own Stable Diffusion models?**
+A: Yes! With Local SD, enter any Hugging Face model ID or use the Model Browser.
+
+**Q: Is there a web version?**
+A: Not currently. This is a desktop application. Web interface is planned for future.
+
+**Q: Can I use this commercially?**
+A: Check each provider's terms:
+- Google, OpenAI: Commercial use allowed with paid plans
+- Stability AI: Commercial use allowed
+- Local SD: Depends on specific model license
+
+## 12. API Reference
 
 ### Provider Specifications
 
@@ -560,7 +837,7 @@ export QT_SCALE_FACTOR=1.25
 
 All API providers return images as base64-encoded PNG data or URLs, automatically decoded and saved by the application. Local SD generates images directly as PIL Image objects.
 
-## 12) Development
+## 13. Development
 
 ### Project Structure
 
@@ -609,7 +886,7 @@ ImageAI/
 - Web interface option
 - Mobile app companion
 
-## 13) Changelog
+## 14. Changelog
 
 ### v0.7.0 (2025-09-06)
 - Added Google Cloud authentication support (Application Default Credentials)

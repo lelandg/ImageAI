@@ -4,7 +4,9 @@
       "Bash(source:*)",
       "Bash(pip install:*)",
       "Bash(python test:*)",
-      "Bash(python:*)"
+      "Bash(python:*)",
+      "Bash(pip3 list:*)",
+      "Bash(pip search:*)"
     ],
     "deny": [],
     "ask": []

@@ -209,9 +209,10 @@ class MainWindow(QMainWindow):
         # Output image
         self.output_image_label = QLabel()
         self.output_image_label.setAlignment(Qt.AlignCenter)
-        self.output_image_label.setMinimumHeight(300)
+        self.output_image_label.setMinimumHeight(400)
         self.output_image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.output_image_label.setStyleSheet("border: 1px solid #ccc;")
+        self.output_image_label.setStyleSheet("border: 1px solid #ccc; background-color: #f5f5f5;")
+        self.output_image_label.setScaledContents(False)  # We handle scaling manually
         v.addWidget(self.output_image_label, 10)
         
         # Output text
@@ -317,40 +318,663 @@ class MainWindow(QMainWindow):
         """Initialize the Help tab."""
         v = QVBoxLayout(self.tab_help)
         
-        self.help_browser = QTextBrowser()
-        self.help_browser.setOpenExternalLinks(True)
+        # Try to use QWebEngineView for better emoji support, fallback to QTextBrowser
+        try:
+            from PySide6.QtWebEngineWidgets import QWebEngineView
+            from PySide6.QtWebEngineCore import QWebEnginePage
+            from PySide6.QtCore import QUrl
+            import webbrowser
+            
+            class CustomWebPage(QWebEnginePage):
+                """Custom page to handle external links."""
+                def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+                    # Open external links in system browser
+                    if url.scheme() in ('http', 'https', 'ftp'):
+                        webbrowser.open(url.toString())
+                        return False
+                    return super().acceptNavigationRequest(url, nav_type, is_main_frame)
+            
+            # Add navigation toolbar
+            nav_layout = QHBoxLayout()
+            
+            # Create web view for help with full emoji support
+            self.help_browser = QWebEngineView()
+            self.help_browser.setPage(CustomWebPage(self.help_browser))
+            
+            # Back button
+            self.btn_help_back = QPushButton("◀ Back")
+            self.btn_help_back.clicked.connect(self.help_browser.back)
+            self.btn_help_back.setToolTip("Go back (Alt+Left, Backspace)")
+            nav_layout.addWidget(self.btn_help_back)
+            
+            # Forward button
+            self.btn_help_forward = QPushButton("Forward ▶")
+            self.btn_help_forward.clicked.connect(self.help_browser.forward)
+            self.btn_help_forward.setToolTip("Go forward (Alt+Right)")
+            nav_layout.addWidget(self.btn_help_forward)
+            
+            # Home button
+            self.btn_help_home = QPushButton("⌂ Home")
+            self.btn_help_home.clicked.connect(lambda: self.help_browser.page().runJavaScript(
+                "window.scrollTo(0, 0);"))
+            self.btn_help_home.setToolTip("Go to top (Ctrl+Home)")
+            nav_layout.addWidget(self.btn_help_home)
+            
+            nav_layout.addStretch()
+            v.addLayout(nav_layout)
+            
+            # Update button states based on history
+            self.help_browser.urlChanged.connect(
+                lambda: self.btn_help_back.setEnabled(self.help_browser.history().canGoBack()))
+            self.help_browser.urlChanged.connect(
+                lambda: self.btn_help_forward.setEnabled(self.help_browser.history().canGoForward()))
+            
+            # Load content
+            readme_content = self._load_readme_content(replace_emojis=False)  # Don't replace - WebEngine handles emojis!
+            html_content = self._markdown_to_html_with_anchors(readme_content, use_webengine=True)
+            
+            # Load HTML with base URL for relative links
+            self.help_browser.setHtml(html_content, QUrl("file:///"))
+            
+            v.addWidget(self.help_browser)
+            
+            # Enable initial button states
+            self.btn_help_back.setEnabled(False)
+            self.btn_help_forward.setEnabled(False)
+            
+            print("Help tab using QWebEngineView - emojis will render properly!")
+            return  # Exit early if WebEngine works
+            
+        except ImportError:
+            print("QWebEngineView not available, falling back to QTextBrowser")
+            
+        # Fallback to QTextBrowser implementation
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QFont, QFontDatabase
+        import platform
         
-        # Load help text
-        help_text = f"""
-        <h2>ImageAI v{VERSION}</h2>
-        <p>AI Image Generation Tool</p>
+        class CustomHelpBrowser(QTextBrowser):
+            def __init__(self, parent=None):
+                super().__init__(parent)
+                self.anchor_history = []
+                self.history_index = -1
+                self._parent_window = parent
+                self._navigating_history = False  # Flag to prevent adding to history during back/forward
+                
+                # Connect to anchorClicked signal to intercept ALL link clicks
+                self.anchorClicked.connect(self.handle_anchor_click)
+                
+            def handle_anchor_click(self, url):
+                """Handle all anchor/link clicks."""
+                import webbrowser
+                
+                # Check if it's an external link
+                if url.scheme() in ('http', 'https', 'ftp'):
+                    webbrowser.open(url.toString())
+                    return
+                
+                # Internal anchor link
+                anchor = url.fragment() if url.hasFragment() else ""
+                
+                # Don't add to history if we're navigating via back/forward
+                if not self._navigating_history:
+                    # If it's just a fragment, scroll to it
+                    if anchor:
+                        self.scrollToAnchor(anchor)
+                    else:
+                        # No anchor means go to top
+                        self.verticalScrollBar().setValue(0)
+                    
+                    # Add to history
+                    self.add_to_history(anchor)
+                
+            def add_to_history(self, anchor):
+                """Add anchor to navigation history."""
+                # Remove any forward history when navigating to a new anchor
+                if self.history_index < len(self.anchor_history) - 1:
+                    self.anchor_history = self.anchor_history[:self.history_index + 1]
+                
+                # Don't add duplicate entries
+                if not self.anchor_history or self.anchor_history[-1] != anchor:
+                    self.anchor_history.append(anchor)
+                    self.history_index = len(self.anchor_history) - 1
+                
+                self.update_nav_buttons()
+            
+            def go_back(self):
+                """Navigate back in history."""
+                if self.history_index > 0:
+                    from PySide6.QtCore import QTimer
+                    self._navigating_history = True
+                    self.history_index -= 1
+                    anchor = self.anchor_history[self.history_index]
+                    
+                    # Use QTimer to delay scrolling to avoid focus-related timing issues
+                    def do_scroll():
+                        if anchor:
+                            self.scrollToAnchor(anchor)
+                        else:
+                            # Scroll to top
+                            self.verticalScrollBar().setValue(0)
+                        self._navigating_history = False
+                    
+                    # Small delay to let Qt process focus events
+                    QTimer.singleShot(10, do_scroll)
+                    self.update_nav_buttons()
+            
+            def go_forward(self):
+                """Navigate forward in history."""
+                if self.history_index < len(self.anchor_history) - 1:
+                    from PySide6.QtCore import QTimer
+                    self._navigating_history = True
+                    self.history_index += 1
+                    anchor = self.anchor_history[self.history_index]
+                    
+                    # Use QTimer to delay scrolling to avoid focus-related timing issues
+                    def do_scroll():
+                        if anchor:
+                            self.scrollToAnchor(anchor)
+                        else:
+                            # Scroll to top
+                            self.verticalScrollBar().setValue(0)
+                        self._navigating_history = False
+                    
+                    # Small delay to let Qt process focus events
+                    QTimer.singleShot(10, do_scroll)
+                    self.update_nav_buttons()
+            
+            def go_home(self):
+                """Go to top of document."""
+                from PySide6.QtCore import QTimer
+                
+                # Use QTimer for consistency with other navigation
+                def do_scroll():
+                    self.verticalScrollBar().setValue(0)
+                
+                QTimer.singleShot(10, do_scroll)
+                
+                if not self._navigating_history:
+                    self.add_to_history(None)  # Add top as a history entry
+            
+            def update_nav_buttons(self):
+                """Update navigation button states."""
+                if self._parent_window and hasattr(self._parent_window, 'btn_help_back'):
+                    self._parent_window.btn_help_back.setEnabled(self.history_index > 0)
+                    self._parent_window.btn_help_forward.setEnabled(
+                        self.history_index < len(self.anchor_history) - 1
+                    )
+            
+            def keyPressEvent(self, event):
+                """Handle keyboard shortcuts."""
+                from PySide6.QtCore import Qt
+                key = event.key()
+                modifiers = event.modifiers()
+                
+                if key == Qt.Key_Backspace or (key == Qt.Key_Left and modifiers == Qt.AltModifier):
+                    self.go_back()
+                    event.accept()
+                elif key == Qt.Key_Right and modifiers == Qt.AltModifier:
+                    self.go_forward()
+                    event.accept()
+                elif key == Qt.Key_Home and modifiers == Qt.ControlModifier:
+                    self.go_home()
+                    event.accept()
+                else:
+                    super().keyPressEvent(event)
+            
+            def mousePressEvent(self, event):
+                """Handle mouse button navigation."""
+                from PySide6.QtCore import Qt
+                button = event.button()
+                
+                if button == Qt.XButton1:  # Mouse back button (usually button 4)
+                    self.go_back()
+                    event.accept()
+                elif button == Qt.XButton2:  # Mouse forward button (usually button 5)
+                    self.go_forward()
+                    event.accept()
+                else:
+                    super().mousePressEvent(event)
         
-        <h3>Quick Start</h3>
-        <ol>
-        <li>Get an API key from your provider</li>
-        <li>Enter the key in Settings tab</li>
-        <li>Enter a prompt in Generate tab</li>
-        <li>Click Generate</li>
-        </ol>
+        # Add navigation toolbar
+        nav_layout = QHBoxLayout()
         
-        <h3>Providers</h3>
-        <ul>
-        <li><b>Google Gemini</b> - Advanced image generation</li>
-        <li><b>OpenAI DALL-E</b> - Creative image generation</li>
-        <li><b>Stability AI</b> - Stable Diffusion models (API)</li>
-        <li><b>Local SD</b> - Run Stable Diffusion locally (no API key needed)</li>
-        </ul>
+        # Back button
+        self.btn_help_back = QPushButton("◀ Back")
+        self.btn_help_back.setEnabled(False)
+        self.btn_help_back.setToolTip("Go back (Alt+Left, Backspace)")
+        nav_layout.addWidget(self.btn_help_back)
         
-        <h3>Tips</h3>
-        <ul>
-        <li>Be specific in your prompts</li>
-        <li>Use the Examples button for inspiration</li>
-        <li>Images are auto-saved to the config directory</li>
-        </ul>
-        """
+        # Forward button
+        self.btn_help_forward = QPushButton("Forward ▶")
+        self.btn_help_forward.setEnabled(False)
+        self.btn_help_forward.setToolTip("Go forward (Alt+Right)")
+        nav_layout.addWidget(self.btn_help_forward)
         
-        self.help_browser.setHtml(help_text)
+        # Home button
+        self.btn_help_home = QPushButton("⌂ Home")
+        self.btn_help_home.setToolTip("Go to top (Ctrl+Home)")
+        nav_layout.addWidget(self.btn_help_home)
+        
+        nav_layout.addStretch()
+        v.addLayout(nav_layout)
+        
+        # Create custom help browser
+        self.help_browser = CustomHelpBrowser(self)
+        
+        # Connect button clicks
+        self.btn_help_back.clicked.connect(self.help_browser.go_back)
+        self.btn_help_forward.clicked.connect(self.help_browser.go_forward)
+        self.btn_help_home.clicked.connect(self.help_browser.go_home)
+        
+        # Set minimal stylesheet - let system handle fonts for emoji support
+        try:
+            self.help_browser.setStyleSheet("QTextBrowser { font-size: 13pt; }")
+            # Don't override document fonts - let HTML content control it
+        except Exception:
+            pass
+        
+        # Load and convert README content to HTML with proper anchors
+        readme_content = self._load_readme_content(replace_emojis=True)  # Replace for QTextBrowser
+        html_content = self._markdown_to_html_with_anchors(readme_content, use_webengine=False)
+        
+        try:
+            self.help_browser.setHtml(html_content)
+            # Start with "top" in history
+            self.help_browser.add_to_history(None)
+        except Exception:
+            # Fallback to markdown if HTML fails
+            try:
+                self.help_browser.setMarkdown(readme_content)
+            except Exception:
+                self.help_browser.setPlainText(readme_content)
+        
+        # IMPORTANT: Set to False so we can intercept ALL link clicks via anchorClicked signal
+        self.help_browser.setOpenExternalLinks(False)
+        
         v.addWidget(self.help_browser)
+    
+    def _load_readme_content(self, replace_emojis=True) -> str:
+        """Load and process README.md content for help display."""
+        try:
+            # Get the README path relative to main.py location
+            from pathlib import Path
+            
+            # Look for README.md in the project root (parent of gui folder)
+            readme_path = Path(__file__).parent.parent / "README.md"
+            
+            if readme_path.exists():
+                content = readme_path.read_text(encoding="utf-8")
+                
+                # Only replace emojis for QTextBrowser, not QWebEngineView
+                if replace_emojis:
+                    content = self._replace_emojis_with_text(content)
+                
+                # Filter out development-specific sections for user help
+                lines = content.split('\n')
+                filtered_lines = []
+                skip_section = False
+                skip_headers = {'## 13. Development', '## 14. Changelog', '## Credits', '## License', '## Support'}
+                
+                for line in lines:
+                    # Check if we should skip this section
+                    if any(line.startswith(header) for header in skip_headers):
+                        skip_section = True
+                        continue
+                    
+                    # Check if we're starting a new major section (reset skip)
+                    if line.startswith('## ') and not any(line.startswith(header) for header in skip_headers):
+                        skip_section = False
+                    
+                    # Add line if we're not skipping
+                    if not skip_section:
+                        filtered_lines.append(line)
+                
+                return '\n'.join(filtered_lines)
+                
+        except Exception as e:
+            print(f"Could not load README.md: {e}")
+        
+        # Fallback help text if README.md can't be loaded
+        return self._get_fallback_help()
+    
+    def _markdown_to_html_with_anchors(self, markdown_text: str, use_webengine: bool = False) -> str:
+        """Convert markdown to HTML with proper GitHub-style anchor IDs."""
+        try:
+            # Try to use the markdown library if available
+            import markdown
+            from markdown.extensions.toc import TocExtension
+            
+            # Configure to generate GitHub-style anchors
+            md = markdown.Markdown(extensions=[
+                'fenced_code',
+                'tables',
+                TocExtension(slugify=self._github_slugify),
+            ])
+            
+            # Process the markdown
+            html_body = md.convert(markdown_text)
+            
+            # Add explicit anchors for headers that might not have them
+            html_body = self._add_explicit_anchors(html_body)
+            
+            # Wrap in proper HTML document with UTF-8 encoding
+            if use_webengine:
+                # QWebEngineView can handle emojis with proper font stack
+                html = f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <style>
+        body {{ 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Color Emoji", 
+                         "Apple Color Emoji", "Segoe UI Emoji", Roboto, Helvetica, Arial, sans-serif;
+            font-size: 13pt;
+            line-height: 1.4;
+            margin: 10px;
+        }}
+        h1 {{ font-size: 20pt; color: #2c3e50; }}
+        h2 {{ font-size: 16pt; color: #2c3e50; }}
+        h3 {{ font-size: 14pt; color: #2c3e50; }}
+        code {{ 
+            background-color: #f8f9fa; 
+            padding: 2px 4px; 
+            border-radius: 3px; 
+        }}
+        pre {{ 
+            background-color: #f8f9fa; 
+            padding: 10px; 
+            border-radius: 5px; 
+            overflow-x: auto; 
+        }}
+        a {{ color: #0366d6; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+    </style>
+</head>
+<body>
+{html_body}
+</body>
+</html>'''
+            else:
+                # QTextBrowser - simpler styling
+                html = f'''<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <style>
+        body {{ 
+            font-size: 13pt;
+            line-height: 1.4;
+            margin: 10px;
+        }}
+        h1 {{ font-size: 20pt; color: #2c3e50; }}
+        h2 {{ font-size: 16pt; color: #2c3e50; }}
+        h3 {{ font-size: 14pt; color: #2c3e50; }}
+        code {{ 
+            background-color: #f8f9fa; 
+            padding: 2px 4px; 
+            border-radius: 3px; 
+        }}
+        pre {{ 
+            background-color: #f8f9fa; 
+            padding: 10px; 
+            border-radius: 5px; 
+            overflow-x: auto; 
+        }}
+        a {{ color: #0366d6; text-decoration: none; }}
+        a:hover {{ text-decoration: underline; }}
+    </style>
+</head>
+<body>
+{html_body}
+</body>
+</html>'''
+            
+            return html
+            
+        except ImportError:
+            # If markdown library is not available, do basic conversion
+            return self._basic_markdown_to_html(markdown_text)
+    
+    def _github_slugify(self, value, separator):
+        """Generate GitHub-style anchor IDs from header text."""
+        # Convert to lowercase and replace spaces with hyphens
+        # Keep numbers and letters, replace other chars with hyphens
+        import re
+        value = value.lower()
+        # Replace spaces and dots with hyphens
+        value = re.sub(r'[\s\.]+', '-', value)
+        # Remove other special characters
+        value = re.sub(r'[^\w\-]', '', value)
+        # Remove leading/trailing hyphens
+        value = value.strip('-')
+        return value
+    
+    def _add_explicit_anchors(self, html: str) -> str:
+        """Add explicit anchor tags for headers to ensure navigation works."""
+        import re
+        
+        # Pattern to find headers - use non-greedy match and handle any content
+        header_pattern = r'<h([1-6])[^>]*>(.+?)</h\1>'
+        
+        def replace_header(match):
+            level = match.group(1)
+            text = match.group(2)
+            # Strip any existing anchor tags or IDs from the text
+            clean_text = re.sub(r'<[^>]+>', '', text)
+            # Generate anchor ID from clean text (without HTML tags)
+            anchor_id = self._github_slugify(clean_text, '-')
+            # Return header with explicit anchor, preserving original text (with emojis)
+            return f'<h{level} id="{anchor_id}"><a name="{anchor_id}"></a>{text}</h{level}>'
+        
+        return re.sub(header_pattern, replace_header, html, flags=re.DOTALL)
+    
+    def _basic_markdown_to_html(self, markdown_text: str) -> str:
+        """Basic markdown to HTML conversion with proper anchors and UTF-8 encoding."""
+        import re
+        
+        lines = markdown_text.split('\n')
+        html_lines = [
+            '<!DOCTYPE html>',
+            '<html>',
+            '<head>',
+            '<meta charset="UTF-8">',
+            '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">',
+            '<style>',
+            'body { font-size: 13pt; line-height: 1.4; margin: 10px; }',
+            'h1 { font-size: 20pt; color: #2c3e50; }',
+            'h2 { font-size: 16pt; color: #2c3e50; }',
+            'h3 { font-size: 14pt; color: #2c3e50; }',
+            'code { background-color: #f8f9fa; padding: 2px 4px; border-radius: 3px; }',
+            'pre { background-color: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; }',
+            'a { color: #0366d6; text-decoration: none; }',
+            'a:hover { text-decoration: underline; }',
+            '</style>',
+            '</head>',
+            '<body>'
+        ]
+        in_code_block = False
+        in_list = False
+        
+        for line in lines:
+            # Handle code blocks
+            if line.startswith('```'):
+                if in_code_block:
+                    html_lines.append('</pre>')
+                    in_code_block = False
+                else:
+                    html_lines.append('<pre>')
+                    in_code_block = True
+                continue
+            
+            if in_code_block:
+                # Escape HTML in code blocks
+                line = line.replace('<', '&lt;').replace('>', '&gt;')
+                html_lines.append(line)
+                continue
+            
+            # Convert headers with anchors (preserve emojis)
+            if line.startswith('#'):
+                match = re.match(r'^(#+)\s+(.+)$', line)
+                if match:
+                    level = len(match.group(1))
+                    text = match.group(2)
+                    anchor_id = self._github_slugify(text, '-')
+                    # Don't escape the text - preserve emojis
+                    html_lines.append(f'<h{level} id="{anchor_id}"><a name="{anchor_id}"></a>{text}</h{level}>')
+                    continue
+            
+            # Handle lists
+            is_list_item = False
+            if line.strip().startswith('- ') or line.strip().startswith('* '):
+                if not in_list:
+                    html_lines.append('<ul>')
+                    in_list = True
+                line = '<li>' + line.strip()[2:] + '</li>'
+                is_list_item = True
+            elif re.match(r'^\d+\.\s', line.strip()):
+                if not in_list:
+                    html_lines.append('<ol>')
+                    in_list = True
+                line = '<li>' + re.sub(r'^\d+\.\s', '', line.strip()) + '</li>'
+                is_list_item = True
+            elif in_list and not line.strip():
+                # End of list
+                html_lines.append('</ul>' if '<ul>' in html_lines[-10:] else '</ol>')
+                in_list = False
+            
+            # Convert links
+            # Handle [text](url) style links
+            line = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', line)
+            
+            # Convert bold and italic
+            line = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', line)
+            line = re.sub(r'\*([^*]+)\*', r'<em>\1</em>', line)
+            
+            # Convert inline code
+            line = re.sub(r'`([^`]+)`', r'<code>\1</code>', line)
+            
+            # Add line breaks for non-empty lines
+            if line.strip():
+                if not is_list_item:
+                    html_lines.append(line + '<br>')
+                else:
+                    html_lines.append(line)
+            else:
+                html_lines.append('<br>')
+        
+        # Close any open list
+        if in_list:
+            html_lines.append('</ul>' if '<ul>' in html_lines[-10:] else '</ol>')
+        
+        html_lines.extend(['</body>', '</html>'])
+        return '\n'.join(html_lines)
+    
+    def _replace_emojis_with_text(self, content: str) -> str:
+        """Replace emojis with text equivalents for better compatibility."""
+        # Use simple text/symbol replacements that work universally
+        replacements = {
+            "🎨": "●",  # Art/Palette - bullet point
+            "🔐": "●",  # Security/Lock - bullet point
+            "💻": "●",  # Computer - bullet point
+            "📁": "●",  # Folder - bullet point
+            "🏠": "[Home]",
+            "⌂": "[Home]",
+            "◀": "←",  # Left arrow
+            "▶": "→",  # Right arrow
+            "✓": "✓",  # Checkmark (basic unicode)
+            "✅": "[✓]",
+            "❌": "[X]",
+            "⚙️": "[Settings]",
+            "🚀": "[>]",
+            "❤️": "♥",  # Heart (basic unicode)
+            "🌟": "★",  # Star (basic unicode)
+        }
+        
+        for emoji, text in replacements.items():
+            content = content.replace(emoji, text)
+        
+        return content
+    
+    def _get_fallback_help(self) -> str:
+        """Return fallback help content if README cannot be loaded."""
+        return f"""# ImageAI Help
+
+## Quick Start Guide
+
+### Setting Up Authentication
+
+**For Google Gemini:**
+1. Visit [Google AI Studio](https://aistudio.google.com/apikey)
+2. Create or copy an API key
+3. Enter the key in Settings tab
+4. Click "Save & Test"
+
+**For OpenAI DALL-E:**
+1. Visit [OpenAI Platform](https://platform.openai.com/api-keys)
+2. Create an API key
+3. Select "OpenAI" provider in Settings
+4. Enter your key and save
+
+**For Stability AI:**
+1. Visit [Stability AI Platform](https://platform.stability.ai/)
+2. Create an API key
+3. Select "Stability AI" provider in Settings
+4. Enter your key and save
+
+**For Local Stable Diffusion:**
+1. No API key needed!
+2. Select "Local SD" provider in Settings
+3. Requires additional dependencies (see installation guide)
+
+### Generating Images
+
+1. **Enter a Prompt**: Type your image description in the text area
+2. **Select Model**: Choose a model from the dropdown (optional)
+3. **Click Generate**: Press the Generate button or Ctrl+Enter
+4. **Wait**: Generation typically takes 5-30 seconds
+5. **View Result**: Image appears below when complete
+
+### Using Templates
+
+Templates help you create consistent prompts:
+1. Go to Templates tab
+2. Select a template from the dropdown
+3. Fill in the placeholders (optional)
+4. Click "Insert into Prompt"
+
+### Tips for Better Results
+
+**Be Specific**: Instead of "a cat", try "a fluffy orange tabby cat sitting on a windowsill"
+
+**Include Style**: Add artistic style like "oil painting", "photorealistic", "cartoon style"
+
+**Describe Mood**: Include lighting and atmosphere like "golden hour", "dramatic lighting", "cozy"
+
+**Add Details**: More details generally produce better results
+
+### Keyboard Shortcuts
+
+- **Ctrl+Enter**: Generate image
+- **Ctrl+S**: Save current image
+- **Ctrl+Q**: Quit application
+- **Ctrl+A**: Select all text
+- **Ctrl+C/V/X**: Copy/Paste/Cut
+
+### Common Issues
+
+**"API key not found"**: Make sure you've entered and saved your API key in Settings
+
+**"Invalid API key"**: Verify your key is correct and active on the provider's website
+
+**"Quota exceeded"**: Check your usage limits on the provider's dashboard
+
+**"Module not found"**: Run `pip install -r requirements.txt` to install dependencies
+
+For more detailed information, please refer to the full documentation.
+"""
     
     def _init_templates_tab(self):
         """Initialize templates tab."""
@@ -719,12 +1343,16 @@ class MainWindow(QMainWindow):
             pixmap.loadFromData(image_data)
             
             # Scale to fit label while maintaining aspect ratio
+            label_size = self.output_image_label.size()
             scaled = pixmap.scaled(
-                self.output_image_label.size(),
+                label_size,
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation
             )
             self.output_image_label.setPixmap(scaled)
+            
+            # Store the original pixmap for potential resizing
+            self.output_image_label.setProperty("original_pixmap", pixmap)
         except Exception as e:
             self.output_image_label.setText(f"Error displaying image: {e}")
     
@@ -793,6 +1421,23 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
     
+    def resizeEvent(self, event):
+        """Handle window resize to scale images appropriately."""
+        super().resizeEvent(event)
+        
+        # If we have an image displayed, rescale it to fit the new size
+        if hasattr(self, 'output_image_label'):
+            original_pixmap = self.output_image_label.property("original_pixmap")
+            if original_pixmap and isinstance(original_pixmap, QPixmap):
+                # Rescale the original pixmap to fit the new label size
+                label_size = self.output_image_label.size()
+                scaled = original_pixmap.scaled(
+                    label_size,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                self.output_image_label.setPixmap(scaled)
+    
     def closeEvent(self, event):
         """Save geometry on close."""
         try:
@@ -854,12 +1499,22 @@ class MainWindow(QMainWindow):
                         # Display in output label
                         pixmap = QPixmap()
                         if pixmap.loadFromData(image_data):
+                            # Scale to fit the label while maintaining aspect ratio
+                            # Use the label's current size for better fit
+                            label_size = self.output_image_label.size()
                             scaled = pixmap.scaled(
-                                self.output_image_label.size(),
+                                label_size,
                                 Qt.KeepAspectRatio,
                                 Qt.SmoothTransformation
                             )
                             self.output_image_label.setPixmap(scaled)
+                            
+                            # Store the original pixmap for resizing
+                            self.output_image_label.setProperty("original_pixmap", pixmap)
+                        
+                        # Enable save and copy buttons since we have an image
+                        self.btn_save_image.setEnabled(True)
+                        self.btn_copy_image.setEnabled(True)
                         
                         # Load metadata
                         prompt = history_item.get('prompt', '')

@@ -5,6 +5,7 @@ google-cloud-aiplatform
 PySide6
 openai
 requests  # For Stability AI REST API
+markdown>=3.5  # For better help documentation rendering
 
 # Optional dependencies for Local Stable Diffusion
 # Uncomment these lines to enable local SD support:
