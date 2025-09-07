@@ -306,11 +306,27 @@ class QualitySelector(QWidget):
     def get_settings(self) -> dict:
         """Get current settings."""
         settings = {}
-        if self.quality_group.isVisible():
+        # Always save quality setting if the group exists
+        if hasattr(self, 'quality_group'):
             settings["quality"] = "hd" if self.hd_radio.isChecked() else "standard"
-        if self.style_group.isVisible():
+        # Always save style setting if the group exists
+        if hasattr(self, 'style_group'):
             settings["style"] = "natural" if self.natural_radio.isChecked() else "vivid"
         return settings
+    
+    def set_settings(self, settings: dict):
+        """Restore settings."""
+        if "quality" in settings:
+            if settings["quality"] == "hd":
+                self.hd_radio.setChecked(True)
+            else:
+                self.standard_radio.setChecked(True)
+        
+        if "style" in settings:
+            if settings["style"] == "vivid":
+                self.vivid_radio.setChecked(True)
+            else:
+                self.natural_radio.setChecked(True)
 
 
 class BatchSelector(QWidget):
@@ -551,7 +567,69 @@ class AdvancedSettingsPanel(QWidget):
     
     def get_settings(self) -> dict:
         """Get current settings."""
-        return self.settings.copy()
+        # Always include the current state of all controls
+        current_settings = {}
+        
+        # Google settings
+        if hasattr(self, 'prompt_rewrite_check'):
+            current_settings['enable_prompt_rewriting'] = self.prompt_rewrite_check.isChecked()
+        
+        if hasattr(self, 'safety_combo'):
+            current_settings['safety_filter'] = self.safety_combo.currentText()
+        
+        # OpenAI settings
+        if hasattr(self, 'openai_hd_check'):
+            current_settings['openai_quality'] = 'hd' if self.openai_hd_check.isChecked() else 'standard'
+        
+        if hasattr(self, 'openai_vivid_radio'):
+            current_settings['openai_style'] = 'vivid' if self.openai_vivid_radio.isChecked() else 'natural'
+        
+        # Stability settings
+        if hasattr(self, 'seed_spin'):
+            current_settings['seed'] = self.seed_spin.value()
+        
+        if hasattr(self, 'cfg_spin'):
+            current_settings['cfg_scale'] = self.cfg_spin.value()
+        
+        if hasattr(self, 'steps_spin'):
+            current_settings['steps'] = self.steps_spin.value()
+        
+        # Merge with any existing settings that might have been set
+        return {**self.settings, **current_settings}
+    
+    def set_settings(self, settings: dict):
+        """Restore settings."""
+        self.settings = settings.copy()
+        
+        # Update Google settings
+        if "enable_prompt_rewriting" in settings:
+            self.prompt_rewrite_check.setChecked(settings["enable_prompt_rewriting"])
+        
+        if "safety_filter" in settings:
+            idx = self.safety_combo.findText(settings["safety_filter"])
+            if idx >= 0:
+                self.safety_combo.setCurrentIndex(idx)
+        
+        # Update OpenAI settings
+        if "openai_quality" in settings:
+            if settings["openai_quality"] == "hd":
+                self.openai_hd_check.setChecked(True)
+        
+        if "openai_style" in settings:
+            if settings["openai_style"] == "vivid":
+                self.openai_vivid_radio.setChecked(True)
+            else:
+                self.openai_natural_radio.setChecked(True)
+        
+        # Update Stability settings
+        if "seed" in settings:
+            self.seed_spin.setValue(settings["seed"])
+        
+        if "cfg_scale" in settings:
+            self.cfg_spin.setValue(settings["cfg_scale"])
+        
+        if "steps" in settings:
+            self.steps_spin.setValue(settings["steps"])
 
 
 class CostEstimator:

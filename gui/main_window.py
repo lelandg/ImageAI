@@ -81,11 +81,12 @@ class MainWindow(QMainWindow):
         self._init_ui()
         self._init_menu()
         
-        # Restore window geometry
+        # Restore window geometry and UI state
         self._restore_geometry()
+        self._restore_ui_state()
     
     def _load_history_from_disk(self):
-        """Load history from disk into memory."""
+        """Load history from disk into memory with enhanced metadata."""
         for path in self.history_paths:
             try:
                 # Try to read sidecar file for metadata
@@ -96,14 +97,23 @@ class MainWindow(QMainWindow):
                         'prompt': sidecar.get('prompt', ''),
                         'timestamp': sidecar.get('timestamp', path.stat().st_mtime),
                         'model': sidecar.get('model', ''),
-                        'provider': sidecar.get('provider', '')
+                        'provider': sidecar.get('provider', ''),
+                        'width': sidecar.get('width', ''),
+                        'height': sidecar.get('height', ''),
+                        'num_images': sidecar.get('num_images', 1),
+                        'quality': sidecar.get('quality', ''),
+                        'style': sidecar.get('style', ''),
+                        'cost': sidecar.get('cost', 0.0)
                     })
                 else:
-                    # No sidecar, just add path
+                    # No sidecar, just add path with basic info
                     self.history.append({
                         'path': path,
                         'prompt': path.stem.replace('_', ' '),
-                        'timestamp': path.stat().st_mtime
+                        'timestamp': path.stat().st_mtime,
+                        'model': '',
+                        'provider': '',
+                        'cost': 0.0
                     })
             except Exception:
                 pass
@@ -124,17 +134,13 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_templates, "Templates")
         self.tabs.addTab(self.tab_settings, "Settings")
         self.tabs.addTab(self.tab_help, "Help")
-        
-        # Add History tab if there's history
-        if self.history:
-            self.tabs.addTab(self.tab_history, "History")
+        self.tabs.addTab(self.tab_history, "History")  # Always add history tab
         
         self._init_generate_tab()
         self._init_templates_tab()
         self._init_settings_tab()
         self._init_help_tab()
-        if self.history:
-            self._init_history_tab()
+        self._init_history_tab()  # Always init history tab
         
         # Connect tab change signal to handle help tab rendering
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -1140,43 +1146,96 @@ For more detailed information, please refer to the full documentation.
         self._on_template_changed(self.template_combo.currentText())
     
     def _init_history_tab(self):
-        """Initialize history tab."""
+        """Initialize history tab with enhanced table display."""
+        from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
+        
         v = QVBoxLayout(self.tab_history)
         
-        # History list - scrollable with full prompts
-        self.history_list = QListWidget()
-        self.history_list.setAlternatingRowColors(True)
-        self.history_list.setWordWrap(True)  # Allow text wrapping for longer prompts
-        self.history_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.history_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # Create table widget for better organization
+        self.history_table = QTableWidget()
+        self.history_table.setColumnCount(7)
+        self.history_table.setHorizontalHeaderLabels([
+            "Date", "Time", "Provider", "Model", "Prompt", "Resolution", "Cost"
+        ])
         
-        # Add history items with more prompt text and tooltips
-        for item in self.history:
+        # Configure table
+        self.history_table.setAlternatingRowColors(True)
+        self.history_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.history_table.setSortingEnabled(True)
+        
+        # Set column widths
+        header = self.history_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Date
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Time
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Provider
+        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Model
+        header.setSectionResizeMode(4, QHeaderView.Stretch)  # Prompt - takes remaining space
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Resolution
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Cost
+        
+        # Populate table with history
+        self.history_table.setRowCount(len(self.history))
+        for row, item in enumerate(self.history):
             if isinstance(item, dict):
-                prompt = item.get('prompt', 'No prompt')
-                # Format timestamp nicely
-                timestamp = item.get('timestamp', 'Unknown time')
+                # Parse timestamp
+                timestamp = item.get('timestamp', '')
+                date_str = time_str = ''
                 if isinstance(timestamp, float):
                     from datetime import datetime
                     dt = datetime.fromtimestamp(timestamp)
-                    timestamp = dt.strftime("%Y-%m-%d %H:%M")
+                    date_str = dt.strftime("%Y-%m-%d")
+                    time_str = dt.strftime("%H:%M:%S")
                 elif isinstance(timestamp, str) and 'T' in timestamp:
-                    # ISO format, simplify it
-                    timestamp = timestamp.replace('T', ' ').split('.')[0]
+                    # ISO format
+                    parts = timestamp.split('T')
+                    date_str = parts[0]
+                    time_str = parts[1].split('.')[0] if len(parts) > 1 else ''
                 
-                # Show more of the prompt (up to 100 chars on two lines)
-                display_prompt = prompt[:100] + '...' if len(prompt) > 100 else prompt
-                display_text = f"{timestamp}\n{display_prompt}"
+                # Date column
+                date_item = QTableWidgetItem(date_str)
+                self.history_table.setItem(row, 0, date_item)
                 
-                list_item = QListWidgetItem(display_text)
-                # Set full prompt as tooltip for easy viewing
-                list_item.setToolTip(f"Full prompt:\n{prompt}")
-                self.history_list.addItem(list_item)
-            else:
-                self.history_list.addItem(str(item))
+                # Time column
+                time_item = QTableWidgetItem(time_str)
+                self.history_table.setItem(row, 1, time_item)
+                
+                # Provider column
+                provider = item.get('provider', '')
+                provider_item = QTableWidgetItem(provider.title() if provider else 'Unknown')
+                self.history_table.setItem(row, 2, provider_item)
+                
+                # Model column
+                model = item.get('model', '')
+                model_display = model.split('/')[-1] if '/' in model else model  # Simplify model names
+                model_item = QTableWidgetItem(model_display)
+                model_item.setToolTip(model)  # Full model name in tooltip
+                self.history_table.setItem(row, 3, model_item)
+                
+                # Prompt column
+                prompt = item.get('prompt', 'No prompt')
+                prompt_item = QTableWidgetItem(prompt[:100] + '...' if len(prompt) > 100 else prompt)
+                prompt_item.setToolTip(f"Full prompt:\n{prompt}")
+                self.history_table.setItem(row, 4, prompt_item)
+                
+                # Resolution column
+                width = item.get('width', '')
+                height = item.get('height', '')
+                resolution = f"{width}x{height}" if width and height else ''
+                resolution_item = QTableWidgetItem(resolution)
+                self.history_table.setItem(row, 5, resolution_item)
+                
+                # Cost column
+                cost = item.get('cost', 0.0)
+                cost_str = f"${cost:.4f}" if cost > 0 else '-'
+                cost_item = QTableWidgetItem(cost_str)
+                self.history_table.setItem(row, 6, cost_item)
+                
+                # Store the history item data in the first column for easy retrieval
+                date_item.setData(Qt.UserRole, item)
         
         v.addWidget(QLabel(f"History ({len(self.history)} items):"))
-        v.addWidget(self.history_list)
+        v.addWidget(self.history_table)
         
         # Buttons
         h = QHBoxLayout()
@@ -1188,8 +1247,8 @@ For more detailed information, please refer to the full documentation.
         v.addLayout(h)
         
         # Connect signals
-        self.history_list.itemSelectionChanged.connect(self._on_history_selection_changed)
-        self.history_list.itemDoubleClicked.connect(self._load_history_item)
+        self.history_table.selectionModel().selectionChanged.connect(self._on_history_selection_changed)
+        self.history_table.itemDoubleClicked.connect(self._load_history_item)
         self.btn_load_history.clicked.connect(self._load_selected_history)
         self.btn_clear_history.clicked.connect(self._clear_history)
     
@@ -1542,14 +1601,52 @@ For more detailed information, please refer to the full documentation.
             stub = sanitize_stub_from_prompt(self.current_prompt)
             saved_paths = auto_save_images(images, base_stub=stub)
             
-            # Save metadata
-            for path in saved_paths:
+            # Calculate cost for this generation
+            generation_cost = 0.0
+            settings = {}
+            settings["num_images"] = len(images)
+            
+            # Get resolution from image data if possible
+            try:
+                from PIL import Image
+                import io
+                img = Image.open(io.BytesIO(images[0]))
+                settings["width"] = img.width
+                settings["height"] = img.height
+                settings["resolution"] = f"{img.width}x{img.height}"
+            except:
+                pass
+            
+            # Get quality/style settings if available
+            if hasattr(self, 'quality_settings'):
+                settings.update(self.quality_settings)
+            
+            # Calculate the cost if estimator is available
+            if CostEstimator:
+                try:
+                    generation_cost = CostEstimator.calculate(self.current_provider, settings)
+                except:
+                    generation_cost = 0.0
+            
+            # Save metadata with cost
+            for i, path in enumerate(saved_paths):
                 meta = {
                     "prompt": self.current_prompt,
                     "provider": self.current_provider,
                     "model": self.current_model,
                     "timestamp": datetime.now().isoformat(),
+                    "cost": generation_cost / len(images),  # Cost per image
                 }
+                
+                # Add resolution info if we got it
+                if 'width' in settings:
+                    meta["width"] = settings["width"]
+                    meta["height"] = settings["height"]
+                
+                # Add quality/style info
+                if hasattr(self, 'quality_settings'):
+                    meta.update(self.quality_settings)
+                
                 write_image_sidecar(path, meta)
             
             # Display first image
@@ -1560,8 +1657,31 @@ For more detailed information, please refer to the full documentation.
             self.btn_save_image.setEnabled(True)
             self.btn_copy_image.setEnabled(True)
             
-            # Update history
+            # Update history with the new generation
             self.history_paths = scan_disk_history()
+            
+            # Add to in-memory history for immediate display
+            for i, path in enumerate(saved_paths):
+                history_entry = {
+                    'path': path,
+                    'prompt': self.current_prompt,
+                    'timestamp': datetime.now().isoformat(),
+                    'model': self.current_model,
+                    'provider': self.current_provider,
+                    'cost': generation_cost / len(images) if generation_cost else 0.0
+                }
+                
+                # Add resolution if available
+                if 'width' in settings:
+                    history_entry['width'] = settings['width']
+                    history_entry['height'] = settings['height']
+                
+                # Add to history list
+                self.history.append(history_entry)
+            
+            # Update history tab if it exists
+            if hasattr(self, 'history_table'):
+                self._refresh_history_table()
             
             # Copy filename if enabled
             if self.auto_copy_filename and saved_paths:
@@ -1684,8 +1804,9 @@ For more detailed information, please refer to the full documentation.
                 self.output_image_label.setPixmap(scaled)
     
     def closeEvent(self, event):
-        """Save geometry on close."""
+        """Save all UI state on close."""
         try:
+            # Save window geometry
             geo = {
                 "x": self.x(),
                 "y": self.y(),
@@ -1693,9 +1814,14 @@ For more detailed information, please refer to the full documentation.
                 "h": self.height(),
             }
             self.config.set("window_geometry", geo)
+            
+            # Save all UI state
+            self._save_ui_state()
+            
+            # Save config
             self.config.save()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error saving UI state: {e}")
         
         # Clean up thread if running
         self._cleanup_thread()
@@ -1723,16 +1849,17 @@ For more detailed information, please refer to the full documentation.
             self.prompt_edit.setPlainText(template_text)
             self.tabs.setCurrentWidget(self.tab_generate)
     
-    def _on_history_selection_changed(self):
+    def _on_history_selection_changed(self, selected, deselected):
         """Handle history selection change - display the image."""
-        items = self.history_list.selectedItems()
-        if not items:
+        indexes = self.history_table.selectionModel().selectedRows()
+        if not indexes:
             return
         
-        # Get the selected history item
-        index = self.history_list.row(items[0])
-        if 0 <= index < len(self.history):
-            history_item = self.history[index]
+        # Get the selected history item from the table
+        row = indexes[0].row()
+        date_item = self.history_table.item(row, 0)
+        if date_item:
+            history_item = date_item.data(Qt.UserRole)
             if isinstance(history_item, dict):
                 path = history_item.get('path')
                 if path and path.exists():
@@ -1793,9 +1920,12 @@ For more detailed information, please refer to the full documentation.
     
     def _load_selected_history(self):
         """Load the selected history item."""
-        current_item = self.history_list.currentItem()
-        if current_item:
-            self._load_history_item(current_item)
+        indexes = self.history_table.selectionModel().selectedRows()
+        if indexes:
+            row = indexes[0].row()
+            date_item = self.history_table.item(row, 0)
+            if date_item:
+                self._load_history_item(date_item)
     
     def _clear_history(self):
         """Clear history."""
@@ -1806,7 +1936,7 @@ For more detailed information, please refer to the full documentation.
         )
         if reply == QMessageBox.Yes:
             self.history.clear()
-            self.history_list.clear()
+            self.history_table.setRowCount(0)
     
     def _on_tab_changed(self, index):
         """Handle tab change events."""
@@ -1830,3 +1960,283 @@ For more detailed information, please refer to the full documentation.
         is_visible = self.image_settings_container.isVisible()
         self.image_settings_container.setVisible(not is_visible)
         self.image_settings_toggle.setText("▼ Image Settings" if not is_visible else "▶ Image Settings")
+    
+    def _save_ui_state(self):
+        """Save all UI widget states to config."""
+        ui_state = {}
+        
+        try:
+            # Current tab index
+            ui_state['current_tab'] = self.tabs.currentIndex()
+            
+            # Generate tab settings
+            ui_state['prompt'] = self.prompt_edit.toPlainText()
+            ui_state['model'] = self.model_combo.currentText()
+            ui_state['model_index'] = self.model_combo.currentIndex()
+            
+            # Image settings expansion state
+            ui_state['image_settings_expanded'] = self.image_settings_container.isVisible()
+            
+            # Image settings values
+            if hasattr(self, 'aspect_selector') and self.aspect_selector:
+                ui_state['aspect_ratio'] = self.aspect_selector.get_ratio()
+            
+            if hasattr(self, 'resolution_selector') and self.resolution_selector:
+                ui_state['resolution'] = self.resolution_selector.get_resolution()
+            elif hasattr(self, 'resolution_combo'):
+                ui_state['resolution_combo_index'] = self.resolution_combo.currentIndex()
+            
+            if hasattr(self, 'quality_selector') and self.quality_selector:
+                ui_state['quality_settings'] = self.quality_selector.get_settings()
+            
+            if hasattr(self, 'batch_selector') and self.batch_selector:
+                ui_state['batch_num'] = self.batch_selector.get_num_images()
+            
+            # Advanced settings
+            if hasattr(self, 'advanced_panel') and self.advanced_panel:
+                ui_state['advanced_expanded'] = self.advanced_panel.expanded  # Use attribute, not method
+                ui_state['advanced_settings'] = self.advanced_panel.get_settings()
+            elif hasattr(self, 'advanced_group'):
+                ui_state['advanced_visible'] = self.advanced_group.isVisible()
+                if hasattr(self, 'steps_spin'):
+                    ui_state['steps'] = self.steps_spin.value()
+                if hasattr(self, 'guidance_spin'):
+                    ui_state['guidance'] = self.guidance_spin.value()
+            
+            # Splitter sizes (for prompt/image split)
+            if hasattr(self, 'tab_generate'):
+                splitters = self.tab_generate.findChildren(QSplitter)
+                if splitters:
+                    ui_state['splitter_sizes'] = splitters[0].sizes()
+            
+            # Templates tab
+            if hasattr(self, 'template_combo'):
+                ui_state['template_index'] = self.template_combo.currentIndex()
+            
+            # Settings tab
+            ui_state['provider'] = self.current_provider
+            if hasattr(self, 'provider_combo'):
+                ui_state['provider_index'] = self.provider_combo.currentIndex()
+            
+            # History tab - column widths
+            if hasattr(self, 'history_table'):
+                header = self.history_table.horizontalHeader()
+                column_widths = []
+                for i in range(self.history_table.columnCount()):
+                    column_widths.append(header.sectionSize(i))
+                ui_state['history_column_widths'] = column_widths
+                ui_state['history_sort_column'] = header.sortIndicatorSection()
+                # Convert Qt.SortOrder enum to int
+                from PySide6.QtCore import Qt
+                sort_order = header.sortIndicatorOrder()
+                ui_state['history_sort_order'] = 0 if sort_order == Qt.AscendingOrder else 1
+            
+            # Output text height
+            if hasattr(self, 'output_text'):
+                ui_state['output_text_height'] = self.output_text.height()
+            
+            # Save to config
+            self.config.set('ui_state', ui_state)
+            
+        except Exception as e:
+            print(f"Error saving UI state: {e}")
+    
+    def _restore_ui_state(self):
+        """Restore all UI widget states from config."""
+        ui_state = self.config.get('ui_state', {})
+        if not ui_state:
+            return
+        
+        try:
+            # Restore prompt
+            if 'prompt' in ui_state:
+                self.prompt_edit.setPlainText(ui_state['prompt'])
+            
+            # Restore model selection
+            if 'model_index' in ui_state and ui_state['model_index'] >= 0:
+                if ui_state['model_index'] < self.model_combo.count():
+                    self.model_combo.setCurrentIndex(ui_state['model_index'])
+            elif 'model' in ui_state:
+                idx = self.model_combo.findText(ui_state['model'])
+                if idx >= 0:
+                    self.model_combo.setCurrentIndex(idx)
+            
+            # Restore image settings expansion
+            if 'image_settings_expanded' in ui_state:
+                if ui_state['image_settings_expanded']:
+                    self.image_settings_container.setVisible(True)
+                    self.image_settings_toggle.setText("▼ Image Settings")
+                    self.image_settings_toggle.setChecked(True)
+            
+            # Restore aspect ratio
+            if 'aspect_ratio' in ui_state and hasattr(self, 'aspect_selector') and self.aspect_selector:
+                # The aspect selector might have a method to set the ratio
+                try:
+                    self.aspect_selector.set_ratio(ui_state['aspect_ratio'])
+                except:
+                    pass
+            
+            # Restore resolution
+            if 'resolution' in ui_state and hasattr(self, 'resolution_selector') and self.resolution_selector:
+                try:
+                    self.resolution_selector.set_resolution(ui_state['resolution'])
+                except:
+                    pass
+            elif 'resolution_combo_index' in ui_state and hasattr(self, 'resolution_combo'):
+                if ui_state['resolution_combo_index'] < self.resolution_combo.count():
+                    self.resolution_combo.setCurrentIndex(ui_state['resolution_combo_index'])
+            
+            # Restore quality settings
+            if 'quality_settings' in ui_state and hasattr(self, 'quality_selector') and self.quality_selector:
+                try:
+                    # Now QualitySelector has set_settings method
+                    self.quality_selector.set_settings(ui_state['quality_settings'])
+                except Exception as e:
+                    print(f"Error restoring quality settings: {e}")
+            
+            # Restore batch number
+            if 'batch_num' in ui_state and hasattr(self, 'batch_selector') and self.batch_selector:
+                try:
+                    # BatchSelector uses a spin box
+                    if hasattr(self.batch_selector, 'spin'):
+                        self.batch_selector.spin.setValue(ui_state['batch_num'])
+                        self.batch_selector.num_images = ui_state['batch_num']
+                except:
+                    pass
+            
+            # Restore advanced settings
+            if hasattr(self, 'advanced_panel') and self.advanced_panel:
+                if 'advanced_expanded' in ui_state:
+                    try:
+                        # Set the expanded state directly
+                        if ui_state['advanced_expanded']:
+                            self.advanced_panel.expanded = True
+                            self.advanced_panel.container.setVisible(True)
+                            self.advanced_panel.toggle_btn.setText("▼ Advanced Settings")
+                            self.advanced_panel.toggle_btn.setChecked(True)
+                    except:
+                        pass
+                if 'advanced_settings' in ui_state:
+                    try:
+                        # Now AdvancedSettingsPanel has set_settings method
+                        self.advanced_panel.set_settings(ui_state['advanced_settings'])
+                    except Exception as e:
+                        print(f"Error restoring advanced settings: {e}")
+            elif hasattr(self, 'advanced_group'):
+                if 'advanced_visible' in ui_state:
+                    self.advanced_group.setVisible(ui_state['advanced_visible'])
+                if 'steps' in ui_state and hasattr(self, 'steps_spin'):
+                    self.steps_spin.setValue(ui_state['steps'])
+                if 'guidance' in ui_state and hasattr(self, 'guidance_spin'):
+                    self.guidance_spin.setValue(ui_state['guidance'])
+            
+            # Restore splitter sizes
+            if 'splitter_sizes' in ui_state and hasattr(self, 'tab_generate'):
+                splitters = self.tab_generate.findChildren(QSplitter)
+                if splitters and len(ui_state['splitter_sizes']) == 2:
+                    splitters[0].setSizes(ui_state['splitter_sizes'])
+            
+            # Restore template selection
+            if 'template_index' in ui_state and hasattr(self, 'template_combo'):
+                if ui_state['template_index'] < self.template_combo.count():
+                    self.template_combo.setCurrentIndex(ui_state['template_index'])
+            
+            # Restore provider selection
+            if 'provider_index' in ui_state and hasattr(self, 'provider_combo'):
+                if ui_state['provider_index'] < self.provider_combo.count():
+                    self.provider_combo.setCurrentIndex(ui_state['provider_index'])
+            elif 'provider' in ui_state:
+                self.current_provider = ui_state['provider']
+            
+            # Restore history table column widths
+            if hasattr(self, 'history_table'):
+                if 'history_column_widths' in ui_state:
+                    header = self.history_table.horizontalHeader()
+                    widths = ui_state['history_column_widths']
+                    for i, width in enumerate(widths):
+                        if i < self.history_table.columnCount():
+                            header.resizeSection(i, width)
+                
+                if 'history_sort_column' in ui_state and 'history_sort_order' in ui_state:
+                    from PySide6.QtCore import Qt
+                    sort_order = Qt.AscendingOrder if ui_state['history_sort_order'] == 0 else Qt.DescendingOrder
+                    self.history_table.sortItems(ui_state['history_sort_column'], sort_order)
+            
+            # Restore output text height
+            if 'output_text_height' in ui_state and hasattr(self, 'output_text'):
+                self.output_text.setMaximumHeight(ui_state['output_text_height'])
+            
+            # Restore current tab (do this last so all content is ready)
+            if 'current_tab' in ui_state:
+                if ui_state['current_tab'] < self.tabs.count():
+                    self.tabs.setCurrentIndex(ui_state['current_tab'])
+            
+        except Exception as e:
+            print(f"Error restoring UI state: {e}")
+    
+    def _refresh_history_table(self):
+        """Refresh the history table with current history data."""
+        if not hasattr(self, 'history_table'):
+            return
+        
+        # Clear and repopulate the table
+        self.history_table.setRowCount(len(self.history))
+        
+        for row, item in enumerate(self.history):
+            if isinstance(item, dict):
+                # Parse timestamp
+                timestamp = item.get('timestamp', '')
+                date_str = time_str = ''
+                if isinstance(timestamp, float):
+                    from datetime import datetime
+                    dt = datetime.fromtimestamp(timestamp)
+                    date_str = dt.strftime("%Y-%m-%d")
+                    time_str = dt.strftime("%H:%M:%S")
+                elif isinstance(timestamp, str) and 'T' in timestamp:
+                    # ISO format
+                    parts = timestamp.split('T')
+                    date_str = parts[0]
+                    time_str = parts[1].split('.')[0] if len(parts) > 1 else ''
+                
+                # Date column
+                from PySide6.QtWidgets import QTableWidgetItem
+                date_item = QTableWidgetItem(date_str)
+                self.history_table.setItem(row, 0, date_item)
+                
+                # Time column
+                time_item = QTableWidgetItem(time_str)
+                self.history_table.setItem(row, 1, time_item)
+                
+                # Provider column
+                provider = item.get('provider', '')
+                provider_item = QTableWidgetItem(provider.title() if provider else 'Unknown')
+                self.history_table.setItem(row, 2, provider_item)
+                
+                # Model column
+                model = item.get('model', '')
+                model_display = model.split('/')[-1] if '/' in model else model
+                model_item = QTableWidgetItem(model_display)
+                model_item.setToolTip(model)
+                self.history_table.setItem(row, 3, model_item)
+                
+                # Prompt column
+                prompt = item.get('prompt', 'No prompt')
+                prompt_item = QTableWidgetItem(prompt[:100] + '...' if len(prompt) > 100 else prompt)
+                prompt_item.setToolTip(f"Full prompt:\n{prompt}")
+                self.history_table.setItem(row, 4, prompt_item)
+                
+                # Resolution column
+                width = item.get('width', '')
+                height = item.get('height', '')
+                resolution = f"{width}x{height}" if width and height else ''
+                resolution_item = QTableWidgetItem(resolution)
+                self.history_table.setItem(row, 5, resolution_item)
+                
+                # Cost column
+                cost = item.get('cost', 0.0)
+                cost_str = f"${cost:.4f}" if cost > 0 else '-'
+                cost_item = QTableWidgetItem(cost_str)
+                self.history_table.setItem(row, 6, cost_item)
+                
+                # Store the history item data in the first column for easy retrieval
+                date_item.setData(Qt.UserRole, item)
