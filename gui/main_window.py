@@ -12,8 +12,8 @@ try:
         QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
         QLabel, QTextEdit, QPushButton, QComboBox, QLineEdit,
         QFormLayout, QSizePolicy, QMessageBox, QFileDialog,
-        QCheckBox, QTextBrowser, QListWidget, QDialog, QSpinBox,
-        QDoubleSpinBox, QGroupBox
+        QCheckBox, QTextBrowser, QListWidget, QListWidgetItem, QDialog, QSpinBox,
+        QDoubleSpinBox, QGroupBox, QApplication, QSplitter
     )
 except ImportError:
     raise ImportError("PySide6 is required for GUI mode")
@@ -155,40 +155,85 @@ class MainWindow(QMainWindow):
     def _init_generate_tab(self):
         """Initialize the Generate tab."""
         v = QVBoxLayout(self.tab_generate)
+        v.setSpacing(2)
+        v.setContentsMargins(5, 5, 5, 5)
         
-        # Model selection
-        form = QFormLayout()
+        # Model selection at the very top
+        model_layout = QHBoxLayout()
+        model_layout.addWidget(QLabel("Model:"))
         self.model_combo = QComboBox()
         self._update_model_list()
         self.model_combo.currentTextChanged.connect(self._on_model_changed)
-        form.addRow("Model:", self.model_combo)
+        model_layout.addWidget(self.model_combo)
+        model_layout.addStretch()
+        v.addLayout(model_layout)
         
-        # Prompt input
+        # Create vertical splitter for prompt and image
+        splitter = QSplitter(Qt.Vertical)
+        
+        # Top section: Prompt input (resizable via splitter)
+        prompt_container = QWidget()
+        prompt_layout = QVBoxLayout(prompt_container)
+        prompt_layout.setContentsMargins(0, 0, 0, 0)
+        prompt_layout.setSpacing(2)
+        
+        prompt_label = QLabel("Prompt:")
+        prompt_layout.addWidget(prompt_label)
+        
         self.prompt_edit = QTextEdit()
         self.prompt_edit.setPlaceholderText("Describe what to generate...")
         self.prompt_edit.setAcceptRichText(False)
-        self.prompt_edit.setMaximumHeight(100)
-        form.addRow("Prompt:", self.prompt_edit)
-        v.addLayout(form)
+        prompt_layout.addWidget(self.prompt_edit)
         
-        # Basic Settings Group
-        basic_group = QGroupBox("Image Settings")
-        basic_layout = QVBoxLayout(basic_group)
+        # Add prompt container to splitter
+        splitter.addWidget(prompt_container)
+        
+        # Bottom section: Everything else
+        bottom_widget = QWidget()
+        bottom_layout = QVBoxLayout(bottom_widget)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.setSpacing(5)
+        
+        # Image Settings - expandable like Advanced Settings
+        # Toggle button
+        self.image_settings_toggle = QPushButton("▶ Image Settings")
+        self.image_settings_toggle.setCheckable(True)
+        self.image_settings_toggle.clicked.connect(self._toggle_image_settings)
+        self.image_settings_toggle.setStyleSheet("""
+            QPushButton {
+                text-align: left;
+                padding: 5px;
+                border: none;
+                background: transparent;
+            }
+            QPushButton:hover {
+                background: rgba(0, 0, 0, 0.05);
+            }
+        """)
+        bottom_layout.addWidget(self.image_settings_toggle)
+        
+        # Container for image settings (initially hidden)
+        self.image_settings_container = QWidget()
+        self.image_settings_container.setVisible(False)
+        image_settings_layout = QVBoxLayout(self.image_settings_container)
+        image_settings_layout.setSpacing(5)
+        image_settings_layout.setContentsMargins(10, 0, 0, 0)  # Indent for hierarchy
         
         # Aspect Ratio Selector
         if AspectRatioSelector:
             aspect_label = QLabel("Aspect Ratio:")
-            aspect_label.setStyleSheet("font-weight: bold;")
-            basic_layout.addWidget(aspect_label)
+            aspect_label.setMaximumHeight(20)
+            image_settings_layout.addWidget(aspect_label)
             
             self.aspect_selector = AspectRatioSelector()
             self.aspect_selector.ratioChanged.connect(self._on_aspect_ratio_changed)
-            basic_layout.addWidget(self.aspect_selector)
+            image_settings_layout.addWidget(self.aspect_selector)
         else:
             self.aspect_selector = None
         
         # Resolution and Quality
         settings_form = QFormLayout()
+        settings_form.setVerticalSpacing(5)
         
         if ResolutionSelector:
             self.resolution_selector = ResolutionSelector(self.current_provider)
@@ -221,14 +266,14 @@ class MainWindow(QMainWindow):
         else:
             self.batch_selector = None
         
-        basic_layout.addLayout(settings_form)
-        v.addWidget(basic_group)
+        image_settings_layout.addLayout(settings_form)
+        bottom_layout.addWidget(self.image_settings_container)
         
         # Advanced Settings (collapsible)
         if AdvancedSettingsPanel:
             self.advanced_panel = AdvancedSettingsPanel(self.current_provider)
             self.advanced_panel.settingsChanged.connect(self._on_advanced_settings_changed)
-            v.addWidget(self.advanced_panel)
+            bottom_layout.addWidget(self.advanced_panel)
         else:
             # Fallback to old advanced settings
             advanced_group = QGroupBox("Advanced Settings")
@@ -250,52 +295,63 @@ class MainWindow(QMainWindow):
             advanced_layout.addRow("Guidance:", self.guidance_spin)
             
             advanced_group.setLayout(advanced_layout)
-            v.addWidget(advanced_group)
+            bottom_layout.addWidget(advanced_group)
             self.advanced_group = advanced_group
             self.advanced_panel = None
         
         # Update visibility based on provider
         self._update_advanced_visibility()
         
-        # Buttons
+        # Buttons - all on one row for compactness
         hb = QHBoxLayout()
         self.btn_examples = QPushButton("Examples")
         self.btn_generate = QPushButton("Generate")
-        hb.addWidget(self.btn_examples)
-        hb.addStretch(1)
-        hb.addWidget(self.btn_generate)
-        v.addLayout(hb)
-        
-        # Status
-        self.status_label = QLabel("Ready.")
-        v.addWidget(self.status_label)
-        
-        # Output image
-        self.output_image_label = QLabel()
-        self.output_image_label.setAlignment(Qt.AlignCenter)
-        self.output_image_label.setMinimumHeight(400)
-        self.output_image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.output_image_label.setStyleSheet("border: 1px solid #ccc; background-color: #f5f5f5;")
-        self.output_image_label.setScaledContents(False)  # We handle scaling manually
-        v.addWidget(self.output_image_label, 10)
-        
-        # Output text
-        v.addWidget(QLabel("Output Text:"))
-        self.output_text = QTextEdit()
-        self.output_text.setReadOnly(True)
-        self.output_text.setMaximumHeight(100)
-        v.addWidget(self.output_text)
-        
-        # Output actions
-        hb_output = QHBoxLayout()
         self.btn_save_image = QPushButton("Save Image")
         self.btn_copy_image = QPushButton("Copy to Clipboard")
         self.btn_save_image.setEnabled(False)
         self.btn_copy_image.setEnabled(False)
-        hb_output.addWidget(self.btn_save_image)
-        hb_output.addWidget(self.btn_copy_image)
-        hb_output.addStretch()
-        v.addLayout(hb_output)
+        
+        hb.addWidget(self.btn_examples)
+        hb.addWidget(self.btn_generate)
+        hb.addStretch(1)
+        hb.addWidget(self.btn_save_image)
+        hb.addWidget(self.btn_copy_image)
+        bottom_layout.addLayout(hb)
+        
+        # Status - compact
+        self.status_label = QLabel("Ready.")
+        self.status_label.setMaximumHeight(20)
+        bottom_layout.addWidget(self.status_label)
+        
+        # Output image - maximize this area
+        self.output_image_label = QLabel()
+        self.output_image_label.setAlignment(Qt.AlignCenter)
+        self.output_image_label.setMinimumHeight(300)  # Reduced minimum
+        self.output_image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.output_image_label.setStyleSheet("border: 1px solid #ccc; background-color: #f5f5f5;")
+        self.output_image_label.setScaledContents(False)  # We handle scaling manually
+        bottom_layout.addWidget(self.output_image_label, 20)  # Increased stretch factor to take more space
+        
+        # Output text - much smaller
+        output_text_label = QLabel("Output Text:")
+        output_text_label.setMaximumHeight(15)
+        bottom_layout.addWidget(output_text_label)
+        self.output_text = QTextEdit()
+        self.output_text.setReadOnly(True)
+        self.output_text.setMaximumHeight(40)  # Much smaller
+        self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+        bottom_layout.addWidget(self.output_text)
+        
+        # Add bottom widget to splitter
+        splitter.addWidget(bottom_widget)
+        
+        # Set initial splitter sizes (small prompt, large image area)
+        splitter.setSizes([100, 600])  # 100px for prompt, 600px for rest
+        splitter.setStretchFactor(0, 0)  # Don't stretch prompt section
+        splitter.setStretchFactor(1, 1)  # Stretch image section
+        
+        # Add splitter to main layout
+        v.addWidget(splitter)
         
         # Connect signals
         self.btn_examples.clicked.connect(self._open_examples)
@@ -1087,17 +1143,37 @@ For more detailed information, please refer to the full documentation.
         """Initialize history tab."""
         v = QVBoxLayout(self.tab_history)
         
-        # History list
+        # History list - scrollable with full prompts
         self.history_list = QListWidget()
         self.history_list.setAlternatingRowColors(True)
+        self.history_list.setWordWrap(True)  # Allow text wrapping for longer prompts
+        self.history_list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.history_list.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
-        # Add history items
+        # Add history items with more prompt text and tooltips
         for item in self.history:
             if isinstance(item, dict):
-                display_text = f"{item.get('timestamp', 'Unknown time')} - {item.get('prompt', 'No prompt')[:50]}..."
+                prompt = item.get('prompt', 'No prompt')
+                # Format timestamp nicely
+                timestamp = item.get('timestamp', 'Unknown time')
+                if isinstance(timestamp, float):
+                    from datetime import datetime
+                    dt = datetime.fromtimestamp(timestamp)
+                    timestamp = dt.strftime("%Y-%m-%d %H:%M")
+                elif isinstance(timestamp, str) and 'T' in timestamp:
+                    # ISO format, simplify it
+                    timestamp = timestamp.replace('T', ' ').split('.')[0]
+                
+                # Show more of the prompt (up to 100 chars on two lines)
+                display_prompt = prompt[:100] + '...' if len(prompt) > 100 else prompt
+                display_text = f"{timestamp}\n{display_prompt}"
+                
+                list_item = QListWidgetItem(display_text)
+                # Set full prompt as tooltip for easy viewing
+                list_item.setToolTip(f"Full prompt:\n{prompt}")
+                self.history_list.addItem(list_item)
             else:
-                display_text = str(item)
-            self.history_list.addItem(display_text)
+                self.history_list.addItem(str(item))
         
         v.addWidget(QLabel(f"History ({len(self.history)} items):"))
         v.addWidget(self.history_list)
@@ -1506,10 +1582,14 @@ For more detailed information, please refer to the full documentation.
             pixmap = QPixmap()
             pixmap.loadFromData(image_data)
             
-            # Scale to fit label while maintaining aspect ratio
+            # Get the label's current size
             label_size = self.output_image_label.size()
+            
+            # Scale to fit the label completely while maintaining aspect ratio
+            # Use the full available space
             scaled = pixmap.scaled(
-                label_size,
+                label_size.width() - 4,  # Account for border
+                label_size.height() - 4,  # Account for border
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation
             )
@@ -1596,7 +1676,8 @@ For more detailed information, please refer to the full documentation.
                 # Rescale the original pixmap to fit the new label size
                 label_size = self.output_image_label.size()
                 scaled = original_pixmap.scaled(
-                    label_size,
+                    label_size.width() - 4,  # Account for border
+                    label_size.height() - 4,  # Account for border
                     Qt.KeepAspectRatio,
                     Qt.SmoothTransformation
                 )
@@ -1667,7 +1748,8 @@ For more detailed information, please refer to the full documentation.
                             # Use the label's current size for better fit
                             label_size = self.output_image_label.size()
                             scaled = pixmap.scaled(
-                                label_size,
+                                label_size.width() - 4,  # Account for border
+                                label_size.height() - 4,  # Account for border
                                 Qt.KeepAspectRatio,
                                 Qt.SmoothTransformation
                             )
@@ -1742,3 +1824,9 @@ For more detailed information, please refer to the full documentation.
                 scrollbar.setValue(0)
             except Exception:
                 pass
+    
+    def _toggle_image_settings(self):
+        """Toggle the image settings panel visibility."""
+        is_visible = self.image_settings_container.isVisible()
+        self.image_settings_container.setVisible(not is_visible)
+        self.image_settings_toggle.setText("▼ Image Settings" if not is_visible else "▶ Image Settings")

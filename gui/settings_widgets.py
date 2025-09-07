@@ -34,21 +34,16 @@ class AspectRatioSelector(QWidget):
     
     def _init_ui(self):
         """Initialize the UI."""
-        layout = QGridLayout(self)
-        layout.setSpacing(5)  # Tighter spacing
+        layout = QHBoxLayout(self)  # Use horizontal layout for single row
+        layout.setSpacing(3)  # Tighter spacing
         layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
         
-        col = 0
-        row = 0
         for ratio, info in self.ASPECT_RATIOS.items():
             button = self._create_ratio_button(ratio, info)
             self.buttons[ratio] = button
-            layout.addWidget(button, row, col)
-            
-            col += 1
-            if col > 2:  # 3 columns
-                col = 0
-                row += 1
+            layout.addWidget(button)
+        
+        layout.addStretch()  # Push buttons to the left
         
         # Select default
         self.set_ratio("1:1")
@@ -58,13 +53,13 @@ class AspectRatioSelector(QWidget):
         button = QToolButton()
         button.setCheckable(True)
         button.setToolTip(f"{info['label']}\n{info['use']}")
-        button.setMinimumSize(65, 65)  # Smaller buttons
-        button.setMaximumSize(75, 75)  # Constrain max size
-        button.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        button.setMinimumSize(55, 55)  # Even smaller for single row
+        button.setMaximumSize(60, 60)  # Constrain max size
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         
         # Create visual preview
         width, height = map(int, ratio.split(':'))
-        max_size = 40  # Smaller preview
+        max_size = 30  # Even smaller preview for single row
         if width > height:
             w = max_size
             h = int(max_size * height / width)
@@ -73,33 +68,33 @@ class AspectRatioSelector(QWidget):
             w = int(max_size * width / height)
         
         # Create pixmap with aspect ratio preview
-        pixmap = QPixmap(65, 50)
+        pixmap = QPixmap(55, 45)  # Smaller pixmap for smaller buttons
         pixmap.fill(Qt.transparent)
         painter = QPainter(pixmap)
         
         # Draw rectangle
         rect_color = QColor("#4CAF50")
-        painter.fillRect((65-w)//2, (50-h)//2 - 5, w, h, rect_color)
+        painter.fillRect((55-w)//2, (45-h)//2 - 5, w, h, rect_color)
         
         # Draw label with dark text on white background for visibility
         painter.setPen(Qt.black)  # Dark text
         font = QFont()
-        font.setPixelSize(11)  # Slightly larger font
+        font.setPixelSize(10)  # Smaller font for smaller buttons
         font.setBold(True)  # Bold for better visibility
         painter.setFont(font)
         
         # Draw white background for text
         text_rect = painter.fontMetrics().boundingRect(ratio)
-        text_x = (65 - text_rect.width()) // 2
-        text_y = 50 - 12
-        painter.fillRect(text_x - 2, text_y - 2, text_rect.width() + 4, 14, QColor(255, 255, 255, 200))
+        text_x = (55 - text_rect.width()) // 2
+        text_y = 45 - 10
+        painter.fillRect(text_x - 2, text_y - 2, text_rect.width() + 4, 12, QColor(255, 255, 255, 200))
         
         # Draw the ratio text
         painter.drawText(pixmap.rect(), Qt.AlignBottom | Qt.AlignHCenter, ratio)
         painter.end()
         
         button.setIcon(pixmap)
-        button.setIconSize(QSize(65, 50))
+        button.setIconSize(QSize(55, 45))
         button.clicked.connect(lambda: self._on_ratio_clicked(ratio))
         
         # Add custom style for better selected state visibility
