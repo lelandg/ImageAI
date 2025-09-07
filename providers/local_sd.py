@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, Tuple, List
 
 from PIL import Image
 from .base import ImageProvider
+from .model_info import ModelInfo
 
 logger = logging.getLogger(__name__)
 
@@ -136,14 +137,28 @@ class LocalSDProvider(ImageProvider):
         Returns:
             Dictionary mapping model IDs to display names
         """
-        return {
-            "stabilityai/stable-diffusion-2-1": "Stable Diffusion 2.1",
-            "runwayml/stable-diffusion-v1-5": "Stable Diffusion 1.5",
-            "stabilityai/stable-diffusion-xl-base-1.0": "SDXL Base 1.0",
-            "segmind/SSD-1B": "SSD-1B (Fast SDXL)",
-            "CompVis/stable-diffusion-v1-4": "Stable Diffusion 1.4",
-            "custom": "Custom Model (specify in settings)",
-        }
+        models = {}
+        
+        # Add installed models first
+        installed = ModelInfo.get_installed_models(self.cache_dir)
+        for model_id in installed:
+            # Check if it's a known model
+            if model_id in ModelInfo.POPULAR_MODELS:
+                name = ModelInfo.POPULAR_MODELS[model_id]["name"]
+                models[model_id] = f"✓ {name}"
+            else:
+                # Unknown/custom model
+                models[model_id] = f"✓ {model_id}"
+        
+        # Add popular models that aren't installed
+        for model_id, info in ModelInfo.POPULAR_MODELS.items():
+            if model_id not in models:
+                models[model_id] = info["name"]
+        
+        # Add custom option
+        models["custom"] = "Custom Model (specify in settings)"
+        
+        return models
     
     def get_default_model(self) -> str:
         """
@@ -275,23 +290,32 @@ class LocalSDProvider(ImageProvider):
         # Load pipeline if needed
         self._load_pipeline(model)
         
-        # Extract parameters
+        # Check if this is a Turbo model for optimizations
+        is_turbo = 'turbo' in self.current_model.lower()
+        
+        # Extract parameters with Turbo-specific defaults
         width = kwargs.get("width", 512)
         height = kwargs.get("height", 512)
         num_images = kwargs.get("count", 1)
-        num_inference_steps = kwargs.get("steps", 50)
-        guidance_scale = kwargs.get("cfg_scale", 7.5)
+        
+        # Turbo models use very few steps and no CFG
+        if is_turbo:
+            num_inference_steps = kwargs.get("steps", 2)  # 1-4 steps for turbo
+            guidance_scale = kwargs.get("cfg_scale", 0.0)  # No CFG for turbo
+        else:
+            num_inference_steps = kwargs.get("steps", 20)  # Reduced from 50 for better speed
+            guidance_scale = kwargs.get("cfg_scale", 7.5)
+        
         negative_prompt = kwargs.get("negative_prompt", None)
         seed = kwargs.get("seed", None)
         
-        # Adjust sizes based on model
-        if "xl" in self.current_model.lower():
-            # SDXL models prefer 1024x1024
-            if width < 1024 and height < 1024:
+        # Adjust sizes based on model (only if not explicitly set)
+        if width == 512 and height == 512:  # Default value, can auto-adjust
+            if "xl" in self.current_model.lower():
+                # SDXL models prefer 1024x1024
                 width = height = 1024
-        else:
-            # SD 1.x/2.x models work best at 512x512 or 768x768
-            if width > 768 or height > 768:
+            elif "2." in self.current_model or "2-" in self.current_model:
+                # SD 2.x can handle 768x768 well
                 width = height = 768
         
         # Set seed if provided
@@ -300,7 +324,10 @@ class LocalSDProvider(ImageProvider):
             generator = torch.Generator(device=self.device_manager.device).manual_seed(seed)
         
         try:
-            logger.info(f"Generating {num_images} image(s) at {width}x{height}")
+            if is_turbo:
+                logger.info(f"Generating with TURBO model: {num_images} image(s) at {width}x{height}, steps={num_inference_steps}, cfg={guidance_scale}")
+            else:
+                logger.info(f"Generating {num_images} image(s) at {width}x{height}, steps={num_inference_steps}, cfg={guidance_scale}")
             
             # Generate images
             result = self.pipeline(

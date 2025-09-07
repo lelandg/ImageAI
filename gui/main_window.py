@@ -12,7 +12,8 @@ try:
         QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
         QLabel, QTextEdit, QPushButton, QComboBox, QLineEdit,
         QFormLayout, QSizePolicy, QMessageBox, QFileDialog,
-        QCheckBox, QTextBrowser, QListWidget
+        QCheckBox, QTextBrowser, QListWidget, QDialog, QSpinBox,
+        QDoubleSpinBox, QGroupBox
     )
 except ImportError:
     raise ImportError("PySide6 is required for GUI mode")
@@ -27,6 +28,14 @@ from core.constants import DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT
 from providers import get_provider, list_providers
 from gui.dialogs import ExamplesDialog
 from gui.workers import GenWorker
+try:
+    from gui.model_browser import ModelBrowserDialog
+except ImportError:
+    ModelBrowserDialog = None
+try:
+    from gui.local_sd_widget import LocalSDWidget
+except ImportError:
+    LocalSDWidget = None
 
 
 class MainWindow(QMainWindow):
@@ -136,6 +145,7 @@ class MainWindow(QMainWindow):
         form = QFormLayout()
         self.model_combo = QComboBox()
         self._update_model_list()
+        self.model_combo.currentTextChanged.connect(self._on_model_changed)
         form.addRow("Model:", self.model_combo)
         
         # Prompt input
@@ -145,6 +155,43 @@ class MainWindow(QMainWindow):
         self.prompt_edit.setMaximumHeight(100)
         form.addRow("Prompt:", self.prompt_edit)
         v.addLayout(form)
+        
+        # Advanced settings group (collapsible)
+        advanced_group = QGroupBox("Advanced Settings")
+        advanced_layout = QFormLayout()
+        
+        # Resolution dropdown
+        self.resolution_combo = QComboBox()
+        self.resolution_combo.addItems([
+            "Auto (based on model)",
+            "512x512 (SD 1.x/2.x)",
+            "768x768 (SD 1.x/2.x HQ)",
+            "1024x1024 (SDXL)"
+        ])
+        self.resolution_combo.setCurrentIndex(0)  # Default to Auto
+        advanced_layout.addRow("Resolution:", self.resolution_combo)
+        
+        # Steps spinner (for Local SD)
+        self.steps_spin = QSpinBox()
+        self.steps_spin.setRange(1, 50)
+        self.steps_spin.setValue(20)  # Default to 20 for better balance
+        self.steps_spin.setToolTip("Number of inference steps (1-4 for Turbo models, 20-50 for regular)")
+        advanced_layout.addRow("Steps:", self.steps_spin)
+        
+        # Guidance scale
+        self.guidance_spin = QDoubleSpinBox()
+        self.guidance_spin.setRange(0.0, 20.0)
+        self.guidance_spin.setSingleStep(0.5)
+        self.guidance_spin.setValue(7.5)
+        self.guidance_spin.setToolTip("Guidance scale (0.0 for Turbo models, 7-8 for regular)")
+        advanced_layout.addRow("Guidance:", self.guidance_spin)
+        
+        advanced_group.setLayout(advanced_layout)
+        v.addWidget(advanced_group)
+        
+        # Hide advanced settings for non-local providers initially
+        self.advanced_group = advanced_group
+        self._update_advanced_visibility()
         
         # Buttons
         hb = QHBoxLayout()
@@ -208,7 +255,12 @@ class MainWindow(QMainWindow):
             self.provider_combo.setCurrentText(self.current_provider)
         form.addRow("Provider:", self.provider_combo)
         
-        # API key
+        # API key section (hidden for Local SD)
+        self.api_key_widget = QWidget()
+        api_key_layout = QVBoxLayout(self.api_key_widget)
+        api_key_layout.setContentsMargins(0, 0, 0, 0)
+        
+        api_key_form = QFormLayout()
         self.api_key_edit = QLineEdit()
         self.api_key_edit.setEchoMode(QLineEdit.Password)
         
@@ -222,9 +274,8 @@ class MainWindow(QMainWindow):
             
         if self.current_api_key:
             self.api_key_edit.setText(self.current_api_key)
-        form.addRow("API Key:", self.api_key_edit)
-        
-        v.addLayout(form)
+        api_key_form.addRow("API Key:", self.api_key_edit)
+        api_key_layout.addLayout(api_key_form)
         
         # Buttons
         hb = QHBoxLayout()
@@ -233,7 +284,21 @@ class MainWindow(QMainWindow):
         hb.addWidget(self.btn_get_key)
         hb.addStretch(1)
         hb.addWidget(self.btn_save_test)
-        v.addLayout(hb)
+        api_key_layout.addLayout(hb)
+        
+        v.addLayout(form)
+        v.addWidget(self.api_key_widget)
+        
+        # Local SD model management widget (initially hidden)
+        if LocalSDWidget:
+            self.local_sd_widget = LocalSDWidget()
+            self.local_sd_widget.models_changed.connect(self._update_model_list)
+            v.addWidget(self.local_sd_widget)
+            # Show/hide based on provider
+            self.local_sd_widget.setVisible(self.current_provider == "local_sd")
+            self.api_key_widget.setVisible(self.current_provider != "local_sd")
+        else:
+            self.local_sd_widget = None
         
         # Options
         self.chk_auto_copy = QCheckBox("Auto-copy filename to clipboard")
@@ -352,6 +417,7 @@ class MainWindow(QMainWindow):
         v.addLayout(h)
         
         # Connect signals
+        self.history_list.itemSelectionChanged.connect(self._on_history_selection_changed)
         self.history_list.itemDoubleClicked.connect(self._load_history_item)
         self.btn_load_history.clicked.connect(self._load_selected_history)
         self.btn_clear_history.clicked.connect(self._clear_history)
@@ -385,6 +451,25 @@ class MainWindow(QMainWindow):
             elif self.current_provider == "local_sd":
                 self.model_combo.addItems(["stabilityai/stable-diffusion-2-1"])
     
+    def _update_advanced_visibility(self):
+        """Show/hide advanced settings based on provider."""
+        if hasattr(self, 'advanced_group'):
+            # Only show for local_sd provider
+            self.advanced_group.setVisible(self.current_provider == "local_sd")
+    
+    def _on_model_changed(self, model_name: str):
+        """Handle model selection change."""
+        if self.current_provider == "local_sd" and hasattr(self, 'steps_spin'):
+            # Auto-adjust for Turbo models
+            if 'turbo' in model_name.lower():
+                self.steps_spin.setValue(2)  # 1-4 steps for turbo
+                self.guidance_spin.setValue(0.0)  # No CFG for turbo
+                # Set resolution to 1024x1024 for SDXL turbo
+                if 'sdxl' in model_name.lower():
+                    idx = self.resolution_combo.findText("1024x1024", Qt.MatchContains)
+                    if idx >= 0:
+                        self.resolution_combo.setCurrentIndex(idx)
+    
     def _on_provider_changed(self, provider: str):
         """Handle provider change."""
         self.current_provider = provider.lower()
@@ -395,16 +480,25 @@ class MainWindow(QMainWindow):
         self.current_api_key = self.config.get_api_key(self.current_provider)
         self.api_key_edit.setText(self.current_api_key or "")
         
-        # Update placeholder text based on provider
+        # Show/hide appropriate widgets based on provider
         if self.current_provider == "local_sd":
-            self.api_key_edit.setPlaceholderText("No API key needed for Local SD")
-            self.api_key_edit.setEnabled(False)
+            if hasattr(self, 'api_key_widget'):
+                self.api_key_widget.setVisible(False)
+            if hasattr(self, 'local_sd_widget') and self.local_sd_widget:
+                self.local_sd_widget.setVisible(True)
         else:
-            self.api_key_edit.setPlaceholderText("Enter API key...")
-            self.api_key_edit.setEnabled(True)
+            if hasattr(self, 'api_key_widget'):
+                self.api_key_widget.setVisible(True)
+                self.api_key_edit.setPlaceholderText("Enter API key...")
+                self.api_key_edit.setEnabled(True)
+            if hasattr(self, 'local_sd_widget') and self.local_sd_widget:
+                self.local_sd_widget.setVisible(False)
         
         # Update model list
         self._update_model_list()
+        
+        # Update advanced settings visibility
+        self._update_advanced_visibility()
     
     def _open_api_key_page(self):
         """Open API key documentation page."""
@@ -412,10 +506,8 @@ class MainWindow(QMainWindow):
         url = get_api_key_url(self.current_provider)
         
         if self.current_provider == "local_sd":
-            QMessageBox.information(self, APP_NAME, 
-                "Local SD doesn't require an API key.\n\n"
-                "To use Local SD, install the dependencies:\n"
-                "pip install -r requirements-local-sd.txt")
+            # Local SD widget is embedded, no need for separate dialog
+            return
         elif url:
             try:
                 webbrowser.open(url)
@@ -424,6 +516,29 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, APP_NAME, 
                 f"No API key URL available for {self.current_provider}")
+    
+    def _open_model_browser(self):
+        """Open the model browser dialog for Local SD."""
+        if not ModelBrowserDialog:
+            QMessageBox.warning(self, APP_NAME, 
+                "Model browser not available. Please ensure all dependencies are installed.")
+            return
+            
+        try:
+            # Get cache directory from config or use default
+            cache_dir = Path.home() / ".cache" / "huggingface"
+            
+            # Create and show model browser
+            dialog = ModelBrowserDialog(self, cache_dir)
+            result = dialog.exec()
+            
+            if result == QDialog.Accepted:
+                # Refresh model list after potential downloads
+                self._update_model_list()
+                if hasattr(self, 'status_bar'):
+                    self.status_bar.showMessage("Model browser closed", 3000)
+        except Exception as e:
+            QMessageBox.warning(self, APP_NAME, f"Could not open model browser: {e}")
     
     def _save_and_test(self):
         """Save API key and test connection."""
@@ -495,13 +610,34 @@ class MainWindow(QMainWindow):
         # Get current model
         model = self.model_combo.currentText()
         
+        # Get advanced parameters for Local SD
+        kwargs = {}
+        if self.current_provider == "local_sd":
+            # Get resolution
+            resolution_text = self.resolution_combo.currentText()
+            if "512x512" in resolution_text:
+                kwargs['width'] = 512
+                kwargs['height'] = 512
+            elif "768x768" in resolution_text:
+                kwargs['width'] = 768
+                kwargs['height'] = 768
+            elif "1024x1024" in resolution_text:
+                kwargs['width'] = 1024
+                kwargs['height'] = 1024
+            # else Auto - let provider decide
+            
+            # Get steps and guidance
+            kwargs['steps'] = self.steps_spin.value()
+            kwargs['cfg_scale'] = self.guidance_spin.value()
+        
         # Create worker thread
         self.gen_thread = QThread()
         self.gen_worker = GenWorker(
             provider=self.current_provider,
             model=model,
             prompt=prompt,
-            auth_mode="api-key"
+            auth_mode="api-key",
+            **kwargs
         )
         
         self.gen_worker.moveToThread(self.gen_thread)
@@ -697,15 +833,62 @@ class MainWindow(QMainWindow):
             self.prompt_edit.setPlainText(template_text)
             self.tabs.setCurrentWidget(self.tab_generate)
     
-    def _load_history_item(self, item):
-        """Load a history item."""
-        index = self.history_list.row(item)
+    def _on_history_selection_changed(self):
+        """Handle history selection change - display the image."""
+        items = self.history_list.selectedItems()
+        if not items:
+            return
+        
+        # Get the selected history item
+        index = self.history_list.row(items[0])
         if 0 <= index < len(self.history):
             history_item = self.history[index]
             if isinstance(history_item, dict):
-                prompt = history_item.get('prompt', '')
-                self.prompt_edit.setPlainText(prompt)
-                self.tabs.setCurrentWidget(self.tab_generate)
+                path = history_item.get('path')
+                if path and path.exists():
+                    try:
+                        # Read and display the image
+                        image_data = path.read_bytes()
+                        self.current_image_data = image_data
+                        
+                        # Display in output label
+                        pixmap = QPixmap()
+                        if pixmap.loadFromData(image_data):
+                            scaled = pixmap.scaled(
+                                self.output_image_label.size(),
+                                Qt.KeepAspectRatio,
+                                Qt.SmoothTransformation
+                            )
+                            self.output_image_label.setPixmap(scaled)
+                        
+                        # Load metadata
+                        prompt = history_item.get('prompt', '')
+                        self.prompt_edit.setPlainText(prompt)
+                        
+                        # Load model if available
+                        model = history_item.get('model', '')
+                        if model:
+                            idx = self.model_combo.findText(model)
+                            if idx >= 0:
+                                self.model_combo.setCurrentIndex(idx)
+                        
+                        # Load provider if available and different
+                        provider = history_item.get('provider', '')
+                        if provider and provider != self.current_provider:
+                            idx = self.provider_combo.findText(provider)
+                            if idx >= 0:
+                                self.provider_combo.setCurrentIndex(idx)
+                        
+                        # Update status
+                        self.status_label.setText("Loaded from history")
+                        
+                    except Exception as e:
+                        self.output_image_label.setText(f"Error loading image: {e}")
+    
+    def _load_history_item(self, item):
+        """Load a history item and switch to Generate tab."""
+        # Selection change will handle the loading
+        self.tabs.setCurrentWidget(self.tab_generate)
     
     def _load_selected_history(self):
         """Load the selected history item."""

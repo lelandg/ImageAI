@@ -6,8 +6,20 @@ A desktop GUI and CLI application for AI image generation using Google Gemini
 and OpenAI (DALL-E) APIs.
 """
 
+import os
 import sys
+import warnings
 from pathlib import Path
+
+# Suppress TensorFlow and protobuf warnings
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow info messages
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable oneDNN custom operations message
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', message='.*GetPrototype.*')
+
+# Suppress protobuf AttributeErrors by catching them during import
+import logging
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
 
 
 def main():

@@ -14,12 +14,13 @@ class GenWorker(QObject):
     error = Signal(str)
     finished = Signal(list, list)  # (texts, images)
     
-    def __init__(self, provider: str, model: str, prompt: str, auth_mode: str = "api-key"):
+    def __init__(self, provider: str, model: str, prompt: str, auth_mode: str = "api-key", **kwargs):
         super().__init__()
         self.provider = provider
         self.model = model
         self.prompt = prompt
         self.auth_mode = auth_mode
+        self.kwargs = kwargs  # Additional parameters like width, height, steps, etc.
     
     def run(self):
         """Run image generation in worker thread."""
@@ -40,7 +41,8 @@ class GenWorker(QObject):
             provider_instance = get_provider(self.provider, provider_config)
             texts, images = provider_instance.generate(
                 prompt=self.prompt,
-                model=self.model
+                model=self.model,
+                **self.kwargs  # Pass additional parameters
             )
             
             self.finished.emit(texts, images)

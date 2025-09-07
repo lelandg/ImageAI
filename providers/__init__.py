@@ -1,6 +1,14 @@
 """Image generation providers for ImageAI."""
 
+import os
+import warnings
 from typing import Dict, Type, Optional, Any
+
+# Suppress warnings before importing providers
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+warnings.filterwarnings('ignore', message='.*GetPrototype.*')
+warnings.filterwarnings('ignore', category=FutureWarning)
+
 from .base import ImageProvider
 
 # Lazy load providers to avoid import errors when dependencies are missing
@@ -10,7 +18,22 @@ def _get_providers() -> Dict[str, Type[ImageProvider]]:
     """Lazy load provider classes."""
     global _PROVIDERS
     if _PROVIDERS is None:
+        import sys
+        import io
+        import contextlib
+        
         _PROVIDERS = {}
+        
+        # Create a context manager to suppress stderr during imports
+        @contextlib.contextmanager
+        def suppress_stderr():
+            """Temporarily suppress stderr to hide protobuf errors."""
+            old_stderr = sys.stderr
+            sys.stderr = io.StringIO()
+            try:
+                yield
+            finally:
+                sys.stderr = old_stderr
         
         # Try to import Google provider
         try:
@@ -26,20 +49,22 @@ def _get_providers() -> Dict[str, Type[ImageProvider]]:
         except ImportError:
             pass
         
-        # Try to import Stability AI provider
+        # Try to import Stability AI provider (may have protobuf issues)
         try:
-            from .stability import StabilityProvider
-            _PROVIDERS["stability"] = StabilityProvider
+            with suppress_stderr():
+                from .stability import StabilityProvider
+                _PROVIDERS["stability"] = StabilityProvider
         except (ImportError, AttributeError) as e:
             # AttributeError can occur with protobuf conflicts
             import logging
             logging.debug(f"Could not load Stability provider: {e}")
             pass
         
-        # Try to import Local SD provider
+        # Try to import Local SD provider (may have TensorFlow/protobuf issues)
         try:
-            from .local_sd import LocalSDProvider
-            _PROVIDERS["local_sd"] = LocalSDProvider
+            with suppress_stderr():
+                from .local_sd import LocalSDProvider
+                _PROVIDERS["local_sd"] = LocalSDProvider
         except (ImportError, AttributeError) as e:
             # AttributeError can occur with protobuf/TensorFlow conflicts
             import logging
