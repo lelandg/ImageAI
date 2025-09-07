@@ -443,6 +443,8 @@ class MainWindow(QMainWindow):
     def _init_help_tab(self):
         """Initialize the Help tab."""
         v = QVBoxLayout(self.tab_help)
+        v.setSpacing(0)
+        v.setContentsMargins(2, 2, 2, 2)
         
         # Try to use QWebEngineView for better emoji support, fallback to QTextBrowser
         try:
@@ -460,12 +462,18 @@ class MainWindow(QMainWindow):
                         return False
                     return super().acceptNavigationRequest(url, nav_type, is_main_frame)
             
-            # Add navigation toolbar
-            nav_layout = QHBoxLayout()
-            
             # Create web view for help with full emoji support
             self.help_browser = QWebEngineView()
             self.help_browser.setPage(CustomWebPage(self.help_browser))
+            
+            # Create navigation toolbar container widget with fixed height
+            nav_widget = QWidget()
+            nav_widget.setMaximumHeight(30)
+            nav_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+            
+            nav_layout = QHBoxLayout(nav_widget)
+            nav_layout.setSpacing(2)
+            nav_layout.setContentsMargins(0, 0, 0, 0)
             
             # Back button
             self.btn_help_back = QPushButton("◀ Back")
@@ -487,7 +495,36 @@ class MainWindow(QMainWindow):
             nav_layout.addWidget(self.btn_help_home)
             
             nav_layout.addStretch()
-            v.addLayout(nav_layout)
+            
+            # Search controls - compact layout
+            search_label = QLabel("Search:")
+            nav_layout.addWidget(search_label)
+            
+            self.help_search_input = QLineEdit()
+            self.help_search_input.setPlaceholderText("Find in docs...")
+            self.help_search_input.setMaximumWidth(200)
+            self.help_search_input.returnPressed.connect(self._search_help_webengine)
+            nav_layout.addWidget(self.help_search_input)
+            
+            self.btn_help_search_prev = QPushButton("◀")
+            self.btn_help_search_prev.setToolTip("Previous match (Shift+F3)")
+            self.btn_help_search_prev.clicked.connect(lambda: self._search_help_webengine(backward=True))
+            self.btn_help_search_prev.setMaximumWidth(25)
+            nav_layout.addWidget(self.btn_help_search_prev)
+            
+            self.btn_help_search_next = QPushButton("▶")
+            self.btn_help_search_next.setToolTip("Next match (F3)")
+            self.btn_help_search_next.clicked.connect(self._search_help_webengine)
+            self.btn_help_search_next.setMaximumWidth(25)
+            nav_layout.addWidget(self.btn_help_search_next)
+            
+            self.help_search_results = QLabel("")
+            self.help_search_results.setMinimumWidth(80)
+            self.help_search_results.setStyleSheet("color: #666;")
+            nav_layout.addWidget(self.help_search_results)
+            
+            # Add the navigation widget (not layout) to the main layout
+            v.addWidget(nav_widget)
             
             # Update button states based on history
             self.help_browser.urlChanged.connect(
@@ -665,8 +702,14 @@ class MainWindow(QMainWindow):
                 else:
                     super().mousePressEvent(event)
         
-        # Add navigation toolbar
-        nav_layout = QHBoxLayout()
+        # Create navigation toolbar container widget with fixed height
+        nav_widget = QWidget()
+        nav_widget.setMaximumHeight(30)
+        nav_widget.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
+        
+        nav_layout = QHBoxLayout(nav_widget)
+        nav_layout.setSpacing(2)
+        nav_layout.setContentsMargins(0, 0, 0, 0)
         
         # Back button
         self.btn_help_back = QPushButton("◀ Back")
@@ -686,7 +729,36 @@ class MainWindow(QMainWindow):
         nav_layout.addWidget(self.btn_help_home)
         
         nav_layout.addStretch()
-        v.addLayout(nav_layout)
+        
+        # Search controls - compact layout
+        search_label = QLabel("Search:")
+        nav_layout.addWidget(search_label)
+        
+        self.help_search_input = QLineEdit()
+        self.help_search_input.setPlaceholderText("Find in docs...")
+        self.help_search_input.setMaximumWidth(200)
+        self.help_search_input.returnPressed.connect(self._search_help_textbrowser)
+        nav_layout.addWidget(self.help_search_input)
+        
+        self.btn_help_search_prev = QPushButton("◀")
+        self.btn_help_search_prev.setToolTip("Previous match (Shift+F3)")
+        self.btn_help_search_prev.clicked.connect(lambda: self._search_help_textbrowser(backward=True))
+        self.btn_help_search_prev.setMaximumWidth(25)
+        nav_layout.addWidget(self.btn_help_search_prev)
+        
+        self.btn_help_search_next = QPushButton("▶")
+        self.btn_help_search_next.setToolTip("Next match (F3)")
+        self.btn_help_search_next.clicked.connect(self._search_help_textbrowser)
+        self.btn_help_search_next.setMaximumWidth(25)
+        nav_layout.addWidget(self.btn_help_search_next)
+        
+        self.help_search_results = QLabel("")
+        self.help_search_results.setMinimumWidth(80)
+        self.help_search_results.setStyleSheet("color: #666;")
+        nav_layout.addWidget(self.help_search_results)
+        
+        # Add the navigation widget (not layout) to the main layout
+        v.addWidget(nav_widget)
         
         # Create custom help browser
         self.help_browser = CustomHelpBrowser(self)
@@ -1954,6 +2026,114 @@ For more detailed information, please refer to the full documentation.
                 scrollbar.setValue(0)
             except Exception:
                 pass
+    
+    def _search_help_webengine(self, backward=False):
+        """Search in WebEngine-based help browser."""
+        if not hasattr(self, 'help_browser'):
+            return
+            
+        search_text = self.help_search_input.text().strip()
+        if not search_text:
+            self.help_search_results.setText("")
+            return
+        
+        try:
+            from PySide6.QtWebEngineCore import QWebEnginePage
+            
+            # Create search flags
+            flags = QWebEnginePage.FindFlag(0)
+            if backward:
+                flags |= QWebEnginePage.FindBackward
+            
+            # Perform search with callback for result count
+            def handle_result(result):
+                if hasattr(result, 'numberOfMatches'):
+                    total = result.numberOfMatches()
+                    current = result.activeMatch()
+                    if total > 0:
+                        self.help_search_results.setText(f"{current}/{total} matches")
+                    else:
+                        self.help_search_results.setText("No matches")
+                else:
+                    # Fallback for older Qt versions
+                    self.help_search_results.setText("Searching...")
+            
+            # Search with callback
+            self.help_browser.findText(search_text, flags, handle_result)
+            
+        except Exception as e:
+            print(f"Search error: {e}")
+            # Fallback to simple search without match count
+            try:
+                from PySide6.QtWebEngineCore import QWebEnginePage
+                flags = QWebEnginePage.FindFlag(0)
+                if backward:
+                    flags |= QWebEnginePage.FindBackward
+                self.help_browser.findText(search_text, flags)
+                self.help_search_results.setText("Searching...")
+            except:
+                pass
+    
+    def _search_help_textbrowser(self, backward=False):
+        """Search in QTextBrowser-based help browser."""
+        if not hasattr(self, 'help_browser'):
+            return
+            
+        search_text = self.help_search_input.text().strip()
+        if not search_text:
+            self.help_search_results.setText("")
+            # Clear any existing highlights
+            cursor = self.help_browser.textCursor()
+            cursor.clearSelection()
+            self.help_browser.setTextCursor(cursor)
+            return
+        
+        try:
+            from PySide6.QtGui import QTextDocument
+            from PySide6.QtCore import Qt
+            
+            # Set up search flags
+            flags = QTextDocument.FindFlag(0)
+            if backward:
+                flags |= QTextDocument.FindBackward
+            
+            # Search from current position
+            found = self.help_browser.find(search_text, flags)
+            
+            if not found:
+                # If not found and we're going forward, try from beginning
+                if not backward:
+                    cursor = self.help_browser.textCursor()
+                    cursor.movePosition(cursor.Start)
+                    self.help_browser.setTextCursor(cursor)
+                    found = self.help_browser.find(search_text, flags)
+                # If not found and we're going backward, try from end
+                else:
+                    cursor = self.help_browser.textCursor()
+                    cursor.movePosition(cursor.End)
+                    self.help_browser.setTextCursor(cursor)
+                    found = self.help_browser.find(search_text, flags)
+            
+            # Update search results label
+            if found:
+                # Count total matches (simple approach)
+                doc = self.help_browser.document()
+                cursor = doc.find(search_text)
+                count = 0
+                while not cursor.isNull():
+                    count += 1
+                    cursor = doc.find(search_text, cursor)
+                
+                if count > 0:
+                    self.help_search_results.setText(f"{count} matches")
+                else:
+                    self.help_search_results.setText("Found")
+            else:
+                self.help_search_results.setText("No matches")
+                
+        except Exception as e:
+            print(f"Search error: {e}")
+            self.help_search_results.setText("Error")
     
     def _toggle_image_settings(self):
         """Toggle the image settings panel visibility."""

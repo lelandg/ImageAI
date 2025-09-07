@@ -438,9 +438,18 @@ python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
   - Sort by date, cost, or model
 
 #### Help Tab
-- Embedded README documentation
+- Embedded README documentation with full content
+- **Interactive Search**:
+  - Search box with real-time results
+  - Navigate between matches with Previous/Next buttons
+  - Match counter showing current/total results
+  - Keyboard shortcuts (F3 for next, Shift+F3 for previous)
+- Navigation controls:
+  - Back/Forward buttons for history
+  - Home button to return to top
+  - Keyboard navigation (Alt+Left/Right, Backspace)
 - Quick reference guide
-- Keyboard shortcuts
+- Keyboard shortcuts reference
 - Provider-specific tips
 - Troubleshooting guide
 
@@ -620,6 +629,12 @@ The template system allows you to create consistent, reusable prompts with varia
 - **Ctrl+C/V/X**: Copy/Paste/Cut
 - **Tab**: Switch between tabs
 - **F1**: Show help
+- **F3**: Find next in help documentation
+- **Shift+F3**: Find previous in help documentation
+- **Ctrl+F**: Focus search box in help tab
+- **Alt+Left/Backspace**: Navigate back in help
+- **Alt+Right**: Navigate forward in help
+- **Ctrl+Home**: Go to top of help
 
 ### Batch Generation
 
