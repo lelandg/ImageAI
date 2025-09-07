@@ -3,7 +3,7 @@
 **Version 0.8.0**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
-#### Created with _JetBrains **PyCharm**_ and AI assistance
+#### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
 ###### Enterprise-ready with multiple authentication methods and provider support  
 
 ## Overview
