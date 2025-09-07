@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.8.0**
+**Version 0.9.0**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -889,6 +889,14 @@ ImageAI/
 - Mobile app companion
 
 ## 14. Changelog
+
+### v0.9.0 (2025-09-07)
+- Added comprehensive UI state persistence - all settings saved between sessions
+- Enhanced history display with detailed table (date, time, provider, model, resolution, cost)
+- Fixed quality radio button and prompt rewriting checkbox persistence
+- Automatic cost tracking and display for all generations
+- Improved user experience with complete settings restoration
+- All UI elements now properly save and restore their state
 
 ### v0.8.0 (2025-09-07)
 - Added version metadata tags (__version__, __author__, __email__, __license__, __copyright__)

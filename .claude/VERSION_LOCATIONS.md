@@ -4,8 +4,13 @@ When the user says "increment version", update the VERSION in these locations:
 
 ## Primary Version Definition
 1. **`core/constants.py`** - Line 7
-   - `VERSION = "0.8.0"`  ← Update this version number
+   - `VERSION = "0.9.0"`  ← Update this version number
    - This is the single source of truth for the version
+
+## Files That Need Manual Updates
+1. **`README.md`** - Line 3
+   - `**Version X.X.X**` - Update this to match
+   - Also add changelog entry in section 14
 
 ## Files that Import VERSION
 These files automatically use the version from `core/constants.py`:
@@ -28,8 +33,10 @@ These files automatically use the version from `core/constants.py`:
 ## Version Increment Instructions
 To increment the version:
 1. Edit `core/constants.py` line 7
-2. Change `VERSION = "0.8.0"` to the new version (e.g., `"0.8.1"` for patch, `"0.9.0"` for minor, `"1.0.0"` for major)
-3. All other locations will automatically use the updated version
+2. Change `VERSION = "0.9.0"` to the new version (e.g., `"0.9.1"` for patch, `"1.0.0"` for minor, `"2.0.0"` for major)
+3. Update `README.md` line 3 with the new version
+4. Add a changelog entry in `README.md` section 14
+5. All other locations will automatically use the updated version from core/constants.py
 
 ## Version Format
 - Follow semantic versioning: MAJOR.MINOR.PATCH
@@ -38,7 +45,7 @@ To increment the version:
 - PATCH: Bug fixes, backwards compatible
 
 ## Current Version
-- **0.8.0** (as of last check)
+- **0.9.0** (as of last check)
 
 ## Notes
 - No setup.py or pyproject.toml found (not a packaged distribution)

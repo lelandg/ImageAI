@@ -92,6 +92,13 @@ Configuration and generated images are stored in platform-specific user director
 - Images auto-save with sanitized filenames based on prompts
 - Template system supports placeholder substitution for prompt generation
 
+## Version Management
+
+**IMPORTANT**: When incrementing the version, see `.claude/VERSION_LOCATIONS.md` for all locations that need updating:
+1. `core/constants.py` - Primary version definition
+2. `README.md` - Version display and changelog
+3. The VERSION_LOCATIONS.md file documents all locations
+
 ## Future Development Plans
 
 The `Plans/` directory contains documentation for upcoming features:
