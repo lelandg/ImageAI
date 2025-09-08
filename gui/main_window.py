@@ -382,7 +382,55 @@ class MainWindow(QMainWindow):
             self.provider_combo.setCurrentText(self.current_provider)
         form.addRow("Provider:", self.provider_combo)
         
-        # API key section (hidden for Local SD)
+        # Auth Mode selection (for Google provider)
+        self.auth_mode_combo = QComboBox()
+        self.auth_mode_combo.addItems(["API Key", "Google Cloud Account"])
+        auth_mode = self.config.get("auth_mode", "API Key")
+        self.auth_mode_combo.setCurrentText(auth_mode)
+        form.addRow("Auth Mode:", self.auth_mode_combo)
+        
+        # Google Cloud Project ID (shown for Google Cloud Account mode)
+        self.project_id_label = QLabel("Not detected")
+        form.addRow("Project ID:", self.project_id_label)
+        
+        # Status field
+        self.gcloud_status_label = QLabel("Not checked")
+        form.addRow("Status:", self.gcloud_status_label)
+        
+        v.addLayout(form)
+        
+        # Google Cloud Setup Help (shown for Google Cloud Account mode)
+        self.gcloud_help_widget = QWidget()
+        gcloud_layout = QVBoxLayout(self.gcloud_help_widget)
+        gcloud_layout.setContentsMargins(0, 10, 0, 0)
+        
+        help_label = QLabel("<b>Setup Help:</b>")
+        gcloud_layout.addWidget(help_label)
+        
+        quick_setup = QLabel("""<b>Quick Setup:</b>
+1. Install Google Cloud CLI
+2. Run: <code>gcloud auth application-default login</code>
+3. Click 'Check Status' below""")
+        quick_setup.setWordWrap(True)
+        quick_setup.setStyleSheet("QLabel { padding: 10px; background-color: #f5f5f5; }")
+        gcloud_layout.addWidget(quick_setup)
+        
+        # Google Cloud buttons
+        gcloud_buttons = QHBoxLayout()
+        self.btn_check_status = QPushButton("Check Status")
+        self.btn_get_gcloud = QPushButton("Get gcloud CLI")
+        self.btn_cloud_console = QPushButton("Cloud Console")
+        self.btn_login_help = QPushButton("Login Help")
+        
+        gcloud_buttons.addWidget(self.btn_check_status)
+        gcloud_buttons.addWidget(self.btn_get_gcloud)
+        gcloud_buttons.addWidget(self.btn_cloud_console)
+        gcloud_buttons.addWidget(self.btn_login_help)
+        gcloud_layout.addLayout(gcloud_buttons)
+        
+        v.addWidget(self.gcloud_help_widget)
+        
+        # API key section (hidden for Local SD and Google Cloud Account)
         self.api_key_widget = QWidget()
         api_key_layout = QVBoxLayout(self.api_key_widget)
         api_key_layout.setContentsMargins(0, 0, 0, 0)
@@ -407,14 +455,29 @@ class MainWindow(QMainWindow):
         # Buttons
         hb = QHBoxLayout()
         self.btn_get_key = QPushButton("Get API Key")
-        self.btn_save_test = QPushButton("Save & Test")
+        self.btn_save_test = QPushButton("Test Connection")
         hb.addWidget(self.btn_get_key)
         hb.addStretch(1)
         hb.addWidget(self.btn_save_test)
         api_key_layout.addLayout(hb)
         
-        v.addLayout(form)
         v.addWidget(self.api_key_widget)
+        
+        # Config storage location info (visible when using API Key mode)
+        self.config_location_widget = QWidget()
+        config_layout = QVBoxLayout(self.config_location_widget)
+        config_layout.setContentsMargins(0, 10, 0, 0)
+        
+        config_path = str(self.config.config_path)
+        self.config_location_label = QLabel(f"Stored at: {config_path}")
+        self.config_location_label.setWordWrap(True)
+        self.config_location_label.setStyleSheet("color: gray; font-size: 10pt;")
+        config_layout.addWidget(self.config_location_label)
+        
+        v.addWidget(self.config_location_widget)
+        
+        # Update visibility based on auth mode
+        self._update_auth_visibility()
         
         # Local SD model management widget (initially hidden)
         if LocalSDWidget:
@@ -423,12 +486,11 @@ class MainWindow(QMainWindow):
             v.addWidget(self.local_sd_widget)
             # Show/hide based on provider
             self.local_sd_widget.setVisible(self.current_provider == "local_sd")
-            self.api_key_widget.setVisible(self.current_provider != "local_sd")
         else:
             self.local_sd_widget = None
         
         # Options
-        self.chk_auto_copy = QCheckBox("Auto-copy filename to clipboard")
+        self.chk_auto_copy = QCheckBox("Auto-copy saved filename to clipboard")
         self.chk_auto_copy.setChecked(self.auto_copy_filename)
         v.addWidget(self.chk_auto_copy)
         
@@ -436,9 +498,16 @@ class MainWindow(QMainWindow):
         
         # Connect signals
         self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
+        self.auth_mode_combo.currentTextChanged.connect(self._on_auth_mode_changed)
         self.btn_get_key.clicked.connect(self._open_api_key_page)
         self.btn_save_test.clicked.connect(self._save_and_test)
         self.chk_auto_copy.toggled.connect(self._toggle_auto_copy)
+        
+        # Google Cloud buttons
+        self.btn_check_status.clicked.connect(self._check_gcloud_status)
+        self.btn_get_gcloud.clicked.connect(self._open_gcloud_cli_page)
+        self.btn_cloud_console.clicked.connect(self._open_cloud_console)
+        self.btn_login_help.clicked.connect(self._show_login_help)
     
     def _init_help_tab(self):
         """Initialize the Help tab."""
@@ -1184,38 +1253,58 @@ For more detailed information, please refer to the full documentation.
     def _init_templates_tab(self):
         """Initialize templates tab."""
         v = QVBoxLayout(self.tab_templates)
+        v.setSpacing(10)
         
-        # Template selection
-        h = QHBoxLayout()
-        h.addWidget(QLabel("Template:"))
+        # Info text
+        info_label = QLabel("Select a template and fill in any attributes (all optional):")
+        v.addWidget(info_label)
+        
+        # Template selection dropdown
         self.template_combo = QComboBox()
         self.template_combo.addItems([
-            "Photorealistic Portrait",
+            "Photorealistic product shot",
             "Fantasy Landscape", 
             "Sci-Fi Scene",
             "Abstract Art",
-            "Product Photography",
+            "Character concept art",
             "Architectural Render",
             "Character Design",
             "Logo Design"
         ])
-        h.addWidget(self.template_combo, 1)
-        self.btn_apply_template = QPushButton("Apply Template")
-        h.addWidget(self.btn_apply_template)
-        v.addLayout(h)
+        v.addWidget(self.template_combo)
         
-        # Template preview
-        self.template_preview = QTextEdit()
-        self.template_preview.setReadOnly(True)
-        self.template_preview.setPlaceholderText("Template preview will appear here...")
-        v.addWidget(self.template_preview)
+        # Template attributes form
+        self.template_form = QFormLayout()
+        self.template_form.setSpacing(8)
+        
+        # Dictionary to store attribute input fields
+        self.template_inputs = {}
+        
+        # Create initial attribute fields for the first template
+        self._create_template_fields()
+        
+        v.addLayout(self.template_form)
+        
+        # Add stretch to push everything to the top
+        v.addStretch()
+        
+        # Options
+        self.append_prompt_check = QCheckBox("Append to current prompt instead of replacing")
+        v.addWidget(self.append_prompt_check)
+        
+        # Apply button
+        self.btn_insert_prompt = QPushButton("Insert into Prompt")
+        self.btn_insert_prompt.setStyleSheet("""
+            QPushButton {
+                padding: 8px;
+                font-weight: bold;
+            }
+        """)
+        v.addWidget(self.btn_insert_prompt)
         
         # Connect signals
         self.template_combo.currentTextChanged.connect(self._on_template_changed)
-        self.btn_apply_template.clicked.connect(self._apply_template)
-        
-        # Load initial template
-        self._on_template_changed(self.template_combo.currentText())
+        self.btn_insert_prompt.clicked.connect(self._apply_template)
     
     def _init_history_tab(self):
         """Initialize history tab with enhanced table display."""
@@ -1396,6 +1485,13 @@ For more detailed information, please refer to the full documentation.
         # Update API key field
         self.current_api_key = self.config.get_api_key(self.current_provider)
         self.api_key_edit.setText(self.current_api_key or "")
+        
+        # Update auth visibility
+        self._update_auth_visibility()
+        
+        # Update Local SD widget visibility
+        if hasattr(self, 'local_sd_widget') and self.local_sd_widget:
+            self.local_sd_widget.setVisible(self.current_provider == "local_sd")
     
     def _on_aspect_ratio_changed(self, ratio: str):
         """Handle aspect ratio change."""
@@ -1540,6 +1636,96 @@ For more detailed information, please refer to the full documentation.
         self.auto_copy_filename = checked
         self.config.set("auto_copy_filename", checked)
         self.config.save()
+    
+    def _update_auth_visibility(self):
+        """Update visibility of auth-related widgets based on provider and auth mode."""
+        is_google = self.current_provider == "google"
+        is_gcloud_auth = self.auth_mode_combo.currentText() == "Google Cloud Account"
+        
+        # Show auth mode only for Google provider
+        self.auth_mode_combo.setVisible(is_google)
+        
+        # Show Google Cloud fields only for Google Cloud Account auth mode
+        show_gcloud = is_google and is_gcloud_auth
+        self.project_id_label.setVisible(show_gcloud)
+        self.gcloud_status_label.setVisible(show_gcloud)
+        self.gcloud_help_widget.setVisible(show_gcloud)
+        
+        # Show API key fields for API Key mode or non-Google providers
+        show_api_key = (not is_google or not is_gcloud_auth) and self.current_provider != "local_sd"
+        self.api_key_widget.setVisible(show_api_key)
+        self.config_location_widget.setVisible(show_api_key)
+    
+    def _on_auth_mode_changed(self, auth_mode: str):
+        """Handle auth mode change."""
+        self.config.set("auth_mode", auth_mode)
+        self._update_auth_visibility()
+        
+        # Check status if switching to Google Cloud Account
+        if auth_mode == "Google Cloud Account":
+            self._check_gcloud_status()
+    
+    def _check_gcloud_status(self):
+        """Check Google Cloud CLI status and credentials."""
+        try:
+            # Import the functions from gcloud_utils
+            from core.gcloud_utils import check_gcloud_auth_status, get_gcloud_project_id
+            
+            # Use the exact same functions as the original
+            is_auth, status_msg = check_gcloud_auth_status()
+            
+            if is_auth:
+                # Get project ID
+                project_id = get_gcloud_project_id()
+                if project_id:
+                    self.project_id_label.setText(project_id)
+                    self.gcloud_status_label.setText("✓ Authenticated")
+                    self.gcloud_status_label.setStyleSheet("color: green;")
+                else:
+                    self.project_id_label.setText("Not set")
+                    self.gcloud_status_label.setText("✓ Authenticated (no project)")
+                    self.gcloud_status_label.setStyleSheet("color: orange;")
+            else:
+                self.project_id_label.setText("Not detected")
+                # Show the status message from check_gcloud_auth_status
+                if len(status_msg) > 50:
+                    # Truncate long messages for the status label
+                    self.gcloud_status_label.setText("✗ Not authenticated")
+                else:
+                    self.gcloud_status_label.setText(f"✗ {status_msg}")
+                self.gcloud_status_label.setStyleSheet("color: red;")
+                
+        except Exception as e:
+            self.project_id_label.setText("Error")
+            self.gcloud_status_label.setText(f"✗ Error: {str(e)[:50]}")
+            self.gcloud_status_label.setStyleSheet("color: red;")
+    
+    def _open_gcloud_cli_page(self):
+        """Open Google Cloud CLI download page."""
+        webbrowser.open("https://cloud.google.com/sdk/docs/install")
+    
+    def _open_cloud_console(self):
+        """Open Google Cloud Console."""
+        webbrowser.open("https://console.cloud.google.com/")
+    
+    def _show_login_help(self):
+        """Show help for Google Cloud login."""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Google Cloud Login Help")
+        msg.setText("""To authenticate with Google Cloud:
+
+1. Install Google Cloud CLI from: https://cloud.google.com/sdk
+
+2. Open a terminal/command prompt and run:
+   gcloud auth application-default login
+
+3. Follow the browser prompts to authenticate
+
+4. Optionally set a default project:
+   gcloud config set project YOUR_PROJECT_ID
+
+5. Click 'Check Status' to verify authentication""")
+        msg.exec()
     
     def _open_examples(self):
         """Open examples dialog."""
@@ -1898,28 +2084,96 @@ For more detailed information, please refer to the full documentation.
         # Clean up thread if running
         self._cleanup_thread()
     
+    def _get_template_data(self):
+        """Get template data with placeholders."""
+        return {
+            "Photorealistic product shot": {
+                "template": "A high-resolution studio photograph of [product] on a [background] background, [lighting] lighting, shot with a [camera] lens, [style] style, [mood] mood",
+                "fields": ["product", "background", "lighting", "camera", "style", "mood"]
+            },
+            "Fantasy Landscape": {
+                "template": "Epic fantasy landscape with [feature], [atmosphere] atmosphere, [colors] colors, detailed environment, [style] art style",
+                "fields": ["feature", "atmosphere", "colors", "style"]
+            },
+            "Sci-Fi Scene": {
+                "template": "Futuristic [scene] with [technology], [aesthetic] aesthetic, [lighting], detailed sci-fi environment",
+                "fields": ["scene", "technology", "aesthetic", "lighting"]
+            },
+            "Abstract Art": {
+                "template": "Abstract [concept] artwork, [style] art style, [colors] colors, [composition] composition",
+                "fields": ["concept", "style", "colors", "composition"]
+            },
+            "Character concept art": {
+                "template": "Character design of [character], [style] style, [pose] pose, [setting], detailed costume design",
+                "fields": ["character", "style", "pose", "setting"]
+            },
+            "Architectural Render": {
+                "template": "Architectural visualization of [building], [style] design, [materials], [lighting] lighting, photorealistic render",
+                "fields": ["building", "style", "materials", "lighting"]
+            },
+            "Character Design": {
+                "template": "Character design of [character], concept art, [costume] costume, [pose] view, professional illustration",
+                "fields": ["character", "costume", "pose"]
+            },
+            "Logo Design": {
+                "template": "Logo design for [company], [style] style, [colors] colors, [elements], professional branding",
+                "fields": ["company", "style", "colors", "elements"]
+            }
+        }
+    
+    def _create_template_fields(self):
+        """Create input fields for the current template."""
+        # Clear existing fields
+        while self.template_form.count():
+            item = self.template_form.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self.template_inputs.clear()
+        
+        # Get current template
+        template_name = self.template_combo.currentText()
+        template_data = self._get_template_data().get(template_name, {})
+        
+        if not template_data:
+            return
+        
+        # Create field for each placeholder
+        for field in template_data.get("fields", []):
+            line_edit = QLineEdit()
+            line_edit.setPlaceholderText(f"[{field}]")
+            self.template_form.addRow(f"{field}:", line_edit)
+            self.template_inputs[field] = line_edit
+    
     def _on_template_changed(self, template_name: str):
         """Handle template selection change."""
-        templates = {
-            "Photorealistic Portrait": "Ultra-realistic portrait of {subject}, professional photography, studio lighting, 8K resolution, highly detailed",
-            "Fantasy Landscape": "Epic fantasy landscape with {feature}, magical atmosphere, vibrant colors, detailed environment, concept art style",
-            "Sci-Fi Scene": "Futuristic {scene} with advanced technology, cyberpunk aesthetic, neon lights, detailed sci-fi environment",
-            "Abstract Art": "Abstract {concept} artwork, modern art style, bold colors, dynamic composition, artistic interpretation",
-            "Product Photography": "Professional product photo of {product}, white background, studio lighting, commercial photography",
-            "Architectural Render": "Architectural visualization of {building}, photorealistic render, modern design, detailed materials",
-            "Character Design": "Character design of {character}, concept art, detailed costume, full body view, professional illustration",
-            "Logo Design": "Minimalist logo design for {company}, vector style, clean lines, professional branding"
-        }
-        
-        template_text = templates.get(template_name, "")
-        self.template_preview.setPlainText(template_text)
+        self._create_template_fields()
     
     def _apply_template(self):
         """Apply selected template to prompt."""
-        template_text = self.template_preview.toPlainText()
-        if template_text:
-            self.prompt_edit.setPlainText(template_text)
-            self.tabs.setCurrentWidget(self.tab_generate)
+        template_name = self.template_combo.currentText()
+        template_data = self._get_template_data().get(template_name, {})
+        
+        if not template_data:
+            return
+        
+        # Get the template string
+        template_text = template_data.get("template", "")
+        
+        # Replace placeholders with user input
+        for field, input_widget in self.template_inputs.items():
+            value = input_widget.text().strip()
+            if value:
+                template_text = template_text.replace(f"[{field}]", value)
+        
+        # Apply to prompt
+        if self.append_prompt_check.isChecked():
+            # Append to existing prompt
+            current_prompt = self.prompt_edit.toPlainText()
+            if current_prompt:
+                template_text = f"{current_prompt}\n\n{template_text}"
+        
+        self.prompt_edit.setPlainText(template_text)
+        self.tabs.setCurrentWidget(self.tab_generate)
     
     def _on_history_selection_changed(self, selected, deselected):
         """Handle history selection change - display the image."""

@@ -181,3 +181,6 @@ test_output/
 test_*.png
 test_*.jpg
 
+_screenshots
+test_gcloud.py
+test_gcloud_ps.py
