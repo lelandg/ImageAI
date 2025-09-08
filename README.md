@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.9.0**
+**Version 0.9.1**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -1041,6 +1041,27 @@ ImageAI/
 - Enhanced CLI --version output with copyright and author information
 - Improved package-level metadata access
 - Version number now prominently displayed in README
+
+### v0.9.1 (2025-09-08)
+- Added Project Save/Load functionality with full UI state preservation  
+- Auto-reload last displayed image at startup
+- Enhanced project files (.imgai) containing image and all settings
+- Added File menu with project management options
+- Improved session persistence across application restarts
+- Track last displayed image whether generated or loaded from history
+
+### v0.9.0 (2025-09-08)
+- Added Settings Tab with comprehensive application preferences
+- Added Template Tab with community template access
+- Enhanced Image Settings panel with aspect ratio and resolution selectors
+- Template preview and generation capabilities
+- Smart placeholder substitution in templates
+- Interactive Help tab with embedded documentation
+- Refactored code architecture with modular provider system
+- Added Stability AI provider (ready for integration)
+- Enhanced metadata sidecar files with complete generation details
+- Improved cross-platform compatibility
+- Added advanced settings for Local SD (steps, guidance scale)
 
 ### v0.7.0 (2025-09-06)
 - Added Google Cloud authentication support (Application Default Credentials)

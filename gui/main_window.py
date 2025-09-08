@@ -1,12 +1,13 @@
 """Main window for ImageAI GUI."""
 
+import json
 import webbrowser
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
 
 try:
-    from PySide6.QtCore import Qt, QThread, Signal
+    from PySide6.QtCore import Qt, QThread, Signal, QTimer
     from PySide6.QtGui import QPixmap, QAction
     from PySide6.QtWidgets import (
         QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
@@ -150,9 +151,22 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
         file_menu = mb.addMenu("File")
         
+        # Project actions
+        act_save_project = QAction("Save Project...", self)
+        act_save_project.triggered.connect(self._save_project)
+        file_menu.addAction(act_save_project)
+        
+        act_load_project = QAction("Load Project...", self)
+        act_load_project.triggered.connect(self._load_project)
+        file_menu.addAction(act_load_project)
+        
+        file_menu.addSeparator()
+        
         act_save = QAction("Save Image As...", self)
         act_save.triggered.connect(self._save_image_as)
         file_menu.addAction(act_save)
+        
+        file_menu.addSeparator()
         
         act_quit = QAction("Quit", self)
         act_quit.triggered.connect(self.close)
@@ -1910,6 +1924,8 @@ For more detailed information, please refer to the full documentation.
             # Display first image
             self.current_image_data = images[0]
             self._display_image(images[0])
+            if saved_paths:
+                self._last_displayed_image_path = saved_paths[0]  # Track last displayed image
             
             # Enable save/copy buttons
             self.btn_save_image.setEnabled(True)
@@ -1975,6 +1991,9 @@ For more detailed information, please refer to the full documentation.
             
             # Store the original pixmap for potential resizing
             self.output_image_label.setProperty("original_pixmap", pixmap)
+            
+            # Update current image data
+            self.current_image_data = image_data
         except Exception as e:
             self.output_image_label.setText(f"Error displaying image: {e}")
     
@@ -2028,6 +2047,237 @@ For more detailed information, please refer to the full documentation.
             self.gen_thread.wait()
         self.gen_thread = None
         self.gen_worker = None
+    
+    def _load_image_file(self, path: Path):
+        """Load and display an image file."""
+        try:
+            if not path.exists():
+                return
+            
+            # Read image data
+            image_data = path.read_bytes()
+            self.current_image_data = image_data
+            self._last_displayed_image_path = path
+            
+            # Display the image
+            self._display_image(image_data)
+            
+            # Enable save/copy buttons
+            self.btn_save_image.setEnabled(True)
+            self.btn_copy_image.setEnabled(True)
+            
+            # Try to load metadata if it exists
+            json_path = path.with_suffix(path.suffix + ".json")
+            if json_path.exists():
+                try:
+                    with open(json_path, 'r') as f:
+                        metadata = json.load(f)
+                        
+                        # Restore prompt
+                        if 'prompt' in metadata:
+                            self.prompt_edit.setPlainText(metadata['prompt'])
+                        
+                        # Restore model
+                        if 'model' in metadata:
+                            idx = self.model_combo.findText(metadata['model'])
+                            if idx >= 0:
+                                self.model_combo.setCurrentIndex(idx)
+                        
+                        # Restore provider
+                        if 'provider' in metadata and metadata['provider'] != self.current_provider:
+                            idx = self.provider_combo.findText(metadata['provider'])
+                            if idx >= 0:
+                                self.provider_combo.setCurrentIndex(idx)
+                except Exception:
+                    pass  # Ignore metadata errors
+            
+            self.status_label.setText("Image loaded")
+        except Exception as e:
+            self.status_label.setText(f"Error loading image: {e}")
+    
+    def _save_project(self):
+        """Save current project including image and all settings."""
+        if not self.current_image_data:
+            QMessageBox.warning(self, APP_NAME, "No image to save in project.")
+            return
+        
+        # Get save path
+        path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save Project",
+            str(Path.home() / "project.imgai"),
+            "ImageAI Projects (*.imgai)"
+        )
+        
+        if not path:
+            return
+        
+        try:
+            project_path = Path(path)
+            
+            # Create project data
+            project_data = {
+                'version': VERSION,
+                'timestamp': datetime.now().isoformat(),
+                'provider': self.current_provider,
+                'model': self.model_combo.currentText(),
+                'prompt': self.prompt_edit.toPlainText(),
+                'ui_state': {}
+            }
+            
+            # Add all UI state
+            if hasattr(self, 'aspect_selector') and self.aspect_selector:
+                project_data['ui_state']['aspect_ratio'] = self.aspect_selector.get_ratio()
+            
+            if hasattr(self, 'resolution_selector') and self.resolution_selector:
+                project_data['ui_state']['resolution'] = self.resolution_selector.get_resolution()
+            elif hasattr(self, 'resolution_combo'):
+                project_data['ui_state']['resolution_combo_index'] = self.resolution_combo.currentIndex()
+            
+            if hasattr(self, 'quality_selector') and self.quality_selector:
+                project_data['ui_state']['quality_settings'] = self.quality_selector.get_settings()
+            
+            if hasattr(self, 'batch_selector') and self.batch_selector:
+                project_data['ui_state']['batch_num'] = self.batch_selector.get_num_images()
+            
+            # Advanced settings
+            if hasattr(self, 'advanced_panel') and self.advanced_panel:
+                project_data['ui_state']['advanced_settings'] = self.advanced_panel.get_settings()
+            elif hasattr(self, 'steps_spin'):
+                project_data['ui_state']['steps'] = self.steps_spin.value()
+                project_data['ui_state']['guidance'] = self.guidance_spin.value()
+            
+            # Image settings visibility
+            project_data['ui_state']['image_settings_expanded'] = self.image_settings_container.isVisible()
+            
+            # Encode image data
+            import base64
+            project_data['image_data'] = base64.b64encode(self.current_image_data).decode('utf-8')
+            
+            # Detect image format
+            ext = detect_image_extension(self.current_image_data)
+            project_data['image_format'] = ext
+            
+            # Save project file
+            with open(project_path, 'w') as f:
+                json.dump(project_data, f, indent=2)
+            
+            # Track current project
+            self._current_project_path = project_path
+            
+            self.status_label.setText(f"Project saved: {project_path.name}")
+            QMessageBox.information(self, APP_NAME, f"Project saved to:\n{project_path}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, APP_NAME, f"Error saving project:\n{e}")
+    
+    def _load_project(self):
+        """Load a project file."""
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Load Project",
+            str(Path.home()),
+            "ImageAI Projects (*.imgai)"
+        )
+        
+        if path:
+            self._load_project_file(Path(path))
+    
+    def _load_project_file(self, project_path: Path):
+        """Load a project from file."""
+        try:
+            if not project_path.exists():
+                return
+            
+            with open(project_path, 'r') as f:
+                project_data = json.load(f)
+            
+            # Load provider first if different
+            if 'provider' in project_data and project_data['provider'] != self.current_provider:
+                idx = self.provider_combo.findText(project_data['provider'])
+                if idx >= 0:
+                    self.provider_combo.setCurrentIndex(idx)
+            
+            # Load model
+            if 'model' in project_data:
+                idx = self.model_combo.findText(project_data['model'])
+                if idx >= 0:
+                    self.model_combo.setCurrentIndex(idx)
+            
+            # Load prompt
+            if 'prompt' in project_data:
+                self.prompt_edit.setPlainText(project_data['prompt'])
+            
+            # Load UI state
+            ui_state = project_data.get('ui_state', {})
+            
+            # Aspect ratio
+            if 'aspect_ratio' in ui_state and hasattr(self, 'aspect_selector') and self.aspect_selector:
+                # Try to set the aspect ratio
+                for button in self.aspect_selector.buttons.values():
+                    if button.property('ratio') == ui_state['aspect_ratio']:
+                        button.click()
+                        break
+            
+            # Resolution
+            if 'resolution' in ui_state and hasattr(self, 'resolution_selector') and self.resolution_selector:
+                # The resolution selector might need a method to set resolution
+                if hasattr(self.resolution_selector, 'set_resolution'):
+                    self.resolution_selector.set_resolution(ui_state['resolution'])
+            elif 'resolution_combo_index' in ui_state and hasattr(self, 'resolution_combo'):
+                if ui_state['resolution_combo_index'] < self.resolution_combo.count():
+                    self.resolution_combo.setCurrentIndex(ui_state['resolution_combo_index'])
+            
+            # Quality settings
+            if 'quality_settings' in ui_state and hasattr(self, 'quality_selector') and self.quality_selector:
+                if hasattr(self.quality_selector, 'set_settings'):
+                    self.quality_selector.set_settings(ui_state['quality_settings'])
+            
+            # Batch number
+            if 'batch_num' in ui_state and hasattr(self, 'batch_selector') and self.batch_selector:
+                if hasattr(self.batch_selector, 'set_num_images'):
+                    self.batch_selector.set_num_images(ui_state['batch_num'])
+            
+            # Advanced settings
+            if 'advanced_settings' in ui_state and hasattr(self, 'advanced_panel') and self.advanced_panel:
+                if hasattr(self.advanced_panel, 'set_settings'):
+                    self.advanced_panel.set_settings(ui_state['advanced_settings'])
+            elif hasattr(self, 'steps_spin'):
+                if 'steps' in ui_state:
+                    self.steps_spin.setValue(ui_state['steps'])
+                if 'guidance' in ui_state:
+                    self.guidance_spin.setValue(ui_state['guidance'])
+            
+            # Image settings visibility
+            if 'image_settings_expanded' in ui_state:
+                if ui_state['image_settings_expanded']:
+                    self.image_settings_container.setVisible(True)
+                    self.image_settings_toggle.setText("▼ Image Settings")
+                    self.image_settings_toggle.setChecked(True)
+                else:
+                    self.image_settings_container.setVisible(False)
+                    self.image_settings_toggle.setText("▶ Image Settings")
+                    self.image_settings_toggle.setChecked(False)
+            
+            # Load and display image
+            if 'image_data' in project_data:
+                import base64
+                image_data = base64.b64decode(project_data['image_data'])
+                self.current_image_data = image_data
+                self._display_image(image_data)
+                
+                # Enable save/copy buttons
+                self.btn_save_image.setEnabled(True)
+                self.btn_copy_image.setEnabled(True)
+            
+            # Track current project
+            self._current_project_path = project_path
+            
+            self.status_label.setText(f"Project loaded: {project_path.name}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, APP_NAME, f"Error loading project:\n{e}")
+            self.status_label.setText(f"Error loading project: {e}")
     
     def _restore_geometry(self):
         """Restore window geometry from config."""
@@ -2193,6 +2443,7 @@ For more detailed information, please refer to the full documentation.
                         # Read and display the image
                         image_data = path.read_bytes()
                         self.current_image_data = image_data
+                        self._last_displayed_image_path = path  # Track last displayed image
                         
                         # Display in output label
                         pixmap = QPixmap()
@@ -2426,6 +2677,14 @@ For more detailed information, please refer to the full documentation.
             if hasattr(self, 'batch_selector') and self.batch_selector:
                 ui_state['batch_num'] = self.batch_selector.get_num_images()
             
+            # Save last displayed image path
+            if hasattr(self, '_last_displayed_image_path'):
+                ui_state['last_displayed_image'] = str(self._last_displayed_image_path)
+            
+            # Save current project if any
+            if hasattr(self, '_current_project_path'):
+                ui_state['last_project'] = str(self._current_project_path)
+            
             # Advanced settings
             if hasattr(self, 'advanced_panel') and self.advanced_panel:
                 ui_state['advanced_expanded'] = self.advanced_panel.expanded  # Use attribute, not method
@@ -2604,6 +2863,19 @@ For more detailed information, please refer to the full documentation.
             if 'current_tab' in ui_state:
                 if ui_state['current_tab'] < self.tabs.count():
                     self.tabs.setCurrentIndex(ui_state['current_tab'])
+            
+            # Restore last project if saved
+            if 'last_project' in ui_state:
+                project_path = Path(ui_state['last_project'])
+                if project_path.exists():
+                    # Use QTimer to load project after UI is fully initialized
+                    QTimer.singleShot(100, lambda: self._load_project_file(project_path))
+            # Otherwise restore last displayed image if available
+            elif 'last_displayed_image' in ui_state:
+                image_path = Path(ui_state['last_displayed_image'])
+                if image_path.exists():
+                    # Use QTimer to load image after UI is fully initialized
+                    QTimer.singleShot(100, lambda: self._load_image_file(image_path))
             
         except Exception as e:
             print(f"Error restoring UI state: {e}")
