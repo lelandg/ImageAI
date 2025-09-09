@@ -58,7 +58,8 @@ class GoogleProvider(ImageProvider):
             # Check if we have cached auth validation
             if self.config_manager.get_auth_validated("google"):
                 self.project_id = self.config_manager.get_gcloud_project_id()
-            self._init_gcloud_client()
+            # Don't initialize gcloud client here - do it lazily in generate()
+            # This allows auth checking without failing
         elif self.api_key:
             self._init_api_key_client()
     
@@ -72,13 +73,19 @@ class GoogleProvider(ImageProvider):
         if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
     
-    def _init_gcloud_client(self):
-        """Initialize client with Google Cloud authentication."""
+    def _init_gcloud_client(self, raise_on_error=True):
+        """Initialize client with Google Cloud authentication.
+        
+        Args:
+            raise_on_error: If True, raise exception on auth failure. If False, return False.
+        """
         if not GCLOUD_AVAILABLE:
-            raise ImportError(
-                "Google Cloud AI Platform not installed. "
-                "Run: pip install google-cloud-aiplatform"
-            )
+            if raise_on_error:
+                raise ImportError(
+                    "Google Cloud AI Platform not installed. "
+                    "Run: pip install google-cloud-aiplatform"
+                )
+            return False
         
         try:
             # Get Application Default Credentials
@@ -86,10 +93,12 @@ class GoogleProvider(ImageProvider):
             if not project:
                 project = self._get_gcloud_project_id()
             if not project:
-                raise ValueError(
-                    "No Google Cloud project found. "
-                    "Set a project with: gcloud config set project YOUR_PROJECT_ID"
-                )
+                if raise_on_error:
+                    raise ValueError(
+                        "No Google Cloud project found. "
+                        "Set a project with: gcloud config set project YOUR_PROJECT_ID"
+                    )
+                return False
             
             self.project_id = project
             # Initialize aiplatform
@@ -97,9 +106,11 @@ class GoogleProvider(ImageProvider):
             
             # Create genai client that will use ADC
             self.client = genai.Client()
+            return True
             
         except DefaultCredentialsError as e:
-            raise RuntimeError(
+            if raise_on_error:
+                raise RuntimeError(
                 f"Google Cloud authentication failed.\n\n"
                 f"Please complete the setup:\n"
                 f"1. Install Google Cloud CLI from:\n"
@@ -114,6 +125,7 @@ class GoogleProvider(ImageProvider):
                 f"   - Cloud Resource Manager API\n\n"
                 f"Error details: {e}"
             )
+            return False
     
     def _get_gcloud_project_id(self) -> Optional[str]:
         """Get the current Google Cloud project ID."""
@@ -143,7 +155,8 @@ class GoogleProvider(ImageProvider):
         """Generate images using Google Gemini/Imagen 3."""
         if not self.client:
             if self.auth_mode == "gcloud":
-                self._init_gcloud_client()
+                # Try to initialize gcloud client, raise error if it fails
+                self._init_gcloud_client(raise_on_error=True)
             else:
                 raise ValueError("No API key configured for Google provider")
         

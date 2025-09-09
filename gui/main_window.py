@@ -493,6 +493,18 @@ class MainWindow(QMainWindow):
         # Update visibility based on auth mode
         self._update_auth_visibility()
         
+        # Check and display cached auth status if in Google Cloud mode
+        if self.current_provider == "google" and auth_mode == "Google Cloud Account":
+            if self.config.get("gcloud_auth_validated", False):
+                project_id = self.config.get("gcloud_project_id", "")
+                if project_id:
+                    self.gcloud_status_label.setText(f"✓ Authenticated (Project: {project_id}) [cached]")
+                    self.project_id_label.setText(project_id)
+                else:
+                    self.gcloud_status_label.setText("✓ Authenticated [cached]")
+                    self.project_id_label.setText("Not set")
+                self.gcloud_status_label.setStyleSheet("color: green;")
+        
         # Local SD model management widget (initially hidden)
         if LocalSDWidget:
             self.local_sd_widget = LocalSDWidget()
@@ -1675,9 +1687,10 @@ For more detailed information, please refer to the full documentation.
         self.config.set("auth_mode", auth_mode)
         self._update_auth_visibility()
         
-        # Check status if switching to Google Cloud Account
+        # Only check status if switching to Google Cloud Account and no cached auth
         if auth_mode == "Google Cloud Account":
-            self._check_gcloud_status()
+            if not self.config.get("gcloud_auth_validated", False):
+                self._check_gcloud_status()
     
     def _check_gcloud_status(self):
         """Check Google Cloud CLI status and credentials."""
@@ -1699,6 +1712,12 @@ For more detailed information, please refer to the full documentation.
                     self.project_id_label.setText("Not set")
                     self.gcloud_status_label.setText("✓ Authenticated (no project)")
                     self.gcloud_status_label.setStyleSheet("color: orange;")
+                
+                # Save the auth validation status
+                self.config.set("gcloud_auth_validated", True)
+                if project_id:
+                    self.config.set("gcloud_project_id", project_id)
+                self.config.save()
             else:
                 self.project_id_label.setText("Not detected")
                 # Show the status message from check_gcloud_auth_status
@@ -1708,6 +1727,11 @@ For more detailed information, please refer to the full documentation.
                 else:
                     self.gcloud_status_label.setText(f"✗ {status_msg}")
                 self.gcloud_status_label.setStyleSheet("color: red;")
+                
+                # Clear cached auth validation
+                self.config.set("gcloud_auth_validated", False)
+                self.config.set("gcloud_project_id", "")
+                self.config.save()
                 
         except Exception as e:
             self.project_id_label.setText("Error")

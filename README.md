@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.9.1**
+**Version 0.9.2**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -1026,6 +1026,26 @@ ImageAI/
 - Mobile app companion
 
 ## 14. Changelog
+
+### v0.9.2 (2025-09-09)
+- **Security Enhancements:**
+  - Added secure API key storage using system keyring (optional)
+  - Implemented path traversal validation for file operations
+  - Added rate limiting for API calls (configurable per provider)
+- **Authentication Improvements:**
+  - Google Cloud auth state now persists between sessions
+  - Settings tab shows cached auth status immediately on load
+  - Fixed "Check Status" button functionality
+  - Lazy initialization for Google Cloud provider
+- **Code Quality:**
+  - Replaced generic Exception catches with specific exception types
+  - Improved error handling throughout the codebase
+  - Better subprocess exception handling
+
+### v0.9.1 (2025-09-08)
+- Added Google Cloud authentication support
+- Improved template UI with better error handling
+- Fixed various UI bugs
 
 ### v0.9.0 (2025-09-07)
 - Added comprehensive UI state persistence - all settings saved between sessions
