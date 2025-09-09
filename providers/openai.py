@@ -5,11 +5,17 @@ from base64 import b64decode
 
 from .base import ImageProvider
 
+# Import rate_limiter with fallback for different import contexts
+try:
+    from ..core.security import rate_limiter
+except ImportError:
+    from core.security import rate_limiter
+
 # Lazy import OpenAI
 try:
     import importlib
     OpenAIClient = importlib.import_module("openai").OpenAI
-except Exception:
+except ImportError:
     OpenAIClient = None
 
 
@@ -52,6 +58,9 @@ class OpenAIProvider(ImageProvider):
         model = model or self.get_default_model()
         texts: List[str] = []
         images: List[bytes] = []
+        
+        # Apply rate limiting
+        rate_limiter.check_rate_limit('openai', wait=True)
         
         # Handle new settings from UI
         # Size/resolution mapping for DALL-E 3
@@ -125,7 +134,7 @@ class OpenAIProvider(ImageProvider):
                     if b64:
                         try:
                             images.append(b64decode(b64))
-                        except Exception:
+                        except (ValueError, TypeError):
                             pass
                 elif response_format == "url":
                     # For URL response, we need to download the image
@@ -136,7 +145,7 @@ class OpenAIProvider(ImageProvider):
                             resp = requests.get(url, timeout=30)
                             if resp.status_code == 200:
                                 images.append(resp.content)
-                        except Exception:
+                        except (OSError, IOError, AttributeError):
                             pass
             
             # Handle multiple images for DALL-E 3 (generate multiple times)
@@ -157,7 +166,7 @@ class OpenAIProvider(ImageProvider):
                                     resp = requests.get(url, timeout=30)
                                     if resp.status_code == 200:
                                         images.append(resp.content)
-                    except Exception:
+                    except (ValueError, RuntimeError, AttributeError, OSError, IOError):
                         pass  # Continue even if one generation fails
             
             if not images:
@@ -166,7 +175,7 @@ class OpenAIProvider(ImageProvider):
                     "Check model name, content policy, or quota."
                 )
                 
-        except Exception as e:
+        except (ValueError, RuntimeError, AttributeError) as e:
             raise RuntimeError(f"OpenAI generation failed: {e}")
         
         return texts, images
@@ -182,7 +191,7 @@ class OpenAIProvider(ImageProvider):
             # Try to list models as a validation check
             models = self.client.models.list()
             return True, "API key is valid"
-        except Exception as e:
+        except (ValueError, RuntimeError, AttributeError) as e:
             return False, f"API key validation failed: {e}"
     
     def get_models(self) -> Dict[str, str]:
@@ -222,6 +231,9 @@ class OpenAIProvider(ImageProvider):
         texts: List[str] = []
         images: List[bytes] = []
         
+        # Apply rate limiting
+        rate_limiter.check_rate_limit('openai', wait=True)
+        
         try:
             # OpenAI expects file-like objects
             from io import BytesIO
@@ -249,13 +261,13 @@ class OpenAIProvider(ImageProvider):
                 if b64:
                     try:
                         images.append(b64decode(b64))
-                    except Exception:
+                    except (ValueError, TypeError):
                         pass
             
             if not images:
                 raise RuntimeError("OpenAI returned no edited images.")
                 
-        except Exception as e:
+        except (ValueError, RuntimeError, AttributeError) as e:
             raise RuntimeError(f"OpenAI image editing failed: {e}")
         
         return texts, images
@@ -275,6 +287,9 @@ class OpenAIProvider(ImageProvider):
         texts: List[str] = []
         images: List[bytes] = []
         
+        # Apply rate limiting
+        rate_limiter.check_rate_limit('openai', wait=True)
+        
         try:
             from io import BytesIO
             image_file = BytesIO(image)
@@ -293,13 +308,13 @@ class OpenAIProvider(ImageProvider):
                 if b64:
                     try:
                         images.append(b64decode(b64))
-                    except Exception:
+                    except (ValueError, TypeError):
                         pass
             
             if not images:
                 raise RuntimeError("OpenAI returned no image variations.")
                 
-        except Exception as e:
+        except (ValueError, RuntimeError, AttributeError) as e:
             raise RuntimeError(f"OpenAI variations failed: {e}")
         
         return texts, images

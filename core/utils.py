@@ -2,11 +2,13 @@
 
 import re
 import string
+import json
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
 from .constants import README_PATH
+from .security import path_validator
 
 
 def sanitize_filename(name: str, max_len: int = 100) -> str:
@@ -57,7 +59,7 @@ def read_key_file(path: Path) -> Optional[str]:
             s = line.strip()
             if s:
                 return s
-    except Exception:
+    except (OSError, IOError, UnicodeDecodeError):
         return None
     return None
 
@@ -72,7 +74,7 @@ def read_readme_text() -> str:
     try:
         if README_PATH.exists():
             return README_PATH.read_text(encoding="utf-8")
-    except Exception:
+    except (OSError, IOError, UnicodeDecodeError):
         pass
     
     # Fallback minimal help
@@ -170,7 +172,7 @@ def parse_image_size(size_str: str) -> tuple[int, int]:
         parts = size_str.lower().split("x")
         if len(parts) == 2:
             return (int(parts[0]), int(parts[1]))
-    except Exception:
+    except (ValueError, IndexError, AttributeError):
         pass
     return (1024, 1024)  # Default size
 
@@ -191,22 +193,20 @@ def sidecar_path(image_path: Path) -> Path:
 
 def write_image_sidecar(image_path: Path, meta: dict) -> None:
     """Write human-readable JSON beside the image."""
-    import json
     try:
         p = sidecar_path(image_path)
         p.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-    except Exception:
+    except (OSError, IOError, json.JSONEncodeError):
         pass
 
 
 def read_image_sidecar(image_path: Path) -> Optional[dict]:
     """Read metadata from image sidecar file."""
-    import json
     try:
         sp = sidecar_path(image_path)
         if sp.exists():
             return json.loads(sp.read_text(encoding="utf-8"))
-    except Exception:
+    except (OSError, IOError, json.JSONDecodeError, UnicodeDecodeError):
         return None
     return None
 
@@ -222,7 +222,7 @@ def detect_image_extension(data: bytes) -> str:
             return ".gif"
         if data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
             return ".webp"
-    except Exception:
+    except (IndexError, TypeError):
         pass
     return ".png"
 
@@ -253,7 +253,7 @@ def sanitize_stub_from_prompt(prompt: str, max_len: int = 60) -> str:
         if s.startswith("."):
             s = s.lstrip(".") or "gen"
         return s
-    except Exception:
+    except (AttributeError, TypeError, ValueError):
         return "gen"
 
 
@@ -266,9 +266,22 @@ def auto_save_images(images: list, base_stub: str = "gen") -> list:
     for idx, data in enumerate(images, start=1):
         ext = detect_image_extension(data if isinstance(data, (bytes, bytearray)) else bytes(data))
         name = f"{base_stub}_{ts}_{idx}{ext}"
+        
+        # Validate filename is safe
+        if not path_validator.validate_filename(name):
+            name = sanitize_filename(name)
+        
         p = out_dir / name
-        p.write_bytes(data)
-        saved.append(p.resolve())
+        
+        # Validate path doesn't escape output directory
+        if not path_validator.is_safe_path(p, out_dir):
+            continue  # Skip unsafe paths
+        
+        try:
+            p.write_bytes(data)
+            saved.append(p.resolve())
+        except (OSError, IOError):
+            continue
     return saved
 
 
@@ -280,7 +293,7 @@ def scan_disk_history(max_items: int = 500) -> list[Path]:
         items = [p for p in out_dir.iterdir() if p.is_file() and p.suffix.lower() in exts]
         items.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         return items[:max_items]
-    except Exception:
+    except (OSError, IOError, AttributeError):
         return []
 
 
@@ -309,13 +322,13 @@ def find_cached_demo(prompt: str, provider: str = "google") -> Optional[Path]:
             if meta.get("prompt") == prompt and meta.get("provider") == provider:
                 try:
                     mtime = img.stat().st_mtime
-                except Exception:
+                except (OSError, AttributeError):
                     mtime = 0.0
                 matches.append((mtime, img))
         if matches:
             matches.sort(key=lambda t: t[0], reverse=True)
             return matches[0][1]
-    except Exception:
+    except (OSError, IOError, IndexError):
         return None
     return None
 

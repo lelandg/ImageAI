@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from .constants import APP_NAME, PROVIDER_KEY_URLS
+from .security import secure_storage
 
 
 class ConfigManager:
@@ -40,7 +41,7 @@ class ConfigManager:
         if self.config_path.exists():
             try:
                 return json.loads(self.config_path.read_text(encoding="utf-8"))
-            except Exception:
+            except (OSError, IOError, json.JSONDecodeError):
                 return {}
         return {}
     
@@ -72,6 +73,11 @@ class ConfigManager:
     
     def get_api_key(self, provider: str) -> Optional[str]:
         """Get API key for a provider."""
+        # Try keyring first (most secure)
+        key = secure_storage.retrieve_key(provider)
+        if key:
+            return key
+        
         # Check provider-specific config first
         provider_config = self.get_provider_config(provider)
         if "api_key" in provider_config:
@@ -85,13 +91,18 @@ class ConfigManager:
     
     def set_api_key(self, provider: str, api_key: str) -> None:
         """Set API key for a provider."""
-        provider_config = self.get_provider_config(provider)
-        provider_config["api_key"] = api_key
-        self.set_provider_config(provider, provider_config)
+        # Try to store in keyring first (most secure)
+        stored_in_keyring = secure_storage.store_key(provider, api_key)
         
-        # Also set legacy top-level api_key for Google (backward compatibility)
-        if provider == "google":
-            self.config["api_key"] = api_key
+        # If keyring storage failed or not available, fall back to file storage
+        if not stored_in_keyring:
+            provider_config = self.get_provider_config(provider)
+            provider_config["api_key"] = api_key
+            self.set_provider_config(provider, provider_config)
+            
+            # Also set legacy top-level api_key for Google (backward compatibility)
+            if provider == "google":
+                self.config["api_key"] = api_key
     
     def get_auth_mode(self, provider: str = "google") -> str:
         """Get authentication mode for a provider."""
@@ -104,12 +115,44 @@ class ConfigManager:
         if provider == "google":
             self.config["auth_mode"] = mode
     
+    def get_auth_validated(self, provider: str = "google") -> bool:
+        """Check if authentication has been validated for a provider."""
+        if provider == "google":
+            return self.config.get("gcloud_auth_validated", False)
+        return False
+    
+    def set_auth_validated(self, provider: str, validated: bool) -> None:
+        """Set authentication validation status for a provider."""
+        if provider == "google":
+            self.config["gcloud_auth_validated"] = validated
+            # Also store the project ID if available
+            if validated:
+                from pathlib import Path
+                import subprocess
+                import platform
+                try:
+                    gcloud_cmd = "gcloud.cmd" if platform.system() == "Windows" else "gcloud"
+                    result = subprocess.run(
+                        [gcloud_cmd, "config", "get-value", "project"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5
+                    )
+                    if result.returncode == 0 and result.stdout:
+                        self.config["gcloud_project_id"] = result.stdout.strip()
+                except Exception:
+                    pass
+    
+    def get_gcloud_project_id(self) -> Optional[str]:
+        """Get the stored Google Cloud project ID."""
+        return self.config.get("gcloud_project_id")
+    
     def save_details_record(self, details: Dict[str, Any]) -> None:
         """Save a template/details record to history."""
         try:
             with self.details_path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(details, ensure_ascii=False) + "\n")
-        except Exception:
+        except (OSError, IOError, json.JSONEncodeError):
             pass
     
     def load_details_records(self) -> list:
@@ -122,7 +165,7 @@ class ConfigManager:
                         line = line.strip()
                         if line:
                             records.append(json.loads(line))
-            except Exception:
+            except (OSError, IOError, json.JSONDecodeError):
                 pass
         return records
     

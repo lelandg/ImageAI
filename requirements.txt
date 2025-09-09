@@ -6,6 +6,7 @@ PySide6
 openai
 requests  # For Stability AI REST API
 markdown>=3.5  # For better help documentation rendering
+keyring>=24.0.0  # For secure API key storage (optional)
 
 # Optional dependencies for Local Stable Diffusion
 # Uncomment these lines to enable local SD support:

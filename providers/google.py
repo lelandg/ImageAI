@@ -17,6 +17,12 @@ except ImportError:
 
 from .base import ImageProvider
 
+# Import rate_limiter with fallback for different import contexts
+try:
+    from ..core.security import rate_limiter
+except ImportError:
+    from core.security import rate_limiter
+
 
 # Optional Google Cloud imports
 try:
@@ -40,8 +46,18 @@ class GoogleProvider(ImageProvider):
         self.client = None
         self.project_id = None
         
+        # Get config manager for auth state
+        try:
+            from ..core.config import ConfigManager
+        except ImportError:
+            from core.config import ConfigManager
+        self.config_manager = ConfigManager()
+        
         # Initialize client based on auth mode
         if self.auth_mode == "gcloud":
+            # Check if we have cached auth validation
+            if self.config_manager.get_auth_validated("google"):
+                self.project_id = self.config_manager.get_gcloud_project_id()
             self._init_gcloud_client()
         elif self.api_key:
             self._init_api_key_client()
@@ -114,6 +130,7 @@ class GoogleProvider(ImageProvider):
             if result.returncode == 0 and result.stdout:
                 return result.stdout.strip()
         except Exception:
+            # Broader exception handling for various subprocess issues
             pass
         return None
     
@@ -131,6 +148,11 @@ class GoogleProvider(ImageProvider):
                 raise ValueError("No API key configured for Google provider")
         
         model = model or self.get_default_model()
+        
+        # Only apply rate limiting for API key mode (Google Cloud has its own quotas)
+        if self.auth_mode != "gcloud":
+            rate_limiter.check_rate_limit('google', wait=True)
+        
         texts: List[str] = []
         images: List[bytes] = []
         
@@ -239,6 +261,13 @@ class GoogleProvider(ImageProvider):
     
     def _check_gcloud_auth(self) -> Tuple[bool, str]:
         """Check Google Cloud authentication status."""
+        # First check if we have cached validation
+        if self.config_manager.get_auth_validated("google"):
+            project_id = self.config_manager.get_gcloud_project_id()
+            if project_id:
+                return True, f"Authenticated (Project: {project_id}) [cached]"
+            return True, "Authenticated [cached]"
+        
         try:
             gcloud_cmd = "gcloud.cmd" if platform.system() == "Windows" else "gcloud"
             
@@ -265,11 +294,18 @@ class GoogleProvider(ImageProvider):
             
             if result.returncode == 0:
                 project_id = self._get_gcloud_project_id()
+                # Cache the successful auth validation
+                self.config_manager.set_auth_validated("google", True)
+                self.config_manager.save()
+                
                 if project_id:
                     return True, f"Authenticated (Project: {project_id})"
                 else:
                     return True, "Authenticated (No project set)"
             else:
+                # Clear cached auth if validation fails
+                self.config_manager.set_auth_validated("google", False)
+                self.config_manager.save()
                 return False, "Not authenticated. Run: gcloud auth application-default login"
                 
         except Exception as e:
