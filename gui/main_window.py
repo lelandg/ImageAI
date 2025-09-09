@@ -668,11 +668,57 @@ class MainWindow(QMainWindow):
             def handle_anchor_click(self, url):
                 """Handle all anchor/link clicks."""
                 import webbrowser
+                from pathlib import Path
                 
                 # Check if it's an external link
                 if url.scheme() in ('http', 'https', 'ftp'):
                     webbrowser.open(url.toString())
                     return
+                
+                # Check if it's a local file link (like CHANGELOG.md)
+                url_str = url.toString()
+                if url.scheme() in ('', 'file') and not url_str.startswith('#'):
+                    # Try to load local markdown file
+                    try:
+                        # Get the project root directory
+                        project_root = Path(__file__).parent.parent
+                        
+                        # Parse the file path from URL
+                        if url_str.startswith('file:///'):
+                            file_path = url_str.replace('file:///', '')
+                        else:
+                            file_path = url_str
+                        
+                        # Resolve relative to project root
+                        full_path = project_root / file_path
+                        
+                        if full_path.exists() and full_path.suffix.lower() == '.md':
+                            # Load and display the markdown file
+                            content = full_path.read_text(encoding='utf-8')
+                            
+                            # Convert to HTML and display
+                            parent = self.parent()
+                            while parent and not hasattr(parent, '_markdown_to_html_with_anchors'):
+                                parent = parent.parent()
+                            
+                            if parent:
+                                # Add a "Back to README" link at the top if not viewing README
+                                if 'README' not in file_path.upper():
+                                    back_link = '<p><a href="README.md">← Back to README</a></p><hr>'
+                                    content = back_link + '\n\n' + content
+                                
+                                html = parent._markdown_to_html_with_anchors(content, use_webengine=False)
+                                self.setHtml(html)
+                                self.verticalScrollBar().setValue(0)
+                                self.add_to_history(file_path)
+                                
+                                # Update the window/tab title or status to show current file
+                                if hasattr(parent, 'status_label'):
+                                    parent.status_label.setText(f"Viewing: {file_path}")
+                                
+                                return
+                    except Exception as e:
+                        print(f"Error loading local file: {e}")
                 
                 # Internal anchor link
                 anchor = url.fragment() if url.hasFragment() else ""

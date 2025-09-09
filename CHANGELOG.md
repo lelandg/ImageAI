@@ -1,0 +1,129 @@
+# Changelog
+
+All notable changes to ImageAI will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.9.3] - 2025-09-09
+
+### Added
+- Configuration migration script (`migrate_config.py`) for updating old config formats
+- API key security script (`secure_keys.py`) for Windows Credential Manager integration
+- Utility scripts documentation in README
+
+### Changed
+- Removed legacy `api_key` field from config.json root level
+- Fixed incorrect `keys.<provider>` structure in configuration
+- All API keys now properly stored under `providers.<provider>.api_key`
+- Config structure cleaned up for consistency
+
+### Security
+- API keys can now be encrypted using Windows Credential Manager
+- Automatic keyring storage attempted when available
+- Fallback to config.json only when keyring unavailable
+
+## [0.9.2] - 2025-09-09
+
+### Security
+- Added secure API key storage using system keyring (optional)
+- Implemented path traversal validation for file operations  
+- Added rate limiting for API calls (configurable per provider)
+
+### Improved
+- Google Cloud auth state now persists between sessions
+- Settings tab shows cached auth status immediately on load
+- Fixed "Check Status" button functionality
+- Lazy initialization for Google Cloud provider
+- Replaced generic Exception catches with specific exception types
+- Improved error handling throughout the codebase
+- Better subprocess exception handling
+
+## [0.9.1] - 2025-09-08
+
+### Added
+- Project Save/Load functionality with full UI state preservation
+- Auto-reload last displayed image at startup
+- Enhanced project files (.imgai) containing image and all settings
+- File menu with project management options
+- Google Cloud authentication support
+- Template UI with better error handling
+
+### Improved
+- Session persistence across application restarts
+- Track last displayed image whether generated or loaded from history
+- Fixed various UI bugs
+
+## [0.9.0] - 2025-09-07
+
+### Added
+- Comprehensive UI state persistence - all settings saved between sessions
+- Enhanced history display with detailed table (date, time, provider, model, resolution, cost)
+- Automatic cost tracking and display for all generations
+- Settings Tab with comprehensive application preferences
+- Template Tab with community template access
+- Enhanced Image Settings panel with aspect ratio and resolution selectors
+- Template preview and generation capabilities
+- Smart placeholder substitution in templates
+- Interactive Help tab with embedded documentation
+- Advanced settings for Local SD (steps, guidance scale)
+
+### Improved
+- Fixed quality radio button and prompt rewriting checkbox persistence
+- All UI elements now properly save and restore their state
+- Refactored code architecture with modular provider system
+- Enhanced metadata sidecar files with complete generation details
+- Improved cross-platform compatibility
+
+### Ready for Integration
+- Stability AI provider implementation
+
+## [0.8.0] - 2025-09-07
+
+### Added
+- Version metadata tags (__version__, __author__, __email__, __license__, __copyright__)
+- Display version in GUI title bar as "ImageAI v0.8.0"
+- Enhanced CLI --version output with copyright and author information
+- Improved package-level metadata access
+- Version number prominently displayed in README
+
+## [0.7.0] - 2025-09-06
+
+### Added
+- Google Cloud authentication support (Application Default Credentials)
+- New `--auth-mode` CLI flag for authentication method selection
+- Enhanced GUI Settings with auth mode selector and helper buttons
+- Comprehensive API enablement documentation
+
+### Changed
+- Improved Windows/PowerShell compatibility
+- Project renamed to ImageAI
+
+## [0.6.0] - 2025-08-29
+
+### Added
+- OpenAI provider with DALL·E-3 and DALL·E-2 support
+- Per-provider API key management
+- Provider switching in GUI and CLI
+
+### Improved
+- Enhanced error messages and guidance
+
+## [0.3.0] - 2025-08-29
+
+### Added
+- Initial public release
+- Google Gemini integration
+- GUI and CLI interfaces
+- Auto-save with metadata sidecars
+- Template system
+
+## Notes
+
+### Versioning
+- Major version (X.0.0): Breaking changes or major feature additions
+- Minor version (0.X.0): New features, backwards compatible
+- Patch version (0.0.X): Bug fixes and minor improvements
+
+### Future Releases
+See [Plans/](Plans/) directory for upcoming features and roadmap.

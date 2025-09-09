@@ -78,14 +78,10 @@ class ConfigManager:
         if key:
             return key
         
-        # Check provider-specific config first
+        # Check provider-specific config
         provider_config = self.get_provider_config(provider)
         if "api_key" in provider_config:
             return provider_config["api_key"]
-        
-        # Fall back to legacy top-level api_key for backward compatibility
-        if provider == "google":
-            return self.config.get("api_key")
         
         return None
     
@@ -99,10 +95,6 @@ class ConfigManager:
             provider_config = self.get_provider_config(provider)
             provider_config["api_key"] = api_key
             self.set_provider_config(provider, provider_config)
-            
-            # Also set legacy top-level api_key for Google (backward compatibility)
-            if provider == "google":
-                self.config["api_key"] = api_key
     
     def get_auth_mode(self, provider: str = "google") -> str:
         """Get authentication mode for a provider."""

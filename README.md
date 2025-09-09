@@ -844,7 +844,55 @@ export QT_SCALE_FACTOR=1.25
 | "Module not found" | Run `pip install -r requirements.txt` |
 | "gcloud not found" | Install Google Cloud SDK or use API key mode |
 
-## 11. Frequently Asked Questions
+## 11. Utility Scripts
+
+### Configuration Migration (`migrate_config.py`)
+
+Migrates old configuration formats to the current structure and optionally secures API keys.
+
+**Usage:**
+```bash
+# Dry run to see what changes would be made
+python migrate_config.py --dry-run
+
+# Perform migration
+python migrate_config.py
+
+# Migration without securing keys
+python migrate_config.py --no-secure
+```
+
+**What it does:**
+- Removes legacy `api_key` field from root level
+- Fixes incorrect `keys.<provider>` structure
+- Moves all API keys to proper `providers.<provider>.api_key` format
+- Attempts to secure keys in system keyring when available
+- Creates timestamped backups before making changes
+
+### API Key Security (`secure_keys.py`)
+
+**Windows only:** Moves API keys from plaintext config.json to Windows Credential Manager for encryption.
+
+**Usage (run in Windows PowerShell/Command Prompt, not WSL):**
+```bash
+cd D:\path\to\ImageAI
+python secure_keys.py
+```
+
+**What it does:**
+- Reads API keys from config.json
+- Stores them securely in Windows Credential Manager (encrypted by OS)
+- Removes plaintext keys from config.json
+- Creates backup before modification
+- Keys are automatically retrieved by the app when needed
+
+**Benefits:**
+- API keys are encrypted by Windows
+- Keys survive config.json deletion/corruption
+- More secure than plaintext storage
+- Works seamlessly with the application
+
+## 12. Frequently Asked Questions
 
 ### General Questions
 
@@ -936,7 +984,7 @@ A: Check each provider's terms:
 - Stability AI: Commercial use allowed
 - Local SD: Depends on specific model license
 
-## 12. API Reference
+## 13. API Reference
 
 ### Provider Specifications
 
@@ -976,7 +1024,7 @@ A: Check each provider's terms:
 
 All API providers return images as base64-encoded PNG data or URLs, automatically decoded and saved by the application. Local SD generates images directly as PIL Image objects.
 
-## 13. Development
+## 14. Development
 
 ### Project Structure
 
@@ -1025,84 +1073,16 @@ ImageAI/
 - Web interface option
 - Mobile app companion
 
-## 14. Changelog
+## 15. Changelog
 
-### v0.9.2 (2025-09-09)
-- **Security Enhancements:**
-  - Added secure API key storage using system keyring (optional)
-  - Implemented path traversal validation for file operations
-  - Added rate limiting for API calls (configurable per provider)
-- **Authentication Improvements:**
-  - Google Cloud auth state now persists between sessions
-  - Settings tab shows cached auth status immediately on load
-  - Fixed "Check Status" button functionality
-  - Lazy initialization for Google Cloud provider
-- **Code Quality:**
-  - Replaced generic Exception catches with specific exception types
-  - Improved error handling throughout the codebase
-  - Better subprocess exception handling
+See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
-### v0.9.1 (2025-09-08)
-- Added Google Cloud authentication support
-- Improved template UI with better error handling
-- Fixed various UI bugs
+### Latest Release: v0.9.3 (2025-09-09)
+- Configuration migration and security scripts
+- API key encryption support via Windows Credential Manager
+- Config structure improvements and fixes
 
-### v0.9.0 (2025-09-07)
-- Added comprehensive UI state persistence - all settings saved between sessions
-- Enhanced history display with detailed table (date, time, provider, model, resolution, cost)
-- Fixed quality radio button and prompt rewriting checkbox persistence
-- Automatic cost tracking and display for all generations
-- Improved user experience with complete settings restoration
-- All UI elements now properly save and restore their state
-
-### v0.8.0 (2025-09-07)
-- Added version metadata tags (__version__, __author__, __email__, __license__, __copyright__)
-- Display version in GUI title bar as "ImageAI v0.8.0"
-- Enhanced CLI --version output with copyright and author information
-- Improved package-level metadata access
-- Version number now prominently displayed in README
-
-### v0.9.1 (2025-09-08)
-- Added Project Save/Load functionality with full UI state preservation  
-- Auto-reload last displayed image at startup
-- Enhanced project files (.imgai) containing image and all settings
-- Added File menu with project management options
-- Improved session persistence across application restarts
-- Track last displayed image whether generated or loaded from history
-
-### v0.9.0 (2025-09-08)
-- Added Settings Tab with comprehensive application preferences
-- Added Template Tab with community template access
-- Enhanced Image Settings panel with aspect ratio and resolution selectors
-- Template preview and generation capabilities
-- Smart placeholder substitution in templates
-- Interactive Help tab with embedded documentation
-- Refactored code architecture with modular provider system
-- Added Stability AI provider (ready for integration)
-- Enhanced metadata sidecar files with complete generation details
-- Improved cross-platform compatibility
-- Added advanced settings for Local SD (steps, guidance scale)
-
-### v0.7.0 (2025-09-06)
-- Added Google Cloud authentication support (Application Default Credentials)
-- New `--auth-mode` CLI flag for authentication method selection
-- Enhanced GUI Settings with auth mode selector and helper buttons
-- Improved Windows/PowerShell compatibility
-- Added comprehensive API enablement documentation
-- Project renamed to ImageAI
-
-### v0.6.0 (2025-08-29)
-- Added OpenAI provider with DALL·E-3 and DALL·E-2 support
-- Per-provider API key management
-- Provider switching in GUI and CLI
-- Enhanced error messages and guidance
-
-### v0.3.0 (2025-08-29)
-- Initial public release
-- Google Gemini integration
-- GUI and CLI interfaces
-- Auto-save with metadata sidecars
-- Template system
+For complete changelog, see [CHANGELOG.md](CHANGELOG.md)
 
 ## Credits
 
