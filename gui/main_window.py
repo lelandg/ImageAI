@@ -190,6 +190,18 @@ class MainWindow(QMainWindow):
         
         # Create vertical splitter for prompt and image
         splitter = QSplitter(Qt.Vertical)
+        splitter.setHandleWidth(8)  # Make handle thicker and more visible
+        splitter.setStyleSheet("""
+            QSplitter::handle {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #e0e0e0, stop:0.5 #888888, stop:1 #e0e0e0);
+                border: 1px solid #cccccc;
+            }
+            QSplitter::handle:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #a0a0ff, stop:0.5 #6060ff, stop:1 #a0a0ff);
+            }
+        """)
         
         # Top section: Prompt input (resizable via splitter)
         prompt_container = QWidget()
@@ -203,6 +215,10 @@ class MainWindow(QMainWindow):
         self.prompt_edit = QTextEdit()
         self.prompt_edit.setPlaceholderText("Describe what to generate...")
         self.prompt_edit.setAcceptRichText(False)
+        # Ensure minimum height for 3 lines of text
+        font_metrics = self.prompt_edit.fontMetrics()
+        min_height = font_metrics.lineSpacing() * 3 + 10  # 3 lines + padding
+        self.prompt_edit.setMinimumHeight(min_height)
         prompt_layout.addWidget(self.prompt_edit)
         
         # Add prompt container to splitter
@@ -369,6 +385,12 @@ class MainWindow(QMainWindow):
         splitter.setSizes([100, 600])  # 100px for prompt, 600px for rest
         splitter.setStretchFactor(0, 0)  # Don't stretch prompt section
         splitter.setStretchFactor(1, 1)  # Stretch image section
+        # Set minimum sizes to prevent prompt from disappearing
+        font_metrics = self.prompt_edit.fontMetrics()
+        min_prompt_height = font_metrics.lineSpacing() * 3 + 35  # 3 lines + label + padding
+        splitter.setChildrenCollapsible(False)  # Prevent sections from collapsing
+        prompt_container.setMinimumHeight(min_prompt_height)
+        bottom_widget.setMinimumHeight(200)  # Minimum for image area
         
         # Add splitter to main layout
         v.addWidget(splitter)
@@ -2367,19 +2389,40 @@ For more detailed information, please refer to the full documentation.
         """Handle window resize to scale images appropriately."""
         super().resizeEvent(event)
         
+        # Use a timer to debounce resize events to prevent errors
+        if not hasattr(self, '_resize_timer'):
+            from PySide6.QtCore import QTimer
+            self._resize_timer = QTimer()
+            self._resize_timer.setSingleShot(True)
+            self._resize_timer.timeout.connect(self._perform_image_resize)
+        
+        # Reset timer on each resize event (debounce)
+        self._resize_timer.stop()
+        self._resize_timer.start(50)  # 50ms delay
+    
+    def _perform_image_resize(self):
+        """Actually perform the image resize after debounce."""
         # If we have an image displayed, rescale it to fit the new size
         if hasattr(self, 'output_image_label'):
             original_pixmap = self.output_image_label.property("original_pixmap")
             if original_pixmap and isinstance(original_pixmap, QPixmap):
-                # Rescale the original pixmap to fit the new label size
-                label_size = self.output_image_label.size()
-                scaled = original_pixmap.scaled(
-                    label_size.width() - 4,  # Account for border
-                    label_size.height() - 4,  # Account for border
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
-                )
-                self.output_image_label.setPixmap(scaled)
+                try:
+                    # Get current label size and validate
+                    label_size = self.output_image_label.size()
+                    if label_size.width() <= 0 or label_size.height() <= 0:
+                        return  # Skip if label has invalid size
+                    
+                    # Rescale the original pixmap to fit the new label size
+                    scaled = original_pixmap.scaled(
+                        max(1, label_size.width() - 4),  # Ensure minimum size
+                        max(1, label_size.height() - 4),  # Ensure minimum size
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                    self.output_image_label.setPixmap(scaled)
+                except Exception:
+                    # Silently ignore resize errors during rapid resizing
+                    pass
     
     def closeEvent(self, event):
         """Save all UI state on close."""
