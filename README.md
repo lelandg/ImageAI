@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.9.3**
+**Version 0.9.4**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -1086,10 +1086,12 @@ ImageAI/
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
-### Latest Release: v0.9.3 (2025-09-11)
-- **Performance**: Dramatically improved startup time (from ~17s to ~3s) with lazy provider loading
-- **User Experience**: Added loading messages when importing AI providers
-- **Optimization**: Provider libraries now cached after first load for faster switching
+### Latest Release: v0.9.4 (2025-09-11)
+- **Provider Persistence**: Fixed provider selection not persisting between app restarts
+- **Model Display**: Added nicknames and descriptive names for models (e.g., "Nano Banana" for Gemini 2.5 Flash)
+- **Google Cloud Auth**: Optimized authentication from 24+ seconds to ~5 seconds
+- **UI Controls**: Added Google Cloud authentication button and editable project ID field
+- **Bug Fix**: Provider now correctly switches when loading projects and history items
 - Configuration migration and security scripts
 - API key encryption support via Windows Credential Manager
 - Config structure improvements and fixes

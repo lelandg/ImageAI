@@ -1,5 +1,6 @@
 """Google Gemini provider for image generation."""
 
+import os
 import subprocess
 import platform
 from pathlib import Path
@@ -155,14 +156,34 @@ class GoogleProvider(ImageProvider):
     def _get_gcloud_project_id(self) -> Optional[str]:
         """Get the current Google Cloud project ID."""
         try:
-            # Try to get project ID from gcloud config
+            # Fast path: Read directly from gcloud config file
+            from pathlib import Path
+            import configparser
+            
+            # Check gcloud config locations
+            config_paths = [
+                Path.home() / ".config" / "gcloud" / "configurations" / "config_default",  # Linux/WSL
+                Path.home() / "AppData" / "Roaming" / "gcloud" / "configurations" / "config_default",  # Windows
+            ]
+            
+            for config_path in config_paths:
+                if config_path.exists():
+                    try:
+                        config = configparser.ConfigParser()
+                        config.read(config_path)
+                        if 'core' in config and 'project' in config['core']:
+                            return config['core']['project']
+                    except Exception:
+                        continue
+            
+            # Fallback: Try subprocess if config file not found
             gcloud_cmd = "gcloud.cmd" if platform.system() == "Windows" else "gcloud"
             result = subprocess.run(
                 [gcloud_cmd, "config", "get-value", "project"],
                 capture_output=True,
                 text=True,
-                timeout=5,
-                shell=(platform.system() == "Windows")
+                timeout=2,  # Reduced timeout
+                shell=False
             )
             if result.returncode == 0 and result.stdout:
                 return result.stdout.strip()
@@ -307,44 +328,53 @@ class GoogleProvider(ImageProvider):
             return True, "Authenticated [cached]"
         
         try:
-            gcloud_cmd = "gcloud.cmd" if platform.system() == "Windows" else "gcloud"
+            # Fast path: Check if credentials file exists first
+            from pathlib import Path
+            import json
             
-            # Check if gcloud is installed
-            which_cmd = "where" if platform.system() == "Windows" else "which"
-            result = subprocess.run(
-                [which_cmd, gcloud_cmd],
-                capture_output=True,
-                timeout=5,
-                shell=(platform.system() == "Windows")
-            )
+            # Check standard ADC locations
+            adc_paths = [
+                Path.home() / ".config" / "gcloud" / "application_default_credentials.json",  # Linux/WSL
+                Path.home() / "AppData" / "Roaming" / "gcloud" / "application_default_credentials.json",  # Windows
+            ]
             
-            if result.returncode != 0:
-                return False, "Google Cloud CLI not installed"
+            creds_file = None
+            for path in adc_paths:
+                if path.exists():
+                    creds_file = path
+                    break
             
-            # Check authentication
-            result = subprocess.run(
-                [gcloud_cmd, "auth", "application-default", "print-access-token"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                shell=(platform.system() == "Windows")
-            )
-            
-            if result.returncode == 0:
-                project_id = self._get_gcloud_project_id()
-                # Cache the successful auth validation
-                self.config_manager.set_auth_validated("google", True)
-                self.config_manager.save()
-                
-                if project_id:
-                    return True, f"Authenticated (Project: {project_id})"
-                else:
-                    return True, "Authenticated (No project set)"
-            else:
-                # Clear cached auth if validation fails
+            if not creds_file:
+                # Clear cached auth if no credentials file
                 self.config_manager.set_auth_validated("google", False)
                 self.config_manager.save()
                 return False, "Not authenticated. Run: gcloud auth application-default login"
+            
+            # Quick validation: check if file is valid JSON and not expired
+            try:
+                with open(creds_file, 'r') as f:
+                    creds_data = json.load(f)
+                
+                # Basic validation - check if it has expected fields
+                if 'client_id' in creds_data or 'type' in creds_data:
+                    # Get project ID quickly
+                    project = self._get_gcloud_project_id()
+                    
+                    # Cache the successful auth validation
+                    self.config_manager.set_auth_validated("google", True)
+                    if project:
+                        self.config_manager.set_gcloud_project_id(project)
+                    self.config_manager.save()
+                    
+                    if project:
+                        return True, f"Authenticated (Project: {project})"
+                    else:
+                        return True, "Authenticated (No project set)"
+                else:
+                    return False, "Invalid credentials file"
+                    
+            except (json.JSONDecodeError, KeyError):
+                return False, "Corrupted credentials file. Re-authenticate with: gcloud auth application-default login"
                 
         except Exception as e:
             return False, f"Error checking authentication: {e}"
@@ -357,6 +387,39 @@ class GoogleProvider(ImageProvider):
             "gemini-2.5-pro": "Gemini 2.5 Pro",
             "gemini-1.5-flash": "Gemini 1.5 Flash",
             "gemini-1.5-pro": "Gemini 1.5 Pro",
+        }
+    
+    def get_models_with_details(self) -> Dict[str, Dict[str, str]]:
+        """Get available Google models with detailed display information.
+        
+        Returns:
+            Dictionary mapping model IDs to display information including:
+            - name: Short display name
+            - nickname: Optional nickname/codename
+            - description: Optional brief description
+        """
+        return {
+            "gemini-2.5-flash-image-preview": {
+                "name": "Gemini 2.5 Flash Image",
+                "nickname": "Nano Banana",
+                "description": "Advanced image generation and editing"
+            },
+            "gemini-2.5-flash": {
+                "name": "Gemini 2.5 Flash",
+                "description": "Fast performance on everyday tasks"
+            },
+            "gemini-2.5-pro": {
+                "name": "Gemini 2.5 Pro",
+                "description": "Advanced reasoning and complex problems"
+            },
+            "gemini-1.5-flash": {
+                "name": "Gemini 1.5 Flash",
+                "description": "Balanced speed and capability"
+            },
+            "gemini-1.5-pro": {
+                "name": "Gemini 1.5 Pro",
+                "description": "Wide-range reasoning tasks"
+            },
         }
     
     def get_default_model(self) -> str:

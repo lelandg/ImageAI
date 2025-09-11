@@ -139,6 +139,10 @@ class ConfigManager:
         """Get the stored Google Cloud project ID."""
         return self.config.get("gcloud_project_id")
     
+    def set_gcloud_project_id(self, project_id: str) -> None:
+        """Set the Google Cloud project ID."""
+        self.config["gcloud_project_id"] = project_id
+    
     def save_details_record(self, details: Dict[str, Any]) -> None:
         """Save a template/details record to history."""
         try:

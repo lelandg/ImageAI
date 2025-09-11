@@ -210,6 +210,26 @@ class OpenAIProvider(ImageProvider):
             "dall-e-2": "DALL·E 2",
         }
     
+    def get_models_with_details(self) -> Dict[str, Dict[str, str]]:
+        """Get available OpenAI models with detailed display information.
+        
+        Returns:
+            Dictionary mapping model IDs to display information including:
+            - name: Short display name
+            - nickname: Optional nickname/codename (None for OpenAI models)
+            - description: Optional brief description
+        """
+        return {
+            "dall-e-3": {
+                "name": "DALL·E 3",
+                "description": "Most advanced, highest quality images"
+            },
+            "dall-e-2": {
+                "name": "DALL·E 2",
+                "description": "Previous generation, lower cost"
+            },
+        }
+    
     def get_default_model(self) -> str:
         """Get default OpenAI model."""
         return "dall-e-3"

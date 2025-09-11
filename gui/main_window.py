@@ -79,9 +79,16 @@ class MainWindow(QMainWindow):
         self._load_history_from_disk()
         
         # Preload current provider to show loading message early
+        auth_mode_value = self.config.get("auth_mode", "api-key")
+        # Handle legacy/display values
+        if auth_mode_value in ["api_key", "API Key"]:
+            auth_mode_value = "api-key"
+        elif auth_mode_value == "Google Cloud Account":
+            auth_mode_value = "gcloud"
+        
         provider_config = {
             "api_key": self.current_api_key,
-            "auth_mode": self.config.get("auth_mode", "api-key")
+            "auth_mode": auth_mode_value
         }
         preload_provider(self.current_provider, provider_config)
         
@@ -423,18 +430,32 @@ class MainWindow(QMainWindow):
         elif available_providers:
             self.current_provider = available_providers[0]
             self.provider_combo.setCurrentText(self.current_provider)
+            # Save the fallback provider so it persists
+            self.config.set("provider", self.current_provider)
+            self.config.save()
         form.addRow("Provider:", self.provider_combo)
         
         # Auth Mode selection (for Google provider)
         self.auth_mode_combo = QComboBox()
         self.auth_mode_combo.addItems(["API Key", "Google Cloud Account"])
-        auth_mode = self.config.get("auth_mode", "API Key")
-        self.auth_mode_combo.setCurrentText(auth_mode)
+        # Map internal auth mode to display text
+        auth_mode_internal = self.config.get("auth_mode", "api-key")
+        # Handle legacy values
+        if auth_mode_internal in ["api_key", "API Key"]:
+            auth_mode_internal = "api-key"
+        elif auth_mode_internal == "Google Cloud Account":
+            auth_mode_internal = "gcloud"
+        auth_mode_display = "Google Cloud Account" if auth_mode_internal == "gcloud" else "API Key"
+        self.auth_mode_combo.setCurrentText(auth_mode_display)
         form.addRow("Auth Mode:", self.auth_mode_combo)
         
         # Google Cloud Project ID (shown for Google Cloud Account mode)
-        self.project_id_label = QLabel("Not detected")
-        form.addRow("Project ID:", self.project_id_label)
+        self.project_id_edit = QLineEdit()
+        self.project_id_edit.setPlaceholderText("Enter project ID or leave blank to detect")
+        project_id = self.config.get("gcloud_project_id", "")
+        if project_id:
+            self.project_id_edit.setText(project_id)
+        form.addRow("Project ID:", self.project_id_edit)
         
         # Status field
         self.gcloud_status_label = QLabel("Not checked")
@@ -460,15 +481,16 @@ class MainWindow(QMainWindow):
         
         # Google Cloud buttons
         gcloud_buttons = QHBoxLayout()
+        self.btn_authenticate = QPushButton("Authenticate")
+        self.btn_authenticate.setToolTip("Run: gcloud auth application-default login")
         self.btn_check_status = QPushButton("Check Status")
         self.btn_get_gcloud = QPushButton("Get gcloud CLI")
         self.btn_cloud_console = QPushButton("Cloud Console")
-        self.btn_login_help = QPushButton("Login Help")
         
+        gcloud_buttons.addWidget(self.btn_authenticate)
         gcloud_buttons.addWidget(self.btn_check_status)
         gcloud_buttons.addWidget(self.btn_get_gcloud)
         gcloud_buttons.addWidget(self.btn_cloud_console)
-        gcloud_buttons.addWidget(self.btn_login_help)
         gcloud_layout.addLayout(gcloud_buttons)
         
         v.addWidget(self.gcloud_help_widget)
@@ -523,15 +545,15 @@ class MainWindow(QMainWindow):
         self._update_auth_visibility()
         
         # Check and display cached auth status if in Google Cloud mode
-        if self.current_provider == "google" and auth_mode == "Google Cloud Account":
+        if self.current_provider == "google" and auth_mode_display == "Google Cloud Account":
             if self.config.get("gcloud_auth_validated", False):
                 project_id = self.config.get("gcloud_project_id", "")
                 if project_id:
                     self.gcloud_status_label.setText(f"✓ Authenticated (Project: {project_id}) [cached]")
-                    self.project_id_label.setText(project_id)
+                    self.project_id_edit.setText(project_id)
                 else:
                     self.gcloud_status_label.setText("✓ Authenticated [cached]")
-                    self.project_id_label.setText("Not set")
+                    self.project_id_edit.setText("")
                 self.gcloud_status_label.setStyleSheet("color: green;")
         
         # Local SD model management widget (initially hidden)
@@ -559,10 +581,13 @@ class MainWindow(QMainWindow):
         self.chk_auto_copy.toggled.connect(self._toggle_auto_copy)
         
         # Google Cloud buttons
+        self.btn_authenticate.clicked.connect(self._authenticate_gcloud)
         self.btn_check_status.clicked.connect(self._check_gcloud_status)
         self.btn_get_gcloud.clicked.connect(self._open_gcloud_cli_page)
         self.btn_cloud_console.clicked.connect(self._open_cloud_console)
-        self.btn_login_help.clicked.connect(self._show_login_help)
+        
+        # Connect project ID edit
+        self.project_id_edit.editingFinished.connect(self._on_project_id_changed)
     
     def _init_help_tab(self):
         """Initialize the Help tab."""
@@ -1514,6 +1539,29 @@ For more detailed information, please refer to the full documentation.
         self.btn_load_history.clicked.connect(self._load_selected_history)
         self.btn_clear_history.clicked.connect(self._clear_history)
     
+    def _find_model_in_combo(self, model_id: str) -> int:
+        """Find a model by its ID in the combo box.
+        
+        Args:
+            model_id: The model ID to search for
+            
+        Returns:
+            Index of the model in the combo box, or -1 if not found
+        """
+        # First try to find by data (preferred method)
+        for i in range(self.model_combo.count()):
+            if self.model_combo.itemData(i) == model_id:
+                return i
+        
+        # Fallback: try to find by text (for backward compatibility)
+        for i in range(self.model_combo.count()):
+            text = self.model_combo.itemText(i)
+            # Check if the model ID is in the text (e.g., "Name (model-id)")
+            if f"({model_id})" in text or text == model_id:
+                return i
+        
+        return -1
+    
     def _update_model_list(self):
         """Update model combo box based on current provider."""
         self.model_combo.clear()
@@ -1521,27 +1569,57 @@ For more detailed information, please refer to the full documentation.
         try:
             # Get provider instance to fetch available models
             provider = get_provider(self.current_provider, {"api_key": ""})
-            models = provider.get_models()
             
-            # Add model IDs to the combo box
-            if models:
-                self.model_combo.addItems(list(models.keys()))
+            # Try to get detailed model information if available
+            if hasattr(provider, 'get_models_with_details'):
+                models_details = provider.get_models_with_details()
                 
-                # Set default model
-                default_model = provider.get_default_model()
-                if default_model in models:
-                    self.model_combo.setCurrentText(default_model)
+                for model_id, details in models_details.items():
+                    # Format display text based on available information
+                    display_text = ""
+                    
+                    # Add nickname if available (e.g., "Nano Banana")
+                    if details.get('nickname'):
+                        display_text = f"{details['nickname']} — "
+                    
+                    # Add model name
+                    display_text += details.get('name', model_id)
+                    
+                    # Add model ID in parentheses
+                    display_text += f" ({model_id})"
+                    
+                    # Add item with display text and store model ID as data
+                    self.model_combo.addItem(display_text, model_id)
+            else:
+                # Fallback to simple models list
+                models = provider.get_models()
+                if models:
+                    for model_id, display_name in models.items():
+                        # Format: "Display Name (model-id)"
+                        display_text = f"{display_name} ({model_id})"
+                        self.model_combo.addItem(display_text, model_id)
+            
+            # Set default model
+            default_model = provider.get_default_model()
+            for i in range(self.model_combo.count()):
+                if self.model_combo.itemData(i) == default_model:
+                    self.model_combo.setCurrentIndex(i)
+                    break
+                    
         except Exception as e:
             # Fallback to some basic models if provider fails to load
             print(f"Error loading models for {self.current_provider}: {e}")
             if self.current_provider == "google":
-                self.model_combo.addItems(["gemini-2.5-flash-image-preview"])
+                self.model_combo.addItem("Gemini 2.5 Flash Image (gemini-2.5-flash-image-preview)", 
+                                        "gemini-2.5-flash-image-preview")
             elif self.current_provider == "openai":
-                self.model_combo.addItems(["dall-e-3"])
+                self.model_combo.addItem("DALL·E 3 (dall-e-3)", "dall-e-3")
             elif self.current_provider == "stability":
-                self.model_combo.addItems(["stable-diffusion-xl-1024-v1-0"])
+                self.model_combo.addItem("Stable Diffusion XL (stable-diffusion-xl-1024-v1-0)", 
+                                        "stable-diffusion-xl-1024-v1-0")
             elif self.current_provider == "local_sd":
-                self.model_combo.addItems(["stabilityai/stable-diffusion-2-1"])
+                self.model_combo.addItem("Stable Diffusion 2.1 (stabilityai/stable-diffusion-2-1)", 
+                                        "stabilityai/stable-diffusion-2-1")
     
     def _update_advanced_visibility(self):
         """Show/hide advanced settings based on provider."""
@@ -1573,9 +1651,16 @@ For more detailed information, please refer to the full documentation.
         self.config.save()
         
         # Preload the new provider
+        auth_mode_internal = self.config.get("auth_mode", "api-key")
+        # Handle legacy values
+        if auth_mode_internal in ["api_key", "API Key"]:
+            auth_mode_internal = "api-key"
+        elif auth_mode_internal == "Google Cloud Account":
+            auth_mode_internal = "gcloud"
+        
         provider_config = {
             "api_key": self.config.get_api_key(self.current_provider),
-            "auth_mode": self.config.get("auth_mode", "api-key")
+            "auth_mode": auth_mode_internal
         }
         preload_provider(self.current_provider, provider_config)
         
@@ -1755,7 +1840,7 @@ For more detailed information, please refer to the full documentation.
         
         # Show Google Cloud fields only for Google Cloud Account auth mode
         show_gcloud = is_google and is_gcloud_auth
-        self.project_id_label.setVisible(show_gcloud)
+        self.project_id_edit.setVisible(show_gcloud)
         self.gcloud_status_label.setVisible(show_gcloud)
         self.gcloud_help_widget.setVisible(show_gcloud)
         
@@ -1766,7 +1851,9 @@ For more detailed information, please refer to the full documentation.
     
     def _on_auth_mode_changed(self, auth_mode: str):
         """Handle auth mode change."""
-        self.config.set("auth_mode", auth_mode)
+        # Map display text to internal auth mode value
+        auth_mode_internal = "gcloud" if auth_mode == "Google Cloud Account" else "api-key"
+        self.config.set("auth_mode", auth_mode_internal)
         self._update_auth_visibility()
         
         # Only check status if switching to Google Cloud Account and no cached auth
@@ -1787,11 +1874,11 @@ For more detailed information, please refer to the full documentation.
                 # Get project ID
                 project_id = get_gcloud_project_id()
                 if project_id:
-                    self.project_id_label.setText(project_id)
+                    self.project_id_edit.setText(project_id)
                     self.gcloud_status_label.setText("✓ Authenticated")
                     self.gcloud_status_label.setStyleSheet("color: green;")
                 else:
-                    self.project_id_label.setText("Not set")
+                    self.project_id_edit.setText("")
                     self.gcloud_status_label.setText("✓ Authenticated (no project)")
                     self.gcloud_status_label.setStyleSheet("color: orange;")
                 
@@ -1801,7 +1888,7 @@ For more detailed information, please refer to the full documentation.
                     self.config.set("gcloud_project_id", project_id)
                 self.config.save()
             else:
-                self.project_id_label.setText("Not detected")
+                self.project_id_edit.setText("")
                 # Show the status message from check_gcloud_auth_status
                 if len(status_msg) > 50:
                     # Truncate long messages for the status label
@@ -1816,9 +1903,75 @@ For more detailed information, please refer to the full documentation.
                 self.config.save()
                 
         except Exception as e:
-            self.project_id_label.setText("Error")
+            self.project_id_edit.setText("")
             self.gcloud_status_label.setText(f"✗ Error: {str(e)[:50]}")
             self.gcloud_status_label.setStyleSheet("color: red;")
+    
+    def _authenticate_gcloud(self):
+        """Run gcloud auth application-default login."""
+        try:
+            # Clear any cached validation before authenticating
+            self.config.set("gcloud_auth_validated", False)
+            self.config.save()
+            
+            # Show progress dialog
+            msg = QMessageBox(self)
+            msg.setWindowTitle(APP_NAME)
+            msg.setText("Starting Google Cloud authentication...")
+            msg.setInformativeText("A browser window will open for authentication.\nPlease complete the login process.")
+            msg.setStandardButtons(QMessageBox.Ok)
+            msg.setIcon(QMessageBox.Information)
+            
+            # Start authentication in background
+            import subprocess
+            import platform
+            
+            gcloud_cmd = "gcloud.cmd" if platform.system() == "Windows" else "gcloud"
+            
+            # Open the auth URL in browser
+            try:
+                subprocess.Popen([gcloud_cmd, "auth", "application-default", "login"])
+                msg.exec()
+                
+                # After user closes dialog, check status
+                QTimer.singleShot(1000, self._check_gcloud_status)
+                
+            except FileNotFoundError:
+                QMessageBox.critical(self, APP_NAME, 
+                    "Google Cloud CLI not found.\n\n"
+                    "Please install it from:\n"
+                    "https://cloud.google.com/sdk/docs/install")
+            except Exception as e:
+                QMessageBox.critical(self, APP_NAME, f"Authentication failed:\n{str(e)}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, APP_NAME, f"Error starting authentication:\n{str(e)}")
+    
+    def _on_project_id_changed(self):
+        """Handle project ID edit changes."""
+        project_id = self.project_id_edit.text().strip()
+        
+        # Save the project ID
+        if project_id:
+            self.config.set("gcloud_project_id", project_id)
+        else:
+            # If empty, try to detect from gcloud config
+            try:
+                from core.gcloud_utils import get_gcloud_project_id
+                detected_id = get_gcloud_project_id()
+                if detected_id:
+                    self.project_id_edit.setText(detected_id)
+                    project_id = detected_id
+                    self.config.set("gcloud_project_id", project_id)
+            except:
+                pass
+        
+        self.config.save()
+        
+        # Update status if we have a project ID
+        if project_id:
+            self.gcloud_status_label.setText(f"Project: {project_id}")
+            self.gcloud_status_label.setStyleSheet("color: blue;")
     
     def _open_gcloud_cli_page(self):
         """Open Google Cloud CLI download page."""
@@ -1880,7 +2033,11 @@ For more detailed information, please refer to the full documentation.
         self.current_image_data = None
         
         # Get current model
-        model = self.model_combo.currentText()
+        # Get the actual model ID from the combo box data
+        model = self.model_combo.currentData()
+        if not model:
+            # Fallback to text if no data is stored (for backward compatibility)
+            model = self.model_combo.currentText()
         
         # Gather all generation parameters
         kwargs = {}
@@ -1933,11 +2090,18 @@ For more detailed information, please refer to the full documentation.
         
         # Create worker thread
         self.gen_thread = QThread()
+        # Get the actual auth mode from config
+        auth_mode = "api-key"  # default
+        if self.current_provider == "google":
+            auth_mode_text = self.auth_mode_combo.currentText()
+            if auth_mode_text == "Google Cloud Account":
+                auth_mode = "gcloud"
+        
         self.gen_worker = GenWorker(
             provider=self.current_provider,
             model=model,
             prompt=prompt,
-            auth_mode="api-key",
+            auth_mode=auth_mode,
             **kwargs
         )
         
@@ -2185,15 +2349,13 @@ For more detailed information, please refer to the full documentation.
                         
                         # Restore model
                         if 'model' in metadata:
-                            idx = self.model_combo.findText(metadata['model'])
+                            idx = self._find_model_in_combo(metadata['model'])
                             if idx >= 0:
                                 self.model_combo.setCurrentIndex(idx)
                         
-                        # Restore provider
-                        if 'provider' in metadata and metadata['provider'] != self.current_provider:
-                            idx = self.provider_combo.findText(metadata['provider'])
-                            if idx >= 0:
-                                self.provider_combo.setCurrentIndex(idx)
+                        # Don't restore provider - it's a persistent app setting
+                        # The user's selected provider shouldn't change just because
+                        # they're viewing an image made with a different provider
                 except Exception:
                     pass  # Ignore metadata errors
             
@@ -2226,7 +2388,7 @@ For more detailed information, please refer to the full documentation.
                 'version': VERSION,
                 'timestamp': datetime.now().isoformat(),
                 'provider': self.current_provider,
-                'model': self.model_combo.currentText(),
+                'model': self.model_combo.currentData() or self.model_combo.currentText(),
                 'prompt': self.prompt_edit.toPlainText(),
                 'ui_state': {}
             }
@@ -2306,7 +2468,7 @@ For more detailed information, please refer to the full documentation.
             
             # Load model
             if 'model' in project_data:
-                idx = self.model_combo.findText(project_data['model'])
+                idx = self._find_model_in_combo(project_data['model'])
                 if idx >= 0:
                     self.model_combo.setCurrentIndex(idx)
             
@@ -2600,7 +2762,7 @@ For more detailed information, please refer to the full documentation.
                         # Load model if available
                         model = history_item.get('model', '')
                         if model:
-                            idx = self.model_combo.findText(model)
+                            idx = self._find_model_in_combo(model)
                             if idx >= 0:
                                 self.model_combo.setCurrentIndex(idx)
                         
@@ -2783,7 +2945,7 @@ For more detailed information, please refer to the full documentation.
             
             # Generate tab settings
             ui_state['prompt'] = self.prompt_edit.toPlainText()
-            ui_state['model'] = self.model_combo.currentText()
+            ui_state['model'] = self.model_combo.currentData() or self.model_combo.currentText()
             ui_state['model_index'] = self.model_combo.currentIndex()
             
             # Image settings expansion state
@@ -2833,10 +2995,7 @@ For more detailed information, please refer to the full documentation.
             if hasattr(self, 'template_combo'):
                 ui_state['template_index'] = self.template_combo.currentIndex()
             
-            # Settings tab
-            ui_state['provider'] = self.current_provider
-            if hasattr(self, 'provider_combo'):
-                ui_state['provider_index'] = self.provider_combo.currentIndex()
+            # Settings tab - provider is saved in config, not UI state
             
             # History tab - column widths
             if hasattr(self, 'history_table'):
@@ -2877,7 +3036,7 @@ For more detailed information, please refer to the full documentation.
                 if ui_state['model_index'] < self.model_combo.count():
                     self.model_combo.setCurrentIndex(ui_state['model_index'])
             elif 'model' in ui_state:
-                idx = self.model_combo.findText(ui_state['model'])
+                idx = self._find_model_in_combo(ui_state['model'])
                 if idx >= 0:
                     self.model_combo.setCurrentIndex(idx)
             
@@ -2961,12 +3120,9 @@ For more detailed information, please refer to the full documentation.
                 if ui_state['template_index'] < self.template_combo.count():
                     self.template_combo.setCurrentIndex(ui_state['template_index'])
             
-            # Restore provider selection
-            if 'provider_index' in ui_state and hasattr(self, 'provider_combo'):
-                if ui_state['provider_index'] < self.provider_combo.count():
-                    self.provider_combo.setCurrentIndex(ui_state['provider_index'])
-            elif 'provider' in ui_state:
-                self.current_provider = ui_state['provider']
+            # Provider is restored from config, not UI state
+            # This ensures the provider selection persists correctly
+            # (UI state is for session state, config is for persistent settings)
             
             # Restore history table column widths
             if hasattr(self, 'history_table'):
