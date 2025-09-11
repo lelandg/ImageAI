@@ -8,12 +8,18 @@ https://ai.google.dev/gemini-api/docs/video?example=dialogue
 ---
 
 ## 1) Overview
-Add a **Video Project** workflow to ImageAI that turns **lyrics/text** into an **auto‑storyboard** → **image generation** pipeline → **video assembly**.  
-It uses existing provider integrations (Gemini, OpenAI, Stable Diffusion/local) for **images only** and supports **local slideshow/ffmpeg** for video assembly. Future support planned for **Gemini Veo** when API becomes available.
+Add a **Video Project** workflow to ImageAI that turns **lyrics/text** into an **auto‑storyboard** → **AI-powered prompt generation** → **image generation** pipeline → **video assembly**.  
 
-**Important Note:** As of 2025, neither OpenAI (Sora) nor Google (Veo) offer public API access for video generation. This implementation focuses on image-based video creation using FFmpeg.
+**Key Features:**
+- **AI Prompt Generation**: Use Gemini or OpenAI to generate cinematic prompts from lyrics/text
+- **Full Edit Control**: All AI-generated prompts are editable by the user
+- **Comprehensive History**: Complete versioning system with time-travel restore capability
+- **Image Generation**: Leverage existing providers (Gemini, OpenAI, Stable Diffusion/local)
+- **Video Assembly**: Two paths:
+  - **Gemini Veo API** (veo-3.0-generate-001): Generate 8-second AI video clips
+  - **Local FFmpeg**: Create slideshow videos with Ken Burns effects and transitions
 
-**Out of scope now:** music/beat/TTS, song mixing, external audio alignment, direct AI video generation (until APIs available).
+**Out of scope now:** music/beat/TTS, song mixing, external audio alignment.
 
 **Additional development data:** I used ChatGPT-5 to create lyrics, image prompts, and "Veo project." Everything is in the (project root) `./Sample/` folder. It shows examples of image prompts based on lyrics, and a template folder layout for each Veo scene. I don't care what format the output is in, since it will produce a valid MP4. So consider this an example. It *would* be nice to save projects so the user can switch between them, and always restore the same images/videos.
 
@@ -22,15 +28,16 @@ It uses existing provider integrations (Gemini, OpenAI, Stable Diffusion/local) 
 ## 2) Goals & Non‑Goals
 ### ✅ Goals
 - Paste lyrics/text (the same format you used in *Grandpa Was a Democrat*) or load from file.
+- **AI-powered prompt generation** using Gemini or OpenAI LLMs with full user edit capability.
 - Auto‑derive a **shotlist/storyboard** with scene durations that sum to either:
   - a user‑specified total length (e.g., 2:45), or
   - an auto‑estimate (based on line counts and pacing presets).
 - Generate **N images** (per scene) using a selected **provider/model** (already wired in ImageAI).
 - Human‑in‑the‑loop **review/approve/reorder/regenerate**.
+- **Comprehensive version history** with time-travel restore to any previous state.
 - **Render video** via:
-  - **Local slideshow** (Ken Burns, crossfades, captions; silent by default) - PRIMARY METHOD.
-  - **Future: Gemini Veo** (when API available): create 5–8s AI clips and concatenate.
-  - **Future: OpenAI Sora** (when API available): direct video generation.
+  - **Gemini Veo API** (veo-3.0-generate-001): Generate 8-second AI video clips.
+  - **Local slideshow** (Ken Burns, crossfades, captions; silent by default).
 - Save a **project file** (`.iaproj.json`) and all assets under a dedicated project folder.
 - Keep detailed **metadata** for reproducibility & cost tracking.
 
@@ -41,7 +48,89 @@ It uses existing provider integrations (Gemini, OpenAI, Stable Diffusion/local) 
 
 ---
 
-## 3) UX Spec (GUI)
+## 3) AI Prompt Generation & Editing
+
+### Prompt Generation Pipeline
+1. **Input Analysis**: Parse lyrics/text to identify scenes and key elements
+2. **LLM Enhancement**: Use Gemini or OpenAI to generate cinematic prompts
+3. **User Review**: Present generated prompts with inline editing capability
+4. **Version Tracking**: Save all prompt versions (AI-generated and user-edited)
+
+### Prompt Generation Features
+- **Provider Selection**: Choose between Gemini or OpenAI for prompt generation
+- **Style Templates**: Apply cinematic, artistic, or photorealistic styles
+- **Batch Generation**: Generate all scene prompts in one operation
+- **Regeneration**: Re-generate individual prompts while preserving others
+- **Edit History**: Track all changes with diff visualization
+
+### Example Prompt Enhancement
+```
+Input: "Grandpa was a Democrat"
+AI Output: "Cinematic wide shot of an elderly man in worn denim overalls, 
+sitting on a weathered porch in rural America, golden hour lighting, 
+American flag gently waving, nostalgic 1960s aesthetic, Norman Rockwell style"
+```
+
+---
+
+## 4) Version History & Time Travel
+
+### Event Sourcing Architecture
+Every action creates an immutable event, enabling complete reconstruction of any previous state:
+
+#### Event Types
+- **Project Events**: Creation, settings changes, exports
+- **Scene Events**: Addition, deletion, reordering, duration changes
+- **Prompt Events**: AI generation, user edits, regeneration
+- **Image Events**: Generation, selection, deletion
+- **Render Events**: Video generation, export settings
+
+### History Features
+#### History Tab (Per Project)
+- **Timeline View**: Visual representation of all project events
+- **Filter Controls**: Show/hide event types, search by content
+- **Diff Viewer**: Compare any two versions side-by-side
+- **Restore Points**: One-click restore to any previous state
+- **Branch Support**: Create alternate versions from any point
+
+#### Storage Strategy
+- **Event Store**: SQLite with JSON columns for flexibility
+- **Snapshots**: Periodic full-state captures for fast restoration
+- **Delta Compression**: Efficient storage of incremental changes
+- **Media Caching**: Preserve generated images/videos with events
+
+### Implementation Example
+```python
+@dataclass
+class ProjectEvent:
+    event_id: str
+    project_id: str
+    event_type: str
+    event_data: Dict[str, Any]
+    timestamp: datetime
+    user_action: bool  # True if user-initiated, False if AI-generated
+    
+class ProjectHistory:
+    def save_prompt_edit(self, scene_id: str, old_prompt: str, new_prompt: str):
+        event = ProjectEvent(
+            event_id=uuid.uuid4(),
+            project_id=self.project_id,
+            event_type="prompt_edited",
+            event_data={
+                "scene_id": scene_id,
+                "old_prompt": old_prompt,
+                "new_prompt": new_prompt,
+                "diff": difflib.unified_diff(old_prompt, new_prompt)
+            },
+            timestamp=datetime.now(),
+            user_action=True
+        )
+        self.event_store.append(event)
+```
+
+---
+
+## 5) UX Spec (GUI)
 ### New Tab: **🎬 Video Project**
 - **Project header**: name, base folder, open/save.
 - **Input panel**:
@@ -60,9 +149,11 @@ It uses existing provider integrations (Gemini, OpenAI, Stable Diffusion/local) 
     - Template picker (Jinja‑like): `templates/lyric_prompt.j2`.
 
 - **Storyboard panel**:
-  - Auto‑computed **scenes table** (line → prompt → duration).  
+  - Auto‑computed **scenes table** (line → prompt → duration).
+  - **Inline prompt editing** with syntax highlighting and AI suggestions.
   - Per‑scene **N variants** (e.g., 1–4) with thumbnail grid. Re‑roll per scene.  
   - Drag to reorder scenes; duration knob per scene; title/caption toggle.
+  - **Prompt history dropdown** showing all versions for each scene.
 
 - **Preview & Export**:
   - **Preview cut**: quick render (low res, fast transitions).  
@@ -72,9 +163,20 @@ It uses existing provider integrations (Gemini, OpenAI, Stable Diffusion/local) 
     - **Mute audio** option (for Veo 3 outputs).  
   - **Render queue** with progress & logs.
 
+### New Tab: **📜 Project History**
+- **Timeline View**: Interactive timeline showing all project events
+- **Event Filters**: Toggle visibility of different event types
+- **Diff Viewer**: Side-by-side comparison of any two versions
+- **Restore Controls**: 
+  - Restore button for any historical state
+  - Create branch from any point
+  - Export history as JSON
+- **Search**: Find events by content, date, or type
+- **Statistics Panel**: Event counts, storage usage, activity graph
+
 ---
 
-## 4) Data & Files
+## 6) Data & Files
 ```
 {
   "schema": "imageai.video_project.v1",
@@ -119,7 +221,7 @@ It uses existing provider integrations (Gemini, OpenAI, Stable Diffusion/local) 
 
 ---
 
-## 5) Architecture & Code Layout (Detailed)
+## 7) Architecture & Code Layout (Detailed)
 
 ### Directory Structure
 ```
@@ -213,7 +315,7 @@ VIDEO_CONFIG_SCHEMA = {
 
 ---
 
-## 6) Core Algorithms
+## 8) Core Algorithms
 ### 6.1 Lyric/Text → Scenes
 - **Timestamped** lines: exact cut points from `[mm:ss(.mmm)]`; otherwise use **pacing preset** to distribute total length over lines, weighted by line length.
 - **Shot count**: `ceil(total_length / target_shot_seconds)` (defaults: 3–5s per shot).  
@@ -233,7 +335,7 @@ VIDEO_CONFIG_SCHEMA = {
 
 ---
 
-## 7) Constraints & Model Notes
+## 9) Constraints & Model Notes
 - **Veo 3 / Veo 3 Fast**: 8s, 24fps, 720p or 1080p (16:9 only), audio always on.  
 - **Veo 2**: 5–8s, 24fps, 720p, silent; can do 9:16 portrait.  
 - **Region/person rules**: `personGeneration` options vary by region; enforce in UI.  
@@ -245,7 +347,7 @@ VIDEO_CONFIG_SCHEMA = {
 
 ---
 
-## 8) CLI (initial sketch)
+## 10) CLI (initial sketch)
 ```bash
 # Build storyboard and images, then render slideshow
 imageai video --in lyrics.txt --provider gemini --model imagen-4.0-generate-001   --length 00:02:30 --slideshow --out exports/grandpa.mp4
@@ -256,7 +358,7 @@ imageai video --in lyrics.txt --image-provider openai --image-model dall-e-3   -
 
 ---
 
-## 9) API Implementation Examples
+## 11) API Implementation Examples
 
 ### 9.1 Complete Veo Integration Class
 ```python
@@ -639,13 +741,13 @@ class VideoProjectPipeline:
 
 ---
 
-## 10) Validation
+## 12) Validation
 - Golden sample projects checked into `Plans/samples/` with deterministic seeds.
 - Headless **CI smoke**: generate 2 scenes with tiny images + 2s clips; assert MP4 exists.
 
 ---
 
-## 11) Risks & Mitigations
+## 13) Risks & Mitigations
 - **Model safety blocks** → auto‑rewrite prompts (LLM), add negative terms, or switch provider.
 - **Latency** (Veo ops) → queue + UI progress + local preview path.
 - **Regional restrictions** → gate `personGeneration` options by `iso_region`.
@@ -653,25 +755,24 @@ class VideoProjectPipeline:
 
 ---
 
-## 12) Phased Delivery
-1. **MVP (Immediate)**: Tab, parser, storyboard, image batcher, FFmpeg slideshow export.  
-2. **Enhancement (v1.1)**: Advanced transitions, captions, presets, caching, cost panel, drag‑reorder UX.  
-3. **API Integration (When Available)**: 
-   - Veo integration: 5–8s clips + concat; mute option; region gates.
-   - Sora integration: Direct video generation when API released.
-4. **Continuity (v2.0)**: Seed carry‑over, character consistency, style transfer.  
-5. **Audio (v3.0)**: External track alignment, beat mapping, music sync.
+## 14) Phased Delivery
+1. **MVP Phase 1**: Core foundation - Event sourcing, AI prompt generation, storyboard, image batcher.
+2. **MVP Phase 2**: Video generation - Veo API integration (8s clips), FFmpeg slideshow export.
+3. **Enhancement (v1.1)**: History tab, advanced transitions, captions, presets, caching, cost panel.
+4. **Polish (v1.2)**: Drag-reorder UX, branch support, diff viewer, restore points.
+5. **Continuity (v2.0)**: Seed carry-over, character consistency, style transfer.
+6. **Audio (v3.0)**: External track alignment, beat mapping, music sync.
 
 ---
 
-## 13) References
+## 15) References
 - Gemini API – Generate videos with Veo (models, durations, polling, retention): https://ai.google.dev/gemini-api/docs/video  
 - Gemini API – Models catalog: https://ai.google.dev/gemini-api/docs/models  
 - ImageAI repo README (providers, PySide6 GUI, CLI): https://github.com/lelandg/ImageAI
 
 ---
 
-## 14) Acceptance Criteria (MVP)
+## 16) Acceptance Criteria (MVP)
 - I can paste lyrics, click **Storyboard**, see scene rows with durations summing to target length.
 - I can **Generate Images** and see thumbnails per scene; re‑roll one scene without touching others.
 - I can **Export → Slideshow** and get a valid MP4 at 24fps, 16:9.
@@ -680,7 +781,7 @@ class VideoProjectPipeline:
 
 ---
 
-## 15) Implementation Checklist
+## 17) Implementation Checklist
 
 ### Phase 1: Foundation & Core Components
 #### 1.1 Project Structure Setup
@@ -701,119 +802,152 @@ class VideoProjectPipeline:
 - [ ] Verify google-genai supports latest Veo models
 - [ ] Update config system to include video-specific settings
 
-### Phase 2: Text Processing & Storyboarding
-#### 2.1 Input Parsing
+### Phase 2: AI Prompt Generation & History System
+#### 2.1 Version History Foundation
+- [ ] Implement event sourcing with SQLite backend
+- [ ] Create ProjectEvent dataclass and event types enum
+- [ ] Build EventStore with append and query operations
+- [ ] Implement snapshot system for performance
+- [ ] Add delta compression for storage efficiency
+
+#### 2.2 AI Prompt Generation
+- [ ] Integrate LLM providers for prompt generation (Gemini/OpenAI)
+- [ ] Create prompt enhancement templates
+- [ ] Build batch prompt generation system
+- [ ] Implement style presets (cinematic, artistic, photorealistic)
+- [ ] Add prompt regeneration with preservation of other prompts
+
+#### 2.3 Prompt Editing & Tracking
+- [ ] Build inline prompt editor with syntax highlighting
+- [ ] Implement prompt version tracking
+- [ ] Create diff visualization for prompt changes
+- [ ] Add prompt history dropdown per scene
+- [ ] Build prompt lineage tracking system
+
+### Phase 3: Text Processing & Storyboarding
+#### 3.1 Input Parsing
 - [ ] Implement timestamped format parser: `[mm:ss] text` and `[mm:ss.mmm] text`
 - [ ] Implement structured lyrics parser: `# Verse`, `# Chorus`, etc.
 - [ ] Create format auto-detection logic
 - [ ] Add file loaders for `.txt`, `.md`, `.iaproj.json`
 
-#### 2.2 Timing & Scene Generation
+#### 3.2 Timing & Scene Generation
 - [ ] Implement `TimingEngine` with pacing presets (Fast/Medium/Slow)
 - [ ] Create duration allocation algorithm for target length
 - [ ] Build scene splitter with configurable shot duration (3-5s default)
 - [ ] Add duration validation and adjustment logic
 
-#### 2.3 Prompt Engineering
+#### 3.3 Prompt Engineering
 - [ ] Create base Jinja2 templates: `lyric_prompt.j2`, `shot_prompt.j2`
 - [ ] Implement `PromptEngine` with LLM rewrite capability
 - [ ] Add template token system for style variables
 - [ ] Create cinematic prompt generator with camera/style/ambiance tokens
 
-### Phase 3: Image Generation Pipeline
-#### 3.1 Provider Integration
+### Phase 4: Image Generation Pipeline
+#### 4.1 Provider Integration
 - [ ] Ensure unified `generate_image()` interface across all providers
 - [ ] Add batch generation support with concurrency limits
 - [ ] Implement provider-specific error handling and retries
 - [ ] Add cost estimation and tracking per provider
 
-#### 3.2 Image Caching & Management
+#### 4.2 Image Caching & Management
 - [ ] Create idempotent cache with hash-based lookup
 - [ ] Implement cache invalidation and cleanup
 - [ ] Add image variant management (N per scene)
 - [ ] Build thumbnail generation for UI display
 
-#### 3.3 Scene Management
+#### 4.3 Scene Management
 - [ ] Implement per-scene regeneration without affecting others
 - [ ] Add approved image selection and persistence
 - [ ] Create scene reordering logic
 - [ ] Build metadata tracking for each generation
 
-### Phase 4: GUI Implementation
-#### 4.1 Video Project Tab
+### Phase 5: GUI Implementation
+#### 5.1 Video Project Tab
 - [ ] Create `VideoProjectTab` widget in PySide6
 - [ ] Implement project header with name/folder/save controls
 - [ ] Add input panel with text area and format selector
 - [ ] Build provider selection with model dropdowns
 
-#### 4.2 Storyboard Interface
+#### 5.2 Storyboard Interface
 - [ ] Create `StoryboardTable` widget with scene rows
 - [ ] Implement thumbnail grid display (N variants per scene)
 - [ ] Add drag-and-drop scene reordering
 - [ ] Build duration adjustment controls per scene
 - [ ] Add caption/title toggle switches
 
-#### 4.3 Style & Configuration
+#### 5.3 Style & Configuration
 - [ ] Add aspect ratio selector (16:9, 9:16)
 - [ ] Implement quality/resolution controls
 - [ ] Add negative prompt input
 - [ ] Create seed management UI
 - [ ] Build template selector and editor
 
-#### 4.4 Progress & Feedback
+#### 5.4 Progress & Feedback
 - [ ] Implement `RenderQueue` widget with progress bars
 - [ ] Add real-time generation status display
 - [ ] Create cost estimate display
 - [ ] Build error notification system
 
-### Phase 5: Video Assembly - Local Slideshow
-#### 5.1 FFmpeg Integration
+#### 5.5 History Tab Implementation
+- [ ] Create `HistoryTab` widget with timeline view
+- [ ] Implement event filtering and search
+- [ ] Build diff viewer for comparing versions
+- [ ] Add restore point creation and management
+- [ ] Implement branch creation from historical states
+- [ ] Create history export functionality
+- [ ] Add storage usage analytics display
+
+### Phase 6: Video Assembly - Local Slideshow
+#### 6.1 FFmpeg Integration
 - [ ] Implement `FFmpegSlideshow` class
 - [ ] Add Ken Burns effect (pan/zoom) support
 - [ ] Create crossfade transition system (0.5s default)
 - [ ] Build caption overlay system
 
-#### 5.2 Video Export
+#### 6.2 Video Export
 - [ ] Implement H.264 encoding at 24fps
 - [ ] Add resolution options (720p, 1080p)
 - [ ] Create preview generation (low-res, fast)
 - [ ] Build final export with quality settings
 
-### Phase 6: Future Video API Integration (Post-MVP)
-#### 6.1 API Monitoring & Preparation
-- [ ] Monitor Google Veo API announcements
-- [ ] Monitor OpenAI Sora API announcements
-- [ ] Create abstract video provider interface
-- [ ] Design plugin architecture for future providers
-
-#### 6.2 Veo Integration (When Available)
-- [ ] Create `VeoClient` wrapper class
+### Phase 7: Veo API Integration
+#### 7.1 Veo Client Implementation
+- [ ] Create `VeoClient` wrapper class using google.genai
 - [ ] Implement `generate_videos()` with all config options
-- [ ] Add polling mechanism for long-running operations
-- [ ] Build download and local storage system
-- [ ] Add Veo model support (3.0, 3.0 Fast, 2.0)
-- [ ] Implement regional compliance rules
+- [ ] Add polling mechanism for long-running operations (11s-6min)
+- [ ] Build download and local storage system (2-day retention handling)
+- [ ] Implement timeout and retry logic
 
-#### 6.3 Sora Integration (When Available)
-- [ ] Create `SoraClient` wrapper class
-- [ ] Implement OpenAI video generation interface
-- [ ] Add Sora-specific configuration options
-- [ ] Build compatibility layer with existing pipeline
+#### 7.2 Veo Model Support
+- [ ] Add Veo 3.0 support (`veo-3.0-generate-001`)
+- [ ] Add Veo 3.0 Fast support (`veo-3.0-fast-generate-001`)
+- [ ] Add Veo 2.0 support (`veo-2.0-generate-001`)
+- [ ] Implement model-specific constraints (resolution, duration, audio)
+- [ ] Add aspect ratio support (16:9, 9:16)
 
-#### 6.4 Alternative Providers (Optional)
-- [ ] Research Runway Gen-3 API integration
-- [ ] Evaluate Stability AI Video when available
-- [ ] Consider Pika Labs or other emerging APIs
-- [ ] Implement provider cost comparison
+#### 7.3 Regional Compliance
+- [ ] Implement region detection system
+- [ ] Add `personGeneration` option gating by region
+- [ ] Create UI warnings for regional restrictions
+- [ ] Build fallback strategies for blocked content
+- [ ] Handle MENA/EU restrictions appropriately
 
-### Phase 7: CLI Implementation
-#### 7.1 Command Structure
+#### 7.4 Video Processing
+- [ ] Implement clip concatenation system using ffmpeg
+- [ ] Add audio muting option for Veo 3 outputs
+- [ ] Build 2-day retention warning system
+- [ ] Create automatic local backup on generation
+- [ ] Add SynthID watermark detection/display
+
+### Phase 8: CLI Implementation
+#### 8.1 Command Structure
 - [ ] Add `video` subcommand to main CLI
 - [ ] Implement all GUI features in CLI
 - [ ] Add batch processing support
 - [ ] Create progress indicators for terminal
 
-#### 7.2 CLI Arguments
+#### 8.2 CLI Arguments
 - [ ] `--in`: Input file path
 - [ ] `--provider`: Image provider selection
 - [ ] `--model`: Model selection
@@ -823,39 +957,39 @@ class VideoProjectPipeline:
 - [ ] `--out`: Output file path
 - [ ] `--mute`: Mute audio option
 
-### Phase 8: Testing & Validation
-#### 8.1 Unit Tests
+### Phase 9: Testing & Validation
+#### 9.1 Unit Tests
 - [ ] Test lyric parsing (all formats)
 - [ ] Test timing allocation algorithms
 - [ ] Test prompt generation and templates
 - [ ] Test project save/load/migration
 
-#### 8.2 Integration Tests
+#### 9.2 Integration Tests
 - [ ] Test provider image generation pipeline
 - [ ] Test video assembly (slideshow)
 - [ ] Test Veo API integration
 - [ ] Test end-to-end workflow
 
-#### 8.3 Sample Projects
+#### 9.3 Sample Projects
 - [ ] Create "Grandpa Was a Democrat" reference project
 - [ ] Add deterministic seed test cases
 - [ ] Build CI/CD smoke tests
 - [ ] Document expected outputs
 
-### Phase 9: Documentation & Polish
-#### 9.1 User Documentation
+### Phase 10: Documentation & Polish
+#### 10.1 User Documentation
 - [ ] Update README with video feature documentation
 - [ ] Create video workflow tutorial
 - [ ] Add troubleshooting guide
 - [ ] Document all CLI options
 
-#### 9.2 Developer Documentation
+#### 10.2 Developer Documentation
 - [ ] Document API interfaces
 - [ ] Create plugin architecture docs
 - [ ] Add contribution guidelines
 - [ ] Build architecture diagrams
 
-#### 9.3 UI Polish
+#### 10.3 UI Polish
 - [ ] Add tooltips and help text
 - [ ] Implement keyboard shortcuts
 - [ ] Create preset management
@@ -895,48 +1029,7 @@ moviepy>=1.0.3  # Video processing (or imageio-ffmpeg)
 
 ---
 
-## 16) Video API Availability Status (2025)
-
-### Current Reality
-As of 2025, the video generation API landscape is limited:
-
-#### **Google Veo**
-- **Status**: No public API available
-- **Access**: Limited to Google Labs VideoFX (waitlist only)
-- **API Timeline**: Not announced
-- **Implementation Strategy**: Build infrastructure now, integrate when available
-
-#### **OpenAI Sora**
-- **Status**: No API available or planned
-- **Access**: ChatGPT Plus/Pro subscribers only (web interface)
-- **API Timeline**: OpenAI states "no plans for a Sora API yet"
-- **Implementation Strategy**: Focus on DALL-E 3 for storyboard images
-
-#### **Available Alternatives**
-1. **FFmpeg Slideshow** (PRIMARY APPROACH)
-   - Fully available now
-   - Complete control over transitions and effects
-   - No API limitations or costs
-   - Supports arbitrary video lengths
-
-2. **Runway Gen-3 API** (Future consideration)
-   - Limited beta API access
-   - $0.05-0.10 per second of video
-   - Requires separate integration
-
-3. **Stability AI Video** (Future consideration)
-   - API in development
-   - Pricing TBD
-
-### Implementation Approach
-Given the API limitations, the MVP will focus on:
-1. **Image Generation**: Use existing providers (Gemini, OpenAI, SD)
-2. **Video Assembly**: FFmpeg-based slideshow with professional effects
-3. **Future-Ready Architecture**: Modular design to easily add Veo/Sora when available
-
----
-
-## 17) Known Limitations & Future Enhancements
+## 18) Known Limitations & Future Enhancements
 
 ### Current Limitations
 - No audio synchronization (music/beat alignment)
