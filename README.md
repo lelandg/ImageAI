@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.9.2**
+**Version 0.9.3**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -769,6 +769,15 @@ python -c "import torch; print(torch.cuda.is_available())"
 
 ### Troubleshooting Common Issues
 
+#### Startup Performance
+
+The application may take a few seconds to start as it loads AI provider libraries:
+- **Google Cloud AI**: ~10-15 seconds on first load (largest library)
+- **Google Gemini**: ~2 seconds
+- **OpenAI**: ~3 seconds
+
+You'll see "Loading provider: [name]..." in the console during startup. Provider libraries are cached after first load, so switching between providers is faster after the initial import.
+
 #### Authentication Errors
 
 **Google API Key Issues**:
@@ -1077,7 +1086,10 @@ ImageAI/
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
-### Latest Release: v0.9.3 (2025-09-09)
+### Latest Release: v0.9.3 (2025-09-11)
+- **Performance**: Dramatically improved startup time (from ~17s to ~3s) with lazy provider loading
+- **User Experience**: Added loading messages when importing AI providers
+- **Optimization**: Provider libraries now cached after first load for faster switching
 - Configuration migration and security scripts
 - API key encryption support via Windows Credential Manager
 - Config structure improvements and fixes

@@ -6,14 +6,16 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 from base64 import b64decode
 
+# Check if google.genai is available but don't import yet
 try:
-    from google import genai
-    from google.genai import types
-    GENAI_AVAILABLE = True
+    import importlib.util
+    GENAI_AVAILABLE = importlib.util.find_spec("google.genai") is not None
 except ImportError:
-    genai = None
-    types = None
     GENAI_AVAILABLE = False
+
+# These will be populated on first use
+genai = None
+types = None
 
 from .base import ImageProvider
 
@@ -24,17 +26,17 @@ except ImportError:
     from core.security import rate_limiter
 
 
-# Optional Google Cloud imports
+# Check if Google Cloud is available but don't import yet
 try:
-    from google.cloud import aiplatform
-    from google.auth import default as google_auth_default
-    from google.auth.exceptions import DefaultCredentialsError
-    GCLOUD_AVAILABLE = True
+    import importlib.util
+    GCLOUD_AVAILABLE = importlib.util.find_spec("google.cloud.aiplatform") is not None
 except ImportError:
-    aiplatform = None
-    google_auth_default = None
-    DefaultCredentialsError = Exception
     GCLOUD_AVAILABLE = False
+
+# These will be populated on first use
+aiplatform = None
+google_auth_default = None
+DefaultCredentialsError = Exception
 
 
 class GoogleProvider(ImageProvider):
@@ -65,11 +67,20 @@ class GoogleProvider(ImageProvider):
     
     def _init_api_key_client(self):
         """Initialize client with API key."""
+        global genai, types
+        
         if not GENAI_AVAILABLE:
             raise ImportError(
                 "Google GenAI library not installed. "
                 "Run: pip install google-generativeai"
             )
+        
+        # Lazy import on first use
+        if genai is None:
+            print("Loading Google AI provider...")
+            from google import genai
+            from google.genai import types
+        
         if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
     
@@ -79,6 +90,8 @@ class GoogleProvider(ImageProvider):
         Args:
             raise_on_error: If True, raise exception on auth failure. If False, return False.
         """
+        global aiplatform, google_auth_default, DefaultCredentialsError, genai, types
+        
         if not GCLOUD_AVAILABLE:
             if raise_on_error:
                 raise ImportError(
@@ -86,6 +99,18 @@ class GoogleProvider(ImageProvider):
                     "Run: pip install google-cloud-aiplatform"
                 )
             return False
+        
+        # Lazy import Google Cloud on first use
+        if aiplatform is None:
+            print("Loading Google Cloud AI provider...")
+            from google.cloud import aiplatform
+            from google.auth import default as google_auth_default
+            from google.auth.exceptions import DefaultCredentialsError
+        
+        # Also ensure genai is imported for gcloud mode
+        if genai is None:
+            from google import genai
+            from google.genai import types
         
         try:
             # Get Application Default Credentials

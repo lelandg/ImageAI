@@ -14,6 +14,9 @@ from .base import ImageProvider
 # Lazy load providers to avoid import errors when dependencies are missing
 _PROVIDERS = None
 
+# Cache for loaded provider instances
+_PROVIDER_CACHE = {}
+
 def _get_providers() -> Dict[str, Type[ImageProvider]]:
     """Lazy load provider classes."""
     global _PROVIDERS
@@ -74,13 +77,14 @@ def _get_providers() -> Dict[str, Type[ImageProvider]]:
     return _PROVIDERS
 
 
-def get_provider(name: str, config: Optional[Dict[str, Any]] = None) -> ImageProvider:
+def get_provider(name: str, config: Optional[Dict[str, Any]] = None, use_cache: bool = True) -> ImageProvider:
     """
     Get a provider instance by name.
     
     Args:
         name: Provider name (google, openai, etc.)
         config: Provider configuration including API keys
+        use_cache: If True, return cached provider if available
     
     Returns:
         Provider instance
@@ -88,6 +92,8 @@ def get_provider(name: str, config: Optional[Dict[str, Any]] = None) -> ImagePro
     Raises:
         ValueError: If provider name is unknown
     """
+    global _PROVIDER_CACHE
+    
     providers = _get_providers()
     name = name.lower().strip()
     
@@ -95,8 +101,24 @@ def get_provider(name: str, config: Optional[Dict[str, Any]] = None) -> ImagePro
         available = ', '.join(providers.keys()) if providers else 'none (no providers available)'
         raise ValueError(f"Unknown provider: {name}. Available: {available}")
     
+    # Check cache first
+    if use_cache and name in _PROVIDER_CACHE:
+        # Update config if provided
+        if config:
+            cached = _PROVIDER_CACHE[name]
+            cached.api_key = config.get('api_key', cached.api_key)
+            cached.auth_mode = config.get('auth_mode', cached.auth_mode)
+        return _PROVIDER_CACHE[name]
+    
+    # Create new provider instance
     provider_class = providers[name]
-    return provider_class(config or {})
+    provider_instance = provider_class(config or {})
+    
+    # Cache it
+    if use_cache:
+        _PROVIDER_CACHE[name] = provider_instance
+    
+    return provider_instance
 
 
 def list_providers() -> list[str]:
@@ -105,8 +127,28 @@ def list_providers() -> list[str]:
     return list(providers.keys())
 
 
+def clear_provider_cache():
+    """Clear the provider cache."""
+    global _PROVIDER_CACHE
+    _PROVIDER_CACHE = {}
+
+
+def preload_provider(name: str, config: Optional[Dict[str, Any]] = None) -> None:
+    """
+    Preload a provider into cache.
+    
+    Args:
+        name: Provider name to preload
+        config: Provider configuration
+    """
+    print(f"Loading provider: {name}...")
+    get_provider(name, config, use_cache=True)
+
+
 __all__ = [
     "ImageProvider",
     "get_provider",
     "list_providers",
+    "clear_provider_cache",
+    "preload_provider",
 ]

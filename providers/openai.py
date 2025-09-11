@@ -11,12 +11,15 @@ try:
 except ImportError:
     from core.security import rate_limiter
 
-# Lazy import OpenAI
+# Check if openai is available but don't import yet
 try:
-    import importlib
-    OpenAIClient = importlib.import_module("openai").OpenAI
+    import importlib.util
+    OPENAI_AVAILABLE = importlib.util.find_spec("openai") is not None
 except ImportError:
-    OpenAIClient = None
+    OPENAI_AVAILABLE = False
+
+# This will be populated on first use
+OpenAIClient = None
 
 
 class OpenAIProvider(ImageProvider):
@@ -27,16 +30,22 @@ class OpenAIProvider(ImageProvider):
         super().__init__(config)
         self.client = None
         
-        if self.api_key and OpenAIClient:
-            self.client = OpenAIClient(api_key=self.api_key)
+        # Don't initialize client here - do it lazily when needed
     
     def _ensure_client(self):
         """Ensure OpenAI client is available."""
-        if OpenAIClient is None:
+        global OpenAIClient
+        
+        if not OPENAI_AVAILABLE:
             raise ImportError(
                 "The 'openai' package is not installed. "
                 "Please run: pip install openai"
             )
+        
+        # Lazy import on first use
+        if OpenAIClient is None:
+            print("Loading OpenAI provider...")
+            from openai import OpenAI as OpenAIClient
         
         if not self.client:
             if not self.api_key:

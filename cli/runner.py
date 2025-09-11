@@ -6,7 +6,7 @@ from typing import Optional, Tuple, List
 
 from core import ConfigManager, get_api_key_url, sanitize_filename, read_key_file
 from core.utils import read_readme_text, extract_api_key_help
-from providers import get_provider
+from providers import get_provider, preload_provider
 
 
 def resolve_api_key(
@@ -122,6 +122,11 @@ def run_cli(args) -> int:
         "api_key": key,
         "auth_mode": auth_mode,
     }
+    
+    # Preload the provider to show loading message early
+    # This happens for all operations to give user feedback
+    if args.test or args.prompt:
+        preload_provider(provider, provider_config)
     
     # Handle --test
     if args.test:

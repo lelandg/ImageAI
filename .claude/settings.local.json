@@ -7,7 +7,8 @@
       "Bash(python:*)",
       "Bash(pip3 list:*)",
       "Bash(pip search:*)",
-      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline -15)"
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline -15)",
+      "Bash(time:*)"
     ],
     "deny": [],
     "ask": []

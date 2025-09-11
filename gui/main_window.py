@@ -26,7 +26,7 @@ from core import (
     detect_image_extension, find_cached_demo, default_model_for_provider
 )
 from core.constants import DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT
-from providers import get_provider, list_providers
+from providers import get_provider, preload_provider, list_providers
 from gui.dialogs import ExamplesDialog
 from gui.workers import GenWorker
 try:
@@ -77,6 +77,13 @@ class MainWindow(QMainWindow):
         
         # Load history from disk
         self._load_history_from_disk()
+        
+        # Preload current provider to show loading message early
+        provider_config = {
+            "api_key": self.current_api_key,
+            "auth_mode": self.config.get("auth_mode", "api-key")
+        }
+        preload_provider(self.current_provider, provider_config)
         
         # Create UI
         self._init_ui()
@@ -1564,6 +1571,13 @@ For more detailed information, please refer to the full documentation.
         self.current_provider = provider.lower()
         self.config.set("provider", self.current_provider)
         self.config.save()
+        
+        # Preload the new provider
+        provider_config = {
+            "api_key": self.config.get_api_key(self.current_provider),
+            "auth_mode": self.config.get("auth_mode", "api-key")
+        }
+        preload_provider(self.current_provider, provider_config)
         
         # Update new widgets if available
         if hasattr(self, 'resolution_selector') and self.resolution_selector:
