@@ -9,9 +9,11 @@ https://ai.google.dev/gemini-api/docs/video?example=dialogue
 
 ## 1) Overview
 Add a **Video Project** workflow to ImageAI that turns **lyrics/text** into an **auto‑storyboard** → **image generation** pipeline → **video assembly**.  
-It uses existing provider integrations (Gemini, OpenAI, Stable Diffusion/local) for images and supports **Gemini Veo** (Veo 3 / Veo 3 Fast / Veo 2) for short AI‑native clips, plus a **local slideshow/ffmpeg** path for arbitrary lengths.
+It uses existing provider integrations (Gemini, OpenAI, Stable Diffusion/local) for **images only** and supports **local slideshow/ffmpeg** for video assembly. Future support planned for **Gemini Veo** when API becomes available.
 
-**Out of scope now:** music/beat/TTS, song mixing, external audio alignment.
+**Important Note:** As of 2025, neither OpenAI (Sora) nor Google (Veo) offer public API access for video generation. This implementation focuses on image-based video creation using FFmpeg.
+
+**Out of scope now:** music/beat/TTS, song mixing, external audio alignment, direct AI video generation (until APIs available).
 
 **Additional development data:** I used ChatGPT-5 to create lyrics, image prompts, and "Veo project." Everything is in the (project root) `./Sample/` folder. It shows examples of image prompts based on lyrics, and a template folder layout for each Veo scene. I don't care what format the output is in, since it will produce a valid MP4. So consider this an example. It *would* be nice to save projects so the user can switch between them, and always restore the same images/videos.
 
@@ -26,8 +28,9 @@ It uses existing provider integrations (Gemini, OpenAI, Stable Diffusion/local) 
 - Generate **N images** (per scene) using a selected **provider/model** (already wired in ImageAI).
 - Human‑in‑the‑loop **review/approve/reorder/regenerate**.
 - **Render video** via:
-  - **Local slideshow** (Ken Burns, crossfades, captions; silent by default).
-  - **Gemini Veo**: create 5–8s AI clips (Veo 2 silent, Veo 3 w/ audio) and concatenate.
+  - **Local slideshow** (Ken Burns, crossfades, captions; silent by default) - PRIMARY METHOD.
+  - **Future: Gemini Veo** (when API available): create 5–8s AI clips and concatenate.
+  - **Future: OpenAI Sora** (when API available): direct video generation.
 - Save a **project file** (`.iaproj.json`) and all assets under a dedicated project folder.
 - Keep detailed **metadata** for reproducibility & cost tracking.
 
@@ -651,11 +654,13 @@ class VideoProjectPipeline:
 ---
 
 ## 12) Phased Delivery
-1. **MVP**: Tab, parser, storyboard, image batcher, slideshow export.  
-2. **Veo integration**: 5–8s clips + concat; mute option; region gates.  
-3. **Polish**: captions, presets, caching, cost panel, drag‑reorder UX.  
-4. **Continuity**: seed carry‑over & “character sheet”.  
-5. **Audio (future)**: external track alignment, beat mapping.
+1. **MVP (Immediate)**: Tab, parser, storyboard, image batcher, FFmpeg slideshow export.  
+2. **Enhancement (v1.1)**: Advanced transitions, captions, presets, caching, cost panel, drag‑reorder UX.  
+3. **API Integration (When Available)**: 
+   - Veo integration: 5–8s clips + concat; mute option; region gates.
+   - Sora integration: Direct video generation when API released.
+4. **Continuity (v2.0)**: Seed carry‑over, character consistency, style transfer.  
+5. **Audio (v3.0)**: External track alignment, beat mapping, music sync.
 
 ---
 
@@ -774,30 +779,32 @@ class VideoProjectPipeline:
 - [ ] Create preview generation (low-res, fast)
 - [ ] Build final export with quality settings
 
-### Phase 6: Veo Integration
-#### 6.1 Veo Client Implementation
+### Phase 6: Future Video API Integration (Post-MVP)
+#### 6.1 API Monitoring & Preparation
+- [ ] Monitor Google Veo API announcements
+- [ ] Monitor OpenAI Sora API announcements
+- [ ] Create abstract video provider interface
+- [ ] Design plugin architecture for future providers
+
+#### 6.2 Veo Integration (When Available)
 - [ ] Create `VeoClient` wrapper class
 - [ ] Implement `generate_videos()` with all config options
 - [ ] Add polling mechanism for long-running operations
 - [ ] Build download and local storage system
+- [ ] Add Veo model support (3.0, 3.0 Fast, 2.0)
+- [ ] Implement regional compliance rules
 
-#### 6.2 Model Support
-- [ ] Add Veo 3.0 support (`veo-3.0-generate-001`)
-- [ ] Add Veo 3.0 Fast support (`veo-3.0-fast-generate-001`)
-- [ ] Add Veo 2.0 support (`veo-2.0-generate-001`)
-- [ ] Implement model-specific constraints (resolution, duration)
+#### 6.3 Sora Integration (When Available)
+- [ ] Create `SoraClient` wrapper class
+- [ ] Implement OpenAI video generation interface
+- [ ] Add Sora-specific configuration options
+- [ ] Build compatibility layer with existing pipeline
 
-#### 6.3 Regional Compliance
-- [ ] Implement region detection system
-- [ ] Add `personGeneration` option gating by region
-- [ ] Create UI warnings for regional restrictions
-- [ ] Build fallback strategies for blocked content
-
-#### 6.4 Video Processing
-- [ ] Implement clip concatenation system
-- [ ] Add audio muting option for Veo 3 outputs
-- [ ] Build 2-day retention warning system
-- [ ] Create automatic local backup on generation
+#### 6.4 Alternative Providers (Optional)
+- [ ] Research Runway Gen-3 API integration
+- [ ] Evaluate Stability AI Video when available
+- [ ] Consider Pika Labs or other emerging APIs
+- [ ] Implement provider cost comparison
 
 ### Phase 7: CLI Implementation
 #### 7.1 Command Structure
@@ -888,7 +895,48 @@ moviepy>=1.0.3  # Video processing (or imageio-ffmpeg)
 
 ---
 
-## 16) Known Limitations & Future Enhancements
+## 16) Video API Availability Status (2025)
+
+### Current Reality
+As of 2025, the video generation API landscape is limited:
+
+#### **Google Veo**
+- **Status**: No public API available
+- **Access**: Limited to Google Labs VideoFX (waitlist only)
+- **API Timeline**: Not announced
+- **Implementation Strategy**: Build infrastructure now, integrate when available
+
+#### **OpenAI Sora**
+- **Status**: No API available or planned
+- **Access**: ChatGPT Plus/Pro subscribers only (web interface)
+- **API Timeline**: OpenAI states "no plans for a Sora API yet"
+- **Implementation Strategy**: Focus on DALL-E 3 for storyboard images
+
+#### **Available Alternatives**
+1. **FFmpeg Slideshow** (PRIMARY APPROACH)
+   - Fully available now
+   - Complete control over transitions and effects
+   - No API limitations or costs
+   - Supports arbitrary video lengths
+
+2. **Runway Gen-3 API** (Future consideration)
+   - Limited beta API access
+   - $0.05-0.10 per second of video
+   - Requires separate integration
+
+3. **Stability AI Video** (Future consideration)
+   - API in development
+   - Pricing TBD
+
+### Implementation Approach
+Given the API limitations, the MVP will focus on:
+1. **Image Generation**: Use existing providers (Gemini, OpenAI, SD)
+2. **Video Assembly**: FFmpeg-based slideshow with professional effects
+3. **Future-Ready Architecture**: Modular design to easily add Veo/Sora when available
+
+---
+
+## 17) Known Limitations & Future Enhancements
 
 ### Current Limitations
 - No audio synchronization (music/beat alignment)
