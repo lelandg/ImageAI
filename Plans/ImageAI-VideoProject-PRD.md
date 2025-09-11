@@ -1,6 +1,6 @@
 # 🎬 ImageAI – Video Project Feature (PRD & Build Plan)
-*Version:* 0.1 • *Date:* 2025-09-11 20:08 UTC  
-*Owner:* ImageAI • *Status:* Draft
+*Version:* 1.0 • *Date:* 2025-09-11 20:30 UTC  
+*Owner:* ImageAI • *Status:* Implementation Ready
 
 Veo API reference: 
 https://ai.google.dev/gemini-api/docs/video?example=dialogue
@@ -116,34 +116,97 @@ It uses existing provider integrations (Gemini, OpenAI, Stable Diffusion/local) 
 
 ---
 
-## 5) Architecture & Code Layout (proposed)
+## 5) Architecture & Code Layout (Detailed)
+
+### Directory Structure
 ```
 /gui
-  video_project_tab.py            # New PySide6 tab widget
-  widgets/storyboard_table.py     # Scene grid + thumbnails
-  widgets/render_queue.py         # Progress & logs
+  video/
+    video_project_tab.py         # Main tab widget with all panels
+    storyboard_table.py          # Scene management table widget
+    render_queue.py              # Export queue with progress tracking
+    timeline_widget.py           # Visual timeline for scene durations
+    preview_player.py            # Video preview widget
 
 /core
-  storyboard.py                   # Parse input → scenes (ids, prompts, durations)
-  prompt_engine.py                # LLM rewrite via Gemini/OpenAI
-  image_batcher.py                # Fan‑out image jobs, retries, caching
-  timing.py                       # Target-length allocation algorithm
-  video/ffmpeg_slideshow.py       # Local slideshow builder
-  video/veo_client.py             # Thin wrapper over google-genai generate_videos
+  video/
+    __init__.py                  # Video module exports
+    project.py                   # VideoProject data model & persistence
+    storyboard.py                # Scene parsing and management
+    timing.py                    # Duration allocation algorithms
+    prompt_engine.py             # LLM-based prompt enhancement
+    image_batcher.py             # Concurrent image generation
+    cache.py                     # Content-addressed storage
+    
+  video/renderers/
+    ffmpeg_slideshow.py          # Local slideshow generator
+    veo_renderer.py              # Veo API video generation
+    base_renderer.py             # Abstract renderer interface
 
 /providers
-  images/                         # (existing) ensure unified: generate_image(prompt, cfg)
-  video/gemini_veo.py             # High-level “clip” API (5–8s), chaining, concat
+  video/
+    __init__.py                  # Video provider exports
+    gemini_veo.py                # Veo 2/3 implementation
+    base_video.py                # Abstract video provider
+
+/templates
+  video/
+    lyric_prompt.j2              # Template for lyric → image prompt
+    shot_prompt.j2               # Template for cinematic shots
+    scene_description.j2         # Template for scene metadata
 
 /cli
-  video.py                        # `python main.py video …` entry
-  ```
+  commands/
+    video.py                     # Video subcommand implementation
+```
 
-**Touch points in existing repo**
-- `main.py`: register tab → `VideoProjectTab()`  
-- `providers/`: ensure image providers expose **uniform** signature:  
-  `generate_image(prompt:str, size:tuple, negative:str|None, seed:int|None, **kwargs) -> Path`
-- `templates/`: add `lyric_prompt.j2`, `shot_prompt.j2`
+### Integration Points with Existing Code
+
+#### main.py modifications:
+```python
+# Add to GUI tab registration
+if self.config.get("features", {}).get("video_enabled", True):
+    from gui.video.video_project_tab import VideoProjectTab
+    self.video_tab = VideoProjectTab(self.config, self.providers)
+    self.tabs.addTab(self.video_tab, "🎬 Video Project")
+
+# Add to CLI argument parser
+subparsers = parser.add_subparsers(dest='command')
+video_parser = subparsers.add_parser('video', help='Video generation')
+cli.commands.video.setup_parser(video_parser)
+```
+
+#### Provider Interface Extension:
+```python
+# providers/base.py - Add video generation interface
+class BaseProvider:
+    def generate_image(self, prompt: str, **kwargs) -> Path:
+        """Existing image generation"""
+        pass
+    
+    def generate_video(self, prompt: str, image: Path = None, **kwargs) -> Path:
+        """New video generation interface"""
+        raise NotImplementedError("Video generation not supported")
+
+# providers/google.py - Extend for Veo
+class GoogleProvider(BaseProvider):
+    def generate_video(self, prompt: str, image: Path = None, **kwargs):
+        from providers.video.gemini_veo import VeoRenderer
+        renderer = VeoRenderer(self.client)
+        return renderer.generate(prompt, image, **kwargs)
+```
+
+#### Configuration Schema:
+```python
+# core/config.py - Add video settings
+VIDEO_CONFIG_SCHEMA = {
+    "video_projects_dir": str,  # Default: user_config_dir / "video_projects"
+    "default_video_provider": str,  # "veo" or "slideshow"
+    "veo_model": str,  # "veo-3.0-generate-001"
+    "ffmpeg_path": str,  # Auto-detect or user-specified
+    "cache_size_mb": int,  # Max cache size (default: 5000)
+    "concurrent_images": int,  # Max parallel generations (default: 3)
+}
 
 ---
 
@@ -190,37 +253,385 @@ imageai video --in lyrics.txt --image-provider openai --image-model dall-e-3   -
 
 ---
 
-## 9) API Call Shapes
-### Google Gemini – Veo (Python, google-genai)
+## 9) API Implementation Examples
+
+### 9.1 Complete Veo Integration Class
 ```python
+# providers/video/gemini_veo.py
+import time
+import logging
+from pathlib import Path
+from typing import Optional, Dict, Any
 from google import genai
 from google.genai import types
 
-client = genai.Client()
-
-op = client.models.generate_videos(
-    model="veo-3.0-generate-001",
-    prompt="Close-up cinematic shot of…",
-    image=approved_png,  # optional
-    config=types.GenerateVideosConfig(
-        aspect_ratio="16:9",
-        resolution="720p",             # Veo 3: 720p or 1080p; Veo 2: 720p only
-        negative_prompt="low quality, cartoon, artifacting",
-        person_generation="allow_adult",  # allowed values depend on region & mode
-        seed=1234
-    ),
-)
-while not op.done:
-    op = client.operations.get(op)
-
-video = op.response.generated_videos[0]
-client.files.download(file=video.video)
-video.video.save("clip-001.mp4")
+class VeoRenderer:
+    """Gemini Veo video generation wrapper"""
+    
+    MODELS = {
+        "veo-3": "veo-3.0-generate-001",
+        "veo-3-fast": "veo-3.0-fast-generate-001", 
+        "veo-2": "veo-2.0-generate-001"
+    }
+    
+    def __init__(self, api_key: str):
+        self.client = genai.Client(api_key=api_key)
+        self.logger = logging.getLogger(__name__)
+    
+    def generate_video(self, 
+                      prompt: str,
+                      model: str = "veo-3",
+                      image: Optional[Path] = None,
+                      aspect_ratio: str = "16:9",
+                      resolution: str = "720p",
+                      negative_prompt: Optional[str] = None,
+                      person_generation: str = "dont_allow",
+                      seed: Optional[int] = None,
+                      output_path: Optional[Path] = None,
+                      timeout: int = 600) -> Path:
+        """
+        Generate video using Veo API
+        
+        Args:
+            prompt: Text description for video
+            model: Model key (veo-3, veo-3-fast, veo-2)
+            image: Optional first frame image
+            aspect_ratio: Video aspect ratio (16:9 or 9:16)
+            resolution: Output resolution (720p or 1080p)
+            negative_prompt: Things to avoid in generation
+            person_generation: Person generation policy
+            seed: Random seed for reproducibility
+            output_path: Where to save the video
+            timeout: Maximum wait time in seconds
+            
+        Returns:
+            Path to saved video file
+        """
+        
+        # Validate model
+        if model not in self.MODELS:
+            raise ValueError(f"Unknown model: {model}")
+        
+        model_name = self.MODELS[model]
+        
+        # Build config
+        config_kwargs = {
+            "aspect_ratio": aspect_ratio,
+            "resolution": resolution,
+            "person_generation": person_generation
+        }
+        
+        if negative_prompt:
+            config_kwargs["negative_prompt"] = negative_prompt
+        if seed is not None:
+            config_kwargs["seed"] = seed
+            
+        config = types.GenerateVideosConfig(**config_kwargs)
+        
+        # Load image if provided
+        image_file = None
+        if image and image.exists():
+            with open(image, 'rb') as f:
+                image_file = self.client.files.upload(f)
+        
+        # Start generation
+        self.logger.info(f"Starting video generation with {model_name}")
+        operation = self.client.models.generate_videos(
+            model=model_name,
+            prompt=prompt,
+            image=image_file,
+            config=config
+        )
+        
+        # Poll for completion
+        start_time = time.time()
+        while not operation.done:
+            if time.time() - start_time > timeout:
+                raise TimeoutError(f"Video generation timed out after {timeout}s")
+            
+            time.sleep(10)
+            operation = self.client.operations.get(operation)
+            self.logger.debug(f"Generation status: {operation.metadata}")
+        
+        # Check for errors
+        if operation.error:
+            raise Exception(f"Video generation failed: {operation.error}")
+        
+        # Download result
+        if not operation.result or not operation.result.generated_videos:
+            raise Exception("No video was generated")
+        
+        video = operation.result.generated_videos[0]
+        self.client.files.download(file=video.video)
+        
+        # Save to file
+        if not output_path:
+            output_path = Path(f"veo_{model}_{int(time.time())}.mp4")
+        
+        video.video.save(str(output_path))
+        self.logger.info(f"Video saved to {output_path}")
+        
+        return output_path
+    
+    def concatenate_videos(self, video_paths: list[Path], output: Path) -> Path:
+        """Concatenate multiple Veo clips into one video"""
+        import subprocess
+        
+        # Create concat file
+        concat_file = Path("concat.txt")
+        with open(concat_file, 'w') as f:
+            for path in video_paths:
+                f.write(f"file '{path.absolute()}'\n")
+        
+        # Run ffmpeg concat
+        cmd = [
+            "ffmpeg", "-f", "concat", "-safe", "0",
+            "-i", str(concat_file),
+            "-c", "copy",  # No re-encoding
+            str(output)
+        ]
+        
+        subprocess.run(cmd, check=True)
+        concat_file.unlink()
+        
+        return output
 ```
 
-### Local slideshow (ffmpeg idea)
-```bash
-ffmpeg -r 24 -f concat -safe 0 -i frames.txt -filter_complex   "zoompan=d=120,fade=t=in:st=0:d=0.5,fade=t=out:st=4.5:d=0.5"   -c:v libx264 -pix_fmt yuv420p exports/out.mp4
+### 9.2 FFmpeg Slideshow Generator
+```python
+# core/video/renderers/ffmpeg_slideshow.py
+import subprocess
+import json
+from pathlib import Path
+from typing import List, Optional, Tuple
+
+class FFmpegSlideshow:
+    """Generate video slideshows from images using FFmpeg"""
+    
+    def __init__(self, ffmpeg_path: str = "ffmpeg"):
+        self.ffmpeg = ffmpeg_path
+        self._verify_ffmpeg()
+    
+    def _verify_ffmpeg(self):
+        """Check if FFmpeg is available"""
+        try:
+            subprocess.run([self.ffmpeg, "-version"], 
+                         capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            raise RuntimeError("FFmpeg not found. Please install FFmpeg.")
+    
+    def create_slideshow(self,
+                        images: List[Path],
+                        durations: List[float],
+                        output: Path,
+                        resolution: Tuple[int, int] = (1920, 1080),
+                        fps: int = 24,
+                        transition_duration: float = 0.5,
+                        enable_ken_burns: bool = True,
+                        captions: Optional[List[str]] = None) -> Path:
+        """
+        Create slideshow video from images
+        
+        Args:
+            images: List of image paths
+            durations: Duration for each image in seconds
+            output: Output video path
+            resolution: Output resolution (width, height)
+            fps: Frames per second
+            transition_duration: Crossfade duration
+            enable_ken_burns: Enable pan/zoom effect
+            captions: Optional captions for each image
+        """
+        
+        # Build filter complex
+        filter_parts = []
+        
+        for i, (img, duration) in enumerate(zip(images, durations)):
+            # Scale and pad to resolution
+            filter_parts.append(
+                f"[{i}:v]scale={resolution[0]}:{resolution[1]}:"
+                f"force_original_aspect_ratio=decrease,"
+                f"pad={resolution[0]}:{resolution[1]}:(ow-iw)/2:(oh-ih)/2"
+            )
+            
+            # Ken Burns effect (zoom and pan)
+            if enable_ken_burns:
+                zoom_factor = 1.1
+                pan_x = "(iw-ow)/2+sin(t/10)*20"
+                pan_y = "(ih-oh)/2+cos(t/10)*20"
+                filter_parts[-1] += (
+                    f",zoompan=z='min(zoom+0.002,{zoom_factor})':"
+                    f"x='{pan_x}':y='{pan_y}':"
+                    f"d={int(duration * fps)}:s={resolution[0]}x{resolution[1]}"
+                )
+            
+            # Add caption if provided
+            if captions and i < len(captions):
+                caption = captions[i].replace("'", "\\'")
+                filter_parts[-1] += (
+                    f",drawtext=text='{caption}':"
+                    f"fontsize=48:fontcolor=white:"
+                    f"shadowcolor=black:shadowx=2:shadowy=2:"
+                    f"x=(w-text_w)/2:y=h-80"
+                )
+            
+            filter_parts[-1] += f"[v{i}]"
+        
+        # Build crossfade chain
+        if len(images) > 1:
+            # Start with first video
+            concat_filter = f"[v0]"
+            
+            for i in range(1, len(images)):
+                offset = sum(durations[:i]) - transition_duration * i
+                concat_filter += (
+                    f"[v{i}]xfade=transition=fade:"
+                    f"duration={transition_duration}:"
+                    f"offset={offset}"
+                )
+                if i < len(images) - 1:
+                    concat_filter += f"[vx{i}];[vx{i}]"
+            
+            filter_parts.append(concat_filter + ",format=yuv420p[out]")
+        else:
+            filter_parts.append("[v0]format=yuv420p[out]")
+        
+        # Build FFmpeg command
+        cmd = [self.ffmpeg, "-y"]
+        
+        # Add inputs
+        for img in images:
+            cmd.extend(["-loop", "1", "-i", str(img)])
+        
+        # Add filter complex
+        cmd.extend([
+            "-filter_complex", ";".join(filter_parts),
+            "-map", "[out]",
+            "-r", str(fps),
+            "-c:v", "libx264",
+            "-preset", "medium",
+            "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            str(output)
+        ])
+        
+        # Run FFmpeg
+        subprocess.run(cmd, check=True)
+        
+        return output
+```
+
+### 9.3 Scene-to-Video Pipeline
+```python
+# core/video/pipeline.py
+from typing import List, Dict, Any
+from pathlib import Path
+import asyncio
+import concurrent.futures
+
+class VideoProjectPipeline:
+    """End-to-end video generation pipeline"""
+    
+    def __init__(self, config: Dict[str, Any], providers: Dict[str, Any]):
+        self.config = config
+        self.providers = providers
+        self.image_cache = {}
+    
+    async def process_scene(self, scene: Dict[str, Any]) -> List[Path]:
+        """Generate images for a single scene"""
+        
+        # Check cache first
+        cache_key = self._get_cache_key(scene)
+        if cache_key in self.image_cache:
+            return self.image_cache[cache_key]
+        
+        # Get provider
+        provider_name = scene.get("provider", self.config["default_provider"])
+        provider = self.providers[provider_name]
+        
+        # Generate variants
+        images = []
+        num_variants = scene.get("variants", 3)
+        
+        for i in range(num_variants):
+            seed = scene.get("seed", 0) + i if scene.get("seed") else None
+            
+            image_path = await self._generate_image_async(
+                provider=provider,
+                prompt=scene["prompt"],
+                seed=seed,
+                negative=scene.get("negative_prompt"),
+                size=(1920, 1080)  # 16:9 for video
+            )
+            images.append(image_path)
+        
+        # Cache results
+        self.image_cache[cache_key] = images
+        return images
+    
+    async def generate_all_scenes(self, scenes: List[Dict]) -> Dict[str, List[Path]]:
+        """Generate images for all scenes concurrently"""
+        
+        # Limit concurrency
+        semaphore = asyncio.Semaphore(self.config.get("concurrent_images", 3))
+        
+        async def process_with_limit(scene):
+            async with semaphore:
+                return await self.process_scene(scene)
+        
+        # Process all scenes
+        tasks = [process_with_limit(scene) for scene in scenes]
+        results = await asyncio.gather(*tasks)
+        
+        # Map scene IDs to images
+        return {
+            scene["id"]: images 
+            for scene, images in zip(scenes, results)
+        }
+    
+    def render_video(self, project: Dict, renderer: str = "slideshow") -> Path:
+        """Render final video using specified renderer"""
+        
+        if renderer == "slideshow":
+            from core.video.renderers.ffmpeg_slideshow import FFmpegSlideshow
+            slideshow = FFmpegSlideshow()
+            
+            # Collect approved images
+            images = []
+            durations = []
+            captions = []
+            
+            for scene in project["scenes"]:
+                images.append(Path(scene["approved_image"]))
+                durations.append(scene["duration_sec"])
+                captions.append(scene.get("caption", ""))
+            
+            return slideshow.create_slideshow(
+                images=images,
+                durations=durations,
+                captions=captions,
+                output=Path(project["export"]["path"])
+            )
+        
+        elif renderer == "veo":
+            from providers.video.gemini_veo import VeoRenderer
+            veo = VeoRenderer(self.config["google_api_key"])
+            
+            # Generate Veo clips for each scene
+            clips = []
+            for scene in project["scenes"]:
+                clip = veo.generate_video(
+                    prompt=scene["prompt"],
+                    image=Path(scene["approved_image"]),
+                    model=project["provider"]["video"]["model"]
+                )
+                clips.append(clip)
+            
+            # Concatenate clips
+            return veo.concatenate_videos(
+                clips, 
+                Path(project["export"]["path"])
+            )
 ```
 
 ---
@@ -261,3 +672,237 @@ ffmpeg -r 24 -f concat -safe 0 -i frames.txt -filter_complex   "zoompan=d=120,fa
 - I can **Export → Slideshow** and get a valid MP4 at 24fps, 16:9.
 - All artifacts + a `project.iaproj.json` are saved under the project folder.
 - Rerunning the same prompts with the same seed reuses cached images.
+
+---
+
+## 15) Implementation Checklist
+
+### Phase 1: Foundation & Core Components
+#### 1.1 Project Structure Setup
+- [ ] Create core video module directories: `core/video/`, `gui/video/`
+- [ ] Create templates directory: `templates/video/`
+- [ ] Set up project storage structure under user config directory
+- [ ] Create sample project structure in `Plans/samples/`
+
+#### 1.2 Data Models & Storage
+- [ ] Define `VideoProject` class with schema version control
+- [ ] Implement `Scene` data model (id, source, prompt, duration, images, approved)
+- [ ] Create `ProjectManager` for save/load/migrate operations
+- [ ] Implement project file validation & schema migration
+
+#### 1.3 Dependencies & Configuration
+- [ ] Add Jinja2 to requirements.txt for template processing
+- [ ] Add moviepy or imageio-ffmpeg for video processing
+- [ ] Verify google-genai supports latest Veo models
+- [ ] Update config system to include video-specific settings
+
+### Phase 2: Text Processing & Storyboarding
+#### 2.1 Input Parsing
+- [ ] Implement timestamped format parser: `[mm:ss] text` and `[mm:ss.mmm] text`
+- [ ] Implement structured lyrics parser: `# Verse`, `# Chorus`, etc.
+- [ ] Create format auto-detection logic
+- [ ] Add file loaders for `.txt`, `.md`, `.iaproj.json`
+
+#### 2.2 Timing & Scene Generation
+- [ ] Implement `TimingEngine` with pacing presets (Fast/Medium/Slow)
+- [ ] Create duration allocation algorithm for target length
+- [ ] Build scene splitter with configurable shot duration (3-5s default)
+- [ ] Add duration validation and adjustment logic
+
+#### 2.3 Prompt Engineering
+- [ ] Create base Jinja2 templates: `lyric_prompt.j2`, `shot_prompt.j2`
+- [ ] Implement `PromptEngine` with LLM rewrite capability
+- [ ] Add template token system for style variables
+- [ ] Create cinematic prompt generator with camera/style/ambiance tokens
+
+### Phase 3: Image Generation Pipeline
+#### 3.1 Provider Integration
+- [ ] Ensure unified `generate_image()` interface across all providers
+- [ ] Add batch generation support with concurrency limits
+- [ ] Implement provider-specific error handling and retries
+- [ ] Add cost estimation and tracking per provider
+
+#### 3.2 Image Caching & Management
+- [ ] Create idempotent cache with hash-based lookup
+- [ ] Implement cache invalidation and cleanup
+- [ ] Add image variant management (N per scene)
+- [ ] Build thumbnail generation for UI display
+
+#### 3.3 Scene Management
+- [ ] Implement per-scene regeneration without affecting others
+- [ ] Add approved image selection and persistence
+- [ ] Create scene reordering logic
+- [ ] Build metadata tracking for each generation
+
+### Phase 4: GUI Implementation
+#### 4.1 Video Project Tab
+- [ ] Create `VideoProjectTab` widget in PySide6
+- [ ] Implement project header with name/folder/save controls
+- [ ] Add input panel with text area and format selector
+- [ ] Build provider selection with model dropdowns
+
+#### 4.2 Storyboard Interface
+- [ ] Create `StoryboardTable` widget with scene rows
+- [ ] Implement thumbnail grid display (N variants per scene)
+- [ ] Add drag-and-drop scene reordering
+- [ ] Build duration adjustment controls per scene
+- [ ] Add caption/title toggle switches
+
+#### 4.3 Style & Configuration
+- [ ] Add aspect ratio selector (16:9, 9:16)
+- [ ] Implement quality/resolution controls
+- [ ] Add negative prompt input
+- [ ] Create seed management UI
+- [ ] Build template selector and editor
+
+#### 4.4 Progress & Feedback
+- [ ] Implement `RenderQueue` widget with progress bars
+- [ ] Add real-time generation status display
+- [ ] Create cost estimate display
+- [ ] Build error notification system
+
+### Phase 5: Video Assembly - Local Slideshow
+#### 5.1 FFmpeg Integration
+- [ ] Implement `FFmpegSlideshow` class
+- [ ] Add Ken Burns effect (pan/zoom) support
+- [ ] Create crossfade transition system (0.5s default)
+- [ ] Build caption overlay system
+
+#### 5.2 Video Export
+- [ ] Implement H.264 encoding at 24fps
+- [ ] Add resolution options (720p, 1080p)
+- [ ] Create preview generation (low-res, fast)
+- [ ] Build final export with quality settings
+
+### Phase 6: Veo Integration
+#### 6.1 Veo Client Implementation
+- [ ] Create `VeoClient` wrapper class
+- [ ] Implement `generate_videos()` with all config options
+- [ ] Add polling mechanism for long-running operations
+- [ ] Build download and local storage system
+
+#### 6.2 Model Support
+- [ ] Add Veo 3.0 support (`veo-3.0-generate-001`)
+- [ ] Add Veo 3.0 Fast support (`veo-3.0-fast-generate-001`)
+- [ ] Add Veo 2.0 support (`veo-2.0-generate-001`)
+- [ ] Implement model-specific constraints (resolution, duration)
+
+#### 6.3 Regional Compliance
+- [ ] Implement region detection system
+- [ ] Add `personGeneration` option gating by region
+- [ ] Create UI warnings for regional restrictions
+- [ ] Build fallback strategies for blocked content
+
+#### 6.4 Video Processing
+- [ ] Implement clip concatenation system
+- [ ] Add audio muting option for Veo 3 outputs
+- [ ] Build 2-day retention warning system
+- [ ] Create automatic local backup on generation
+
+### Phase 7: CLI Implementation
+#### 7.1 Command Structure
+- [ ] Add `video` subcommand to main CLI
+- [ ] Implement all GUI features in CLI
+- [ ] Add batch processing support
+- [ ] Create progress indicators for terminal
+
+#### 7.2 CLI Arguments
+- [ ] `--in`: Input file path
+- [ ] `--provider`: Image provider selection
+- [ ] `--model`: Model selection
+- [ ] `--length`: Target video length
+- [ ] `--slideshow`: Use local slideshow renderer
+- [ ] `--veo-model`: Veo model selection
+- [ ] `--out`: Output file path
+- [ ] `--mute`: Mute audio option
+
+### Phase 8: Testing & Validation
+#### 8.1 Unit Tests
+- [ ] Test lyric parsing (all formats)
+- [ ] Test timing allocation algorithms
+- [ ] Test prompt generation and templates
+- [ ] Test project save/load/migration
+
+#### 8.2 Integration Tests
+- [ ] Test provider image generation pipeline
+- [ ] Test video assembly (slideshow)
+- [ ] Test Veo API integration
+- [ ] Test end-to-end workflow
+
+#### 8.3 Sample Projects
+- [ ] Create "Grandpa Was a Democrat" reference project
+- [ ] Add deterministic seed test cases
+- [ ] Build CI/CD smoke tests
+- [ ] Document expected outputs
+
+### Phase 9: Documentation & Polish
+#### 9.1 User Documentation
+- [ ] Update README with video feature documentation
+- [ ] Create video workflow tutorial
+- [ ] Add troubleshooting guide
+- [ ] Document all CLI options
+
+#### 9.2 Developer Documentation
+- [ ] Document API interfaces
+- [ ] Create plugin architecture docs
+- [ ] Add contribution guidelines
+- [ ] Build architecture diagrams
+
+#### 9.3 UI Polish
+- [ ] Add tooltips and help text
+- [ ] Implement keyboard shortcuts
+- [ ] Create preset management
+- [ ] Add export history viewer
+
+### Technical Requirements & Notes
+
+#### Dependencies to Add
+```txt
+# Add to requirements.txt
+Jinja2>=3.1.0  # Template processing
+moviepy>=1.0.3  # Video processing (or imageio-ffmpeg)
+# google-genai already present
+```
+
+#### FFmpeg Requirements
+- Must be installed separately by user
+- Provide installation instructions per platform
+- Implement graceful fallback if not available
+
+#### File Size Considerations
+- Image cache management (auto-cleanup old projects)
+- Video file compression options
+- Streaming preview instead of full download
+
+#### Performance Optimizations
+- Concurrent image generation with rate limiting
+- Lazy loading of thumbnails in UI
+- Background video rendering with queue
+- Incremental project saves
+
+#### Error Handling Priority
+- Network timeouts and retries
+- API rate limiting and backoff
+- Provider safety blocks and fallbacks
+- Disk space monitoring
+
+---
+
+## 16) Known Limitations & Future Enhancements
+
+### Current Limitations
+- No audio synchronization (music/beat alignment)
+- Limited to 8-second Veo clips
+- No character consistency across scenes
+- Regional restrictions on person generation
+- 2-day retention for Veo videos
+
+### Future Enhancements (Post-MVP)
+- Music beat detection and sync
+- TTS narration integration
+- Multi-track timeline editor
+- Character consistency via ControlNet/IP-Adapter
+- External audio track alignment
+- Longer video generation via clip chaining
+- Style transfer between scenes
+- Motion templates and presets
