@@ -167,15 +167,22 @@ class LyricParser:
         """
         lines = []
         line_number = 0
+        current_section = None
         
         for raw_line in text.strip().split('\n'):
             line_number += 1
             stripped = raw_line.strip()
             
+            # Check if this is a section marker even in plain format
+            if stripped and stripped.startswith('[') and stripped.endswith(']'):
+                # Extract section name for metadata but keep the line
+                current_section = stripped[1:-1].strip()
+            
             if stripped:
                 lines.append(ParsedLine(
                     text=stripped,
-                    line_number=line_number
+                    line_number=line_number,
+                    section=current_section if not (stripped.startswith('[') and stripped.endswith(']')) else current_section
                 ))
         
         return lines
@@ -475,14 +482,22 @@ class StoryboardGenerator:
                 len(parsed_lines), preset, weights
             )
         
-        # Create scenes
+        # Create scenes (skip section markers)
         scenes = []
+        scene_index = 0
+        skipped_markers = 0
         for i, (line, duration) in enumerate(zip(parsed_lines, durations)):
+            # Skip section markers like [Verse 1], [Chorus], etc.
+            if line.text.strip().startswith('[') and line.text.strip().endswith(']'):
+                self.logger.info(f"Skipping section marker: {line.text}")
+                skipped_markers += 1
+                continue
+            
             scene = Scene(
                 source=line.text,
                 prompt=line.text,  # Initial prompt is the source text
                 duration_sec=duration,
-                order=i
+                order=scene_index
             )
             
             # Add metadata
@@ -492,6 +507,7 @@ class StoryboardGenerator:
                 scene.metadata["section"] = line.section
             
             scenes.append(scene)
+            scene_index += 1
         
         # Apply MIDI synchronization if available
         if midi_timing_data and sync_mode != "none":
@@ -499,7 +515,7 @@ class StoryboardGenerator:
                 scenes, midi_timing_data, sync_mode, snap_strength
             )
         
-        self.logger.info(f"Generated {len(scenes)} scenes, "
+        self.logger.info(f"Generated {len(scenes)} content scenes (skipped {skipped_markers} section markers), "
                         f"total duration: {sum(s.duration_sec for s in scenes):.1f} seconds")
         
         return scenes

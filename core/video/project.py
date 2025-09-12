@@ -188,6 +188,7 @@ class VideoProject:
     
     # Template and style
     prompt_template: str = "templates/video/lyric_prompt.j2"
+    prompt_style: Optional[str] = None  # Cinematic, Artistic, etc.
     style: Dict[str, Any] = field(default_factory=lambda: {
         "aspect_ratio": "16:9",
         "negative_prompt": "",
@@ -196,11 +197,21 @@ class VideoProject:
         "resolution": "1080p"
     })
     
+    # Generation settings
+    variants: int = 3  # Number of image variants to generate
+    ken_burns: bool = True  # Enable Ken Burns effect
+    transitions: bool = True  # Enable transitions
+    captions: bool = False  # Enable captions
+    
     # Input configuration
     input_text: str = ""
-    input_format: str = "structured"  # 'timestamped' or 'structured'
-    timing_preset: str = "medium"  # 'fast', 'medium', 'slow'
+    input_format: str = "structured"  # 'timestamped' or 'structured' or 'Auto-detect'
+    timing_preset: str = "medium"  # 'fast', 'medium', 'slow' or 'Medium', 'Fast', 'Slow'
     target_duration: Optional[str] = None  # "00:02:45" format
+    aspect_ratio: Optional[str] = None  # Redundant with style, but kept for compatibility
+    resolution: Optional[str] = None  # Redundant with style, but kept for compatibility
+    seed: Optional[int] = None  # Redundant with style, but kept for compatibility  
+    negative_prompt: Optional[str] = None  # Redundant with style, but kept for compatibility
     
     # Audio configuration
     audio_tracks: List[AudioTrack] = field(default_factory=list)
@@ -249,6 +260,7 @@ class VideoProject:
                 }
             },
             "prompt_template": self.prompt_template,
+            "prompt_style": self.prompt_style,
             "style": self.style,
             "input": {
                 "raw": self.input_text,
@@ -257,6 +269,12 @@ class VideoProject:
             "timing": {
                 "target": self.target_duration,
                 "preset": self.timing_preset
+            },
+            "generation": {
+                "variants": self.variants,
+                "ken_burns": self.ken_burns,
+                "transitions": self.transitions,
+                "captions": self.captions
             },
             "audio": {
                 "tracks": [track.to_dict() for track in self.audio_tracks]
@@ -305,7 +323,22 @@ class VideoProject:
         
         # Load style and templates
         project.prompt_template = data.get("prompt_template", "templates/video/lyric_prompt.j2")
+        project.prompt_style = data.get("prompt_style")
         project.style = data.get("style", project.style)
+        
+        # Load generation settings
+        if "generation" in data:
+            gen = data["generation"]
+            project.variants = gen.get("variants", 3)
+            project.ken_burns = gen.get("ken_burns", True)
+            project.transitions = gen.get("transitions", True)
+            project.captions = gen.get("captions", False)
+        else:
+            # Fallback for older projects
+            project.variants = 3
+            project.ken_burns = True
+            project.transitions = True
+            project.captions = False
         
         # Load input configuration
         if "input" in data:

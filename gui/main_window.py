@@ -2734,6 +2734,19 @@ For more detailed information, please refer to the full documentation.
     def closeEvent(self, event):
         """Save all UI state on close."""
         try:
+            # Auto-save video project if exists
+            if hasattr(self, 'tab_video') and self.tab_video:
+                try:
+                    # Check if the video tab has a workspace widget with a current project
+                    if hasattr(self.tab_video, 'workspace') and self.tab_video.workspace:
+                        workspace = self.tab_video.workspace
+                        if hasattr(workspace, 'current_project') and workspace.current_project:
+                            # Auto-save the project
+                            workspace.save_project()
+                            print(f"Auto-saved video project: {workspace.current_project.name}")
+                except Exception as e:
+                    print(f"Error auto-saving video project: {e}")
+            
             # Save window geometry
             geo = {
                 "x": self.x(),

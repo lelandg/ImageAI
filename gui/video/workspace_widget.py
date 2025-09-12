@@ -542,7 +542,7 @@ class WorkspaceWidget(QWidget):
     # Event handlers
     def new_project(self):
         """Create a new project"""
-        if self.current_project and self.current_project.is_modified:
+        if self.current_project and len(self.current_project.scenes) > 0:
             reply = QMessageBox.question(
                 self, "Save Project",
                 "Save current project before creating new?",
@@ -626,8 +626,17 @@ class WorkspaceWidget(QWidget):
         
         try:
             self.update_project_from_ui()
+            
+            # Debug: Log what we're saving
+            num_scenes = len(self.current_project.scenes) if self.current_project.scenes else 0
+            self.logger.info(f"Saving project with {num_scenes} scenes")
+            self.logger.info(f"Saving LLM: {self.current_project.llm_provider}/{self.current_project.llm_model}")
+            self.logger.info(f"Saving Image: {self.current_project.image_provider}/{self.current_project.image_model}")
+            self.logger.info(f"Saving Variants: {self.current_project.variants}")
+            self.logger.info(f"Saving Ken Burns: {self.current_project.ken_burns}")
+            
             self.project_manager.save_project(self.current_project)
-            self.status_label.setText(f"Project saved: {self.current_project.name}")
+            self.status_label.setText(f"Project saved: {self.current_project.name} ({num_scenes} scenes)")
             self.project_changed.emit(self.current_project)
         except Exception as e:
             self.logger.error(f"Failed to save project: {e}", exc_info=True)
@@ -646,6 +655,8 @@ class WorkspaceWidget(QWidget):
         
         # Generate scenes
         from core.video.storyboard import StoryboardGenerator
+        from core.video.llm_sync import LLMSyncAssistant
+        
         generator = StoryboardGenerator()
         
         # Get format type
@@ -667,6 +678,11 @@ class WorkspaceWidget(QWidget):
             sync_mode = self.sync_mode_combo.currentText().lower()
             snap_strength = self.snap_strength_slider.value() / 100.0
         
+        # Check if LLM sync should be used
+        llm_provider = self.llm_provider_combo.currentText()
+        llm_model = self.llm_model_combo.currentText()
+        use_llm_sync = llm_provider != "None" and llm_model
+        
         # Generate scenes with MIDI sync if available
         scenes = generator.generate_scenes(
             text,
@@ -678,11 +694,61 @@ class WorkspaceWidget(QWidget):
             snap_strength=snap_strength
         )
         
-        # Update project
+        # Apply LLM sync if enabled and we have timing data
+        if use_llm_sync and midi_timing:
+            self.logger.info(f"Using LLM sync with {llm_provider}/{llm_model}")
+            sync_assistant = LLMSyncAssistant(provider=llm_provider.lower(), model=llm_model)
+            
+            # Extract lyrics and sections from scenes and MIDI (skip section markers)
+            lyrics_lines = [scene.source for scene in scenes 
+                          if not (scene.source.strip().startswith('[') and scene.source.strip().endswith(']'))]
+            sections = {}
+            total_duration = sum(s.duration_sec for s in scenes)
+            
+            # Handle MidiTimingData object or dict
+            if hasattr(midi_timing, 'duration_sec'):
+                # It's a MidiTimingData object
+                total_duration = midi_timing.duration_sec
+                if hasattr(midi_timing, 'sections'):
+                    sections = midi_timing.sections
+            elif isinstance(midi_timing, dict):
+                # It's a dict
+                total_duration = midi_timing.get('duration_sec', sum(s.duration_sec for s in scenes))
+                sections = midi_timing.get('sections', {})
+            
+            # Get improved timing from LLM sync
+            timed_lyrics = sync_assistant.estimate_lyric_timing(lyrics_lines, total_duration, sections)
+            
+            # Update scene timings based on LLM sync (skip section markers)
+            if timed_lyrics:
+                lyric_index = 0
+                for scene in scenes:
+                    # Skip section markers
+                    if scene.source.strip().startswith('[') and scene.source.strip().endswith(']'):
+                        continue
+                    
+                    if lyric_index < len(timed_lyrics):
+                        timed_lyric = timed_lyrics[lyric_index]
+                        scene.duration_sec = timed_lyric.end_time - timed_lyric.start_time
+                        scene.metadata['llm_start_time'] = timed_lyric.start_time
+                        scene.metadata['llm_end_time'] = timed_lyric.end_time
+                        if timed_lyric.section_type:
+                            scene.metadata['section'] = timed_lyric.section_type
+                        lyric_index += 1
+                
+                self.logger.info(f"Applied LLM sync to {lyric_index} content scenes (skipped section markers)")
+        
+        # Update project with ALL current settings
+        self.update_project_from_ui()  # This now saves all settings including LLM
+        
+        # Update specific storyboard-related fields
         self.current_project.scenes = scenes
         self.current_project.input_text = text
         self.current_project.sync_mode = sync_mode
         self.current_project.snap_strength = snap_strength
+        
+        # Log scenes being added
+        self.logger.info(f"Generated {len(scenes)} scenes for project")
         
         # Update karaoke settings if enabled
         if self.karaoke_group.isChecked():
@@ -707,6 +773,10 @@ class WorkspaceWidget(QWidget):
         self.populate_scene_table()
         self.update_ui_state()
         self.project_changed.emit(self.current_project)
+        
+        # Auto-save after generating storyboard to preserve scenes
+        self.save_project()
+        self.logger.info(f"Auto-saved project after storyboard generation with {len(scenes)} scenes")
     
     def populate_scene_table(self):
         """Populate scene table with project scenes"""
@@ -718,13 +788,13 @@ class WorkspaceWidget(QWidget):
         total_duration = 0
         for i, scene in enumerate(self.current_project.scenes):
             self.scene_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            self.scene_table.setItem(i, 1, QTableWidgetItem(scene.source_text[:50]))
-            self.scene_table.setItem(i, 2, QTableWidgetItem(f"{scene.duration:.1f}s"))
+            self.scene_table.setItem(i, 1, QTableWidgetItem(scene.source[:50] if scene.source else ""))
+            self.scene_table.setItem(i, 2, QTableWidgetItem(f"{scene.duration_sec:.1f}s"))
             self.scene_table.setItem(i, 3, QTableWidgetItem(scene.prompt or ""))
             self.scene_table.setItem(i, 4, QTableWidgetItem(str(len(scene.images))))
             self.scene_table.setItem(i, 5, QTableWidgetItem("Ready" if scene.images else "Pending"))
             
-            total_duration += scene.duration
+            total_duration += scene.duration_sec
         
         # Update total duration
         minutes = int(total_duration // 60)
@@ -848,13 +918,15 @@ class WorkspaceWidget(QWidget):
             self.audio_file_label.setText(Path(filename).name)
             self.clear_audio_btn.setEnabled(True)
             if self.current_project:
-                from core.video.models import AudioTrack
-                self.current_project.audio_track = AudioTrack(
-                    file_path=filename,
+                from core.video.project import AudioTrack
+                # Clear existing tracks and add new one
+                self.current_project.audio_tracks = []
+                self.current_project.audio_tracks.append(AudioTrack(
+                    file_path=Path(filename),
                     volume=self.volume_slider.value() / 100.0,
-                    fade_in=self.fade_in_spin.value(),
-                    fade_out=self.fade_out_spin.value()
-                )
+                    fade_in_duration=self.fade_in_spin.value(),
+                    fade_out_duration=self.fade_out_spin.value()
+                ))
     
     def clear_audio(self):
         """Clear audio selection"""
@@ -945,6 +1017,89 @@ class WorkspaceWidget(QWidget):
                 QMessageBox.information(self, "No Lyrics",
                                       "No lyrics found in MIDI. Enter lyrics manually to align to beats.")
     
+    def _recalculate_scene_timing(self):
+        """Recalculate scene timing using LLM or MIDI sync."""
+        if not self.current_project or not self.current_project.scenes:
+            return
+        
+        from core.video.llm_sync import LLMSyncAssistant
+        
+        # Get current settings
+        llm_provider = self.current_project.llm_provider if hasattr(self.current_project, 'llm_provider') else None
+        llm_model = self.current_project.llm_model if hasattr(self.current_project, 'llm_model') else None
+        use_llm = llm_provider and llm_model
+        
+        # Get total duration
+        total_duration = self.duration_spin.value()  # in seconds
+        if total_duration <= 0:
+            total_duration = 120  # Default to 2 minutes
+        
+        # Get MIDI timing data if available
+        midi_timing = self.current_project.midi_timing_data if hasattr(self.current_project, 'midi_timing_data') else None
+        sections = {}
+        
+        # Handle MidiTimingData object or dict
+        if midi_timing:
+            if hasattr(midi_timing, 'duration_sec'):
+                # It's a MidiTimingData object
+                total_duration = midi_timing.duration_sec
+                if hasattr(midi_timing, 'sections'):
+                    sections = midi_timing.sections
+            elif isinstance(midi_timing, dict) and 'duration_sec' in midi_timing:
+                # It's a dict
+                total_duration = midi_timing['duration_sec']
+                sections = midi_timing.get('sections', {})
+        
+        # Extract lyrics from scenes (skip section markers)
+        lyrics_lines = [scene.source for scene in self.current_project.scenes
+                       if not (scene.source.strip().startswith('[') and scene.source.strip().endswith(']'))]
+        
+        if use_llm or sections:
+            # Use LLM sync assistant
+            sync_assistant = LLMSyncAssistant(provider=llm_provider if use_llm else None, 
+                                            model=llm_model if use_llm else None)
+            timed_lyrics = sync_assistant.estimate_lyric_timing(lyrics_lines, total_duration, sections)
+            
+            # Update scene timings (skip section markers)
+            if timed_lyrics:
+                lyric_index = 0
+                for scene in self.current_project.scenes:
+                    # Skip section markers
+                    if scene.source.strip().startswith('[') and scene.source.strip().endswith(']'):
+                        scene.duration_sec = 0.0  # Section markers get no time
+                        continue
+                    
+                    if lyric_index < len(timed_lyrics):
+                        timed_lyric = timed_lyrics[lyric_index]
+                        scene.duration_sec = timed_lyric.end_time - timed_lyric.start_time
+                        scene.metadata['start_time'] = timed_lyric.start_time
+                        scene.metadata['end_time'] = timed_lyric.end_time
+                        if timed_lyric.section_type:
+                            scene.metadata['section'] = timed_lyric.section_type
+                        lyric_index += 1
+                
+                self.logger.info(f"Recalculated timing for {len(timed_lyrics)} scenes using {'LLM' if use_llm else 'MIDI'} sync")
+        else:
+            # Simple even distribution
+            avg_duration = total_duration / len(self.current_project.scenes)
+            current_time = 0.0
+            
+            for scene in self.current_project.scenes:
+                # Skip section markers or give them less time
+                if scene.source.startswith('[') and scene.source.endswith(']'):
+                    scene.duration_sec = avg_duration * 0.3
+                else:
+                    scene.duration_sec = avg_duration
+                
+                scene.metadata['start_time'] = current_time
+                scene.metadata['end_time'] = current_time + scene.duration_sec
+                current_time += scene.duration_sec
+            
+            self.logger.info(f"Recalculated timing for {len(self.current_project.scenes)} scenes with even distribution")
+        
+        # Auto-save the fixed timing
+        self.save_project()
+    
     def update_ui_state(self):
         """Update UI element states based on project"""
         has_project = self.current_project is not None
@@ -975,6 +1130,46 @@ class WorkspaceWidget(QWidget):
         seconds = duration_sec % 60
         self.current_project.target_duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         
+        # Save LLM provider settings
+        llm_provider = self.llm_provider_combo.currentText()
+        if llm_provider != "None":
+            self.current_project.llm_provider = llm_provider.lower()
+            self.current_project.llm_model = self.llm_model_combo.currentText()
+        else:
+            self.current_project.llm_provider = None
+            self.current_project.llm_model = None
+        
+        # Save image provider settings
+        self.current_project.image_provider = self.img_provider_combo.currentText().lower()
+        self.current_project.image_model = self.img_model_combo.currentText()
+        
+        # Save video provider settings
+        self.current_project.video_provider = self.video_provider_combo.currentText().lower()
+        if self.video_provider_combo.currentText() == "Google Veo":
+            self.current_project.video_model = self.veo_model_combo.currentText()
+        else:
+            self.current_project.video_model = None
+        
+        # Save style settings
+        self.current_project.aspect_ratio = self.aspect_combo.currentText()
+        self.current_project.resolution = self.resolution_combo.currentText()
+        self.current_project.seed = self.seed_spin.value() if self.seed_spin.value() >= 0 else None
+        self.current_project.negative_prompt = self.negative_prompt.text()
+        
+        # Save prompt template/style
+        self.current_project.prompt_style = self.prompt_style_combo.currentText()
+        
+        # Save generation settings
+        self.current_project.variants = self.variants_spin.value()
+        self.current_project.ken_burns = self.ken_burns_check.isChecked()
+        self.current_project.transitions = self.transitions_check.isChecked()
+        self.current_project.captions = self.captions_check.isChecked()
+        
+        # IMPORTANT: Save audio and MIDI file information
+        # These are already set when browsing, but we need to ensure they're preserved
+        # The audio_track and midi_file_path are already set in browse_audio_file and browse_midi_file
+        # No additional action needed here as they're already part of self.current_project
+        
     def load_project_to_ui(self):
         """Load project data to UI"""
         if not self.current_project:
@@ -996,6 +1191,113 @@ class WorkspaceWidget(QWidget):
                 if index >= 0:
                     self.pacing_combo.setCurrentIndex(index)
             
+            # Load LLM provider settings
+            if self.current_project.llm_provider:
+                # Find and set the provider - handle case variations
+                provider_text = self.current_project.llm_provider
+                if provider_text.lower() == 'openai':
+                    provider_text = 'OpenAI'
+                elif provider_text.lower() == 'claude':
+                    provider_text = 'Claude'
+                elif provider_text.lower() == 'gemini':
+                    provider_text = 'Gemini'
+                elif provider_text.lower() == 'ollama':
+                    provider_text = 'Ollama'
+                elif provider_text.lower() == 'lm studio':
+                    provider_text = 'LM Studio'
+                
+                index = self.llm_provider_combo.findText(provider_text)
+                if index >= 0:
+                    self.llm_provider_combo.setCurrentIndex(index)
+                    # This will trigger on_llm_provider_changed which populates models
+                    
+                    # After models are populated, set the model
+                    if self.current_project.llm_model:
+                        model_index = self.llm_model_combo.findText(self.current_project.llm_model)
+                        if model_index >= 0:
+                            self.llm_model_combo.setCurrentIndex(model_index)
+                        else:
+                            self.logger.warning(f"LLM model not found in combo: {self.current_project.llm_model}")
+                else:
+                    self.logger.warning(f"LLM provider not found in combo: {provider_text}")
+            else:
+                self.llm_provider_combo.setCurrentIndex(0)  # Set to "None"
+            
+            # Load image provider settings
+            if self.current_project.image_provider:
+                # Handle case variations
+                provider_text = self.current_project.image_provider
+                if provider_text.lower() == 'openai':
+                    provider_text = 'OpenAI'
+                elif provider_text.lower() == 'gemini':
+                    provider_text = 'Gemini'
+                elif provider_text.lower() == 'stability':
+                    provider_text = 'Stability'
+                
+                index = self.img_provider_combo.findText(provider_text)
+                if index >= 0:
+                    self.img_provider_combo.setCurrentIndex(index)
+                    # This triggers on_img_provider_changed
+                    
+                    # Set the model
+                    if self.current_project.image_model:
+                        model_index = self.img_model_combo.findText(self.current_project.image_model)
+                        if model_index >= 0:
+                            self.img_model_combo.setCurrentIndex(model_index)
+                        else:
+                            self.logger.warning(f"Image model not found in combo: {self.current_project.image_model}")
+                else:
+                    self.logger.warning(f"Image provider not found in combo: {provider_text}")
+            
+            # Load video provider settings
+            if self.current_project.video_provider:
+                if self.current_project.video_provider == "slideshow":
+                    self.video_provider_combo.setCurrentIndex(0)
+                elif self.current_project.video_provider == "veo" or self.current_project.video_provider == "google veo":
+                    index = self.video_provider_combo.findText("Google Veo")
+                    if index >= 0:
+                        self.video_provider_combo.setCurrentIndex(index)
+                        # Set Veo model if available
+                        if self.current_project.video_model:
+                            model_index = self.veo_model_combo.findText(self.current_project.video_model)
+                            if model_index >= 0:
+                                self.veo_model_combo.setCurrentIndex(model_index)
+            
+            # Load style settings
+            if hasattr(self.current_project, 'aspect_ratio') and self.current_project.aspect_ratio:
+                index = self.aspect_combo.findText(self.current_project.aspect_ratio)
+                if index >= 0:
+                    self.aspect_combo.setCurrentIndex(index)
+            
+            if hasattr(self.current_project, 'resolution') and self.current_project.resolution:
+                index = self.resolution_combo.findText(self.current_project.resolution)
+                if index >= 0:
+                    self.resolution_combo.setCurrentIndex(index)
+            
+            if hasattr(self.current_project, 'seed') and self.current_project.seed is not None:
+                self.seed_spin.setValue(self.current_project.seed)
+            
+            if hasattr(self.current_project, 'negative_prompt') and self.current_project.negative_prompt:
+                self.negative_prompt.setText(self.current_project.negative_prompt)
+            
+            if hasattr(self.current_project, 'prompt_style') and self.current_project.prompt_style:
+                index = self.prompt_style_combo.findText(self.current_project.prompt_style)
+                if index >= 0:
+                    self.prompt_style_combo.setCurrentIndex(index)
+            
+            # Load generation settings
+            if hasattr(self.current_project, 'variants'):
+                self.variants_spin.setValue(self.current_project.variants)
+            
+            if hasattr(self.current_project, 'ken_burns'):
+                self.ken_burns_check.setChecked(self.current_project.ken_burns)
+            
+            if hasattr(self.current_project, 'transitions'):
+                self.transitions_check.setChecked(self.current_project.transitions)
+            
+            if hasattr(self.current_project, 'captions'):
+                self.captions_check.setChecked(self.current_project.captions)
+            
             # Load target duration
             if self.current_project.target_duration:
                 try:
@@ -1009,11 +1311,79 @@ class WorkspaceWidget(QWidget):
                 except Exception as e:
                     self.logger.warning(f"Could not parse target duration: {e}")
             
+            # Load audio track if present
+            if self.current_project.audio_tracks and len(self.current_project.audio_tracks) > 0:
+                audio_track = self.current_project.audio_tracks[0]
+                if audio_track.file_path:
+                    self.audio_file_label.setText(Path(audio_track.file_path).name)
+                    self.clear_audio_btn.setEnabled(True)
+                    # Set audio controls
+                    self.volume_slider.setValue(int(audio_track.volume * 100))
+                    self.fade_in_spin.setValue(audio_track.fade_in_duration)
+                    self.fade_out_spin.setValue(audio_track.fade_out_duration)
+            else:
+                self.audio_file_label.setText("No file")
+                self.clear_audio_btn.setEnabled(False)
+            
+            # Load MIDI file if present
+            if self.current_project.midi_file_path:
+                self.midi_file_label.setText(Path(self.current_project.midi_file_path).name)
+                self.clear_midi_btn.setEnabled(True)
+                self.sync_mode_combo.setEnabled(True)
+                self.snap_strength_slider.setEnabled(True)
+                self.extract_lyrics_btn.setEnabled(True)
+                self.karaoke_group.setVisible(True)
+                
+                # Set sync controls
+                if hasattr(self.current_project, 'sync_mode'):
+                    index = self.sync_mode_combo.findText(self.current_project.sync_mode.title())
+                    if index >= 0:
+                        self.sync_mode_combo.setCurrentIndex(index)
+                
+                if hasattr(self.current_project, 'snap_strength'):
+                    self.snap_strength_slider.setValue(int(self.current_project.snap_strength * 100))
+                
+                # Display MIDI info if available
+                if self.current_project.midi_timing_data:
+                    timing_data = self.current_project.midi_timing_data
+                    self.midi_info_label.setText(
+                        f"{timing_data.tempo_bpm:.0f} BPM, {timing_data.time_signature}, "
+                        f"{timing_data.duration_sec:.1f}s"
+                    )
+            else:
+                self.midi_file_label.setText("No file")
+                self.midi_info_label.setText("")
+                self.clear_midi_btn.setEnabled(False)
+                self.sync_mode_combo.setEnabled(False)
+                self.snap_strength_slider.setEnabled(False)
+                self.extract_lyrics_btn.setEnabled(False)
+                self.karaoke_group.setVisible(False)
+            
             # Load scene table
+            num_scenes = len(self.current_project.scenes) if self.current_project.scenes else 0
+            self.logger.info(f"Loaded project with {num_scenes} scenes")
+            
+            # Check and fix incorrect scene timing if needed
+            if self.current_project.scenes and len(self.current_project.scenes) > 2:
+                durations = [s.duration_sec for s in self.current_project.scenes]
+                # If most scenes have exactly 0.5 sec duration (except maybe the first), recalculate
+                non_first_durations = durations[1:] if len(durations) > 1 else durations
+                if non_first_durations.count(0.5) > len(non_first_durations) * 0.7:
+                    self.logger.warning("Detected incorrect scene timing, recalculating...")
+                    self._recalculate_scene_timing()
+            
             self.populate_scene_table()
             
             # Update UI state
             self.update_ui_state()
+            
+            # Update status to show scene count
+            self.status_label.setText(f"Loaded: {self.current_project.name} ({num_scenes} scenes)")
+            
+            # Save project with updated format if needed
+            if not hasattr(self.current_project, 'variants'):
+                self.logger.info("Upgrading project format and saving...")
+                self.save_project()
             
         except Exception as e:
             self.logger.error(f"Error loading project to UI: {e}", exc_info=True)

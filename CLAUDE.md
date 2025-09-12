@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 When the application exits, it automatically copies debug files to the current directory:
 - **`./imageai_current.log`** - Copy of the most recent log file with all errors and debug info
 - **`./imageai_current_project.json`** - Copy of the last loaded/saved project file
+- Use these when you need to check the current log or project file for errors.
 
 These files are invaluable for debugging issues. Always check them first when investigating errors.
 
