@@ -1,23 +1,24 @@
 # ImageAI CodeMap
 
-*Last Updated: 2025-09-08 19:41:03*
+*Last Updated: 2025-09-11 19:46:26*
 
 ## Table of Contents
 
 | Section | Line Number |
 |---------|-------------|
-| [Quick Navigation](#quick-navigation) | 22 |
-| [Visual Architecture Overview](#visual-architecture-overview) | 43 |
-| [Project Structure](#project-structure) | 137 |
-| [Core Module](#core-module) | 208 |
-| [Providers Module](#providers-module) | 375 |
-| [GUI Module](#gui-module) | 531 |
-| [CLI Module](#cli-module) | 753 |
-| [Templates](#templates) | 807 |
-| [Cross-File Dependencies](#cross-file-dependencies) | 837 |
-| [Configuration Files](#configuration-files) | 898 |
-| [Architecture Patterns](#architecture-patterns) | 943 |
-| [Development Guidelines](#development-guidelines) | 992 |
+| [Quick Navigation](#quick-navigation) | 23 |
+| [Visual Architecture Overview](#visual-architecture-overview) | 48 |
+| [Project Structure](#project-structure) | 142 |
+| [Core Module](#core-module) | 217 |
+| [Providers Module](#providers-module) | 386 |
+| [GUI Module](#gui-module) | 542 |
+| [CLI Module](#cli-module) | 764 |
+| [Templates](#templates) | 818 |
+| [Utility Scripts](#utility-scripts) | 848 |
+| [Cross-File Dependencies](#cross-file-dependencies) | 884 |
+| [Configuration Files](#configuration-files) | 945 |
+| [Architecture Patterns](#architecture-patterns) | 1007 |
+| [Development Guidelines](#development-guidelines) | 1058 |
 
 ## Quick Navigation
 
@@ -25,20 +26,24 @@
 - **Main Application**: `main.py:25` - Entry point function
 - **GUI Launch**: `gui/__init__.py:15` - GUI initialization
 - **CLI Runner**: `cli/runner.py:69` - CLI execution handler
-- **Provider Factory**: `providers/__init__.py:77` - Provider instantiation
+- **Provider Factory**: `providers/__init__.py:121` - Provider instantiation
 
 ### Key Configuration
-- **App Constants**: `core/constants.py:6` - APP_NAME and VERSION (0.9.1)
-- **Config Manager**: `core/config.py:11` - Configuration handling class
+- **App Constants**: `core/constants.py:6` - APP_NAME and VERSION (0.9.3)
+- **Config Manager**: `core/config.py:13` - Configuration handling class
 - **Security Module**: `core/security.py:30` - Path validation, key storage, rate limiting
 - **Provider Models**: `core/constants.py:14` - Model mappings per provider
 
 ### User Actions
-- **Generate Image (GUI)**: `gui/main_window.py:837` - handle_generate()
-- **Generate Image (CLI)**: `cli/runner.py:162` - provider.generate()
-- **Manage API Keys**: `gui/main_window.py:623` - handle_save_settings()
+- **Generate Image (GUI)**: `gui/main_window.py:1563` - handle_generate()
+- **Generate Image (CLI)**: `cli/runner.py:164` - provider.generate()
+- **Manage API Keys**: `gui/main_window.py:1182` - handle_save_settings()
 - **Test Authentication**: `cli/runner.py:133` - provider.validate_auth()
 - **Google Cloud Auth**: `core/gcloud_utils.py:22` - find_gcloud_command()
+
+### Utility Scripts
+- **Config Migration**: `migrate_config.py:52` - Migrate old config format
+- **Secure Keys**: `secure_keys.py:15` - Store keys in system keyring
 
 ## Visual Architecture Overview
 
@@ -143,24 +148,24 @@ ImageAI/
 │
 ├── core/                   # Core functionality module
 │   ├── __init__.py        # Module exports (51 lines)
-│   ├── config.py          # Configuration management (185 lines)
-│   ├── constants.py       # Application constants (80 lines)
+│   ├── config.py          # Configuration management (177 lines)
+│   ├── constants.py       # Application constants (85 lines)
 │   ├── gcloud_utils.py    # Google Cloud utilities (143 lines)
 │   ├── security.py        # Security utilities (283 lines)
 │   └── utils.py           # Utility functions (345 lines)
 │
 ├── providers/             # AI provider implementations
-│   ├── __init__.py       # Provider factory (111 lines)
+│   ├── __init__.py       # Provider factory (153 lines)
 │   ├── base.py           # Abstract base class (144 lines)
-│   ├── google.py         # Google Gemini provider (294 lines)
-│   ├── openai.py         # OpenAI DALL-E provider (237 lines)
+│   ├── google.py         # Google Gemini provider (471 lines)
+│   ├── openai.py         # OpenAI DALL-E provider (348 lines)
 │   ├── stability.py      # Stability AI provider (445 lines)
 │   ├── local_sd.py       # Local Stable Diffusion (490 lines)
 │   └── model_info.py     # Model information registry (145 lines)
 │
 ├── gui/                   # GUI components
 │   ├── __init__.py       # GUI launcher (25 lines)
-│   ├── main_window.py    # Main window class (1683 lines)
+│   ├── main_window.py    # Main window class (3230 lines)
 │   ├── dialogs.py        # Dialog windows (194 lines)
 │   ├── workers.py        # Background workers (50 lines)
 │   ├── settings_widgets.py # Settings UI widgets (487 lines)
@@ -170,7 +175,7 @@ ImageAI/
 ├── cli/                   # CLI components
 │   ├── __init__.py       # CLI exports (5 lines)
 │   ├── parser.py         # Argument parser (102 lines)
-│   └── runner.py         # CLI execution (232 lines)
+│   └── runner.py         # CLI execution (237 lines)
 │
 ├── templates/             # Prompt templates
 │   └── __init__.py       # Template definitions (2097 lines)
@@ -186,6 +191,7 @@ ImageAI/
 │   ├── ComprehensiveSettings.md
 │   ├── GeminiFullFeatures.md
 │   ├── GoogleCloudAuth.md
+│   ├── ImageAI-VideoProject-PRD.md # Video project specification
 │   ├── NewProviders.md
 │   ├── ProviderIntegration.md
 │   └── RefactoringPlan.md
@@ -197,9 +203,12 @@ ImageAI/
 │   ├── settings.local.json
 │   └── VERSION_LOCATIONS.md
 │
+├── migrate_config.py      # Config migration utility (179 lines)
+├── secure_keys.py         # API key security utility (106 lines)
 ├── requirements.txt       # Python dependencies
 ├── requirements-local-sd.txt # Local SD dependencies
 ├── README.md             # User documentation
+├── CHANGELOG.md          # Version history
 ├── CLAUDE.md             # Claude AI instructions
 ├── GEMINI.md             # Gemini templates guide
 └── download_models.py    # Model download utility (160 lines)
@@ -238,49 +247,51 @@ ImageAI/
 | default_model_for_provider | 26 | function | utils |
 
 ### core/config.py
-**Path**: `core/config.py` - 185 lines
+**Path**: `core/config.py` - 177 lines
 **Purpose**: Configuration management and API key storage with secure keyring integration
 
 #### Classes
 | Class | Line | Description |
 |-------|------|-------------|
-| ConfigManager | 11 | Main configuration handler with keyring support |
+| ConfigManager | 13 | Main configuration handler with keyring support |
 
 #### ConfigManager Methods
 | Method | Line | Access | Returns | Description |
 |--------|------|--------|---------|-------------|
-| __init__() | 14 | public | None | Initialize config with platform-specific paths |
-| _ensure_config_exists() | 29 | private | None | Create config file if missing |
-| load() | 35 | public | None | Load configuration from disk |
-| save() | 44 | public | None | Save configuration to disk |
-| get() | 50 | public | Any | Get config value with default |
-| set() | 58 | public | None | Set config value |
-| get_api_key() | 63 | public | str | Get API key from keyring or config |
-| set_api_key() | 74 | public | None | Set API key in keyring and config |
-| get_images_dir() | 83 | public | Path | Get images output directory |
-| get_templates() | 94 | public | list | Get saved templates |
-| add_template() | 100 | public | None | Add new template |
-| remove_template() | 110 | public | None | Remove template |
-| get_auth_validated() | 118 | public | bool | Get auth validation state |
-| set_auth_validated() | 124 | public | None | Set auth validation state |
-| clear_auth_validation() | 130 | public | None | Clear all auth states |
-| get_gcloud_project_id() | 146 | public | str | Get Google Cloud project ID |
-| set_gcloud_project_id() | 152 | public | None | Set Google Cloud project ID |
+| __init__() | 16 | public | None | Initialize config with platform-specific paths |
+| _get_config_dir() | 23 | private | Path | Get platform-specific config directory |
+| _load_config() | 37 | private | dict | Load configuration from disk |
+| save() | 48 | public | None | Save configuration to disk |
+| get() | 55 | public | Any | Get config value with default |
+| set() | 59 | public | None | Set config value |
+| get_provider_config() | 63 | public | dict | Get provider-specific config |
+| set_provider_config() | 68 | public | None | Set provider-specific config |
+| get_api_key() | 74 | public | str | Get API key from keyring or config |
+| set_api_key() | 88 | public | None | Set API key in keyring and config |
+| get_auth_mode() | 99 | public | str | Get auth mode for provider |
+| set_auth_mode() | 105 | public | None | Set auth mode for provider |
+| get_auth_validated() | 110 | public | bool | Get auth validation state |
+| set_auth_validated() | 116 | public | None | Set auth validation state |
+| get_gcloud_project_id() | 138 | public | str | Get Google Cloud project ID |
+| set_gcloud_project_id() | 142 | public | None | Set Google Cloud project ID |
+| save_details_record() | 146 | public | None | Save generation details |
+| load_details_records() | 154 | public | list | Load generation records |
+| get_images_dir() | 168 | public | Path | Get images output directory |
 
 #### Module Functions
 | Function | Line | Returns | Description |
 |----------|------|---------|-------------|
-| get_api_key_url() | 165 | str | Get API key URL for provider |
+| get_api_key_url() | 175 | str | Get API key URL for provider |
 
 ### core/constants.py
-**Path**: `core/constants.py` - 80 lines
+**Path**: `core/constants.py` - 85 lines
 **Purpose**: Application constants and default values
 
 #### Constants
 | Constant | Line | Type | Value/Description |
 |----------|------|------|-------------------|
 | APP_NAME | 6 | str | "ImageAI" |
-| VERSION | 7 | str | "0.9.1" |
+| VERSION | 7 | str | "0.9.3" |
 | DEFAULT_PROVIDER | 10 | str | "google" |
 | DEFAULT_MODEL | 11 | str | "gemini-2.5-flash-image-preview" |
 | PROVIDER_MODELS | 14 | dict | Model mappings per provider |
@@ -295,7 +306,7 @@ ImageAI/
 | PREVIEW_MAX_WIDTH | 61 | int | 512 |
 | PREVIEW_MAX_HEIGHT | 62 | int | 512 |
 | TEMPLATE_CATEGORIES | 65 | list | Template category names |
-| IMAGE_FORMATS | 76 | dict | Supported image formats |
+| IMAGE_FORMATS | 81 | dict | Supported image formats |
 
 ### core/security.py
 **Path**: `core/security.py` - 283 lines
@@ -375,23 +386,23 @@ ImageAI/
 ## Providers Module
 
 ### providers/__init__.py
-**Path**: `providers/__init__.py` - 111 lines
-**Purpose**: Provider factory and lazy loading
+**Path**: `providers/__init__.py` - 153 lines
+**Purpose**: Provider factory and lazy loading with performance improvements
 
 #### Module Functions
 | Function | Line | Returns | Description |
 |----------|------|---------|-------------|
-| _get_providers() | 17 | dict | Lazy load provider classes |
-| get_provider() | 77 | ImageProvider | Get provider instance by name |
-| list_providers() | 102 | list | Get available provider names |
+| _get_providers() | 23 | dict | Lazy load provider classes with caching |
+| get_provider() | 121 | ImageProvider | Get provider instance by name |
+| list_providers() | 144 | list | Get available provider names |
 
 #### Provider Loading
 | Provider | Line | Class | Module |
 |----------|------|-------|--------|
-| google | 41 | GoogleProvider | providers.google |
-| openai | 48 | OpenAIProvider | providers.openai |
-| stability | 56 | StabilityProvider | providers.stability |
-| local_sd | 67 | LocalSDProvider | providers.local_sd |
+| google | 62 | GoogleProvider | providers.google |
+| openai | 69 | OpenAIProvider | providers.openai |
+| stability | 80 | StabilityProvider | providers.stability |
+| local_sd | 91 | LocalSDProvider | providers.local_sd |
 
 ### providers/base.py
 **Path**: `providers/base.py` - 144 lines
@@ -417,48 +428,48 @@ ImageAI/
 | inpaint() | 124 | public | Tuple | Inpaint masked regions |
 
 ### providers/google.py
-**Path**: `providers/google.py` - 294 lines
-**Purpose**: Google Gemini provider with Google Cloud auth support and rate limiting
+**Path**: `providers/google.py` - 471 lines
+**Purpose**: Google Gemini provider with Google Cloud auth support and improved performance
 
 #### Classes
 | Class | Line | Description |
 |-------|------|-------------|
-| GoogleProvider | 14 | Google Gemini implementation |
+| GoogleProvider | 17 | Google Gemini implementation |
 
 #### GoogleProvider Methods
 | Method | Line | Access | Returns | Description |
 |--------|------|--------|---------|-------------|
-| __init__() | 17 | public | None | Initialize with auth mode support |
-| _get_client() | 35 | private | genai | Get configured client (lazy init for Google Cloud) |
-| generate() | 65 | public | Tuple | Generate with conditional rate limiting |
-| _generate_with_imagen() | 131 | private | Tuple | Use Imagen models |
-| _generate_with_gemini() | 150 | private | Tuple | Use Gemini models with rate limiting |
-| validate_auth() | 211 | public | Tuple | Validate API key or Google Cloud auth |
-| get_models() | 241 | public | dict | Get model list |
-| get_default_model() | 248 | public | str | Get default model |
-| get_api_key_url() | 252 | public | str | Get API key URL |
-| get_supported_features() | 256 | public | list | List features |
+| __init__() | 21 | public | None | Initialize with auth mode support |
+| _get_client() | 45 | private | genai | Get configured client (lazy init) |
+| generate() | 109 | public | Tuple | Generate with conditional rate limiting |
+| _generate_with_imagen() | 197 | private | Tuple | Use Imagen models |
+| _generate_with_gemini() | 231 | private | Tuple | Use Gemini models with rate limiting |
+| validate_auth() | 323 | public | Tuple | Validate API key or Google Cloud auth |
+| get_models() | 399 | public | dict | Get model list with caching |
+| get_default_model() | 419 | public | str | Get default model |
+| get_api_key_url() | 427 | public | str | Get API key URL |
+| get_supported_features() | 435 | public | list | List features |
 
 ### providers/openai.py
-**Path**: `providers/openai.py` - 237 lines
-**Purpose**: OpenAI DALL-E provider with rate limiting
+**Path**: `providers/openai.py` - 348 lines
+**Purpose**: OpenAI DALL-E provider with rate limiting and enhanced error handling
 
 #### Classes
 | Class | Line | Description |
 |-------|------|-------------|
-| OpenAIProvider | 12 | OpenAI DALL-E implementation |
+| OpenAIProvider | 14 | OpenAI DALL-E implementation |
 
 #### OpenAIProvider Methods
 | Method | Line | Access | Returns | Description |
 |--------|------|--------|---------|-------------|
-| __init__() | 15 | public | None | Initialize with config |
-| generate() | 23 | public | Tuple | Generate images with rate limiting |
-| edit_image() | 93 | public | Tuple | Edit image with DALL-E 2 |
-| validate_auth() | 143 | public | Tuple | Validate API key |
-| get_models() | 173 | public | dict | Get model list |
-| get_default_model() | 183 | public | str | Get default model |
-| get_api_key_url() | 187 | public | str | Get API key URL |
-| get_supported_features() | 191 | public | list | List features |
+| __init__() | 18 | public | None | Initialize with config |
+| generate() | 35 | public | Tuple | Generate images with rate limiting |
+| edit_image() | 145 | public | Tuple | Edit image with DALL-E 2 |
+| validate_auth() | 223 | public | Tuple | Validate API key |
+| get_models() | 274 | public | dict | Get model list with details |
+| get_default_model() | 302 | public | str | Get default model |
+| get_api_key_url() | 310 | public | str | Get API key URL |
+| get_supported_features() | 318 | public | list | List features |
 
 ### providers/stability.py
 **Path**: `providers/stability.py` - 445 lines
@@ -540,87 +551,87 @@ ImageAI/
 | launch_gui() | 15 | None | Create and run GUI application |
 
 ### gui/main_window.py
-**Path**: `gui/main_window.py` - 1683 lines
-**Purpose**: Main application window with enhanced settings and auth persistence
+**Path**: `gui/main_window.py` - 3230 lines
+**Purpose**: Main application window with enhanced provider handling and UI improvements
 
 #### Table of Contents
 | Section | Line Number |
 |---------|-------------|
-| Imports and Setup | 1-39 |
-| MainWindow Class | 42 |
-| Initialization Methods | 44-98 |
-| UI Creation Methods | 99-558 |
-| Event Handlers | 559-1150 |
-| Helper Methods | 1151-1450 |
-| Window Management | 1451-1683 |
+| Imports and Setup | 1-52 |
+| MainWindow Class | 55 |
+| Initialization Methods | 57-142 |
+| UI Creation Methods | 143-802 |
+| Event Handlers | 803-2100 |
+| Helper Methods | 2101-2850 |
+| Window Management | 2851-3230 |
 
 #### Classes
 | Class | Line | Description |
 |-------|------|-------------|
-| MainWindow | 42 | Main application window |
+| MainWindow | 55 | Main application window |
 
 #### MainWindow Core Methods
 | Method | Line | Access | Returns | Description |
 |--------|------|--------|---------|-------------|
-| __init__() | 44 | public | None | Initialize window |
-| _load_history_from_disk() | 75 | private | None | Load image history |
-| _init_ui() | 99 | private | None | Create UI elements |
-| _init_menu() | 108 | private | None | Create menu bar |
-| _create_generate_tab() | 151 | private | QWidget | Create generation tab with aspect ratio |
-| _create_settings_tab() | 273 | private | QWidget | Create settings with auth persistence |
-| _create_templates_tab() | 397 | private | QWidget | Create templates tab |
-| _create_help_tab() | 482 | private | QWidget | Create help tab with search |
-| _create_history_tab() | 513 | private | QWidget | Create history tab |
+| __init__() | 57 | public | None | Initialize window with improved state |
+| _load_history_from_disk() | 107 | private | None | Load image history |
+| _init_ui() | 143 | private | None | Create UI elements |
+| _init_menu() | 156 | private | None | Create menu bar |
+| _create_generate_tab() | 232 | private | QWidget | Create generation tab with splitter |
+| _create_settings_tab() | 485 | private | QWidget | Create settings with provider persistence |
+| _create_templates_tab() | 671 | private | QWidget | Create templates tab |
+| _create_help_tab() | 742 | private | QWidget | Create help tab with search |
+| _create_history_tab() | 781 | private | QWidget | Create history tab |
 
 #### Event Handler Methods
 | Method | Line | Access | Returns | Description |
 |--------|------|--------|---------|-------------|
-| handle_provider_change() | 559 | private | None | Provider selection changed |
-| handle_auth_mode_change() | 593 | private | None | Auth mode changed with persistence |
-| handle_save_settings() | 623 | private | None | Save settings with keyring |
-| handle_test_key() | 656 | private | None | Test API key or Google Cloud auth |
-| handle_get_key() | 686 | private | None | Open API key URL |
-| handle_template_selected() | 711 | private | None | Template selected |
-| handle_apply_template() | 745 | private | None | Apply template |
-| handle_save_template() | 789 | private | None | Save new template |
-| handle_delete_template() | 825 | private | None | Delete template |
-| handle_generate() | 837 | private | None | Start generation |
-| handle_generation_done() | 901 | private | None | Generation completed |
-| handle_generation_error() | 945 | private | None | Generation failed |
-| handle_copy_prompt() | 975 | private | None | Copy prompt to clipboard |
-| handle_save_image() | 985 | private | None | Save image to file |
-| handle_auto_save_changed() | 1025 | private | None | Auto-save toggled |
-| handle_image_size_changed() | 1035 | private | None | Image size changed |
-| handle_copy_filename_changed() | 1045 | private | None | Copy filename toggled |
-| handle_history_selected() | 1055 | private | None | History item selected |
-| handle_load_from_history() | 1085 | private | None | Load history item |
-| handle_clear_history() | 1115 | private | None | Clear history |
-| handle_show_examples() | 1135 | private | None | Show examples dialog |
-| handle_save_project() | 1145 | private | None | Save project state |
-| handle_load_project() | 1165 | private | None | Load project state |
+| handle_provider_change() | 1107 | private | None | Provider selection with model update |
+| handle_auth_mode_change() | 1168 | private | None | Auth mode changed with persistence |
+| handle_save_settings() | 1182 | private | None | Save settings with keyring |
+| handle_test_key() | 1235 | private | None | Test API key or Google Cloud auth |
+| handle_get_key() | 1312 | private | None | Open API key URL |
+| handle_template_selected() | 1345 | private | None | Template selected |
+| handle_apply_template() | 1402 | private | None | Apply template |
+| handle_save_template() | 1482 | private | None | Save new template |
+| handle_delete_template() | 1534 | private | None | Delete template |
+| handle_generate() | 1563 | private | None | Start generation with validation |
+| handle_generation_done() | 1685 | private | None | Generation completed |
+| handle_generation_error() | 1756 | private | None | Generation failed |
+| handle_copy_prompt() | 1812 | private | None | Copy prompt to clipboard |
+| handle_save_image() | 1835 | private | None | Save image to file |
+| handle_auto_save_changed() | 1912 | private | None | Auto-save toggled |
+| handle_image_size_changed() | 1935 | private | None | Image size changed |
+| handle_copy_filename_changed() | 1956 | private | None | Copy filename toggled |
+| handle_history_selected() | 1978 | private | None | History item selected |
+| handle_load_from_history() | 2023 | private | None | Load history item |
+| handle_clear_history() | 2078 | private | None | Clear history |
+| handle_show_examples() | 2112 | private | None | Show examples dialog |
 
 #### Helper Methods
 | Method | Line | Access | Returns | Description |
 |--------|------|--------|---------|-------------|
-| _update_models_for_provider() | 1185 | private | None | Update model list |
-| _load_templates() | 1215 | private | None | Load saved templates |
-| _refresh_template_list() | 1245 | private | None | Refresh template UI |
-| _update_preview() | 1275 | private | None | Update image preview |
-| _add_to_history() | 1315 | private | None | Add to history |
-| _refresh_history_list() | 1345 | private | None | Refresh history UI |
-| _get_template_defaults() | 1385 | private | dict | Get template defaults |
-| _parse_template_placeholders() | 1415 | private | list | Parse placeholders |
-| _apply_template_with_values() | 1445 | private | str | Apply template values |
-| _update_auth_status() | 1475 | private | None | Update auth status display |
-| _restore_auth_state() | 1505 | private | None | Restore cached auth state |
+| _update_models_for_provider() | 2145 | private | None | Update model list with caching |
+| _load_templates() | 2212 | private | None | Load saved templates |
+| _refresh_template_list() | 2267 | private | None | Refresh template UI |
+| _update_preview() | 2312 | private | None | Update image preview with debouncing |
+| _add_to_history() | 2389 | private | None | Add to history |
+| _refresh_history_list() | 2445 | private | None | Refresh history UI |
+| _get_template_defaults() | 2512 | private | dict | Get template defaults |
+| _parse_template_placeholders() | 2567 | private | list | Parse placeholders |
+| _apply_template_with_values() | 2612 | private | str | Apply template values |
+| _update_auth_status() | 2678 | private | None | Update auth status display |
+| _restore_auth_state() | 2734 | private | None | Restore cached auth state |
 
 #### Window Management Methods
 | Method | Line | Access | Returns | Description |
 |--------|------|--------|---------|-------------|
-| _restore_geometry() | 1535 | private | None | Restore window position |
-| _save_geometry() | 1565 | private | None | Save window position |
-| closeEvent() | 1595 | protected | None | Handle window close |
-| show_about() | 1625 | private | None | Show about dialog |
+| _restore_geometry() | 2789 | private | None | Restore window position |
+| _save_geometry() | 2845 | private | None | Save window position |
+| closeEvent() | 2901 | protected | None | Handle window close |
+| show_about() | 2967 | private | None | Show about dialog |
+| handle_save_project() | 3023 | private | None | Save project state |
+| handle_load_project() | 3089 | private | None | Load project state |
 
 ### gui/settings_widgets.py
 **Path**: `gui/settings_widgets.py` - 487 lines
@@ -783,8 +794,8 @@ ImageAI/
 | Advanced Options | 92 | --verbose, --debug |
 
 ### cli/runner.py
-**Path**: `cli/runner.py` - 232 lines
-**Purpose**: CLI execution and coordination
+**Path**: `cli/runner.py` - 237 lines
+**Purpose**: CLI execution and coordination with improved provider handling
 
 #### Functions
 | Function | Line | Returns | Description |
@@ -800,9 +811,9 @@ ImageAI/
 | Handle Help | 84 | Show API key help if requested |
 | Resolve API Key | 97 | Get key from various sources |
 | Handle --set-key | 104 | Store API key if provided |
-| Handle --test | 127 | Test authentication |
-| Handle --prompt | 150 | Generate images |
-| Save Output | 177 | Save images and metadata |
+| Handle --test | 127 | Test authentication with feedback |
+| Handle --prompt | 150 | Generate images with validation |
+| Save Output | 182 | Save images and metadata |
 
 ## Templates
 
@@ -834,12 +845,48 @@ ImageAI/
 }
 ```
 
+## Utility Scripts
+
+### migrate_config.py
+**Path**: `migrate_config.py` - 179 lines
+**Purpose**: Migrate old config.json format to new structure and secure API keys
+
+#### Functions
+| Function | Line | Returns | Description |
+|----------|------|---------|-------------|
+| get_config_path() | 37 | Path | Get platform-specific config path |
+| migrate_config() | 52 | dict | Migrate configuration format |
+| main() | 150 | int | Main entry point |
+
+#### Migration Features
+- Moves legacy top-level `api_key` to `providers.google.api_key`
+- Fixes incorrect `keys.<provider>` structure
+- Optionally stores API keys in system keyring
+- Creates timestamped backups
+- Supports dry-run mode
+
+### secure_keys.py
+**Path**: `secure_keys.py` - 106 lines
+**Purpose**: Move API keys from config.json to Windows Credential Manager
+
+#### Functions
+| Function | Line | Returns | Description |
+|----------|------|---------|-------------|
+| main() | 15 | int | Secure API keys in keyring |
+
+#### Security Features
+- Windows-specific (must run in PowerShell/CMD)
+- Stores keys in Windows Credential Manager
+- Verifies successful storage
+- Creates backup before modification
+- Removes keys from config.json after securing
+
 ## Cross-File Dependencies
 
 ### Configuration Flow
 **Managed by**: `core/config.py:ConfigManager`
 **Consumed by**:
-- `gui/main_window.py:46` - Load settings with auth persistence
+- `gui/main_window.py:59` - Load settings with auth persistence
 - `cli/runner.py:40` - Get API keys
 - `providers/*.py` - Provider initialization
 - `core/security.py:82` - SecureKeyStorage integration
@@ -848,24 +895,24 @@ ImageAI/
 **Components**: `core/security.py`
 **Path Validation**:
 - `core/utils.py:165` - auto_save_images() validates paths
-- `gui/main_window.py:990` - Save operations use validated paths
+- `gui/main_window.py:1841` - Save operations use validated paths
 
 **Key Storage**:
-- `core/config.py:63` - get_api_key() checks keyring first
-- `core/config.py:74` - set_api_key() stores in keyring
-- `gui/main_window.py:630` - Settings save uses secure storage
+- `core/config.py:74` - get_api_key() checks keyring first
+- `core/config.py:88` - set_api_key() stores in keyring
+- `gui/main_window.py:1189` - Settings save uses secure storage
 
 **Rate Limiting**:
-- `providers/google.py:167` - Conditional rate limiting (API key mode only)
-- `providers/openai.py:63` - Rate limiting for all operations
+- `providers/google.py:265` - Conditional rate limiting (API key mode only)
+- `providers/openai.py:82` - Rate limiting for all operations
 
 ### Google Cloud Authentication
 **Managed by**: `core/gcloud_utils.py`
 **Integration Points**:
-- `providers/google.py:35` - Lazy initialization for Google Cloud auth
-- `gui/main_window.py:593` - Auth mode selection and persistence
-- `gui/main_window.py:1475` - Cached auth status display
-- `core/config.py:118` - Auth validation state persistence
+- `providers/google.py:45` - Lazy initialization for Google Cloud auth
+- `gui/main_window.py:1168` - Auth mode selection and persistence
+- `gui/main_window.py:2678` - Cached auth status display
+- `core/config.py:110` - Auth validation state persistence
 
 ### Provider System
 **Factory**: `providers/__init__.py:get_provider()`
@@ -882,7 +929,7 @@ ImageAI/
 **Definitions**: `templates/__init__.py`
 **Parser**: `core/utils.py:284` - parse_template_placeholders()
 **Consumers**:
-- `gui/main_window.py:397` - Templates tab with improved UI
+- `gui/main_window.py:671` - Templates tab with improved UI
 - `gui/dialogs.py:145` - Placeholder input
 - `cli/parser.py:82` - Template CLI args
 
@@ -892,8 +939,8 @@ ImageAI/
 **Metadata Sidecars**: `core/utils.py:97` - write_image_sidecar()
 **History Scanning**: `core/utils.py:217` - scan_disk_history()
 **Consumers**:
-- `gui/main_window.py:57` - Load history
-- `cli/runner.py:204` - Save images with validation
+- `gui/main_window.py:107` - Load history
+- `cli/runner.py:209` - Save images with validation
 
 ## Configuration Files
 
@@ -921,6 +968,13 @@ ImageAI/
 - `safetensors>=0.4.0` - Safe tensor storage
 - `huggingface-hub>=0.19.0` - HF Hub client
 
+### CHANGELOG.md
+**Path**: `CHANGELOG.md`
+**Purpose**: Version history and release notes
+- Documents changes from v0.3.0 to v0.9.3
+- Follows Keep a Changelog format
+- Tracks features, improvements, and security updates
+
 ### CLAUDE.md
 **Path**: `CLAUDE.md`
 **Purpose**: Instructions for Claude AI assistant
@@ -938,7 +992,17 @@ ImageAI/
 - API key setup
 - Feature documentation
 - Troubleshooting guide
-- Changelog (v0.9.1)
+- Changelog (v0.9.3)
+
+### Plans/ImageAI-VideoProject-PRD.md
+**Path**: `Plans/ImageAI-VideoProject-PRD.md`
+**Purpose**: Video project feature specification
+- Lyrics-to-video storyboard pipeline
+- AI-powered prompt generation with LLM support
+- Comprehensive version history system
+- Gemini Veo API integration for video generation
+- Local FFmpeg video assembly option
+- Multi-provider LLM support (cloud and local)
 
 ## Architecture Patterns
 
@@ -982,12 +1046,14 @@ ImageAI/
 - Google Cloud auth initialized on first use
 - Import errors handled gracefully
 - Optional dependencies isolated
+- Provider list cached after first load
 
 #### Security First
 - Path traversal prevention in all file operations
 - API keys stored in system keyring when available
 - Rate limiting prevents API abuse
 - Input validation throughout
+- Config migration utilities for secure key storage
 
 ## Development Guidelines
 
@@ -1034,15 +1100,17 @@ ImageAI/
 - Check error handling and recovery
 - Validate metadata sidecar creation
 - Test rate limiting behavior
+- Run migration scripts in dry-run mode first
 
 ### Performance Considerations
 
 - Lazy load heavy dependencies
-- Cache provider instances
+- Cache provider instances and model lists
 - Use threading for long operations
 - Stream large images efficiently
 - Minimize API calls with rate limiting
 - Initialize Google Cloud auth only when needed
+- Debounce UI updates (image resizing)
 
 ### Security Best Practices
 
@@ -1054,3 +1122,5 @@ ImageAI/
 - Implement rate limiting for API providers
 - Handle authentication failures gracefully
 - Clear sensitive data from memory after use
+- Run secure_keys.py on Windows for key encryption
+- Use migrate_config.py to update old configurations
