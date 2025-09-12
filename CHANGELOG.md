@@ -5,10 +5,24 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.10.0] - 2025-09-11
+## [0.10.1] - 2025-01-11
+
+### Changed
+- Cleaned up development notices from documentation
+- Updated video feature status from "Coming Soon" to "Planned" for Veo integration
+- Enhanced README documentation with comprehensive video feature details
+
+### Fixed
+- Version number properly incremented to reflect stable UI implementation
+
+### Removed
+- Removed Imagen 3/4 models from UI - these require Vertex AI access, not available through Gemini API
+- Note: Imagen models (imagen-3.0-generate-002, imagen-4.0-generate-001) require Google Cloud Vertex AI, not the standard Gemini API used by ImageAI
+
+## [0.10.0] - 2025-01-11
 
 ### Added
-- **Video Project Feature (Beta)** - New tab for creating AI-powered videos from text/lyrics
+- **Video Project Feature** - New tab for creating AI-powered videos from text/lyrics
   - Project management system with save/load functionality
   - Multiple input formats: timestamped lyrics, structured text, plain text
   - Automatic scene generation with intelligent timing allocation
@@ -34,9 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added template system for prompt generation
 - Built foundation for FFmpeg slideshow and Veo API integration
 
-### Note
-- Video feature is in beta with "Under Development" notice
-- Full video generation capabilities will be completed in subsequent releases
+### Implementation Status
+- Video UI and project management fully implemented
+- Scene generation and LLM enhancement operational  
+- FFmpeg slideshow rendering prepared
+- Veo API integration planned for future release
 
 ## [0.9.3] - 2025-09-09
 

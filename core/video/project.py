@@ -172,7 +172,7 @@ class VideoProject:
     llm_provider: Optional[str] = None  # For prompt generation
     llm_model: Optional[str] = None
     image_provider: str = "gemini"
-    image_model: str = "imagen-4.0-generate-001"
+    image_model: str = "gemini-2.5-flash-image-preview"
     video_provider: str = "slideshow"  # 'veo' or 'slideshow'
     video_model: Optional[str] = None  # For Veo: 'veo-3.0-generate-001', etc.
     
@@ -266,7 +266,7 @@ class VideoProject:
                 project.llm_model = providers["llm"].get("model")
             if "images" in providers:
                 project.image_provider = providers["images"].get("provider", "gemini")
-                project.image_model = providers["images"].get("model", "imagen-4.0-generate-001")
+                project.image_model = providers["images"].get("model", "gemini-2.5-flash-image-preview")
             if "video" in providers:
                 project.video_provider = providers["video"].get("provider", "slideshow")
                 project.video_model = providers["video"].get("model")

@@ -4,7 +4,7 @@ from pathlib import Path
 
 # Application metadata
 APP_NAME = "ImageAI"
-VERSION = "0.10.0"
+VERSION = "0.10.1"
 __version__ = VERSION
 __author__ = "Leland Green"
 __email__ = "contact@lelandgreen.com"
@@ -21,8 +21,6 @@ PROVIDER_MODELS = {
         "gemini-2.5-flash-image-preview": "Gemini 2.5 Flash (Image Preview)",
         "gemini-2.5-flash": "Gemini 2.5 Flash",
         "gemini-2.5-pro": "Gemini 2.5 Pro",
-        "imagen-3": "Imagen 3 (Coming Soon)",
-        "imagen-3-fast": "Imagen 3 Fast (Coming Soon)",
     },
     "openai": {
         "dall-e-3": "DALL·E 3",

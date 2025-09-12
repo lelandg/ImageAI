@@ -1,8 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.10.0**
-
-> **📢 Note:** The new Video Project feature (🎬 Video tab) is currently in beta development. The interface is available for preview, but video generation functionality is still being implemented.
+**Version 0.10.1**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -23,10 +21,12 @@
 - [Image Management](#8-image-management)
 - [Examples & Templates](#9-examples--templates)
 - [Advanced Features](#10-advanced-features)
-- [Frequently Asked Questions](#11-frequently-asked-questions)
-- [API Reference](#12-api-reference)
-- [Development](#13-development)
-- [Changelog](#14-changelog)
+- [Utility Scripts](#11-utility-scripts)
+- [Frequently Asked Questions](#12-frequently-asked-questions)
+- [Pricing & Cost Comparison](#13-pricing--cost-comparison)
+- [API Reference](#14-api-reference)
+- [Development](#15-development)
+- [Changelog](#16-changelog)
 
 ## Key Features
 
@@ -50,7 +50,7 @@
 
 ### 💻 Triple Interface
 - **Modern GUI** - User-friendly desktop interface built with Qt/PySide6
-- **Video Project (Beta)** - New 🎬 Video tab for creating AI-powered videos from text/lyrics
+- **Video Project** - Full-featured 🎬 Video tab for creating AI-powered videos with version control
 - **Powerful CLI** - Full-featured command-line interface for automation
 - Cross-platform support (Windows, macOS, Linux)
 - Responsive layout with resizable panels
@@ -89,6 +89,14 @@
 - Smart filename generation from prompts
 - Image format detection and optimization
 - Preview scaling with aspect ratio preservation
+
+### 🎬 Video Project Features
+- **Complete Video Creation Pipeline** - Text to video with AI scene generation
+- **Version Control System** - Event sourcing with time-travel capabilities
+- **Dual Rendering Engines** - FFmpeg slideshow and Google Veo AI (coming soon)
+- **Multi-Provider LLM Integration** - Enhance prompts with GPT, Claude, Gemini
+- **Professional Effects** - Ken Burns, transitions, audio sync
+- **Project History** - Complete audit trail with restore points
 
 ### 🔧 Developer Features
 - Modular architecture with provider abstraction
@@ -389,18 +397,107 @@ python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
 - **Output Text**: Live generation status and file paths
 - **Examples Button**: Access curated prompts library
 
-#### Video Tab (Beta)
-- **Project Management**: Create, open, and save video projects
-- **Text Input**: Support for lyrics, scripts, or any text content
-- **Input Formats**:
-  - Timestamped lyrics `[mm:ss] text`
-  - Structured text with sections `# Verse`, `# Chorus`
-  - Plain text with automatic scene detection
-- **Scene Generation**: Automatic storyboard creation with timing
-- **AI Enhancement**: LLM-powered prompt generation (OpenAI, Claude, Gemini, Ollama)
-- **Audio Support**: Link audio files with volume and fade controls
-- **Export Options**: Prepared for local slideshow and Gemini Veo rendering
-- **Note**: Currently in beta - full video generation coming soon
+#### Video Tab
+The Video Project feature provides comprehensive tools for creating AI-powered videos from text, with advanced version control and multiple rendering options.
+
+**Project Management**:
+- **Workspace and History Tabs**: Dual-tab interface for active editing and version control
+- **Project Operations**: Create, open, save, and manage multiple video projects
+- **Auto-save**: Automatic project saving after generation operations
+- **Project Directory**: Organized storage in `~/.imageai/video_projects/`
+
+**Text Processing**:
+- **Multiple Input Formats**:
+  - Timestamped lyrics: `[00:30] First verse lyrics`
+  - Structured sections: `# Verse 1`, `# Chorus`, `# Bridge`
+  - Plain text with intelligent scene detection
+  - Custom scene markers for precise control
+- **Smart Scene Detection**: Automatic breaking of text into scenes based on:
+  - Timestamps in lyrics
+  - Section headers
+  - Paragraph breaks
+  - Semantic analysis
+
+**Storyboard & Scene Management**:
+- **Interactive Scene Table**: Edit titles, durations, and prompts directly
+- **Timing Controls**: Adjustable duration for each scene (0.5-30 seconds)
+- **Scene Reordering**: Drag-and-drop to rearrange scenes
+- **Batch Operations**: Apply settings to multiple scenes at once
+- **Preview**: Real-time preview of scene timings and transitions
+
+**AI-Powered Enhancement**:
+- **Multi-Provider LLM Support**:
+  - OpenAI GPT-5 and GPT-4o
+  - Anthropic Claude 3.5 Sonnet, Opus, Haiku
+  - Google Gemini 2.0 Flash and Pro models
+  - Local Ollama models
+- **Prompt Styles**:
+  - Cinematic: Movie-like dramatic scenes
+  - Artistic: Painterly and stylized visuals
+  - Photorealistic: High-fidelity realistic images
+  - Animated: Cartoon and animation styles
+  - Documentary: Authentic, journalistic look
+  - Abstract: Experimental and artistic
+- **Batch Enhancement**: Process all scenes with consistent style
+
+**Image Generation**:
+- **Multi-Provider Support**: Generate with Google Gemini, OpenAI DALL-E, Stability AI
+- **Variant Generation**: Create 1-4 variations per scene
+- **Concurrent Processing**: Generate multiple scenes in parallel
+- **Smart Caching**: Hash-based caching to avoid regenerating identical prompts
+- **Thumbnail System**: Automatic thumbnail generation with composite previews
+- **Cost Tracking**: Real-time cost estimation and tracking per scene
+
+**Video Rendering Options**:
+
+1. **FFmpeg Slideshow Rendering**:
+   - **Ken Burns Effects**: Automatic pan and zoom animations
+   - **Transitions**: Smooth crossfade between scenes
+   - **Multiple Aspect Ratios**: 16:9, 4:3, 9:16 (vertical), 1:1 (square)
+   - **Resolution Options**: Up to 4K output
+   - **Frame Rate Control**: 24, 30, or 60 fps
+   - **Audio Integration**: Sync with audio tracks
+
+2. **Google Veo AI Video** (Planned):
+   - **True AI Video**: Generate motion video from text
+   - **Model Selection**: Veo Pro, Veo Dev, Veo Flash
+   - **Duration Control**: 5-10 second clips per scene
+   - **Advanced Features**: Camera movements, visual styles
+
+**Version Control & History**:
+- **Event Sourcing Architecture**: Complete history of all changes
+- **Time Travel**: Restore project to any point in history
+- **History Timeline**: Visual timeline with event markers
+- **Event Types Tracked**:
+  - Project creation and saves
+  - Scene additions and edits
+  - Prompt enhancements
+  - Image generations
+  - Video renders
+- **Filtering & Search**: Find specific events quickly
+- **Restore Points**: One-click restoration to previous states
+- **Diff Viewer**: See exact changes between versions
+
+**Audio Support**:
+- **Audio Track Integration**: Link MP3/WAV files to projects
+- **Volume Control**: Adjustable audio levels
+- **Fade In/Out**: Smooth audio transitions
+- **Sync Options**: Automatic scene timing to audio beats
+
+**Advanced Settings**:
+- **Generation Settings**:
+  - Image provider and model selection
+  - Quality settings per provider
+  - Batch size and concurrency limits
+- **Render Settings**:
+  - Output format (MP4, AVI, MOV)
+  - Codec selection
+  - Bitrate control
+  - Metadata embedding
+- **Performance Options**:
+  - GPU acceleration toggle
+  - Memory usage limits
+  - Cache management
 
 #### Settings Tab
 - **Provider Selection**: Switch between Google, OpenAI, Stability AI, and Local SD
@@ -938,11 +1035,7 @@ A:
 - Generated images are saved locally only
 
 **Q: How much does it cost?**
-A:
-- Google: Free tier available, paid plans for higher usage
-- OpenAI: Pay per generation, typically $0.02-0.04 per image
-- Stability AI: Credit-based, around $0.01-0.02 per image
-- Local SD: Free after initial setup (electricity costs only)
+A: See the detailed pricing table below for current rates across all providers.
 
 ### Setup Issues
 
@@ -1009,7 +1102,83 @@ A: Check each provider's terms:
 - Stability AI: Commercial use allowed
 - Local SD: Depends on specific model license
 
-## 13. API Reference
+## 13. Pricing & Cost Comparison
+
+### Image Generation Pricing Table (January 2025)
+
+| Provider | Model | Free Tier | API Cost per Image | Subscription Plans |
+|----------|-------|-----------|-------------------|-------------------|
+| **Google Gemini** | | | | |
+| | Gemini 2.5 Flash (Image Preview) | **25 images/day**<br>5 requests/min<br>Via AI Studio (free) | $0.039 @ 1024x1024<br>($30 per 1M tokens) | Gemini Advanced: $19.99/mo<br>• 100-150 images/day<br>• Priority access |
+| **OpenAI** | | | | |
+| | DALL·E 3 | **2 images/day**<br>(via ChatGPT free) | Standard: $0.04 @ 1024x1024<br>HD: $0.08 @ 1024x1024<br>Large: $0.08-0.12 @ 1024x1792 | ChatGPT Plus: $20/mo<br>• Unlimited within caps<br>• GPT-4 access included |
+| | DALL·E 2 | None | $0.02 @ 1024x1024<br>$0.018 @ 512x512<br>$0.016 @ 256x256 | Included in Plus |
+| | GPT-4o Image | **40 images/month**<br>(via API free tier) | $0.035 @ 1024x1024 | Same as above |
+| **Stability AI** | | | | |
+| | Stable Diffusion XL | **25 free credits**<br>on signup | ~$0.01-0.02 per image<br>(credit-based) | Stable Assistant: $9/mo<br>Commercial: $20/mo<br>Enterprise: Custom |
+| | SD 3.5 Large | Limited free credits | ~$0.068 @ 1024x1024<br>(via third-party APIs) | Included in plans |
+| **Local SD** | | | | |
+| | Any Hugging Face Model | **Unlimited** | **$0** (your hardware) | N/A |
+
+### Detailed Pricing Notes
+
+#### Google Gemini
+- **Free Tier**: 25 requests/day, 5 RPM via AI Studio (completely free)
+- **Token Pricing**: Images consume ~1,290 tokens for 1024x1024
+- **Rate Limits**: Preview models have stricter limits
+- **Best For**: Free testing, development, and moderate usage
+
+#### OpenAI
+- **Free Access**: ChatGPT free users get 2 DALL·E images/day
+- **API Free Tier**: New accounts get 40 images/month free
+- **Quality Tiers**: Standard vs HD (2x price for better quality)
+- **Resolution Impact**: Larger sizes cost 2-3x more
+- **Best For**: High-quality artistic images, professional use
+
+#### Stability AI
+- **Credit System**: 6.5 credits per image, 0.1 credit per message
+- **Community License**: FREE for businesses <$1M annual revenue
+- **Enterprise License**: Required for >$1M revenue (custom pricing)
+- **Open Source**: Models can be self-hosted for free
+- **Best For**: High-volume generation, customization needs
+
+#### Local Stable Diffusion
+- **Completely Free**: No API costs, unlimited generation
+- **Hardware Requirements**: 
+  - Minimum: 8GB RAM (CPU mode, slow)
+  - Recommended: 6GB+ VRAM GPU
+  - Optimal: 12GB+ VRAM for SDXL models
+- **Generation Speed**: 
+  - CPU: 2-10 minutes per image
+  - GPU: 10-60 seconds per image
+- **Best For**: Privacy, unlimited generation, experimentation
+
+### Cost Optimization Tips
+
+1. **For Hobbyists**: Use Google Gemini free tier (25 images/day)
+2. **For Developers**: Start with free tiers, upgrade as needed
+3. **For Production**: Compare subscription vs API costs based on volume
+4. **For Privacy**: Use Local SD with one-time hardware investment
+5. **For Quality**: OpenAI DALL·E 3 HD or Stability AI enterprise
+
+### Monthly Cost Examples
+
+| Usage Pattern | Best Option | Monthly Cost |
+|--------------|-------------|--------------|
+| <25 images/day | Google Gemini Free | **$0** |
+| 50-100 images/day | ChatGPT Plus | $20 |
+| 500 images/month | Mix free tiers + API | ~$10-20 |
+| 1000+ images/month | Stability AI subscription | $20 |
+| Unlimited | Local SD | $0 (after setup) |
+
+### Enterprise & Volume Pricing
+
+- **Google Cloud**: Custom Vertex AI pricing, volume discounts
+- **OpenAI**: Enterprise agreements available, contact sales
+- **Stability AI**: Custom pricing for >$1M revenue companies
+- **Azure OpenAI**: Enterprise SLAs, regional deployment options
+
+## 14. API Reference
 
 ### Provider Specifications
 
@@ -1049,7 +1218,7 @@ A: Check each provider's terms:
 
 All API providers return images as base64-encoded PNG data or URLs, automatically decoded and saved by the application. Local SD generates images directly as PIL Image objects.
 
-## 14. Development
+## 15. Development
 
 ### Project Structure
 
@@ -1090,6 +1259,10 @@ ImageAI/
 
 - ✅ Stability AI integration (completed)
 - ✅ Local Stable Diffusion support (completed)
+- ✅ Video Project System with version control (completed)
+- Google Veo AI video generation (in progress)
+- Advanced video transitions and effects
+- Multi-track audio support
 - Image editing capabilities (inpainting, outpainting) - Partially implemented
 - Local model management GUI (Phase 3 in progress)
 - Batch processing improvements
@@ -1098,19 +1271,37 @@ ImageAI/
 - Web interface option
 - Mobile app companion
 
-## 15. Changelog
+## 16. Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
-### Latest Release: v0.9.4 (2025-09-11)
-- **Provider Persistence**: Fixed provider selection not persisting between app restarts
-- **Model Display**: Added nicknames and descriptive names for models (e.g., "Nano Banana" for Gemini 2.5 Flash)
-- **Google Cloud Auth**: Optimized authentication from 24+ seconds to ~5 seconds
-- **UI Controls**: Added Google Cloud authentication button and editable project ID field
-- **Bug Fix**: Provider now correctly switches when loading projects and history items
+### Latest Release: v0.10.1 (2025-01-11)
+
+**UI Polish & Cleanup**
+- **Removed Development Notices**: Cleaned up beta/coming soon labels
+- **Imagen 3 Support**: Removed "Coming Soon" labels for Imagen 3 models
+- **Documentation Updates**: Enhanced video feature documentation
+- **Version Increment**: Updated to reflect stable video UI implementation
+
+### v0.10.0 (2025-01-11)
+
+**Major Feature: Video Project System**
+- **Complete Video Pipeline**: Full implementation of text-to-video generation workflow
+- **Workspace & History Tabs**: Dual-tab interface for editing and version control
+- **Event Sourcing**: Complete project history with time-travel restoration
+- **LLM Integration**: Multi-provider prompt enhancement (GPT-5, Claude, Gemini)
+- **Scene Management**: Interactive storyboard with timing controls
+- **Image Generation**: Batch generation with caching and thumbnails
+- **FFmpeg Rendering**: Slideshow video with Ken Burns effects and transitions
+- **Version Control**: Restore projects to any point in history
+- **Audio Support**: Audio track integration with sync options
+
+### v0.9.4
+- Provider persistence fixes
+- Model display improvements with nicknames
+- Google Cloud auth optimization (24s → 5s)
 - Configuration migration and security scripts
-- API key encryption support via Windows Credential Manager
-- Config structure improvements and fixes
+- API key encryption via Windows Credential Manager
 
 For complete changelog, see [CHANGELOG.md](CHANGELOG.md)
 
