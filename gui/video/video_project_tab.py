@@ -6,6 +6,7 @@ Main interface for creating and managing video projects.
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import logging
+from datetime import datetime
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
@@ -51,28 +52,91 @@ class VideoGenerationThread(QThread):
     
     def _generate_images(self):
         """Generate images for all scenes"""
-        # TODO: Implement actual image generation
-        total_scenes = len(self.project.scenes)
-        for i, scene in enumerate(self.project.scenes):
-            if self.cancelled:
-                break
+        try:
+            from ...core.video.image_generator import ImageGenerator
+            from ...core.video.thumbnail_manager import ThumbnailManager
+            from pathlib import Path
             
-            progress = int((i / total_scenes) * 100)
-            self.progress_update.emit(progress, f"Generating images for scene {i+1}/{total_scenes}")
+            # Initialize generators
+            generator = ImageGenerator(self.kwargs)
+            thumbnail_mgr = ThumbnailManager()
             
-            # Simulate generation (replace with actual implementation)
-            import time
-            time.sleep(0.5)
+            # Get generation parameters
+            provider = self.kwargs.get('provider', 'google')
+            model = self.kwargs.get('model', '')
+            variants = self.kwargs.get('variants', 3)
             
-            result = {
-                "scene_id": scene.id,
-                "images": [],
-                "status": "completed"
-            }
-            self.scene_complete.emit(scene.id, result)
-        
-        if not self.cancelled:
-            self.generation_complete.emit(True, "Image generation complete")
+            # Filter scenes that need generation
+            scenes_to_generate = [s for s in self.project.scenes if not s.images or len(s.images) < variants]
+            total_scenes = len(scenes_to_generate)
+            
+            if total_scenes == 0:
+                self.generation_complete.emit(True, "All scenes already have images")
+                return
+            
+            # Generate images for each scene
+            for i, scene in enumerate(scenes_to_generate):
+                if self.cancelled:
+                    break
+                
+                progress = int((i / total_scenes) * 100)
+                self.progress_update.emit(progress, f"Generating images for scene {i+1}/{total_scenes}: {scene.title or scene.id}")
+                
+                # Generate images using the actual provider
+                results = generator.generate_batch(
+                    [scene],
+                    provider=provider,
+                    model=model,
+                    variants_per_scene=variants,
+                    **self.kwargs
+                )
+                
+                if results and results[0].success:
+                    result = results[0]
+                    
+                    # Store images in scene
+                    scene.images = result.paths
+                    
+                    # Create thumbnails
+                    thumbnails = []
+                    for img_data in result.images[:4]:  # Max 4 for composite
+                        thumb = thumbnail_mgr.create_thumbnail_with_cache(img_data)
+                        thumbnails.append(thumb)
+                    
+                    # Create composite thumbnail for scene
+                    scene_thumb = thumbnail_mgr.create_scene_thumbnail(
+                        result.images,
+                        scene.title or f"Scene {i+1}"
+                    )
+                    
+                    result_data = {
+                        "scene_id": scene.id,
+                        "images": result.paths,
+                        "thumbnails": thumbnails,
+                        "scene_thumbnail": scene_thumb,
+                        "cost": result.cost,
+                        "status": "completed"
+                    }
+                else:
+                    error_msg = results[0].error if results else "Unknown error"
+                    result_data = {
+                        "scene_id": scene.id,
+                        "images": [],
+                        "status": "failed",
+                        "error": error_msg
+                    }
+                
+                self.scene_complete.emit(scene.id, result_data)
+            
+            # Save project with generated images
+            if hasattr(self.project, 'save'):
+                self.project.save()
+            
+            if not self.cancelled:
+                self.generation_complete.emit(True, f"Generated images for {total_scenes} scenes")
+                
+        except Exception as e:
+            self.generation_complete.emit(False, f"Image generation failed: {e}")
     
     def _render_video(self):
         """Render the final video"""

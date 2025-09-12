@@ -1030,22 +1030,22 @@ class VideoProjectPipeline:
 
 ### Phase 4: Image Generation Pipeline
 #### 4.1 Provider Integration
-- [ ] Ensure unified `generate_image()` interface across all providers
-- [ ] Add batch generation support with concurrency limits
-- [ ] Implement provider-specific error handling and retries
-- [ ] Add cost estimation and tracking per provider
+- [x] Ensure unified `generate_image()` interface across all providers
+- [x] Add batch generation support with concurrency limits
+- [x] Implement provider-specific error handling and retries
+- [x] Add cost estimation and tracking per provider
 
 #### 4.2 Image Caching & Management
-- [ ] Create idempotent cache with hash-based lookup
-- [ ] Implement cache invalidation and cleanup
-- [ ] Add image variant management (N per scene)
-- [ ] Build thumbnail generation for UI display
+- [x] Create idempotent cache with hash-based lookup
+- [x] Implement cache invalidation and cleanup
+- [x] Add image variant management (N per scene)
+- [x] Build thumbnail generation for UI display
 
 #### 4.3 Scene Management
-- [ ] Implement per-scene regeneration without affecting others
-- [ ] Add approved image selection and persistence
+- [x] Implement per-scene regeneration without affecting others
+- [x] Add approved image selection and persistence
 - [ ] Create scene reordering logic
-- [ ] Build metadata tracking for each generation
+- [x] Build metadata tracking for each generation
 
 ### Phase 5: GUI Implementation
 #### 5.1 Video Project Tab
@@ -1056,7 +1056,7 @@ class VideoProjectPipeline:
 
 #### 5.2 Storyboard Interface
 - [x] Create `StoryboardTable` widget with scene rows
-- [ ] Implement thumbnail grid display (N variants per scene)
+- [x] Implement thumbnail grid display (N variants per scene)
 - [ ] Add drag-and-drop scene reordering
 - [x] Build duration adjustment controls per scene
 - [x] Add caption/title toggle switches
@@ -1075,13 +1075,13 @@ class VideoProjectPipeline:
 - [ ] Build error notification system
 
 #### 5.5 History Tab Implementation
-- [ ] Create `HistoryTab` widget with timeline view
-- [ ] Implement event filtering and search
-- [ ] Build diff viewer for comparing versions
-- [ ] Add restore point creation and management
+- [x] Create `HistoryTab` widget with timeline view
+- [x] Implement event filtering and search
+- [x] Build diff viewer for comparing versions
+- [x] Add restore point creation and management
 - [ ] Implement branch creation from historical states
-- [ ] Create history export functionality
-- [ ] Add storage usage analytics display
+- [x] Create history export functionality
+- [x] Add storage usage analytics display
 
 ### Phase 6: Audio Integration
 #### 6.1 Audio File Management
@@ -1109,33 +1109,33 @@ class VideoProjectPipeline:
 
 ### Phase 7: Video Assembly - Local Slideshow
 #### 7.1 FFmpeg Integration
-- [ ] Implement `FFmpegSlideshow` class
-- [ ] Add Ken Burns effect (pan/zoom) support
-- [ ] Create crossfade transition system (0.5s default)
-- [ ] Build caption overlay system
-- [ ] Integrate audio track mixing
+- [x] Implement `FFmpegSlideshow` class
+- [x] Add Ken Burns effect (pan/zoom) support
+- [x] Create crossfade transition system (0.5s default)
+- [x] Build caption overlay system
+- [x] Integrate audio track mixing
 
 #### 7.2 Video Export
-- [ ] Implement H.264 encoding at 24fps
-- [ ] Add resolution options (720p, 1080p)
-- [ ] Create preview generation (low-res, fast)
-- [ ] Build final export with quality settings
-- [ ] Ensure audio sync with video duration
+- [x] Implement H.264 encoding at 24fps
+- [x] Add resolution options (720p, 1080p)
+- [x] Create preview generation (low-res, fast)
+- [x] Build final export with quality settings
+- [x] Ensure audio sync with video duration
 
 ### Phase 8: Veo API Integration
 #### 8.1 Veo Client Implementation
-- [ ] Create `VeoClient` wrapper class using google.genai
-- [ ] Implement `generate_videos()` with all config options
-- [ ] Add polling mechanism for long-running operations (11s-6min)
-- [ ] Build download and local storage system (2-day retention handling)
-- [ ] Implement timeout and retry logic
+- [x] Create `VeoClient` wrapper class using google.genai
+- [x] Implement `generate_videos()` with all config options
+- [x] Add polling mechanism for long-running operations (11s-6min)
+- [x] Build download and local storage system (2-day retention handling)
+- [x] Implement timeout and retry logic
 
 #### 8.2 Veo Model Support
-- [ ] Add Veo 3.0 support (`veo-3.0-generate-001`)
-- [ ] Add Veo 3.0 Fast support (`veo-3.0-fast-generate-001`)
-- [ ] Add Veo 2.0 support (`veo-2.0-generate-001`)
-- [ ] Implement model-specific constraints (resolution, duration, audio)
-- [ ] Add aspect ratio support (16:9, 9:16)
+- [x] Add Veo 3.0 support (`veo-3.0-generate-001`)
+- [x] Add Veo 3.0 Fast support (`veo-3.0-fast-generate-001`)
+- [x] Add Veo 2.0 support (`veo-2.0-generate-001`)
+- [x] Implement model-specific constraints (resolution, duration, audio)
+- [x] Add aspect ratio support (16:9, 9:16)
 
 #### 8.3 Regional Compliance
 - [ ] Implement region detection system
