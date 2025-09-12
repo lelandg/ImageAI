@@ -28,6 +28,7 @@ from core import (
 from core.constants import DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT
 from providers import get_provider, preload_provider, list_providers
 from gui.dialogs import ExamplesDialog
+from gui.video.video_project_tab import VideoProjectTab
 from gui.workers import GenWorker
 try:
     from gui.model_browser import ModelBrowserDialog
@@ -145,11 +146,20 @@ class MainWindow(QMainWindow):
         self.tab_help = QWidget()
         self.tab_history = QWidget()
         
-        self.tabs.addTab(self.tab_generate, "Generate")
-        self.tabs.addTab(self.tab_templates, "Templates")
-        self.tabs.addTab(self.tab_settings, "Settings")
-        self.tabs.addTab(self.tab_help, "Help")
-        self.tabs.addTab(self.tab_history, "History")  # Always add history tab
+        # Create video tab - pass config and available providers
+        providers_dict = {
+            'available': list_providers(),
+            'current': self.current_provider,
+            'config': self.config
+        }
+        self.tab_video = VideoProjectTab(self.config.config, providers_dict)
+        
+        self.tabs.addTab(self.tab_generate, "🎨 Generate")
+        self.tabs.addTab(self.tab_video, "🎬 Video")
+        self.tabs.addTab(self.tab_templates, "📝 Templates")
+        self.tabs.addTab(self.tab_settings, "⚙️ Settings")
+        self.tabs.addTab(self.tab_help, "❓ Help")
+        self.tabs.addTab(self.tab_history, "📜 History")  # Always add history tab
         
         self._init_generate_tab()
         self._init_templates_tab()

@@ -5,6 +5,39 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2025-09-11
+
+### Added
+- **Video Project Feature (Beta)** - New tab for creating AI-powered videos from text/lyrics
+  - Project management system with save/load functionality
+  - Multiple input formats: timestamped lyrics, structured text, plain text
+  - Automatic scene generation with intelligent timing allocation
+  - AI-powered prompt enhancement using multiple LLM providers (OpenAI, Claude, Gemini, Ollama)
+  - Audio track support with volume/fade controls (files linked, not copied)
+  - Storyboard interface for scene management
+  - Export options for both local slideshow and Gemini Veo (prepared for implementation)
+- **Tab Icons** - Added visual icons to all tabs for better UI navigation
+  - 🎨 Generate, 🎬 Video, 📝 Templates, ⚙️ Settings, ❓ Help, 📜 History
+- **Video Dependencies** - Added new requirements for video features:
+  - Jinja2 for template processing
+  - moviepy for video assembly
+  - litellm for unified LLM provider interface
+  - anthropic for Claude API support
+
+### Changed
+- Improved tab visual design with icons for better user experience
+- Updated project structure to support modular video features
+
+### Technical
+- Created comprehensive video module architecture (`core/video/`, `gui/video/`)
+- Implemented data models for video projects with full serialization
+- Added template system for prompt generation
+- Built foundation for FFmpeg slideshow and Veo API integration
+
+### Note
+- Video feature is in beta with "Under Development" notice
+- Full video generation capabilities will be completed in subsequent releases
+
 ## [0.9.3] - 2025-09-09
 
 ### Added

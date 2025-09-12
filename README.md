@@ -1,6 +1,8 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.9.4**
+**Version 0.10.0**
+
+> **📢 Note:** The new Video Project feature (🎬 Video tab) is currently in beta development. The interface is available for preview, but video generation functionality is still being implemented.
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -46,8 +48,9 @@
 - Environment variable support for CI/CD integration
 - Per-provider API key management
 
-### 💻 Dual Interface
+### 💻 Triple Interface
 - **Modern GUI** - User-friendly desktop interface built with Qt/PySide6
+- **Video Project (Beta)** - New 🎬 Video tab for creating AI-powered videos from text/lyrics
 - **Powerful CLI** - Full-featured command-line interface for automation
 - Cross-platform support (Windows, macOS, Linux)
 - Responsive layout with resizable panels
@@ -385,6 +388,19 @@ python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
   - Prompt rewriting toggle
 - **Output Text**: Live generation status and file paths
 - **Examples Button**: Access curated prompts library
+
+#### Video Tab (Beta)
+- **Project Management**: Create, open, and save video projects
+- **Text Input**: Support for lyrics, scripts, or any text content
+- **Input Formats**:
+  - Timestamped lyrics `[mm:ss] text`
+  - Structured text with sections `# Verse`, `# Chorus`
+  - Plain text with automatic scene detection
+- **Scene Generation**: Automatic storyboard creation with timing
+- **AI Enhancement**: LLM-powered prompt generation (OpenAI, Claude, Gemini, Ollama)
+- **Audio Support**: Link audio files with volume and fade controls
+- **Export Options**: Prepared for local slideshow and Gemini Veo rendering
+- **Note**: Currently in beta - full video generation coming soon
 
 #### Settings Tab
 - **Provider Selection**: Switch between Google, OpenAI, Stability AI, and Local SD

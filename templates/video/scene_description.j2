@@ -1,0 +1,42 @@
+{% raw %}
+{# Template for scene metadata and descriptions #}
+Scene {{ scene_number }}: {{ scene_title|default('Untitled') }}
+Duration: {{ duration_seconds }}s
+{% if timestamp %}Timestamp: {{ timestamp }}{% endif %}
+
+{# Scene content #}
+Content: {{ scene_text }}
+
+{# Visual description #}
+Visual: {{ visual_description }}
+{% if key_elements %}
+Key Elements:
+{% for element in key_elements %}
+- {{ element }}
+{% endfor %}
+{% endif %}
+
+{# Technical specifications #}
+Technical:
+- Shot Type: {{ shot_type|default('medium shot') }}
+- Camera: {{ camera_angle|default('eye level') }}
+- Movement: {{ camera_movement|default('static') }}
+- Transitions: {{ transition_in|default('cut') }} in, {{ transition_out|default('cut') }} out
+
+{# Audio notes #}
+{% if audio_notes %}
+Audio: {{ audio_notes }}
+{% endif %}
+
+{# Production notes #}
+{% if production_notes %}
+Notes: {{ production_notes }}
+{% endif %}
+
+{# Generation metadata #}
+Metadata:
+- Provider: {{ provider }}
+- Model: {{ model }}
+- Seed: {{ seed|default('random') }}
+- Variants: {{ num_variants|default(3) }}
+{% endraw %}

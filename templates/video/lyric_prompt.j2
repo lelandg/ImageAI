@@ -1,0 +1,25 @@
+{% raw %}
+{# Template for converting lyrics/text into cinematic image prompts #}
+{% if style == 'cinematic' %}
+Cinematic {{ shot_type|default('wide') }} shot: {{ scene_text }}
+{% if location %}Location: {{ location }}. {% endif %}
+{% if time_of_day %}Time: {{ time_of_day }}. {% endif %}
+{% if mood %}Mood: {{ mood }}. {% endif %}
+{% if camera_angle %}Camera: {{ camera_angle }}. {% endif %}
+Lighting: {{ lighting|default('golden hour') }}, {{ visual_style|default('photorealistic') }}, 
+{{ quality|default('8k resolution, highly detailed') }}
+{% elif style == 'artistic' %}
+Artistic interpretation of: {{ scene_text }}
+Style: {{ art_style|default('impressionist painting') }}
+Color palette: {{ colors|default('warm, vibrant') }}
+Composition: {{ composition|default('rule of thirds') }}
+{% else %}
+{{ scene_text }}
+{% if visual_style %}Style: {{ visual_style }}{% endif %}
+{% if location %}Setting: {{ location }}{% endif %}
+{% endif %}
+
+{% if negative_prompt %}
+Negative: {{ negative_prompt }}
+{% endif %}
+{% endraw %}

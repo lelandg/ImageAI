@@ -1,0 +1,32 @@
+feat: Add Video Project feature (beta) and tab icons - v0.10.0
+
+Major Features:
+- Add new Video Project tab for creating AI-powered videos from text/lyrics
+- Add visual icons to all GUI tabs for better navigation
+- Implement comprehensive video project foundation
+
+Video Project Features (Beta):
+- Project management with save/load functionality
+- Multiple input formats (timestamped, structured, plain text)
+- Automatic scene generation with intelligent timing
+- AI prompt enhancement via multiple LLM providers
+- Audio track support with volume/fade controls
+- Storyboard interface for scene management
+- Prepared for FFmpeg slideshow and Gemini Veo integration
+
+UI Improvements:
+- Added icons to all tabs: 🎨 Generate, 🎬 Video, 📝 Templates, ⚙️ Settings, ❓ Help, 📜 History
+- Optimized Video tab layout with compact header
+- Added development notice banner (to be removed when fully functional)
+
+Technical Implementation:
+- Created modular video architecture (core/video/, gui/video/)
+- Implemented data models with full serialization
+- Added Jinja2 template system for prompts
+- Integrated LiteLLM for unified LLM access
+- Added new dependencies: Jinja2, moviepy, litellm, anthropic
+
+Note: Video generation features are in beta. Full functionality will be completed in subsequent releases.
+
+BREAKING CHANGES: None
+NEW DEPENDENCIES: Jinja2, moviepy, imageio-ffmpeg, litellm, anthropic (optional)

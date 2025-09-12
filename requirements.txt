@@ -16,3 +16,14 @@ keyring>=24.0.0  # For secure API key storage (optional)
 # accelerate>=0.24.0
 # safetensors>=0.4.0
 # psutil>=5.9.0
+
+# Video Project Feature Dependencies
+Jinja2>=3.1.0  # Template processing for prompt generation
+moviepy>=1.0.3  # Video processing and assembly
+imageio-ffmpeg>=0.4.9  # FFmpeg Python bindings
+litellm>=1.0.0  # Unified LLM provider interface
+anthropic>=0.25.0  # Claude API support (optional for prompt generation)
+
+# Optional dependencies for Local LLM support
+# Uncomment if you want to use local LLMs for prompt generation:
+# ollama>=0.3.0  # Local LLM support via Ollama

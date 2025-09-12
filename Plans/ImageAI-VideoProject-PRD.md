@@ -935,26 +935,45 @@ class VideoProjectPipeline:
 
 ---
 
-## 18) Implementation Checklist
+## 18) Implementation Notes
+
+### Development Notice
+- **IMPORTANT**: A development notice banner is currently displayed in the Video tab
+- The notice warns users that the feature is under development
+- **TODO**: Remove the notice from `gui/video/video_project_tab.py` line 131-142 once:
+  - Image generation is connected and working
+  - Video rendering (FFmpeg or Veo) is functional
+  - Basic end-to-end workflow is tested and stable
+
+### Documentation Updates Required
+- **TODO**: Update the Help tab content once video generation is functional:
+  - Add section explaining video project workflow
+  - Document supported input formats with examples
+  - Include video export options and requirements
+  - Add troubleshooting section for common video issues
+  - Include FFmpeg installation instructions
+  - Document Veo API requirements and limitations
+
+## 19) Implementation Checklist
 
 ### Phase 1: Foundation & Core Components
 #### 1.1 Project Structure Setup
-- [ ] Create core video module directories: `core/video/`, `gui/video/`
-- [ ] Create templates directory: `templates/video/`
-- [ ] Set up project storage structure under user config directory
-- [ ] Create sample project structure in `Plans/samples/`
+- [x] Create core video module directories: `core/video/`, `gui/video/`
+- [x] Create templates directory: `templates/video/`
+- [x] Set up project storage structure under user config directory
+- [x] Create sample project structure in `Plans/samples/`
 
 #### 1.2 Data Models & Storage
-- [ ] Define `VideoProject` class with schema version control
-- [ ] Implement `Scene` data model (id, source, prompt, duration, images, approved)
-- [ ] Create `ProjectManager` for save/load/migrate operations
-- [ ] Implement project file validation & schema migration
+- [x] Define `VideoProject` class with schema version control
+- [x] Implement `Scene` data model (id, source, prompt, duration, images, approved)
+- [x] Create `ProjectManager` for save/load/migrate operations
+- [x] Implement project file validation & schema migration
 
 #### 1.3 Dependencies & Configuration
-- [ ] Add Jinja2 to requirements.txt for template processing
-- [ ] Add moviepy or imageio-ffmpeg for video processing
+- [x] Add Jinja2 to requirements.txt for template processing
+- [x] Add moviepy or imageio-ffmpeg for video processing
 - [ ] Verify google-genai supports latest Veo models
-- [ ] Update config system to include video-specific settings
+- [x] Update config system to include video-specific settings
 
 ### Phase 2: AI Prompt Generation & History System
 #### 2.1 Version History Foundation
@@ -992,22 +1011,22 @@ class VideoProjectPipeline:
 
 ### Phase 3: Text Processing & Storyboarding
 #### 3.1 Input Parsing
-- [ ] Implement timestamped format parser: `[mm:ss] text` and `[mm:ss.mmm] text`
-- [ ] Implement structured lyrics parser: `# Verse`, `# Chorus`, etc.
-- [ ] Create format auto-detection logic
+- [x] Implement timestamped format parser: `[mm:ss] text` and `[mm:ss.mmm] text`
+- [x] Implement structured lyrics parser: `# Verse`, `# Chorus`, etc.
+- [x] Create format auto-detection logic
 - [ ] Add file loaders for `.txt`, `.md`, `.iaproj.json`
 
 #### 3.2 Timing & Scene Generation
-- [ ] Implement `TimingEngine` with pacing presets (Fast/Medium/Slow)
-- [ ] Create duration allocation algorithm for target length
-- [ ] Build scene splitter with configurable shot duration (3-5s default)
-- [ ] Add duration validation and adjustment logic
+- [x] Implement `TimingEngine` with pacing presets (Fast/Medium/Slow)
+- [x] Create duration allocation algorithm for target length
+- [x] Build scene splitter with configurable shot duration (3-5s default)
+- [x] Add duration validation and adjustment logic
 
 #### 3.3 Prompt Engineering
-- [ ] Create base Jinja2 templates: `lyric_prompt.j2`, `shot_prompt.j2`
-- [ ] Implement `PromptEngine` with LLM rewrite capability
-- [ ] Add template token system for style variables
-- [ ] Create cinematic prompt generator with camera/style/ambiance tokens
+- [x] Create base Jinja2 templates: `lyric_prompt.j2`, `shot_prompt.j2`
+- [x] Implement `PromptEngine` with LLM rewrite capability
+- [x] Add template token system for style variables
+- [x] Create cinematic prompt generator with camera/style/ambiance tokens
 
 ### Phase 4: Image Generation Pipeline
 #### 4.1 Provider Integration
@@ -1030,29 +1049,29 @@ class VideoProjectPipeline:
 
 ### Phase 5: GUI Implementation
 #### 5.1 Video Project Tab
-- [ ] Create `VideoProjectTab` widget in PySide6
-- [ ] Implement project header with name/folder/save controls
-- [ ] Add input panel with text area and format selector
-- [ ] Build provider selection with model dropdowns
+- [x] Create `VideoProjectTab` widget in PySide6
+- [x] Implement project header with name/folder/save controls
+- [x] Add input panel with text area and format selector
+- [x] Build provider selection with model dropdowns
 
 #### 5.2 Storyboard Interface
-- [ ] Create `StoryboardTable` widget with scene rows
+- [x] Create `StoryboardTable` widget with scene rows
 - [ ] Implement thumbnail grid display (N variants per scene)
 - [ ] Add drag-and-drop scene reordering
-- [ ] Build duration adjustment controls per scene
-- [ ] Add caption/title toggle switches
+- [x] Build duration adjustment controls per scene
+- [x] Add caption/title toggle switches
 
 #### 5.3 Style & Configuration
-- [ ] Add aspect ratio selector (16:9, 9:16)
-- [ ] Implement quality/resolution controls
-- [ ] Add negative prompt input
-- [ ] Create seed management UI
+- [x] Add aspect ratio selector (16:9, 9:16)
+- [x] Implement quality/resolution controls
+- [x] Add negative prompt input
+- [x] Create seed management UI
 - [ ] Build template selector and editor
 
 #### 5.4 Progress & Feedback
-- [ ] Implement `RenderQueue` widget with progress bars
-- [ ] Add real-time generation status display
-- [ ] Create cost estimate display
+- [x] Implement `RenderQueue` widget with progress bars
+- [x] Add real-time generation status display
+- [x] Create cost estimate display
 - [ ] Build error notification system
 
 #### 5.5 History Tab Implementation
@@ -1066,17 +1085,17 @@ class VideoProjectPipeline:
 
 ### Phase 6: Audio Integration
 #### 6.1 Audio File Management
-- [ ] Implement AudioTrack dataclass with file linking (no copy)
-- [ ] Build AudioManager for track management
-- [ ] Add support for multiple audio formats (MP3, WAV, M4A, etc.)
+- [x] Implement AudioTrack dataclass with file linking (no copy)
+- [x] Build AudioManager for track management
+- [x] Add support for multiple audio formats (MP3, WAV, M4A, etc.)
 - [ ] Create audio file validation and error handling
-- [ ] Implement path resolution for linked audio files
+- [x] Implement path resolution for linked audio files
 
 #### 6.2 Audio Controls
-- [ ] Build audio panel in GUI with file browser
+- [x] Build audio panel in GUI with file browser
 - [ ] Implement waveform visualization
-- [ ] Add volume control with real-time preview
-- [ ] Create fade in/out controls
+- [x] Add volume control with real-time preview
+- [x] Create fade in/out controls
 - [ ] Build trim controls for start/end offsets
 - [ ] Add audio preview playback
 

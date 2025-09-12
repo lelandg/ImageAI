@@ -105,5 +105,7 @@ The `Plans/` directory contains documentation for upcoming features:
 - **GoogleCloudAuth.md**: Implementation plan for Google Cloud authentication via Application Default Credentials
 - **NewProviders.md**: Comprehensive plan for adding additional AI image providers (Stability AI, Adobe Firefly, etc.) and features like image editing, masking, and upscaling
 - When implementing new features, keep file sizes reasonable for your use.
-- For testing Python code use 'source /mnt/d/Documents/Code/GitHub/ImageAI/.venv/bin/activate' first
+- For testing Python code:
+  - **In WSL/Linux bash**: Use `source /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/activate`
+  - **In PowerShell**: Use `.\.venv\Scripts\Activate.ps1` (this is the primary environment)
 - I'm running this project from PowerShell. Please consider that when checking config files, etc.

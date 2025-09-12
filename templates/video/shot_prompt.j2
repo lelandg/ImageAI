@@ -1,0 +1,40 @@
+{% raw %}
+{# Template for generating cinematic shot descriptions #}
+{% set shot_types = ['extreme wide shot', 'wide shot', 'medium shot', 'close-up', 'extreme close-up'] %}
+{% set camera_movements = ['static', 'pan left', 'pan right', 'tilt up', 'tilt down', 'dolly in', 'dolly out'] %}
+
+{{ shot_type|default(shot_types|random) }} of {{ subject }}
+{% if action %}Action: {{ action }}{% endif %}
+{% if emotion %}Emotion: {{ emotion }}{% endif %}
+
+{# Camera specifications #}
+Camera: {{ camera_angle|default('eye level') }}, 
+{% if camera_movement %}{{ camera_movement }}{% else %}{{ camera_movements|random }}{% endif %}
+Lens: {{ lens|default('50mm') }}
+Depth of field: {{ dof|default('shallow, bokeh background') }}
+
+{# Lighting setup #}
+Lighting: {{ lighting_setup|default('three-point lighting') }}
+Key light: {{ key_light|default('soft, warm') }}
+{% if practical_lights %}Practical lights: {{ practical_lights }}{% endif %}
+
+{# Environment #}
+Setting: {{ location|default('interior') }}
+Time: {{ time_of_day|default('golden hour') }}
+Weather: {{ weather|default('clear') }}
+Atmosphere: {{ atmosphere|default('cinematic haze') }}
+
+{# Visual style #}
+Style: {{ visual_style|default('cinematic, photorealistic') }}
+Color grading: {{ color_grading|default('teal and orange') }}
+Film stock: {{ film_stock|default('35mm film, grain') }}
+Aspect ratio: {{ aspect_ratio|default('16:9') }}
+
+{% if reference_style %}
+Reference: {{ reference_style }} style
+{% endif %}
+
+{% if negative_prompt %}
+Avoid: {{ negative_prompt }}
+{% endif %}
+{% endraw %}
