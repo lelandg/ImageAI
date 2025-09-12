@@ -198,7 +198,7 @@ class GoogleProvider(ImageProvider):
         model: Optional[str] = None,
         **kwargs
     ) -> Tuple[List[str], List[bytes]]:
-        """Generate images using Google Gemini/Imagen 3."""
+        """Generate images using Google Gemini models."""
         if not self.client:
             if self.auth_mode == "gcloud":
                 # Try to initialize gcloud client, raise error if it fails
@@ -215,36 +215,38 @@ class GoogleProvider(ImageProvider):
         texts: List[str] = []
         images: List[bytes] = []
         
-        # Build generation config with Imagen 3 parameters
+        # Build generation config for Gemini models
+        # Note: Gemini 2.5 Flash (Nano Banana) only generates square (1:1) images
+        # Aspect ratio parameters are not supported by the Gemini API
         config = {}
         
-        # Handle aspect ratio (Imagen 3 supports: 1:1, 3:4, 4:3, 9:16, 16:9)
+        # Optionally add aspect ratio to the prompt text for better results
         aspect_ratio = kwargs.get('aspect_ratio', '1:1')
-        if aspect_ratio in ['1:1', '3:4', '4:3', '9:16', '16:9']:
-            config['aspect_ratio'] = aspect_ratio
+        if aspect_ratio != '1:1':
+            # Add aspect ratio hint to prompt (doesn't guarantee output ratio)
+            aspect_hints = {
+                '16:9': 'widescreen landscape 16:9 aspect ratio',
+                '9:16': 'vertical portrait 9:16 aspect ratio',
+                '4:3': 'standard 4:3 aspect ratio',
+                '3:4': 'portrait 3:4 aspect ratio'
+            }
+            if aspect_ratio in aspect_hints:
+                prompt = f"{prompt}, {aspect_hints[aspect_ratio]}"
         
-        # Handle resolution (1K or 2K for Imagen 3)
-        resolution = kwargs.get('resolution', '1024x1024')
-        if '2048' in str(resolution) or '2K' in str(resolution).upper():
-            config['sample_image_size'] = '2K'
-        else:
-            config['sample_image_size'] = '1K'
+        # Note: These generation_config parameters may not be supported by all Gemini models
+        # Most are placeholders for potential future support
         
-        # Number of images (1-4 for Imagen 3)
+        # Number of images - may work with some models
         num_images = kwargs.get('num_images', 1)
-        if 1 <= num_images <= 4:
-            config['number_of_images'] = num_images
+        if num_images > 1:
+            # Try to request multiple images (may not be supported)
+            config['candidate_count'] = num_images
         
-        # Advanced settings
-        if kwargs.get('enable_prompt_rewriting') is not None:
-            config['enable_prompt_rewriting'] = kwargs['enable_prompt_rewriting']
-        
+        # Safety settings (these generally work)
         if kwargs.get('safety_filter'):
-            config['safety_filter_level'] = kwargs['safety_filter']
+            config['safety_settings'] = kwargs['safety_filter']
         
-        if kwargs.get('person_generation') is not None:
-            config['person_generation'] = 'allow' if kwargs['person_generation'] else 'dont_allow'
-        
+        # Seed for reproducibility (if supported)
         if kwargs.get('seed') is not None:
             config['seed'] = kwargs['seed']
         

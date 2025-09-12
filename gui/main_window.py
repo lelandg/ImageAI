@@ -292,6 +292,12 @@ class MainWindow(QMainWindow):
             self.aspect_selector = AspectRatioSelector()
             self.aspect_selector.ratioChanged.connect(self._on_aspect_ratio_changed)
             image_settings_layout.addWidget(self.aspect_selector)
+            
+            # Configure aspect selector based on current provider
+            if self.current_provider == 'google':
+                self.aspect_selector.set_ratio("1:1")
+                self.aspect_selector.setEnabled(False)
+                self.aspect_selector.setToolTip("Google Gemini currently only supports square (1:1) images")
         else:
             self.aspect_selector = None
         
@@ -1104,6 +1110,27 @@ class MainWindow(QMainWindow):
         }}
         a {{ color: #0366d6; text-decoration: none; }}
         a:hover {{ text-decoration: underline; }}
+        table {{ 
+            border-collapse: collapse; 
+            width: 100%; 
+            margin: 15px 0;
+        }}
+        th, td {{ 
+            border: 1px solid #ddd; 
+            padding: 8px; 
+            text-align: left;
+        }}
+        th {{ 
+            background-color: #f0f0f0; 
+            font-weight: bold;
+        }}
+        tr:nth-child(even) {{ 
+            background-color: #f9f9f9;
+        }}
+        td:first-child {{ 
+            background-color: #f5f5f5; 
+            font-weight: 500;
+        }}
     </style>
 </head>
 <body>
@@ -1139,6 +1166,27 @@ class MainWindow(QMainWindow):
         }}
         a {{ color: #0366d6; text-decoration: none; }}
         a:hover {{ text-decoration: underline; }}
+        table {{ 
+            border-collapse: collapse; 
+            width: 100%; 
+            margin: 15px 0;
+        }}
+        th, td {{ 
+            border: 1px solid #ddd; 
+            padding: 8px; 
+            text-align: left;
+        }}
+        th {{ 
+            background-color: #f0f0f0; 
+            font-weight: bold;
+        }}
+        tr:nth-child(even) {{ 
+            background-color: #f9f9f9;
+        }}
+        td:first-child {{ 
+            background-color: #f5f5f5; 
+            font-weight: 500;
+        }}
     </style>
 </head>
 <body>
@@ -1205,6 +1253,11 @@ class MainWindow(QMainWindow):
             'pre { background-color: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; }',
             'a { color: #0366d6; text-decoration: none; }',
             'a:hover { text-decoration: underline; }',
+            'table { border-collapse: collapse; width: 100%; margin: 15px 0; }',
+            'th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }',
+            'th { background-color: #f0f0f0; font-weight: bold; }',
+            'tr:nth-child(even) { background-color: #f9f9f9; }',
+            'td:first-child { background-color: #f5f5f5; font-weight: 500; }',
             '</style>',
             '</head>',
             '<body>'
@@ -1454,9 +1507,9 @@ For more detailed information, please refer to the full documentation.
         
         # Create table widget for better organization
         self.history_table = QTableWidget()
-        self.history_table.setColumnCount(7)
+        self.history_table.setColumnCount(6)
         self.history_table.setHorizontalHeaderLabels([
-            "Date", "Time", "Provider", "Model", "Prompt", "Resolution", "Cost"
+            "Date & Time", "Provider", "Model", "Prompt", "Resolution", "Cost"
         ])
         
         # Configure table
@@ -1467,73 +1520,79 @@ For more detailed information, please refer to the full documentation.
         
         # Set column widths
         header = self.history_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Date
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Time
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Provider
-        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Model
-        header.setSectionResizeMode(4, QHeaderView.Stretch)  # Prompt - takes remaining space
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Resolution
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Cost
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Date & Time
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Provider
+        header.setSectionResizeMode(2, QHeaderView.Interactive)  # Model
+        header.setSectionResizeMode(3, QHeaderView.Stretch)  # Prompt - takes remaining space
+        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Resolution
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Cost
         
         # Populate table with history
         self.history_table.setRowCount(len(self.history))
         for row, item in enumerate(self.history):
             if isinstance(item, dict):
-                # Parse timestamp
+                # Parse timestamp and combine date & time
                 timestamp = item.get('timestamp', '')
-                date_str = time_str = ''
+                datetime_str = ''
+                sortable_datetime = None
                 if isinstance(timestamp, float):
                     from datetime import datetime
                     dt = datetime.fromtimestamp(timestamp)
-                    date_str = dt.strftime("%Y-%m-%d")
-                    time_str = dt.strftime("%H:%M:%S")
+                    datetime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    sortable_datetime = dt
                 elif isinstance(timestamp, str) and 'T' in timestamp:
                     # ISO format
-                    parts = timestamp.split('T')
-                    date_str = parts[0]
-                    time_str = parts[1].split('.')[0] if len(parts) > 1 else ''
+                    from datetime import datetime
+                    try:
+                        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                        datetime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                        sortable_datetime = dt
+                    except:
+                        parts = timestamp.split('T')
+                        date_str = parts[0]
+                        time_str = parts[1].split('.')[0] if len(parts) > 1 else ''
+                        datetime_str = f"{date_str} {time_str}"
                 
-                # Date column
-                date_item = QTableWidgetItem(date_str)
-                self.history_table.setItem(row, 0, date_item)
+                # Date & Time column (combined)
+                datetime_item = QTableWidgetItem(datetime_str)
+                # Store sortable datetime for proper chronological sorting
+                if sortable_datetime:
+                    datetime_item.setData(Qt.UserRole + 1, sortable_datetime)
+                self.history_table.setItem(row, 0, datetime_item)
                 
-                # Time column
-                time_item = QTableWidgetItem(time_str)
-                self.history_table.setItem(row, 1, time_item)
-                
-                # Provider column
+                # Provider column (now column 1)
                 provider = item.get('provider', '')
                 provider_item = QTableWidgetItem(provider.title() if provider else 'Unknown')
-                self.history_table.setItem(row, 2, provider_item)
+                self.history_table.setItem(row, 1, provider_item)
                 
-                # Model column
+                # Model column (now column 2)
                 model = item.get('model', '')
                 model_display = model.split('/')[-1] if '/' in model else model  # Simplify model names
                 model_item = QTableWidgetItem(model_display)
                 model_item.setToolTip(model)  # Full model name in tooltip
-                self.history_table.setItem(row, 3, model_item)
+                self.history_table.setItem(row, 2, model_item)
                 
-                # Prompt column
+                # Prompt column (now column 3)
                 prompt = item.get('prompt', 'No prompt')
                 prompt_item = QTableWidgetItem(prompt[:100] + '...' if len(prompt) > 100 else prompt)
                 prompt_item.setToolTip(f"Full prompt:\n{prompt}")
-                self.history_table.setItem(row, 4, prompt_item)
+                self.history_table.setItem(row, 3, prompt_item)
                 
-                # Resolution column
+                # Resolution column (now column 4)
                 width = item.get('width', '')
                 height = item.get('height', '')
                 resolution = f"{width}x{height}" if width and height else ''
                 resolution_item = QTableWidgetItem(resolution)
-                self.history_table.setItem(row, 5, resolution_item)
+                self.history_table.setItem(row, 4, resolution_item)
                 
-                # Cost column
+                # Cost column (now column 5)
                 cost = item.get('cost', 0.0)
                 cost_str = f"${cost:.4f}" if cost > 0 else '-'
                 cost_item = QTableWidgetItem(cost_str)
-                self.history_table.setItem(row, 6, cost_item)
+                self.history_table.setItem(row, 5, cost_item)
                 
                 # Store the history item data in the first column for easy retrieval
-                date_item.setData(Qt.UserRole, item)
+                datetime_item.setData(Qt.UserRole, item)
         
         v.addWidget(QLabel(f"History ({len(self.history)} items):"))
         v.addWidget(self.history_table)
@@ -1685,6 +1744,18 @@ For more detailed information, please refer to the full documentation.
             self.quality_selector.update_provider(self.current_provider)
         if hasattr(self, 'advanced_panel') and self.advanced_panel:
             self.advanced_panel.update_provider(self.current_provider)
+        
+        # Handle aspect ratio selector for Google (only supports square images)
+        if hasattr(self, 'aspect_selector') and self.aspect_selector:
+            if self.current_provider == 'google':
+                # Google Gemini only supports square images
+                self.aspect_selector.set_ratio("1:1")
+                self.aspect_selector.setEnabled(False)
+                self.aspect_selector.setToolTip("Google Gemini currently only supports square (1:1) images")
+            else:
+                # Other providers support multiple aspect ratios
+                self.aspect_selector.setEnabled(True)
+                self.aspect_selector.setToolTip("")
         
         # Update cost estimate
         self._update_cost_estimate()
@@ -3187,59 +3258,66 @@ For more detailed information, please refer to the full documentation.
         
         for row, item in enumerate(self.history):
             if isinstance(item, dict):
-                # Parse timestamp
+                # Parse timestamp and combine date & time
                 timestamp = item.get('timestamp', '')
-                date_str = time_str = ''
+                datetime_str = ''
+                sortable_datetime = None
                 if isinstance(timestamp, float):
                     from datetime import datetime
                     dt = datetime.fromtimestamp(timestamp)
-                    date_str = dt.strftime("%Y-%m-%d")
-                    time_str = dt.strftime("%H:%M:%S")
+                    datetime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    sortable_datetime = dt
                 elif isinstance(timestamp, str) and 'T' in timestamp:
                     # ISO format
-                    parts = timestamp.split('T')
-                    date_str = parts[0]
-                    time_str = parts[1].split('.')[0] if len(parts) > 1 else ''
+                    from datetime import datetime
+                    try:
+                        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                        datetime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
+                        sortable_datetime = dt
+                    except:
+                        parts = timestamp.split('T')
+                        date_str = parts[0]
+                        time_str = parts[1].split('.')[0] if len(parts) > 1 else ''
+                        datetime_str = f"{date_str} {time_str}"
                 
-                # Date column
+                # Date & Time column (combined)
                 from PySide6.QtWidgets import QTableWidgetItem
-                date_item = QTableWidgetItem(date_str)
-                self.history_table.setItem(row, 0, date_item)
+                datetime_item = QTableWidgetItem(datetime_str)
+                # Store sortable datetime for proper chronological sorting
+                if sortable_datetime:
+                    datetime_item.setData(Qt.UserRole + 1, sortable_datetime)
+                self.history_table.setItem(row, 0, datetime_item)
                 
-                # Time column
-                time_item = QTableWidgetItem(time_str)
-                self.history_table.setItem(row, 1, time_item)
-                
-                # Provider column
+                # Provider column (now column 1)
                 provider = item.get('provider', '')
                 provider_item = QTableWidgetItem(provider.title() if provider else 'Unknown')
-                self.history_table.setItem(row, 2, provider_item)
+                self.history_table.setItem(row, 1, provider_item)
                 
-                # Model column
+                # Model column (now column 2)
                 model = item.get('model', '')
                 model_display = model.split('/')[-1] if '/' in model else model
                 model_item = QTableWidgetItem(model_display)
                 model_item.setToolTip(model)
-                self.history_table.setItem(row, 3, model_item)
+                self.history_table.setItem(row, 2, model_item)
                 
-                # Prompt column
+                # Prompt column (now column 3)
                 prompt = item.get('prompt', 'No prompt')
                 prompt_item = QTableWidgetItem(prompt[:100] + '...' if len(prompt) > 100 else prompt)
                 prompt_item.setToolTip(f"Full prompt:\n{prompt}")
-                self.history_table.setItem(row, 4, prompt_item)
+                self.history_table.setItem(row, 3, prompt_item)
                 
-                # Resolution column
+                # Resolution column (now column 4)
                 width = item.get('width', '')
                 height = item.get('height', '')
                 resolution = f"{width}x{height}" if width and height else ''
                 resolution_item = QTableWidgetItem(resolution)
-                self.history_table.setItem(row, 5, resolution_item)
+                self.history_table.setItem(row, 4, resolution_item)
                 
-                # Cost column
+                # Cost column (now column 5)
                 cost = item.get('cost', 0.0)
                 cost_str = f"${cost:.4f}" if cost > 0 else '-'
                 cost_item = QTableWidgetItem(cost_str)
-                self.history_table.setItem(row, 6, cost_item)
+                self.history_table.setItem(row, 5, cost_item)
                 
                 # Store the history item data in the first column for easy retrieval
-                date_item.setData(Qt.UserRole, item)
+                datetime_item.setData(Qt.UserRole, item)

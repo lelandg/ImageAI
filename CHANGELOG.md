@@ -11,13 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cleaned up development notices from documentation
 - Updated video feature status from "Coming Soon" to "Planned" for Veo integration
 - Enhanced README documentation with comprehensive video feature details
+- Added comprehensive pricing comparison table with free tier details
 
 ### Fixed
 - Version number properly incremented to reflect stable UI implementation
+- Google Gemini aspect ratio handling - now correctly indicates only square (1:1) images are supported
+- Disabled aspect ratio selector for Google provider with explanatory tooltip
+- Updated provider code to add aspect ratio hints to prompts for Google (best effort)
 
 ### Removed
 - Removed Imagen 3/4 models from UI - these require Vertex AI access, not available through Gemini API
 - Note: Imagen models (imagen-3.0-generate-002, imagen-4.0-generate-001) require Google Cloud Vertex AI, not the standard Gemini API used by ImageAI
+
+### Known Limitations
+- Google Gemini (Nano Banana) only generates square images regardless of aspect ratio settings
 
 ## [0.10.0] - 2025-01-11
 

@@ -19,11 +19,11 @@
 - [CLI Reference](#6-cli-reference)
 - [GUI Features](#7-gui-features)
 - [Image Management](#8-image-management)
-- [Examples & Templates](#9-examples--templates)
+- [Examples and Templates](#9-examples-and-templates)
 - [Advanced Features](#10-advanced-features)
 - [Utility Scripts](#11-utility-scripts)
 - [Frequently Asked Questions](#12-frequently-asked-questions)
-- [Pricing & Cost Comparison](#13-pricing--cost-comparison)
+- [Pricing and Cost Comparison](#13-pricing-and-cost-comparison)
 - [API Reference](#14-api-reference)
 - [Development](#15-development)
 - [Changelog](#16-changelog)
@@ -69,7 +69,7 @@
   - Negative prompts
   - Prompt rewriting/enhancement
 
-### 📊 Enhanced History & Tracking
+### 📊 Enhanced History and Tracking
 - **Detailed History Table** - View all generations with:
   - Date and time stamps
   - Provider and model used
@@ -464,7 +464,7 @@ The Video Project feature provides comprehensive tools for creating AI-powered v
    - **Duration Control**: 5-10 second clips per scene
    - **Advanced Features**: Camera movements, visual styles
 
-**Version Control & History**:
+**Version Control and History**:
 - **Event Sourcing Architecture**: Complete history of all changes
 - **Time Travel**: Restore project to any point in history
 - **History Timeline**: Visual timeline with event markers
@@ -474,7 +474,7 @@ The Video Project feature provides comprehensive tools for creating AI-powered v
   - Prompt enhancements
   - Image generations
   - Video renders
-- **Filtering & Search**: Find specific events quickly
+- **Filtering and Search**: Find specific events quickly
 - **Restore Points**: One-click restoration to previous states
 - **Diff Viewer**: See exact changes between versions
 
@@ -638,7 +638,7 @@ Each image gets a `.json` sidecar file containing:
 - Quick access to recent generations
 - Metadata search and filtering
 
-## 9. Examples & Templates
+## 9. Examples and Templates
 
 ### Example Prompts
 
@@ -1102,7 +1102,7 @@ A: Check each provider's terms:
 - Stability AI: Commercial use allowed
 - Local SD: Depends on specific model license
 
-## 13. Pricing & Cost Comparison
+## 13. Pricing and Cost Comparison
 
 ### Image Generation Pricing Table (January 2025)
 
@@ -1126,6 +1126,7 @@ A: Check each provider's terms:
 - **Free Tier**: 25 requests/day, 5 RPM via AI Studio (completely free)
 - **Token Pricing**: Images consume ~1,290 tokens for 1024x1024
 - **Rate Limits**: Preview models have stricter limits
+- **Limitations**: Currently only generates square (1:1) images regardless of aspect ratio settings
 - **Best For**: Free testing, development, and moderate usage
 
 #### OpenAI
@@ -1171,7 +1172,7 @@ A: Check each provider's terms:
 | 1000+ images/month | Stability AI subscription | $20 |
 | Unlimited | Local SD | $0 (after setup) |
 
-### Enterprise & Volume Pricing
+### Enterprise and Volume Pricing
 
 - **Google Cloud**: Custom Vertex AI pricing, volume discounts
 - **OpenAI**: Enterprise agreements available, contact sales
@@ -1287,7 +1288,7 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
 **Major Feature: Video Project System**
 - **Complete Video Pipeline**: Full implementation of text-to-video generation workflow
-- **Workspace & History Tabs**: Dual-tab interface for editing and version control
+- **Workspace and History Tabs**: Dual-tab interface for editing and version control
 - **Event Sourcing**: Complete project history with time-travel restoration
 - **LLM Integration**: Multi-provider prompt enhancement (GPT-5, Claude, Gemini)
 - **Scene Management**: Interactive storyboard with timing controls
