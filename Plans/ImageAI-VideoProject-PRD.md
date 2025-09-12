@@ -43,9 +43,9 @@ Add a **Video Project** workflow to ImageAI that turns **lyrics/text** into an *
 - Keep detailed **metadata** for reproducibility & cost tracking.
 
 ### 🚫 Non‑Goals (initial)
-- Audio/music timing, vocal synthesis, lyric karaoke overlays.
+- Vocal synthesis, automatic music generation.
 - Advanced continuity (face/character locking across all scenes) beyond seed/prompt carry‑over.
-- Multi‑track timelines; we’ll ship a single-track MVP, then iterate.
+- Multi‑track timelines; we'll ship a single-track MVP, then iterate.
 
 ---
 
@@ -180,7 +180,221 @@ class ProjectHistory:
 
 ---
 
-## 5) Audio Track Support
+## 5) MIDI-Based Synchronization & Timing
+
+### Overview
+When both MIDI and audio files are available (e.g., from AI song generators like aisonggenerator.ai), we can achieve frame-accurate synchronization using MIDI's precise timing data. This enables:
+- **Perfect beat/measure alignment** for scene transitions
+- **Word-level lyric synchronization** for karaoke effects
+- **Musical structure awareness** (verse, chorus, bridge detection)
+- **Tempo-aware scene pacing** that follows the music's rhythm
+
+### MIDI Processing Pipeline
+1. **MIDI Analysis**: Extract tempo, time signatures, beat positions, and lyric events
+2. **Beat Grid Generation**: Create a timeline of beats, measures, and musical sections
+3. **Lyric Extraction**: Parse MIDI lyric meta-events or align external lyrics to beats
+4. **Scene Mapping**: Auto-align scenes to musical boundaries (measures, phrases, sections)
+5. **Fine-Tuning**: Allow manual adjustment while maintaining musical alignment
+
+### Technical Implementation
+```python
+@dataclass
+class MidiTimingData:
+    """MIDI timing information for synchronization"""
+    file_path: Path
+    tempo_changes: List[Tuple[float, float]]  # (time, bpm)
+    time_signatures: List[Tuple[float, int, int]]  # (time, numerator, denominator)
+    beats: List[float]  # Beat timestamps in seconds
+    measures: List[float]  # Measure timestamps in seconds
+    lyrics: List[Tuple[float, str]]  # (time, lyric_text)
+    
+class MidiProcessor:
+    """Process MIDI files for timing extraction"""
+    
+    def extract_timing(self, midi_path: Path) -> MidiTimingData:
+        """Extract all timing information from MIDI file"""
+        import pretty_midi
+        pm = pretty_midi.PrettyMIDI(midi_path)
+        
+        # Get beat and downbeat locations
+        beats = pm.get_beats()
+        downbeats = pm.get_downbeats()
+        
+        # Extract tempo changes
+        tempo_changes = pm.get_tempo_changes()
+        
+        # Extract lyric events if present
+        lyrics = self.extract_lyrics(pm)
+        
+        return MidiTimingData(...)
+    
+    def align_scenes_to_beats(self, scenes: List[Scene], 
+                            timing: MidiTimingData,
+                            alignment: str = "measure") -> List[Scene]:
+        """Align scene transitions to musical boundaries"""
+        if alignment == "measure":
+            boundaries = timing.measures
+        elif alignment == "beat":
+            boundaries = timing.beats
+        else:  # "section" - detect verse/chorus boundaries
+            boundaries = self.detect_musical_sections(timing)
+        
+        # Snap scene durations to nearest boundaries
+        return self.snap_to_grid(scenes, boundaries)
+```
+
+### Libraries Required
+```txt
+# Add to requirements.txt for MIDI support
+pretty-midi>=0.2.10  # High-level MIDI analysis
+mido>=1.3.0  # Low-level MIDI manipulation
+music21>=9.1.0  # Advanced music theory analysis (optional)
+```
+
+### MIDI Features in GUI
+- **MIDI Import Panel**:
+  - Browse button for MIDI file selection
+  - Display detected tempo, time signature, duration
+  - Beat grid visualization overlay
+  - Section markers (verse, chorus, etc.)
+  
+- **Sync Options**:
+  - **Alignment Mode**: Beat / Measure / Section / Free
+  - **Snap Strength**: 0-100% (how strongly to snap to grid)
+  - **Lead Time**: Offset scenes ahead of beats (ms)
+  - **Transition Style**: Cut on beat / Fade through beat
+
+- **Preview**:
+  - Waveform with beat markers
+  - Play with click track
+  - Visual metronome during preview
+
+## 6) Karaoke & Music Notation Overlays
+
+### Karaoke Overlay System
+Post-processing feature to add synchronized lyrics overlays to generated videos:
+
+#### Bouncing Ball Implementation
+```python
+@dataclass
+class KaraokeOverlay:
+    """Karaoke overlay configuration"""
+    style: str  # "bouncing_ball", "highlight", "fade_in"
+    position: str  # "bottom", "top", "center"
+    font_size: int
+    font_color: str
+    background_opacity: float  # 0.0-1.0
+    ball_image: Optional[Path]  # Custom ball sprite
+    lead_time: float  # Seconds before word to start animation
+    
+class KaraokeRenderer:
+    """Render karaoke overlays on video"""
+    
+    def add_bouncing_ball(self, video_path: Path, 
+                          lyrics: List[Tuple[float, str, float]],  # (start, word, duration)
+                          overlay: KaraokeOverlay) -> Path:
+        """Add bouncing ball karaoke to video using FFmpeg"""
+        # Generate ball animation keyframes
+        # Create subtitle file with word-level timing
+        # Use FFmpeg drawtext and overlay filters
+        pass
+    
+    def generate_lrc_from_midi(self, midi_path: Path, 
+                               lyrics_text: str) -> str:
+        """Generate LRC file from MIDI timing + lyrics"""
+        # Extract MIDI beats/measures
+        # Align lyrics to timing
+        # Output enhanced LRC format with word timing
+        pass
+```
+
+#### Karaoke Formats Support
+- **LRC** (Lyrics): Simple timestamp format for music players
+- **Enhanced LRC**: Word-level timing with `<mm:ss.xx>` tags
+- **SRT** (SubRip): Video subtitle format with start/end times
+- **ASS/SSA**: Advanced SubStation for styled karaoke effects
+
+#### FFmpeg Karaoke Filters
+```bash
+# Bouncing ball with drawtext filter
+ffmpeg -i video.mp4 -i ball.png \
+  -filter_complex "[0:v][1:v]overlay=x='if(gte(t,2),100+50*sin(t*3.14),NAN)':y='400-abs(sin(t*3.14)*50)':enable='between(t,2,5)'[v1]; \
+  [v1]drawtext=text='Hello World':fontsize=40:x=(w-text_w)/2:y=450:fontcolor=white[out]" \
+  -map "[out]" -map 0:a output.mp4
+
+# Highlight words progressively
+ffmpeg -i video.mp4 -vf "subtitles=lyrics.srt:force_style='Fontsize=24,PrimaryColour=&H00FFFF&'" output.mp4
+```
+
+### Sheet Music Overlay
+Optional music notation display for educational/performance videos:
+
+#### Music Notation Features
+- **Staff Display**: Show current measure's notation
+- **Scrolling Mode**: Continuous horizontal scroll
+- **Highlight Current**: Mark playing notes/measures
+- **Position Options**: Bottom strip, side panel, or corner
+
+#### Implementation Approach
+```python
+class SheetMusicOverlay:
+    """Generate and overlay sheet music notation"""
+    
+    def midi_to_notation(self, midi_path: Path) -> List[Path]:
+        """Convert MIDI to sheet music images"""
+        import music21
+        score = music21.converter.parse(midi_path)
+        
+        # Generate PNG images per measure/system
+        measures = []
+        for measure in score.measures(1, None):
+            # Render measure to PNG
+            measures.append(self.render_measure(measure))
+        return measures
+    
+    def overlay_notation(self, video_path: Path,
+                        notation_images: List[Path],
+                        timing: MidiTimingData) -> Path:
+        """Overlay sheet music synchronized to video"""
+        # Create scrolling notation strip
+        # Sync to MIDI measure timing
+        # Composite over video with FFmpeg
+        pass
+```
+
+### LLM-Assisted Synchronization
+For complex synchronization tasks without precise MIDI:
+
+#### GPT-5 Integration
+```python
+class LLMSyncAssistant:
+    """Use advanced LLMs for audio/lyric alignment"""
+    
+    async def analyze_audio_structure(self, audio_path: Path) -> Dict:
+        """Use GPT-5 to analyze song structure"""
+        # Upload audio to GPT-5
+        # Request beat detection, section identification
+        # Return structured timing data
+        pass
+    
+    async def align_lyrics_to_audio(self, audio_path: Path, 
+                                   lyrics: str) -> List[Tuple[float, str]]:
+        """Use GPT-5 for forced alignment"""
+        # Upload audio + lyrics
+        # Request word-level timing alignment
+        # Return synchronized lyrics
+        pass
+    
+    async def generate_karaoke_timing(self, midi_path: Path,
+                                     lyrics: str) -> str:
+        """Generate professional karaoke timing"""
+        # Upload MIDI + lyrics to GPT-5
+        # Request LRC/SRT generation with proper sync
+        # Include syllable-level timing if needed
+        pass
+```
+
+## 7) Audio Track Support
 
 ### Audio Features
 - **File Linking**: Reference audio files in-place without copying (saves disk space)
@@ -241,7 +455,7 @@ ffmpeg -i video.mp4 -i music.mp3 \
 
 ---
 
-## 6) UX Spec (GUI)
+## 8) UX Spec (GUI)
 ### New Tab: **🎬 Video Project**
 - **Project header**: name, base folder, open/save.
 - **Input panel**:
@@ -262,15 +476,28 @@ ffmpeg -i video.mp4 -i music.mp3 \
     - **Draft mode**: Use local LLM for quick iterations, cloud for final.
     - Template picker (Jinja‑like): `templates/lyric_prompt.j2`.
 
-- **Audio panel**:
-  - **Browse button**: Select audio file (no copy, just link)
-  - **Audio file path**: Display linked file with folder location
-  - **Waveform preview**: Visual audio waveform display
-  - **Volume slider**: 0-100% with real-time preview
-  - **Fade controls**: In/out duration in seconds
-  - **Trim controls**: Start/end offset for audio
-  - **Test play button**: Preview audio with current settings
-  - **Clear audio**: Remove audio track from project
+- **Audio & MIDI panel**:
+  - **Audio Section**:
+    - **Browse button**: Select audio file (no copy, just link)
+    - **Audio file path**: Display linked file with folder location
+    - **Waveform preview**: Visual audio waveform display
+    - **Volume slider**: 0-100% with real-time preview
+    - **Fade controls**: In/out duration in seconds
+    - **Trim controls**: Start/end offset for audio
+    - **Test play button**: Preview audio with current settings
+  - **MIDI Section**:
+    - **Browse MIDI**: Select MIDI file for timing sync
+    - **MIDI info display**: BPM, time signature, duration
+    - **Beat grid toggle**: Show/hide beat markers on timeline
+    - **Sync mode**: None / Beat / Measure / Section
+    - **Snap strength**: 0-100% slider
+    - **Extract lyrics button**: Pull lyrics from MIDI if present
+  - **Karaoke Options** (appears when MIDI loaded):
+    - **Enable karaoke**: Checkbox to add lyric overlay
+    - **Style**: Bouncing ball / Highlight / Fade-in
+    - **Position**: Bottom / Top / Center
+    - **Font settings**: Size, color, background opacity
+    - **Export formats**: LRC / SRT / ASS checkboxes
 
 - **Storyboard panel**:
   - Auto‑computed **scenes table** (line → prompt → duration).
@@ -328,6 +555,38 @@ ffmpeg -i video.mp4 -i music.mp3 \
         "end_offset": 0.0
       }
     ]
+  },
+  "midi": {
+    "file_path": "/absolute/path/to/song.mid",
+    "tempo_bpm": 120,
+    "time_signature": "4/4",
+    "duration_sec": 165.5,
+    "sync_mode": "measure",
+    "snap_strength": 0.8,
+    "beat_timestamps": [0.0, 0.5, 1.0, 1.5, ...],
+    "measure_timestamps": [0.0, 2.0, 4.0, 6.0, ...],
+    "extracted_lyrics": [
+      {"time": 0.0, "text": "My"},
+      {"time": 0.25, "text": "Country"},
+      {"time": 0.75, "text": "Tis"},
+      {"time": 1.0, "text": "of"},
+      {"time": 1.25, "text": "Thee"}
+    ]
+  },
+  "karaoke": {
+    "enabled": true,
+    "style": "bouncing_ball",
+    "position": "bottom",
+    "font_size": 32,
+    "font_color": "#FFFFFF",
+    "background_opacity": 0.7,
+    "ball_image": "assets/karaoke/ball.png",
+    "lead_time": 0.2,
+    "export_formats": ["lrc", "srt"],
+    "generated_files": {
+      "lrc": "exports/lyrics.lrc",
+      "srt": "exports/lyrics.srt"
+    }
   },
   "scenes": [
     {
@@ -503,6 +762,20 @@ imageai video --in lyrics.txt --image-provider openai --image-model dall-e-3 \
 # No audio (silent video)
 imageai video --in lyrics.txt --provider gemini --slideshow \
   --out exports/silent_video.mp4
+
+# MIDI-synchronized video with karaoke overlay
+imageai video --in lyrics.txt --provider gemini --slideshow \
+  --audio /path/to/song.mp3 --midi /path/to/song.mid \
+  --sync-mode measure --snap-strength 0.9 \
+  --karaoke --karaoke-style bouncing_ball \
+  --export-lrc --export-srt \
+  --out exports/karaoke_video.mp4
+
+# Extract timing from MIDI and generate perfectly synced scenes
+imageai video --in lyrics.txt --midi /path/to/song.mid \
+  --sync-mode beat --provider openai --model dall-e-3 \
+  --audio /path/to/song.mp3 \
+  --out exports/beat_synced.mp4
 ```
 
 ---
@@ -933,6 +1206,14 @@ class VideoProjectPipeline:
 - Audio files remain **linked** (not copied) with absolute paths in the project file.
 - Rerunning the same prompts with the same seed reuses cached images.
 
+### Additional MIDI/Karaoke Criteria
+- I can **Import MIDI** file and see tempo, time signature, and duration information.
+- Scene transitions **snap to beats/measures** when MIDI sync is enabled.
+- I can **Enable karaoke overlay** and choose from bouncing ball, highlight, or fade-in styles.
+- The system **exports LRC/SRT files** with accurate word-level timing from MIDI.
+- I can see a **beat grid overlay** on the timeline when MIDI is loaded.
+- Karaoke overlays are **perfectly synchronized** to the music when using MIDI timing.
+
 ---
 
 ## 18) Implementation Notes
@@ -974,6 +1255,9 @@ class VideoProjectPipeline:
 - [x] Add moviepy or imageio-ffmpeg for video processing
 - [ ] Verify google-genai supports latest Veo models
 - [x] Update config system to include video-specific settings
+- [ ] Add pretty-midi for MIDI processing
+- [ ] Add mido for low-level MIDI manipulation
+- [ ] Add music21 for sheet music generation (optional)
 
 ### Phase 2: AI Prompt Generation & History System
 #### 2.1 Version History Foundation
@@ -1107,58 +1391,92 @@ class VideoProjectPipeline:
 - [ ] Implement audio codec selection (AAC, MP3)
 - [ ] Add -shortest flag handling for duration matching
 
-### Phase 7: Video Assembly - Local Slideshow
-#### 7.1 FFmpeg Integration
+### Phase 7: MIDI Synchronization & Karaoke Features
+#### 7.1 MIDI Processing
+- [ ] Implement `MidiProcessor` class with pretty-midi
+- [ ] Extract tempo, time signatures, beats, measures
+- [ ] Parse MIDI lyric meta-events
+- [ ] Create beat grid generation system
+- [ ] Build scene-to-beat alignment algorithm
+- [ ] Add musical section detection (verse/chorus)
+- [ ] Implement MIDI-to-timing data converter
+
+#### 7.2 Karaoke System
+- [ ] Create `KaraokeRenderer` class
+- [ ] Implement bouncing ball animation generator
+- [ ] Build word-level timing extraction from MIDI
+- [ ] Add LRC format generator
+- [ ] Add SRT format generator
+- [ ] Implement ASS/SSA format support
+- [ ] Create FFmpeg filter chains for overlays
+- [ ] Add custom ball sprite support
+
+#### 7.3 Sheet Music Overlay (Optional)
+- [ ] Implement MIDI-to-notation converter with music21
+- [ ] Create measure-by-measure PNG renderer
+- [ ] Build scrolling notation overlay system
+- [ ] Add current measure highlighting
+- [ ] Implement notation positioning options
+
+#### 7.4 LLM-Assisted Sync
+- [ ] Create `LLMSyncAssistant` class
+- [ ] Implement GPT-5 audio structure analysis
+- [ ] Add forced alignment for lyrics without MIDI
+- [ ] Build fallback sync when MIDI unavailable
+- [ ] Create syllable-level timing generation
+
+### Phase 8: Video Assembly - Local Slideshow
+#### 8.1 FFmpeg Integration
 - [x] Implement `FFmpegSlideshow` class
 - [x] Add Ken Burns effect (pan/zoom) support
 - [x] Create crossfade transition system (0.5s default)
 - [x] Build caption overlay system
 - [x] Integrate audio track mixing
 
-#### 7.2 Video Export
+#### 8.2 Video Export
 - [x] Implement H.264 encoding at 24fps
 - [x] Add resolution options (720p, 1080p)
 - [x] Create preview generation (low-res, fast)
 - [x] Build final export with quality settings
 - [x] Ensure audio sync with video duration
 
-### Phase 8: Veo API Integration
-#### 8.1 Veo Client Implementation
+### Phase 9: Veo API Integration
+#### 9.1 Veo Client Implementation
 - [x] Create `VeoClient` wrapper class using google.genai
 - [x] Implement `generate_videos()` with all config options
 - [x] Add polling mechanism for long-running operations (11s-6min)
 - [x] Build download and local storage system (2-day retention handling)
 - [x] Implement timeout and retry logic
 
-#### 8.2 Veo Model Support
+#### 9.2 Veo Model Support
 - [x] Add Veo 3.0 support (`veo-3.0-generate-001`)
 - [x] Add Veo 3.0 Fast support (`veo-3.0-fast-generate-001`)
 - [x] Add Veo 2.0 support (`veo-2.0-generate-001`)
 - [x] Implement model-specific constraints (resolution, duration, audio)
 - [x] Add aspect ratio support (16:9, 9:16)
 
-#### 8.3 Regional Compliance
+#### 9.3 Regional Compliance
 - [ ] Implement region detection system
 - [ ] Add `personGeneration` option gating by region
 - [ ] Create UI warnings for regional restrictions
 - [ ] Build fallback strategies for blocked content
 - [ ] Handle MENA/EU restrictions appropriately
 
-#### 8.4 Video Processing
+#### 9.4 Video Processing
 - [ ] Implement clip concatenation system using ffmpeg
 - [ ] Add audio muting option for Veo 3 outputs
 - [ ] Build 2-day retention warning system
 - [ ] Create automatic local backup on generation
 - [ ] Add SynthID watermark detection/display
 
-### Phase 9: CLI Implementation
-#### 9.1 Command Structure
+### Phase 10: CLI Implementation
+#### 10.1 Command Structure
 - [ ] Add `video` subcommand to main CLI
 - [ ] Implement all GUI features in CLI
 - [ ] Add batch processing support
 - [ ] Create progress indicators for terminal
 
-#### 9.2 CLI Arguments
+#### 10.2 CLI Arguments
 - [ ] `--in`: Input file path
 - [ ] `--provider`: Image provider selection
 - [ ] `--model`: Model selection
@@ -1167,44 +1485,51 @@ class VideoProjectPipeline:
 - [ ] `--veo-model`: Veo model selection
 - [ ] `--out`: Output file path
 - [ ] `--audio`: Path to audio file (linked, not copied)
+- [ ] `--midi`: Path to MIDI file for timing sync
+- [ ] `--sync-mode`: Sync alignment (none|beat|measure|section)
+- [ ] `--snap-strength`: Snap strength 0.0-1.0
 - [ ] `--volume`: Audio volume (0.0-1.0)
 - [ ] `--fade-in`: Fade in duration in seconds
 - [ ] `--fade-out`: Fade out duration in seconds
 - [ ] `--mute`: Mute audio option (for Veo)
+- [ ] `--karaoke`: Enable karaoke overlay
+- [ ] `--karaoke-style`: Style (bouncing_ball|highlight|fade_in)
+- [ ] `--export-lrc`: Export LRC file
+- [ ] `--export-srt`: Export SRT file
 
-### Phase 10: Testing & Validation
-#### 10.1 Unit Tests
+### Phase 11: Testing & Validation
+#### 11.1 Unit Tests
 - [ ] Test lyric parsing (all formats)
 - [ ] Test timing allocation algorithms
 - [ ] Test prompt generation and templates
 - [ ] Test project save/load/migration
 
-#### 10.2 Integration Tests
+#### 11.2 Integration Tests
 - [ ] Test provider image generation pipeline
 - [ ] Test video assembly (slideshow)
 - [ ] Test Veo API integration
 - [ ] Test end-to-end workflow
 
-#### 10.3 Sample Projects
+#### 11.3 Sample Projects
 - [ ] Create "My Country tis of Thee" reference project
 - [ ] Add deterministic seed test cases
 - [ ] Build CI/CD smoke tests
 - [ ] Document expected outputs
 
-### Phase 11: Documentation & Polish
-#### 11.1 User Documentation
+### Phase 12: Documentation & Polish
+#### 12.1 User Documentation
 - [ ] Update README with video feature documentation
 - [ ] Create video workflow tutorial
 - [ ] Add troubleshooting guide
 - [ ] Document all CLI options
 
-#### 11.2 Developer Documentation
+#### 12.2 Developer Documentation
 - [ ] Document API interfaces
 - [ ] Create plugin architecture docs
 - [ ] Add contribution guidelines
 - [ ] Build architecture diagrams
 
-#### 11.3 UI Polish
+#### 12.3 UI Polish
 - [ ] Add tooltips and help text
 - [ ] Implement keyboard shortcuts
 - [ ] Create preset management
