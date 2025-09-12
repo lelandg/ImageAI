@@ -53,23 +53,72 @@ Add a **Video Project** workflow to ImageAI that turns **lyrics/text** into an *
 
 ### Prompt Generation Pipeline
 1. **Input Analysis**: Parse lyrics/text to identify scenes and key elements
-2. **LLM Enhancement**: Use Gemini or OpenAI to generate cinematic prompts
+2. **LLM Enhancement**: Use cloud or local LLMs to generate cinematic prompts
 3. **User Review**: Present generated prompts with inline editing capability
 4. **Version Tracking**: Save all prompt versions (AI-generated and user-edited)
 
+### LLM Provider Support
+#### Cloud Providers
+- **OpenAI** (GPT-4, GPT-4 Turbo, GPT-3.5)
+- **Anthropic Claude** (Claude 3 Opus, Sonnet, Haiku)
+- **Google Gemini** (Gemini Pro, Gemini Ultra)
+
+#### Local LLM Support
+- **Ollama** (Llama 3.1, Mistral, Mixtral, etc.)
+- **LM Studio** (Any GGUF model via OpenAI-compatible API)
+- **Direct Model Loading** (via llama.cpp bindings)
+
 ### Prompt Generation Features
-- **Provider Selection**: Choose between Gemini or OpenAI for prompt generation
+- **Provider Selection**: Choose any cloud or local LLM for prompt generation
+- **Unified Interface**: LiteLLM integration for consistent API across all providers
 - **Style Templates**: Apply cinematic, artistic, or photorealistic styles
 - **Batch Generation**: Generate all scene prompts in one operation
 - **Regeneration**: Re-generate individual prompts while preserving others
 - **Edit History**: Track all changes with diff visualization
+- **Cost Optimization**: Use local LLMs for drafts, cloud for final generation
 
 ### Example Prompt Enhancement
 ```
 Input: "Grandpa was a Democrat"
-AI Output: "Cinematic wide shot of an elderly man in worn denim overalls, 
-sitting on a weathered porch in rural America, golden hour lighting, 
-American flag gently waving, nostalgic 1960s aesthetic, Norman Rockwell style"
+
+Claude 3 Output: "Cinematic wide shot of an elderly man in worn denim overalls, 
+sitting on a weathered porch in rural America, golden hour lighting casting long 
+shadows, American flag gently waving, nostalgic 1960s aesthetic, Norman Rockwell 
+style, weathered hands holding a coffee mug, distant fields visible"
+
+Local Llama 3.1 Output: "Wide establishing shot: elderly gentleman on wooden 
+porch, late afternoon sun, rural farmhouse, American heartland, vintage clothing, 
+contemplative mood, documentary photography style"
+```
+
+### LLM Provider Implementation
+```python
+from litellm import completion
+
+class UnifiedLLMProvider:
+    """Single interface for all LLM providers"""
+    
+    PROVIDER_MODELS = {
+        'openai': ['gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
+        'anthropic': ['claude-3-opus', 'claude-3-sonnet', 'claude-3-haiku'],
+        'gemini': ['gemini-pro', 'gemini-ultra'],
+        'ollama': ['llama3.1:8b', 'mistral:7b', 'mixtral:8x7b'],
+        'lmstudio': ['local-model']  # Uses OpenAI-compatible endpoint
+    }
+    
+    def enhance_prompt(self, text: str, provider: str, model: str, style: str):
+        response = completion(
+            model=f"{provider}/{model}",
+            messages=[{
+                "role": "system", 
+                "content": f"Enhance prompts for {style} image generation"
+            }, {
+                "role": "user",
+                "content": f"Enhance: {text}"
+            }],
+            temperature=0.7
+        )
+        return response.choices[0].message.content
 ```
 
 ---
@@ -204,10 +253,13 @@ ffmpeg -i video.mp4 -i music.mp3 \
   - **Target Length**: `hh:mm:ss` (optional).
 
 - **Provider & Prompting**:
+  - **LLM Provider**: Dropdown for prompt generation (OpenAI / Claude / Gemini / Ollama / LM Studio)
+  - **LLM Model**: Model selection based on provider (GPT-4, Claude 3, Llama 3.1, etc.)
   - **Image Provider**: Gemini / OpenAI / Stability / Local SD (+ model dropdown).  
   - **Style controls**: aspect ratio (pre‑set to **16:9**), quality, negative prompt, seed.  
   - **Prompt strategy**:  
-    - "Literal line" vs "Cinematic rewrite" (LLM rewrites each line into a robust image prompt; supports template tokens).  
+    - "Literal line" vs "Cinematic rewrite" (LLM rewrites each line into a robust image prompt).
+    - **Draft mode**: Use local LLM for quick iterations, cloud for final.
     - Template picker (Jinja‑like): `templates/lyric_prompt.j2`.
 
 - **Audio panel**:
@@ -255,6 +307,7 @@ ffmpeg -i video.mp4 -i music.mp3 \
   "name": "Grandpa Was a Democrat",
   "created": "ISO-8601",
   "provider": {
+    "llm": { "provider": "openai|anthropic|gemini|ollama|lmstudio", "model": "gpt-4|claude-3-opus|gemini-pro|llama3.1:8b|…" },
     "images": { "provider": "gemini|openai|stability|local", "model": "…" },
     "video":   { "provider": "veo|slideshow", "model": "veo-3.0-generate-001|veo-2.0-generate-001|…" }
   },
@@ -911,14 +964,26 @@ class VideoProjectPipeline:
 - [ ] Implement snapshot system for performance
 - [ ] Add delta compression for storage efficiency
 
-#### 2.2 AI Prompt Generation
-- [ ] Integrate LLM providers for prompt generation (Gemini/OpenAI)
-- [ ] Create prompt enhancement templates
-- [ ] Build batch prompt generation system
-- [ ] Implement style presets (cinematic, artistic, photorealistic)
-- [ ] Add prompt regeneration with preservation of other prompts
+#### 2.2 LLM Provider Integration
+- [ ] Add LiteLLM dependency for unified LLM access
+- [ ] Implement OpenAI provider for GPT-4/GPT-3.5
+- [ ] Implement Anthropic provider for Claude 3 models
+- [ ] Implement Google Gemini provider for Gemini Pro/Ultra
+- [ ] Add Ollama integration for local LLMs
+- [ ] Add LM Studio support via OpenAI-compatible API
+- [ ] Create provider selection UI with model dropdowns
+- [ ] Implement API key management for each provider
 
-#### 2.3 Prompt Editing & Tracking
+#### 2.3 AI Prompt Generation
+- [ ] Create UnifiedLLMProvider class with LiteLLM
+- [ ] Build prompt enhancement templates
+- [ ] Implement batch prompt generation system
+- [ ] Add style presets (cinematic, artistic, photorealistic)
+- [ ] Create draft mode (local LLM) vs final mode (cloud)
+- [ ] Add prompt regeneration with preservation of other prompts
+- [ ] Implement cost tracking per provider/model
+
+#### 2.4 Prompt Editing & Tracking
 - [ ] Build inline prompt editor with syntax highlighting
 - [ ] Implement prompt version tracking
 - [ ] Create diff visualization for prompt changes
@@ -1131,10 +1196,24 @@ class VideoProjectPipeline:
 #### Dependencies to Add
 ```txt
 # Add to requirements.txt
+# LLM Support
+litellm>=1.0.0  # Unified LLM provider interface
+anthropic>=0.25.0  # Claude API support
+ollama>=0.3.0  # Local LLM support (optional)
+
+# Template & Video
 Jinja2>=3.1.0  # Template processing
 moviepy>=1.0.3  # Video processing (or imageio-ffmpeg)
-# google-genai already present
+
+# Already present:
+# google-genai - Gemini support
+# openai - GPT support
 ```
+
+#### Local LLM Requirements
+- **Ollama**: Separate installation from https://ollama.ai
+- **LM Studio**: Separate installation from https://lmstudio.ai
+- **Hardware**: 16GB+ RAM, RTX 4060 Ti+ recommended for 7B models
 
 #### FFmpeg Requirements
 - Must be installed separately by user
