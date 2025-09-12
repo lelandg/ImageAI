@@ -19,7 +19,7 @@ Add a **Video Project** workflow to ImageAI that turns **lyrics/text** into an *
   - **Gemini Veo API** (veo-3.0-generate-001): Generate 8-second AI video clips
   - **Local FFmpeg**: Create slideshow videos with Ken Burns effects and transitions
 
-**Out of scope now:** music/beat/TTS, song mixing, external audio alignment.
+**Out of scope now:** beat detection/sync, TTS, automated song mixing (manual audio tracks ARE supported).
 
 **Additional development data:** I used ChatGPT-5 to create lyrics, image prompts, and "Veo project." Everything is in the (project root) `./Sample/` folder. It shows examples of image prompts based on lyrics, and a template folder layout for each Veo scene. I don't care what format the output is in, since it will produce a valid MP4. So consider this an example. It *would* be nice to save projects so the user can switch between them, and always restore the same images/videos.
 
@@ -35,9 +35,10 @@ Add a **Video Project** workflow to ImageAI that turns **lyrics/text** into an *
 - Generate **N images** (per scene) using a selected **provider/model** (already wired in ImageAI).
 - Human‑in‑the‑loop **review/approve/reorder/regenerate**.
 - **Comprehensive version history** with time-travel restore to any previous state.
+- **Custom audio support**: Link to any local audio file (MP3, WAV, M4A, etc.) without copying.
 - **Render video** via:
-  - **Gemini Veo API** (veo-3.0-generate-001): Generate 8-second AI video clips.
-  - **Local slideshow** (Ken Burns, crossfades, captions; silent by default).
+  - **Gemini Veo API** (veo-3.0-generate-001): Generate 8-second AI video clips with optional audio.
+  - **Local slideshow** (Ken Burns, crossfades, captions) with custom soundtrack.
 - Save a **project file** (`.iaproj.json`) and all assets under a dedicated project folder.
 - Keep detailed **metadata** for reproducibility & cost tracking.
 
@@ -130,7 +131,68 @@ class ProjectHistory:
 
 ---
 
-## 5) UX Spec (GUI)
+## 5) Audio Track Support
+
+### Audio Features
+- **File Linking**: Reference audio files in-place without copying (saves disk space)
+- **Format Support**: MP3, WAV, M4A, FLAC, OGG, AAC, and other common formats
+- **Multiple Tracks**: Support for music track + optional narration/sound effects
+- **Volume Control**: Adjustable volume levels per track
+- **Fade In/Out**: Configurable audio fades at start/end
+- **Preview**: Audio playback with video preview synchronization
+
+### Audio Implementation
+```python
+@dataclass
+class AudioTrack:
+    track_id: str
+    file_path: Path  # Absolute path to audio file (not copied)
+    track_type: str  # 'music', 'narration', 'sfx'
+    volume: float = 1.0  # 0.0 to 1.0
+    fade_in_duration: float = 0.0  # seconds
+    fade_out_duration: float = 0.0  # seconds
+    start_offset: float = 0.0  # trim from beginning
+    end_offset: float = 0.0  # trim from end
+    
+class AudioManager:
+    def add_audio_track(self, audio_file: Path, track_type: str = 'music'):
+        """Link to audio file without copying"""
+        if not audio_file.exists():
+            raise FileNotFoundError(f"Audio file not found: {audio_file}")
+        
+        track = AudioTrack(
+            track_id=str(uuid.uuid4()),
+            file_path=audio_file.absolute(),  # Store absolute path
+            track_type=track_type
+        )
+        return track
+    
+    def mix_with_video(self, video_path: Path, audio_tracks: List[AudioTrack]):
+        """Mix audio tracks with video using FFmpeg"""
+        # Build FFmpeg command with audio mixing
+        pass
+```
+
+### FFmpeg Audio Integration
+```bash
+# Add single audio track to video
+ffmpeg -i video.mp4 -i /path/to/music.mp3 -c:v copy -c:a aac -shortest output.mp4
+
+# Mix multiple audio tracks with volume control
+ffmpeg -i video.mp4 -i music.mp3 -i narration.wav \
+  -filter_complex "[1:a]volume=0.8[music];[2:a]volume=1.0[narration];
+  [music][narration]amix=inputs=2[aout]" \
+  -map 0:v -map "[aout]" -shortest output.mp4
+
+# Add fade effects
+ffmpeg -i video.mp4 -i music.mp3 \
+  -af "afade=t=in:st=0:d=2,afade=t=out:st=58:d=2" \
+  -c:v copy -shortest output.mp4
+```
+
+---
+
+## 6) UX Spec (GUI)
 ### New Tab: **🎬 Video Project**
 - **Project header**: name, base folder, open/save.
 - **Input panel**:
@@ -145,8 +207,18 @@ class ProjectHistory:
   - **Image Provider**: Gemini / OpenAI / Stability / Local SD (+ model dropdown).  
   - **Style controls**: aspect ratio (pre‑set to **16:9**), quality, negative prompt, seed.  
   - **Prompt strategy**:  
-    - “Literal line” vs “Cinematic rewrite” (LLM rewrites each line into a robust image prompt; supports template tokens).  
+    - "Literal line" vs "Cinematic rewrite" (LLM rewrites each line into a robust image prompt; supports template tokens).  
     - Template picker (Jinja‑like): `templates/lyric_prompt.j2`.
+
+- **Audio panel**:
+  - **Browse button**: Select audio file (no copy, just link)
+  - **Audio file path**: Display linked file with folder location
+  - **Waveform preview**: Visual audio waveform display
+  - **Volume slider**: 0-100% with real-time preview
+  - **Fade controls**: In/out duration in seconds
+  - **Trim controls**: Start/end offset for audio
+  - **Test play button**: Preview audio with current settings
+  - **Clear audio**: Remove audio track from project
 
 - **Storyboard panel**:
   - Auto‑computed **scenes table** (line → prompt → duration).
@@ -176,7 +248,7 @@ class ProjectHistory:
 
 ---
 
-## 6) Data & Files
+## 7) Data & Files
 ```
 {
   "schema": "imageai.video_project.v1",
@@ -190,6 +262,20 @@ class ProjectHistory:
   "style": { "aspect_ratio": "16:9", "negative": "…", "seed": 1234 },
   "input": { "raw": "…lyrics…", "format": "timestamped|structured" },
   "timing": { "target": "00:02:45", "preset": "medium" },
+  "audio": {
+    "tracks": [
+      {
+        "track_id": "audio-001",
+        "file_path": "/absolute/path/to/music.mp3",
+        "track_type": "music",
+        "volume": 0.8,
+        "fade_in": 2.0,
+        "fade_out": 3.0,
+        "start_offset": 0.0,
+        "end_offset": 0.0
+      }
+    ]
+  },
   "scenes": [
     {
       "id": "scene-001",
@@ -221,7 +307,7 @@ class ProjectHistory:
 
 ---
 
-## 7) Architecture & Code Layout (Detailed)
+## 8) Architecture & Code Layout (Detailed)
 
 ### Directory Structure
 ```
@@ -315,7 +401,7 @@ VIDEO_CONFIG_SCHEMA = {
 
 ---
 
-## 8) Core Algorithms
+## 9) Core Algorithms
 ### 6.1 Lyric/Text → Scenes
 - **Timestamped** lines: exact cut points from `[mm:ss(.mmm)]`; otherwise use **pacing preset** to distribute total length over lines, weighted by line length.
 - **Shot count**: `ceil(total_length / target_shot_seconds)` (defaults: 3–5s per shot).  
@@ -335,7 +421,7 @@ VIDEO_CONFIG_SCHEMA = {
 
 ---
 
-## 9) Constraints & Model Notes
+## 10) Constraints & Model Notes
 - **Veo 3 / Veo 3 Fast**: 8s, 24fps, 720p or 1080p (16:9 only), audio always on.  
 - **Veo 2**: 5–8s, 24fps, 720p, silent; can do 9:16 portrait.  
 - **Region/person rules**: `personGeneration` options vary by region; enforce in UI.  
@@ -347,18 +433,28 @@ VIDEO_CONFIG_SCHEMA = {
 
 ---
 
-## 10) CLI (initial sketch)
+## 11) CLI (initial sketch)
 ```bash
-# Build storyboard and images, then render slideshow
-imageai video --in lyrics.txt --provider gemini --model imagen-4.0-generate-001   --length 00:02:30 --slideshow --out exports/grandpa.mp4
+# Build storyboard and images, then render slideshow with music
+imageai video --in lyrics.txt --provider gemini --model imagen-4.0-generate-001 \
+  --length 00:02:30 --slideshow \
+  --audio /path/to/music.mp3 --volume 0.8 --fade-in 2 --fade-out 3 \
+  --out exports/grandpa.mp4
 
-# Build Gemini Veo chain (silent)
-imageai video --in lyrics.txt --image-provider openai --image-model dall-e-3   --veo-model veo-2.0-generate-001 --out exports/grandpa_veo.mp4 --mute
+# Build Gemini Veo chain with custom audio
+imageai video --in lyrics.txt --image-provider openai --image-model dall-e-3 \
+  --veo-model veo-3.0-generate-001 \
+  --audio /path/to/soundtrack.mp3 \
+  --out exports/grandpa_veo.mp4
+
+# No audio (silent video)
+imageai video --in lyrics.txt --provider gemini --slideshow \
+  --out exports/silent_video.mp4
 ```
 
 ---
 
-## 11) API Implementation Examples
+## 12) API Implementation Examples
 
 ### 9.1 Complete Veo Integration Class
 ```python
@@ -741,13 +837,13 @@ class VideoProjectPipeline:
 
 ---
 
-## 12) Validation
+## 13) Validation
 - Golden sample projects checked into `Plans/samples/` with deterministic seeds.
 - Headless **CI smoke**: generate 2 scenes with tiny images + 2s clips; assert MP4 exists.
 
 ---
 
-## 13) Risks & Mitigations
+## 14) Risks & Mitigations
 - **Model safety blocks** → auto‑rewrite prompts (LLM), add negative terms, or switch provider.
 - **Latency** (Veo ops) → queue + UI progress + local preview path.
 - **Regional restrictions** → gate `personGeneration` options by `iso_region`.
@@ -755,33 +851,38 @@ class VideoProjectPipeline:
 
 ---
 
-## 14) Phased Delivery
+## 15) Phased Delivery
 1. **MVP Phase 1**: Core foundation - Event sourcing, AI prompt generation, storyboard, image batcher.
-2. **MVP Phase 2**: Video generation - Veo API integration (8s clips), FFmpeg slideshow export.
-3. **Enhancement (v1.1)**: History tab, advanced transitions, captions, presets, caching, cost panel.
-4. **Polish (v1.2)**: Drag-reorder UX, branch support, diff viewer, restore points.
-5. **Continuity (v2.0)**: Seed carry-over, character consistency, style transfer.
-6. **Audio (v3.0)**: External track alignment, beat mapping, music sync.
+2. **MVP Phase 2**: Audio support - File linking, mixing, volume/fade controls.
+3. **MVP Phase 3**: Video generation - Veo API integration (8s clips), FFmpeg slideshow with audio.
+4. **Enhancement (v1.1)**: History tab, advanced transitions, captions, presets, caching, cost panel.
+5. **Polish (v1.2)**: Drag-reorder UX, branch support, diff viewer, restore points.
+6. **Continuity (v2.0)**: Seed carry-over, character consistency, style transfer.
+7. **Advanced Audio (v3.0)**: Beat detection, automatic sync, multi-track timeline.
 
 ---
 
-## 15) References
+## 16) References
 - Gemini API – Generate videos with Veo (models, durations, polling, retention): https://ai.google.dev/gemini-api/docs/video  
 - Gemini API – Models catalog: https://ai.google.dev/gemini-api/docs/models  
 - ImageAI repo README (providers, PySide6 GUI, CLI): https://github.com/lelandg/ImageAI
 
 ---
 
-## 16) Acceptance Criteria (MVP)
+## 17) Acceptance Criteria (MVP)
 - I can paste lyrics, click **Storyboard**, see scene rows with durations summing to target length.
 - I can **Generate Images** and see thumbnails per scene; re‑roll one scene without touching others.
-- I can **Export → Slideshow** and get a valid MP4 at 24fps, 16:9.
+- I can **Add Audio** by browsing to a local file (MP3/WAV/M4A) without copying it.
+- I can adjust audio **volume, fade in/out** and preview the settings.
+- I can **Export → Slideshow** and get a valid MP4 at 24fps, 16:9 with my custom audio.
+- I can **Export → Veo** and get 8-second AI video clips with optional audio mixing.
 - All artifacts + a `project.iaproj.json` are saved under the project folder.
+- Audio files remain **linked** (not copied) with absolute paths in the project file.
 - Rerunning the same prompts with the same seed reuses cached images.
 
 ---
 
-## 17) Implementation Checklist
+## 18) Implementation Checklist
 
 ### Phase 1: Foundation & Core Components
 #### 1.1 Project Structure Setup
@@ -898,56 +999,82 @@ class VideoProjectPipeline:
 - [ ] Create history export functionality
 - [ ] Add storage usage analytics display
 
-### Phase 6: Video Assembly - Local Slideshow
-#### 6.1 FFmpeg Integration
+### Phase 6: Audio Integration
+#### 6.1 Audio File Management
+- [ ] Implement AudioTrack dataclass with file linking (no copy)
+- [ ] Build AudioManager for track management
+- [ ] Add support for multiple audio formats (MP3, WAV, M4A, etc.)
+- [ ] Create audio file validation and error handling
+- [ ] Implement path resolution for linked audio files
+
+#### 6.2 Audio Controls
+- [ ] Build audio panel in GUI with file browser
+- [ ] Implement waveform visualization
+- [ ] Add volume control with real-time preview
+- [ ] Create fade in/out controls
+- [ ] Build trim controls for start/end offsets
+- [ ] Add audio preview playback
+
+#### 6.3 FFmpeg Audio Mixing
+- [ ] Implement audio track mixing with video
+- [ ] Add volume normalization
+- [ ] Build fade effect processing
+- [ ] Create multi-track mixing support
+- [ ] Implement audio codec selection (AAC, MP3)
+- [ ] Add -shortest flag handling for duration matching
+
+### Phase 7: Video Assembly - Local Slideshow
+#### 7.1 FFmpeg Integration
 - [ ] Implement `FFmpegSlideshow` class
 - [ ] Add Ken Burns effect (pan/zoom) support
 - [ ] Create crossfade transition system (0.5s default)
 - [ ] Build caption overlay system
+- [ ] Integrate audio track mixing
 
-#### 6.2 Video Export
+#### 7.2 Video Export
 - [ ] Implement H.264 encoding at 24fps
 - [ ] Add resolution options (720p, 1080p)
 - [ ] Create preview generation (low-res, fast)
 - [ ] Build final export with quality settings
+- [ ] Ensure audio sync with video duration
 
-### Phase 7: Veo API Integration
-#### 7.1 Veo Client Implementation
+### Phase 8: Veo API Integration
+#### 8.1 Veo Client Implementation
 - [ ] Create `VeoClient` wrapper class using google.genai
 - [ ] Implement `generate_videos()` with all config options
 - [ ] Add polling mechanism for long-running operations (11s-6min)
 - [ ] Build download and local storage system (2-day retention handling)
 - [ ] Implement timeout and retry logic
 
-#### 7.2 Veo Model Support
+#### 8.2 Veo Model Support
 - [ ] Add Veo 3.0 support (`veo-3.0-generate-001`)
 - [ ] Add Veo 3.0 Fast support (`veo-3.0-fast-generate-001`)
 - [ ] Add Veo 2.0 support (`veo-2.0-generate-001`)
 - [ ] Implement model-specific constraints (resolution, duration, audio)
 - [ ] Add aspect ratio support (16:9, 9:16)
 
-#### 7.3 Regional Compliance
+#### 8.3 Regional Compliance
 - [ ] Implement region detection system
 - [ ] Add `personGeneration` option gating by region
 - [ ] Create UI warnings for regional restrictions
 - [ ] Build fallback strategies for blocked content
 - [ ] Handle MENA/EU restrictions appropriately
 
-#### 7.4 Video Processing
+#### 8.4 Video Processing
 - [ ] Implement clip concatenation system using ffmpeg
 - [ ] Add audio muting option for Veo 3 outputs
 - [ ] Build 2-day retention warning system
 - [ ] Create automatic local backup on generation
 - [ ] Add SynthID watermark detection/display
 
-### Phase 8: CLI Implementation
-#### 8.1 Command Structure
+### Phase 9: CLI Implementation
+#### 9.1 Command Structure
 - [ ] Add `video` subcommand to main CLI
 - [ ] Implement all GUI features in CLI
 - [ ] Add batch processing support
 - [ ] Create progress indicators for terminal
 
-#### 8.2 CLI Arguments
+#### 9.2 CLI Arguments
 - [ ] `--in`: Input file path
 - [ ] `--provider`: Image provider selection
 - [ ] `--model`: Model selection
@@ -955,41 +1082,45 @@ class VideoProjectPipeline:
 - [ ] `--slideshow`: Use local slideshow renderer
 - [ ] `--veo-model`: Veo model selection
 - [ ] `--out`: Output file path
-- [ ] `--mute`: Mute audio option
+- [ ] `--audio`: Path to audio file (linked, not copied)
+- [ ] `--volume`: Audio volume (0.0-1.0)
+- [ ] `--fade-in`: Fade in duration in seconds
+- [ ] `--fade-out`: Fade out duration in seconds
+- [ ] `--mute`: Mute audio option (for Veo)
 
-### Phase 9: Testing & Validation
-#### 9.1 Unit Tests
+### Phase 10: Testing & Validation
+#### 10.1 Unit Tests
 - [ ] Test lyric parsing (all formats)
 - [ ] Test timing allocation algorithms
 - [ ] Test prompt generation and templates
 - [ ] Test project save/load/migration
 
-#### 9.2 Integration Tests
+#### 10.2 Integration Tests
 - [ ] Test provider image generation pipeline
 - [ ] Test video assembly (slideshow)
 - [ ] Test Veo API integration
 - [ ] Test end-to-end workflow
 
-#### 9.3 Sample Projects
+#### 10.3 Sample Projects
 - [ ] Create "Grandpa Was a Democrat" reference project
 - [ ] Add deterministic seed test cases
 - [ ] Build CI/CD smoke tests
 - [ ] Document expected outputs
 
-### Phase 10: Documentation & Polish
-#### 10.1 User Documentation
+### Phase 11: Documentation & Polish
+#### 11.1 User Documentation
 - [ ] Update README with video feature documentation
 - [ ] Create video workflow tutorial
 - [ ] Add troubleshooting guide
 - [ ] Document all CLI options
 
-#### 10.2 Developer Documentation
+#### 11.2 Developer Documentation
 - [ ] Document API interfaces
 - [ ] Create plugin architecture docs
 - [ ] Add contribution guidelines
 - [ ] Build architecture diagrams
 
-#### 10.3 UI Polish
+#### 11.3 UI Polish
 - [ ] Add tooltips and help text
 - [ ] Implement keyboard shortcuts
 - [ ] Create preset management
@@ -1029,7 +1160,7 @@ moviepy>=1.0.3  # Video processing (or imageio-ffmpeg)
 
 ---
 
-## 18) Known Limitations & Future Enhancements
+## 19) Known Limitations & Future Enhancements
 
 ### Current Limitations
 - No audio synchronization (music/beat alignment)
