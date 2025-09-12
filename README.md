@@ -1179,6 +1179,32 @@ A: Check each provider's terms:
 - **Stability AI**: Custom pricing for >$1M revenue companies
 - **Azure OpenAI**: Enterprise SLAs, regional deployment options
 
+### Google Veo Video Generation Pricing
+
+Since ImageAI's Video Project feature is designed to work with Google Veo for AI video generation, here's the current pricing:
+
+#### AI Video Generation Models (January 2025)
+
+| Model | Model ID | Duration | Audio | Gemini API Price | Features |
+|-------|----------|----------|-------|-----------------|----------|
+| **Veo 3** | `veo-3.0-generate-001` | 8 sec | ✅ Yes | $0.75/second<br>($6.00/video) | Best quality, physics-accurate |
+| **Veo 3 Fast** | `veo-3.0-fast-generate-001` | 8 sec | ✅ Yes | $0.40/second<br>($3.20/video) | Optimized for speed |
+| **Veo 2** | `veo-2.0-generate-001` | 5-8 sec | ❌ No | $0.35/second<br>($2.10-2.80/video) | 4K support, no audio |
+
+#### Subscription Options
+
+| Plan | Price/Month | Video Credits | Best For |
+|------|------------|---------------|----------|
+| **Google AI Pro** | $19.99 | 90 Veo 3 Fast videos | Individual creators |
+| **Google AI Ultra** | $249.99 | Higher limits + Veo 3 | Professional use |
+| **API Pay-as-you-go** | Usage-based | Unlimited | Developers |
+
+**Notes**: 
+- Videos are 8 seconds max (chain for longer content)
+- Generated videos stored for 2 days only
+- All videos include SynthID watermark
+- Available in US (consumer plans), global via Vertex AI
+
 ## 14. API Reference
 
 ### Provider Specifications
