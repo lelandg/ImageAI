@@ -432,7 +432,10 @@ class StoryboardGenerator:
                        text: str,
                        target_duration: Optional[str] = None,
                        preset: str = "medium",
-                       format_hint: Optional[InputFormat] = None) -> List[Scene]:
+                       format_hint: Optional[InputFormat] = None,
+                       midi_timing_data: Optional[Any] = None,
+                       sync_mode: str = "none",
+                       snap_strength: float = 0.8) -> List[Scene]:
         """
         Generate scenes from input text.
         
@@ -441,6 +444,9 @@ class StoryboardGenerator:
             target_duration: Optional target duration "mm:ss" or "hh:mm:ss"
             preset: Pacing preset if no target duration
             format_hint: Optional format hint
+            midi_timing_data: Optional MIDI timing data for synchronization
+            sync_mode: Synchronization mode ("none", "beat", "measure", "section")
+            snap_strength: How strongly to snap to MIDI boundaries (0.0-1.0)
             
         Returns:
             List of Scene objects
@@ -487,10 +493,84 @@ class StoryboardGenerator:
             
             scenes.append(scene)
         
+        # Apply MIDI synchronization if available
+        if midi_timing_data and sync_mode != "none":
+            scenes = self.sync_scenes_to_midi(
+                scenes, midi_timing_data, sync_mode, snap_strength
+            )
+        
         self.logger.info(f"Generated {len(scenes)} scenes, "
-                        f"total duration: {sum(durations):.1f} seconds")
+                        f"total duration: {sum(s.duration_sec for s in scenes):.1f} seconds")
         
         return scenes
+    
+    def sync_scenes_to_midi(self, scenes: List[Scene],
+                           midi_timing_data: Any,
+                           sync_mode: str,
+                           snap_strength: float) -> List[Scene]:
+        """
+        Synchronize scenes to MIDI timing.
+        
+        Args:
+            scenes: List of scenes to sync
+            midi_timing_data: MIDI timing data
+            sync_mode: "beat", "measure", or "section"
+            snap_strength: How strongly to snap (0.0-1.0)
+            
+        Returns:
+            List of synchronized scenes
+        """
+        try:
+            from .midi_processor import MidiProcessor
+            processor = MidiProcessor()
+            
+            # Convert scenes to dict format for processor
+            scene_dicts = [
+                {
+                    'duration_sec': scene.duration_sec,
+                    'source': scene.source,
+                    'prompt': scene.prompt,
+                    'order': scene.order,
+                    'metadata': scene.metadata
+                }
+                for scene in scenes
+            ]
+            
+            # Align to MIDI
+            aligned = processor.align_scenes_to_beats(
+                scene_dicts, midi_timing_data, sync_mode, snap_strength
+            )
+            
+            # Convert back to Scene objects
+            synced_scenes = []
+            for scene_dict in aligned:
+                scene = Scene(
+                    source=scene_dict['source'],
+                    prompt=scene_dict['prompt'],
+                    duration_sec=scene_dict['duration_sec'],
+                    order=scene_dict['order']
+                )
+                scene.metadata = scene_dict.get('metadata', {})
+                
+                # Add MIDI sync metadata
+                if 'start_time' in scene_dict:
+                    scene.metadata['midi_start'] = scene_dict['start_time']
+                if 'end_time' in scene_dict:
+                    scene.metadata['midi_end'] = scene_dict['end_time']
+                if 'beat_markers' in scene_dict:
+                    scene.metadata['beat_markers'] = scene_dict['beat_markers']
+                
+                synced_scenes.append(scene)
+            
+            self.logger.info(f"Synchronized {len(synced_scenes)} scenes to MIDI {sync_mode}")
+            return synced_scenes
+            
+        except ImportError:
+            self.logger.warning("MIDI processor not available, skipping synchronization")
+            return scenes
+        except Exception as e:
+            self.logger.error(f"Failed to sync to MIDI: {e}")
+            return scenes
     
     def split_long_scenes(self, scenes: List[Scene], 
                          max_duration: float = 8.0) -> List[Scene]:

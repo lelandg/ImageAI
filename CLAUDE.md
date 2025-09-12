@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Debug Files
+
+When the application exits, it automatically copies debug files to the current directory:
+- **`./imageai_current.log`** - Copy of the most recent log file with all errors and debug info
+- **`./imageai_current_project.json`** - Copy of the last loaded/saved project file
+
+These files are invaluable for debugging issues. Always check them first when investigating errors.
+
 ## Project Overview
 
 **ImageAI** - A Python desktop GUI and CLI application for AI image generation using Google Gemini and OpenAI (DALL·E) APIs. The application securely stores API keys and provides both a Qt-based GUI interface and a command-line interface for generating images.

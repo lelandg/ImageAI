@@ -186,3 +186,4 @@ test_*.jpg
 _screenshots
 test_gcloud.py
 test_gcloud_ps.py
+imageai_current_project.json

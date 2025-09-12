@@ -41,6 +41,9 @@ class WorkspaceWidget(QWidget):
         self.logger = logging.getLogger(__name__)
         
         self.init_ui()
+        
+        # Auto-reload last project if enabled
+        self.auto_load_last_project()
     
     def init_ui(self):
         """Initialize the workspace UI"""
@@ -78,28 +81,42 @@ class WorkspaceWidget(QWidget):
     
     def create_project_header(self) -> QWidget:
         """Create project header with name and controls"""
-        group = QGroupBox("Project")
-        layout = QHBoxLayout()
+        widget = QWidget()
+        widget.setMaximumHeight(40)  # Make it compact
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(5, 2, 5, 2)  # Reduce margins
         
-        layout.addWidget(QLabel("Name:"))
+        layout.addWidget(QLabel("Project:"))
         self.project_name = QLineEdit()
         self.project_name.setPlaceholderText("My Video Project")
+        self.project_name.setMaximumWidth(200)
         layout.addWidget(self.project_name)
         
+        # Make buttons compact
+        button_style = "QPushButton { padding: 2px 8px; }"
+        
         self.new_btn = QPushButton("New")
+        self.new_btn.setStyleSheet(button_style)
         self.new_btn.clicked.connect(self.new_project)
         layout.addWidget(self.new_btn)
         
         self.open_btn = QPushButton("Open")
+        self.open_btn.setStyleSheet(button_style)
         self.open_btn.clicked.connect(self.open_project)
         layout.addWidget(self.open_btn)
         
+        self.browse_btn = QPushButton("Browse")
+        self.browse_btn.setStyleSheet(button_style)
+        self.browse_btn.clicked.connect(self.browse_projects)
+        layout.addWidget(self.browse_btn)
+        
         self.save_btn = QPushButton("Save")
+        self.save_btn.setStyleSheet(button_style)
         self.save_btn.clicked.connect(self.save_project)
         layout.addWidget(self.save_btn)
         
-        group.setLayout(layout)
-        return group
+        layout.addStretch()
+        return widget
     
     def create_input_panel(self) -> QWidget:
         """Create input panel for lyrics/text"""
@@ -240,26 +257,78 @@ class WorkspaceWidget(QWidget):
         return group
     
     def create_audio_panel(self) -> QWidget:
-        """Create audio settings panel"""
-        group = QGroupBox("Audio Track")
+        """Create audio and MIDI settings panel"""
+        group = QGroupBox("Audio & MIDI")
         layout = QVBoxLayout()
         layout.setSpacing(5)
         
-        # File selection
-        file_layout = QHBoxLayout()
-        self.audio_file_label = QLabel("No audio file selected")
-        file_layout.addWidget(self.audio_file_label)
+        # Audio file selection
+        audio_layout = QHBoxLayout()
+        audio_layout.addWidget(QLabel("Audio:"))
+        self.audio_file_label = QLabel("No file")
+        self.audio_file_label.setMinimumWidth(150)
+        audio_layout.addWidget(self.audio_file_label)
         
         self.browse_audio_btn = QPushButton("Browse...")
         self.browse_audio_btn.clicked.connect(self.browse_audio_file)
-        file_layout.addWidget(self.browse_audio_btn)
+        audio_layout.addWidget(self.browse_audio_btn)
         
         self.clear_audio_btn = QPushButton("Clear")
         self.clear_audio_btn.clicked.connect(self.clear_audio)
         self.clear_audio_btn.setEnabled(False)
-        file_layout.addWidget(self.clear_audio_btn)
+        audio_layout.addWidget(self.clear_audio_btn)
         
-        layout.addLayout(file_layout)
+        layout.addLayout(audio_layout)
+        
+        # MIDI file selection
+        midi_layout = QHBoxLayout()
+        midi_layout.addWidget(QLabel("MIDI:"))
+        self.midi_file_label = QLabel("No file")
+        self.midi_file_label.setMinimumWidth(150)
+        midi_layout.addWidget(self.midi_file_label)
+        
+        self.browse_midi_btn = QPushButton("Browse...")
+        self.browse_midi_btn.clicked.connect(self.browse_midi_file)
+        midi_layout.addWidget(self.browse_midi_btn)
+        
+        self.clear_midi_btn = QPushButton("Clear")
+        self.clear_midi_btn.clicked.connect(self.clear_midi)
+        self.clear_midi_btn.setEnabled(False)
+        midi_layout.addWidget(self.clear_midi_btn)
+        
+        self.midi_info_label = QLabel("")
+        self.midi_info_label.setStyleSheet("color: #666; font-size: 10pt;")
+        midi_layout.addWidget(self.midi_info_label)
+        
+        layout.addLayout(midi_layout)
+        
+        # MIDI Sync controls
+        sync_layout = QHBoxLayout()
+        sync_layout.addWidget(QLabel("Sync:"))
+        self.sync_mode_combo = QComboBox()
+        self.sync_mode_combo.addItems(["None", "Beat", "Measure", "Section"])
+        self.sync_mode_combo.setEnabled(False)
+        sync_layout.addWidget(self.sync_mode_combo)
+        
+        sync_layout.addWidget(QLabel("Snap:"))
+        self.snap_strength_slider = QSlider(Qt.Horizontal)
+        self.snap_strength_slider.setRange(0, 100)
+        self.snap_strength_slider.setValue(80)
+        self.snap_strength_slider.setMaximumWidth(100)
+        self.snap_strength_slider.setEnabled(False)
+        sync_layout.addWidget(self.snap_strength_slider)
+        
+        self.snap_label = QLabel("80%")
+        self.snap_strength_slider.valueChanged.connect(lambda v: self.snap_label.setText(f"{v}%"))
+        sync_layout.addWidget(self.snap_label)
+        
+        self.extract_lyrics_btn = QPushButton("Extract Lyrics")
+        self.extract_lyrics_btn.clicked.connect(self.extract_midi_lyrics)
+        self.extract_lyrics_btn.setEnabled(False)
+        sync_layout.addWidget(self.extract_lyrics_btn)
+        
+        sync_layout.addStretch()
+        layout.addLayout(sync_layout)
         
         # Audio controls
         controls_layout = QHBoxLayout()
@@ -291,6 +360,53 @@ class WorkspaceWidget(QWidget):
         
         controls_layout.addStretch()
         layout.addLayout(controls_layout)
+        
+        # Karaoke options (hidden by default)
+        self.karaoke_group = QGroupBox("Karaoke Options")
+        self.karaoke_group.setCheckable(True)
+        self.karaoke_group.setChecked(False)
+        self.karaoke_group.setVisible(False)
+        karaoke_layout = QVBoxLayout()
+        
+        karaoke_style_layout = QHBoxLayout()
+        karaoke_style_layout.addWidget(QLabel("Style:"))
+        self.karaoke_style_combo = QComboBox()
+        self.karaoke_style_combo.addItems(["Bouncing Ball", "Highlight", "Fade In"])
+        karaoke_style_layout.addWidget(self.karaoke_style_combo)
+        
+        karaoke_style_layout.addWidget(QLabel("Position:"))
+        self.karaoke_position_combo = QComboBox()
+        self.karaoke_position_combo.addItems(["Bottom", "Top", "Center"])
+        karaoke_style_layout.addWidget(self.karaoke_position_combo)
+        
+        karaoke_style_layout.addWidget(QLabel("Font Size:"))
+        self.karaoke_font_spin = QSpinBox()
+        self.karaoke_font_spin.setRange(16, 72)
+        self.karaoke_font_spin.setValue(32)
+        karaoke_style_layout.addWidget(self.karaoke_font_spin)
+        
+        karaoke_style_layout.addStretch()
+        karaoke_layout.addLayout(karaoke_style_layout)
+        
+        # Export formats
+        export_layout = QHBoxLayout()
+        export_layout.addWidget(QLabel("Export:"))
+        self.export_lrc_check = QCheckBox("LRC")
+        self.export_lrc_check.setChecked(True)
+        export_layout.addWidget(self.export_lrc_check)
+        
+        self.export_srt_check = QCheckBox("SRT")
+        self.export_srt_check.setChecked(True)
+        export_layout.addWidget(self.export_srt_check)
+        
+        self.export_ass_check = QCheckBox("ASS")
+        export_layout.addWidget(self.export_ass_check)
+        
+        export_layout.addStretch()
+        karaoke_layout.addLayout(export_layout)
+        
+        self.karaoke_group.setLayout(karaoke_layout)
+        layout.addWidget(self.karaoke_group)
         
         group.setLayout(layout)
         return group
@@ -442,6 +558,46 @@ class WorkspaceWidget(QWidget):
         self.update_ui_state()
         self.project_changed.emit(self.current_project)
     
+    def auto_load_last_project(self):
+        """Auto-load the last opened project if enabled"""
+        from gui.video.project_browser import get_last_project_path
+        
+        self.logger.info("Checking for last project to auto-load...")
+        last_project = get_last_project_path()
+        if last_project:
+            self.logger.info(f"Auto-loading last project: {last_project}")
+            try:
+                self.load_project_from_path(last_project)
+            except Exception as e:
+                self.logger.warning(f"Could not auto-load last project: {e}")
+        else:
+            self.logger.info("No last project to auto-load")
+    
+    def browse_projects(self):
+        """Browse and open projects using the project browser"""
+        from gui.video.project_browser import ProjectBrowserDialog
+        
+        dialog = ProjectBrowserDialog(self.project_manager, self)
+        dialog.project_selected.connect(self.load_project_from_path)
+        dialog.exec()
+    
+    def load_project_from_path(self, project_path):
+        """Load a project from a given path"""
+        try:
+            self.current_project = self.project_manager.load_project(project_path)
+            self.load_project_to_ui()
+            self.update_ui_state()
+            self.project_changed.emit(self.current_project)
+            self.status_label.setText(f"Loaded: {self.current_project.name}")
+            
+            # Save as last opened project
+            from PySide6.QtCore import QSettings
+            settings = QSettings("ImageAI", "VideoProjects")
+            settings.setValue("last_project", str(project_path))
+        except Exception as e:
+            self.logger.error(f"Failed to load project from {project_path}: {e}", exc_info=True)
+            QMessageBox.warning(self, "Error", f"Failed to open project: {e}")
+    
     def open_project(self):
         """Open existing project"""
         filename, _ = QFileDialog.getOpenFileName(
@@ -457,12 +613,16 @@ class WorkspaceWidget(QWidget):
                 self.update_ui_state()
                 self.project_changed.emit(self.current_project)
             except Exception as e:
+                self.logger.error(f"Failed to open project: {e}", exc_info=True)
                 QMessageBox.warning(self, "Error", f"Failed to open project: {e}")
     
     def save_project(self):
         """Save current project"""
         if not self.current_project:
-            return
+            # Create a new project if none exists
+            project_name = self.project_name.text().strip() or "Untitled"
+            self.current_project = VideoProject(name=project_name)
+            self.update_ui_state()
         
         try:
             self.update_project_from_ui()
@@ -470,12 +630,14 @@ class WorkspaceWidget(QWidget):
             self.status_label.setText(f"Project saved: {self.current_project.name}")
             self.project_changed.emit(self.current_project)
         except Exception as e:
+            self.logger.error(f"Failed to save project: {e}", exc_info=True)
             QMessageBox.warning(self, "Error", f"Failed to save project: {e}")
     
     def generate_storyboard(self):
         """Generate storyboard from input text"""
         text = self.input_text.toPlainText()
         if not text:
+            self.logger.warning("Generate storyboard called with no input text")
             QMessageBox.warning(self, "No Input", "Please enter text or lyrics")
             return
         
@@ -486,17 +648,62 @@ class WorkspaceWidget(QWidget):
         from core.video.storyboard import StoryboardGenerator
         generator = StoryboardGenerator()
         
+        # Get format type
         format_type = self.format_combo.currentText()
         if format_type == "Auto-detect":
             format_type = None
         
-        scenes = generator.generate_storyboard(
+        # Get target duration
+        target_duration = f"00:{self.duration_spin.value():02d}:00"
+        preset = self.pacing_combo.currentText().lower()
+        
+        # Get MIDI sync settings
+        midi_timing = None
+        sync_mode = "none"
+        snap_strength = 0.8
+        
+        if self.current_project and self.current_project.midi_timing_data:
+            midi_timing = self.current_project.midi_timing_data
+            sync_mode = self.sync_mode_combo.currentText().lower()
+            snap_strength = self.snap_strength_slider.value() / 100.0
+        
+        # Generate scenes with MIDI sync if available
+        scenes = generator.generate_scenes(
             text,
-            target_duration=self.duration_spin.value(),
-            format_type=format_type
+            target_duration=target_duration,
+            preset=preset,
+            format_hint=format_type,
+            midi_timing_data=midi_timing,
+            sync_mode=sync_mode,
+            snap_strength=snap_strength
         )
         
+        # Update project
         self.current_project.scenes = scenes
+        self.current_project.input_text = text
+        self.current_project.sync_mode = sync_mode
+        self.current_project.snap_strength = snap_strength
+        
+        # Update karaoke settings if enabled
+        if self.karaoke_group.isChecked():
+            from core.video.karaoke_renderer import KaraokeConfig
+            self.current_project.karaoke_config = KaraokeConfig(
+                enabled=True,
+                style=self.karaoke_style_combo.currentText().lower().replace(" ", "_"),
+                position=self.karaoke_position_combo.currentText().lower(),
+                font_size=self.karaoke_font_spin.value()
+            )
+            
+            # Set export formats
+            export_formats = []
+            if self.export_lrc_check.isChecked():
+                export_formats.append("lrc")
+            if self.export_srt_check.isChecked():
+                export_formats.append("srt")
+            if self.export_ass_check.isChecked():
+                export_formats.append("ass")
+            self.current_project.karaoke_export_formats = export_formats
+        
         self.populate_scene_table()
         self.update_ui_state()
         self.project_changed.emit(self.current_project)
@@ -628,6 +835,7 @@ class WorkspaceWidget(QWidget):
                 with open(filename, 'r', encoding='utf-8') as f:
                     self.input_text.setPlainText(f.read())
             except Exception as e:
+                self.logger.error(f"Failed to load file: {e}", exc_info=True)
                 QMessageBox.warning(self, "Error", f"Failed to load file: {e}")
     
     def browse_audio_file(self):
@@ -650,10 +858,92 @@ class WorkspaceWidget(QWidget):
     
     def clear_audio(self):
         """Clear audio selection"""
-        self.audio_file_label.setText("No audio file selected")
+        self.audio_file_label.setText("No file")
         self.clear_audio_btn.setEnabled(False)
         if self.current_project:
-            self.current_project.audio_track = None
+            self.current_project.audio_tracks = []
+    
+    def browse_midi_file(self):
+        """Browse for MIDI file"""
+        filename, _ = QFileDialog.getOpenFileName(
+            self, "Select MIDI File",
+            "", "MIDI Files (*.mid *.midi);;All Files (*.*)"
+        )
+        if filename:
+            try:
+                # Process MIDI file
+                from core.video.midi_utils import get_midi_processor
+                processor = get_midi_processor()
+                timing_data = processor.extract_timing(Path(filename))
+                
+                # Update UI
+                self.midi_file_label.setText(Path(filename).name)
+                self.midi_info_label.setText(
+                    f"{timing_data.tempo_bpm:.0f} BPM, {timing_data.time_signature}, "
+                    f"{timing_data.duration_sec:.1f}s"
+                )
+                self.clear_midi_btn.setEnabled(True)
+                self.sync_mode_combo.setEnabled(True)
+                self.snap_strength_slider.setEnabled(True)
+                self.extract_lyrics_btn.setEnabled(True)
+                self.karaoke_group.setVisible(True)
+                
+                # Store in project
+                if self.current_project:
+                    self.current_project.midi_file_path = Path(filename)
+                    self.current_project.midi_timing_data = timing_data
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to process MIDI file: {e}", exc_info=True)
+                QMessageBox.warning(self, "MIDI Error", f"Failed to process MIDI file: {e}")
+    
+    def clear_midi(self):
+        """Clear MIDI file"""
+        self.midi_file_label.setText("No file")
+        self.midi_info_label.setText("")
+        self.clear_midi_btn.setEnabled(False)
+        self.sync_mode_combo.setEnabled(False)
+        self.snap_strength_slider.setEnabled(False)
+        self.extract_lyrics_btn.setEnabled(False)
+        self.karaoke_group.setVisible(False)
+        
+        if self.current_project:
+            self.current_project.midi_file_path = None
+            self.current_project.midi_timing_data = None
+    
+    def extract_midi_lyrics(self):
+        """Extract lyrics from MIDI or align to timing"""
+        if not self.current_project or not self.current_project.midi_timing_data:
+            return
+        
+        # Get lyrics from MIDI timing data
+        midi_lyrics = self.current_project.midi_timing_data.lyrics
+        
+        if midi_lyrics:
+            # Format as text and insert into input
+            lyrics_text = "\n".join([text for _, text in midi_lyrics])
+            self.input_text.setPlainText(lyrics_text)
+            QMessageBox.information(self, "Lyrics Extracted", 
+                                  f"Extracted {len(midi_lyrics)} lyric events from MIDI")
+        else:
+            # Try to align existing text to MIDI timing
+            text = self.input_text.toPlainText()
+            if text:
+                try:
+                    from core.video.midi_utils import get_midi_processor
+                    processor = get_midi_processor()
+                    aligned = processor._align_lyrics_to_timing(
+                        text, self.current_project.midi_timing_data
+                    )
+                    if aligned:
+                        QMessageBox.information(self, "Lyrics Aligned",
+                                          f"Aligned {len(aligned)} words to MIDI timing")
+                except Exception as e:
+                    self.logger.error(f"MIDI lyrics alignment error: {e}", exc_info=True)
+                    QMessageBox.warning(self, "MIDI Error", str(e))
+            else:
+                QMessageBox.information(self, "No Lyrics",
+                                      "No lyrics found in MIDI. Enter lyrics manually to align to beats.")
     
     def update_ui_state(self):
         """Update UI element states based on project"""
@@ -674,12 +964,58 @@ class WorkspaceWidget(QWidget):
             return
         
         self.current_project.name = self.project_name.text()
-        # Update other project settings from UI
+        self.current_project.input_text = self.input_text.toPlainText()
+        self.current_project.input_format = self.format_combo.currentText()
+        self.current_project.timing_preset = self.pacing_combo.currentText()
+        
+        # Update target duration from spin box
+        duration_sec = self.duration_spin.value()
+        hours = duration_sec // 3600
+        minutes = (duration_sec % 3600) // 60
+        seconds = duration_sec % 60
+        self.current_project.target_duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         
     def load_project_to_ui(self):
         """Load project data to UI"""
         if not self.current_project:
             return
         
-        self.populate_scene_table()
-        # Load other project settings to UI
+        try:
+            # Load basic project info
+            self.project_name.setText(self.current_project.name)
+            self.input_text.setPlainText(self.current_project.input_text or "")
+            
+            # Load format and timing settings
+            if hasattr(self.current_project, 'input_format'):
+                index = self.format_combo.findText(self.current_project.input_format)
+                if index >= 0:
+                    self.format_combo.setCurrentIndex(index)
+            
+            if hasattr(self.current_project, 'timing_preset'):
+                index = self.pacing_combo.findText(self.current_project.timing_preset)
+                if index >= 0:
+                    self.pacing_combo.setCurrentIndex(index)
+            
+            # Load target duration
+            if self.current_project.target_duration:
+                try:
+                    parts = self.current_project.target_duration.split(':')
+                    if len(parts) == 3:
+                        hours = int(parts[0])
+                        minutes = int(parts[1])
+                        seconds = int(parts[2])
+                        total_seconds = hours * 3600 + minutes * 60 + seconds
+                        self.duration_spin.setValue(total_seconds)
+                except Exception as e:
+                    self.logger.warning(f"Could not parse target duration: {e}")
+            
+            # Load scene table
+            self.populate_scene_table()
+            
+            # Update UI state
+            self.update_ui_state()
+            
+        except Exception as e:
+            self.logger.error(f"Error loading project to UI: {e}", exc_info=True)
+            QMessageBox.warning(self, "Load Error", 
+                              f"Some project data could not be loaded.\nCheck logs for details.\nError: {e}")

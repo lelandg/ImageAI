@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.10.1**
+**Version 0.10.3**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -27,6 +27,8 @@
 - [API Reference](#14-api-reference)
 - [Development](#15-development)
 - [Changelog](#16-changelog)
+
+![ImageAI Screenshot](screenshot_20250912.png)
 
 ## Key Features
 
@@ -56,8 +58,16 @@
 - Responsive layout with resizable panels
 
 ### 🎯 Advanced Generation Controls
-- **Visual Aspect Ratio Selector** - Interactive preview rectangles for aspect ratios
-- **Smart Resolution Presets** - Provider-optimized resolution settings
+- **Enhanced Aspect Ratio Selector** - Interactive preview rectangles with custom input support:
+  - Visual preset buttons for common ratios (1:1, 3:4, 4:3, 16:9, 9:16, 21:9)
+  - **Custom aspect ratio input** - Enter any ratio like "16:10" or decimal "1.6"
+  - Clear mode indicator showing "Using Aspect Ratio" or "Using Resolution"
+  - Automatic resolution calculation based on provider capabilities
+- **Smart Resolution System** - Dual-mode resolution control:
+  - **Auto mode** - Resolution calculated from selected aspect ratio
+  - **Manual mode** - Direct resolution selection overrides aspect ratio
+  - Provider-optimized presets (DALL·E, Gemini, Stability AI)
+  - Visual feedback showing which mode is active (green for AR, blue for resolution)
 - **Quality & Style Options** - Standard/HD quality, style presets for different looks
 - **Batch Generation** - Generate multiple variations at once
 - **Cost Estimation** - Real-time cost calculation for all providers
@@ -98,6 +108,16 @@
 - **Professional Effects** - Ken Burns, transitions, audio sync
 - **Project History** - Complete audit trail with restore points
 
+### 🎵 MIDI Synchronization & Karaoke (NEW!)
+- **MIDI-Based Timing** - Perfect beat/measure alignment for scene transitions
+- **Musical Structure Detection** - Identify verses, choruses, bridges from MIDI
+- **Karaoke Overlays** - Bouncing ball, highlighting, fade-in styles
+- **Lyric Export Formats** - Generate LRC, SRT, and ASS subtitle files
+- **Word-Level Synchronization** - Extract timing from MIDI lyric events
+- **Adjustable Snap Strength** - Control how tightly scenes align to beats
+- **Audio Track Support** - Link MP3, WAV, M4A files without copying
+- **Volume & Fade Controls** - Professional audio mixing options
+
 ### 🔧 Developer Features
 - Modular architecture with provider abstraction
 - Worker threads for non-blocking generation
@@ -105,8 +125,6 @@
 - Progress tracking and status updates
 - Event-driven architecture with Qt signals
 - Extensible provider system for new services
-
-![ImageAI Screenshot](screenshot_20250906.jpg)
 
 ## 1. Requirements
 
@@ -120,6 +138,10 @@
   - `PySide6` - GUI framework (optional for CLI-only usage)
   - `pillow` - Image processing
   - `protobuf` - Protocol buffer support
+  - `pretty-midi` - MIDI file analysis and timing extraction
+  - `mido` - Low-level MIDI manipulation for lyrics and events
+  - `moviepy` - Video processing and assembly
+  - `litellm` - Unified LLM provider interface (for video prompts)
 
 ## 2. Authentication Setup
 
@@ -372,11 +394,34 @@ python main.py --provider stability -s -k "YOUR_STABILITY_KEY"
 python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
 ```
 
+### Video Generation with MIDI Sync (NEW!)
+
+```bash
+# Basic video generation with slideshow
+python main.py video --in lyrics.txt --provider gemini --slideshow \
+  --audio /path/to/music.mp3 --out video.mp4
+
+# MIDI-synchronized video with beat alignment
+python main.py video --in lyrics.txt --midi /path/to/song.mid \
+  --audio /path/to/song.mp3 --sync-mode measure --snap-strength 0.9 \
+  --out synced_video.mp4
+
+# Video with karaoke overlay
+python main.py video --in lyrics.txt --midi song.mid --audio song.mp3 \
+  --karaoke --karaoke-style bouncing_ball \
+  --export-lrc --export-srt --export-ass \
+  --out karaoke_video.mp4
+
+# Using Veo AI for video generation (when available)
+python main.py video --in script.txt --veo-model veo-3.0-generate-001 \
+  --audio soundtrack.mp3 --out ai_video.mp4
+```
+
 ## 7. GUI Features
 
 ### Main Interface
 
-#### Generate Tab
+#### Image Tab (Primary)
 - **Model Selection**: Dropdown with provider-specific models
 - **Prompt Input**: Multi-line text area for detailed prompts
 - **Generate Button**: Start image generation with progress tracking
@@ -396,6 +441,11 @@ python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
   - Prompt rewriting toggle
 - **Output Text**: Live generation status and file paths
 - **Examples Button**: Access curated prompts library
+
+#### Templates Tab
+- **Predefined Templates**: Ready-to-use prompts with customizable placeholders
+- **Quick Generation**: Jump-start your creativity with proven prompt patterns
+- **Placeholder System**: Customize templates with your own variables
 
 #### Video Tab
 The Video Project feature provides comprehensive tools for creating AI-powered videos from text, with advanced version control and multiple rendering options.
@@ -478,11 +528,26 @@ The Video Project feature provides comprehensive tools for creating AI-powered v
 - **Restore Points**: One-click restoration to previous states
 - **Diff Viewer**: See exact changes between versions
 
-**Audio Support**:
-- **Audio Track Integration**: Link MP3/WAV files to projects
-- **Volume Control**: Adjustable audio levels
-- **Fade In/Out**: Smooth audio transitions
-- **Sync Options**: Automatic scene timing to audio beats
+**Audio & MIDI Support**:
+- **Audio Track Integration**: Link MP3/WAV/M4A/OGG files without copying
+- **MIDI Synchronization**: Load MIDI files for precise timing control
+  - Beat grid alignment for scene transitions
+  - Measure and section synchronization
+  - Tempo and time signature display
+  - Musical structure detection (verse, chorus, bridge)
+- **Karaoke Features**:
+  - Bouncing ball, highlighting, and fade-in styles
+  - Export to LRC, SRT, and ASS formats
+  - Word-level timing from MIDI lyrics
+  - Customizable font size and position
+- **Audio Controls**:
+  - Volume adjustment with real-time preview
+  - Fade in/out transitions
+  - Trim controls for start/end offsets
+- **Sync Options**: 
+  - None, Beat, Measure, or Section alignment
+  - Adjustable snap strength (0-100%)
+  - Extract lyrics from MIDI files
 
 **Advanced Settings**:
 - **Generation Settings**:
@@ -1302,13 +1367,33 @@ ImageAI/
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
-### Latest Release: v0.10.1 (2025-01-11)
+### Latest Release: v0.10.3 (2025-01-12)
 
-**UI Polish & Cleanup**
-- **Removed Development Notices**: Cleaned up beta/coming soon labels
-- **Imagen 3 Support**: Removed "Coming Soon" labels for Imagen 3 models
-- **Documentation Updates**: Enhanced video feature documentation
-- **Version Increment**: Updated to reflect stable video UI implementation
+**Enhanced Aspect Ratio & Resolution Controls**
+- **Custom Aspect Ratio Input**: New manual input field for custom aspect ratios (e.g., "16:10" or "1.6")
+- **Smart Mode Switching**: Clear visual indicators showing whether aspect ratio or resolution is controlling dimensions
+- **Improved UI Feedback**: 
+  - Green badge for aspect ratio mode, blue badge for resolution mode
+  - Auto mode in resolution selector calculates from aspect ratio
+  - Selecting a manual resolution automatically clears aspect ratio selection
+- **Provider-Aware Calculations**: Resolution automatically calculated based on provider capabilities (DALL·E, Gemini, Stability)
+
+### v0.10.2 (2025-01-12)
+
+**Video Project Improvements & Bug Fixes**
+- **Project Browser**: New dialog for easy project management with double-click to open
+- **Auto-reload**: Last opened project automatically loads on startup (configurable)
+- **MIDI Support**: Fixed MIDI import errors by adding setuptools dependency
+- **Enhanced Logging**: Comprehensive error logging with automatic log/project file copying on exit
+- **UI Improvements**: 
+  - Renamed "Generate" tab to "Image" for clarity
+  - Moved Templates tab next to Image tab for better workflow
+  - Made Video Project header more compact
+  - Added development notice to Video tab
+- **Bug Fixes**:
+  - Fixed project save/load not preserving lyrics and settings
+  - Fixed `timing_combo` AttributeError on project load
+  - Added proper error logging for all dialog messages
 
 ### v0.10.0 (2025-01-11)
 

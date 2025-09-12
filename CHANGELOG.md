@@ -5,6 +5,33 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3] - 2025-01-12
+
+### Added
+- **Custom Aspect Ratio Input** - New manual input field for entering custom aspect ratios
+  - Supports ratio format (e.g., "16:10") and decimal format (e.g., "1.6")
+  - Input validation ensures only valid formats are accepted
+  - Custom button with visual indicator when active
+- **Resolution/Aspect Ratio Mode Indicator** - Clear visual feedback showing which control is active
+  - Green badge with "Using Aspect Ratio" when AR controls dimensions
+  - Blue badge with "Using Resolution" when manual resolution is selected
+  - Info text shows current mode and calculated values
+
+### Changed
+- **Enhanced Aspect Ratio Selector** - Improved interaction between aspect ratio and resolution controls
+  - Selecting an aspect ratio automatically switches resolution to "Auto (from AR)" mode
+  - Selecting a manual resolution automatically deselects all aspect ratio buttons
+  - Resolution selector shows calculated resolution when in auto mode
+- **Smart Resolution Calculation** - Provider-aware resolution calculation from aspect ratios
+  - DALL·E 3: Maps to supported sizes (1024×1024, 1792×1024, 1024×1792)
+  - Google Gemini: Maintains square (1:1) limitation
+  - Stability AI: Maps to optimal SDXL resolutions
+
+### Fixed
+- Generation parameters now correctly send either aspect ratio OR resolution, not both
+- Resolution selector properly updates when aspect ratio changes
+- Clear visual feedback prevents confusion about which setting is controlling dimensions
+
 ## [0.10.1] - 2025-01-11
 
 ### Changed

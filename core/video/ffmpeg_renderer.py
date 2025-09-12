@@ -16,7 +16,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 import re
 
-from .models import Scene, AudioTrack, VideoProject
+from .project import Scene, AudioTrack, VideoProject
 
 
 @dataclass
@@ -74,7 +74,8 @@ class FFmpegRenderer:
                         project: VideoProject,
                         output_path: Path,
                         settings: Optional[RenderSettings] = None,
-                        progress_callback: Optional[callable] = None) -> Path:
+                        progress_callback: Optional[callable] = None,
+                        add_karaoke: bool = False) -> Path:
         """
         Render a slideshow video from project scenes.
         
@@ -83,6 +84,7 @@ class FFmpegRenderer:
             output_path: Output video file path
             settings: Render settings (uses defaults if None)
             progress_callback: Callback for progress updates
+            add_karaoke: Whether to add karaoke overlay
             
         Returns:
             Path to rendered video
@@ -111,10 +113,18 @@ class FFmpegRenderer:
             )
             
             # Add audio if available
-            if project.audio_track and project.audio_track.file_path:
-                final_path = temp_path / "final.mp4"
+            if project.audio_tracks and project.audio_tracks[0].file_path:
+                audio_video_path = temp_path / "audio_video.mp4"
                 self._add_audio_track(
-                    video_path, project.audio_track, final_path, settings
+                    video_path, project.audio_tracks[0], audio_video_path, settings
+                )
+                video_path = audio_video_path
+            
+            # Add karaoke overlay if requested
+            if add_karaoke and project.karaoke_config and project.midi_timing_data:
+                final_path = temp_path / "karaoke_final.mp4"
+                self._add_karaoke_overlay(
+                    video_path, project, final_path, settings
                 )
             else:
                 final_path = video_path
@@ -456,6 +466,80 @@ class FFmpegRenderer:
         
         subprocess.run(cmd, capture_output=True, check=True)
         return output_path
+    
+    def _add_karaoke_overlay(self,
+                            video_path: Path,
+                            project: VideoProject,
+                            output_path: Path,
+                            settings: RenderSettings) -> Path:
+        """
+        Add karaoke overlay to video.
+        
+        Args:
+            video_path: Input video path
+            project: Video project with karaoke settings
+            output_path: Output video path
+            settings: Render settings
+            
+        Returns:
+            Path to video with karaoke
+        """
+        try:
+            from ..karaoke_renderer import KaraokeRenderer
+            from ..midi_processor import MidiProcessor
+            
+            renderer = KaraokeRenderer(self.ffmpeg_path)
+            processor = MidiProcessor()
+            
+            # Extract lyrics with timing
+            if project.midi_timing_data and project.input_text:
+                lyrics_timing = processor.extract_lyrics_with_timing(
+                    project.midi_file_path,
+                    project.input_text
+                )
+                
+                # Add karaoke overlay
+                result = renderer.add_bouncing_ball_overlay(
+                    video_path,
+                    lyrics_timing,
+                    output_path,
+                    project.karaoke_config
+                )
+                
+                # Export lyrics files if requested
+                if project.karaoke_export_formats:
+                    export_dir = output_path.parent / "lyrics"
+                    export_dir.mkdir(exist_ok=True)
+                    
+                    if "lrc" in project.karaoke_export_formats:
+                        lrc_path = export_dir / f"{output_path.stem}.lrc"
+                        renderer.generate_lrc(lyrics_timing, lrc_path)
+                        project.karaoke_generated_files["lrc"] = lrc_path
+                    
+                    if "srt" in project.karaoke_export_formats:
+                        srt_path = export_dir / f"{output_path.stem}.srt"
+                        renderer.generate_srt(lyrics_timing, srt_path)
+                        project.karaoke_generated_files["srt"] = srt_path
+                    
+                    if "ass" in project.karaoke_export_formats:
+                        ass_path = export_dir / f"{output_path.stem}.ass"
+                        renderer.generate_ass(lyrics_timing, ass_path, project.karaoke_config)
+                        project.karaoke_generated_files["ass"] = ass_path
+                
+                return result
+            else:
+                # No karaoke data, just copy
+                shutil.copy2(video_path, output_path)
+                return output_path
+                
+        except ImportError as e:
+            self.logger.warning(f"Karaoke modules not available: {e}")
+            shutil.copy2(video_path, output_path)
+            return output_path
+        except Exception as e:
+            self.logger.error(f"Failed to add karaoke overlay: {e}")
+            shutil.copy2(video_path, output_path)
+            return output_path
     
     def get_video_info(self, video_path: Path) -> Dict[str, Any]:
         """

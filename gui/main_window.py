@@ -154,9 +154,9 @@ class MainWindow(QMainWindow):
         }
         self.tab_video = VideoProjectTab(self.config.config, providers_dict)
         
-        self.tabs.addTab(self.tab_generate, "🎨 Generate")
-        self.tabs.addTab(self.tab_video, "🎬 Video")
+        self.tabs.addTab(self.tab_generate, "🎨 Image")
         self.tabs.addTab(self.tab_templates, "📝 Templates")
+        self.tabs.addTab(self.tab_video, "🎬 Video")
         self.tabs.addTab(self.tab_settings, "⚙️ Settings")
         self.tabs.addTab(self.tab_help, "❓ Help")
         self.tabs.addTab(self.tab_history, "📜 History")  # Always add history tab
@@ -195,6 +195,17 @@ class MainWindow(QMainWindow):
         act_quit = QAction("Quit", self)
         act_quit.triggered.connect(self.close)
         file_menu.addAction(act_quit)
+        
+        # Help menu
+        help_menu = mb.addMenu("Help")
+        
+        act_show_logs = QAction("Show Log Location", self)
+        act_show_logs.triggered.connect(self._show_log_location)
+        help_menu.addAction(act_show_logs)
+        
+        act_report_error = QAction("How to Report Errors", self)
+        act_report_error.triggered.connect(self._show_error_reporting)
+        help_menu.addAction(act_report_error)
     
     def _init_generate_tab(self):
         """Initialize the Generate tab."""
@@ -308,6 +319,12 @@ class MainWindow(QMainWindow):
         if ResolutionSelector:
             self.resolution_selector = ResolutionSelector(self.current_provider)
             self.resolution_selector.resolutionChanged.connect(self._on_resolution_changed)
+            # Connect resolution selector to aspect ratio changes
+            if hasattr(self, 'aspect_selector') and self.aspect_selector:
+                self.aspect_selector.ratioChanged.connect(self.resolution_selector.update_aspect_ratio)
+                self.resolution_selector.modeChanged.connect(self._on_resolution_mode_changed)
+                # Initialize resolution selector with current aspect ratio
+                self.resolution_selector.update_aspect_ratio(self.aspect_selector.get_ratio())
             settings_form.addRow("Resolution:", self.resolution_selector)
         else:
             # Fallback to old resolution combo
@@ -1775,6 +1792,9 @@ For more detailed information, please refer to the full documentation.
         """Handle aspect ratio change."""
         # Store for use in generation
         self.current_aspect_ratio = ratio
+        # When aspect ratio changes, switch resolution selector to auto mode
+        if hasattr(self, 'resolution_selector') and self.resolution_selector:
+            self.resolution_selector.set_mode_aspect_ratio()
         # Could update resolution options based on aspect ratio
         self._update_cost_estimate()
     
@@ -1782,6 +1802,18 @@ For more detailed information, please refer to the full documentation.
         """Handle resolution change."""
         self.current_resolution = resolution
         self._update_cost_estimate()
+    
+    def _on_resolution_mode_changed(self, mode: str):
+        """Handle resolution mode change (aspect_ratio vs resolution)."""
+        # When user manually selects a resolution, clear aspect ratio selection
+        if mode == "resolution" and hasattr(self, 'aspect_selector') and self.aspect_selector:
+            # Don't trigger aspect ratio change when switching to resolution mode
+            # Just visually uncheck all aspect ratio buttons
+            for button in self.aspect_selector.buttons.values():
+                button.setChecked(False)
+            if hasattr(self.aspect_selector, 'custom_button'):
+                self.aspect_selector.custom_button.setChecked(False)
+                self.aspect_selector._show_custom_input(False)
     
     def _on_quality_settings_changed(self, settings: dict):
         """Handle quality/style settings change."""
@@ -2127,13 +2159,27 @@ For more detailed information, please refer to the full documentation.
         # Gather all generation parameters
         kwargs = {}
         
-        # Get resolution settings
+        # Get resolution or aspect ratio settings based on which mode is active
         if hasattr(self, 'resolution_selector') and self.resolution_selector:
-            resolution = self.resolution_selector.get_resolution()
-            if resolution and 'x' in resolution:
-                width, height = map(int, resolution.split('x'))
-                kwargs['width'] = width
-                kwargs['height'] = height
+            if self.resolution_selector.is_using_aspect_ratio():
+                # Using aspect ratio mode - send aspect ratio
+                if hasattr(self, 'aspect_selector') and self.aspect_selector:
+                    aspect_ratio = self.aspect_selector.get_ratio()
+                    kwargs['aspect_ratio'] = aspect_ratio
+                    # Also send calculated resolution for providers that need it
+                    resolution = self.resolution_selector.get_resolution()
+                    if resolution and 'x' in resolution:
+                        width, height = map(int, resolution.split('x'))
+                        kwargs['width'] = width
+                        kwargs['height'] = height
+            else:
+                # Using explicit resolution mode - only send resolution
+                resolution = self.resolution_selector.get_resolution()
+                if resolution and 'x' in resolution:
+                    width, height = map(int, resolution.split('x'))
+                    kwargs['width'] = width
+                    kwargs['height'] = height
+                # Don't send aspect_ratio when using explicit resolution
         elif hasattr(self, 'resolution_combo'):
             # Fallback to old resolution combo
             resolution_text = self.resolution_combo.currentText()
@@ -2146,11 +2192,11 @@ For more detailed information, please refer to the full documentation.
             elif "1024x1024" in resolution_text:
                 kwargs['width'] = 1024
                 kwargs['height'] = 1024
-        
-        # Get aspect ratio (for providers that support it)
-        if hasattr(self, 'aspect_selector') and self.aspect_selector:
-            aspect_ratio = self.aspect_selector.get_ratio()
-            kwargs['aspect_ratio'] = aspect_ratio
+            
+            # Also check for old aspect selector
+            if hasattr(self, 'aspect_selector') and self.aspect_selector:
+                aspect_ratio = self.aspect_selector.get_ratio()
+                kwargs['aspect_ratio'] = aspect_ratio
         
         # Get quality/style settings
         if hasattr(self, 'quality_selector') and self.quality_selector:
@@ -3321,3 +3367,46 @@ For more detailed information, please refer to the full documentation.
                 
                 # Store the history item data in the first column for easy retrieval
                 datetime_item.setData(Qt.UserRole, item)
+    def _show_log_location(self):
+        """Show the location of log files to the user."""
+        from core.logging_config import get_error_report_info
+        info = get_error_report_info()
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Log File Location")
+        msg.setIcon(QMessageBox.Information)
+        
+        text = f"<b>Log files are stored in:</b><br>{info['log_directory']}<br><br>"
+        if info['recent_log']:
+            text += f"<b>Most recent log:</b><br>{info['recent_log']}<br><br>"
+        text += "<b>Logs contain:</b><br>• Error messages<br>• Debug information<br>• System information"
+        
+        msg.setText(text)
+        msg.setDetailedText(info['report_instructions'])
+        msg.exec()
+    
+    def _show_error_reporting(self):
+        """Show instructions for reporting errors."""
+        from core.logging_config import get_error_report_info
+        info = get_error_report_info()
+        
+        msg = QMessageBox(self)
+        msg.setWindowTitle("How to Report Errors")
+        msg.setIcon(QMessageBox.Information)
+        
+        text = (
+            "<b>To report an error:</b><br><br>"
+            "1. Find the log file (Help → Show Log Location)<br>"
+            "2. Copy the error messages from the log<br>"
+            "3. Create an issue at:<br>"
+            "   <a href='https://github.com/anthropics/imageai/issues'>github.com/anthropics/imageai/issues</a><br><br>"
+            "<b>Include in your report:</b><br>"
+            "• What you were trying to do<br>"
+            "• The exact error message<br>"
+            "• Steps to reproduce the issue<br>"
+            "• Relevant log excerpts"
+        )
+        
+        msg.setText(text)
+        msg.setTextFormat(Qt.RichText)
+        msg.exec()

@@ -2,18 +2,18 @@
 
 from typing import Dict, Any, Optional, Tuple
 from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QPixmap, QPainter, QColor, QFont
+from PySide6.QtGui import QPixmap, QPainter, QColor, QFont, QRegularExpressionValidator
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QComboBox, QSlider, QSpinBox, QDoubleSpinBox,
     QCheckBox, QPushButton, QGroupBox, QButtonGroup,
     QRadioButton, QToolButton, QFrame, QScrollArea,
-    QSizePolicy
+    QSizePolicy, QLineEdit
 )
 
 
 class AspectRatioSelector(QWidget):
-    """Visual aspect ratio selector with preview rectangles."""
+    """Visual aspect ratio selector with preview rectangles and manual input."""
     
     ratioChanged = Signal(str)
     
@@ -30,20 +30,64 @@ class AspectRatioSelector(QWidget):
         super().__init__(parent)
         self.current_ratio = "1:1"
         self.buttons = {}
+        self.custom_button = None
+        self.custom_input = None
+        self._using_custom = False
         self._init_ui()
     
     def _init_ui(self):
         """Initialize the UI."""
-        layout = QHBoxLayout(self)  # Use horizontal layout for single row
-        layout.setSpacing(3)  # Tighter spacing
-        layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
+        main_layout = QVBoxLayout(self)
+        main_layout.setSpacing(3)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Preset buttons row
+        buttons_layout = QHBoxLayout()
+        buttons_layout.setSpacing(3)
         
         for ratio, info in self.ASPECT_RATIOS.items():
             button = self._create_ratio_button(ratio, info)
             self.buttons[ratio] = button
-            layout.addWidget(button)
+            buttons_layout.addWidget(button)
         
-        layout.addStretch()  # Push buttons to the left
+        # Add custom button
+        self.custom_button = self._create_custom_button()
+        buttons_layout.addWidget(self.custom_button)
+        
+        buttons_layout.addStretch()
+        main_layout.addLayout(buttons_layout)
+        
+        # Manual input row (initially hidden)
+        input_layout = QHBoxLayout()
+        input_layout.setSpacing(5)
+        
+        self.custom_label = QLabel("Custom AR:")
+        self.custom_label.setVisible(False)
+        input_layout.addWidget(self.custom_label)
+        
+        self.custom_input = QLineEdit()
+        self.custom_input.setPlaceholderText("e.g., 16:10 or 1.6")
+        self.custom_input.setMaximumWidth(100)
+        self.custom_input.setVisible(False)
+        self.custom_input.setToolTip("Enter aspect ratio as W:H (e.g., 16:9) or decimal (e.g., 1.78)")
+        
+        # Add validator for aspect ratio input
+        from PySide6.QtCore import QRegularExpression
+        regex = QRegularExpression(r"^\d+(\.\d+)?(:?\d+(\.\d+)?)?$")
+        validator = QRegularExpressionValidator(regex)
+        self.custom_input.setValidator(validator)
+        
+        self.custom_input.editingFinished.connect(self._on_custom_input_changed)
+        input_layout.addWidget(self.custom_input)
+        
+        self.apply_button = QPushButton("Apply")
+        self.apply_button.setMaximumWidth(60)
+        self.apply_button.setVisible(False)
+        self.apply_button.clicked.connect(self._apply_custom_ratio)
+        input_layout.addWidget(self.apply_button)
+        
+        input_layout.addStretch()
+        main_layout.addLayout(input_layout)
         
         # Select default
         self.set_ratio("1:1")
@@ -96,6 +140,7 @@ class AspectRatioSelector(QWidget):
         button.setIcon(pixmap)
         button.setIconSize(QSize(55, 45))
         button.clicked.connect(lambda: self._on_ratio_clicked(ratio))
+        button.setProperty('ratio', ratio)
         
         # Add custom style for better selected state visibility
         button.setStyleSheet("""
@@ -116,38 +161,186 @@ class AspectRatioSelector(QWidget):
         
         return button
     
+    def _create_custom_button(self) -> QToolButton:
+        """Create custom aspect ratio button."""
+        button = QToolButton()
+        button.setCheckable(True)
+        button.setToolTip("Custom aspect ratio\nClick to enter a custom value")
+        button.setMinimumSize(55, 55)
+        button.setMaximumSize(60, 60)
+        button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        
+        # Create pixmap with "Custom" text
+        pixmap = QPixmap(55, 45)
+        pixmap.fill(Qt.transparent)
+        painter = QPainter(pixmap)
+        
+        # Draw custom icon
+        rect_color = QColor("#FF9800")  # Orange for custom
+        painter.fillRect(10, 10, 35, 20, rect_color)
+        
+        # Draw text
+        painter.setPen(Qt.black)
+        font = QFont()
+        font.setPixelSize(9)
+        font.setBold(True)
+        painter.setFont(font)
+        
+        # Draw white background for text
+        text = "Custom"
+        text_rect = painter.fontMetrics().boundingRect(text)
+        text_x = (55 - text_rect.width()) // 2
+        text_y = 45 - 10
+        painter.fillRect(text_x - 2, text_y - 2, text_rect.width() + 4, 12, QColor(255, 255, 255, 200))
+        painter.drawText(pixmap.rect(), Qt.AlignBottom | Qt.AlignHCenter, text)
+        painter.end()
+        
+        button.setIcon(pixmap)
+        button.setIconSize(QSize(55, 45))
+        button.clicked.connect(self._on_custom_clicked)
+        
+        # Same style as other buttons
+        button.setStyleSheet("""
+            QToolButton {
+                border: 2px solid transparent;
+                border-radius: 4px;
+                background: rgba(0, 0, 0, 0.02);
+            }
+            QToolButton:hover {
+                background: rgba(255, 152, 0, 0.1);
+                border: 2px solid rgba(255, 152, 0, 0.3);
+            }
+            QToolButton:checked {
+                background: rgba(255, 152, 0, 0.2);
+                border: 2px solid #FF9800;
+            }
+        """)
+        
+        return button
+    
     def _on_ratio_clicked(self, ratio: str):
         """Handle ratio button click."""
+        # Hide custom input when selecting preset
+        self._show_custom_input(False)
+        self._using_custom = False
+        self.custom_button.setChecked(False)
         self.set_ratio(ratio)
         self.ratioChanged.emit(ratio)
+    
+    def _on_custom_clicked(self):
+        """Handle custom button click."""
+        if self.custom_button.isChecked():
+            # Show custom input
+            self._show_custom_input(True)
+            self._using_custom = True
+            # Uncheck all preset buttons
+            for button in self.buttons.values():
+                button.setChecked(False)
+            # Set focus to input
+            self.custom_input.setFocus()
+        else:
+            # Hide custom input and select default
+            self._show_custom_input(False)
+            self._using_custom = False
+            self.set_ratio("1:1")
+            self.ratioChanged.emit("1:1")
+    
+    def _show_custom_input(self, show: bool):
+        """Show or hide custom input controls."""
+        self.custom_label.setVisible(show)
+        self.custom_input.setVisible(show)
+        self.apply_button.setVisible(show)
+    
+    def _on_custom_input_changed(self):
+        """Handle custom input text change."""
+        # Enable apply button when text changes
+        text = self.custom_input.text().strip()
+        self.apply_button.setEnabled(bool(text))
+    
+    def _apply_custom_ratio(self):
+        """Apply the custom aspect ratio."""
+        text = self.custom_input.text().strip()
+        if not text:
+            return
+        
+        # Parse the input - could be "16:9" or "1.78"
+        if ':' in text:
+            # Format: W:H
+            parts = text.split(':')
+            if len(parts) == 2:
+                try:
+                    w = float(parts[0])
+                    h = float(parts[1])
+                    if h > 0:
+                        # Normalize to W:H format
+                        ratio = f"{w:.1f}:{h:.1f}".replace('.0:', ':').replace('.0', '')
+                        self.current_ratio = ratio
+                        self._using_custom = True
+                        self.ratioChanged.emit(ratio)
+                except ValueError:
+                    pass
+        else:
+            # Format: decimal (e.g., 1.78)
+            try:
+                decimal = float(text)
+                if decimal > 0:
+                    # Convert to W:H format (normalize to height of 1)
+                    ratio = f"{decimal:.2f}:1"
+                    self.current_ratio = ratio
+                    self._using_custom = True
+                    self.ratioChanged.emit(ratio)
+            except ValueError:
+                pass
     
     def set_ratio(self, ratio: str):
         """Set the current aspect ratio."""
         self.current_ratio = ratio
-        for r, button in self.buttons.items():
-            button.setChecked(r == ratio)
+        
+        # Check if it's a preset ratio
+        if ratio in self.buttons:
+            for r, button in self.buttons.items():
+                button.setChecked(r == ratio)
+            self.custom_button.setChecked(False)
+            self._show_custom_input(False)
+            self._using_custom = False
+        else:
+            # It's a custom ratio
+            for button in self.buttons.values():
+                button.setChecked(False)
+            self.custom_button.setChecked(True)
+            self._show_custom_input(True)
+            self._using_custom = True
+            self.custom_input.setText(ratio)
     
     def get_ratio(self) -> str:
         """Get the current aspect ratio."""
         return self.current_ratio
+    
+    def is_using_custom(self) -> bool:
+        """Check if using custom aspect ratio."""
+        return self._using_custom
 
 
 class ResolutionSelector(QWidget):
-    """Smart resolution selector with presets."""
+    """Smart resolution selector with presets and AR/resolution mode indicator."""
     
     resolutionChanged = Signal(str)
+    modeChanged = Signal(str)  # "resolution" or "aspect_ratio"
     
     PRESETS = {
         "google": {
+            "Auto (from AR)": "auto",
             "1K (1024×1024)": "1024x1024",
             "2K (2048×2048)": "2048x2048",
         },
         "openai": {
+            "Auto (from AR)": "auto",
             "Square (1024×1024)": "1024x1024",
             "Portrait (1024×1792)": "1024x1792",
             "Landscape (1792×1024)": "1792x1024",
         },
         "stability": {
+            "Auto (from AR)": "auto",
             "SD 1.5 (512×512)": "512x512",
             "SD 1.5 HD (768×768)": "768x768",
             "SDXL (1024×1024)": "1024x1024",
@@ -160,13 +353,40 @@ class ResolutionSelector(QWidget):
     def __init__(self, provider: str = "google", parent=None):
         super().__init__(parent)
         self.provider = provider
+        self._using_aspect_ratio = True
+        self._aspect_ratio = "1:1"
         self._init_ui()
     
     def _init_ui(self):
         """Initialize the UI."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
         
+        # Mode indicator
+        mode_layout = QHBoxLayout()
+        mode_layout.setSpacing(5)
+        
+        self.mode_label = QLabel("Mode:")
+        mode_layout.addWidget(self.mode_label)
+        
+        self.mode_indicator = QLabel("Using Aspect Ratio")
+        self.mode_indicator.setStyleSheet("""
+            QLabel {
+                color: #4CAF50;
+                font-weight: bold;
+                padding: 2px 6px;
+                border: 1px solid #4CAF50;
+                border-radius: 3px;
+                background: rgba(76, 175, 80, 0.1);
+            }
+        """)
+        mode_layout.addWidget(self.mode_indicator)
+        mode_layout.addStretch()
+        
+        layout.addLayout(mode_layout)
+        
+        # Resolution combo
         self.combo = QComboBox()
         self.combo.currentTextChanged.connect(self._on_resolution_changed)
         layout.addWidget(self.combo)
@@ -187,32 +407,147 @@ class ResolutionSelector(QWidget):
         for label, resolution in presets.items():
             self.combo.addItem(label, resolution)
         
+        # Set default to Auto
+        self.combo.setCurrentIndex(0)
+        
         # Update info
-        if provider == "google":
-            self.info_label.setText("2K only available for Standard/Ultra models")
-        elif provider == "openai":
-            self.info_label.setText("Different sizes may affect generation style")
-        elif provider == "stability":
-            self.info_label.setText("Use model-specific optimal resolutions")
+        self._update_info_text()
+    
+    def _update_info_text(self):
+        """Update the info label based on current state."""
+        if self._using_aspect_ratio:
+            self.info_label.setText(f"Resolution calculated from aspect ratio: {self._aspect_ratio}")
         else:
-            self.info_label.clear()
+            if self.provider == "google":
+                self.info_label.setText("Using manual resolution (overrides aspect ratio)")
+            elif self.provider == "openai":
+                self.info_label.setText("Using manual resolution (may affect generation style)")
+            elif self.provider == "stability":
+                self.info_label.setText("Using manual resolution (model-specific optimal)")
+            else:
+                self.info_label.setText("Using manual resolution")
     
     def _on_resolution_changed(self, text: str):
         """Handle resolution change."""
         resolution = self.combo.currentData()
         if resolution:
-            self.resolutionChanged.emit(resolution)
+            if resolution == "auto":
+                # Switch to aspect ratio mode
+                self.set_mode_aspect_ratio()
+            else:
+                # Switch to resolution mode
+                self.set_mode_resolution()
+                self.resolutionChanged.emit(resolution)
+    
+    def set_mode_aspect_ratio(self):
+        """Set mode to use aspect ratio."""
+        self._using_aspect_ratio = True
+        self.mode_indicator.setText("Using Aspect Ratio")
+        self.mode_indicator.setStyleSheet("""
+            QLabel {
+                color: #4CAF50;
+                font-weight: bold;
+                padding: 2px 6px;
+                border: 1px solid #4CAF50;
+                border-radius: 3px;
+                background: rgba(76, 175, 80, 0.1);
+            }
+        """)
+        self._update_info_text()
+        self.modeChanged.emit("aspect_ratio")
+        
+        # Set combo to Auto if not already
+        if self.combo.currentData() != "auto":
+            self.combo.setCurrentIndex(0)
+    
+    def set_mode_resolution(self):
+        """Set mode to use explicit resolution."""
+        self._using_aspect_ratio = False
+        self.mode_indicator.setText("Using Resolution")
+        self.mode_indicator.setStyleSheet("""
+            QLabel {
+                color: #2196F3;
+                font-weight: bold;
+                padding: 2px 6px;
+                border: 1px solid #2196F3;
+                border-radius: 3px;
+                background: rgba(33, 150, 243, 0.1);
+            }
+        """)
+        self._update_info_text()
+        self.modeChanged.emit("resolution")
+    
+    def update_aspect_ratio(self, ratio: str):
+        """Update the current aspect ratio (for display)."""
+        self._aspect_ratio = ratio
+        if self._using_aspect_ratio:
+            self._update_info_text()
+            # Calculate suggested resolution based on aspect ratio
+            self._update_suggested_resolution(ratio)
+    
+    def _update_suggested_resolution(self, ratio: str):
+        """Update the combo text to show suggested resolution from AR."""
+        if self._using_aspect_ratio and self.combo.currentData() == "auto":
+            # Calculate resolution based on aspect ratio and provider
+            suggested = self._calculate_resolution_from_ar(ratio)
+            # Update the Auto item text to show the calculated resolution
+            self.combo.setItemText(0, f"Auto ({suggested})")
+    
+    def _calculate_resolution_from_ar(self, ratio: str) -> str:
+        """Calculate resolution from aspect ratio based on provider."""
+        # Parse aspect ratio
+        if ':' in ratio:
+            parts = ratio.split(':')
+            try:
+                w = float(parts[0])
+                h = float(parts[1])
+                ar = w / h
+            except (ValueError, IndexError):
+                ar = 1.0
+        else:
+            ar = 1.0
+        
+        # Calculate based on provider
+        if self.provider == "openai":
+            if ar > 1.3:  # Landscape
+                return "1792×1024"
+            elif ar < 0.77:  # Portrait
+                return "1024×1792"
+            else:  # Square-ish
+                return "1024×1024"
+        elif self.provider == "google":
+            # Google only supports square for now
+            return "1024×1024"
+        else:  # stability and others
+            if ar > 1.3:  # Landscape
+                return "1152×896"
+            elif ar < 0.77:  # Portrait
+                return "896×1152"
+            else:  # Square-ish
+                return "1024×1024"
     
     def get_resolution(self) -> str:
         """Get current resolution."""
-        return self.combo.currentData() or "1024x1024"
+        if self._using_aspect_ratio:
+            # Calculate from aspect ratio
+            return self._calculate_resolution_from_ar(self._aspect_ratio).replace('×', 'x')
+        else:
+            return self.combo.currentData() or "1024x1024"
     
     def set_resolution(self, resolution: str):
         """Set resolution."""
-        for i in range(self.combo.count()):
-            if self.combo.itemData(i) == resolution:
-                self.combo.setCurrentIndex(i)
-                break
+        if resolution == "auto":
+            self.set_mode_aspect_ratio()
+        else:
+            for i in range(self.combo.count()):
+                if self.combo.itemData(i) == resolution:
+                    self.combo.setCurrentIndex(i)
+                    self.set_mode_resolution()
+                    break
+    
+    def is_using_aspect_ratio(self) -> bool:
+        """Check if using aspect ratio mode."""
+        return self._using_aspect_ratio
 
 
 class QualitySelector(QWidget):

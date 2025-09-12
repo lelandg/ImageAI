@@ -11,6 +11,16 @@ from pathlib import Path
 from typing import Dict, List, Any, Optional
 from enum import Enum
 
+# Import MIDI and karaoke modules if available
+try:
+    from .midi_processor import MidiTimingData
+    from .karaoke_renderer import KaraokeConfig
+    MIDI_SUPPORT = True
+except ImportError:
+    MidiTimingData = None
+    KaraokeConfig = None
+    MIDI_SUPPORT = False
+
 
 class VideoProvider(Enum):
     """Available video generation providers"""
@@ -195,6 +205,17 @@ class VideoProject:
     # Audio configuration
     audio_tracks: List[AudioTrack] = field(default_factory=list)
     
+    # MIDI configuration (optional)
+    midi_file_path: Optional[Path] = None
+    midi_timing_data: Optional[MidiTimingData] = None
+    sync_mode: str = "none"  # 'none', 'beat', 'measure', 'section'
+    snap_strength: float = 0.8  # 0.0-1.0
+    
+    # Karaoke configuration (optional)
+    karaoke_config: Optional[KaraokeConfig] = None
+    karaoke_export_formats: List[str] = field(default_factory=list)  # ['lrc', 'srt', 'ass']
+    karaoke_generated_files: Dict[str, Path] = field(default_factory=dict)
+    
     # Scenes
     scenes: List[Scene] = field(default_factory=list)
     
@@ -240,6 +261,17 @@ class VideoProject:
             "audio": {
                 "tracks": [track.to_dict() for track in self.audio_tracks]
             },
+            "midi": {
+                "file_path": str(self.midi_file_path) if self.midi_file_path else None,
+                "sync_mode": self.sync_mode,
+                "snap_strength": self.snap_strength,
+                "timing_data": self.midi_timing_data.to_dict() if self.midi_timing_data else None
+            } if self.midi_file_path else None,
+            "karaoke": {
+                "config": self.karaoke_config.to_dict() if self.karaoke_config else None,
+                "export_formats": self.karaoke_export_formats,
+                "generated_files": {k: str(v) for k, v in self.karaoke_generated_files.items()}
+            } if self.karaoke_config else None,
             "scenes": [scene.to_dict() for scene in self.scenes],
             "export": {
                 "path": str(self.export_path) if self.export_path else None
@@ -287,6 +319,27 @@ class VideoProject:
         # Load audio tracks
         if "audio" in data and "tracks" in data["audio"]:
             project.audio_tracks = [AudioTrack.from_dict(track) for track in data["audio"]["tracks"]]
+        
+        # Load MIDI configuration
+        if "midi" in data and data["midi"]:
+            midi_data = data["midi"]
+            if midi_data.get("file_path"):
+                project.midi_file_path = Path(midi_data["file_path"])
+            project.sync_mode = midi_data.get("sync_mode", "none")
+            project.snap_strength = midi_data.get("snap_strength", 0.8)
+            if midi_data.get("timing_data") and MidiTimingData:
+                project.midi_timing_data = MidiTimingData.from_dict(midi_data["timing_data"])
+        
+        # Load karaoke configuration
+        if "karaoke" in data and data["karaoke"]:
+            karaoke_data = data["karaoke"]
+            if karaoke_data.get("config") and KaraokeConfig:
+                project.karaoke_config = KaraokeConfig.from_dict(karaoke_data["config"])
+            project.karaoke_export_formats = karaoke_data.get("export_formats", [])
+            if karaoke_data.get("generated_files"):
+                project.karaoke_generated_files = {
+                    k: Path(v) for k, v in karaoke_data["generated_files"].items()
+                }
         
         # Load scenes
         project.scenes = [Scene.from_dict(scene) for scene in data.get("scenes", [])]

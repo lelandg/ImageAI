@@ -24,6 +24,10 @@ logging.getLogger('tensorflow').setLevel(logging.ERROR)
 
 def main():
     """Main entry point for ImageAI."""
+    # Set up logging
+    from core.logging_config import setup_logging
+    log_file = setup_logging()
+    
     # Default to GUI mode when no arguments provided
     if len(sys.argv) == 1:
         # No arguments - launch GUI by default

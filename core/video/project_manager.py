@@ -11,6 +11,7 @@ from datetime import datetime
 import logging
 
 from .project import VideoProject
+from core.project_tracker import set_current_project
 
 
 class ProjectManager:
@@ -106,7 +107,41 @@ class ProjectManager:
         project = VideoProject.load(project_file)
         self.logger.info(f"Loaded project: {project.name} from {project_file}")
         
+        # Track this project for debugging
+        set_current_project(project_file)
+        
         return project
+    
+    def save_project(self, project: VideoProject) -> Path:
+        """
+        Save an existing project.
+        
+        Args:
+            project: VideoProject instance to save
+            
+        Returns:
+            Path to saved project file
+        """
+        if not project.project_dir:
+            # If no project directory exists, create one
+            safe_name = "".join(c for c in project.name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+            safe_name = safe_name.replace(' ', '_')
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            project_dir_name = f"{safe_name}_{timestamp}"
+            project.project_dir = self.base_dir / project_dir_name
+            project.project_dir.mkdir(parents=True, exist_ok=True)
+            (project.project_dir / "assets").mkdir(exist_ok=True)
+            (project.project_dir / "exports").mkdir(exist_ok=True)
+            (project.project_dir / "logs").mkdir(exist_ok=True)
+        
+        # Save the project
+        saved_path = project.save()
+        self.logger.info(f"Saved project: {project.name} to {saved_path}")
+        
+        # Track this project for debugging
+        set_current_project(saved_path)
+        
+        return saved_path
     
     def list_projects(self) -> List[Dict[str, Any]]:
         """
