@@ -206,6 +206,10 @@ class MainWindow(QMainWindow):
         model_layout = QHBoxLayout()
         model_layout.addWidget(QLabel("Model:"))
         self.model_combo = QComboBox()
+        # Set minimum width to ensure model names are fully visible
+        self.model_combo.setMinimumWidth(350)
+        # Adjust size policy to show full text
+        self.model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self._update_model_list()
         self.model_combo.currentTextChanged.connect(self._on_model_changed)
         model_layout.addWidget(self.model_combo)

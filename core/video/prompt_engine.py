@@ -56,16 +56,16 @@ class UnifiedLLMProvider:
     """
     
     PROVIDER_MODELS = {
-        'openai': ['gpt-4-turbo', 'gpt-4', 'gpt-3.5-turbo'],
-        'anthropic': ['claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307'],
-        'gemini': ['gemini-pro', 'gemini-ultra'],
-        'ollama': ['llama3.1:8b', 'mistral:7b', 'mixtral:8x7b', 'phi3:medium'],
+        'openai': ['gpt-5', 'gpt-4o', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano'],
+        'anthropic': ['claude-opus-4.1', 'claude-opus-4', 'claude-sonnet-4', 'claude-3.7-sonnet', 'claude-3.5-sonnet', 'claude-3.5-haiku'],
+        'gemini': ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-pro'],
+        'ollama': ['llama3.2:latest', 'llama3.1:8b', 'mistral:7b', 'mixtral:8x7b', 'phi3:medium'],
         'lmstudio': ['local-model']  # Uses OpenAI-compatible endpoint
     }
     
     PROVIDER_PREFIXES = {
         'openai': '',  # No prefix needed for OpenAI
-        'anthropic': 'claude-3-opus-20240229',  # Use full model name
+        'anthropic': 'claude-opus-4.1',  # Use full model name for default
         'gemini': 'gemini/',
         'ollama': 'ollama/',
         'lmstudio': 'openai/'  # LM Studio uses OpenAI-compatible API

@@ -273,6 +273,9 @@ class VideoProjectTab(QWidget):
         
         self.llm_model_combo = QComboBox()
         self.llm_model_combo.setEnabled(False)
+        # Set minimum width to ensure model names are fully visible
+        self.llm_model_combo.setMinimumWidth(250)
+        self.llm_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         llm_layout.addWidget(self.llm_model_combo)
         
         self.prompt_style_combo = QComboBox()
@@ -287,9 +290,13 @@ class VideoProjectTab(QWidget):
         img_layout.addWidget(QLabel("Image Provider:"))
         self.img_provider_combo = QComboBox()
         self.img_provider_combo.addItems(["Gemini", "OpenAI", "Stability", "Local SD"])
+        self.img_provider_combo.currentTextChanged.connect(self.on_img_provider_changed)
         img_layout.addWidget(self.img_provider_combo)
         
         self.img_model_combo = QComboBox()
+        # Set minimum width for image model combo too
+        self.img_model_combo.setMinimumWidth(250)
+        self.img_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         img_layout.addWidget(self.img_model_combo)
         
         img_layout.addWidget(QLabel("Variants:"))
@@ -331,6 +338,10 @@ class VideoProjectTab(QWidget):
         layout.addLayout(neg_layout)
         
         group.setLayout(layout)
+        
+        # Initialize the model combos with default selections
+        self.on_img_provider_changed(self.img_provider_combo.currentText())
+        
         return group
     
     def create_audio_panel(self) -> QWidget:
@@ -443,6 +454,9 @@ class VideoProjectTab(QWidget):
         self.veo_model_combo = QComboBox()
         self.veo_model_combo.addItems(["veo-3.0-generate-001", "veo-3.0-fast-generate-001", "veo-2.0-generate-001"])
         self.veo_model_combo.setVisible(False)
+        # Set minimum width for Veo model combo
+        self.veo_model_combo.setMinimumWidth(250)
+        self.veo_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         provider_layout.addWidget(self.veo_model_combo)
         
         provider_layout.addStretch()
@@ -719,22 +733,57 @@ class VideoProjectTab(QWidget):
     
     def on_llm_provider_changed(self, provider: str):
         """Handle LLM provider change"""
+        # Always clear the combo first
+        self.llm_model_combo.clear()
+        
         if provider == "None":
             self.llm_model_combo.setEnabled(False)
-            self.llm_model_combo.clear()
         else:
             self.llm_model_combo.setEnabled(True)
-            # TODO: Populate with actual models for provider
+            # Populate with actual models for provider
             if provider == "OpenAI":
-                self.llm_model_combo.addItems(["gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"])
+                self.llm_model_combo.addItems(["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
             elif provider == "Claude":
-                self.llm_model_combo.addItems(["claude-3-opus", "claude-3-sonnet", "claude-3-haiku"])
+                self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
             elif provider == "Gemini":
-                self.llm_model_combo.addItems(["gemini-pro", "gemini-ultra"])
+                self.llm_model_combo.addItems(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"])
     
     def on_video_provider_changed(self, provider: str):
         """Handle video provider change"""
         self.veo_model_combo.setVisible(provider == "Gemini Veo")
+    
+    def on_img_provider_changed(self, provider: str):
+        """Handle image provider change"""
+        # Clear the model combo first
+        self.img_model_combo.clear()
+        
+        # Populate with models based on provider
+        if provider == "Gemini":
+            self.img_model_combo.addItems([
+                "gemini-2.5-flash-image-preview",
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-1.5-flash",
+                "gemini-1.5-pro"
+            ])
+        elif provider == "OpenAI":
+            self.img_model_combo.addItems([
+                "dall-e-3",
+                "dall-e-2"
+            ])
+        elif provider == "Stability":
+            self.img_model_combo.addItems([
+                "stable-diffusion-xl-1024-v1-0",
+                "stable-diffusion-xl-1024-v0-9",
+                "stable-diffusion-512-v2-1",
+                "stable-diffusion-768-v2-1"
+            ])
+        elif provider == "Local SD":
+            self.img_model_combo.addItems([
+                "stabilityai/stable-diffusion-xl-base-1.0",
+                "stabilityai/stable-diffusion-2-1",
+                "runwayml/stable-diffusion-v1-5"
+            ])
     
     @Slot(int, str)
     def on_progress_update(self, progress: int, message: str):

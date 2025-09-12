@@ -33,19 +33,19 @@ class VideoConfig:
         "llm_providers": {
             "openai": {
                 "enabled": True,
-                "models": ["gpt-4-turbo", "gpt-4", "gpt-3.5-turbo"]
+                "models": ["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"]
             },
             "anthropic": {
                 "enabled": True,
-                "models": ["claude-3-opus", "claude-3-sonnet", "claude-3-haiku"]
+                "models": ["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"]
             },
             "gemini": {
                 "enabled": True,
-                "models": ["gemini-pro", "gemini-ultra"]
+                "models": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"]
             },
             "ollama": {
                 "enabled": False,  # Disabled by default, requires local setup
-                "models": ["llama3.1:8b", "mistral:7b", "mixtral:8x7b"],
+                "models": ["llama3.2:latest", "llama3.1:8b", "mistral:7b", "mixtral:8x7b"],
                 "endpoint": "http://localhost:11434"
             },
             "lmstudio": {
