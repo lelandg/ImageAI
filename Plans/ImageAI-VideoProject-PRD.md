@@ -27,7 +27,7 @@ Add a **Video Project** workflow to ImageAI that turns **lyrics/text** into an *
 
 ## 2) Goals & Non‑Goals
 ### ✅ Goals
-- Paste lyrics/text (the same format you used in *Grandpa Was a Democrat*) or load from file.
+- Paste lyrics/text (the same format you used in *My Country Tis of Thee*) or load from file.
 - **AI-powered prompt generation** using Gemini or OpenAI LLMs with full user edit capability.
 - Auto‑derive a **shotlist/storyboard** with scene durations that sum to either:
   - a user‑specified total length (e.g., 2:45), or
@@ -79,7 +79,7 @@ Add a **Video Project** workflow to ImageAI that turns **lyrics/text** into an *
 
 ### Example Prompt Enhancement
 ```
-Input: "Grandpa was a Democrat"
+Input: "My Country Tis of Thee"
 
 Claude 3 Output: "Cinematic wide shot of an elderly man in worn denim overalls, 
 sitting on a weathered porch in rural America, golden hour lighting casting long 
@@ -304,7 +304,7 @@ ffmpeg -i video.mp4 -i music.mp3 \
 ```
 {
   "schema": "imageai.video_project.v1",
-  "name": "Grandpa Was a Democrat",
+  "name": "My Country Tis of Thee",
   "created": "ISO-8601",
   "provider": {
     "llm": { "provider": "openai|anthropic|gemini|ollama|lmstudio", "model": "gpt-4|claude-3-opus|gemini-pro|llama3.1:8b|…" },
@@ -332,7 +332,7 @@ ffmpeg -i video.mp4 -i music.mp3 \
   "scenes": [
     {
       "id": "scene-001",
-      "source": "[00:12] Grandpa was a Democrat…",
+      "source": "[00:12] My Country Tis of Thee…",
       "prompt": "Cinematic Americana kitchen…",
       "duration_sec": 4.5,
       "images": [
@@ -348,7 +348,7 @@ ffmpeg -i video.mp4 -i music.mp3 \
       "approved_image": "assets/scene-001/var-1.png"
     }
   ],
-  "export": { "path": "exports/grandpa_2025-09-11.mp4" }
+  "export": { "path": "exports/mycountry_2025-09-11.mp4" }
 }
 ```
 
@@ -492,13 +492,13 @@ VIDEO_CONFIG_SCHEMA = {
 imageai video --in lyrics.txt --provider gemini --model imagen-4.0-generate-001 \
   --length 00:02:30 --slideshow \
   --audio /path/to/music.mp3 --volume 0.8 --fade-in 2 --fade-out 3 \
-  --out exports/grandpa.mp4
+  --out exports/mycountry.mp4
 
 # Build Gemini Veo chain with custom audio
 imageai video --in lyrics.txt --image-provider openai --image-model dall-e-3 \
   --veo-model veo-3.0-generate-001 \
   --audio /path/to/soundtrack.mp3 \
-  --out exports/grandpa_veo.mp4
+  --out exports/mycountry_veo.mp4
 
 # No audio (silent video)
 imageai video --in lyrics.txt --provider gemini --slideshow \
@@ -1167,7 +1167,7 @@ class VideoProjectPipeline:
 - [ ] Test end-to-end workflow
 
 #### 10.3 Sample Projects
-- [ ] Create "Grandpa Was a Democrat" reference project
+- [ ] Create "My Country tis of Thee" reference project
 - [ ] Add deterministic seed test cases
 - [ ] Build CI/CD smoke tests
 - [ ] Document expected outputs
