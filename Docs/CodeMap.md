@@ -1,6 +1,6 @@
 # ImageAI CodeMap
 
-Last Updated: 2025-09-13 11:01:03
+Last Updated: 2025-09-13 11:07:54
 
 ## Quick Navigation
 - Main Application: `main.py`
@@ -15,7 +15,7 @@ Last Updated: 2025-09-13 11:01:03
 ImageAI/
 ├── Docs/
 │   ├── ChatGPT Lyric Generator for aisonggenerator.ai.md  # 153 lines
-│   ├── CodeMap.md  # 163 lines
+│   ├── CodeMap.md  # 186 lines
 │   ├── CodeMap_Generator.md  # 24 lines
 │   └── ProjectReview.md  # 183 lines
 ├── Notes/
@@ -130,8 +130,8 @@ ImageAI/
 │   │   └── shot_prompt.j2  # 40 lines
 │   └── __init__.py  # 2098 lines
 ├── tools/
-│   └── generate_code_map.py  # 178 lines
-├── AGENTS.md  # 41 lines
+│   └── generate_code_map.py  # 237 lines
+├── AGENTS.md  # 46 lines
 ├── CHANGELOG.md  # 212 lines
 ├── CLAUDE.md  # 120 lines
 ├── COMMIT_MESSAGE.txt  # 32 lines
@@ -180,6 +180,115 @@ ImageAI/
 - scan_disk_history (from core.utils)
 - find_cached_demo (from core.utils)
 - default_model_for_provider (from core.utils)
+
+## Module Symbols (Top-Level)
+- `gui/__init__.py`
+  - functions: launch_gui
+- `core/video/midi_utils.py`
+  - functions: check_midi_available, get_midi_processor
+- `core/project_tracker.py`
+  - functions: set_current_project, copy_project_on_exit
+- `gui/workers.py`
+  - classes: GenWorker
+- `gui/dialog_utils.py`
+  - functions: show_error, show_warning, show_info, show_question
+- `core/video/continuity_helper.py`
+  - classes: ContinuityHelper
+  - functions: get_continuity_helper
+- `cli/parser.py`
+  - functions: build_arg_parser
+- `providers/base.py`
+  - classes: ImageProvider
+- `providers/model_info.py`
+  - classes: ModelInfo
+- `providers/__init__.py`
+  - functions: _get_providers, get_provider, list_providers, clear_provider_cache, preload_provider
+- `core/logging_config.py`
+  - classes: ErrorLogger
+  - functions: setup_logging, get_error_report_info
+- `core/config.py`
+  - classes: ConfigManager
+  - functions: get_api_key_url
+- `core/gcloud_utils.py`
+  - functions: find_gcloud_command, get_gcloud_project_id, check_gcloud_auth_status
+- `gui/dialogs.py`
+  - classes: ExamplesDialog
+- `gui/common/dialog_manager.py`
+  - classes: DialogManager
+  - functions: get_dialog_manager, set_dialog_manager_parent
+- `cli/runner.py`
+  - functions: resolve_api_key, store_api_key, run_cli
+- `gui/video/project_browser.py`
+  - classes: ProjectBrowserDialog
+  - functions: get_last_project_path
+- `core/security.py`
+  - classes: PathValidator, SecureKeyStorage, RateLimiter
+- `core/video/config.py`
+  - classes: VideoConfig
+- `core/video/image_continuity.py`
+  - classes: ContinuityMethod, ContinuityContext, ImageContinuityManager
+- `core/utils.py`
+  - functions: sanitize_filename, read_key_file, read_readme_text, extract_api_key_help, generate_timestamp, format_file_size, parse_image_size, images_output_dir, sidecar_path, write_image_sidecar, read_image_sidecar, detect_image_extension, sanitize_stub_from_prompt, auto_save_images, scan_disk_history, find_cached_demo, default_model_for_provider
+- `core/video/image_processing.py`
+  - classes: ImageProcessor
+- `providers/openai.py`
+  - classes: OpenAIProvider
+- `core/video/thumbnail_manager.py`
+  - classes: ThumbnailManager
+- `core/video/project_manager.py`
+  - classes: ProjectManager
+- `core/video/karaoke_renderer.py`
+  - classes: KaraokeConfig, KaraokeRenderer
+- `core/video/llm_sync.py`
+  - classes: TimedLyric, LLMSyncAssistant
+- `core/video/image_generator.py`
+  - classes: ImageGenerationResult, ImageGenerator
+- `gui/model_browser.py`
+  - classes: ModelDownloader, ModelBrowserDialog
+- `core/video/midi_processor.py`
+  - classes: MidiTimingData, MidiProcessor
+- `providers/stability.py`
+  - classes: StabilityProvider
+- `core/video/project.py`
+  - classes: VideoProvider, SceneStatus, AudioTrack, ImageVariant, Scene, VideoProject
+- `gui/video/project_dialog.py`
+  - classes: NewProjectDialog, OpenProjectDialog, ProjectSettingsDialog
+- `core/video/veo_client.py`
+  - classes: VeoModel, VeoGenerationConfig, VeoGenerationResult, VeoClient
+- `gui/local_sd_widget.py`
+  - classes: ModelDownloadThread, LocalSDWidget
+- `providers/google.py`
+  - classes: GoogleProvider
+- `providers/local_sd.py`
+  - classes: DeviceManager, LocalSDProvider
+- `core/video/storyboard_v2.py`
+  - classes: StoryboardApproach, SceneSpec, StyleGuide, EnhancedStoryboardGenerator
+- `core/video/event_store.py`
+  - classes: EventType, ProjectEvent, EventStore
+- `core/video/project_enhancements.py`
+  - classes: VersioningMode, CropMode, AudioHandling, CropSettings, KenBurnsSettings, ProjectSettings, ImageVariant, SceneVariants, KenBurnsPresets, EnhancedProjectManager
+- `gui/video/video_project_tab.py`
+  - classes: VideoGenerationThread, VideoProjectTab
+- `gui/video/history_tab.py`
+  - classes: HistoryTab
+- `core/video/prompt_engine.py`
+  - classes: PromptStyle, PromptTemplate, UnifiedLLMProvider, PromptEngine
+- `gui/video/enhanced_workspace.py`
+  - classes: ImageVariantSelector, CropControlWidget, KenBurnsControlWidget
+- `core/video/ffmpeg_renderer.py`
+  - classes: RenderSettings, FFmpegRenderer
+- `core/video/storyboard.py`
+  - classes: InputFormat, ParsedLine, LyricParser, TimingEngine, StoryboardGenerator
+- `core/video/llm_sync_v2.py`
+  - classes: TimedLyric, LLMSyncAssistant
+- `gui/video/video_project_tab_old.py`
+  - classes: VideoGenerationThread, VideoProjectTab
+- `gui/settings_widgets.py`
+  - classes: AspectRatioSelector, ResolutionSelector, QualitySelector, BatchSelector, AdvancedSettingsPanel, CostEstimator
+- `gui/video/workspace_widget.py`
+  - classes: WorkspaceWidget
+- `gui/main_window.py`
+  - classes: MainWindow
 
 ## Notes
 - Refer to this map to quickly locate functions, classes, and modules.

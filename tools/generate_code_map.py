@@ -17,6 +17,7 @@ import os
 import re
 import sys
 from pathlib import Path
+import ast
 from datetime import datetime
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +28,10 @@ EXCLUDE_DIRS = {
     "Screenshots", "Debug", ".junie", ".claude",
 }
 EXCLUDE_FILES = {"screenshot_20250912.png"}
+
+# Limits to keep the map readable
+MAX_SYMBOL_FILES = 60
+MAX_SYMBOLS_PER_FILE = 20
 
 
 def list_source_files(root: Path) -> list[Path]:
@@ -138,6 +143,48 @@ def summarize_core_exports(core_init: Path) -> list[str]:
     return exports
 
 
+def parse_module_symbols(py_path: Path) -> tuple[list[str], list[str]]:
+    """Return (classes, functions) defined at module top-level."""
+    try:
+        text = py_path.read_text(encoding="utf-8", errors="ignore")
+        tree = ast.parse(text, filename=str(py_path))
+    except Exception:
+        return [], []
+    classes: list[str] = []
+    funcs: list[str] = []
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef):
+            classes.append(node.name)
+        elif isinstance(node, ast.FunctionDef):
+            funcs.append(node.name)
+    return classes[:MAX_SYMBOLS_PER_FILE], funcs[:MAX_SYMBOLS_PER_FILE]
+
+
+def collect_symbol_index(root: Path) -> list[tuple[str, list[str], list[str]]]:
+    """Collect a list of (relative_path, classes, functions) for Python modules."""
+    py_files = []
+    for d in ["core", "cli", "providers", "gui"]:
+        base = root / d
+        if not base.exists():
+            continue
+        for path in base.rglob("*.py"):
+            # Skip caches and excluded dirs
+            parts = path.parts
+            if any(p in EXCLUDE_DIRS for p in parts):
+                continue
+            py_files.append(path)
+    # Prefer smaller to medium files first to keep it concise
+    py_files = sorted(py_files, key=lambda p: (count_lines(p), str(p)))
+    results: list[tuple[str, list[str], list[str]]] = []
+    for p in py_files[:MAX_SYMBOL_FILES]:
+        classes, funcs = parse_module_symbols(p)
+        if not classes and not funcs:
+            continue
+        rel = str(p.relative_to(root))
+        results.append((rel, classes, funcs))
+    return results
+
+
 def generate() -> str:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     parts: list[str] = []
@@ -159,6 +206,18 @@ def generate() -> str:
         parts.extend(exports)
     else:
         parts.append("- (No exports detected)")
+    parts.append("")
+    parts.append("## Module Symbols (Top-Level)")
+    symbols = collect_symbol_index(REPO_ROOT)
+    if symbols:
+        for rel, classes, funcs in symbols:
+            parts.append(f"- `{rel}`")
+            if classes:
+                parts.append(f"  - classes: {', '.join(classes)}")
+            if funcs:
+                parts.append(f"  - functions: {', '.join(funcs)}")
+    else:
+        parts.append("- (No modules parsed)")
     parts.append("")
     parts.append("## Notes")
     parts.append("- Refer to this map to quickly locate functions, classes, and modules.")

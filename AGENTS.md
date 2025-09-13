@@ -42,4 +42,5 @@
 
 ## Agent-Specific Instructions
 - Always consult `Docs/CodeMap.md` first to locate variables, functions, and modules before searching the tree.
-- If the map seems outdated, regenerate it with `python tools/generate_code_map.py` and re-check locations.
+- Regenerate the map if needed: `make codemap` (or `python tools/generate_code_map.py`).
+- Use the "Module Symbols" section in the code map to jump directly to files exposing the classes/functions you need.
