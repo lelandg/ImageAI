@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.10.3**
+**Version 0.10.4**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -1367,7 +1367,27 @@ ImageAI/
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
-### Latest Release: v0.10.3 (2025-01-12)
+### Latest Release: v0.10.4 (2025-01-12)
+
+**Advanced Video Project LLM Sync & Timing**
+- **Strict Lyric Timing Contract v1.0**: Implemented standardized format for GPT-5 lyric synchronization
+  - No fragmentation - one-to-one mapping between lyrics and timing entries
+  - Consistent millisecond integer format
+  - Order preservation without reordering
+- **Multi-Format LLM Response Handling**: Smart parsing for various GPT-5 response formats
+  - Handles `startMs`/`endMs`, `start`/`end` in seconds, and mixed formats
+  - Intelligent fragment merging for karaoke-style timing
+  - Automatic detection of Strict Contract v1.0 format
+- **Fixed Critical Scene Table Update Bug**: Resolved indentation issue preventing UI updates after storyboard generation
+- **Gemini Response Optimization**: Adjusted prompts to avoid response size limits
+  - Line-level timing for longer songs (>20 lines)
+  - Emphasis on including all lyrics in response
+- **Enhanced Settings Persistence**: All video tab settings now properly saved
+  - LLM provider and model selection
+  - Image provider and model selection
+  - Variants, Ken Burns, transitions, captions settings
+
+### v0.10.3 (2025-01-12)
 
 **Enhanced Aspect Ratio & Resolution Controls**
 - **Custom Aspect Ratio Input**: New manual input field for custom aspect ratios (e.g., "16:10" or "1.6")
