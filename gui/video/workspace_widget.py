@@ -22,6 +22,7 @@ from core.video.project import VideoProject, Scene
 from core.video.project_manager import ProjectManager
 from core.video.storyboard import StoryboardGenerator
 from core.video.config import VideoConfig
+from core.security import SecureKeyStorage
 
 
 class WorkspaceWidget(QWidget):
@@ -177,7 +178,7 @@ class WorkspaceWidget(QWidget):
         llm_layout = QHBoxLayout()
         llm_layout.addWidget(QLabel("LLM:"))
         self.llm_provider_combo = QComboBox()
-        self.llm_provider_combo.addItems(["None", "OpenAI", "Claude", "Gemini", "Ollama", "LM Studio"])
+        self.llm_provider_combo.addItems(["None", "OpenAI", "Gemini", "Ollama", "LM Studio"])
         self.llm_provider_combo.currentTextChanged.connect(self.on_llm_provider_changed)
         llm_layout.addWidget(self.llm_provider_combo)
         
@@ -644,19 +645,24 @@ class WorkspaceWidget(QWidget):
     
     def generate_storyboard(self):
         """Generate storyboard from input text"""
+        self.logger.info("=== Starting storyboard generation ===")
         text = self.input_text.toPlainText()
         if not text:
             self.logger.warning("Generate storyboard called with no input text")
             QMessageBox.warning(self, "No Input", "Please enter text or lyrics")
             return
         
+        self.logger.info(f"Input text length: {len(text)} characters, {len(text.splitlines())} lines")
+        
         if not self.current_project:
             self.new_project()
         
         # Generate scenes
+        self.logger.info("Importing modules...")
         from core.video.storyboard import StoryboardGenerator
-        from core.video.llm_sync import LLMSyncAssistant
+        from core.video.llm_sync_v2 import LLMSyncAssistant
         
+        self.logger.info("Creating StoryboardGenerator...")
         generator = StoryboardGenerator()
         
         # Get format type
@@ -668,6 +674,8 @@ class WorkspaceWidget(QWidget):
         target_duration = f"00:{self.duration_spin.value():02d}:00"
         preset = self.pacing_combo.currentText().lower()
         
+        self.logger.info(f"Settings: format={format_type}, duration={target_duration}, preset={preset}")
+        
         # Get MIDI sync settings
         midi_timing = None
         sync_mode = "none"
@@ -677,13 +685,21 @@ class WorkspaceWidget(QWidget):
             midi_timing = self.current_project.midi_timing_data
             sync_mode = self.sync_mode_combo.currentText().lower()
             snap_strength = self.snap_strength_slider.value() / 100.0
+            self.logger.info(f"MIDI sync enabled: mode={sync_mode}, snap={snap_strength:.0%}")
+            if hasattr(midi_timing, 'duration_sec'):
+                self.logger.info(f"MIDI duration: {midi_timing.duration_sec:.1f}s")
+        else:
+            self.logger.info("No MIDI timing data available")
         
         # Check if LLM sync should be used
         llm_provider = self.llm_provider_combo.currentText()
         llm_model = self.llm_model_combo.currentText()
         use_llm_sync = llm_provider != "None" and llm_model
         
+        self.logger.info(f"LLM sync: {use_llm_sync} (provider={llm_provider}, model={llm_model})")
+        
         # Generate scenes with MIDI sync if available
+        self.logger.info("Generating initial scenes...")
         scenes = generator.generate_scenes(
             text,
             target_duration=target_duration,
@@ -693,15 +709,24 @@ class WorkspaceWidget(QWidget):
             sync_mode=sync_mode,
             snap_strength=snap_strength
         )
+        self.logger.info(f"Generated {len(scenes)} scenes before LLM sync")
         
         # Apply LLM sync if enabled and we have timing data
         if use_llm_sync and midi_timing:
-            self.logger.info(f"Using LLM sync with {llm_provider}/{llm_model}")
-            sync_assistant = LLMSyncAssistant(provider=llm_provider.lower(), model=llm_model)
+            self.logger.info(f"Starting LLM sync with {llm_provider}/{llm_model}...")
+            import time
+            start_time = time.time()
             
-            # Extract lyrics and sections from scenes and MIDI (skip section markers)
+            # Get config for API keys
+            config = self.get_provider_config()
+            sync_assistant = LLMSyncAssistant(provider=llm_provider.lower(), model=llm_model, config=config)
+            
+            # Extract lyrics (skip section markers)
             lyrics_lines = [scene.source for scene in scenes 
                           if not (scene.source.strip().startswith('[') and scene.source.strip().endswith(']'))]
+            lyrics_text = '\n'.join(lyrics_lines)
+            self.logger.info(f"Extracted {len(lyrics_lines)} lyric lines (excluding section markers)")
+            
             sections = {}
             total_duration = sum(s.duration_sec for s in scenes)
             
@@ -716,27 +741,65 @@ class WorkspaceWidget(QWidget):
                 total_duration = midi_timing.get('duration_sec', sum(s.duration_sec for s in scenes))
                 sections = midi_timing.get('sections', {})
             
-            # Get improved timing from LLM sync
-            timed_lyrics = sync_assistant.estimate_lyric_timing(lyrics_lines, total_duration, sections)
+            # Get audio file path if available
+            audio_path = None
+            if self.current_project.audio_tracks and len(self.current_project.audio_tracks) > 0:
+                audio_track = self.current_project.audio_tracks[0]
+                if audio_track.file_path:
+                    audio_path = audio_track.file_path
+                    self.logger.info(f"Using audio file for LLM sync: {audio_path}")
+            else:
+                self.logger.info("No audio file available for LLM sync")
+            
+            # Call LLM sync with audio and lyrics
+            self.logger.info(f"Calling sync_with_llm with {len(lyrics_lines)} lyrics, duration={total_duration:.1f}s")
+            if sections:
+                self.logger.info(f"  Sections: {list(sections.keys())}")
+            
+            timed_lyrics = sync_assistant.sync_with_llm(
+                lyrics=lyrics_text,
+                audio_path=audio_path,
+                total_duration=total_duration,
+                sections=sections
+            )
+            
+            elapsed = time.time() - start_time
+            self.logger.info(f"LLM sync completed in {elapsed:.1f} seconds, got {len(timed_lyrics) if timed_lyrics else 0} timed lyrics")
             
             # Update scene timings based on LLM sync (skip section markers)
             if timed_lyrics:
+                self.logger.info("Applying LLM timing to scenes...")
                 lyric_index = 0
-                for scene in scenes:
+                updated_count = 0
+                for i, scene in enumerate(scenes):
                     # Skip section markers
                     if scene.source.strip().startswith('[') and scene.source.strip().endswith(']'):
+                        self.logger.debug(f"Scene {i}: Skipping section marker '{scene.source}'")
                         continue
                     
                     if lyric_index < len(timed_lyrics):
                         timed_lyric = timed_lyrics[lyric_index]
+                        old_duration = scene.duration_sec
                         scene.duration_sec = timed_lyric.end_time - timed_lyric.start_time
                         scene.metadata['llm_start_time'] = timed_lyric.start_time
                         scene.metadata['llm_end_time'] = timed_lyric.end_time
                         if timed_lyric.section_type:
                             scene.metadata['section'] = timed_lyric.section_type
+                        
+                        self.logger.debug(f"Scene {i}: Updated duration {old_duration:.2f}s -> {scene.duration_sec:.2f}s")
+                        self.logger.debug(f"  Text: '{scene.source[:50]}...' Time: {timed_lyric.start_time:.2f}-{timed_lyric.end_time:.2f}")
+                        
                         lyric_index += 1
+                        updated_count += 1
                 
-                self.logger.info(f"Applied LLM sync to {lyric_index} content scenes (skipped section markers)")
+                self.logger.info(f"Applied LLM sync to {updated_count} scenes (matched {lyric_index}/{len(timed_lyrics)} lyrics)")
+            else:
+                self.logger.warning("No timed lyrics returned from LLM sync")
+        else:
+            if not use_llm_sync:
+                self.logger.info("LLM sync disabled")
+            if not midi_timing:
+                self.logger.info("No MIDI timing available for LLM sync")
         
         # Update project with ALL current settings
         self.update_project_from_ui()  # This now saves all settings including LLM
@@ -749,6 +812,11 @@ class WorkspaceWidget(QWidget):
         
         # Log scenes being added
         self.logger.info(f"Generated {len(scenes)} scenes for project")
+        
+        # Automatically enhance prompts if LLM is enabled
+        if llm_provider != "None" and llm_model:
+            self.logger.info(f"Auto-enhancing prompts with {llm_provider}/{llm_model}...")
+            self._enhance_scene_prompts(scenes, llm_provider, llm_model)
         
         # Update karaoke settings if enabled
         if self.karaoke_group.isChecked():
@@ -777,6 +845,88 @@ class WorkspaceWidget(QWidget):
         # Auto-save after generating storyboard to preserve scenes
         self.save_project()
         self.logger.info(f"Auto-saved project after storyboard generation with {len(scenes)} scenes")
+    
+    def get_provider_config(self) -> Dict[str, Any]:
+        """Get provider configuration including API keys."""
+        config = {}
+        
+        # Try to get API keys from secure storage
+        key_storage = SecureKeyStorage()
+        
+        # Get OpenAI key
+        openai_key = key_storage.retrieve_key('openai')
+        if openai_key:
+            config['openai_api_key'] = openai_key
+        
+        # Get Anthropic/Claude key
+        anthropic_key = key_storage.retrieve_key('anthropic') or key_storage.retrieve_key('claude')
+        if anthropic_key:
+            config['anthropic_api_key'] = anthropic_key
+        
+        # Get Google/Gemini key
+        google_key = key_storage.retrieve_key('google') or key_storage.retrieve_key('gemini')
+        if google_key:
+            config['google_api_key'] = google_key
+        
+        # Add LM Studio and Ollama endpoints if configured
+        if hasattr(self.video_config, 'config'):
+            llm_providers = self.video_config.config.get('llm_providers', {})
+            if 'ollama' in llm_providers:
+                config['ollama_endpoint'] = llm_providers['ollama'].get('endpoint', 'http://localhost:11434')
+            if 'lmstudio' in llm_providers:
+                config['lmstudio_endpoint'] = llm_providers['lmstudio'].get('endpoint', 'http://localhost:1234/v1')
+        
+        return config
+    
+    def _enhance_scene_prompts(self, scenes: list, provider: str, model: str):
+        """Enhance scene prompts using LLM."""
+        try:
+            from core.video.prompt_engine import UnifiedLLMProvider, PromptStyle
+            
+            # Get API keys
+            config = self.get_provider_config()
+            llm = UnifiedLLMProvider(config)
+            
+            if not llm.is_available():
+                self.logger.warning("LLM provider not available for prompt enhancement")
+                return
+            
+            # Get prompt style
+            prompt_style = self.prompt_style_combo.currentText()
+            style_map = {
+                "Cinematic": PromptStyle.CINEMATIC,
+                "Artistic": PromptStyle.ARTISTIC,
+                "Photorealistic": PromptStyle.PHOTOREALISTIC,
+                "Animated": PromptStyle.ANIMATED,
+                "Documentary": PromptStyle.DOCUMENTARY,
+                "Abstract": PromptStyle.ABSTRACT
+            }
+            style = style_map.get(prompt_style, PromptStyle.CINEMATIC)
+            
+            # Enhance each scene prompt
+            enhanced_count = 0
+            for scene in scenes:
+                try:
+                    original = scene.source
+                    enhanced = llm.enhance_prompt(
+                        original,
+                        provider=provider.lower(),
+                        model=model,
+                        style=style,
+                        temperature=0.7,
+                        max_tokens=150
+                    )
+                    if enhanced and enhanced != original:
+                        scene.prompt = enhanced
+                        enhanced_count += 1
+                        self.logger.debug(f"Enhanced: '{original[:30]}...' -> '{enhanced[:50]}...'")
+                except Exception as e:
+                    self.logger.warning(f"Failed to enhance prompt for scene: {e}")
+            
+            self.logger.info(f"Enhanced {enhanced_count}/{len(scenes)} scene prompts")
+            
+        except Exception as e:
+            self.logger.error(f"Failed to enhance prompts: {e}")
     
     def populate_scene_table(self):
         """Populate scene table with project scenes"""
@@ -1022,7 +1172,7 @@ class WorkspaceWidget(QWidget):
         if not self.current_project or not self.current_project.scenes:
             return
         
-        from core.video.llm_sync import LLMSyncAssistant
+        from core.video.llm_sync_v2 import LLMSyncAssistant
         
         # Get current settings
         llm_provider = self.current_project.llm_provider if hasattr(self.current_project, 'llm_provider') else None
