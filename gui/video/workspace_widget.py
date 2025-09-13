@@ -28,10 +28,12 @@ from gui.common.dialog_manager import get_dialog_manager
 
 class WorkspaceWidget(QWidget):
     """Main workspace for video project editing"""
-    
+
     # Signals
     project_changed = Signal(object)  # VideoProject
     generation_requested = Signal(str, dict)  # operation, kwargs
+    image_provider_changed = Signal(str)  # provider name
+    llm_provider_changed = Signal(str, str)  # provider name, model name
     
     def __init__(self, config: Dict[str, Any], providers: Dict[str, Any]):
         super().__init__()
@@ -50,13 +52,16 @@ class WorkspaceWidget(QWidget):
     def init_ui(self):
         """Initialize the workspace UI"""
         layout = QVBoxLayout(self)
-        
+
+        # LLM Provider at the top (global setting)
+        layout.addWidget(self.create_llm_provider_panel())
+
         # Project header
         layout.addWidget(self.create_project_header())
-        
+
         # Main content area with splitter
         splitter = QSplitter(Qt.Horizontal)
-        
+
         # Left panel - Input and settings
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
@@ -87,41 +92,67 @@ class WorkspaceWidget(QWidget):
         widget.setMaximumHeight(40)  # Make it compact
         layout = QHBoxLayout(widget)
         layout.setContentsMargins(5, 2, 5, 2)  # Reduce margins
-        
+
         layout.addWidget(QLabel("Project:"))
         self.project_name = QLineEdit()
         self.project_name.setPlaceholderText("My Video Project")
         self.project_name.setMaximumWidth(200)
         layout.addWidget(self.project_name)
-        
+
         # Make buttons compact
         button_style = "QPushButton { padding: 2px 8px; }"
-        
+
         self.new_btn = QPushButton("New")
         self.new_btn.setStyleSheet(button_style)
         self.new_btn.clicked.connect(self.new_project)
         layout.addWidget(self.new_btn)
-        
+
         self.open_btn = QPushButton("Open")
         self.open_btn.setStyleSheet(button_style)
         self.open_btn.clicked.connect(self.open_project)
         layout.addWidget(self.open_btn)
-        
+
         self.browse_btn = QPushButton("Browse")
         self.browse_btn.setStyleSheet(button_style)
         self.browse_btn.clicked.connect(self.browse_projects)
         layout.addWidget(self.browse_btn)
-        
+
         self.save_btn = QPushButton("Save")
         self.save_btn.setStyleSheet(button_style)
         self.save_btn.clicked.connect(self.save_project)
         layout.addWidget(self.save_btn)
-        
+
         self.save_as_btn = QPushButton("Save As")
         self.save_as_btn.setStyleSheet(button_style)
         self.save_as_btn.clicked.connect(self.save_project_as)
         layout.addWidget(self.save_as_btn)
-        
+
+        layout.addStretch()
+        return widget
+
+    def create_llm_provider_panel(self) -> QWidget:
+        """Create LLM provider panel at the top (global setting)"""
+        widget = QWidget()
+        widget.setMaximumHeight(40)  # Make it compact
+        layout = QHBoxLayout(widget)
+        layout.setContentsMargins(5, 2, 5, 2)  # Reduce margins
+
+        # LLM provider for prompts
+        layout.addWidget(QLabel("LLM Provider:"))
+        self.llm_provider_combo = QComboBox()
+        self.llm_provider_combo.addItems(["None", "OpenAI", "Claude", "Gemini", "Ollama", "LM Studio"])
+        self.llm_provider_combo.currentTextChanged.connect(self.on_llm_provider_changed)
+        layout.addWidget(self.llm_provider_combo)
+
+        layout.addWidget(QLabel("Model:"))
+        self.llm_model_combo = QComboBox()
+        self.llm_model_combo.setEnabled(False)
+        # Set minimum width to ensure model names are fully visible
+        self.llm_model_combo.setMinimumWidth(250)
+        self.llm_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.llm_model_combo.currentTextChanged.connect(lambda: self._auto_save_settings())
+        layout.addWidget(self.llm_model_combo)
+
         layout.addStretch()
         return widget
     
@@ -179,31 +210,7 @@ class WorkspaceWidget(QWidget):
         """Create settings panel for providers and style"""
         group = QGroupBox("Generation Settings")
         layout = QVBoxLayout()
-        
-        # LLM provider for prompts
-        llm_layout = QHBoxLayout()
-        llm_layout.addWidget(QLabel("LLM:"))
-        self.llm_provider_combo = QComboBox()
-        self.llm_provider_combo.addItems(["None", "OpenAI", "Gemini", "Ollama", "LM Studio"])
-        self.llm_provider_combo.currentTextChanged.connect(self.on_llm_provider_changed)
-        llm_layout.addWidget(self.llm_provider_combo)
-        
-        self.llm_model_combo = QComboBox()
-        self.llm_model_combo.setEnabled(False)
-        # Set minimum width to ensure model names are fully visible
-        self.llm_model_combo.setMinimumWidth(250)
-        self.llm_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
-        self.llm_model_combo.currentTextChanged.connect(lambda: self._auto_save_settings())
-        llm_layout.addWidget(self.llm_model_combo)
-        
-        self.prompt_style_combo = QComboBox()
-        self.prompt_style_combo.addItems(["Cinematic", "Artistic", "Photorealistic", "Animated", "Documentary", "Abstract"])
-        self.prompt_style_combo.currentTextChanged.connect(lambda: self._auto_save_settings())
-        llm_layout.addWidget(self.prompt_style_combo)
-        
-        llm_layout.addStretch()
-        layout.addLayout(llm_layout)
-        
+
         # Image provider
         img_layout = QHBoxLayout()
         img_layout.addWidget(QLabel("Image Provider:"))
@@ -231,24 +238,30 @@ class WorkspaceWidget(QWidget):
         
         # Style settings
         style_layout = QHBoxLayout()
+        style_layout.addWidget(QLabel("Style:"))
+        self.prompt_style_combo = QComboBox()
+        self.prompt_style_combo.addItems(["Cinematic", "Artistic", "Photorealistic", "Animated", "Documentary", "Abstract"])
+        self.prompt_style_combo.currentTextChanged.connect(lambda: self._auto_save_settings())
+        style_layout.addWidget(self.prompt_style_combo)
+
         style_layout.addWidget(QLabel("Aspect Ratio:"))
         self.aspect_combo = QComboBox()
         self.aspect_combo.addItems(["16:9", "9:16", "1:1", "4:3"])
         style_layout.addWidget(self.aspect_combo)
-        
+
         style_layout.addWidget(QLabel("Resolution:"))
         self.resolution_combo = QComboBox()
         self.resolution_combo.addItems(["720p", "1080p", "4K"])
         self.resolution_combo.setCurrentIndex(1)
         style_layout.addWidget(self.resolution_combo)
-        
+
         style_layout.addWidget(QLabel("Seed:"))
         self.seed_spin = QSpinBox()
         self.seed_spin.setRange(-1, 999999)
         self.seed_spin.setValue(-1)
         self.seed_spin.setSpecialValueText("Random")
         style_layout.addWidget(self.seed_spin)
-        
+
         style_layout.addStretch()
         layout.addLayout(style_layout)
         
@@ -1328,11 +1341,46 @@ class WorkspaceWidget(QWidget):
             'stability_api_key': self.config.get('stability_api_key'),
         }
     
+    def set_image_provider(self, provider_name: str):
+        """Set the image provider from external source (e.g., Image tab)."""
+        if hasattr(self, 'img_provider_combo'):
+            # Find the provider in the combo
+            index = -1
+            for i in range(self.img_provider_combo.count()):
+                if self.img_provider_combo.itemText(i).lower() == provider_name.lower():
+                    index = i
+                    break
+
+            if index >= 0:
+                self.img_provider_combo.blockSignals(True)
+                self.img_provider_combo.setCurrentIndex(index)
+                self.img_provider_combo.blockSignals(False)
+                # Trigger the provider change handler to update models
+                self.on_img_provider_changed(self.img_provider_combo.currentText())
+
+    def set_llm_provider(self, provider_name: str, model_name: str = None):
+        """Set the LLM provider from external source (e.g., Image tab)."""
+        if hasattr(self, 'llm_provider_combo'):
+            # Find the provider in the combo
+            index = self.llm_provider_combo.findText(provider_name)
+            if index >= 0:
+                self.llm_provider_combo.blockSignals(True)
+                self.llm_provider_combo.setCurrentIndex(index)
+                self.llm_provider_combo.blockSignals(False)
+                # Trigger the provider change handler to update models
+                self.on_llm_provider_changed(provider_name)
+
+                # Set the model if provided
+                if model_name and hasattr(self, 'llm_model_combo'):
+                    model_index = self.llm_model_combo.findText(model_name)
+                    if model_index >= 0:
+                        self.llm_model_combo.setCurrentIndex(model_index)
+
     def on_llm_provider_changed(self, provider: str):
         """Handle LLM provider change"""
         # Always clear the combo first
         self.llm_model_combo.clear()
-        
+
         if provider == "None":
             self.llm_model_combo.setEnabled(False)
         else:
@@ -1350,7 +1398,11 @@ class WorkspaceWidget(QWidget):
             elif provider == "LM Studio":
                 # Add common LM Studio models
                 self.llm_model_combo.addItems(["local-model", "custom-model"])
-        
+
+        # Emit signal to notify other tabs
+        model = self.llm_model_combo.currentText() if provider != "None" else None
+        self.llm_provider_changed.emit(provider, model)
+
         # Auto-save if we have a project
         self._auto_save_settings()
     
@@ -1358,7 +1410,7 @@ class WorkspaceWidget(QWidget):
         """Handle image provider change"""
         # Clear the model combo first
         self.img_model_combo.clear()
-        
+
         # Populate with models based on provider
         if provider == "Gemini":
             self.img_model_combo.addItems([
@@ -1386,7 +1438,9 @@ class WorkspaceWidget(QWidget):
                 "stabilityai/stable-diffusion-2-1",
                 "runwayml/stable-diffusion-v1-5"
             ])
-        
+        # Emit signal to notify other tabs
+        self.image_provider_changed.emit(provider)
+
         # Auto-save if we have a project
         self._auto_save_settings()
     

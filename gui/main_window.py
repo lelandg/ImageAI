@@ -153,7 +153,13 @@ class MainWindow(QMainWindow):
             'config': self.config
         }
         self.tab_video = VideoProjectTab(self.config.config, providers_dict)
-        
+        # Connect the video tab's image provider change signal to sync with Image tab
+        if hasattr(self.tab_video, 'image_provider_changed'):
+            self.tab_video.image_provider_changed.connect(self._on_video_image_provider_changed)
+        # Connect the video tab's LLM provider change signal to sync with Image tab
+        if hasattr(self.tab_video, 'llm_provider_changed'):
+            self.tab_video.llm_provider_changed.connect(self._on_video_llm_provider_changed)
+
         self.tabs.addTab(self.tab_generate, "🎨 Image")
         self.tabs.addTab(self.tab_templates, "📝 Templates")
         self.tabs.addTab(self.tab_video, "🎬 Video")
@@ -212,10 +218,44 @@ class MainWindow(QMainWindow):
         v = QVBoxLayout(self.tab_generate)
         v.setSpacing(2)
         v.setContentsMargins(5, 5, 5, 5)
-        
-        # Model selection at the very top
-        model_layout = QHBoxLayout()
-        model_layout.addWidget(QLabel("Model:"))
+
+        # LLM Provider and model selection at the very top
+        llm_provider_layout = QHBoxLayout()
+
+        # LLM Provider dropdown
+        llm_provider_layout.addWidget(QLabel("LLM Provider:"))
+        self.llm_provider_combo = QComboBox()
+        self.llm_provider_combo.setMinimumWidth(150)
+        self.llm_provider_combo.addItems(["None", "OpenAI", "Claude", "Gemini", "Ollama", "LM Studio"])
+        self.llm_provider_combo.currentTextChanged.connect(self._on_llm_provider_changed)
+        llm_provider_layout.addWidget(self.llm_provider_combo)
+
+        # LLM Model dropdown
+        llm_provider_layout.addWidget(QLabel("Model:"))
+        self.llm_model_combo = QComboBox()
+        self.llm_model_combo.setMinimumWidth(250)
+        self.llm_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.llm_model_combo.setEnabled(False)
+        llm_provider_layout.addWidget(self.llm_model_combo)
+        llm_provider_layout.addStretch()
+        v.addLayout(llm_provider_layout)
+
+        # Image Provider and model selection
+        provider_model_layout = QHBoxLayout()
+
+        # Image Provider dropdown
+        provider_model_layout.addWidget(QLabel("Image Provider:"))
+        self.image_provider_combo = QComboBox()
+        self.image_provider_combo.setMinimumWidth(150)
+        available_providers = list_providers()
+        self.image_provider_combo.addItems(available_providers)
+        if self.current_provider in available_providers:
+            self.image_provider_combo.setCurrentText(self.current_provider)
+        self.image_provider_combo.currentTextChanged.connect(self._on_image_provider_changed)
+        provider_model_layout.addWidget(self.image_provider_combo)
+
+        # Image Model dropdown
+        provider_model_layout.addWidget(QLabel("Model:"))
         self.model_combo = QComboBox()
         # Set minimum width to ensure model names are fully visible
         self.model_combo.setMinimumWidth(350)
@@ -223,9 +263,9 @@ class MainWindow(QMainWindow):
         self.model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self._update_model_list()
         self.model_combo.currentTextChanged.connect(self._on_model_changed)
-        model_layout.addWidget(self.model_combo)
-        model_layout.addStretch()
-        v.addLayout(model_layout)
+        provider_model_layout.addWidget(self.model_combo)
+        provider_model_layout.addStretch()
+        v.addLayout(provider_model_layout)
         
         # Create vertical splitter for prompt and image
         splitter = QSplitter(Qt.Vertical)
@@ -1721,6 +1761,137 @@ For more detailed information, please refer to the full documentation.
             # Only show for local_sd provider
             self.advanced_group.setVisible(self.current_provider == "local_sd")
     
+    def _on_llm_provider_changed(self, provider: str):
+        """Handle LLM provider change on Image tab."""
+        # Clear the model combo first
+        self.llm_model_combo.clear()
+
+        if provider == "None":
+            self.llm_model_combo.setEnabled(False)
+        else:
+            self.llm_model_combo.setEnabled(True)
+            # Populate with actual models for provider
+            if provider == "OpenAI":
+                self.llm_model_combo.addItems(["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
+            elif provider == "Claude":
+                self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
+            elif provider == "Gemini":
+                self.llm_model_combo.addItems(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"])
+            elif provider == "Ollama":
+                self.llm_model_combo.addItems(["llama2", "mistral", "mixtral", "phi-2", "neural-chat"])
+            elif provider == "LM Studio":
+                self.llm_model_combo.addItems(["local-model", "custom-model"])
+
+        # Sync with Video tab
+        if hasattr(self, 'tab_video') and hasattr(self.tab_video, 'set_llm_provider'):
+            self.tab_video.set_llm_provider(provider, self.llm_model_combo.currentText() if provider != "None" else None)
+
+    def _on_video_llm_provider_changed(self, provider_name: str, model_name: str):
+        """Handle LLM provider change from Video tab."""
+        if hasattr(self, 'llm_provider_combo'):
+            # Sync with Image tab LLM provider combo
+            self.llm_provider_combo.blockSignals(True)
+            index = self.llm_provider_combo.findText(provider_name)
+            if index >= 0:
+                self.llm_provider_combo.setCurrentIndex(index)
+            self.llm_provider_combo.blockSignals(False)
+
+            # Update the models
+            self._on_llm_provider_changed(provider_name)
+
+            # Set the specific model if provided
+            if model_name and hasattr(self, 'llm_model_combo'):
+                model_index = self.llm_model_combo.findText(model_name)
+                if model_index >= 0:
+                    self.llm_model_combo.setCurrentIndex(model_index)
+
+    def _on_video_image_provider_changed(self, provider_name: str):
+        """Handle image provider change from Video tab."""
+        if provider_name and provider_name != self.current_provider:
+            # Update the current provider
+            self.current_provider = provider_name
+            self.config.set("provider", provider_name)
+            self.config.save()
+
+            # Update API key for new provider
+            self.current_api_key = self.config.get_api_key(provider_name)
+
+            # Sync with Image tab provider combo
+            if hasattr(self, 'image_provider_combo'):
+                self.image_provider_combo.blockSignals(True)
+                self.image_provider_combo.setCurrentText(provider_name)
+                self.image_provider_combo.blockSignals(False)
+
+            # Sync with Settings tab provider combo
+            if hasattr(self, 'provider_combo'):
+                self.provider_combo.blockSignals(True)
+                self.provider_combo.setCurrentText(provider_name)
+                self.provider_combo.blockSignals(False)
+
+            # Update model list for new provider
+            self._update_model_list()
+
+            # Update settings visibility
+            self._update_advanced_visibility()
+
+    def _on_image_provider_changed(self, provider_name: str):
+        """Handle provider selection change on Image tab."""
+        if provider_name and provider_name != self.current_provider:
+            self.current_provider = provider_name
+            # Update the config
+            self.config.set("provider", provider_name)
+            self.config.save()
+
+            # Update API key for new provider
+            self.current_api_key = self.config.get_api_key(provider_name)
+
+            # Update model list for new provider
+            self._update_model_list()
+
+            # Sync with Settings tab provider combo
+            if hasattr(self, 'provider_combo'):
+                self.provider_combo.blockSignals(True)
+                self.provider_combo.setCurrentText(provider_name)
+                self.provider_combo.blockSignals(False)
+
+            # Sync with Video tab if it exists
+            if hasattr(self, 'tab_video') and hasattr(self.tab_video, 'set_provider'):
+                self.tab_video.set_provider(provider_name)
+
+            # Update settings visibility
+            self._update_advanced_visibility()
+
+            # Update aspect ratio selector if present
+            if hasattr(self, 'aspect_selector') and self.aspect_selector:
+                if provider_name == 'google':
+                    self.aspect_selector.set_ratio("1:1")
+                    self.aspect_selector.setEnabled(False)
+                    self.aspect_selector.setToolTip("Google Gemini currently only supports square (1:1) images")
+                else:
+                    self.aspect_selector.setEnabled(True)
+                    self.aspect_selector.setToolTip("")
+
+            # Preload the new provider
+            auth_mode_internal = self.config.get("auth_mode", "api-key")
+            if auth_mode_internal in ["api_key", "API Key"]:
+                auth_mode_internal = "api-key"
+            elif auth_mode_internal == "Google Cloud Account":
+                auth_mode_internal = "gcloud"
+
+            provider_config = {
+                "api_key": self.current_api_key,
+                "auth_mode": auth_mode_internal
+            }
+            preload_provider(self.current_provider, provider_config)
+
+            # Update new widgets if available
+            if hasattr(self, 'resolution_selector') and self.resolution_selector:
+                self.resolution_selector.update_provider(self.current_provider)
+            if hasattr(self, 'quality_selector') and self.quality_selector:
+                self.quality_selector.update_provider(self.current_provider)
+            if hasattr(self, 'advanced_panel') and self.advanced_panel:
+                self.advanced_panel.update_provider(self.current_provider)
+
     def _on_model_changed(self, model_name: str):
         """Handle model selection change."""
         if self.current_provider == "local_sd" and hasattr(self, 'steps_spin'):
@@ -1735,11 +1906,21 @@ For more detailed information, please refer to the full documentation.
                         self.resolution_combo.setCurrentIndex(idx)
     
     def _on_provider_changed(self, provider: str):
-        """Handle provider change."""
+        """Handle provider change from Settings tab."""
         self.current_provider = provider.lower()
         self.config.set("provider", self.current_provider)
         self.config.save()
-        
+
+        # Sync with Image tab provider combo
+        if hasattr(self, 'image_provider_combo'):
+            self.image_provider_combo.blockSignals(True)
+            self.image_provider_combo.setCurrentText(self.current_provider)
+            self.image_provider_combo.blockSignals(False)
+
+        # Sync with Video tab if it exists
+        if hasattr(self, 'tab_video') and hasattr(self.tab_video, 'set_provider'):
+            self.tab_video.set_provider(self.current_provider)
+
         # Preload the new provider
         auth_mode_internal = self.config.get("auth_mode", "api-key")
         # Handle legacy values
@@ -1747,13 +1928,13 @@ For more detailed information, please refer to the full documentation.
             auth_mode_internal = "api-key"
         elif auth_mode_internal == "Google Cloud Account":
             auth_mode_internal = "gcloud"
-        
+
         provider_config = {
             "api_key": self.config.get_api_key(self.current_provider),
             "auth_mode": auth_mode_internal
         }
         preload_provider(self.current_provider, provider_config)
-        
+
         # Update new widgets if available
         if hasattr(self, 'resolution_selector') and self.resolution_selector:
             self.resolution_selector.update_provider(self.current_provider)
@@ -1761,7 +1942,7 @@ For more detailed information, please refer to the full documentation.
             self.quality_selector.update_provider(self.current_provider)
         if hasattr(self, 'advanced_panel') and self.advanced_panel:
             self.advanced_panel.update_provider(self.current_provider)
-        
+
         # Handle aspect ratio selector for Google (only supports square images)
         if hasattr(self, 'aspect_selector') and self.aspect_selector:
             if self.current_provider == 'google':
@@ -1773,6 +1954,9 @@ For more detailed information, please refer to the full documentation.
                 # Other providers support multiple aspect ratios
                 self.aspect_selector.setEnabled(True)
                 self.aspect_selector.setToolTip("")
+
+        # Update model list for new provider
+        self._update_model_list()
         
         # Update cost estimate
         self._update_cost_estimate()

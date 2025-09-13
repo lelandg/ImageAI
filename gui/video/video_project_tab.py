@@ -289,7 +289,11 @@ class VideoGenerationThread(QThread):
 
 class VideoProjectTab(QWidget):
     """Main video project tab with sub-tabs for workspace and history"""
-    
+
+    # Signals
+    image_provider_changed = Signal(str)  # provider name
+    llm_provider_changed = Signal(str, str)  # provider name, model name
+
     def __init__(self, config: Dict[str, Any], providers: Dict[str, Any]):
         super().__init__()
         self.config = config
@@ -298,9 +302,9 @@ class VideoProjectTab(QWidget):
         self.project_manager = ProjectManager(self.video_config.get_projects_dir())
         self.current_project = None
         self.generation_thread = None
-        
+
         self.logger = logging.getLogger(__name__)
-        
+
         self.init_ui()
     
     def init_ui(self):
@@ -333,6 +337,12 @@ class VideoProjectTab(QWidget):
         self.workspace_widget = WorkspaceWidget(self.config, self.providers)
         self.workspace_widget.project_changed.connect(self.on_project_changed)
         self.workspace_widget.generation_requested.connect(self.on_generation_requested)
+        # Forward the image provider change signal
+        if hasattr(self.workspace_widget, 'image_provider_changed'):
+            self.workspace_widget.image_provider_changed.connect(lambda provider: self.on_image_provider_changed(provider))
+        # Forward the LLM provider change signal
+        if hasattr(self.workspace_widget, 'llm_provider_changed'):
+            self.workspace_widget.llm_provider_changed.connect(lambda provider, model: self.on_llm_provider_changed(provider, model))
         self.tab_widget.addTab(self.workspace_widget, "Workspace")
         
         # Sync with any project that was already loaded during workspace init
@@ -347,6 +357,26 @@ class VideoProjectTab(QWidget):
         # Add tabs to layout
         layout.addWidget(self.tab_widget)
     
+    def set_provider(self, provider_name: str):
+        """Set the image provider and sync with workspace widget."""
+        if hasattr(self, 'workspace_widget'):
+            self.workspace_widget.set_image_provider(provider_name)
+
+    def set_llm_provider(self, provider_name: str, model_name: str = None):
+        """Set the LLM provider and sync with workspace widget."""
+        if hasattr(self, 'workspace_widget'):
+            self.workspace_widget.set_llm_provider(provider_name, model_name)
+
+    def on_image_provider_changed(self, provider_name: str):
+        """Handle image provider change from workspace widget."""
+        # Forward the signal to the main window
+        self.image_provider_changed.emit(provider_name)
+
+    def on_llm_provider_changed(self, provider_name: str, model_name: str):
+        """Handle LLM provider change from workspace widget."""
+        # Forward the signal to the main window
+        self.llm_provider_changed.emit(provider_name, model_name)
+
     def on_project_changed(self, project: VideoProject):
         """Handle project change from workspace"""
         self.current_project = project
