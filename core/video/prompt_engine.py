@@ -169,6 +169,24 @@ class UnifiedLLMProvider:
         # Build system prompt based on style
         system_prompt = self._get_system_prompt(style)
         
+        # Check if this looks like a lyric line (short, no visual descriptions)
+        is_lyric = len(text.split()) < 15 and not any(word in text.lower() for word in 
+                   ['shot', 'camera', 'lighting', 'scene', 'image', 'visual', 'color'])
+        
+        # Adjust user prompt based on whether it's a lyric
+        if is_lyric:
+            user_prompt = f"""Create a detailed visual scene description for this lyric line: "{text}"
+            
+Describe what we should see in the image that represents this lyric visually. Include specific details about:
+- The main subject or action
+- The setting and environment
+- Lighting and mood
+- Visual style and composition
+
+Keep it under 100 words but highly descriptive."""
+        else:
+            user_prompt = f"Transform this into an image generation prompt: {text}"
+        
         # Prepare model identifier for LiteLLM
         if provider == 'lmstudio':
             # LM Studio uses OpenAI-compatible API
@@ -186,7 +204,7 @@ class UnifiedLLMProvider:
                 "model": model_id,
                 "messages": [
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": f"Transform this into an image generation prompt: {text}"}
+                    {"role": "user", "content": user_prompt}
                 ],
                 "temperature": temperature,
                 "max_tokens": max_tokens
@@ -199,13 +217,31 @@ class UnifiedLLMProvider:
             # Call LiteLLM
             response = self.litellm.completion(**kwargs)
             
-            enhanced = response.choices[0].message.content.strip()
-            
-            self.logger.info(f"Enhanced prompt using {provider}/{model}")
-            return enhanced
+            # Check if response has content
+            if (response and response.choices and len(response.choices) > 0 
+                and response.choices[0].message 
+                and response.choices[0].message.content):
+                enhanced = response.choices[0].message.content.strip()
+                
+                # If we still got an empty or very short response for a lyric, create a basic visual
+                if is_lyric and len(enhanced) < 20:
+                    self.logger.warning(f"Got minimal response for lyric, creating basic visual")
+                    enhanced = f"A cinematic scene visualizing: {text}. Dramatic lighting, professional photography, high detail."
+                
+                self.logger.info(f"Enhanced prompt using {provider}/{model}")
+                return enhanced
+            else:
+                self.logger.warning(f"Empty response from {provider}/{model}, creating fallback")
+                # For lyrics, create a basic visual description
+                if is_lyric:
+                    return f"A cinematic scene visualizing: {text}. Dramatic lighting, professional photography, high detail."
+                return text
             
         except Exception as e:
             self.logger.error(f"Failed to enhance prompt with {provider}/{model}: {e}")
+            # For lyrics, still try to create something visual
+            if is_lyric:
+                return f"A cinematic scene visualizing: {text}. Dramatic lighting, professional photography, high detail."
             return text
     
     def batch_enhance(self,
@@ -233,8 +269,21 @@ class UnifiedLLMProvider:
         # For efficiency, try to batch in a single call if provider supports it
         system_prompt = self._get_system_prompt(style)
         
+        # Check if these look like lyrics
+        avg_words = sum(len(text.split()) for text in texts) / len(texts) if texts else 0
+        likely_lyrics = avg_words < 15
+        
         # Create a batch prompt
-        batch_prompt = "Transform each of these lines into cinematic image generation prompts. Return one enhanced prompt per line:\n\n"
+        if likely_lyrics:
+            batch_prompt = """Create detailed visual scene descriptions for each lyric line below.
+For each line, describe what we should see in the image that represents the lyric visually.
+Include specific details about the main subject, setting, lighting, and visual style.
+Return one enhanced visual description per line, numbered:
+
+"""
+        else:
+            batch_prompt = "Transform each of these lines into cinematic image generation prompts. Return one enhanced prompt per line:\n\n"
+        
         for i, text in enumerate(texts, 1):
             batch_prompt += f"{i}. {text}\n"
         

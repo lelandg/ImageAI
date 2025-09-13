@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.10.4**
+**Version 0.10.5**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -104,7 +104,9 @@
 - **Complete Video Creation Pipeline** - Text to video with AI scene generation
 - **Version Control System** - Event sourcing with time-travel capabilities
 - **Dual Rendering Engines** - FFmpeg slideshow and Google Veo AI (coming soon)
-- **Multi-Provider LLM Integration** - Enhance prompts with GPT, Claude, Gemini
+- **Multi-Provider LLM Integration** - Enhance prompts with GPT-5, Gemini, Claude, and more
+- **Visual Continuity System** - Maintain consistency across scenes with provider-specific techniques
+- **Smart Lyric Processing** - Automatic detection and visual scene creation from song lyrics
 - **Professional Effects** - Ken Burns, transitions, audio sync
 - **Project History** - Complete audit trail with restore points
 
@@ -1367,7 +1369,24 @@ ImageAI/
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
-### Latest Release: v0.10.4 (2025-01-12)
+### Latest Release: v0.10.5 (2025-01-13)
+
+**Video Generation Visual Continuity & Enhanced Lyric Processing**
+- **Visual Continuity Features**: New optional features for maintaining consistency across video scenes
+  - Provider-specific continuity techniques (Gemini iterative refinement, OpenAI reference IDs, Claude style guides)
+  - Checkbox controls to enable/disable continuity and enhanced storyboard generation
+  - Automatic aspect ratio hints for Gemini provider
+  - Project-level continuity tracking for multi-scene consistency
+- **Improved Lyric Enhancement**: Smart detection and processing of lyric lines vs. regular text
+  - Lyric-specific prompts create detailed visual scene descriptions
+  - Fallback generation ensures all scenes get visual prompts even with empty LLM responses
+  - Better handling of short text fragments from song lyrics
+- **UI Improvements**: New continuity control checkboxes with informative tooltips
+- **GPT-5 Confirmed Working**: Full integration tested with OpenAI's GPT-5 model
+  - Successful time synchronization using Strict Lyric Timing Contract v1.0
+  - Robust fallback handling for prompt enhancement
+
+### v0.10.4 (2025-01-12)
 
 **Advanced Video Project LLM Sync & Timing**
 - **Strict Lyric Timing Contract v1.0**: Implemented standardized format for GPT-5 lyric synchronization

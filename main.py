@@ -16,6 +16,8 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow info messages
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable oneDNN custom operations message
 warnings.filterwarnings('ignore', category=FutureWarning)
 warnings.filterwarnings('ignore', message='.*GetPrototype.*')
+# Suppress pkg_resources deprecation warning from pretty_midi and other packages
+warnings.filterwarnings('ignore', message='pkg_resources is deprecated as an API', category=UserWarning)
 
 # Suppress protobuf AttributeErrors by catching them during import
 import logging

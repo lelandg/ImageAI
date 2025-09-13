@@ -339,58 +339,144 @@ class LLMSyncAssistant:
                           total_duration: Optional[float] = None,
                           sections: Optional[Dict[str, List[Tuple[float, float]]]] = None) -> List[TimedLyric]:
         """
-        Gemini specific implementation using the prompt from Lyrics-TimeSync-Prompt-ASL-Gemini.md
+        Gemini specific implementation using section-based processing as per Strict-Lyric-Timing-Gemini.md
         """
-        self.logger.info("Using Gemini specific sync prompt")
+        self.logger.info("Using Gemini section-based sync approach")
         
         try:
-            # Build the prompt based on Gemini's specifications
+            # Parse lyrics into sections if structural tags exist
+            sections_to_sync = self._parse_lyrics_into_sections(lyrics)
+            
+            # If no sections found or too small, treat as one section
+            if len(sections_to_sync) <= 1:
+                self.logger.info("Processing lyrics as single section")
+                return self._sync_single_section_with_gemini(
+                    lyrics, audio_path, total_duration, sections, 0, total_duration
+                )
+            
+            # Process each section separately to avoid token limits
+            self.logger.info(f"Processing {len(sections_to_sync)} sections separately")
+            all_timed_lyrics = []
+            
+            for section_name, section_lyrics in sections_to_sync:
+                self.logger.info(f"Processing section: {section_name}")
+                
+                # Determine time range for this section if available
+                section_start = 0
+                section_end = total_duration
+                if sections and section_name in sections:
+                    # Use first occurrence of this section type
+                    if sections[section_name]:
+                        section_start, section_end = sections[section_name][0]
+                        self.logger.info(f"  Time range: {section_start:.2f}s - {section_end:.2f}s")
+                
+                # Sync this section
+                section_timed = self._sync_single_section_with_gemini(
+                    section_lyrics, audio_path, section_end - section_start, 
+                    None, section_start, section_end, section_name
+                )
+                
+                if section_timed:
+                    all_timed_lyrics.extend(section_timed)
+                    self.logger.info(f"  Got {len(section_timed)} timed lyrics for {section_name}")
+                else:
+                    self.logger.warning(f"  No timing data returned for {section_name}")
+            
+            self.logger.info(f"Successfully synchronized {len(all_timed_lyrics)} total lyrics using Gemini")
+            return all_timed_lyrics
+            
+        except Exception as e:
+            self.logger.error(f"Gemini sync failed: {e}")
+            raise  # Re-raise to trigger fallback
+    
+    def _parse_lyrics_into_sections(self, lyrics: str) -> List[Tuple[str, str]]:
+        """
+        Parse lyrics into sections based on structural tags like [Verse 1], [Chorus], etc.
+        Returns list of (section_name, section_lyrics) tuples.
+        """
+        lines = lyrics.split('\n')
+        sections = []
+        current_section = None
+        current_lines = []
+        
+        # Common section patterns
+        section_pattern = re.compile(r'^\[([^\]]+)\]$')
+        
+        for line in lines:
+            match = section_pattern.match(line.strip())
+            if match:
+                # Found a section marker
+                if current_lines:
+                    # Save previous section
+                    section_name = current_section or "Intro"
+                    sections.append((section_name, '\n'.join(current_lines)))
+                    current_lines = []
+                current_section = match.group(1)
+            elif line.strip():  # Non-empty line
+                current_lines.append(line)
+        
+        # Add final section
+        if current_lines:
+            section_name = current_section or "Main"
+            sections.append((section_name, '\n'.join(current_lines)))
+        
+        # If no sections found, return whole lyrics as one section
+        if not sections:
+            sections = [("Full Song", lyrics)]
+        
+        return sections
+    
+    def _sync_single_section_with_gemini(self, lyrics: str, audio_path: Optional[str],
+                                         duration: Optional[float], midi_sections: Optional[Dict],
+                                         start_offset: float = 0, end_time: Optional[float] = None,
+                                         section_name: str = "") -> List[TimedLyric]:
+        """
+        Sync a single section of lyrics with Gemini, following the revised prompt from the plan.
+        """
+        try:
+            # Build the prompt for section-based processing
             system_prompt = (
                 "You are an AI assistant specializing in audio and lyric synchronization. "
-                "Your task is to analyze the audio to determine the precise timing of each line "
-                "and return this information in a structured JSON format. "
-                "The output MUST be a single JSON object containing one key 'lyrics' with an array of line objects."
+                "You will receive an audio file and the plain text lyrics for a single section of a song. "
+                "Your task is to analyze the audio to determine the precise timing of each word for only the lines provided. "
+                "You MUST process all lyric lines sent in this request. "
+                "The output must be a structured JSON object containing only the data for the provided lines."
             )
             
-            # Build the user message based on Gemini's format
-            user_message = "Analyze the following audio and lyrics to create time synchronization:\n\n"
+            # Build user message
+            user_message = ""
+            
+            if section_name:
+                user_message += f"Processing section: {section_name}\n"
             
             if audio_path and Path(audio_path).exists():
                 audio_filename = Path(audio_path).name
                 user_message += f"Audio file: {audio_filename}\n"
-                self.logger.info(f"Sending audio filename to Gemini: {audio_filename}")
             
-            if total_duration:
-                user_message += f"Total Duration: {total_duration:.2f} seconds\n"
+            if start_offset > 0 or end_time:
+                user_message += f"Time range for this section: {start_offset:.2f}s"
+                if end_time:
+                    user_message += f" - {end_time:.2f}s"
+                user_message += "\n"
             
-            if sections:
-                user_message += "\nMIDI Section Timing:\n"
-                for section_type, timings in sections.items():
-                    for start, end in timings:
-                        user_message += f"- {section_type}: {start:.2f}s - {end:.2f}s\n"
-            
-            # Count lyrics for format decision
+            # Count lines in this section
             num_lines = len([line for line in lyrics.split('\n') if line.strip()])
-            include_word_timing = num_lines <= 20  # Only include word-level for shorter songs
+            user_message += f"\nLyrics for this section ({num_lines} lines):\n{lyrics}\n\n"
             
-            user_message += f"\nLyrics to synchronize (ALL {num_lines} lines must be included):\n{lyrics}\n\n"
-            
-            if include_word_timing:
-                user_message += (
-                    "Return a JSON object with a 'lyrics' key containing an array of line objects. "
-                    "Each line object must have: 'line' (text), 'startTime' (MM:SS.mmm), 'endTime' (MM:SS.mmm), "
-                    "and 'words' array with word-level timing. Do not include code fences or commentary."
-                )
-            else:
-                user_message += (
-                    f"Return a JSON object with a 'lyrics' key containing an array of {num_lines} line objects. "
-                    "Each line object must have: 'line' (text), 'startTime' (MM:SS.mmm), 'endTime' (MM:SS.mmm). "
-                    "Skip word-level timing to ensure all lyrics fit in response. "
-                    f"IMPORTANT: Include ALL {num_lines} lyrics with proper timing through the end of the song."
-                )
+            # Request format per the plan - always include word-level for sections
+            user_message += (
+                "Output must be a single JSON object with a 'lines' key containing an array of line objects. "
+                "Each line object must contain: "
+                "'line' (string - full text), "
+                "'startTime' (string - MM:SS.mmm format), "
+                "'endTime' (string - MM:SS.mmm format), "
+                "'words' (array of word objects). "
+                "Each word object must contain: "
+                "'word' (string), 'startTime' (string - MM:SS.mmm), 'endTime' (string - MM:SS.mmm). "
+                "Do not wrap in parent object, do not include code fences or commentary."
+            )
             
             # Call the LLM
-            self.logger.info("Calling Gemini for lyric synchronization")
             self.logger.info("=== LLM REQUEST ===")
             self.logger.info(f"System prompt: {system_prompt[:200]}...")
             self.logger.info(f"User message ({len(user_message)} chars):")
@@ -424,7 +510,7 @@ class LLMSyncAssistant:
             self.logger.info(response_text)
             self.logger.info("=== END LLM RESPONSE ===")
             
-            # Parse the Gemini JSON response
+            # Parse the response
             try:
                 # Clean up response if needed
                 if response_text.startswith('```'):
@@ -433,24 +519,29 @@ class LLMSyncAssistant:
                 
                 timing_data = json.loads(response_text)
                 
-                # Gemini format has 'lyrics' key with array of line objects
-                if not isinstance(timing_data, dict) or 'lyrics' not in timing_data:
-                    self.logger.warning("Gemini response doesn't have expected 'lyrics' key")
+                # Section-based format has 'lines' key per the plan
+                if not isinstance(timing_data, dict) or 'lines' not in timing_data:
+                    self.logger.warning("Response doesn't have expected 'lines' key")
                     return []
                 
-                lines_data = timing_data['lyrics']
+                lines_data = timing_data['lines']
                 timed_lyrics = []
                 
-                self.logger.info(f"Parsing {len(lines_data)} lines from Gemini response")
+                self.logger.info(f"Parsing {len(lines_data)} lines from section response")
                 
                 for i, line_obj in enumerate(lines_data):
                     if isinstance(line_obj, dict) and 'line' in line_obj:
-                        # Parse timestamps (format: MM:SS.mmm)
+                        # Parse timestamps and adjust for section offset
                         start_time = self._parse_timestamp(line_obj.get('startTime', '00:00.000'))
                         end_time = self._parse_timestamp(line_obj.get('endTime', '00:00.000'))
                         
+                        # Adjust times if we have an offset (for sections not starting at 0)
+                        if start_offset > 0:
+                            start_time += start_offset
+                            end_time += start_offset
+                        
                         # Skip entries with invalid timing
-                        if start_time == 0 and end_time == 0:
+                        if start_time == start_offset and end_time == start_offset:
                             self.logger.warning(f"Skipping line {i} with no timing: {line_obj.get('line', '')[:40]}...")
                             continue
                         
@@ -458,35 +549,23 @@ class LLMSyncAssistant:
                             text=line_obj['line'],
                             start_time=start_time,
                             end_time=end_time,
-                            section_type=None
+                            section_type=section_name if section_name else None
                         )
                         timed_lyrics.append(timed_lyric)
                         
-                        if i < 3 or i >= len(lines_data) - 3:
+                        if i < 2:  # Log first few for debugging
                             self.logger.debug(f"  Line {i}: '{timed_lyric.text[:40]}...' @ {timed_lyric.start_time:.2f}-{timed_lyric.end_time:.2f}s")
                 
-                if timed_lyrics:
-                    self.logger.info(f"Successfully synchronized {len(timed_lyrics)} lyrics using Gemini")
-                    
-                    # Check if Gemini returned fewer lyrics than expected
-                    if lyrics:
-                        original_lines = [line.strip() for line in lyrics.split('\n') if line.strip()]
-                        if len(timed_lyrics) < len(original_lines):
-                            self.logger.warning(f"Gemini only returned {len(timed_lyrics)} of {len(original_lines)} expected lyrics")
-                            self.logger.warning("Gemini may have hit response size limit due to word-level timing")
-                            # Still return what we got - partial sync is better than none
-                    
-                    return timed_lyrics
-                else:
-                    self.logger.warning("No valid timing data in Gemini response")
-                    
+                return timed_lyrics
+                
             except json.JSONDecodeError as e:
-                self.logger.error(f"Failed to parse Gemini JSON response: {e}")
-                self.logger.error(f"Response that failed to parse: {response_text[:1000]}...")
+                self.logger.error(f"Failed to parse JSON response: {e}")
+                self.logger.error(f"Response that failed: {response_text[:500]}...")
+                return []
                 
         except Exception as e:
-            self.logger.error(f"Gemini sync failed: {e}")
-            raise  # Re-raise to trigger fallback in main method
+            self.logger.error(f"Section sync failed: {e}")
+            return []
     
     def _merge_fragmented_lyrics(self, timed_fragments: List[TimedLyric], original_lines: List[str]) -> List[TimedLyric]:
         """

@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QThread, Signal, Slot
 
+from gui.common.dialog_manager import get_dialog_manager
+
 from core.video.project import VideoProject
 from core.video.project_manager import ProjectManager
 from core.video.config import VideoConfig
@@ -59,7 +61,7 @@ class VideoGenerationThread(QThread):
     def _enhance_prompts(self):
         """Enhance prompts using LLM"""
         try:
-            from ...core.video.prompt_engine import PromptEngine, UnifiedLLMProvider, PromptStyle
+            from core.video.prompt_engine import PromptEngine, UnifiedLLMProvider, PromptStyle
             
             # Get LLM configuration
             llm_provider = self.kwargs.get('llm_provider', 'none')
@@ -100,9 +102,9 @@ class VideoGenerationThread(QThread):
                 progress = int((i / total_scenes) * 100)
                 self.progress_update.emit(progress, f"Enhancing prompt {i+1}/{total_scenes}")
                 
-                # Generate enhanced prompt
-                enhanced = llm.enhance_prompt(
-                    scene.source_text,
+                # Generate enhanced prompt using the engine (not llm directly)
+                enhanced = engine.enhance_prompt(
+                    scene.source_text if scene.source_text else scene.source,
                     provider=llm_provider,
                     model=llm_model,
                     style=style
@@ -119,12 +121,26 @@ class VideoGenerationThread(QThread):
     def _generate_images(self):
         """Generate images for all scenes"""
         try:
-            from ...core.video.image_generator import ImageGenerator
-            from ...core.video.thumbnail_manager import ThumbnailManager
+            from core.video.image_generator import ImageGenerator
+            from core.video.thumbnail_manager import ThumbnailManager
+            from core.video.image_continuity import ImageContinuityManager
             
             # Initialize generators
             generator = ImageGenerator(self.kwargs)
             thumbnail_mgr = ThumbnailManager()
+            
+            # Check if continuity is enabled
+            use_continuity = self.kwargs.get('enable_continuity', False)
+            continuity_mgr = None
+            
+            if use_continuity:
+                continuity_mgr = ImageContinuityManager()
+                # Initialize with style guide if available
+                if hasattr(self.project, 'metadata') and 'style_guide' in self.project.metadata:
+                    continuity_mgr.initialize_project_context(
+                        self.project.name,
+                        self.project.metadata['style_guide']
+                    )
             
             # Get generation parameters
             provider = self.kwargs.get('provider', 'google')
@@ -202,8 +218,8 @@ class VideoGenerationThread(QThread):
     def _render_video(self):
         """Render the final video"""
         try:
-            from ...core.video.ffmpeg_renderer import FFmpegRenderer, RenderSettings
-            from ...core.video.veo_client import VeoClient, VeoGenerationConfig, VeoModel
+            from core.video.ffmpeg_renderer import FFmpegRenderer, RenderSettings
+            from core.video.veo_client import VeoClient, VeoGenerationConfig, VeoModel
             from pathlib import Path
             
             # Determine render mode
@@ -217,7 +233,7 @@ class VideoGenerationThread(QThread):
     
     def _render_with_ffmpeg(self):
         """Render video using FFmpeg slideshow"""
-        from ...core.video.ffmpeg_renderer import FFmpegRenderer, RenderSettings
+        from core.video.ffmpeg_renderer import FFmpegRenderer, RenderSettings
         from pathlib import Path
         
         try:
@@ -319,6 +335,10 @@ class VideoProjectTab(QWidget):
         self.workspace_widget.generation_requested.connect(self.on_generation_requested)
         self.tab_widget.addTab(self.workspace_widget, "Workspace")
         
+        # Sync with any project that was already loaded during workspace init
+        if self.workspace_widget.current_project:
+            self.current_project = self.workspace_widget.current_project
+        
         # Create history tab
         self.history_widget = HistoryTab()
         self.history_widget.restore_requested.connect(self.on_restore_requested)
@@ -336,18 +356,22 @@ class VideoProjectTab(QWidget):
     
     def on_generation_requested(self, operation: str, kwargs: Dict[str, Any]):
         """Handle generation request from workspace"""
-        if not self.current_project and operation != "generate_storyboard":
-            QMessageBox.warning(self, "No Project", "Please create or open a project first")
+        # Get current project from workspace widget
+        current_project = self.workspace_widget.current_project
+        
+        if not current_project and operation != "generate_storyboard":
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Project", "Please create or open a project first")
             return
         
         # For storyboard generation, create project if needed
-        if operation == "generate_storyboard" and not self.current_project:
+        if operation == "generate_storyboard" and not current_project:
             self.workspace_widget.new_project()
-            self.current_project = self.workspace_widget.current_project
+            current_project = self.workspace_widget.current_project
         
         # Create and start generation thread
         self.generation_thread = VideoGenerationThread(
-            self.current_project, operation, **kwargs
+            current_project, operation, **kwargs
         )
         self.generation_thread.progress_update.connect(self.on_progress_update)
         self.generation_thread.generation_complete.connect(self.on_generation_complete)
@@ -365,7 +389,7 @@ class VideoProjectTab(QWidget):
         """Handle restore request from history tab"""
         try:
             # Rebuild project state from events
-            from ...core.video.event_store import EventStore
+            from core.video.event_store import EventStore
             from pathlib import Path
             
             db_path = Path.home() / ".imageai" / "video_projects" / "events.db"
@@ -385,14 +409,15 @@ class VideoProjectTab(QWidget):
             # Switch to workspace tab
             self.tab_widget.setCurrentIndex(0)
             
-            QMessageBox.information(
-                self,
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_success(
                 "Restore Complete",
                 f"Project restored to state at {timestamp.strftime('%Y-%m-%d %H:%M:%S')}"
             )
             
         except Exception as e:
-            QMessageBox.warning(self, "Restore Failed", f"Failed to restore project: {e}")
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_error("Restore Failed", f"Failed to restore project: {e}")
     
     @Slot(int, str)
     def on_progress_update(self, progress: int, message: str):
@@ -437,7 +462,7 @@ class VideoProjectTab(QWidget):
             
             # Log to event store
             try:
-                from ...core.video.event_store import EventStore, ProjectEvent, EventType
+                from core.video.event_store import EventStore, ProjectEvent, EventType
                 from pathlib import Path
                 
                 db_path = Path.home() / ".imageai" / "video_projects" / "events.db"
@@ -465,4 +490,10 @@ class VideoProjectTab(QWidget):
             except Exception as e:
                 self.logger.error(f"Failed to log event: {e}")
         else:
-            QMessageBox.warning(self, "Generation Failed", message)
+            dialog_manager = get_dialog_manager(self)
+            # Use the specialized generation error method for better logging
+            if self.generation_thread:
+                operation = self.generation_thread.operation.replace('_', ' ').title()
+                dialog_manager.show_generation_error(operation, message)
+            else:
+                dialog_manager.show_error("Generation Failed", message)
