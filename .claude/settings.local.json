@@ -12,7 +12,8 @@
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --since=\"2025-09-08\" --oneline --name-status)",
       "Bash(wc:*)",
       "Read(//mnt/e/Pictures/Screenshots/2025/**)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []

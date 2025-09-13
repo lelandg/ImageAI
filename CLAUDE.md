@@ -117,4 +117,4 @@ The `Plans/` directory contains documentation for upcoming features:
 - For testing Python code:
   - **In WSL/Linux bash**: Use `source /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/activate`
   - **In PowerShell**: Use `.\.venv\Scripts\Activate.ps1` (this is the primary environment)
-- I'm running this project from PowerShell. Please consider that when checking config files, etc.
+- Never add files to git

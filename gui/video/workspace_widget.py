@@ -187,10 +187,12 @@ class WorkspaceWidget(QWidget):
         # Set minimum width to ensure model names are fully visible
         self.llm_model_combo.setMinimumWidth(250)
         self.llm_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.llm_model_combo.currentTextChanged.connect(lambda: self._auto_save_settings())
         llm_layout.addWidget(self.llm_model_combo)
         
         self.prompt_style_combo = QComboBox()
         self.prompt_style_combo.addItems(["Cinematic", "Artistic", "Photorealistic", "Animated", "Documentary", "Abstract"])
+        self.prompt_style_combo.currentTextChanged.connect(lambda: self._auto_save_settings())
         llm_layout.addWidget(self.prompt_style_combo)
         
         llm_layout.addStretch()
@@ -208,12 +210,14 @@ class WorkspaceWidget(QWidget):
         # Set minimum width for image model combo too
         self.img_model_combo.setMinimumWidth(250)
         self.img_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.img_model_combo.currentTextChanged.connect(lambda: self._auto_save_settings())
         img_layout.addWidget(self.img_model_combo)
         
         img_layout.addWidget(QLabel("Variants:"))
         self.variants_spin = QSpinBox()
         self.variants_spin.setRange(1, 4)
         self.variants_spin.setValue(3)
+        self.variants_spin.valueChanged.connect(lambda: self._auto_save_settings())
         img_layout.addWidget(self.variants_spin)
         
         img_layout.addStretch()
@@ -253,7 +257,19 @@ class WorkspaceWidget(QWidget):
         group.setLayout(layout)
         
         # Initialize the model combos with default selections
-        self.on_img_provider_changed(self.img_provider_combo.currentText())
+        # NOTE: Commented out - this was being called before project loading
+        # and was interfering with restoring saved values
+        # self.on_img_provider_changed(self.img_provider_combo.currentText())
+        
+        # Instead, populate the image model combo with default Gemini models
+        # since Gemini is the first item in the provider combo
+        self.img_model_combo.addItems([
+            "gemini-2.5-flash-image-preview",
+            "gemini-2.5-flash",
+            "gemini-2.5-pro",
+            "gemini-1.5-flash",
+            "gemini-1.5-pro"
+        ])
         
         return group
     
@@ -625,10 +641,20 @@ class WorkspaceWidget(QWidget):
             self.current_project = VideoProject(name=project_name)
             self.update_ui_state()
         
+        # Debug: Log combo values BEFORE update
+        self.logger.info("=== BEFORE update_project_from_ui ===")
+        self.logger.info(f"LLM combo index: {self.llm_provider_combo.currentIndex()}, text: '{self.llm_provider_combo.currentText()}'")
+        self.logger.info(f"LLM model combo index: {self.llm_model_combo.currentIndex()}, text: '{self.llm_model_combo.currentText()}'")
+        self.logger.info(f"Image combo index: {self.img_provider_combo.currentIndex()}, text: '{self.img_provider_combo.currentText()}'")
+        self.logger.info(f"Image model combo index: {self.img_model_combo.currentIndex()}, text: '{self.img_model_combo.currentText()}'")
+        self.logger.info(f"Current project LLM: {self.current_project.llm_provider}/{self.current_project.llm_model}")
+        self.logger.info(f"Current project Image: {self.current_project.image_provider}/{self.current_project.image_model}")
+        
         try:
             self.update_project_from_ui()
             
-            # Debug: Log what we're saving
+            # Debug: Log what we're saving AFTER update
+            self.logger.info("=== AFTER update_project_from_ui ===")
             num_scenes = len(self.current_project.scenes) if self.current_project.scenes else 0
             self.logger.info(f"Saving project with {num_scenes} scenes")
             self.logger.info(f"Saving LLM: {self.current_project.llm_provider}/{self.current_project.llm_model}")
@@ -1006,6 +1032,15 @@ class WorkspaceWidget(QWidget):
                 self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
             elif provider == "Gemini":
                 self.llm_model_combo.addItems(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"])
+            elif provider == "Ollama":
+                # Add common Ollama models
+                self.llm_model_combo.addItems(["llama2", "mistral", "mixtral", "phi-2", "neural-chat"])
+            elif provider == "LM Studio":
+                # Add common LM Studio models
+                self.llm_model_combo.addItems(["local-model", "custom-model"])
+        
+        # Auto-save if we have a project
+        self._auto_save_settings()
     
     def on_img_provider_changed(self, provider: str):
         """Handle image provider change"""
@@ -1039,10 +1074,31 @@ class WorkspaceWidget(QWidget):
                 "stabilityai/stable-diffusion-2-1",
                 "runwayml/stable-diffusion-v1-5"
             ])
+        
+        # Auto-save if we have a project
+        self._auto_save_settings()
     
     def on_video_provider_changed(self, provider: str):
         """Handle video provider change"""
         self.veo_model_combo.setVisible(provider == "Gemini Veo")
+    
+    def _auto_save_settings(self):
+        """Auto-save settings to project if we have one"""
+        # Skip auto-save during initial loading
+        if not hasattr(self, '_loading_project'):
+            self._loading_project = False
+            
+        if self._loading_project:
+            return
+            
+        # Only auto-save if we have a project with a name
+        if self.current_project and self.project_name.text().strip():
+            try:
+                self.update_project_from_ui()
+                self.project_manager.save_project(self.current_project)
+                self.logger.debug("Auto-saved project settings")
+            except Exception as e:
+                self.logger.debug(f"Could not auto-save: {e}")
     
     def load_input_file(self):
         """Load input from file"""
@@ -1280,18 +1336,29 @@ class WorkspaceWidget(QWidget):
         seconds = duration_sec % 60
         self.current_project.target_duration = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         
-        # Save LLM provider settings
+        # Save LLM provider settings - preserve exact case
         llm_provider = self.llm_provider_combo.currentText()
+        llm_model = self.llm_model_combo.currentText() if llm_provider != "None" else None
+        
+        # Debug logging
+        self.logger.info(f"Saving LLM combo values - Provider: '{llm_provider}', Model: '{llm_model}'")
+        
         if llm_provider != "None":
-            self.current_project.llm_provider = llm_provider.lower()
-            self.current_project.llm_model = self.llm_model_combo.currentText()
+            self.current_project.llm_provider = llm_provider  # Keep exact case
+            self.current_project.llm_model = llm_model
         else:
             self.current_project.llm_provider = None
             self.current_project.llm_model = None
         
-        # Save image provider settings
-        self.current_project.image_provider = self.img_provider_combo.currentText().lower()
-        self.current_project.image_model = self.img_model_combo.currentText()
+        # Save image provider settings - preserve exact case
+        img_provider = self.img_provider_combo.currentText()
+        img_model = self.img_model_combo.currentText()
+        
+        # Debug logging
+        self.logger.info(f"Saving Image combo values - Provider: '{img_provider}', Model: '{img_model}'")
+        
+        self.current_project.image_provider = img_provider  # Keep exact case
+        self.current_project.image_model = img_model
         
         # Save video provider settings
         self.current_project.video_provider = self.video_provider_combo.currentText().lower()
@@ -1325,6 +1392,13 @@ class WorkspaceWidget(QWidget):
         if not self.current_project:
             return
         
+        self.logger.info("=== STARTING load_project_to_ui ===")
+        self.logger.info(f"Project has LLM: {self.current_project.llm_provider}/{self.current_project.llm_model}")
+        self.logger.info(f"Project has Image: {self.current_project.image_provider}/{self.current_project.image_model}")
+        
+        # Set flag to prevent auto-save during loading
+        self._loading_project = True
+        
         try:
             # Load basic project info
             self.project_name.setText(self.current_project.name)
@@ -1341,63 +1415,112 @@ class WorkspaceWidget(QWidget):
                 if index >= 0:
                     self.pacing_combo.setCurrentIndex(index)
             
-            # Load LLM provider settings
-            if self.current_project.llm_provider:
-                # Find and set the provider - handle case variations
-                provider_text = self.current_project.llm_provider
-                if provider_text.lower() == 'openai':
-                    provider_text = 'OpenAI'
-                elif provider_text.lower() == 'claude':
-                    provider_text = 'Claude'
-                elif provider_text.lower() == 'gemini':
-                    provider_text = 'Gemini'
-                elif provider_text.lower() == 'ollama':
-                    provider_text = 'Ollama'
-                elif provider_text.lower() == 'lm studio':
-                    provider_text = 'LM Studio'
-                
-                index = self.llm_provider_combo.findText(provider_text)
-                if index >= 0:
-                    self.llm_provider_combo.setCurrentIndex(index)
-                    # This will trigger on_llm_provider_changed which populates models
-                    
-                    # After models are populated, set the model
-                    if self.current_project.llm_model:
-                        model_index = self.llm_model_combo.findText(self.current_project.llm_model)
-                        if model_index >= 0:
-                            self.llm_model_combo.setCurrentIndex(model_index)
-                        else:
-                            self.logger.warning(f"LLM model not found in combo: {self.current_project.llm_model}")
-                else:
-                    self.logger.warning(f"LLM provider not found in combo: {provider_text}")
-            else:
-                self.llm_provider_combo.setCurrentIndex(0)  # Set to "None"
+            # Disconnect signals during restoration to prevent cascading changes
+            self.llm_provider_combo.currentTextChanged.disconnect()
+            self.img_provider_combo.currentTextChanged.disconnect()
             
-            # Load image provider settings
-            if self.current_project.image_provider:
-                # Handle case variations
-                provider_text = self.current_project.image_provider
-                if provider_text.lower() == 'openai':
-                    provider_text = 'OpenAI'
-                elif provider_text.lower() == 'gemini':
-                    provider_text = 'Gemini'
-                elif provider_text.lower() == 'stability':
-                    provider_text = 'Stability'
-                
-                index = self.img_provider_combo.findText(provider_text)
-                if index >= 0:
-                    self.img_provider_combo.setCurrentIndex(index)
-                    # This triggers on_img_provider_changed
+            try:
+                # Load LLM provider settings
+                if self.current_project.llm_provider:
+                    # Find and set the provider - handle both exact case and legacy lowercase
+                    provider_text = self.current_project.llm_provider
                     
-                    # Set the model
-                    if self.current_project.image_model:
-                        model_index = self.img_model_combo.findText(self.current_project.image_model)
-                        if model_index >= 0:
-                            self.img_model_combo.setCurrentIndex(model_index)
+                    # First try exact match (new format)
+                    if provider_text in ["OpenAI", "Gemini", "Claude", "Ollama", "LM Studio"]:
+                        pass  # Use as-is
+                    # Then handle legacy lowercase format
+                    elif provider_text.lower() == 'openai':
+                        provider_text = 'OpenAI'
+                    elif provider_text.lower() == 'claude':
+                        provider_text = 'Claude'
+                    elif provider_text.lower() == 'gemini':
+                        provider_text = 'Gemini'
+                    elif provider_text.lower() == 'ollama':
+                        provider_text = 'Ollama'
+                    elif provider_text.lower() == 'lm studio':
+                        provider_text = 'LM Studio'
+                    
+                    index = self.llm_provider_combo.findText(provider_text)
+                    if index >= 0:
+                        self.llm_provider_combo.setCurrentIndex(index)
+                        
+                        # Populate the model combo based on provider without clearing
+                        self.llm_model_combo.clear()
+                        if provider_text != "None":
+                            self.llm_model_combo.setEnabled(True)
+                            if provider_text == "OpenAI":
+                                self.llm_model_combo.addItems(["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
+                            elif provider_text == "Claude":
+                                self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
+                            elif provider_text == "Gemini":
+                                self.llm_model_combo.addItems(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"])
+                            elif provider_text == "Ollama":
+                                self.llm_model_combo.addItems(["llama2", "mistral", "mixtral", "phi-2", "neural-chat"])
+                            elif provider_text == "LM Studio":
+                                self.llm_model_combo.addItems(["local-model", "custom-model"])
                         else:
-                            self.logger.warning(f"Image model not found in combo: {self.current_project.image_model}")
+                            self.llm_model_combo.setEnabled(False)
+                        
+                        # Now set the model
+                        if self.current_project.llm_model:
+                            model_index = self.llm_model_combo.findText(self.current_project.llm_model)
+                            if model_index >= 0:
+                                self.llm_model_combo.setCurrentIndex(model_index)
+                                self.logger.info(f"Restored LLM: {provider_text}/{self.current_project.llm_model}")
+                            else:
+                                self.logger.warning(f"LLM model not found in combo: {self.current_project.llm_model}")
+                    else:
+                        self.logger.warning(f"LLM provider not found in combo: {provider_text}")
                 else:
-                    self.logger.warning(f"Image provider not found in combo: {provider_text}")
+                    self.llm_provider_combo.setCurrentIndex(0)  # Set to "None"
+                
+                # Load image provider settings
+                if self.current_project.image_provider:
+                    # Handle both exact case and legacy lowercase
+                    provider_text = self.current_project.image_provider
+                    
+                    # First try exact match (new format)
+                    if provider_text in ["OpenAI", "Gemini", "Stability", "Local SD"]:
+                        pass  # Use as-is
+                    # Then handle legacy lowercase format
+                    elif provider_text.lower() == 'openai':
+                        provider_text = 'OpenAI'
+                    elif provider_text.lower() == 'gemini':
+                        provider_text = 'Gemini'
+                    elif provider_text.lower() == 'stability':
+                        provider_text = 'Stability'
+                    elif provider_text.lower() == 'local sd':
+                        provider_text = 'Local SD'
+                    
+                    index = self.img_provider_combo.findText(provider_text)
+                    if index >= 0:
+                        self.img_provider_combo.setCurrentIndex(index)
+                        
+                        # Populate the model combo based on provider without clearing
+                        self.img_model_combo.clear()
+                        if provider_text == "Gemini":
+                            self.img_model_combo.addItems(["gemini-2.5-flash-image-preview", "gemini-2.5-flash", "gemini-2.5-pro"])
+                        elif provider_text == "OpenAI":
+                            self.img_model_combo.addItems(["dall-e-3", "dall-e-2"])
+                        elif provider_text == "Stability":
+                            self.img_model_combo.addItems(["stable-diffusion-xl-1024-v1-0", "stable-diffusion-v1-6"])
+                        elif provider_text == "Local SD":
+                            self.img_model_combo.addItems(["stabilityai/stable-diffusion-2-1", "runwayml/stable-diffusion-v1-5"])
+                        
+                        # Now set the model
+                        if self.current_project.image_model:
+                            model_index = self.img_model_combo.findText(self.current_project.image_model)
+                            if model_index >= 0:
+                                self.img_model_combo.setCurrentIndex(model_index)
+                                self.logger.info(f"Restored Image: {provider_text}/{self.current_project.image_model}")
+                            else:
+                                self.logger.warning(f"Image model not found in combo: {self.current_project.image_model}")
+                    else:
+                        self.logger.warning(f"Image provider not found in combo: {provider_text}")
+            finally:
+                # Reconnect signals after restoration
+                self.llm_provider_combo.currentTextChanged.connect(self.on_llm_provider_changed)
+                self.img_provider_combo.currentTextChanged.connect(self.on_img_provider_changed)
             
             # Load video provider settings
             if self.current_project.video_provider:
@@ -1535,7 +1658,17 @@ class WorkspaceWidget(QWidget):
                 self.logger.info("Upgrading project format and saving...")
                 self.save_project()
             
+            # Debug: Log combo values AFTER loading
+            self.logger.info("=== AFTER load_project_to_ui ===")
+            self.logger.info(f"LLM combo index: {self.llm_provider_combo.currentIndex()}, text: '{self.llm_provider_combo.currentText()}'")
+            self.logger.info(f"LLM model combo index: {self.llm_model_combo.currentIndex()}, text: '{self.llm_model_combo.currentText()}'")
+            self.logger.info(f"Image combo index: {self.img_provider_combo.currentIndex()}, text: '{self.img_provider_combo.currentText()}'")
+            self.logger.info(f"Image model combo index: {self.img_model_combo.currentIndex()}, text: '{self.img_model_combo.currentText()}'")
+            
         except Exception as e:
             self.logger.error(f"Error loading project to UI: {e}", exc_info=True)
             QMessageBox.warning(self, "Load Error", 
                               f"Some project data could not be loaded.\nCheck logs for details.\nError: {e}")
+        finally:
+            # Clear loading flag to enable auto-save
+            self._loading_project = False
