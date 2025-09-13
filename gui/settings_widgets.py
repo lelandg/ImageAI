@@ -355,6 +355,8 @@ class ResolutionSelector(QWidget):
         self.provider = provider
         self._using_aspect_ratio = True
         self._aspect_ratio = "1:1"
+        self._custom_width = None
+        self._custom_height = None
         self._init_ui()
     
     def _init_ui(self):
@@ -385,12 +387,46 @@ class ResolutionSelector(QWidget):
         mode_layout.addStretch()
         
         layout.addLayout(mode_layout)
-        
+
         # Resolution combo
         self.combo = QComboBox()
+        self.combo.setEditable(True)  # Allow custom input
         self.combo.currentTextChanged.connect(self._on_resolution_changed)
+        if hasattr(self.combo, 'lineEdit'):
+            self.combo.lineEdit().editingFinished.connect(self._on_custom_resolution)
         layout.addWidget(self.combo)
-        
+
+        # Width/Height spinboxes for aspect ratio mode
+        size_layout = QHBoxLayout()
+        size_layout.setSpacing(5)
+
+        self.width_label = QLabel("Width:")
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(512, 4096)
+        self.width_spin.setSingleStep(128)
+        self.width_spin.setValue(1024)
+        self.width_spin.setToolTip("Target width (used with aspect ratio)")
+        self.width_spin.valueChanged.connect(self._on_size_changed)
+
+        self.height_label = QLabel("Height:")
+        self.height_spin = QSpinBox()
+        self.height_spin.setRange(512, 4096)
+        self.height_spin.setSingleStep(128)
+        self.height_spin.setValue(1024)
+        self.height_spin.setToolTip("Target height (used with aspect ratio)")
+        self.height_spin.valueChanged.connect(self._on_size_changed)
+
+        size_layout.addWidget(self.width_label)
+        size_layout.addWidget(self.width_spin)
+        size_layout.addSpacing(10)
+        size_layout.addWidget(self.height_label)
+        size_layout.addWidget(self.height_spin)
+        size_layout.addStretch()
+
+        self.size_widget = QWidget()  # Container for show/hide
+        self.size_widget.setLayout(size_layout)
+        layout.addWidget(self.size_widget)
+
         # Info label
         self.info_label = QLabel()
         self.info_label.setStyleSheet("color: gray; font-size: 10px;")
@@ -453,9 +489,12 @@ class ResolutionSelector(QWidget):
                 background: rgba(76, 175, 80, 0.1);
             }
         """)
+        # Show size controls in aspect ratio mode
+        if hasattr(self, 'size_widget'):
+            self.size_widget.setVisible(True)
         self._update_info_text()
         self.modeChanged.emit("aspect_ratio")
-        
+
         # Set combo to Auto if not already
         if self.combo.currentData() != "auto":
             self.combo.setCurrentIndex(0)
@@ -474,6 +513,9 @@ class ResolutionSelector(QWidget):
                 background: rgba(33, 150, 243, 0.1);
             }
         """)
+        # Hide size controls in resolution mode
+        if hasattr(self, 'size_widget'):
+            self.size_widget.setVisible(False)
         self._update_info_text()
         self.modeChanged.emit("resolution")
     
@@ -484,7 +526,32 @@ class ResolutionSelector(QWidget):
             self._update_info_text()
             # Calculate suggested resolution based on aspect ratio
             self._update_suggested_resolution(ratio)
-    
+
+    def _on_size_changed(self):
+        """Handle width/height change."""
+        if hasattr(self, 'width_spin') and hasattr(self, 'height_spin'):
+            self._custom_width = self.width_spin.value()
+            self._custom_height = self.height_spin.value()
+            self._update_info_text()
+            if self._using_aspect_ratio:
+                self.resolutionChanged.emit("auto")
+
+    def _on_custom_resolution(self):
+        """Handle custom resolution input."""
+        text = self.combo.currentText()
+        # Parse custom resolution like "1920x1080"
+        if 'x' in text.lower() and '×' not in text:
+            parts = text.lower().split('x')
+            try:
+                width = int(parts[0].strip())
+                height = int(parts[1].strip())
+                # Update the text to use ×
+                self.combo.setEditText(f"{width}×{height}")
+                self.set_mode_resolution()
+                self.resolutionChanged.emit(f"{width}x{height}")
+            except (ValueError, IndexError):
+                pass
+
     def _update_suggested_resolution(self, ratio: str):
         """Update the combo text to show suggested resolution from AR."""
         if self._using_aspect_ratio and self.combo.currentData() == "auto":
@@ -555,6 +622,26 @@ class ResolutionSelector(QWidget):
     def is_using_aspect_ratio(self) -> bool:
         """Check if using aspect ratio mode."""
         return self._using_aspect_ratio
+
+    def get_width_height(self) -> Tuple[Optional[int], Optional[int]]:
+        """Get the width and height to use for generation."""
+        if self._using_aspect_ratio:
+            # Return custom width/height if set
+            if hasattr(self, '_custom_width') and hasattr(self, '_custom_height'):
+                return self._custom_width, self._custom_height
+            return None, None
+        else:
+            # Parse resolution from combo
+            resolution = self.get_resolution()
+            if resolution and resolution != "auto":
+                # Parse resolution string
+                if 'x' in resolution:
+                    parts = resolution.split('x')
+                    try:
+                        return int(parts[0]), int(parts[1])
+                    except (ValueError, IndexError):
+                        return None, None
+        return None, None
 
 
 class QualitySelector(QWidget):

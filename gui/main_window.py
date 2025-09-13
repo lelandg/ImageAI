@@ -1,10 +1,13 @@
 """Main window for ImageAI GUI."""
 
 import json
+import logging
 import webbrowser
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 try:
     from PySide6.QtCore import Qt, QThread, Signal, QTimer
@@ -14,7 +17,7 @@ try:
         QLabel, QTextEdit, QPushButton, QComboBox, QLineEdit,
         QFormLayout, QSizePolicy, QMessageBox, QFileDialog,
         QCheckBox, QTextBrowser, QListWidget, QListWidgetItem, QDialog, QSpinBox,
-        QDoubleSpinBox, QGroupBox, QApplication, QSplitter
+        QDoubleSpinBox, QGroupBox, QApplication, QSplitter, QScrollArea
     )
 except ImportError:
     raise ImportError("PySide6 is required for GUI mode")
@@ -134,8 +137,22 @@ class MainWindow(QMainWindow):
     
 
     def _append_to_console(self, message: str, color: str = "#cccccc", is_separator: bool = False):
-        """Append a message to the console with optional color."""
+        """Append a message to the console with optional color and log it."""
         from PySide6.QtGui import QTextCursor
+
+        # Log the message (skip separators)
+        if not is_separator and message:
+            # Determine log level based on color
+            if color == "#ff6666":  # Red - Error
+                logger.error(f"Console: {message}")
+            elif color == "#ffaa00":  # Orange - Warning
+                logger.warning(f"Console: {message}")
+            elif color == "#00ff00":  # Green - Success/Info
+                logger.info(f"Console: {message}")
+            elif color == "#66ccff":  # Blue - Debug/Progress
+                logger.debug(f"Console: {message}")
+            else:  # Default
+                logger.info(f"Console: {message}")
 
         if is_separator:
             # Add a horizontal separator
@@ -417,11 +434,9 @@ class MainWindow(QMainWindow):
             self.aspect_selector.ratioChanged.connect(self._on_aspect_ratio_changed)
             image_settings_layout.addWidget(self.aspect_selector)
             
-            # Configure aspect selector based on current provider
-            if self.current_provider == 'google':
-                self.aspect_selector.set_ratio("1:1")
-                self.aspect_selector.setEnabled(False)
-                self.aspect_selector.setToolTip("Google Gemini currently only supports square (1:1) images")
+            # Aspect ratios are now supported by all providers including Google Gemini
+            self.aspect_selector.setEnabled(True)
+            self.aspect_selector.setToolTip("Select aspect ratio for your image")
         else:
             self.aspect_selector = None
         
@@ -673,10 +688,21 @@ class MainWindow(QMainWindow):
     
     def _init_settings_tab(self):
         """Initialize the Settings tab."""
-        v = QVBoxLayout(self.tab_settings)
-        
-        # Provider selection
-        form = QFormLayout()
+        # Create scroll area for settings
+        scroll = QScrollArea(self.tab_settings)
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget(scroll)
+        scroll_layout = QVBoxLayout(scroll_widget)
+
+        # Main settings layout
+        v = scroll_layout
+
+        # === IMAGE PROVIDERS SECTION ===
+        providers_group = QGroupBox("Image Generation Providers")
+        providers_layout = QVBoxLayout(providers_group)
+
+        # Current provider selection
+        provider_form = QFormLayout()
         self.provider_combo = QComboBox()
         # Get available providers dynamically, with safe fallback
         try:
@@ -696,8 +722,79 @@ class MainWindow(QMainWindow):
             # Save the fallback provider so it persists
             self.config.set("provider", self.current_provider)
             self.config.save()
-        form.addRow("Provider:", self.provider_combo)
-        
+        provider_form.addRow("Active Provider:", self.provider_combo)
+        providers_layout.addLayout(provider_form)
+
+        # === API KEYS SECTION (All providers shown) ===
+        api_keys_group = QGroupBox("API Keys")
+        api_keys_layout = QFormLayout(api_keys_group)
+
+        # Google API Key
+        self.google_key_edit = QLineEdit(self.tab_settings)
+        self.google_key_edit.setEchoMode(QLineEdit.Password)
+        self.google_key_edit.setPlaceholderText("Enter Google API key...")
+        # Try multiple locations for backward compatibility
+        google_api_key = (self.config.get("google_api_key", "") or
+                         self.config.get("api_key", "") or  # Old format
+                         self.config.get_api_key("google"))
+        if google_api_key:
+            self.google_key_edit.setText(google_api_key)
+        api_keys_layout.addRow("Google:", self.google_key_edit)
+
+        # OpenAI API Key
+        self.openai_key_edit = QLineEdit(self.tab_settings)
+        self.openai_key_edit.setEchoMode(QLineEdit.Password)
+        self.openai_key_edit.setPlaceholderText("Enter OpenAI API key...")
+        # Try multiple locations for backward compatibility
+        openai_api_key = (self.config.get("openai_api_key", "") or
+                         self.config.get_api_key("openai"))
+        if openai_api_key:
+            self.openai_key_edit.setText(openai_api_key)
+        api_keys_layout.addRow("OpenAI:", self.openai_key_edit)
+
+        # Stability API Key
+        self.stability_key_edit = QLineEdit(self.tab_settings)
+        self.stability_key_edit.setEchoMode(QLineEdit.Password)
+        self.stability_key_edit.setPlaceholderText("Enter Stability API key...")
+        # Try multiple locations for backward compatibility
+        stability_api_key = (self.config.get("stability_api_key", "") or
+                            self.config.get_api_key("stability"))
+        if stability_api_key:
+            self.stability_key_edit.setText(stability_api_key)
+        api_keys_layout.addRow("Stability:", self.stability_key_edit)
+
+        # Anthropic API Key (for LLM)
+        self.anthropic_key_edit = QLineEdit(self.tab_settings)
+        self.anthropic_key_edit.setEchoMode(QLineEdit.Password)
+        self.anthropic_key_edit.setPlaceholderText("Enter Anthropic API key (for Claude LLM)...")
+        anthropic_api_key = self.config.get("anthropic_api_key", "")
+        if anthropic_api_key:
+            self.anthropic_key_edit.setText(anthropic_api_key)
+        api_keys_layout.addRow("Anthropic:", self.anthropic_key_edit)
+
+        providers_layout.addWidget(api_keys_group)
+
+        # API Key buttons
+        api_buttons = QHBoxLayout()
+        self.btn_get_key = QPushButton("Get API &Keys")
+        self.btn_get_key.setToolTip("Open provider documentation for API keys")
+        self.btn_save_test = QPushButton("&Save && Test")
+        self.btn_save_test.setToolTip("Save all API keys and test current provider")
+        api_buttons.addWidget(self.btn_get_key)
+        api_buttons.addStretch(1)
+        api_buttons.addWidget(self.btn_save_test)
+        providers_layout.addLayout(api_buttons)
+
+        v.addWidget(providers_group)
+
+        # Keep old API key edit reference for compatibility
+        self.api_key_edit = self.google_key_edit  # Default to Google for backward compat
+
+        # === GOOGLE CLOUD AUTH SECTION ===
+        gcloud_group = QGroupBox("Google Cloud Authentication (Alternative)")
+        gcloud_layout = QVBoxLayout(gcloud_group)
+
+        form = QFormLayout()
         # Auth Mode selection (for Google provider)
         self.auth_mode_combo = QComboBox()
         self.auth_mode_combo.addItems(["API Key", "Google Cloud Account"])
@@ -713,7 +810,7 @@ class MainWindow(QMainWindow):
         form.addRow("Auth Mode:", self.auth_mode_combo)
         
         # Google Cloud Project ID (shown for Google Cloud Account mode)
-        self.project_id_edit = QLineEdit()
+        self.project_id_edit = QLineEdit(self.tab_settings)
         self.project_id_edit.setPlaceholderText("Enter project ID or leave blank to detect")
         project_id = self.config.get("gcloud_project_id", "")
         if project_id:
@@ -723,16 +820,13 @@ class MainWindow(QMainWindow):
         # Status field
         self.gcloud_status_label = QLabel("Not checked")
         form.addRow("Status:", self.gcloud_status_label)
+
+        gcloud_layout.addLayout(form)
         
-        v.addLayout(form)
-        
-        # Google Cloud Setup Help (shown for Google Cloud Account mode)
-        self.gcloud_help_widget = QWidget()
-        gcloud_layout = QVBoxLayout(self.gcloud_help_widget)
-        gcloud_layout.setContentsMargins(0, 10, 0, 0)
-        
-        help_label = QLabel("<b>Setup Help:</b>")
-        gcloud_layout.addWidget(help_label)
+        # Google Cloud Setup Help
+        self.gcloud_help_widget = QWidget(self.tab_settings)
+        gcloud_help_layout = QVBoxLayout(self.gcloud_help_widget)
+        gcloud_help_layout.setContentsMargins(0, 10, 0, 0)
         
         quick_setup = QLabel("""<b>Quick Setup:</b>
 1. Install Google Cloud CLI
@@ -740,7 +834,7 @@ class MainWindow(QMainWindow):
 3. Click 'Check Status' below""")
         quick_setup.setWordWrap(True)
         quick_setup.setStyleSheet("QLabel { padding: 10px; background-color: #f5f5f5; }")
-        gcloud_layout.addWidget(quick_setup)
+        gcloud_help_layout.addWidget(quick_setup)
         
         # Google Cloud buttons
         gcloud_buttons = QHBoxLayout()
@@ -754,55 +848,42 @@ class MainWindow(QMainWindow):
         gcloud_buttons.addWidget(self.btn_check_status)
         gcloud_buttons.addWidget(self.btn_get_gcloud)
         gcloud_buttons.addWidget(self.btn_cloud_console)
-        gcloud_layout.addLayout(gcloud_buttons)
+        gcloud_help_layout.addLayout(gcloud_buttons)
+
+        gcloud_layout.addWidget(self.gcloud_help_widget)
+        v.addWidget(gcloud_group)
         
-        v.addWidget(self.gcloud_help_widget)
+        # Create placeholder for backward compatibility
+        self.api_key_widget = QWidget(self.tab_settings)
+        self.api_key_widget.setVisible(False)
         
-        # API key section (hidden for Local SD and Google Cloud Account)
-        self.api_key_widget = QWidget()
-        api_key_layout = QVBoxLayout(self.api_key_widget)
-        api_key_layout.setContentsMargins(0, 0, 0, 0)
-        
-        api_key_form = QFormLayout()
-        self.api_key_edit = QLineEdit()
-        self.api_key_edit.setEchoMode(QLineEdit.Password)
-        
-        # Set placeholder and enabled state based on provider
-        if self.current_provider == "local_sd":
-            self.api_key_edit.setPlaceholderText("No API key needed for Local SD")
-            self.api_key_edit.setEnabled(False)
-        else:
-            self.api_key_edit.setPlaceholderText("Enter API key...")
-            self.api_key_edit.setEnabled(True)
-            
-        if self.current_api_key:
-            self.api_key_edit.setText(self.current_api_key)
-        api_key_form.addRow("API Key:", self.api_key_edit)
-        api_key_layout.addLayout(api_key_form)
-        
-        # Buttons
-        hb = QHBoxLayout()
-        self.btn_get_key = QPushButton("Get API &Key")  # Alt+K
-        self.btn_save_test = QPushButton("&Test Connection")  # Alt+T
-        hb.addWidget(self.btn_get_key)
-        hb.addStretch(1)
-        hb.addWidget(self.btn_save_test)
-        api_key_layout.addLayout(hb)
-        
-        v.addWidget(self.api_key_widget)
-        
-        # Config storage location info (visible when using API Key mode)
-        self.config_location_widget = QWidget()
-        config_layout = QVBoxLayout(self.config_location_widget)
-        config_layout.setContentsMargins(0, 10, 0, 0)
-        
+        # === GENERAL OPTIONS ===
+        options_group = QGroupBox("Options")
+        options_layout = QVBoxLayout(options_group)
+
+        # LLM logging option
+        self.chk_log_llm = QCheckBox("Log LLM prompts and responses (for debugging)")
+        self.chk_log_llm.setChecked(self.config.get("log_llm_interactions", False))
+        self.chk_log_llm.toggled.connect(lambda checked: self.config.set("log_llm_interactions", checked))
+        options_layout.addWidget(self.chk_log_llm)
+
+        # Auto-copy filename option
+        self.chk_auto_copy = QCheckBox("Auto-copy saved filename to clipboard")
+        self.chk_auto_copy.setChecked(self.auto_copy_filename)
+        options_layout.addWidget(self.chk_auto_copy)
+
+        # Config location info
         config_path = str(self.config.config_path)
-        self.config_location_label = QLabel(f"Stored at: {config_path}")
-        self.config_location_label.setWordWrap(True)
-        self.config_location_label.setStyleSheet("color: gray; font-size: 10pt;")
-        config_layout.addWidget(self.config_location_label)
-        
-        v.addWidget(self.config_location_widget)
+        config_label = QLabel(f"Config stored at: {config_path}")
+        config_label.setWordWrap(True)
+        config_label.setStyleSheet("color: gray; font-size: 10pt;")
+        options_layout.addWidget(config_label)
+
+        v.addWidget(options_group)
+
+        # Create placeholder for backward compatibility
+        self.config_location_widget = QWidget(self.tab_settings)
+        self.config_location_widget.setVisible(False)
         
         # Update visibility based on auth mode
         self._update_auth_visibility()
@@ -819,22 +900,28 @@ class MainWindow(QMainWindow):
                     self.project_id_edit.setText("")
                 self.gcloud_status_label.setStyleSheet("color: green;")
         
-        # Local SD model management widget (initially hidden)
+        # Local SD model management widget
         if LocalSDWidget:
+            local_sd_group = QGroupBox("Local Stable Diffusion")
+            local_sd_layout = QVBoxLayout(local_sd_group)
             self.local_sd_widget = LocalSDWidget()
             self.local_sd_widget.models_changed.connect(self._update_model_list)
-            v.addWidget(self.local_sd_widget)
+            local_sd_layout.addWidget(self.local_sd_widget)
+            v.addWidget(local_sd_group)
             # Show/hide based on provider
-            self.local_sd_widget.setVisible(self.current_provider == "local_sd")
+            local_sd_group.setVisible(self.current_provider == "local_sd")
         else:
             self.local_sd_widget = None
-        
-        # Options
-        self.chk_auto_copy = QCheckBox("Auto-copy saved filename to clipboard")
-        self.chk_auto_copy.setChecked(self.auto_copy_filename)
-        v.addWidget(self.chk_auto_copy)
-        
+
         v.addStretch(1)
+
+        # Set scroll widget
+        scroll.setWidget(scroll_widget)
+
+        # Add scroll area to tab
+        tab_layout = QVBoxLayout(self.tab_settings)
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.addWidget(scroll)
         
         # Connect signals
         self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
@@ -2183,17 +2270,10 @@ For more detailed information, please refer to the full documentation.
         if hasattr(self, 'advanced_panel') and self.advanced_panel:
             self.advanced_panel.update_provider(self.current_provider)
 
-        # Handle aspect ratio selector for Google (only supports square images)
+        # All providers now support aspect ratios including Google Gemini
         if hasattr(self, 'aspect_selector') and self.aspect_selector:
-            if self.current_provider == 'google':
-                # Google Gemini only supports square images
-                self.aspect_selector.set_ratio("1:1")
-                self.aspect_selector.setEnabled(False)
-                self.aspect_selector.setToolTip("Google Gemini currently only supports square (1:1) images")
-            else:
-                # Other providers support multiple aspect ratios
-                self.aspect_selector.setEnabled(True)
-                self.aspect_selector.setToolTip("")
+            self.aspect_selector.setEnabled(True)
+            self.aspect_selector.setToolTip("Aspect ratio is preserved across provider changes")
 
         # Update model list for new provider
         self._update_model_list()
@@ -2201,16 +2281,35 @@ For more detailed information, please refer to the full documentation.
         # Update cost estimate
         self._update_cost_estimate()
         
-        # Update API key field
-        self.current_api_key = self.config.get_api_key(self.current_provider)
-        self.api_key_edit.setText(self.current_api_key or "")
+        # Update API key field reference based on provider
+        if self.current_provider == "google":
+            self.api_key_edit = self.google_key_edit
+            self.current_api_key = self.google_key_edit.text().strip()
+        elif self.current_provider == "openai":
+            self.api_key_edit = self.openai_key_edit
+            self.current_api_key = self.openai_key_edit.text().strip()
+        elif self.current_provider == "stability":
+            self.api_key_edit = self.stability_key_edit
+            self.current_api_key = self.stability_key_edit.text().strip()
+        else:
+            # For unknown providers or local_sd
+            if not hasattr(self, '_dummy_key_edit'):
+                self._dummy_key_edit = QLineEdit(self)  # Add parent to prevent popup
+                self._dummy_key_edit.setVisible(False)
+            self.api_key_edit = self._dummy_key_edit
+            self.current_api_key = self.config.get_api_key(self.current_provider) or ""
         
         # Update auth visibility
         self._update_auth_visibility()
         
         # Update Local SD widget visibility
         if hasattr(self, 'local_sd_widget') and self.local_sd_widget:
-            self.local_sd_widget.setVisible(self.current_provider == "local_sd")
+            # Get the parent group box if it exists
+            parent = self.local_sd_widget.parent()
+            if parent and isinstance(parent, QGroupBox):
+                parent.setVisible(self.current_provider == "local_sd")
+            else:
+                self.local_sd_widget.setVisible(self.current_provider == "local_sd")
     
     def _on_aspect_ratio_changed(self, ratio: str):
         """Handle aspect ratio change."""
@@ -2567,47 +2666,218 @@ For more detailed information, please refer to the full documentation.
         llm_model = self.llm_model_combo.currentText()
 
         self._append_to_console(f"Using LLM: {llm_provider}/{llm_model}", "#66ccff")  # Blue
-        self._append_to_console(f"Original prompt: {current_prompt[:50]}...", "#888888")  # Gray
+        self._append_to_console(f"Original prompt: {current_prompt}", "#888888")  # Gray
 
-        # Create enhanced prompt dialog
-        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QTextEdit, QDialogButtonBox, QProgressBar
+        # Show enhancement options dialog first
+        from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                                       QTextEdit, QDialogButtonBox, QProgressBar,
+                                       QComboBox, QPushButton, QGroupBox)
         from PySide6.QtCore import QThread, Signal
+        from core.prompt_enhancer import EnhancementLevel
+
+        # Create enhancement options dialog
+        options_dlg = QDialog(self)
+        options_dlg.setWindowTitle("Enhancement Options")
+        options_dlg.setModal(True)
+        options_dlg.setMinimumWidth(400)
+
+        layout = QVBoxLayout(options_dlg)
+
+        # Enhancement level
+        level_group = QGroupBox("Enhancement Level")
+        level_layout = QVBoxLayout(level_group)
+
+        level_combo = QComboBox()
+        level_combo.addItems(["Low - Minimal changes",
+                            "Medium - Moderate enhancement",
+                            "High - Maximum detail"])
+        level_combo.setCurrentIndex(1)  # Default to medium
+        level_layout.addWidget(level_combo)
+        layout.addWidget(level_group)
+
+        # Style preset
+        style_group = QGroupBox("Style Preset (Optional)")
+        style_layout = QVBoxLayout(style_group)
+
+        style_combo = QComboBox()
+        style_combo.addItems(["None",
+                            "Cinematic Photoreal",
+                            "Watercolor Illustration",
+                            "Pixel Art (8-bit)",
+                            "Studio Portrait"])
+        style_combo.setCurrentIndex(0)
+        style_layout.addWidget(style_combo)
+        layout.addWidget(style_group)
+
+        # Aspect ratio
+        ar_group = QGroupBox("Aspect Ratio")
+        ar_layout = QVBoxLayout(ar_group)
+
+        ar_combo = QComboBox()
+        ar_combo.addItems(["Default", "1:1", "16:9", "9:16", "4:3", "3:2", "21:9"])
+        ar_combo.setCurrentIndex(0)
+        ar_layout.addWidget(ar_combo)
+        layout.addWidget(ar_group)
+
+        # Dialog buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(options_dlg.accept)
+        button_box.rejected.connect(options_dlg.reject)
+        layout.addWidget(button_box)
+
+        if options_dlg.exec() != QDialog.Accepted:
+            return
+
+        # Get selected options
+        enhancement_level = [EnhancementLevel.LOW, EnhancementLevel.MEDIUM,
+                            EnhancementLevel.HIGH][level_combo.currentIndex()]
+
+        style_preset_map = {
+            "None": None,
+            "Cinematic Photoreal": "cinematic-photoreal",
+            "Watercolor Illustration": "illustrated-watercolor",
+            "Pixel Art (8-bit)": "pixel-art",
+            "Studio Portrait": "studio-portrait"
+        }
+        style_preset = style_preset_map[style_combo.currentText()]
+
+        aspect_ratio = ar_combo.currentText() if ar_combo.currentIndex() > 0 else None
 
         class EnhanceThread(QThread):
             finished_signal = Signal(str)
             error_signal = Signal(str)
 
-            def __init__(self, prompt, provider, model, config):
+            def __init__(self, prompt, provider, model, config, enhancement_level, style_preset, aspect_ratio):
                 super().__init__()
                 self.prompt = prompt
                 self.provider = provider
                 self.model = model
                 self.config = config
+                self.enhancement_level = enhancement_level
+                self.style_preset = style_preset
+                self.aspect_ratio = aspect_ratio
 
             def run(self):
-                try:
-                    # Import the prompt engine
-                    from core.video.prompt_engine import UnifiedLLMProvider
+                import logging
+                logger = logging.getLogger(__name__)
 
-                    # Get API keys from config
-                    api_config = {
-                        'openai_api_key': self.config.get('openai_api_key'),
-                        'anthropic_api_key': self.config.get('anthropic_api_key'),
-                        'google_api_key': self.config.get('google_api_key'),
+                try:
+                    # Import the prompt enhancer and LLM provider
+                    from core.video.prompt_engine import UnifiedLLMProvider
+                    from core.prompt_enhancer_llm import PromptEnhancerLLM
+
+                    logger.info(f"Starting prompt enhancement with LLM provider: {self.provider}, model: {self.model}")
+                    logger.info(f"Enhancement level: {self.enhancement_level}, Style: {self.style_preset}, AR: {self.aspect_ratio}")
+                    logger.info(f"Original prompt: {self.prompt}")
+
+                    # Get API keys from config - check both locations for backward compatibility
+                    api_config = {}
+
+                    # Try to get OpenAI key from both locations
+                    openai_key = None
+                    if 'providers' in self.config and 'openai' in self.config['providers']:
+                        openai_key = self.config['providers']['openai'].get('api_key')
+                    if not openai_key:
+                        openai_key = self.config.get('openai_api_key')
+                    if openai_key:
+                        api_config['openai_api_key'] = openai_key
+
+                    # Try to get Anthropic key
+                    anthropic_key = None
+                    if 'providers' in self.config and 'anthropic' in self.config['providers']:
+                        anthropic_key = self.config['providers']['anthropic'].get('api_key')
+                    if not anthropic_key:
+                        anthropic_key = self.config.get('anthropic_api_key')
+                    if anthropic_key:
+                        api_config['anthropic_api_key'] = anthropic_key
+
+                    # Try to get Google key from both locations
+                    google_key = None
+                    if 'providers' in self.config and 'google' in self.config['providers']:
+                        google_key = self.config['providers']['google'].get('api_key')
+                    if not google_key:
+                        google_key = self.config.get('google_api_key')
+                    if google_key:
+                        api_config['google_api_key'] = google_key
+
+                    logger.debug(f"API keys configured: OpenAI={bool(openai_key)}, Anthropic={bool(anthropic_key)}, Google={bool(google_key)}")
+                    logger.debug(f"api_config keys: {list(api_config.keys())}")
+
+                    # Check if the selected LLM provider has an API key
+                    provider_key_map = {
+                        'openai': 'openai_api_key',
+                        'anthropic': 'anthropic_api_key',
+                        'google': 'google_api_key',
+                        'gemini': 'google_api_key'
                     }
 
-                    llm = UnifiedLLMProvider(api_config)
+                    required_key = provider_key_map.get(self.provider.lower())
+                    if required_key and required_key not in api_config:
+                        error_msg = f"No API key configured for {self.provider}. Please add your API key in Settings."
+                        logger.error(error_msg)
+                        self.error_signal.emit(error_msg)
+                        return
 
-                    # Enhance the prompt
-                    enhanced = llm.enhance_prompt(
-                        self.prompt,
-                        provider=self.provider,
-                        model=self.model,
-                        style="Photorealistic"  # Default style for image generation
+                    llm = UnifiedLLMProvider(api_config)
+                    enhancer = PromptEnhancerLLM(llm)
+
+                    # Get the image provider (not LLM provider) from config
+                    image_provider = self.config.get('provider', 'google').lower()
+                    logger.info(f"Target image provider: {image_provider}")
+
+                    # Enhance the prompt using GPT-5 methodology
+                    logger.info("Calling enhance_with_llm...")
+                    enhanced_data = enhancer.enhance_with_llm(
+                        prompt=self.prompt,
+                        provider=image_provider,  # Target image provider
+                        model=self.model,  # LLM model
+                        enhancement_level=self.enhancement_level,
+                        aspect_ratio=self.aspect_ratio,
+                        style_preset=self.style_preset,
+                        num_variants=0,  # No variants for now
+                        llm_provider=self.provider  # LLM provider for the call
                     )
-                    self.finished_signal.emit(enhanced)
+
+                    logger.info(f"Enhanced data type: {type(enhanced_data)}")
+                    logger.debug(f"Enhanced data: {enhanced_data}")
+
+                    # Extract the appropriate prompt for the image provider
+                    logger.info("Extracting enhanced prompt for provider...")
+                    enhanced_prompt = enhancer.get_enhanced_prompt_for_provider(
+                        enhanced_data, image_provider
+                    )
+
+                    logger.info(f"Enhanced prompt type: {type(enhanced_prompt)}")
+                    if enhanced_prompt and isinstance(enhanced_prompt, str):
+                        logger.info(f"Enhanced prompt: {enhanced_prompt}")
+                        self.finished_signal.emit(enhanced_prompt)
+                    elif enhanced_prompt:
+                        # Try to convert to string if it's not None
+                        logger.warning(f"Enhanced prompt is not a string, attempting conversion from {type(enhanced_prompt)}")
+                        try:
+                            enhanced_str = str(enhanced_prompt)
+                            logger.info(f"Converted to string: {enhanced_str}")
+                            self.finished_signal.emit(enhanced_str)
+                        except Exception as conv_err:
+                            logger.error(f"Failed to convert enhanced prompt to string: {conv_err}")
+                            self.error_signal.emit("Failed to convert enhanced prompt to string")
+                    else:
+                        logger.error("Enhanced prompt is None or empty")
+                        self.error_signal.emit("No enhanced prompt was generated")
+                except TypeError as e:
+                    # Handle NoneType errors specifically
+                    logger.error(f"TypeError in enhancement: {e}", exc_info=True)
+                    error_msg = "Enhancement failed due to type error"
+                    if "NoneType" in str(e) and "os.environ" in str(e):
+                        error_msg = "Enhancement failed - API key configuration error. Please check your API keys in Settings."
+                    elif "NoneType" in str(e):
+                        error_msg = "Enhancement failed - received invalid response from LLM"
+                    self.error_signal.emit(error_msg)
                 except Exception as e:
-                    self.error_signal.emit(str(e))
+                    logger.error(f"Enhancement failed with exception: {e}", exc_info=True)
+                    # Ensure we always have a valid error message
+                    error_msg = str(e) if e else "Unknown error during enhancement"
+                    self.error_signal.emit(error_msg)
 
         # Create progress dialog
         progress_dialog = QDialog(self)
@@ -2623,12 +2893,23 @@ For more detailed information, please refer to the full documentation.
         layout.addWidget(progress_bar)
 
         # Start enhancement thread
-        enhance_thread = EnhanceThread(current_prompt, llm_provider, llm_model, self.config.config)
+        enhance_thread = EnhanceThread(current_prompt, llm_provider, llm_model, self.config.config,
+                                      enhancement_level, style_preset, aspect_ratio)
 
         def on_enhancement_finished(enhanced_prompt):
             progress_dialog.close()
+
+            # Ensure enhanced_prompt is a valid string
+            if not enhanced_prompt or not isinstance(enhanced_prompt, str):
+                self._append_to_console("ERROR: No enhanced prompt generated or invalid type", "#ff6666")  # Red
+                QMessageBox.warning(self, "Enhancement Failed", "Failed to generate an enhanced prompt.")
+                return
+
+            # Convert to string just to be safe
+            enhanced_prompt = str(enhanced_prompt)
+
             self._append_to_console("Enhancement complete!", "#00ff00")  # Green
-            self._append_to_console(f"Enhanced: {enhanced_prompt[:100]}...", "#ffff66")  # Yellow
+            self._append_to_console(f"Enhanced prompt: {enhanced_prompt}", "#ffff66")  # Yellow
 
             # Show enhanced prompt dialog
             dlg = QDialog(self)
@@ -2707,7 +2988,7 @@ For more detailed information, please refer to the full documentation.
 
         # Log generation details
         self._append_to_console(f"Provider: {self.current_provider}", "#66ccff")  # Blue
-        self._append_to_console(f"Prompt: {prompt[:100]}...", "#888888")  # Gray
+        self._append_to_console(f"Prompt: {prompt}", "#888888")  # Gray
 
         # Disable/reset buttons
         self.btn_generate.setEnabled(False)
@@ -2734,19 +3015,33 @@ For more detailed information, please refer to the full documentation.
                 if hasattr(self, 'aspect_selector') and self.aspect_selector:
                     aspect_ratio = self.aspect_selector.get_ratio()
                     kwargs['aspect_ratio'] = aspect_ratio
-                    # Also send calculated resolution for providers that need it
+                    # Get custom width/height if specified
+                    if hasattr(self.resolution_selector, 'get_width_height'):
+                        width, height = self.resolution_selector.get_width_height()
+                        if width:
+                            kwargs['width'] = width
+                        if height:
+                            kwargs['height'] = height
+                    else:
+                        # Fallback to calculated resolution
+                        resolution = self.resolution_selector.get_resolution()
+                        if resolution and 'x' in resolution:
+                            width, height = map(int, resolution.split('x'))
+                            kwargs['width'] = width
+                            kwargs['height'] = height
+            else:
+                # Using explicit resolution mode - only send resolution
+                if hasattr(self.resolution_selector, 'get_width_height'):
+                    width, height = self.resolution_selector.get_width_height()
+                    if width and height:
+                        kwargs['width'] = width
+                        kwargs['height'] = height
+                else:
                     resolution = self.resolution_selector.get_resolution()
                     if resolution and 'x' in resolution:
                         width, height = map(int, resolution.split('x'))
                         kwargs['width'] = width
                         kwargs['height'] = height
-            else:
-                # Using explicit resolution mode - only send resolution
-                resolution = self.resolution_selector.get_resolution()
-                if resolution and 'x' in resolution:
-                    width, height = map(int, resolution.split('x'))
-                    kwargs['width'] = width
-                    kwargs['height'] = height
                 # Don't send aspect_ratio when using explicit resolution
         elif hasattr(self, 'resolution_combo'):
             # Fallback to old resolution combo
@@ -2959,12 +3254,29 @@ For more detailed information, please refer to the full documentation.
     def _display_image(self, image_data: bytes):
         """Display image in the output label."""
         try:
+            # TODO: Re-enable auto-crop after fixing the algorithm
+            # Currently disabled as it's cropping incorrectly
+            # # Apply auto-crop for Nano Banana images if available
+            # try:
+            #     from core.image_utils import auto_crop_solid_borders
+            #     # Only auto-crop for Google provider (Nano Banana)
+            #     if hasattr(self, 'current_provider') and self.current_provider == 'google':
+            #         image_data = auto_crop_solid_borders(image_data)
+            # except ImportError:
+            #     pass  # image_utils not available, skip auto-crop
+
             pixmap = QPixmap()
             pixmap.loadFromData(image_data)
-            
+
             # Get the label's current size
             label_size = self.output_image_label.size()
-            
+
+            # Ensure we have valid dimensions
+            if label_size.width() <= 0 or label_size.height() <= 0:
+                # Label not ready yet, schedule retry
+                QTimer.singleShot(50, lambda: self._display_image(image_data))
+                return
+
             # Scale to fit the label completely while maintaining aspect ratio
             # Use the full available space
             scaled = pixmap.scaled(
@@ -2974,18 +3286,20 @@ For more detailed information, please refer to the full documentation.
                 Qt.SmoothTransformation
             )
             self.output_image_label.setPixmap(scaled)
-            
+
             # Store the original pixmap for potential resizing
             self.output_image_label.setProperty("original_pixmap", pixmap)
-            
+
             # Update current image data
             self.current_image_data = image_data
 
             # After layout settles, ensure the image scales to the final size
-            try:
-                QTimer.singleShot(120, self._perform_image_resize)
-            except Exception:
-                pass
+            # Schedule multiple resize attempts to handle various layout timing
+            for delay in [50, 100, 200, 500]:
+                try:
+                    QTimer.singleShot(delay, self._perform_image_resize)
+                except Exception:
+                    pass
         except Exception as e:
             self.output_image_label.setText(f"Error displaying image: {e}")
     
@@ -3317,10 +3631,12 @@ For more detailed information, please refer to the full documentation.
     def showEvent(self, event):
         """Ensure initial image scales when the window first shows."""
         super().showEvent(event)
-        try:
-            QTimer.singleShot(150, self._perform_image_resize)
-        except Exception:
-            pass
+        # Schedule multiple resize attempts to handle different layout timings
+        for delay in [50, 100, 200, 350, 500]:
+            try:
+                QTimer.singleShot(delay, self._perform_image_resize)
+            except Exception:
+                pass
     
     def _perform_image_resize(self):
         """Actually perform the image resize after debounce."""
@@ -3490,30 +3806,49 @@ For more detailed information, please refer to the full documentation.
                     try:
                         # Read and display the image
                         image_data = path.read_bytes()
-                        self.current_image_data = image_data
                         self._last_displayed_image_path = path  # Track last displayed image
-                        
+
+                        # TODO: Re-enable auto-crop after fixing the algorithm
+                        # Currently disabled as it's cropping incorrectly
+                        # # Apply auto-crop for Google provider images if available
+                        # provider = history_item.get('provider', '')
+                        # if provider == 'google':
+                        #     try:
+                        #         from core.image_utils import auto_crop_solid_borders
+                        #         image_data = auto_crop_solid_borders(image_data)
+                        #     except ImportError:
+                        #         pass  # image_utils not available, skip auto-crop
+
+                        self.current_image_data = image_data
+
                         # Display in output label
                         pixmap = QPixmap()
                         if pixmap.loadFromData(image_data):
-                            # Scale to fit the label while maintaining aspect ratio
-                            # Use the label's current size for better fit
+                            # Get the label's current size
                             label_size = self.output_image_label.size()
-                            scaled = pixmap.scaled(
-                                label_size.width() - 4,  # Account for border
-                                label_size.height() - 4,  # Account for border
-                                Qt.KeepAspectRatio,
-                                Qt.SmoothTransformation
-                            )
-                            self.output_image_label.setPixmap(scaled)
-                            
-                            # Store the original pixmap for resizing
-                            self.output_image_label.setProperty("original_pixmap", pixmap)
-                            # Ensure scaling after layout completes
-                            try:
-                                QTimer.singleShot(120, self._perform_image_resize)
-                            except Exception:
-                                pass
+
+                            # Ensure we have valid dimensions
+                            if label_size.width() <= 0 or label_size.height() <= 0:
+                                # Label not ready yet, use _display_image which handles this
+                                self._display_image(image_data)
+                            else:
+                                # Scale to fit the label while maintaining aspect ratio
+                                scaled = pixmap.scaled(
+                                    label_size.width() - 4,  # Account for border
+                                    label_size.height() - 4,  # Account for border
+                                    Qt.KeepAspectRatio,
+                                    Qt.SmoothTransformation
+                                )
+                                self.output_image_label.setPixmap(scaled)
+
+                                # Store the original pixmap for resizing
+                                self.output_image_label.setProperty("original_pixmap", pixmap)
+                                # Ensure scaling after layout completes
+                                for delay in [50, 100, 200, 500]:
+                                    try:
+                                        QTimer.singleShot(delay, self._perform_image_resize)
+                                    except Exception:
+                                        pass
                         
                         # Enable save and copy buttons since we have an image
                         self.btn_save_image.setEnabled(True)

@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.12.0**
+**Version 0.13.0**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -1400,7 +1400,31 @@ ImageAI/
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
-### Latest Release: v0.12.0 (2025-01-13)
+### Latest Release: v0.13.0 (2025-01-13)
+
+**Enhanced Settings UI, Full Prompt Logging & Improved Google Provider**
+- **Reorganized Settings Tab**: All provider API keys now visible simultaneously
+  - Dedicated sections for Image Providers, API Keys, and Google Cloud Auth
+  - Scrollable interface for better organization on smaller screens
+  - Single "Save & Test" button saves all keys and tests current provider
+  - No more switching between providers to see different API keys
+- **Enhanced Prompt Features**:
+  - Full prompts now displayed in console and logs (no truncation)
+  - Fixed prompt enhancement NoneType errors with better error handling
+  - Added LLM logging option in settings for debugging LLM interactions
+  - All LLM requests/responses can be logged when option is enabled
+- **Google Provider Improvements**:
+  - Added width/height specification support with aspect ratios
+  - Intelligent resolution hints in prompts for higher quality output
+  - Fixed auto-crop algorithm for aspect ratio handling (currently disabled)
+  - Better handling of custom dimensions with aspect ratio preservation
+- **Bug Fixes**:
+  - Fixed empty window popup on startup (parent widget issues)
+  - Fixed backward compatibility with old API key storage format
+  - Improved error handling for missing or None enhanced prompts
+  - Better fallback handling when LLM enhancement fails
+
+### Previous Release: v0.12.0 (2025-01-13)
 
 **Social Media Image Sizes, Keyboard Shortcuts, Gemini Aspect Ratios & Bug Fixes**
 - **Social Media Sizes Dialog**: New dialog for quick access to platform-specific image dimensions

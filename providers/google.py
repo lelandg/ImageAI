@@ -26,6 +26,16 @@ try:
 except ImportError:
     from core.security import rate_limiter
 
+# Import image utilities
+try:
+    from ..core.image_utils import auto_crop_solid_borders
+except ImportError:
+    try:
+        from core.image_utils import auto_crop_solid_borders
+    except ImportError:
+        # Fallback if image_utils doesn't exist yet
+        auto_crop_solid_borders = None
+
 
 # Check if Google Cloud is available but don't import yet
 try:
@@ -219,34 +229,66 @@ class GoogleProvider(ImageProvider):
         # Note: Gemini 2.5 Flash (Nano Banana) supports aspect ratios via prompt specification
         # While the API doesn't have direct aspect ratio parameters, specifying it in the prompt works
         config = {}
-        
+
         # Add aspect ratio to prompt for Gemini (Nano Banana) support
         # According to the Nano Banana guide, we should specify the aspect ratio in the prompt
-        aspect_ratio = kwargs.get('aspect_ratio', '1:1')
-        width = kwargs.get('width', 1024)
-        height = kwargs.get('height', 1024)
+        aspect_ratio = kwargs.get('aspect_ratio')
+        width = kwargs.get('width')
+        height = kwargs.get('height')
 
-        # Calculate aspect ratio from dimensions if not provided
-        if width and height and width != height:
-            # Determine the actual aspect ratio from dimensions
-            ratio = width / height
-            if abs(ratio - 16/9) < 0.1:
-                aspect_ratio = '16:9'
-            elif abs(ratio - 9/16) < 0.1:
-                aspect_ratio = '9:16'
-            elif abs(ratio - 4/3) < 0.1:
-                aspect_ratio = '4:3'
-            elif abs(ratio - 3/4) < 0.1:
-                aspect_ratio = '3:4'
-            elif abs(ratio - 21/9) < 0.1:
-                aspect_ratio = '21:9'
-            elif abs(ratio - 1.0) < 0.1:
-                aspect_ratio = '1:1'
+        # If width or height are specified without aspect ratio, calculate it
+        if (width or height) and not aspect_ratio:
+            # Default to 1024 for missing dimension
+            if width and not height:
+                height = 1024
+            elif height and not width:
+                width = 1024
 
-        # Add aspect ratio specification to prompt as recommended in Nano Banana guide
+            # Now calculate aspect ratio from dimensions
+            if width and height:
+                ratio = width / height
+                if abs(ratio - 16/9) < 0.1:
+                    aspect_ratio = '16:9'
+                elif abs(ratio - 9/16) < 0.1:
+                    aspect_ratio = '9:16'
+                elif abs(ratio - 4/3) < 0.1:
+                    aspect_ratio = '4:3'
+                elif abs(ratio - 3/4) < 0.1:
+                    aspect_ratio = '3:4'
+                elif abs(ratio - 21/9) < 0.1:
+                    aspect_ratio = '21:9'
+                elif abs(ratio - 1.0) < 0.1:
+                    aspect_ratio = '1:1'
+
+        # Default aspect ratio if none specified
+        if not aspect_ratio:
+            aspect_ratio = '1:1'
+
+        # Gemini outputs 1024x1024 by default
+        # When using aspect ratios, we need to specify desired quality/size in prompt
+        # Calculate target resolution hint for the prompt
+        resolution_hint = ""
+        if width or height:
+            # If width or height specified, use them to hint at resolution
+            target_size = max(width or 1024, height or 1024)
+            if target_size > 1536:
+                resolution_hint = "high resolution, 4K quality"
+            elif target_size > 1024:
+                resolution_hint = "high quality, detailed"
+            else:
+                resolution_hint = "crisp and clear"
+
+        # Add aspect ratio and resolution specification to prompt as recommended in Nano Banana guide
+        prompt_additions = []
         if aspect_ratio and aspect_ratio != '1:1':
             # Add explicit format request as per the guide
-            prompt = f"{prompt}. The image should be in a {aspect_ratio} format."
+            prompt_additions.append(f"The image should be in a {aspect_ratio} format")
+
+        if resolution_hint:
+            prompt_additions.append(resolution_hint)
+
+        if prompt_additions:
+            prompt = f"{prompt}. {'. '.join(prompt_additions)}."
         
         # Note: These generation_config parameters may not be supported by all Gemini models
         # Most are placeholders for potential future support
@@ -289,7 +331,10 @@ class GoogleProvider(ImageProvider):
                             elif getattr(part, "inline_data", None) is not None:
                                 data = getattr(part.inline_data, "data", None)
                                 if isinstance(data, (bytes, bytearray)):
-                                    images.append(bytes(data))
+                                    image_bytes = bytes(data)
+                                    # Disabled auto-crop as it's not working correctly
+                                    # Gemini adds padding but cropping algorithm needs more work
+                                    images.append(image_bytes)
         except Exception as e:
             # Fallback to basic generation if advanced config fails
             try:
@@ -307,7 +352,10 @@ class GoogleProvider(ImageProvider):
                             elif getattr(part, "inline_data", None) is not None:
                                 data = getattr(part.inline_data, "data", None)
                                 if isinstance(data, (bytes, bytearray)):
-                                    images.append(bytes(data))
+                                    image_bytes = bytes(data)
+                                    # Disabled auto-crop as it's not working correctly
+                                    # Gemini adds padding but cropping algorithm needs more work
+                                    images.append(image_bytes)
             except Exception as e2:
                 raise RuntimeError(f"Google generation failed: {e2}")
         

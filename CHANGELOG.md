@@ -5,6 +5,44 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2025-01-13
+
+### Added
+- **Reorganized Settings Tab** - All provider API keys now visible simultaneously
+  - Dedicated sections for Image Providers, API Keys, and Google Cloud Auth
+  - Scrollable interface for better organization on smaller screens
+  - Single "Save & Test" button saves all keys and tests current provider
+- **LLM Logging Option** - New checkbox in settings to enable LLM interaction logging
+  - Logs all LLM prompts and responses when enabled
+  - Useful for debugging prompt enhancement issues
+- **Width/Height Specification** - Custom width/height input when using aspect ratios
+  - Target Width and Target Height spinboxes in resolution selector
+  - Works alongside aspect ratio selection for finer control
+  - Google provider uses dimensions to add resolution hints to prompts
+
+### Changed
+- **Full Prompt Display** - Prompts no longer truncated in console and logs
+  - Complete prompts shown in status window
+  - Full prompt text logged for debugging
+- **Settings Layout** - Improved organization with grouped sections
+  - All API keys visible at once (no provider switching needed)
+  - Better visual hierarchy with QGroupBox sections
+  - Consistent layout across all providers
+
+### Fixed
+- **Empty Window Popup** - Fixed parent widget issues causing empty window on startup
+  - All QWidget and QLineEdit instances now have proper parents
+  - No more floating windows during initialization
+- **Prompt Enhancement Errors** - Fixed NoneType errors in enhancement
+  - Better error handling when LLM returns None
+  - Proper fallback when enhancement fails
+- **API Key Loading** - Fixed backward compatibility with old config format
+  - Supports loading from multiple config key locations
+  - Preserves existing API keys during migration
+- **Auto-crop Algorithm** - Fixed logic errors in border detection
+  - Algorithm now properly identifies uniform borders
+  - Currently disabled pending further testing
+
 ## [0.10.3] - 2025-01-12
 
 ### Added

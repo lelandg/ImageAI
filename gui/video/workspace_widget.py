@@ -1336,9 +1336,9 @@ class WorkspaceWidget(QWidget):
             'ken_burns': self.ken_burns_check.isChecked(),
             'transitions': self.transitions_check.isChecked(),
             'captions': self.captions_check.isChecked(),
-            'google_api_key': self.config.get('google_api_key'),
-            'openai_api_key': self.config.get('openai_api_key'),
-            'stability_api_key': self.config.get('stability_api_key'),
+            'google_api_key': self.config.get_api_key('google') or self.config.get('google_api_key'),
+            'openai_api_key': self.config.get_api_key('openai') or self.config.get('openai_api_key'),
+            'stability_api_key': self.config.get_api_key('stability') or self.config.get('stability_api_key'),
         }
     
     def set_image_provider(self, provider_name: str):

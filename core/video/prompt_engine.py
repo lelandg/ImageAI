@@ -98,29 +98,41 @@ class UnifiedLLMProvider:
         """Set up API keys and endpoints for each provider"""
         if not self.litellm:
             return
-        
+
         import os
-        
+
+        # Log what API keys are available
+        self.logger.debug(f"Setting up LLM providers with config keys: {list(self.config.keys())}")
+
         # OpenAI
-        if 'openai_api_key' in self.config:
+        if 'openai_api_key' in self.config and self.config['openai_api_key']:
             os.environ['OPENAI_API_KEY'] = self.config['openai_api_key']
-        
+            self.logger.info("OpenAI API key configured")
+        else:
+            self.logger.debug("No OpenAI API key available")
+
         # Anthropic
-        if 'anthropic_api_key' in self.config:
+        if 'anthropic_api_key' in self.config and self.config['anthropic_api_key']:
             os.environ['ANTHROPIC_API_KEY'] = self.config['anthropic_api_key']
-        
+            self.logger.info("Anthropic API key configured")
+        else:
+            self.logger.debug("No Anthropic API key available")
+
         # Google Gemini
-        if 'google_api_key' in self.config:
+        if 'google_api_key' in self.config and self.config['google_api_key']:
             os.environ['GEMINI_API_KEY'] = self.config['google_api_key']
+            self.logger.info("Google Gemini API key configured")
+        else:
+            self.logger.debug("No Google API key available")
         
         # Ollama endpoint
-        if 'ollama_endpoint' in self.config:
+        if 'ollama_endpoint' in self.config and self.config['ollama_endpoint']:
             os.environ['OLLAMA_API_BASE'] = self.config['ollama_endpoint']
         else:
             os.environ['OLLAMA_API_BASE'] = 'http://localhost:11434'
-        
+
         # LM Studio endpoint (OpenAI-compatible)
-        if 'lmstudio_endpoint' in self.config:
+        if 'lmstudio_endpoint' in self.config and self.config['lmstudio_endpoint']:
             self.lmstudio_base = self.config['lmstudio_endpoint']
         else:
             self.lmstudio_base = 'http://localhost:1234/v1'
@@ -165,6 +177,11 @@ class UnifiedLLMProvider:
         if not self.is_available():
             self.logger.warning("LiteLLM not available, returning original text")
             return text
+
+        # Check if LLM logging is enabled
+        from core.config import ConfigManager
+        config = ConfigManager()
+        log_llm = config.get("log_llm_interactions", False)
         
         # Build system prompt based on style
         system_prompt = self._get_system_prompt(style)
@@ -213,9 +230,26 @@ Keep it under 100 words but highly descriptive."""
             # Add api_base for LM Studio
             if api_base:
                 kwargs["api_base"] = api_base
-            
+
+            # Log LLM request if enabled
+            if log_llm:
+                self.logger.info(f"=== LLM Request to {provider}/{model_id} ===")
+                self.logger.info(f"System: {system_prompt}")
+                self.logger.info(f"User: {user_prompt}")
+                self.logger.info(f"Temperature: {temperature}, Max tokens: {max_tokens}")
+
             # Call LiteLLM
             response = self.litellm.completion(**kwargs)
+
+            # Log LLM response if enabled
+            if log_llm:
+                if response and response.choices and len(response.choices) > 0:
+                    content = response.choices[0].message.content if response.choices[0].message else "No content"
+                    self.logger.info(f"=== LLM Response from {provider}/{model_id} ===")
+                    self.logger.info(f"Response: {content}")
+                else:
+                    self.logger.info(f"=== LLM Response from {provider}/{model_id} ===")
+                    self.logger.info("Response: Empty or no choices")
             
             # Check if response has content
             if (response and response.choices and len(response.choices) > 0 
