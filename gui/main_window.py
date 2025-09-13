@@ -28,7 +28,8 @@ from core import (
 from core.constants import DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT
 from providers import get_provider, preload_provider, list_providers
 from gui.dialogs import ExamplesDialog
-from gui.video.video_project_tab import VideoProjectTab
+# Defer video tab import to improve startup speed
+# from gui.video.video_project_tab import VideoProjectTab
 from gui.workers import GenWorker
 try:
     from gui.model_browser import ModelBrowserDialog
@@ -68,39 +69,112 @@ class MainWindow(QMainWindow):
         self.auto_copy_filename = self.config.get("auto_copy_filename", False)
         
         # Session state
+        print("Scanning image history...")
         self.history_paths: List[Path] = scan_disk_history()
+        print(f"Found {len(self.history_paths)} images in history")
+
         self.history = []  # Initialize empty history list
         self.current_prompt: str = ""
         self.gen_thread: Optional[QThread] = None
         self.gen_worker: Optional[GenWorker] = None
         self.current_image_data: Optional[bytes] = None
         self._last_template_context: Optional[dict] = None
-        
+        self._video_tab_loaded = False  # Track lazy loading of video tab
+
         # Load history from disk
+        print("Loading image metadata...")
         self._load_history_from_disk()
-        
-        # Preload current provider to show loading message early
+        print(f"Loaded metadata for {len(self.history)} images")
+
+        # Create UI first so we have status bar
+        print("Creating user interface...")
+        self._init_ui()
+        self.status_bar.showMessage("Initializing application...")
+        QApplication.processEvents()
+
+        print("Setting up menus...")
+        self._init_menu()
+
+        # Preload providers for faster first use
+        print(f"Preloading {self.current_provider} provider...")
+        self.status_bar.showMessage(f"Loading {self.current_provider} provider...")
+        QApplication.processEvents()
+
         auth_mode_value = self.config.get("auth_mode", "api-key")
         # Handle legacy/display values
         if auth_mode_value in ["api_key", "API Key"]:
             auth_mode_value = "api-key"
         elif auth_mode_value == "Google Cloud Account":
             auth_mode_value = "gcloud"
-        
+
         provider_config = {
             "api_key": self.current_api_key,
             "auth_mode": auth_mode_value
         }
         preload_provider(self.current_provider, provider_config)
-        
-        # Create UI
-        self._init_ui()
-        self._init_menu()
-        
+        print(f"{self.current_provider} provider loaded")
+
+        # Check for LLM provider
+        llm_provider = self.config.get("llm_provider", "None")
+        if llm_provider and llm_provider != "None":
+            print(f"LLM Provider configured: {llm_provider}")
+            self.status_bar.showMessage(f"Loading LLM provider: {llm_provider}...")
+            QApplication.processEvents()
+
         # Restore window geometry and UI state
+        print("Restoring window state...")
+        self.status_bar.showMessage("Restoring window state...")
+        QApplication.processEvents()
         self._restore_geometry()
         self._restore_ui_state()
+
+        print("Application ready!")
+        self.status_bar.showMessage("Ready")
+        QApplication.processEvents()
     
+
+    def _append_to_console(self, message: str, color: str = "#cccccc", is_separator: bool = False):
+        """Append a message to the console with optional color."""
+        from PySide6.QtGui import QTextCursor
+
+        if is_separator:
+            # Add a horizontal separator
+            self.output_text.append('<hr style="border: 1px solid #666; margin: 4px 0;">')
+
+        # Format the message with color
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        formatted = f'<span style="color: #888;">[{timestamp}]</span> <span style="color: {color};">{message}</span>'
+
+        # Append to console
+        self.output_text.append(formatted)
+
+        # Auto-scroll to bottom
+        cursor = self.output_text.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.output_text.setTextCursor(cursor)
+
+        # Auto-resize console to fit content height
+        try:
+            self._auto_resize_console()
+        except Exception:
+            pass
+
+    def _auto_resize_console(self):
+        """Keep the console minimally tall while allowing manual resizing."""
+        doc = self.output_text.document()
+        layout = doc.documentLayout()
+        if layout is None:
+            return
+        doc_height = layout.documentSize().height()
+        fm = self.output_text.fontMetrics()
+        frame = self.output_text.frameWidth() * 2
+        margins = self.output_text.contentsMargins()
+        padding = margins.top() + margins.bottom()
+        min_height = fm.lineSpacing() + 6  # at least one line
+        new_height = int(max(min_height, doc_height + frame + padding))
+        # Use minimum height so user can still expand via splitter
+        self.output_text.setMinimumHeight(new_height)
+
     def _load_history_from_disk(self):
         """Load history from disk into memory with enhanced metadata."""
         for path in self.history_paths:
@@ -136,9 +210,15 @@ class MainWindow(QMainWindow):
     
     def _init_ui(self):
         """Initialize the user interface."""
+        # Create status bar
+        from PySide6.QtWidgets import QStatusBar
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("Ready")
+
         self.tabs = QTabWidget()
         self.setCentralWidget(self.tabs)
-        
+
         # Create tabs
         self.tab_generate = QWidget()
         self.tab_templates = QWidget()
@@ -146,19 +226,9 @@ class MainWindow(QMainWindow):
         self.tab_help = QWidget()
         self.tab_history = QWidget()
         
-        # Create video tab - pass config and available providers
-        providers_dict = {
-            'available': list_providers(),
-            'current': self.current_provider,
-            'config': self.config
-        }
-        self.tab_video = VideoProjectTab(self.config.config, providers_dict)
-        # Connect the video tab's image provider change signal to sync with Image tab
-        if hasattr(self.tab_video, 'image_provider_changed'):
-            self.tab_video.image_provider_changed.connect(self._on_video_image_provider_changed)
-        # Connect the video tab's LLM provider change signal to sync with Image tab
-        if hasattr(self.tab_video, 'llm_provider_changed'):
-            self.tab_video.llm_provider_changed.connect(self._on_video_llm_provider_changed)
+        # Create placeholder for video tab - will be loaded lazily
+        self.tab_video = QWidget()  # Placeholder widget
+        self._video_tab_loaded = False  # Track if real video tab is loaded
 
         self.tabs.addTab(self.tab_generate, "🎨 Image")
         self.tabs.addTab(self.tab_templates, "📝 Templates")
@@ -236,6 +306,7 @@ class MainWindow(QMainWindow):
         self.llm_model_combo.setMinimumWidth(250)
         self.llm_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.llm_model_combo.setEnabled(False)
+        self.llm_model_combo.currentTextChanged.connect(self._on_llm_model_changed)
         llm_provider_layout.addWidget(self.llm_model_combo)
         llm_provider_layout.addStretch()
         v.addLayout(llm_provider_layout)
@@ -432,13 +503,15 @@ class MainWindow(QMainWindow):
         # Buttons - all on one row for compactness
         hb = QHBoxLayout()
         self.btn_examples = QPushButton("Examples")
+        self.btn_enhance_prompt = QPushButton("Enhance Prompt")
         self.btn_generate = QPushButton("Generate")
         self.btn_save_image = QPushButton("Save Image")
         self.btn_copy_image = QPushButton("Copy to Clipboard")
         self.btn_save_image.setEnabled(False)
         self.btn_copy_image.setEnabled(False)
-        
+
         hb.addWidget(self.btn_examples)
+        hb.addWidget(self.btn_enhance_prompt)
         hb.addWidget(self.btn_generate)
         hb.addStretch(1)
         hb.addWidget(self.btn_save_image)
@@ -450,24 +523,63 @@ class MainWindow(QMainWindow):
         self.status_label.setMaximumHeight(20)
         bottom_layout.addWidget(self.status_label)
         
-        # Output image - maximize this area
+        # Create a vertical splitter for image and status console
+        image_console_splitter = QSplitter(Qt.Vertical)
+
+        # Output image
         self.output_image_label = QLabel()
         self.output_image_label.setAlignment(Qt.AlignCenter)
-        self.output_image_label.setMinimumHeight(300)  # Reduced minimum
+        self.output_image_label.setMinimumHeight(200)
         self.output_image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.output_image_label.setStyleSheet("border: 1px solid #ccc; background-color: #f5f5f5;")
         self.output_image_label.setScaledContents(False)  # We handle scaling manually
-        bottom_layout.addWidget(self.output_image_label, 20)  # Increased stretch factor to take more space
-        
-        # Output text - much smaller
-        output_text_label = QLabel("Output Text:")
-        output_text_label.setMaximumHeight(15)
-        bottom_layout.addWidget(output_text_label)
+        image_console_splitter.addWidget(self.output_image_label)
+
+        # Status console container
+        console_container = QWidget()
+        console_layout = QVBoxLayout(console_container)
+        console_layout.setContentsMargins(0, 0, 0, 0)
+        console_layout.setSpacing(0)  # No spacing between header and console
+
+        # Minimal console header label
+        console_header = QLabel("Status Console")
+        console_header.setStyleSheet("color: #666; font-size: 9pt; padding: 0px; margin: 0px;")
+        console_header.setMaximumHeight(16)
+        console_layout.addWidget(console_header)
+
+        # Status console - styled like a terminal
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
-        self.output_text.setMaximumHeight(40)  # Much smaller
-        self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        bottom_layout.addWidget(self.output_text)
+        # Make console height minimal by default, but allow it to grow with splitter
+        self.output_text.setMinimumHeight(0)
+        self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # Terminal-like styling
+        self.output_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #cccccc;
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                font-size: 10pt;
+                border: 1px solid #444;
+                padding: 4px;
+            }
+        """)
+        console_layout.addWidget(self.output_text)
+        # Auto-resize on content changes
+        try:
+            self.output_text.document().contentsChanged.connect(self._auto_resize_console)
+        except Exception:
+            pass
+
+        image_console_splitter.addWidget(console_container)
+
+        # Set initial splitter sizes (large image, small console that fits content)
+        self._auto_resize_console()
+        image_console_splitter.setSizes([500, max(40, self.output_text.minimumHeight())])
+        image_console_splitter.setStretchFactor(0, 3)  # Image gets more stretch
+        image_console_splitter.setStretchFactor(1, 1)  # Console can grow when resizing
+
+        bottom_layout.addWidget(image_console_splitter, 1)
         
         # Add bottom widget to splitter
         splitter.addWidget(bottom_widget)
@@ -488,6 +600,7 @@ class MainWindow(QMainWindow):
         
         # Connect signals
         self.btn_examples.clicked.connect(self._open_examples)
+        self.btn_enhance_prompt.clicked.connect(self._enhance_prompt)
         self.btn_generate.clicked.connect(self._generate)
         self.btn_save_image.clicked.connect(self._save_image_as)
         self.btn_copy_image.clicked.connect(self._copy_image_to_clipboard)
@@ -1763,7 +1876,12 @@ For more detailed information, please refer to the full documentation.
     
     def _on_llm_provider_changed(self, provider: str):
         """Handle LLM provider change on Image tab."""
+        # Don't do anything if we're being updated programmatically
+        if getattr(self, '_updating_llm_provider', False):
+            return
+
         # Clear the model combo first
+        self.llm_model_combo.blockSignals(True)
         self.llm_model_combo.clear()
 
         if provider == "None":
@@ -1782,28 +1900,87 @@ For more detailed information, please refer to the full documentation.
             elif provider == "LM Studio":
                 self.llm_model_combo.addItems(["local-model", "custom-model"])
 
-        # Sync with Video tab
-        if hasattr(self, 'tab_video') and hasattr(self.tab_video, 'set_llm_provider'):
+        self.llm_model_combo.blockSignals(False)
+
+        # Sync with Video tab if it's loaded
+        if self._video_tab_loaded and hasattr(self.tab_video, 'set_llm_provider'):
             self.tab_video.set_llm_provider(provider, self.llm_model_combo.currentText() if provider != "None" else None)
+
+    def _on_llm_model_changed(self, model: str):
+        """Handle LLM model change on Image tab."""
+        # Don't do anything if we're being updated programmatically
+        if getattr(self, '_updating_llm_provider', False):
+            return
+
+        # Sync with Video tab if it's loaded
+        if self._video_tab_loaded and hasattr(self.tab_video, 'set_llm_provider'):
+            provider = self.llm_provider_combo.currentText()
+            self.tab_video.set_llm_provider(provider, model if provider != "None" else None)
+
+    def _schedule_ui_save(self):
+        """Schedule a UI state save after a short delay to avoid rapid saves."""
+        if not hasattr(self, '_save_timer'):
+            self._save_timer = QTimer()
+            self._save_timer.setSingleShot(True)
+            self._save_timer.timeout.connect(self._delayed_ui_save)
+
+        # Cancel any pending save and schedule a new one
+        self._save_timer.stop()
+        self._save_timer.start(500)  # Save after 500ms of no changes
+
+    def _delayed_ui_save(self):
+        """Perform the actual UI state save."""
+        try:
+            self._save_ui_state()
+            self.config.save()
+        except Exception as e:
+            print(f"Error saving UI state: {e}")
 
     def _on_video_llm_provider_changed(self, provider_name: str, model_name: str):
         """Handle LLM provider change from Video tab."""
         if hasattr(self, 'llm_provider_combo'):
+            # Set flag to prevent circular updates
+            self._updating_llm_provider = True
+
             # Sync with Image tab LLM provider combo
             self.llm_provider_combo.blockSignals(True)
             index = self.llm_provider_combo.findText(provider_name)
             if index >= 0:
                 self.llm_provider_combo.setCurrentIndex(index)
-            self.llm_provider_combo.blockSignals(False)
+                # Manually trigger the provider change to populate models
+                self.llm_model_combo.blockSignals(True)
+                self.llm_model_combo.clear()
 
-            # Update the models
-            self._on_llm_provider_changed(provider_name)
+                if provider_name != "None":
+                    self.llm_model_combo.setEnabled(True)
+                    # Populate with actual models for provider
+                    if provider_name == "OpenAI":
+                        self.llm_model_combo.addItems(["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
+                    elif provider_name == "Claude":
+                        self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
+                    elif provider_name == "Gemini":
+                        self.llm_model_combo.addItems(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"])
+                    elif provider_name == "Ollama":
+                        self.llm_model_combo.addItems(["llama2", "mistral", "mixtral", "phi-2", "neural-chat"])
+                    elif provider_name == "LM Studio":
+                        self.llm_model_combo.addItems(["local-model", "custom-model"])
+                else:
+                    self.llm_model_combo.setEnabled(False)
+
+                self.llm_model_combo.blockSignals(False)
+
+            self.llm_provider_combo.blockSignals(False)
 
             # Set the specific model if provided
             if model_name and hasattr(self, 'llm_model_combo'):
+                self.llm_model_combo.blockSignals(True)
                 model_index = self.llm_model_combo.findText(model_name)
                 if model_index >= 0:
                     self.llm_model_combo.setCurrentIndex(model_index)
+                self.llm_model_combo.blockSignals(False)
+
+            # Clear flag
+            self._updating_llm_provider = False
 
     def _on_video_image_provider_changed(self, provider_name: str):
         """Handle image provider change from Video tab."""
@@ -1848,14 +2025,17 @@ For more detailed information, please refer to the full documentation.
             # Update model list for new provider
             self._update_model_list()
 
+            # Show status but don't preload - it will load on first use
+            self.status_bar.showMessage(f"Image provider changed to {provider_name}")
+
             # Sync with Settings tab provider combo
             if hasattr(self, 'provider_combo'):
                 self.provider_combo.blockSignals(True)
                 self.provider_combo.setCurrentText(provider_name)
                 self.provider_combo.blockSignals(False)
 
-            # Sync with Video tab if it exists
-            if hasattr(self, 'tab_video') and hasattr(self.tab_video, 'set_provider'):
+            # Sync with Video tab if it's loaded
+            if self._video_tab_loaded and hasattr(self.tab_video, 'set_provider'):
                 self.tab_video.set_provider(provider_name)
 
             # Update settings visibility
@@ -1911,29 +2091,20 @@ For more detailed information, please refer to the full documentation.
         self.config.set("provider", self.current_provider)
         self.config.save()
 
+        # Show status but don't preload - it will load on first use
+        self.status_bar.showMessage(f"Image provider changed to {self.current_provider}")
+
         # Sync with Image tab provider combo
         if hasattr(self, 'image_provider_combo'):
             self.image_provider_combo.blockSignals(True)
             self.image_provider_combo.setCurrentText(self.current_provider)
             self.image_provider_combo.blockSignals(False)
 
-        # Sync with Video tab if it exists
-        if hasattr(self, 'tab_video') and hasattr(self.tab_video, 'set_provider'):
+        # Sync with Video tab if it's loaded
+        if self._video_tab_loaded and hasattr(self.tab_video, 'set_provider'):
             self.tab_video.set_provider(self.current_provider)
 
-        # Preload the new provider
-        auth_mode_internal = self.config.get("auth_mode", "api-key")
-        # Handle legacy values
-        if auth_mode_internal in ["api_key", "API Key"]:
-            auth_mode_internal = "api-key"
-        elif auth_mode_internal == "Google Cloud Account":
-            auth_mode_internal = "gcloud"
-
-        provider_config = {
-            "api_key": self.config.get_api_key(self.current_provider),
-            "auth_mode": auth_mode_internal
-        }
-        preload_provider(self.current_provider, provider_config)
+        # Don't preload provider here - it will be loaded when actually used
 
         # Update new widgets if available
         if hasattr(self, 'resolution_selector') and self.resolution_selector:
@@ -2301,6 +2472,141 @@ For more detailed information, please refer to the full documentation.
 5. Click 'Check Status' to verify authentication""")
         msg.exec()
     
+    def _enhance_prompt(self):
+        """Enhance the current prompt using the selected LLM."""
+        # Add separator for new operation
+        self._append_to_console("", is_separator=True)
+        self._append_to_console("Starting prompt enhancement...", "#00ff00")  # Green
+
+        # Check if LLM provider is selected
+        if not hasattr(self, 'llm_provider_combo') or self.llm_provider_combo.currentText() == "None":
+            self._append_to_console("ERROR: No LLM provider selected", "#ff6666")  # Red
+            QMessageBox.information(self, "LLM Required",
+                                   "Please select an LLM Provider to enhance prompts.")
+            return
+
+        # Get current prompt
+        current_prompt = self.prompt_edit.toPlainText().strip()
+        if not current_prompt:
+            self._append_to_console("ERROR: No prompt to enhance", "#ff6666")  # Red
+            QMessageBox.information(self, "No Prompt",
+                                   "Please enter a prompt to enhance.")
+            return
+
+        # Get LLM settings
+        llm_provider = self.llm_provider_combo.currentText().lower()
+        llm_model = self.llm_model_combo.currentText()
+
+        self._append_to_console(f"Using LLM: {llm_provider}/{llm_model}", "#66ccff")  # Blue
+        self._append_to_console(f"Original prompt: {current_prompt[:50]}...", "#888888")  # Gray
+
+        # Create enhanced prompt dialog
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QTextEdit, QDialogButtonBox, QProgressBar
+        from PySide6.QtCore import QThread, Signal
+
+        class EnhanceThread(QThread):
+            finished_signal = Signal(str)
+            error_signal = Signal(str)
+
+            def __init__(self, prompt, provider, model, config):
+                super().__init__()
+                self.prompt = prompt
+                self.provider = provider
+                self.model = model
+                self.config = config
+
+            def run(self):
+                try:
+                    # Import the prompt engine
+                    from core.video.prompt_engine import UnifiedLLMProvider
+
+                    # Get API keys from config
+                    api_config = {
+                        'openai_api_key': self.config.get('openai_api_key'),
+                        'anthropic_api_key': self.config.get('anthropic_api_key'),
+                        'google_api_key': self.config.get('google_api_key'),
+                    }
+
+                    llm = UnifiedLLMProvider(api_config)
+
+                    # Enhance the prompt
+                    enhanced = llm.enhance_prompt(
+                        self.prompt,
+                        provider=self.provider,
+                        model=self.model,
+                        style="Photorealistic"  # Default style for image generation
+                    )
+                    self.finished_signal.emit(enhanced)
+                except Exception as e:
+                    self.error_signal.emit(str(e))
+
+        # Create progress dialog
+        progress_dialog = QDialog(self)
+        progress_dialog.setWindowTitle("Enhancing Prompt")
+        progress_dialog.setModal(True)
+        progress_dialog.setMinimumWidth(400)
+
+        layout = QVBoxLayout(progress_dialog)
+        layout.addWidget(QLabel("Enhancing prompt with " + self.llm_provider_combo.currentText() + "..."))
+
+        progress_bar = QProgressBar()
+        progress_bar.setRange(0, 0)  # Indeterminate progress
+        layout.addWidget(progress_bar)
+
+        # Start enhancement thread
+        enhance_thread = EnhanceThread(current_prompt, llm_provider, llm_model, self.config.config)
+
+        def on_enhancement_finished(enhanced_prompt):
+            progress_dialog.close()
+            self._append_to_console("Enhancement complete!", "#00ff00")  # Green
+            self._append_to_console(f"Enhanced: {enhanced_prompt[:100]}...", "#ffff66")  # Yellow
+
+            # Show enhanced prompt dialog
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Enhanced Prompt")
+            dlg.setModal(True)
+            dlg.setMinimumWidth(600)
+            dlg.setMinimumHeight(400)
+
+            layout = QVBoxLayout(dlg)
+
+            layout.addWidget(QLabel("Original prompt:"))
+            original_text = QTextEdit()
+            original_text.setPlainText(current_prompt)
+            original_text.setReadOnly(True)
+            original_text.setMaximumHeight(100)
+            layout.addWidget(original_text)
+
+            layout.addWidget(QLabel("Enhanced prompt:"))
+            enhanced_text = QTextEdit()
+            enhanced_text.setPlainText(enhanced_prompt)
+            enhanced_text.setReadOnly(True)
+            layout.addWidget(enhanced_text)
+
+            buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            buttons.accepted.connect(dlg.accept)
+            buttons.rejected.connect(dlg.reject)
+            layout.addWidget(buttons)
+
+            if dlg.exec() == QDialog.Accepted:
+                # Replace the prompt with enhanced version
+                self.prompt_edit.setPlainText(enhanced_prompt)
+                self._append_to_console("Prompt updated with enhanced version", "#00ff00")
+            else:
+                self._append_to_console("Enhancement cancelled by user", "#ffaa00")  # Orange
+
+        def on_enhancement_error(error_msg):
+            progress_dialog.close()
+            self._append_to_console(f"ERROR: Enhancement failed - {error_msg}", "#ff6666")  # Red
+            QMessageBox.warning(self, "Enhancement Failed",
+                               f"Failed to enhance prompt: {error_msg}")
+
+        enhance_thread.finished_signal.connect(on_enhancement_finished)
+        enhance_thread.error_signal.connect(on_enhancement_error)
+        enhance_thread.start()
+
+        progress_dialog.exec()
+
     def _open_examples(self):
         """Open examples dialog."""
         dlg = ExamplesDialog(self)
@@ -2315,21 +2621,30 @@ For more detailed information, please refer to the full documentation.
     
     def _generate(self):
         """Generate image from prompt."""
+        # Add separator for new generation
+        self._append_to_console("", is_separator=True)
+        self._append_to_console("Starting image generation...", "#00ff00")  # Green
+
         prompt = self.prompt_edit.toPlainText().strip()
         if not prompt:
+            self._append_to_console("ERROR: No prompt provided", "#ff6666")  # Red
             QMessageBox.warning(self, APP_NAME, "Please enter a prompt.")
             return
-        
+
         if not self.current_api_key and self.current_provider != "local_sd":
+            self._append_to_console("ERROR: No API key configured", "#ff6666")  # Red
             QMessageBox.warning(self, APP_NAME, "Please set an API key in Settings.")
             return
-        
+
+        # Log generation details
+        self._append_to_console(f"Provider: {self.current_provider}", "#66ccff")  # Blue
+        self._append_to_console(f"Prompt: {prompt[:100]}...", "#888888")  # Gray
+
         # Disable/reset buttons
         self.btn_generate.setEnabled(False)
         self.btn_save_image.setEnabled(False)
         self.btn_copy_image.setEnabled(False)
         self.status_label.setText("Generating...")
-        self.output_text.clear()
         self.output_image_label.clear()
         self.current_image_data = None
         
@@ -2403,6 +2718,11 @@ For more detailed information, please refer to the full documentation.
             if hasattr(self, 'guidance_spin'):
                 kwargs['cfg_scale'] = self.guidance_spin.value()
         
+        # Show status for provider loading
+        self.status_bar.showMessage(f"Connecting to {self.current_provider}...")
+        self._append_to_console(f"Connecting to {self.current_provider}...", "#66ccff")  # Blue
+        QApplication.processEvents()
+
         # Create worker thread
         self.gen_thread = QThread()
         # Get the actual auth mode from config
@@ -2411,7 +2731,7 @@ For more detailed information, please refer to the full documentation.
             auth_mode_text = self.auth_mode_combo.currentText()
             if auth_mode_text == "Google Cloud Account":
                 auth_mode = "gcloud"
-        
+
         self.gen_worker = GenWorker(
             provider=self.current_provider,
             model=model,
@@ -2419,15 +2739,15 @@ For more detailed information, please refer to the full documentation.
             auth_mode=auth_mode,
             **kwargs
         )
-        
+
         self.gen_worker.moveToThread(self.gen_thread)
-        
+
         # Connect signals
         self.gen_thread.started.connect(self.gen_worker.run)
         self.gen_worker.progress.connect(self._on_progress)
         self.gen_worker.error.connect(self._on_error)
         self.gen_worker.finished.connect(self._on_generation_finished)
-        
+
         # Start generation
         self.gen_thread.start()
         self.current_prompt = prompt
@@ -2436,27 +2756,39 @@ For more detailed information, please refer to the full documentation.
     def _on_progress(self, message: str):
         """Handle progress update."""
         self.status_label.setText(message)
-    
+        self.status_bar.showMessage(message)
+        self._append_to_console(message, "#66ccff")  # Blue for progress
+
     def _on_error(self, error: str):
         """Handle generation error."""
         self.status_label.setText("Error occurred.")
+        self.status_bar.showMessage(f"Error: {error[:50]}...")  # Show truncated error in status
+        self._append_to_console(f"ERROR: {error}", "#ff6666")  # Red
         QMessageBox.critical(self, APP_NAME, f"Generation failed:\n{error}")
         self.btn_generate.setEnabled(True)
         self._cleanup_thread()
-    
+
     def _on_generation_finished(self, texts: List[str], images: List[bytes]):
         """Handle successful generation."""
         self.status_label.setText("Generation complete.")
+        self.status_bar.showMessage("Image generated successfully")
+        self._append_to_console("Generation complete!", "#00ff00")  # Green
         
-        # Display text output
+        # Log any text responses from the provider
         if texts:
-            self.output_text.setPlainText("\n".join(texts))
+            for text in texts:
+                self._append_to_console(f"Response: {text}", "#ffff66")  # Yellow
         
         # Display and save images
         if images:
+            self._append_to_console(f"Received {len(images)} image(s)", "#66ccff")
+
             # Save images
             stub = sanitize_stub_from_prompt(self.current_prompt)
             saved_paths = auto_save_images(images, base_stub=stub)
+
+            if saved_paths:
+                self._append_to_console(f"Saved to: {saved_paths[0].name}", "#00ff00")
             
             # Calculate cost for this generation
             generation_cost = 0.0
@@ -2579,6 +2911,12 @@ For more detailed information, please refer to the full documentation.
             
             # Update current image data
             self.current_image_data = image_data
+
+            # After layout settles, ensure the image scales to the final size
+            try:
+                QTimer.singleShot(120, self._perform_image_resize)
+            except Exception:
+                pass
         except Exception as e:
             self.output_image_label.setText(f"Error displaying image: {e}")
     
@@ -2890,6 +3228,14 @@ For more detailed information, please refer to the full documentation.
         # Reset timer on each resize event (debounce)
         self._resize_timer.stop()
         self._resize_timer.start(50)  # 50ms delay
+
+    def showEvent(self, event):
+        """Ensure initial image scales when the window first shows."""
+        super().showEvent(event)
+        try:
+            QTimer.singleShot(150, self._perform_image_resize)
+        except Exception:
+            pass
     
     def _perform_image_resize(self):
         """Actually perform the image resize after debounce."""
@@ -2921,8 +3267,8 @@ For more detailed information, please refer to the full documentation.
             # Auto-save video project if exists
             if hasattr(self, 'tab_video') and self.tab_video:
                 try:
-                    # Check if the video tab has a workspace widget with a current project
-                    if hasattr(self.tab_video, 'workspace') and self.tab_video.workspace:
+                    # Check if the video tab is loaded and has a workspace widget with a current project
+                    if self._video_tab_loaded and hasattr(self.tab_video, 'workspace') and self.tab_video.workspace:
                         workspace = self.tab_video.workspace
                         if hasattr(workspace, 'current_project') and workspace.current_project:
                             # Auto-save the project
@@ -3078,6 +3424,11 @@ For more detailed information, please refer to the full documentation.
                             
                             # Store the original pixmap for resizing
                             self.output_image_label.setProperty("original_pixmap", pixmap)
+                            # Ensure scaling after layout completes
+                            try:
+                                QTimer.singleShot(120, self._perform_image_resize)
+                            except Exception:
+                                pass
                         
                         # Enable save and copy buttons since we have an image
                         self.btn_save_image.setEnabled(True)
@@ -3134,9 +3485,60 @@ For more detailed information, please refer to the full documentation.
     
     def _on_tab_changed(self, index):
         """Handle tab change events."""
+        current_widget = self.tabs.widget(index)
+
+        # Lazy load video tab on first access
+        if current_widget == self.tab_video and not self._video_tab_loaded:
+            self._load_video_tab()
+
         # If switching to help tab, trigger a minimal scroll to fix rendering
-        if self.tabs.widget(index) == self.tab_help:
+        if current_widget == self.tab_help:
             self._trigger_help_render()
+
+    def _load_video_tab(self):
+        """Lazy load the video tab when first accessed."""
+        try:
+            # Import and create the real video tab
+            from gui.video.video_project_tab import VideoProjectTab
+
+            providers_dict = {
+                'available': list_providers(),
+                'current': self.current_provider,
+                'config': self.config
+            }
+
+            # Store the index before replacing
+            video_index = self.tabs.indexOf(self.tab_video)
+
+            # Create the real video tab
+            real_video_tab = VideoProjectTab(self.config.config, providers_dict)
+
+            # Connect signals
+            if hasattr(real_video_tab, 'image_provider_changed'):
+                real_video_tab.image_provider_changed.connect(self._on_video_image_provider_changed)
+            if hasattr(real_video_tab, 'llm_provider_changed'):
+                real_video_tab.llm_provider_changed.connect(self._on_video_llm_provider_changed)
+
+            # Replace the placeholder with the real tab
+            self.tabs.removeTab(video_index)
+            self.tabs.insertTab(video_index, real_video_tab, "🎬 Video")
+            self.tabs.setCurrentIndex(video_index)
+
+            # Update references
+            self.tab_video = real_video_tab
+            self._video_tab_loaded = True
+
+            # Sync LLM provider to video tab if it's set
+            if hasattr(self, 'llm_provider_combo') and self.llm_provider_combo.currentText() != "None":
+                provider_name = self.llm_provider_combo.currentText()
+                model_name = self.llm_model_combo.currentText() if self.llm_model_combo.isEnabled() else None
+                if hasattr(self.tab_video, 'set_llm_provider'):
+                    self.tab_video.set_llm_provider(provider_name, model_name)
+
+        except Exception as e:
+            import traceback
+            QMessageBox.warning(self, "Video Tab Error",
+                              f"Failed to load video tab: {str(e)}\n\n{traceback.format_exc()}")
     
     def _trigger_help_render(self):
         """Trigger rendering by doing a minimal scroll."""
@@ -3275,7 +3677,12 @@ For more detailed information, please refer to the full documentation.
             ui_state['prompt'] = self.prompt_edit.toPlainText()
             ui_state['model'] = self.model_combo.currentData() or self.model_combo.currentText()
             ui_state['model_index'] = self.model_combo.currentIndex()
-            
+
+            # LLM Provider settings
+            if hasattr(self, 'llm_provider_combo'):
+                ui_state['llm_provider'] = self.llm_provider_combo.currentText()
+                ui_state['llm_model'] = self.llm_model_combo.currentText() if self.llm_model_combo.isEnabled() else None
+
             # Image settings expansion state
             ui_state['image_settings_expanded'] = self.image_settings_container.isVisible()
             
@@ -3338,9 +3745,7 @@ For more detailed information, please refer to the full documentation.
                 sort_order = header.sortIndicatorOrder()
                 ui_state['history_sort_order'] = 0 if sort_order == Qt.AscendingOrder else 1
             
-            # Output text height
-            if hasattr(self, 'output_text'):
-                ui_state['output_text_height'] = self.output_text.height()
+            # Output console height is auto-managed; do not persist
             
             # Save to config
             self.config.set('ui_state', ui_state)
@@ -3367,7 +3772,51 @@ For more detailed information, please refer to the full documentation.
                 idx = self._find_model_in_combo(ui_state['model'])
                 if idx >= 0:
                     self.model_combo.setCurrentIndex(idx)
-            
+
+            # Restore LLM Provider settings
+            if 'llm_provider' in ui_state and hasattr(self, 'llm_provider_combo'):
+                # Set flag to prevent triggering saves during restoration
+                self._updating_llm_provider = True
+
+                provider_index = self.llm_provider_combo.findText(ui_state['llm_provider'])
+                if provider_index >= 0:
+                    self.llm_provider_combo.blockSignals(True)
+                    self.llm_provider_combo.setCurrentIndex(provider_index)
+                    self.llm_provider_combo.blockSignals(False)
+
+                    # Manually populate models for the provider
+                    self.llm_model_combo.blockSignals(True)
+                    self.llm_model_combo.clear()
+
+                    provider = ui_state['llm_provider']
+                    if provider != "None":
+                        self.llm_model_combo.setEnabled(True)
+                        if provider == "OpenAI":
+                            self.llm_model_combo.addItems(["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
+                        elif provider == "Claude":
+                            self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
+                        elif provider == "Gemini":
+                            self.llm_model_combo.addItems(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"])
+                        elif provider == "Ollama":
+                            self.llm_model_combo.addItems(["llama2", "mistral", "mixtral", "phi-2", "neural-chat"])
+                        elif provider == "LM Studio":
+                            self.llm_model_combo.addItems(["local-model", "custom-model"])
+                    else:
+                        self.llm_model_combo.setEnabled(False)
+
+                    self.llm_model_combo.blockSignals(False)
+
+                    # Now restore the model if it was saved
+                    if 'llm_model' in ui_state and ui_state['llm_model'] and hasattr(self, 'llm_model_combo'):
+                        self.llm_model_combo.blockSignals(True)
+                        model_index = self.llm_model_combo.findText(ui_state['llm_model'])
+                        if model_index >= 0:
+                            self.llm_model_combo.setCurrentIndex(model_index)
+                        self.llm_model_combo.blockSignals(False)
+
+                # Clear flag
+                self._updating_llm_provider = False
+
             # Restore image settings expansion
             if 'image_settings_expanded' in ui_state:
                 if ui_state['image_settings_expanded']:
@@ -3466,9 +3915,7 @@ For more detailed information, please refer to the full documentation.
                     sort_order = Qt.AscendingOrder if ui_state['history_sort_order'] == 0 else Qt.DescendingOrder
                     self.history_table.sortItems(ui_state['history_sort_column'], sort_order)
             
-            # Restore output text height
-            if 'output_text_height' in ui_state and hasattr(self, 'output_text'):
-                self.output_text.setMaximumHeight(ui_state['output_text_height'])
+            # Output console height is auto-managed; nothing to restore
             
             # Restore current tab (do this last so all content is ready)
             if 'current_tab' in ui_state:

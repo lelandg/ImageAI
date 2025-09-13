@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.10.5**
+**Version 0.11.0**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -11,6 +11,7 @@
 **ImageAI** is a powerful desktop application and CLI tool for AI image generation supporting multiple providers including Google's Gemini API, OpenAI's DALL·E models, Stability AI's Stable Diffusion, and local Stable Diffusion models. It features enterprise-grade authentication options, secure credential management, and works seamlessly across Windows, macOS, and Linux.
 
 ## Table of Contents
+- [Project Review & Recommendations](Docs/ProjectReview.md)
 - [Requirements](#1-requirements)
 - [Authentication Setup](#2-authentication-setup)
 - [Installation](#3-installation)
@@ -99,6 +100,23 @@
 - Smart filename generation from prompts
 - Image format detection and optimization
 - Preview scaling with aspect ratio preservation
+
+### 🤖 LLM Integration (NEW!)
+- **Global LLM Provider Selection** - Unified provider across Image and Video tabs
+- **Multi-Provider Support** - OpenAI GPT-5, Claude, Gemini, Ollama, LM Studio
+- **Prompt Enhancement** - One-click prompt improvement using selected LLM
+- **Automatic Model Syncing** - Provider and model selections sync between tabs
+- **Smart Model Detection** - Automatically populates available models per provider
+
+### 💻 Enhanced UI Features (NEW!)
+- **Status Bar** - Real-time status messages and provider connection feedback
+- **Console Output Window** - Terminal-style log with color-coded messages:
+  - Timestamp for each operation
+  - Color coding: Green (success), Red (errors), Blue (progress), Yellow (responses)
+  - Visual separators between operations
+  - Resizable with splitter control
+- **Improved Startup** - Progress messages during initialization
+- **Lazy Video Tab Loading** - Faster startup by loading video features on-demand
 
 ### 🎬 Video Project Features
 - **Complete Video Creation Pipeline** - Text to video with AI scene generation
@@ -1369,7 +1387,31 @@ ImageAI/
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
-### Latest Release: v0.10.5 (2025-01-13)
+### Latest Release: v0.11.0 (2025-01-13)
+
+**Global LLM Integration & Enhanced Console UI**
+- **Global LLM Provider System**: Unified LLM provider selection across Image and Video tabs
+  - Support for OpenAI (GPT-5), Claude, Gemini, Ollama, and LM Studio
+  - Automatic model detection and population per provider
+  - Bidirectional syncing between Image and Video tabs
+  - Persistent LLM provider settings across sessions
+- **Prompt Enhancement**: One-click prompt improvement using selected LLM
+  - Works on both Image and Video tabs
+  - Shows original and enhanced prompts side-by-side
+  - Integrated with the new console output for progress tracking
+- **Console Output Window**: New terminal-style status console
+  - Color-coded messages (green for success, red for errors, blue for progress)
+  - Timestamped entries for all operations
+  - Visual separators between operations
+  - Resizable with vertical splitter
+  - Shows LLM interactions and provider communications
+- **UI Improvements**:
+  - Added status bar for real-time feedback
+  - Startup progress messages
+  - Lazy loading for Video tab (faster startup)
+  - Improved layout with LLM provider at top of tabs
+
+### Previous Release: v0.10.5 (2025-01-13)
 
 **Video Generation Visual Continuity & Enhanced Lyric Processing**
 - **Visual Continuity Features**: New optional features for maintaining consistency across video scenes

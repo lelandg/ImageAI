@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Social Media Image Sizes (Updated 2025-09-13)</title>
+<style>
+:root {
+  --bg: #ffffff;
+  --fg: #111111;
+  --muted: #555;
+  --border: #ddd;
+  --accent: #0b5fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --fg: #eaeef6;
+    --muted: #9aa4b2;
+    --border: #2a2f3a;
+    --accent: #66a3ff;
+  }
+}
+body {
+  margin: 0 auto;
+  padding: 24px;
+  max-width: 1200px;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, 'Helvetica Neue', Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
+  background: var(--bg);
+  color: var(--fg);
+}
+header {
+  display: flex; align-items: center; gap: 12px; justify-content: space-between; flex-wrap: wrap;
+}
+h1 { font-size: 1.6rem; margin: 0; }
+.small { color: var(--muted); font-size: 0.95rem; }
+.controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+input[type="search"]{
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; min-width: 280px; background: transparent; color: var(--fg);
+}
+button {
+  padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: transparent; color: var(--fg); cursor: pointer;
+}
+button:hover { border-color: var(--accent); }
+table {
+  width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 0.95rem;
+}
+th, td {
+  padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: top;
+}
+th {
+  text-align: left; position: sticky; top: 0; background: var(--bg); cursor: pointer;
+}
+tr:hover td { background: rgba(11,95,255,0.05); }
+a { color: var(--accent); }
+footer { margin-top: 24px; color: var(--muted); }
+.kbd { padding: 2px 6px; border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; font-size: 0.9em; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>📐 Social Media Image Sizes</h1>
+    <div class="small">Updated 2025-09-13 — Click column headers to sort. Type to filter.</div>
+  </div>
+  <div class="controls">
+    <input id="filter" type="search" placeholder="Filter by platform or type…" />
+    <button id="theme">Toggle theme</button>
+  </div>
+</header>
+
+<table id='sizeTable'><thead><tr><th>Platform</th><th>Image Type</th><th>Recommended Size (px)</th><th>Aspect Ratio</th><th>Max File Size</th><th>Formats</th><th>Notes</th></tr></thead><tbody><tr><td>Apple Podcasts</td><td>Show Cover</td><td>3000 × 3000 (RSS accepts 1400–3000)</td><td>1:1</td><td>—</td><td>PNG, JPG (no transparency)</td><td>Solid background; sRGB.</td></tr><tr><td>Bandcamp</td><td>Album/Single Cover</td><td>≥ 1400 × 1400 (square)</td><td>1:1</td><td>—</td><td>JPG, PNG</td><td>Bigger is better; must be square.</td></tr><tr><td>CD Baby</td><td>Album/Single Cover</td><td>3000 × 3000 (max); 1400 × 1400 (min)</td><td>1:1</td><td>≤25 MB</td><td>PNG, GIF, JPG, JPEG</td><td>72–300 dpi (300 best), RGB only; must be perfectly square.</td></tr><tr><td>Discord</td><td>Custom Emoji</td><td>128 × 128 (uploads can be larger)</td><td>1:1</td><td>≤256 KB</td><td>PNG, GIF (APNG for stickers)</td><td>Resized down by Discord.</td></tr><tr><td>Discord</td><td>Profile (Avatar)</td><td>512 × 512 (upload); min ~128 × 128</td><td>1:1</td><td>≈8 MB (static)</td><td>JPG, PNG (GIF for Nitro)</td><td>Cropped to circle in UI.</td></tr><tr><td>Discord</td><td>Profile Banner (Nitro)</td><td>≥ 680 × 240 (commonly 960 × 540)</td><td>≈16:9</td><td>≤10 MB</td><td>PNG, JPG, GIF</td><td>Nitro-only feature; new UI may crop differently — keep critical content centered.</td></tr><tr><td>Discord</td><td>Server Banner</td><td>960 × 540 (16:9) or larger</td><td>16:9</td><td>—</td><td>PNG, JPG, GIF</td><td>Responsive cropping on new UI; test on desktop &amp; mobile.</td></tr><tr><td>Discord</td><td>Server Icon</td><td>512 × 512</td><td>1:1</td><td>—</td><td>JPG, PNG</td><td>Cropped to circle; shows in sidebar &amp; invites.</td></tr><tr><td>Facebook</td><td>Cover Photo</td><td>851 × 315</td><td>≈2.70:1</td><td>&lt; 100 KB (fast load)</td><td>sRGB JPG (or PNG for text/logo)</td><td>Displays ~820×312 (desktop) / 640×360 (mobile).</td></tr><tr><td>Facebook</td><td>Profile Photo</td><td>≥ 320 × 320</td><td>1:1</td><td>—</td><td>JPG, PNG</td><td>Displays ~176×176 (desktop) / 196×196 (mobile); circle-cropped.</td></tr><tr><td>Instagram</td><td>Feed – 3:4 (new support)</td><td>e.g., 1080 × 1440</td><td>3:4</td><td>—</td><td>JPG, PNG</td><td>Added in 2025; appears as shot without cropping.</td></tr><tr><td>Instagram</td><td>Feed – Landscape</td><td>1080 × 566</td><td>1.91:1</td><td>—</td><td>JPG, PNG</td><td>Upload width ≥1080 px.</td></tr><tr><td>Instagram</td><td>Feed – Portrait</td><td>1080 × 1350</td><td>4:5</td><td>—</td><td>JPG, PNG</td><td>Upload width ≥1080 px.</td></tr><tr><td>Instagram</td><td>Feed – Square</td><td>1080 × 1080</td><td>1:1</td><td>—</td><td>JPG, PNG</td><td>Upload width ≥1080 px.</td></tr><tr><td>Instagram</td><td>Profile Photo</td><td>≥ 320 × 320</td><td>1:1 (circle in UI)</td><td>—</td><td>JPG, PNG</td><td>Center subject for circle crop.</td></tr><tr><td>Instagram</td><td>Stories / Reels Cover</td><td>1080 × 1920</td><td>9:16</td><td>—</td><td>JPG, PNG</td><td>Full‑screen vertical.</td></tr><tr><td>LinkedIn</td><td>Personal Cover (Background)</td><td>1584 × 396</td><td>4:1</td><td>≤8 MB</td><td>JPG, PNG</td><td>Crops differently on mobile vs desktop.</td></tr><tr><td>LinkedIn</td><td>Profile Photo</td><td>≥ 400 × 400</td><td>1:1</td><td>≤8 MB</td><td>JPG, PNG</td><td>Bigger uploads are fine; LinkedIn resizes.</td></tr><tr><td>Mastodon</td><td>Avatar</td><td>Downscaled to 400 × 400</td><td>1:1</td><td>≤2 MB</td><td>PNG, JPG, GIF</td><td>Upload larger; instance downscales.</td></tr><tr><td>Mastodon</td><td>Header</td><td>Downscaled to 1500 × 500</td><td>3:1</td><td>≤2 MB</td><td>PNG, JPG, GIF</td><td>Upload larger; instance downscales.</td></tr><tr><td>Pinterest</td><td>Board Cover</td><td>≈ 600 × 600 (or 1000 × 1000)</td><td>1:1</td><td>—</td><td>JPG, PNG</td><td>Higher res looks crisper.</td></tr><tr><td>Pinterest</td><td>Profile Cover</td><td>1920 × 1080 (16:9)</td><td>16:9</td><td>—</td><td>JPG, PNG</td><td>Pinterest crops/positions to 16:9.</td></tr><tr><td>Pinterest</td><td>Profile Photo</td><td>≈ 165 × 165 (or larger)</td><td>1:1 (circle in UI)</td><td>—</td><td>JPG, PNG</td><td></td></tr><tr><td>Pinterest</td><td>Standard Pin</td><td>1000 × 1500</td><td>2:3</td><td>≤20 MB (web)</td><td>JPG, PNG</td><td>Other ratios possible; 2:3 performs best.</td></tr><tr><td>Reddit</td><td>Subreddit Banner (Large/Med/Small)</td><td>1920 × 384 / 1920 × 256 / 1920 × 128</td><td>5:1 / 7.5:1 / 15:1</td><td>—</td><td>JPG, PNG</td><td>Responsive; taller on mobile.</td></tr><tr><td>Reddit</td><td>User Profile – Avatar</td><td>≈ 256 × 256</td><td>1:1</td><td>—</td><td>JPG, PNG</td><td></td></tr><tr><td>Reddit</td><td>User Profile – Banner</td><td>≈ 1000 × 300</td><td>≈ 10:3</td><td>—</td><td>JPG, PNG</td><td>Cropped/rounded corners on desktop; test on mobile.</td></tr><tr><td>SoundCloud</td><td>Profile Header</td><td>≥ 2480 × 520</td><td>≈ 4.77:1</td><td>≤2 MB</td><td>JPG, PNG</td><td>Avoid text near edges; crops on small screens.</td></tr><tr><td>SoundCloud</td><td>Profile Photo</td><td>≥ 1000 × 1000</td><td>1:1</td><td>≤2 MB</td><td>JPG, PNG</td><td></td></tr><tr><td>Spotify (Artists)</td><td>Artist Avatar</td><td>≥ 750 × 750</td><td>1:1</td><td>≤20 MB</td><td>JPEG, PNG, GIF</td><td></td></tr><tr><td>Spotify (Artists)</td><td>Artist Header</td><td>≥ 2660 × 1140</td><td>≈ 2.33:1</td><td>≤20 MB</td><td>JPEG, PNG, GIF</td><td>Keep critical content centered.</td></tr><tr><td>Spotify (Releases)</td><td>Cover Art</td><td>640–10,000 px (square)</td><td>1:1</td><td>—</td><td>TIFF, PNG, JPG</td><td>sRGB, 24‑bit; no embedded color profiles.</td></tr><tr><td>Threads (Meta)</td><td>Post Image</td><td>1440 × 1920</td><td>9:16 (native 3:4 also used)</td><td>≤8 MB</td><td>JPG, PNG</td><td></td></tr><tr><td>Threads (Meta)</td><td>Profile Photo</td><td>640 × 640 (syncs from Instagram)</td><td>1:1 (circle in UI)</td><td>—</td><td>JPG, PNG</td><td></td></tr><tr><td>TikTok</td><td>Profile Photo</td><td>≥ 200 × 200 (min 20 × 20)</td><td>1:1</td><td>—</td><td>JPG, PNG</td><td>Crop within app on upload.</td></tr><tr><td>Twitch</td><td>Profile Banner</td><td>1200 × 480 (scales by browser width)</td><td>≈ 2.5:1</td><td>—</td><td>JPG, PNG</td><td>Design for left side; scales responsively.</td></tr><tr><td>Twitch</td><td>Profile Picture</td><td>≥ 256 × 256 (800 × 800 for quality)</td><td>1:1</td><td>≤10 MB</td><td>GIF, JPG, PNG</td><td></td></tr><tr><td>X (Twitter)</td><td>Header (Banner)</td><td>1500 × 500</td><td>3:1</td><td>—</td><td>JPG, PNG</td><td>Keep important content centered; profile photo overlaps.</td></tr><tr><td>X (Twitter)</td><td>Profile Photo</td><td>400 × 400</td><td>1:1 (circle in UI)</td><td>—</td><td>JPG, PNG</td><td></td></tr><tr><td>YouTube</td><td>Channel Banner (Channel Art)</td><td>2560 × 1440</td><td>16:9</td><td>≤6 MB</td><td>JPG, PNG</td><td>Safe area (always visible): ~1235 × 338. Minimum upload: 2048 × 1152.</td></tr><tr><td>YouTube</td><td>Profile (Channel Icon)</td><td>≥ 800 × 800</td><td>1:1 (circle in UI)</td><td>≤15 MB</td><td>JPG, PNG, GIF, BMP (no animated GIF)</td><td>Renders at ~98 × 98 in many places.</td></tr><tr><td>YouTube</td><td>Video Thumbnail</td><td>1280 × 720</td><td>16:9</td><td>≤2 MB</td><td>JPG, PNG, GIF</td><td>Minimum width 640 px.</td></tr></tbody></table>
+
+<footer>
+  <p><span class="kbd">Tip:</span> Center critical content (faces/logos) — many platforms crop to circles or differently on mobile vs desktop.</p>
+</footer>
+
+<script>
+// Simple table sort
+document.querySelectorAll('th').forEach((th, idx) => {
+  let asc = true;
+  th.addEventListener('click', () => {
+    const tbody = document.querySelector('#sizeTable tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    rows.sort((a,b) => {
+      const A = a.children[idx].textContent.trim().toLowerCase();
+      const B = b.children[idx].textContent.trim().toLowerCase();
+      if (A === B) return 0;
+      return (A > B ? 1 : -1) * (asc ? 1 : -1);
+    });
+    tbody.innerHTML = '';
+    rows.forEach(r => tbody.appendChild(r));
+    asc = !asc;
+  });
+});
+
+// Filter
+document.getElementById('filter').addEventListener('input', (e) => {
+  const q = e.target.value.trim().toLowerCase();
+  document.querySelectorAll('#sizeTable tbody tr').forEach(tr => {
+    const text = tr.textContent.toLowerCase();
+    tr.style.display = text.includes(q) ? '' : 'none';
+  });
+});
+
+// Theme toggle (light/dark flip via data attribute)
+let dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+const applyTheme = () => {
+  if(dark) {
+    document.documentElement.style.setProperty('--bg', '#0f1115');
+    document.documentElement.style.setProperty('--fg', '#eaeef6');
+    document.documentElement.style.setProperty('--muted', '#9aa4b2');
+    document.documentElement.style.setProperty('--border', '#2a2f3a');
+    document.documentElement.style.setProperty('--accent', '#66a3ff');
+  } else {
+    document.documentElement.style.setProperty('--bg', '#ffffff');
+    document.documentElement.style.setProperty('--fg', '#111111');
+    document.documentElement.style.setProperty('--muted', '#555');
+    document.documentElement.style.setProperty('--border', '#ddd');
+    document.documentElement.style.setProperty('--accent', '#0b5fff');
+  }
+};
+applyTheme();
+document.getElementById('theme').addEventListener('click', () => { dark = !dark; applyTheme(); });
+</script>
+</body>
+</html>
