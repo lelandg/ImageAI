@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.11.0**
+**Version 0.12.0**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -69,6 +69,7 @@
   - **Manual mode** - Direct resolution selection overrides aspect ratio
   - Provider-optimized presets (DALL·E, Gemini, Stability AI)
   - Visual feedback showing which mode is active (green for AR, blue for resolution)
+  - **Social Media Sizes Dialog** - Quick access to platform-specific image dimensions for Instagram, Twitter/X, Facebook, LinkedIn, YouTube, TikTok, and more
 - **Quality & Style Options** - Standard/HD quality, style presets for different looks
 - **Batch Generation** - Generate multiple variations at once
 - **Cost Estimation** - Real-time cost calculation for all providers
@@ -98,6 +99,18 @@
 - Customizable output paths and filenames
 - Auto-copy filename to clipboard option
 - Smart filename generation from prompts
+
+### ⌨️ Keyboard Shortcuts & Accessibility
+- **Comprehensive keyboard navigation** - Full keyboard control for all features
+- **Button mnemonics** - Alt+key shortcuts for all buttons (e.g., Alt+G for Generate)
+- **Global shortcuts**:
+  - **Ctrl+Enter** - Generate image from anywhere in the Generate tab
+  - **Ctrl+S** - Save generated image
+  - **Ctrl+Shift+C** - Copy image to clipboard
+  - **F1** - Jump to Help tab
+- **Text field support** - Ctrl+Enter works even when typing in the prompt field
+- **Tooltips** - All buttons show their keyboard shortcuts
+- **Screen reader compatible** - Proper labels and navigation order
 - Image format detection and optimization
 - Preview scaling with aspect ratio preservation
 
@@ -1387,7 +1400,39 @@ ImageAI/
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
-### Latest Release: v0.11.0 (2025-01-13)
+### Latest Release: v0.12.0 (2025-01-13)
+
+**Social Media Image Sizes, Keyboard Shortcuts, Gemini Aspect Ratios & Bug Fixes**
+- **Social Media Sizes Dialog**: New dialog for quick access to platform-specific image dimensions
+  - Comprehensive list of sizes for Instagram, Twitter/X, Facebook, LinkedIn, YouTube, TikTok
+  - One-click application of social media dimensions to image generation
+  - Searchable and categorized by platform
+  - "Social Sizes..." button next to resolution selector for easy access
+- **Comprehensive Keyboard Shortcuts**: Full keyboard accessibility
+  - Alt+key mnemonics for all buttons (Alt+G to Generate, Alt+S to Save, etc.)
+  - Ctrl+Enter to generate from anywhere, even while typing in prompt field
+  - Ctrl+S to save image, Ctrl+Shift+C to copy to clipboard
+  - F1 for instant help access
+  - All shortcuts shown in button tooltips
+- **Provider Improvements**:
+  - Google Gemini (Nano Banana) now supports aspect ratios via prompt specification
+  - Resolution and aspect ratio settings are preserved when switching providers
+  - No more forced 1:1 aspect ratio for Google - all ratios now work
+- **UI Improvements**:
+  - Fixed status console auto-resizing - now stays at user-set size
+  - Removed white lines between console messages for cleaner output
+  - Console starts at fixed 100px height, resizable via splitter only
+- **Protobuf v5+ Compatibility**: Fixed AttributeError with MessageFactory.GetPrototype
+  - Added runtime compatibility patch for protobuf v5 changes
+  - Suppresses initialization errors during startup
+  - Allows installation with latest protobuf versions
+  - No more version conflicts with other packages
+- **Code Organization**:
+  - Added comprehensive code map documentation at `Docs/CodeMap.md`
+  - Created code map generator agent for maintaining navigation
+  - Updated CLAUDE.md with modularized structure information
+
+### Previous Release: v0.11.0 (2025-01-13)
 
 **Global LLM Integration & Enhanced Console UI**
 - **Global LLM Provider System**: Unified LLM provider selection across Image and Video tabs

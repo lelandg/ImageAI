@@ -216,22 +216,37 @@ class GoogleProvider(ImageProvider):
         images: List[bytes] = []
         
         # Build generation config for Gemini models
-        # Note: Gemini 2.5 Flash (Nano Banana) only generates square (1:1) images
-        # Aspect ratio parameters are not supported by the Gemini API
+        # Note: Gemini 2.5 Flash (Nano Banana) supports aspect ratios via prompt specification
+        # While the API doesn't have direct aspect ratio parameters, specifying it in the prompt works
         config = {}
         
-        # Optionally add aspect ratio to the prompt text for better results
+        # Add aspect ratio to prompt for Gemini (Nano Banana) support
+        # According to the Nano Banana guide, we should specify the aspect ratio in the prompt
         aspect_ratio = kwargs.get('aspect_ratio', '1:1')
-        if aspect_ratio != '1:1':
-            # Add aspect ratio hint to prompt (doesn't guarantee output ratio)
-            aspect_hints = {
-                '16:9': 'widescreen landscape 16:9 aspect ratio',
-                '9:16': 'vertical portrait 9:16 aspect ratio',
-                '4:3': 'standard 4:3 aspect ratio',
-                '3:4': 'portrait 3:4 aspect ratio'
-            }
-            if aspect_ratio in aspect_hints:
-                prompt = f"{prompt}, {aspect_hints[aspect_ratio]}"
+        width = kwargs.get('width', 1024)
+        height = kwargs.get('height', 1024)
+
+        # Calculate aspect ratio from dimensions if not provided
+        if width and height and width != height:
+            # Determine the actual aspect ratio from dimensions
+            ratio = width / height
+            if abs(ratio - 16/9) < 0.1:
+                aspect_ratio = '16:9'
+            elif abs(ratio - 9/16) < 0.1:
+                aspect_ratio = '9:16'
+            elif abs(ratio - 4/3) < 0.1:
+                aspect_ratio = '4:3'
+            elif abs(ratio - 3/4) < 0.1:
+                aspect_ratio = '3:4'
+            elif abs(ratio - 21/9) < 0.1:
+                aspect_ratio = '21:9'
+            elif abs(ratio - 1.0) < 0.1:
+                aspect_ratio = '1:1'
+
+        # Add aspect ratio specification to prompt as recommended in Nano Banana guide
+        if aspect_ratio and aspect_ratio != '1:1':
+            # Add explicit format request as per the guide
+            prompt = f"{prompt}. The image should be in a {aspect_ratio} format."
         
         # Note: These generation_config parameters may not be supported by all Gemini models
         # Most are placeholders for potential future support

@@ -539,11 +539,18 @@ class ResolutionSelector(QWidget):
         if resolution == "auto":
             self.set_mode_aspect_ratio()
         else:
+            found = False
             for i in range(self.combo.count()):
                 if self.combo.itemData(i) == resolution:
                     self.combo.setCurrentIndex(i)
-                    self.set_mode_resolution()
+                    found = True
                     break
+            if not found:
+                # Add or update a custom entry
+                custom_label = f"Custom ({resolution})"
+                self.combo.addItem(custom_label, userData=resolution)
+                self.combo.setCurrentIndex(self.combo.count() - 1)
+            self.set_mode_resolution()
     
     def is_using_aspect_ratio(self) -> bool:
         """Check if using aspect ratio mode."""

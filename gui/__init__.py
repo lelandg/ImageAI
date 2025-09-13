@@ -25,6 +25,10 @@ def launch_gui():
     window = MainWindow()
     window.show()
 
+    # Mark initialization as complete to stop suppressing protobuf errors
+    if hasattr(sys.modules.get('__main__'), '_initialization_complete'):
+        sys.modules['__main__']._initialization_complete = True
+
     print("Starting event loop...")
     sys.exit(app.exec())
 

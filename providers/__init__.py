@@ -1,5 +1,6 @@
 """Image generation providers for ImageAI."""
 
+import sys
 import os
 import warnings
 from typing import Dict, Type, Optional, Any
@@ -8,6 +9,27 @@ from typing import Dict, Type, Optional, Any
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 warnings.filterwarnings('ignore', message='.*GetPrototype.*')
 warnings.filterwarnings('ignore', category=FutureWarning)
+
+# Ensure protobuf is patched if not already done by main.py
+if 'google.protobuf.message_factory' in sys.modules:
+    try:
+        _mf = sys.modules['google.protobuf.message_factory']
+        if hasattr(_mf, 'MessageFactory'):
+            mf_class = _mf.MessageFactory
+            if not hasattr(mf_class, 'GetPrototype') and hasattr(mf_class, 'GetMessageClass'):
+                mf_class.GetPrototype = lambda self, desc: self.GetMessageClass(desc)
+    except:
+        pass
+
+if 'google.protobuf.symbol_database' in sys.modules:
+    try:
+        _sdb = sys.modules['google.protobuf.symbol_database']
+        if hasattr(_sdb, 'Default'):
+            db = _sdb.Default()
+            if not hasattr(db.__class__, 'GetPrototype') and hasattr(db.__class__, 'GetMessageClass'):
+                db.__class__.GetPrototype = lambda self, desc: self.GetMessageClass(desc)
+    except:
+        pass
 
 from .base import ImageProvider
 
@@ -38,19 +60,23 @@ def _get_providers() -> Dict[str, Type[ImageProvider]]:
             finally:
                 sys.stderr = old_stderr
         
+        import logging
+
         # Try to import Google provider
         try:
-            from .google import GoogleProvider
-            _PROVIDERS["google"] = GoogleProvider
-        except ImportError:
-            pass
+            with suppress_stderr():
+                from .google import GoogleProvider
+                _PROVIDERS["google"] = GoogleProvider
+        except Exception as e:
+            logging.debug(f"Could not load Google provider: {e}")
         
         # Try to import OpenAI provider
         try:
-            from .openai import OpenAIProvider
-            _PROVIDERS["openai"] = OpenAIProvider
-        except ImportError:
-            pass
+            with suppress_stderr():
+                from .openai import OpenAIProvider
+                _PROVIDERS["openai"] = OpenAIProvider
+        except Exception as e:
+            logging.debug(f"Could not load OpenAI provider: {e}")
         
         # Try to import Stability AI provider (may have protobuf issues)
         try:

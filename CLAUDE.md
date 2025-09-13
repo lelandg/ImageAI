@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Code Navigation
+
+**IMPORTANT**: Use the comprehensive code map at `Docs/CodeMap.md` for navigating this codebase. It provides:
+- Exact line numbers for all classes, methods, and functions (format: `file.py:123`)
+- Visual architecture diagram showing component relationships
+- Cross-module dependency tracking
+- Quick navigation to primary entry points
+
+To update the code map, follow the instructions in `imageai_codemap_agent.md`.
+
 ## Debug Files
 
 When the application exits, it automatically copies debug files to the current directory:
@@ -57,12 +67,19 @@ python main.py --provider openai -m dall-e-3 -p "Your prompt" -o output.png
 
 ### Main Components
 
-1. **main.py** - Single-file application containing all functionality:
-   - **CLI Interface** (`run_cli()`, `build_arg_parser()`) - Handles command-line arguments and operations
-   - **GUI Interface** (`MainWindow`, `ExamplesDialog`, `GenWorker`) - PySide6/Qt-based desktop interface
-   - **Provider Abstraction** - Supports multiple providers (Google Gemini, OpenAI) with unified interface
-   - **Configuration Management** - Cross-platform config storage in user directories
-   - **Image Generation** - Handles both text and image generation with provider-specific implementations
+The codebase is now modularized (no longer a single file). See `Docs/CodeMap.md` for complete navigation with line numbers.
+
+**Primary Entry Points:**
+- `main.py:69` - main() function that routes to CLI or GUI
+- `gui/__init__.py:7` - launch_gui() for GUI mode
+- `cli/runner.py` - run_cli() for command-line operations
+- `providers/__init__.py` - get_provider() factory for image providers
+
+**Core Systems:**
+- **GUI**: `gui/main_window.py` - MainWindow class with tabs for Generate, Settings, Templates, Help
+- **Providers**: Base class at `providers/base.py`, implementations for Google, OpenAI, Stability, Local SD
+- **Video Project**: Complex subsystem in `core/video/` for lyric-synced video generation
+- **Configuration**: `core/config.py` - ConfigManager for settings and API keys
 
 ### Key Design Patterns
 
@@ -95,11 +112,12 @@ Configuration and generated images are stored in platform-specific user director
 
 ## Important Notes
 
-- The application is a single-file Python script (`main.py`) for simplicity
+- The application is now fully modularized with separate packages for GUI, CLI, providers, and core functionality
 - PySide6 is required for GUI but optional for CLI usage
 - API keys are never committed to source control
 - Images auto-save with sanitized filenames based on prompts
 - Template system supports placeholder substitution for prompt generation
+- When navigating code, always check `Docs/CodeMap.md` first for quick symbol location
 
 ## Version Management
 
@@ -113,7 +131,22 @@ Configuration and generated images are stored in platform-specific user director
 The `Plans/` directory contains documentation for upcoming features:
 - **GoogleCloudAuth.md**: Implementation plan for Google Cloud authentication via Application Default Credentials
 - **NewProviders.md**: Comprehensive plan for adding additional AI image providers (Stability AI, Adobe Firefly, etc.) and features like image editing, masking, and upscaling
-- When implementing new features, keep file sizes reasonable for your use.
+- **ImageAI-VideoProject-PRD.md**: Comprehensive product requirements for video generation features
+
+## Code Map Maintenance
+
+When the code map needs updating:
+1. Check last update: `head -5 Docs/CodeMap.md`
+2. Run the code map agent: Follow instructions in `imageai_codemap_agent.md`
+3. The agent will:
+   - Check git history for changes since last update
+   - Extract all symbols with exact line numbers
+   - Update cross-module dependencies
+   - Generate visual architecture diagram
+
+## Development Notes
+
+- When implementing new features, keep file sizes reasonable for your use
 - For testing Python code:
   - **In WSL/Linux bash**: Use `source /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/activate`
   - **In PowerShell**: Use `.\.venv\Scripts\Activate.ps1` (this is the primary environment)

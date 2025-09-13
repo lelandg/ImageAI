@@ -4,7 +4,7 @@ from pathlib import Path
 
 # Application metadata
 APP_NAME = "ImageAI"
-VERSION = "0.11.0"
+VERSION = "0.12.0"
 __version__ = VERSION
 __author__ = "Leland Green"
 __email__ = "contact@lelandgreen.com"

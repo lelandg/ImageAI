@@ -44,3 +44,9 @@
 - Always consult `Docs/CodeMap.md` first to locate variables, functions, and modules before searching the tree.
 - Regenerate the map if needed: `make codemap` (or `python tools/generate_code_map.py`).
 - Use the "Module Symbols" section in the code map to jump directly to files exposing the classes/functions you need.
+
+## Run Logs & Dialog Logging
+- Log every dialog shown to users (errors, warnings, info, questions). Use helpers in `gui/dialog_utils.py` instead of calling `QMessageBox` directly so messages are captured in logs.
+- Logs are copied on exit to `./imageai_current.log` for quick access (see `core/logging_config.py`).
+- The most recent project file is copied on exit to `./imageai_current_project.json` (see `core/project_tracker.py`).
+- When debugging issues, check these two files first to reproduce the last run context.

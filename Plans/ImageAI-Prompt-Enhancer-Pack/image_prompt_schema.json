@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ImageAI Prompt Enhancer Output",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "unified": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prompt": {
+          "type": "string"
+        },
+        "negative_prompt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "style_tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "aspect_ratio": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^(1:1|16:9|9:16|4:3|3:2|21:9)$"
+        },
+        "guidance": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 30
+        },
+        "steps": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1,
+          "maximum": 200
+        },
+        "seed": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "prompt"
+      ]
+    },
+    "by_model": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "openai_dalle3": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stability_sdxl": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "prompt": {
+              "type": "string"
+            },
+            "negative_prompt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "cfg": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 25
+            },
+            "steps": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "maximum": 200
+            },
+            "seed": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "sampler": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "prompt"
+          ]
+        },
+        "midjourney": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gemini_imagen": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "openai_dalle3",
+        "stability_sdxl",
+        "midjourney",
+        "gemini_imagen"
+      ]
+    },
+    "continuity": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "character_sheet": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "persistent_traits": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "reference_images": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "variants": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "prompt": {
+            "type": "string"
+          },
+          "note": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "prompt"
+        ]
+      }
+    }
+  },
+  "required": [
+    "unified",
+    "by_model"
+  ]
+}

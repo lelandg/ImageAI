@@ -1,0 +1,61 @@
+{
+  "presets": [
+    {
+      "id": "cinematic-photoreal",
+      "label": "Cinematic Photoreal",
+      "style_tags": [
+        "photorealistic",
+        "cinematic",
+        "volumetric lighting",
+        "film grain"
+      ],
+      "camera": {
+        "shot": "wide",
+        "lens": "35mm",
+        "aperture": "f/2.8"
+      },
+      "lighting": "golden hour soft rim light",
+      "default_ar": "16:9"
+    },
+    {
+      "id": "illustrated-watercolor",
+      "label": "Watercolor Illustration",
+      "style_tags": [
+        "watercolor",
+        "paper texture",
+        "soft edges",
+        "ink outline"
+      ],
+      "lighting": "soft diffuse daylight",
+      "default_ar": "3:2"
+    },
+    {
+      "id": "pixel-art",
+      "label": "Pixel Art (8\u2011bit)",
+      "style_tags": [
+        "8-bit",
+        "pixel art",
+        "limited palette",
+        "CRT scanlines"
+      ],
+      "default_ar": "1:1"
+    },
+    {
+      "id": "studio-portrait",
+      "label": "Studio Portrait",
+      "style_tags": [
+        "portrait",
+        "skin\u2011tone accurate",
+        "high detail",
+        "bokeh"
+      ],
+      "camera": {
+        "shot": "headshot",
+        "lens": "85mm",
+        "aperture": "f/1.8"
+      },
+      "lighting": "beauty dish + fill card",
+      "default_ar": "4:5"
+    }
+  ]
+}

@@ -139,41 +139,29 @@ class MainWindow(QMainWindow):
 
         if is_separator:
             # Add a horizontal separator
-            self.output_text.append('<hr style="border: 1px solid #666; margin: 4px 0;">')
+            cursor = self.output_text.textCursor()
+            cursor.movePosition(QTextCursor.End)
+            cursor.insertHtml('<hr style="border: none; border-top: 1px solid #666; margin: 2px 0; padding: 0;">')
 
         # Format the message with color
         timestamp = datetime.now().strftime("%H:%M:%S")
         formatted = f'<span style="color: #888;">[{timestamp}]</span> <span style="color: {color};">{message}</span>'
 
-        # Append to console
-        self.output_text.append(formatted)
+        # Append to console without extra spacing
+        cursor = self.output_text.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        cursor.insertHtml(formatted + '<br/>')
 
         # Auto-scroll to bottom
         cursor = self.output_text.textCursor()
         cursor.movePosition(QTextCursor.End)
         self.output_text.setTextCursor(cursor)
 
-        # Auto-resize console to fit content height
-        try:
-            self._auto_resize_console()
-        except Exception:
-            pass
+        # Don't auto-resize - let user control the console size
 
     def _auto_resize_console(self):
-        """Keep the console minimally tall while allowing manual resizing."""
-        doc = self.output_text.document()
-        layout = doc.documentLayout()
-        if layout is None:
-            return
-        doc_height = layout.documentSize().height()
-        fm = self.output_text.fontMetrics()
-        frame = self.output_text.frameWidth() * 2
-        margins = self.output_text.contentsMargins()
-        padding = margins.top() + margins.bottom()
-        min_height = fm.lineSpacing() + 6  # at least one line
-        new_height = int(max(min_height, doc_height + frame + padding))
-        # Use minimum height so user can still expand via splitter
-        self.output_text.setMinimumHeight(new_height)
+        """Deprecated - no longer auto-resize console."""
+        pass  # Let user control console size via splitter
 
     def _load_history_from_disk(self):
         """Load history from disk into memory with enhanced metadata."""
@@ -318,7 +306,17 @@ class MainWindow(QMainWindow):
         provider_model_layout.addWidget(QLabel("Image Provider:"))
         self.image_provider_combo = QComboBox()
         self.image_provider_combo.setMinimumWidth(150)
-        available_providers = list_providers()
+        # Get available providers with a defensive fallback
+        try:
+            available_providers = list_providers()
+            if not available_providers:
+                # Ensure we have at least core providers listed
+                available_providers = ["google", "openai"]
+        except Exception as e:
+            # Avoid bubbling import-time errors (e.g., protobuf incompat)
+            import logging as _logging
+            _logging.getLogger(__name__).debug(f"Provider discovery failed: {e}")
+            available_providers = ["google", "openai"]
         self.image_provider_combo.addItems(available_providers)
         if self.current_provider in available_providers:
             self.image_provider_combo.setCurrentText(self.current_provider)
@@ -363,12 +361,16 @@ class MainWindow(QMainWindow):
         prompt_layout.addWidget(prompt_label)
         
         self.prompt_edit = QTextEdit()
-        self.prompt_edit.setPlaceholderText("Describe what to generate...")
+        self.prompt_edit.setPlaceholderText("Describe what to generate... (Ctrl+Enter to generate)")
         self.prompt_edit.setAcceptRichText(False)
         # Ensure minimum height for 3 lines of text
         font_metrics = self.prompt_edit.fontMetrics()
         min_height = font_metrics.lineSpacing() * 3 + 10  # 3 lines + padding
         self.prompt_edit.setMinimumHeight(min_height)
+
+        # Install event filter for Ctrl+Enter shortcut
+        self.prompt_edit.installEventFilter(self)
+
         prompt_layout.addWidget(self.prompt_edit)
         
         # Add prompt container to splitter
@@ -436,7 +438,19 @@ class MainWindow(QMainWindow):
                 self.resolution_selector.modeChanged.connect(self._on_resolution_mode_changed)
                 # Initialize resolution selector with current aspect ratio
                 self.resolution_selector.update_aspect_ratio(self.aspect_selector.get_ratio())
-            settings_form.addRow("Resolution:", self.resolution_selector)
+            # Wrap selector with a button for social sizes
+            from PySide6.QtWidgets import QWidget as _W, QHBoxLayout as _HB
+            res_container = _W()
+            res_layout = _HB(res_container)
+            res_layout.setContentsMargins(0, 0, 0, 0)
+            res_layout.setSpacing(6)
+            res_layout.addWidget(self.resolution_selector)
+            self.btn_social_sizes = QPushButton("Social Sizes…")
+            self.btn_social_sizes.setToolTip("Browse common social media sizes and apply")
+            self.btn_social_sizes.clicked.connect(self._open_social_sizes_dialog)
+            res_layout.addWidget(self.btn_social_sizes)
+            res_layout.addStretch(1)
+            settings_form.addRow("Resolution:", res_container)
         else:
             # Fallback to old resolution combo
             self.resolution_selector = None
@@ -502,11 +516,16 @@ class MainWindow(QMainWindow):
         
         # Buttons - all on one row for compactness
         hb = QHBoxLayout()
-        self.btn_examples = QPushButton("Examples")
-        self.btn_enhance_prompt = QPushButton("Enhance Prompt")
-        self.btn_generate = QPushButton("Generate")
-        self.btn_save_image = QPushButton("Save Image")
-        self.btn_copy_image = QPushButton("Copy to Clipboard")
+        self.btn_examples = QPushButton("E&xamples")  # Alt+X
+        self.btn_examples.setToolTip("Browse example prompts (Alt+X)")
+        self.btn_enhance_prompt = QPushButton("&Enhance Prompt")  # Alt+E
+        self.btn_enhance_prompt.setToolTip("Improve prompt with AI (Alt+E)")
+        self.btn_generate = QPushButton("&Generate")  # Alt+G
+        self.btn_generate.setToolTip("Generate image (Alt+G or Ctrl+Enter)")
+        self.btn_save_image = QPushButton("&Save Image")  # Alt+S
+        self.btn_save_image.setToolTip("Save generated image (Alt+S or Ctrl+S)")
+        self.btn_copy_image = QPushButton("&Copy to Clipboard")  # Alt+C
+        self.btn_copy_image.setToolTip("Copy image to clipboard (Alt+C)")
         self.btn_save_image.setEnabled(False)
         self.btn_copy_image.setEnabled(False)
 
@@ -550,10 +569,10 @@ class MainWindow(QMainWindow):
         # Status console - styled like a terminal
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
-        # Make console height minimal by default, but allow it to grow with splitter
-        self.output_text.setMinimumHeight(0)
-        self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        # Terminal-like styling
+        # Set fixed initial height, user can resize via splitter
+        self.output_text.setMinimumHeight(50)  # Minimum height to prevent collapse
+        self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        # Terminal-like styling - remove paragraph spacing
         self.output_text.setStyleSheet("""
             QTextEdit {
                 background-color: #1e1e1e;
@@ -562,20 +581,19 @@ class MainWindow(QMainWindow):
                 font-size: 10pt;
                 border: 1px solid #444;
                 padding: 4px;
+                line-height: 1.0;
             }
         """)
+        # Set document margins to reduce spacing between lines
+        doc = self.output_text.document()
+        doc.setDocumentMargin(0)
         console_layout.addWidget(self.output_text)
-        # Auto-resize on content changes
-        try:
-            self.output_text.document().contentsChanged.connect(self._auto_resize_console)
-        except Exception:
-            pass
+        # Don't auto-resize - let user control size via splitter
 
         image_console_splitter.addWidget(console_container)
 
-        # Set initial splitter sizes (large image, small console that fits content)
-        self._auto_resize_console()
-        image_console_splitter.setSizes([500, max(40, self.output_text.minimumHeight())])
+        # Set initial splitter sizes (large image, small fixed console)
+        image_console_splitter.setSizes([500, 100])  # Fixed initial console height
         image_console_splitter.setStretchFactor(0, 3)  # Image gets more stretch
         image_console_splitter.setStretchFactor(1, 1)  # Console can grow when resizing
 
@@ -602,6 +620,54 @@ class MainWindow(QMainWindow):
         self.btn_examples.clicked.connect(self._open_examples)
         self.btn_enhance_prompt.clicked.connect(self._enhance_prompt)
         self.btn_generate.clicked.connect(self._generate)
+
+        # Add keyboard shortcuts for common actions
+        from PySide6.QtGui import QShortcut, QKeySequence
+
+        # Ctrl+Enter always triggers generate
+        shortcut_ctrl_enter = QShortcut(QKeySequence("Ctrl+Return"), self.tab_generate)
+        shortcut_ctrl_enter.activated.connect(lambda: self._generate() if self.btn_generate.isEnabled() else None)
+
+        # Also support Cmd+Enter on macOS
+        shortcut_cmd_enter = QShortcut(QKeySequence("Meta+Return"), self.tab_generate)
+        shortcut_cmd_enter.activated.connect(lambda: self._generate() if self.btn_generate.isEnabled() else None)
+
+        # Ctrl+S to save image
+        shortcut_save = QShortcut(QKeySequence.StandardKey.Save, self.tab_generate)
+        shortcut_save.activated.connect(lambda: self._save_image_as() if self.btn_save_image.isEnabled() else None)
+
+        # Ctrl+Shift+C to copy image
+        shortcut_copy = QShortcut(QKeySequence("Ctrl+Shift+C"), self.tab_generate)
+        shortcut_copy.activated.connect(lambda: self._copy_image_to_clipboard() if self.btn_copy_image.isEnabled() else None)
+
+        # F1 for help
+        shortcut_help = QShortcut(QKeySequence.StandardKey.HelpContents, self)
+        shortcut_help.activated.connect(lambda: self.tabs.setCurrentWidget(self.tab_help))
+
+    def _open_social_sizes_dialog(self):
+        """Open the Social Media Image Sizes dialog and apply selection."""
+        try:
+            from gui.social_sizes_dialog import SocialSizesDialog
+        except Exception as e:
+            from gui.dialog_utils import show_error
+            show_error(self, APP_NAME, f"Unable to open sizes dialog: {e}", exception=e)
+            return
+        try:
+            dlg = SocialSizesDialog(self)
+            from PySide6.QtWidgets import QDialog
+            if dlg.exec() == QDialog.Accepted:
+                res = dlg.selected_resolution()
+                if res and hasattr(self, 'resolution_selector') and self.resolution_selector:
+                    # Switch to explicit resolution mode and set the value
+                    self.resolution_selector.set_mode_resolution()
+                    # If preset list does not contain this size, temporarily add it
+                    if hasattr(self.resolution_selector, 'set_resolution'):
+                        self.resolution_selector.set_resolution(res)
+                    # Store as current resolution for persistence
+                    self.current_resolution = res
+        except Exception as e:
+            from gui.dialog_utils import show_error
+            show_error(self, APP_NAME, f"Sizes dialog error: {e}", exception=e)
         self.btn_save_image.clicked.connect(self._save_image_as)
         self.btn_copy_image.clicked.connect(self._copy_image_to_clipboard)
     
@@ -612,8 +678,15 @@ class MainWindow(QMainWindow):
         # Provider selection
         form = QFormLayout()
         self.provider_combo = QComboBox()
-        # Get available providers dynamically
-        available_providers = list_providers()
+        # Get available providers dynamically, with safe fallback
+        try:
+            available_providers = list_providers()
+            if not available_providers:
+                available_providers = ["google", "openai"]
+        except Exception as e:
+            import logging as _logging
+            _logging.getLogger(__name__).debug(f"Provider discovery failed (settings tab): {e}")
+            available_providers = ["google", "openai"]
         self.provider_combo.addItems(available_providers)
         if self.current_provider in available_providers:
             self.provider_combo.setCurrentText(self.current_provider)
@@ -671,11 +744,11 @@ class MainWindow(QMainWindow):
         
         # Google Cloud buttons
         gcloud_buttons = QHBoxLayout()
-        self.btn_authenticate = QPushButton("Authenticate")
-        self.btn_authenticate.setToolTip("Run: gcloud auth application-default login")
-        self.btn_check_status = QPushButton("Check Status")
-        self.btn_get_gcloud = QPushButton("Get gcloud CLI")
-        self.btn_cloud_console = QPushButton("Cloud Console")
+        self.btn_authenticate = QPushButton("&Authenticate")  # Alt+A
+        self.btn_authenticate.setToolTip("Run: gcloud auth application-default login (Alt+A)")
+        self.btn_check_status = QPushButton("Check &Status")  # Alt+S
+        self.btn_get_gcloud = QPushButton("Get &gcloud CLI")  # Alt+G
+        self.btn_cloud_console = QPushButton("Cloud C&onsole")  # Alt+O
         
         gcloud_buttons.addWidget(self.btn_authenticate)
         gcloud_buttons.addWidget(self.btn_check_status)
@@ -709,8 +782,8 @@ class MainWindow(QMainWindow):
         
         # Buttons
         hb = QHBoxLayout()
-        self.btn_get_key = QPushButton("Get API Key")
-        self.btn_save_test = QPushButton("Test Connection")
+        self.btn_get_key = QPushButton("Get API &Key")  # Alt+K
+        self.btn_save_test = QPushButton("&Test Connection")  # Alt+T
         hb.addWidget(self.btn_get_key)
         hb.addStretch(1)
         hb.addWidget(self.btn_save_test)
@@ -1656,7 +1729,7 @@ For more detailed information, please refer to the full documentation.
         v.addWidget(self.append_prompt_check)
         
         # Apply button
-        self.btn_insert_prompt = QPushButton("Insert into Prompt")
+        self.btn_insert_prompt = QPushButton("&Insert into Prompt")  # Alt+I
         self.btn_insert_prompt.setStyleSheet("""
             QPushButton {
                 padding: 8px;
@@ -1769,8 +1842,8 @@ For more detailed information, please refer to the full documentation.
         
         # Buttons
         h = QHBoxLayout()
-        self.btn_load_history = QPushButton("Load Selected")
-        self.btn_clear_history = QPushButton("Clear History")
+        self.btn_load_history = QPushButton("&Load Selected")  # Alt+L
+        self.btn_clear_history = QPushButton("C&lear History")  # Alt+L
         h.addWidget(self.btn_load_history)
         h.addStretch()
         h.addWidget(self.btn_clear_history)
@@ -2041,15 +2114,11 @@ For more detailed information, please refer to the full documentation.
             # Update settings visibility
             self._update_advanced_visibility()
 
-            # Update aspect ratio selector if present
+            # Don't change aspect ratio or resolution when switching providers
+            # Google Gemini (Nano Banana) now supports aspect ratios via the prompt
             if hasattr(self, 'aspect_selector') and self.aspect_selector:
-                if provider_name == 'google':
-                    self.aspect_selector.set_ratio("1:1")
-                    self.aspect_selector.setEnabled(False)
-                    self.aspect_selector.setToolTip("Google Gemini currently only supports square (1:1) images")
-                else:
-                    self.aspect_selector.setEnabled(True)
-                    self.aspect_selector.setToolTip("")
+                self.aspect_selector.setEnabled(True)
+                self.aspect_selector.setToolTip("Aspect ratio is preserved across provider changes")
 
             # Preload the new provider
             auth_mode_internal = self.config.get("auth_mode", "api-key")
@@ -3214,6 +3283,22 @@ For more detailed information, please refer to the full documentation.
             except Exception:
                 pass
     
+    def eventFilter(self, obj, event):
+        """Handle events for child widgets."""
+        from PySide6.QtCore import QEvent, Qt
+
+        # Handle Ctrl+Enter in prompt_edit to trigger generation
+        if obj == self.prompt_edit and event.type() == QEvent.KeyPress:
+            # Check for both Return and Enter keys with Ctrl modifier
+            if (event.key() in [Qt.Key_Return, Qt.Key_Enter] and
+                event.modifiers() & Qt.ControlModifier):
+                # Trigger generate if button is enabled
+                if self.btn_generate.isEnabled():
+                    self._generate()
+                    return True  # Event handled
+
+        return super().eventFilter(obj, event)
+
     def resizeEvent(self, event):
         """Handle window resize to scale images appropriately."""
         super().resizeEvent(event)
