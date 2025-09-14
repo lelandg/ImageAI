@@ -14,7 +14,11 @@
       "Read(//mnt/e/Pictures/Screenshots/2025/**)",
       "Bash(grep:*)",
       "Bash(awk:*)",
-      "Bash(.venv_linux/bin/pip install:*)"
+      "Bash(.venv_linux/bin/pip install:*)",
+      "Read(//mnt/c/Users/aboog/AppData/Roaming/ImageAI/generated/**)",
+      "Bash(while read f)",
+      "Bash(cat:*)",
+      "Bash(done)"
     ],
     "deny": [],
     "ask": []

@@ -285,12 +285,27 @@ def auto_save_images(images: list, base_stub: str = "gen") -> list:
     return saved
 
 
-def scan_disk_history(max_items: int = 500) -> list[Path]:
-    """Scan generated dir for images and return sorted list by mtime desc."""
+def scan_disk_history(max_items: int = 500, project_only: bool = False) -> list[Path]:
+    """Scan generated dir for images and return sorted list by mtime desc.
+
+    Args:
+        max_items: Maximum number of items to return
+        project_only: If True, only return images with metadata sidecar files
+    """
     try:
         out_dir = images_output_dir()
         exts = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
         items = [p for p in out_dir.iterdir() if p.is_file() and p.suffix.lower() in exts]
+
+        # Filter for project images (those with metadata sidecars)
+        if project_only:
+            filtered_items = []
+            for item in items:
+                sidecar_path = item.with_suffix(item.suffix + ".json")
+                if sidecar_path.exists():
+                    filtered_items.append(item)
+            items = filtered_items
+
         items.sort(key=lambda p: p.stat().st_mtime, reverse=True)
         return items[:max_items]
     except (OSError, IOError, AttributeError):

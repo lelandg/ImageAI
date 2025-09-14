@@ -74,7 +74,7 @@ class MainWindow(QMainWindow):
         
         # Session state
         print("Scanning image history...")
-        self.history_paths: List[Path] = scan_disk_history()
+        self.history_paths: List[Path] = scan_disk_history(project_only=True)
         print(f"Found {len(self.history_paths)} images in history")
 
         self.history = []  # Initialize empty history list
@@ -136,6 +136,82 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Ready")
         QApplication.processEvents()
     
+
+    def _on_show_all_images_toggled(self, checked: bool):
+        """Handle toggle of show all images checkbox."""
+        # Reload history with new filter
+        self.history_paths = scan_disk_history(project_only=not checked)
+
+        # Clear existing history data
+        self.history = []
+
+        # Load metadata for new set of images
+        print(f"Loading metadata for {len(self.history_paths)} images...")
+        for img_path in self.history_paths[:100]:  # Limit to first 100 for performance
+            meta = read_image_sidecar(img_path)
+            if meta:
+                self.history.append({
+                    'path': img_path,
+                    'prompt': meta.get('prompt', ''),
+                    'timestamp': meta.get('timestamp', ''),
+                    'model': meta.get('model', ''),
+                    'provider': meta.get('provider', ''),
+                    'cost': meta.get('cost', 0.0),
+                    'width': meta.get('width', 0),
+                    'height': meta.get('height', 0)
+                })
+            elif checked:  # Only add non-project images if showing all
+                # For non-project images, create minimal entry
+                self.history.append({
+                    'path': img_path,
+                    'prompt': '',
+                    'timestamp': datetime.fromtimestamp(img_path.stat().st_mtime).isoformat(),
+                    'model': '',
+                    'provider': '',
+                    'cost': 0.0,
+                    'width': 0,
+                    'height': 0
+                })
+
+        print(f"Loaded metadata for {len(self.history)} images")
+
+        # Refresh the history table
+        if hasattr(self, 'history_table'):
+            self._refresh_history_table()
+
+    def _enable_original_toggle(self, original_path, cropped_path):
+        """Enable toggle button for switching between original and cropped."""
+        self.btn_toggle_original.setEnabled(True)
+        self.btn_toggle_original.setVisible(True)
+        self.btn_toggle_original.setText("Show Original")
+        self._showing_original = False
+        self._original_path = original_path
+        self._cropped_path = cropped_path
+
+    def _toggle_original_image(self):
+        """Toggle between original and cropped image."""
+        if not hasattr(self, '_showing_original') or not hasattr(self, '_original_path'):
+            return
+
+        try:
+            if self._showing_original:
+                # Switch to cropped
+                with open(self._cropped_path, 'rb') as f:
+                    image_data = f.read()
+                self._display_image(image_data)
+                self.current_image_data = image_data
+                self.btn_toggle_original.setText("Show Original")
+                self._showing_original = False
+            else:
+                # Switch to original
+                with open(self._original_path, 'rb') as f:
+                    image_data = f.read()
+                self._display_image(image_data)
+                self.current_image_data = image_data
+                self.btn_toggle_original.setText("Show Cropped")
+                self._showing_original = True
+        except Exception as e:
+            logger.error(f"Error toggling image: {e}")
 
     def _append_to_console(self, message: str, color: str = "#cccccc", is_separator: bool = False):
         """Append a message to the console with optional color and log it."""
@@ -549,6 +625,14 @@ class MainWindow(QMainWindow):
         hb.addWidget(self.btn_enhance_prompt)
         hb.addWidget(self.btn_generate)
         hb.addStretch(1)
+
+        # Toggle button for original/cropped (initially hidden)
+        self.btn_toggle_original = QPushButton("Show Original")
+        self.btn_toggle_original.setEnabled(False)
+        self.btn_toggle_original.setVisible(False)
+        self.btn_toggle_original.clicked.connect(self._toggle_original_image)
+        hb.addWidget(self.btn_toggle_original)
+
         hb.addWidget(self.btn_save_image)
         hb.addWidget(self.btn_copy_image)
         bottom_layout.addLayout(hb)
@@ -1832,10 +1916,19 @@ For more detailed information, please refer to the full documentation.
     
     def _init_history_tab(self):
         """Initialize history tab with enhanced table display."""
-        from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView
-        
+        from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QHBoxLayout
+
         v = QVBoxLayout(self.tab_history)
-        
+
+        # Add checkbox for showing non-project images
+        controls_layout = QHBoxLayout()
+        self.chk_show_all_images = QCheckBox("Show non-project images")
+        self.chk_show_all_images.setChecked(False)
+        self.chk_show_all_images.toggled.connect(self._on_show_all_images_toggled)
+        controls_layout.addWidget(self.chk_show_all_images)
+        controls_layout.addStretch()
+        v.addLayout(controls_layout)
+
         # Create table widget for better organization
         self.history_table = QTableWidget()
         self.history_table.setColumnCount(6)
@@ -2995,6 +3088,8 @@ For more detailed information, please refer to the full documentation.
         self.btn_generate.setEnabled(False)
         self.btn_save_image.setEnabled(False)
         self.btn_copy_image.setEnabled(False)
+        self.btn_toggle_original.setEnabled(False)
+        self.btn_toggle_original.setVisible(False)
         self.status_label.setText("Generating...")
         self.output_image_label.clear()
         self.current_image_data = None
@@ -3019,20 +3114,32 @@ For more detailed information, please refer to the full documentation.
                 if hasattr(self, 'aspect_selector') and self.aspect_selector:
                     aspect_ratio = self.aspect_selector.get_ratio()
                     kwargs['aspect_ratio'] = aspect_ratio
-                    # Get custom width/height if specified
-                    if hasattr(self.resolution_selector, 'get_width_height'):
-                        width, height = self.resolution_selector.get_width_height()
-                        if width:
-                            kwargs['width'] = width
-                        if height:
-                            kwargs['height'] = height
+
+                    # For OpenAI, also provide resolution string for proper size mapping
+                    if self.current_provider == "openai":
+                        if aspect_ratio == "1:1":
+                            kwargs['resolution'] = "1024x1024"
+                        elif aspect_ratio == "16:9":
+                            kwargs['resolution'] = "1792x1024"
+                        elif aspect_ratio == "9:16":
+                            kwargs['resolution'] = "1024x1792"
+                        else:
+                            kwargs['resolution'] = "1024x1024"
                     else:
-                        # Fallback to calculated resolution
-                        resolution = self.resolution_selector.get_resolution()
-                        if resolution and 'x' in resolution:
-                            width, height = map(int, resolution.split('x'))
-                            kwargs['width'] = width
-                            kwargs['height'] = height
+                        # For other providers, get custom width/height if specified
+                        if hasattr(self.resolution_selector, 'get_width_height'):
+                            width, height = self.resolution_selector.get_width_height()
+                            if width:
+                                kwargs['width'] = width
+                            if height:
+                                kwargs['height'] = height
+                        else:
+                            # Fallback to calculated resolution
+                            resolution = self.resolution_selector.get_resolution()
+                            if resolution and 'x' in resolution:
+                                width, height = map(int, resolution.split('x'))
+                                kwargs['width'] = width
+                                kwargs['height'] = height
             else:
                 # Using explicit resolution mode
                 width = height = None
@@ -3056,19 +3163,16 @@ For more detailed information, please refer to the full documentation.
                             "#ffaa00"  # Orange for info
                         )
 
-                        # For OpenAI, still need to provide dimensions based on aspect ratio
+                        # For OpenAI, provide resolution string for proper handling
                         if self.current_provider == "openai":
                             if closest_ar == "1:1":
-                                kwargs['width'] = 1024
-                                kwargs['height'] = 1024
+                                kwargs['resolution'] = "1024x1024"
                             elif closest_ar == "16:9":
-                                kwargs['width'] = 1792
-                                kwargs['height'] = 1024
+                                kwargs['resolution'] = "1792x1024"
                             elif closest_ar == "9:16":
-                                kwargs['width'] = 1024
-                                kwargs['height'] = 1792
-                            # Remove aspect_ratio as OpenAI uses dimensions
-                            del kwargs['aspect_ratio']
+                                kwargs['resolution'] = "1024x1792"
+                            # Keep aspect_ratio for fallback
+                            # Don't delete it - provider uses it as fallback
                     else:
                         # Gemini: use exact dimensions
                         kwargs['width'] = width
@@ -3177,6 +3281,110 @@ For more detailed information, please refer to the full documentation.
                 closest_ratio = ratio_str
 
         return closest_ratio or "1:1"
+
+    def _process_image_for_resolution_with_original(self, image_data: bytes):
+        """Process image and return both original and processed if cropping occurred.
+
+        Returns:
+            - tuple(processed_bytes, original_bytes) if cropping was done
+            - bytes if no processing was needed
+        """
+        # Skip processing for Gemini provider
+        if self.current_provider == "google":
+            return image_data
+
+        # Get target resolution
+        if hasattr(self, 'target_resolution') and self.target_resolution:
+            target_width, target_height = self.target_resolution
+        else:
+            # Fallback to getting from UI if not stored
+            target_width = None
+            target_height = None
+
+            # Check resolution selector
+            if hasattr(self, 'resolution_selector') and self.resolution_selector:
+                resolution_text = self.resolution_selector.get_resolution()
+                # Parse resolution like "1024x1024"
+                if 'x' in resolution_text:
+                    try:
+                        parts = resolution_text.split('x')
+                        if len(parts) == 2:
+                            target_width = int(parts[0])
+                            target_height = int(parts[1])
+                    except (ValueError, IndexError):
+                        pass
+
+        # If no valid resolution found, return original
+        if not target_width or not target_height:
+            return image_data
+
+        try:
+            from PIL import Image
+            import io
+            from PySide6.QtGui import QImage, QPixmap
+            from PySide6.QtCore import QByteArray, QBuffer, QIODevice
+
+            # Load image
+            img = Image.open(io.BytesIO(image_data))
+            original_width, original_height = img.size
+
+            # Check if scaling is needed
+            if original_width == target_width and original_height == target_height:
+                return image_data
+
+            # Convert PIL image to QImage properly
+            img_rgba = img.convert("RGBA")
+            data = img_rgba.tobytes("raw", "RGBA")
+            bytes_per_line = 4 * original_width
+            qimage = QImage(data, original_width, original_height, bytes_per_line, QImage.Format_RGBA8888)
+            # Need to copy the data since QImage doesn't own it
+            qimage = qimage.copy()
+
+            # Scale to target width
+            scale_factor = target_width / original_width
+            scaled_height = int(original_height * scale_factor)
+
+            # Scale the image
+            scaled_qimage = qimage.scaled(
+                target_width, scaled_height,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+
+            # Save scaled version (before potential cropping)
+            scaled_bytes = QByteArray()
+            scaled_buffer = QBuffer(scaled_bytes)
+            scaled_buffer.open(QIODevice.WriteOnly)
+            scaled_qimage.save(scaled_buffer, "PNG")
+            scaled_data = bytes(scaled_bytes)
+
+            # Check if cropping is needed
+            if scaled_height != target_height:
+                # Show crop dialog
+                dialog = ImageCropDialog(scaled_qimage, target_width, target_height, self)
+                if dialog.exec() == QDialog.Accepted:
+                    # Get cropped image
+                    result_image = dialog.get_result()
+
+                    # Convert cropped QImage back to bytes
+                    cropped_bytes = QByteArray()
+                    cropped_buffer = QBuffer(cropped_bytes)
+                    cropped_buffer.open(QIODevice.WriteOnly)
+                    result_image.save(cropped_buffer, "PNG")
+
+                    # Return both cropped and original scaled
+                    return (bytes(cropped_bytes), scaled_data)
+                else:
+                    # User cancelled, use scaled image only
+                    return scaled_data
+            else:
+                # No cropping needed
+                return scaled_data
+
+        except Exception as e:
+            logger.error(f"Error processing image for resolution: {e}")
+            self._append_to_console(f"Warning: Could not process image resolution: {e}", "#ffaa00")
+            return image_data
 
     def _process_image_for_resolution(self, image_data: bytes) -> bytes:
         """Process image to match selected resolution (scaling/cropping)."""
@@ -3300,9 +3508,26 @@ For more detailed information, please refer to the full documentation.
 
             # Process images for scaling/cropping if needed (non-Gemini providers only)
             processed_images = []
-            for image_data in images:
-                processed_image = self._process_image_for_resolution(image_data)
-                processed_images.append(processed_image)
+            original_paths = []
+
+            for i, image_data in enumerate(images):
+                processed_result = self._process_image_for_resolution_with_original(image_data)
+
+                if isinstance(processed_result, tuple):
+                    # Got both original and processed
+                    processed_image, original_image = processed_result
+                    processed_images.append(processed_image)
+
+                    # Save original with _original suffix
+                    stub = sanitize_stub_from_prompt(self.current_prompt)
+                    original_stub = f"{stub}_original"
+                    orig_paths = auto_save_images([original_image], base_stub=original_stub)
+                    if orig_paths:
+                        original_paths.append(orig_paths[0])
+                else:
+                    # Just processed image (no cropping needed)
+                    processed_images.append(processed_result)
+                    original_paths.append(None)
 
             # Save processed images
             stub = sanitize_stub_from_prompt(self.current_prompt)
@@ -3359,18 +3584,29 @@ For more detailed information, please refer to the full documentation.
                 
                 write_image_sidecar(path, meta)
             
+            # Store original path references
+            self.current_original_paths = original_paths
+            self.current_saved_paths = saved_paths
+
             # Display first processed image
             self.current_image_data = processed_images[0]
             self._display_image(processed_images[0])
             if saved_paths:
                 self._last_displayed_image_path = saved_paths[0]  # Track last displayed image
+
+            # Enable toggle button if we have an original version
+            if original_paths and original_paths[0]:
+                self._enable_original_toggle(original_paths[0], saved_paths[0])
+                self._append_to_console("Saved both cropped and original versions", "#66ccff")
             
             # Enable save/copy buttons
             self.btn_save_image.setEnabled(True)
             self.btn_copy_image.setEnabled(True)
             
             # Update history with the new generation
-            self.history_paths = scan_disk_history()
+            # Use current filter setting
+            show_all = hasattr(self, 'chk_show_all_images') and self.chk_show_all_images.isChecked()
+            self.history_paths = scan_disk_history(project_only=not show_all)
             
             # Add to in-memory history for immediate display
             for i, path in enumerate(saved_paths):
