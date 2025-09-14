@@ -2798,20 +2798,31 @@ For more detailed information, please refer to the full documentation.
                             "Cinematic Photoreal",
                             "Watercolor Illustration",
                             "Pixel Art (8-bit)",
-                            "Studio Portrait"])
+                            "Studio Portrait",
+                            "Anime/Manga",
+                            "Oil Painting",
+                            "Digital Art",
+                            "3D Render",
+                            "Comic Book",
+                            "Art Nouveau",
+                            "Cyberpunk",
+                            "Fantasy Art",
+                            "Minimalist",
+                            "Surrealism",
+                            "Pop Art",
+                            "Gothic",
+                            "Steampunk",
+                            "Vaporwave",
+                            "Film Noir",
+                            "Renaissance",
+                            "Abstract",
+                            "Photojournalism",
+                            "Fashion Editorial",
+                            "Architectural"])
         style_combo.setCurrentIndex(0)
         style_layout.addWidget(style_combo)
         layout.addWidget(style_group)
 
-        # Aspect ratio
-        ar_group = QGroupBox("Aspect Ratio")
-        ar_layout = QVBoxLayout(ar_group)
-
-        ar_combo = QComboBox()
-        ar_combo.addItems(["Default", "1:1", "16:9", "9:16", "4:3", "3:2", "21:9"])
-        ar_combo.setCurrentIndex(0)
-        ar_layout.addWidget(ar_combo)
-        layout.addWidget(ar_group)
 
         # Dialog buttons
         button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -2831,11 +2842,31 @@ For more detailed information, please refer to the full documentation.
             "Cinematic Photoreal": "cinematic-photoreal",
             "Watercolor Illustration": "illustrated-watercolor",
             "Pixel Art (8-bit)": "pixel-art",
-            "Studio Portrait": "studio-portrait"
+            "Studio Portrait": "studio-portrait",
+            "Anime/Manga": "anime-manga",
+            "Oil Painting": "oil-painting",
+            "Digital Art": "digital-art",
+            "3D Render": "3d-render",
+            "Comic Book": "comic-book",
+            "Art Nouveau": "art-nouveau",
+            "Cyberpunk": "cyberpunk",
+            "Fantasy Art": "fantasy-art",
+            "Minimalist": "minimalist",
+            "Surrealism": "surrealism",
+            "Pop Art": "pop-art",
+            "Gothic": "gothic",
+            "Steampunk": "steampunk",
+            "Vaporwave": "vaporwave",
+            "Film Noir": "film-noir",
+            "Renaissance": "renaissance",
+            "Abstract": "abstract",
+            "Photojournalism": "photojournalism",
+            "Fashion Editorial": "fashion-editorial",
+            "Architectural": "architectural"
         }
         style_preset = style_preset_map[style_combo.currentText()]
 
-        aspect_ratio = ar_combo.currentText() if ar_combo.currentIndex() > 0 else None
+        aspect_ratio = None  # Removed aspect ratio option
 
         class EnhanceThread(QThread):
             finished_signal = Signal(str)
