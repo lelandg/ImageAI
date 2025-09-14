@@ -33,7 +33,7 @@ class VideoConfig:
         "llm_providers": {
             "openai": {
                 "enabled": True,
-                "models": ["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"]
+                "models": ["gpt-5-chat-latest", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"]
             },
             "anthropic": {
                 "enabled": True,

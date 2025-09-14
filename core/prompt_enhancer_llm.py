@@ -167,6 +167,17 @@ class PromptEnhancerLLM:
             if provider == 'google':
                 model_id = f"gemini/{model_id}"
 
+        # Determine which token parameter to use
+        # Use max_completion_tokens for newer OpenAI models (GPT-4+, GPT-5), max_tokens for GPT-3.5 and other providers
+        if provider == "openai":
+            if "gpt-3.5" in model_id.lower():
+                token_param = "max_tokens"
+            else:
+                # GPT-4, GPT-5, and newer models use max_completion_tokens
+                token_param = "max_completion_tokens"
+        else:
+            token_param = "max_tokens"
+
         kwargs = {
             "model": model_id,
             "messages": [
@@ -174,7 +185,7 @@ class PromptEnhancerLLM:
                 {"role": "user", "content": user_prompt}
             ],
             "temperature": temperature,
-            "max_tokens": 1000  # Enough for detailed JSON response
+            token_param: 1000  # Enough for detailed JSON response
         }
 
         # Check if LLM logging is enabled
@@ -182,22 +193,48 @@ class PromptEnhancerLLM:
         config = ConfigManager()
         log_llm = config.get("log_llm_interactions", False)
 
-        if log_llm:
-            self.logger.info(f"LLM Request to {model_id}:")
-            self.logger.info(f"System: {self.enhancer.SYSTEM_PROMPT[:200]}...")
-            self.logger.info(f"User: {user_prompt}")
+        # Always log to both file and console for debugging
+        import logging
+        console = logging.getLogger("console")
+
+        self.logger.info(f"LLM Request to {model_id} (Provider: {provider}):")
+        console.info(f"LLM Request to {model_id} (Provider: {provider}):")
+
+        self.logger.info(f"  Token parameter: {token_param} = {kwargs[token_param]}")
+        console.info(f"  Token parameter: {token_param} = {kwargs[token_param]}")
+
+        self.logger.info(f"  Temperature: {temperature}")
+        console.info(f"  Temperature: {temperature}")
+
+        # Clean up multi-line strings for logging
+        clean_system = self.enhancer.SYSTEM_PROMPT.replace('\n', ' ').strip()
+        clean_user = user_prompt.replace('\n', ' ').strip()
+
+        self.logger.info(f"  System prompt: {clean_system}")
+        console.info(f"  System prompt: {clean_system}")
+
+        self.logger.info(f"  User prompt: {clean_user}")
+        console.info(f"  User prompt: {clean_user}")
 
         # Call litellm
         try:
             response = self.llm_provider.litellm.completion(**kwargs)
         except Exception as e:
             self.logger.error(f"LiteLLM call failed: {e}")
+            console.error(f"LiteLLM call failed: {e}")
             raise
 
-        if log_llm and response:
+        # Always log response for debugging
+        if response:
             if response.choices and len(response.choices) > 0:
                 content = response.choices[0].message.content if response.choices[0].message else "No content"
-                self.logger.info(f"LLM Response: {content}")
+                self.logger.info(f"LLM Response received - Length: {len(content)} chars")
+                console.info(f"LLM Response received - Length: {len(content)} chars")
+
+                # Log first part of response for debugging
+                preview = content[:500] if len(content) > 500 else content
+                self.logger.info(f"LLM Response preview: {preview}")
+                console.info(f"LLM Response preview: {preview}")
 
         # Extract and parse response
         if (response and response.choices and len(response.choices) > 0

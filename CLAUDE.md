@@ -151,3 +151,35 @@ When the code map needs updating:
   - **In WSL/Linux bash**: Use `source /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/activate`
   - **In PowerShell**: Use `.\.venv\Scripts\Activate.ps1` (this is the primary environment)
 - Never add files to git
+- When interacting with LLMs, you MUST show everything sent to the LLM and responses received in the status console and the log.
+
+## LLM Integration Guidelines
+
+### Logging Requirements
+- **Always log LLM interactions comprehensively**: Show all request details (provider, model, temperature, prompts) and full responses in both log file and console
+- **Use dual logging**: Log to both file logger and console logger for visibility
+- **Show prompts in console**: Display generated/enhanced prompts with clear formatting and separators
+- **Include LiteLLM messages**: Capture and display LiteLLM's internal messages for debugging
+
+### Error Handling
+- **Handle empty responses gracefully**: Always check for empty LLM responses and provide fallback content
+- **Use robust JSON parsing**: Clean markdown formatting, handle non-JSON responses, extract from plain text if needed
+- **Provide fallback prompts**: When LLM fails, generate reasonable default prompts based on user input
+
+### UI Consistency
+- **Status consoles at bottom**: All dialogs with LLM interactions should have status consoles at the bottom with splitters
+- **Keyboard shortcuts**: Use consistent shortcuts across dialogs (Ctrl+Enter for primary action, Escape to close)
+- **Show progress in status console**: Display real-time updates of LLM operations in dialog status consoles
+
+### Code Organization
+- **Use shared utilities**: Leverage `gui/llm_utils.py` for common LLM functionality:
+  - `LLMResponseParser` for JSON parsing with fallbacks
+  - `DialogStatusConsole` for consistent status display
+  - `LiteLLMHandler` for LiteLLM setup
+- **Fix ConfigManager access**: Use `config.get_api_key()` method instead of trying to access config dictionary directly
+
+### Model Compatibility
+- **Support model quirks**: Handle model-specific limitations (e.g., gpt-5 only supports temperature=1)
+- **Use LiteLLM when possible**: It handles parameter compatibility automatically
+- **Dynamic parameter selection**: Use `max_completion_tokens` for newer OpenAI models, `max_tokens` for older ones
+- .venv is for Powershell. Do not use in this wsl shell.

@@ -9,7 +9,7 @@ from providers import get_provider
 
 class GenWorker(QObject):
     """Worker thread for image generation."""
-    
+
     progress = Signal(str)
     error = Signal(str)
     finished = Signal(list, list)  # (texts, images)
@@ -44,7 +44,7 @@ class GenWorker(QObject):
                 model=self.model,
                 **self.kwargs  # Pass additional parameters
             )
-            
+
             self.finished.emit(texts, images)
             
         except Exception as e:

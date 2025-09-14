@@ -14,7 +14,9 @@
       "Bash(.venv_linux/bin/pip install:*)",
       "Bash(while read f)",
       "Bash(cat:*)",
-      "Bash(done)"
+      "Bash(done)",
+      "Bash(sed:*)",
+      "Bash(.venv/Scripts/python.exe -m pip uninstall:*)"
     ],
     "deny": [],
     "ask": []

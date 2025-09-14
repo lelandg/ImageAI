@@ -32,3 +32,13 @@ mido>=1.3.2  # Low-level MIDI manipulation for detailed control
 # Optional dependencies for Local LLM support
 # Uncomment if you want to use local LLMs for prompt generation:
 # ollama>=0.3.0  # Local LLM support via Ollama
+
+# AI Upscaling (installed via GUI)
+# Installed on 2025-09-14 17:39:20
+# GPU: NVIDIA GeForce RTX 4090 (CUDA accelerated)
+# PyTorch installed with CUDA support from https://download.pytorch.org/whl/cu121
+torch==2.4.1
+torchvision==0.19.1
+opencv-python
+basicsr>=1.4.2
+realesrgan>=0.3.0

@@ -436,16 +436,38 @@ class ResolutionSelector(QWidget):
     
     def update_provider(self, provider: str):
         """Update options based on provider."""
+        # Save current selection before updating
+        current_resolution = self.get_resolution()
+        current_text = self.combo.currentText() if self.combo.currentIndex() >= 0 else ""
+
         self.provider = provider
         self.combo.clear()
-        
+
         presets = self.PRESETS.get(provider, self.PRESETS["google"])
         for label, resolution in presets.items():
             self.combo.addItem(label, resolution)
-        
-        # Set default to Auto
-        self.combo.setCurrentIndex(0)
-        
+
+        # Try to restore previous selection
+        restored = False
+        # First try to match by resolution value
+        for i in range(self.combo.count()):
+            if self.combo.itemData(i) == current_resolution:
+                self.combo.setCurrentIndex(i)
+                restored = True
+                break
+
+        # If not found, try to match by similar text (e.g., "Auto" should stay "Auto")
+        if not restored and current_text:
+            for i in range(self.combo.count()):
+                if "Auto" in current_text and "Auto" in self.combo.itemText(i):
+                    self.combo.setCurrentIndex(i)
+                    restored = True
+                    break
+
+        # Otherwise default to Auto
+        if not restored:
+            self.combo.setCurrentIndex(0)
+
         # Update info
         self._update_info_text()
     

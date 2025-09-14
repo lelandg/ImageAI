@@ -347,7 +347,7 @@ class GoogleProvider(ImageProvider):
                                     images.append(image_bytes)
             except Exception as e2:
                 raise RuntimeError(f"Google generation failed: {e2}")
-        
+
         return texts, images
     
     def validate_auth(self) -> Tuple[bool, str]:

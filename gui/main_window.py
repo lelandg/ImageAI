@@ -35,6 +35,10 @@ from gui.dialogs import ExamplesDialog
 # from gui.video.video_project_tab import VideoProjectTab
 from gui.workers import GenWorker
 from gui.image_crop_dialog import ImageCropDialog
+from gui.find_dialog import FindDialog
+from gui.prompt_generation_dialog import PromptGenerationDialog
+from gui.prompt_question_dialog import PromptQuestionDialog
+from gui.upscaling_widget import UpscalingSelector
 try:
     from gui.model_browser import ModelBrowserDialog
 except ImportError:
@@ -84,6 +88,7 @@ class MainWindow(QMainWindow):
         self.current_image_data: Optional[bytes] = None
         self._last_template_context: Optional[dict] = None
         self._video_tab_loaded = False  # Track lazy loading of video tab
+        self.upscaling_settings = {}  # Initialize upscaling settings
 
         # Load history from disk
         print("Loading image metadata...")
@@ -466,7 +471,7 @@ class MainWindow(QMainWindow):
         self.prompt_edit.installEventFilter(self)
 
         prompt_layout.addWidget(self.prompt_edit)
-        
+
         # Add prompt container to splitter
         splitter.addWidget(prompt_container)
         
@@ -475,6 +480,57 @@ class MainWindow(QMainWindow):
         bottom_layout = QVBoxLayout(bottom_widget)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.setSpacing(5)
+
+        # Buttons row - below splitter, above Image Settings
+        buttons_container = QWidget()
+        buttons_layout = QVBoxLayout(buttons_container)
+        buttons_layout.setContentsMargins(0, 5, 0, 5)
+        buttons_layout.setSpacing(5)
+
+        # First row of buttons
+        hb1 = QHBoxLayout()
+        self.btn_examples = QPushButton("E&xamples")  # Alt+X
+        self.btn_examples.setToolTip("Browse example prompts (Alt+X)")
+        self.btn_enhance_prompt = QPushButton("&Enhance Prompt")  # Alt+E
+        self.btn_enhance_prompt.setToolTip("Improve prompt with AI (Alt+E)")
+        self.btn_generate_prompts = QPushButton("Generate &Prompts")  # Alt+P
+        self.btn_generate_prompts.setToolTip("Generate multiple prompt variations (Alt+P)")
+        self.btn_ask_about = QPushButton("&Ask About Prompt")  # Alt+A
+        self.btn_ask_about.setToolTip("Ask questions about your prompt (Alt+A)")
+
+        hb1.addWidget(self.btn_examples)
+        hb1.addWidget(self.btn_enhance_prompt)
+        hb1.addWidget(self.btn_generate_prompts)
+        hb1.addWidget(self.btn_ask_about)
+        hb1.addStretch()
+        buttons_layout.addLayout(hb1)
+
+        # Second row of buttons
+        hb2 = QHBoxLayout()
+        self.btn_generate = QPushButton("&Generate")  # Alt+G
+        self.btn_generate.setToolTip("Generate image (Alt+G or Ctrl+Enter)")
+        self.btn_save_image = QPushButton("&Save Image")  # Alt+S
+        self.btn_save_image.setToolTip("Save generated image (Alt+S or Ctrl+S)")
+        self.btn_copy_image = QPushButton("&Copy to Clipboard")  # Alt+C
+        self.btn_copy_image.setToolTip("Copy image to clipboard (Alt+C)")
+        self.btn_save_image.setEnabled(False)
+        self.btn_copy_image.setEnabled(False)
+
+        hb2.addWidget(self.btn_generate)
+        hb2.addStretch()
+
+        # Toggle button for original/cropped (initially hidden)
+        self.btn_toggle_original = QPushButton("Show Original")
+        self.btn_toggle_original.setEnabled(False)
+        self.btn_toggle_original.setVisible(False)
+        self.btn_toggle_original.clicked.connect(self._toggle_original_image)
+        hb2.addWidget(self.btn_toggle_original)
+
+        hb2.addWidget(self.btn_save_image)
+        hb2.addWidget(self.btn_copy_image)
+        buttons_layout.addLayout(hb2)
+
+        bottom_layout.addWidget(buttons_container)
         
         # Image Settings - expandable like Advanced Settings
         # Toggle button
@@ -571,6 +627,21 @@ class MainWindow(QMainWindow):
             self.batch_selector = None
         
         image_settings_layout.addLayout(settings_form)
+
+        # Add upscaling selector (initially hidden)
+        self.upscaling_selector = UpscalingSelector()
+        self.upscaling_selector.upscalingChanged.connect(self._on_upscaling_changed)
+        # Check availability
+        if self.config:
+            realesrgan_available = self.upscaling_selector.check_realesrgan_availability()
+            stability_available = self.upscaling_selector.check_stability_api_availability(self.config)
+            self.upscaling_selector.set_enabled_methods(
+                lanczos=True,
+                realesrgan=realesrgan_available,
+                stability=stability_available
+            )
+        image_settings_layout.addWidget(self.upscaling_selector)
+
         bottom_layout.addWidget(self.image_settings_container)
         
         # Advanced Settings (collapsible)
@@ -605,37 +676,6 @@ class MainWindow(QMainWindow):
         
         # Update visibility based on provider
         self._update_advanced_visibility()
-        
-        # Buttons - all on one row for compactness
-        hb = QHBoxLayout()
-        self.btn_examples = QPushButton("E&xamples")  # Alt+X
-        self.btn_examples.setToolTip("Browse example prompts (Alt+X)")
-        self.btn_enhance_prompt = QPushButton("&Enhance Prompt")  # Alt+E
-        self.btn_enhance_prompt.setToolTip("Improve prompt with AI (Alt+E)")
-        self.btn_generate = QPushButton("&Generate")  # Alt+G
-        self.btn_generate.setToolTip("Generate image (Alt+G or Ctrl+Enter)")
-        self.btn_save_image = QPushButton("&Save Image")  # Alt+S
-        self.btn_save_image.setToolTip("Save generated image (Alt+S or Ctrl+S)")
-        self.btn_copy_image = QPushButton("&Copy to Clipboard")  # Alt+C
-        self.btn_copy_image.setToolTip("Copy image to clipboard (Alt+C)")
-        self.btn_save_image.setEnabled(False)
-        self.btn_copy_image.setEnabled(False)
-
-        hb.addWidget(self.btn_examples)
-        hb.addWidget(self.btn_enhance_prompt)
-        hb.addWidget(self.btn_generate)
-        hb.addStretch(1)
-
-        # Toggle button for original/cropped (initially hidden)
-        self.btn_toggle_original = QPushButton("Show Original")
-        self.btn_toggle_original.setEnabled(False)
-        self.btn_toggle_original.setVisible(False)
-        self.btn_toggle_original.clicked.connect(self._toggle_original_image)
-        hb.addWidget(self.btn_toggle_original)
-
-        hb.addWidget(self.btn_save_image)
-        hb.addWidget(self.btn_copy_image)
-        bottom_layout.addLayout(hb)
         
         # Status - compact
         self.status_label = QLabel("Ready.")
@@ -719,6 +759,8 @@ class MainWindow(QMainWindow):
         # Connect signals
         self.btn_examples.clicked.connect(self._open_examples)
         self.btn_enhance_prompt.clicked.connect(self._enhance_prompt)
+        self.btn_generate_prompts.clicked.connect(self._open_prompt_generator)
+        self.btn_ask_about.clicked.connect(self._open_prompt_question)
         self.btn_generate.clicked.connect(self._generate)
 
         # Add keyboard shortcuts for common actions
@@ -2127,14 +2169,71 @@ For more detailed information, please refer to the full documentation.
         elif hasattr(self, 'advanced_group'):
             # Only show for local_sd provider
             self.advanced_group.setVisible(self.current_provider == "local_sd")
-    
+
+    @staticmethod
+    def get_llm_providers():
+        """Get list of all available LLM providers."""
+        return ["None", "OpenAI", "Claude", "Gemini", "Ollama", "LM Studio"]
+
+    @staticmethod
+    def get_llm_models_for_provider(provider: str):
+        """Get list of models for a specific LLM provider."""
+        models = {
+            "OpenAI": ["gpt-5-chat-latest", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"],
+            "Claude": ["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"],
+            "Gemini": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"],
+            "Ollama": ["llama2", "mistral", "mixtral", "phi-2", "neural-chat"],
+            "LM Studio": ["local-model", "custom-model"]
+        }
+        return models.get(provider, [])
+
+    def populate_llm_combo(self, provider_combo, model_combo, current_provider=None, current_model=None):
+        """Populate LLM provider and model combos with all available options.
+
+        Args:
+            provider_combo: The provider QComboBox to populate
+            model_combo: The model QComboBox to populate
+            current_provider: Optional current provider to select
+            current_model: Optional current model to select
+        """
+        # Populate providers
+        provider_combo.blockSignals(True)
+        provider_combo.clear()
+        provider_combo.addItems(self.get_llm_providers())
+
+        if current_provider:
+            index = provider_combo.findText(current_provider)
+            if index >= 0:
+                provider_combo.setCurrentIndex(index)
+
+        provider_combo.blockSignals(False)
+
+        # Populate models based on selected provider
+        selected_provider = provider_combo.currentText()
+        model_combo.blockSignals(True)
+        model_combo.clear()
+
+        if selected_provider and selected_provider != "None":
+            models = self.get_llm_models_for_provider(selected_provider)
+            model_combo.addItems(models)
+            model_combo.setEnabled(True)
+
+            if current_model:
+                index = model_combo.findText(current_model)
+                if index >= 0:
+                    model_combo.setCurrentIndex(index)
+        else:
+            model_combo.setEnabled(False)
+
+        model_combo.blockSignals(False)
+
     def _on_llm_provider_changed(self, provider: str):
         """Handle LLM provider change on Image tab."""
         # Don't do anything if we're being updated programmatically
         if getattr(self, '_updating_llm_provider', False):
             return
 
-        # Clear the model combo first
+        # Use centralized function to populate models
         self.llm_model_combo.blockSignals(True)
         self.llm_model_combo.clear()
 
@@ -2142,17 +2241,8 @@ For more detailed information, please refer to the full documentation.
             self.llm_model_combo.setEnabled(False)
         else:
             self.llm_model_combo.setEnabled(True)
-            # Populate with actual models for provider
-            if provider == "OpenAI":
-                self.llm_model_combo.addItems(["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
-            elif provider == "Claude":
-                self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
-            elif provider == "Gemini":
-                self.llm_model_combo.addItems(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"])
-            elif provider == "Ollama":
-                self.llm_model_combo.addItems(["llama2", "mistral", "mixtral", "phi-2", "neural-chat"])
-            elif provider == "LM Studio":
-                self.llm_model_combo.addItems(["local-model", "custom-model"])
+            models = self.get_llm_models_for_provider(provider)
+            self.llm_model_combo.addItems(models)
 
         self.llm_model_combo.blockSignals(False)
 
@@ -2209,7 +2299,7 @@ For more detailed information, please refer to the full documentation.
                     self.llm_model_combo.setEnabled(True)
                     # Populate with actual models for provider
                     if provider_name == "OpenAI":
-                        self.llm_model_combo.addItems(["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
+                        self.llm_model_combo.addItems(["gpt-5-chat-latest", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
                     elif provider_name == "Claude":
                         self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
                     elif provider_name == "Gemini":
@@ -2419,6 +2509,7 @@ For more detailed information, please refer to the full documentation.
         """Handle resolution change."""
         self.current_resolution = resolution
         self._update_cost_estimate()
+        self._update_upscaling_visibility()
     
     def _on_resolution_mode_changed(self, mode: str):
         """Handle resolution mode change (aspect_ratio vs resolution)."""
@@ -2736,351 +2827,26 @@ For more detailed information, please refer to the full documentation.
     
     def _enhance_prompt(self):
         """Enhance the current prompt using the selected LLM."""
-        # Add separator for new operation
-        self._append_to_console("", is_separator=True)
-        self._append_to_console("Starting prompt enhancement...", "#00ff00")  # Green
-
-        # Check if LLM provider is selected
-        if not hasattr(self, 'llm_provider_combo') or self.llm_provider_combo.currentText() == "None":
-            self._append_to_console("ERROR: No LLM provider selected", "#ff6666")  # Red
-            QMessageBox.information(self, "LLM Required",
-                                   "Please select an LLM Provider to enhance prompts.")
-            return
-
         # Get current prompt
         current_prompt = self.prompt_edit.toPlainText().strip()
         if not current_prompt:
-            self._append_to_console("ERROR: No prompt to enhance", "#ff6666")  # Red
             QMessageBox.information(self, "No Prompt",
                                    "Please enter a prompt to enhance.")
             return
 
-        # Get LLM settings
-        llm_provider = self.llm_provider_combo.currentText().lower()
-        llm_model = self.llm_model_combo.currentText()
+        # Use the new enhanced prompt dialog
+        from gui.enhanced_prompt_dialog import EnhancedPromptDialog
 
-        self._append_to_console(f"Using LLM: {llm_provider}/{llm_model}", "#66ccff")  # Blue
-        self._append_to_console(f"Original prompt: {current_prompt}", "#888888")  # Gray
+        dialog = EnhancedPromptDialog(self, self.config, current_prompt)
+        dialog.promptEnhanced.connect(self._on_prompt_enhanced)
+        dialog.exec()
 
-        # Show enhancement options dialog first
-        from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                                       QTextEdit, QDialogButtonBox, QProgressBar,
-                                       QComboBox, QPushButton, QGroupBox)
-        from PySide6.QtCore import QThread, Signal
-        from core.prompt_enhancer import EnhancementLevel
+    def _on_prompt_enhanced(self, enhanced_prompt):
+        """Handle the enhanced prompt from the dialog."""
+        if enhanced_prompt:
+            self.prompt_edit.setPlainText(enhanced_prompt)
+            self._append_to_console("Prompt enhanced successfully!", "#00ff00")  # Green
 
-        # Create enhancement options dialog
-        options_dlg = QDialog(self)
-        options_dlg.setWindowTitle("Enhancement Options")
-        options_dlg.setModal(True)
-        options_dlg.setMinimumWidth(400)
-
-        layout = QVBoxLayout(options_dlg)
-
-        # Enhancement level
-        level_group = QGroupBox("Enhancement Level")
-        level_layout = QVBoxLayout(level_group)
-
-        level_combo = QComboBox()
-        level_combo.addItems(["Low - Minimal changes",
-                            "Medium - Moderate enhancement",
-                            "High - Maximum detail"])
-        level_combo.setCurrentIndex(1)  # Default to medium
-        level_layout.addWidget(level_combo)
-        layout.addWidget(level_group)
-
-        # Style preset
-        style_group = QGroupBox("Style Preset (Optional)")
-        style_layout = QVBoxLayout(style_group)
-
-        style_combo = QComboBox()
-        style_combo.addItems(["None",
-                            "Cinematic Photoreal",
-                            "Watercolor Illustration",
-                            "Pixel Art (8-bit)",
-                            "Studio Portrait",
-                            "Anime/Manga",
-                            "Oil Painting",
-                            "Digital Art",
-                            "3D Render",
-                            "Comic Book",
-                            "Art Nouveau",
-                            "Cyberpunk",
-                            "Fantasy Art",
-                            "Minimalist",
-                            "Surrealism",
-                            "Pop Art",
-                            "Gothic",
-                            "Steampunk",
-                            "Vaporwave",
-                            "Film Noir",
-                            "Renaissance",
-                            "Abstract",
-                            "Photojournalism",
-                            "Fashion Editorial",
-                            "Architectural"])
-        style_combo.setCurrentIndex(0)
-        style_layout.addWidget(style_combo)
-        layout.addWidget(style_group)
-
-
-        # Dialog buttons
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(options_dlg.accept)
-        button_box.rejected.connect(options_dlg.reject)
-        layout.addWidget(button_box)
-
-        if options_dlg.exec() != QDialog.Accepted:
-            return
-
-        # Get selected options
-        enhancement_level = [EnhancementLevel.LOW, EnhancementLevel.MEDIUM,
-                            EnhancementLevel.HIGH][level_combo.currentIndex()]
-
-        style_preset_map = {
-            "None": None,
-            "Cinematic Photoreal": "cinematic-photoreal",
-            "Watercolor Illustration": "illustrated-watercolor",
-            "Pixel Art (8-bit)": "pixel-art",
-            "Studio Portrait": "studio-portrait",
-            "Anime/Manga": "anime-manga",
-            "Oil Painting": "oil-painting",
-            "Digital Art": "digital-art",
-            "3D Render": "3d-render",
-            "Comic Book": "comic-book",
-            "Art Nouveau": "art-nouveau",
-            "Cyberpunk": "cyberpunk",
-            "Fantasy Art": "fantasy-art",
-            "Minimalist": "minimalist",
-            "Surrealism": "surrealism",
-            "Pop Art": "pop-art",
-            "Gothic": "gothic",
-            "Steampunk": "steampunk",
-            "Vaporwave": "vaporwave",
-            "Film Noir": "film-noir",
-            "Renaissance": "renaissance",
-            "Abstract": "abstract",
-            "Photojournalism": "photojournalism",
-            "Fashion Editorial": "fashion-editorial",
-            "Architectural": "architectural"
-        }
-        style_preset = style_preset_map[style_combo.currentText()]
-
-        aspect_ratio = None  # Removed aspect ratio option
-
-        class EnhanceThread(QThread):
-            finished_signal = Signal(str)
-            error_signal = Signal(str)
-
-            def __init__(self, prompt, provider, model, config, enhancement_level, style_preset, aspect_ratio):
-                super().__init__()
-                self.prompt = prompt
-                self.provider = provider
-                self.model = model
-                self.config = config
-                self.enhancement_level = enhancement_level
-                self.style_preset = style_preset
-                self.aspect_ratio = aspect_ratio
-
-            def run(self):
-                import logging
-                logger = logging.getLogger(__name__)
-
-                try:
-                    # Import the prompt enhancer and LLM provider
-                    from core.video.prompt_engine import UnifiedLLMProvider
-                    from core.prompt_enhancer_llm import PromptEnhancerLLM
-
-                    logger.info(f"Starting prompt enhancement with LLM provider: {self.provider}, model: {self.model}")
-                    logger.info(f"Enhancement level: {self.enhancement_level}, Style: {self.style_preset}, AR: {self.aspect_ratio}")
-                    logger.info(f"Original prompt: {self.prompt}")
-
-                    # Get API keys from config - check both locations for backward compatibility
-                    api_config = {}
-
-                    # Try to get OpenAI key from both locations
-                    openai_key = None
-                    if 'providers' in self.config and 'openai' in self.config['providers']:
-                        openai_key = self.config['providers']['openai'].get('api_key')
-                    if not openai_key:
-                        openai_key = self.config.get('openai_api_key')
-                    if openai_key:
-                        api_config['openai_api_key'] = openai_key
-
-                    # Try to get Anthropic key
-                    anthropic_key = None
-                    if 'providers' in self.config and 'anthropic' in self.config['providers']:
-                        anthropic_key = self.config['providers']['anthropic'].get('api_key')
-                    if not anthropic_key:
-                        anthropic_key = self.config.get('anthropic_api_key')
-                    if anthropic_key:
-                        api_config['anthropic_api_key'] = anthropic_key
-
-                    # Try to get Google key from both locations
-                    google_key = None
-                    if 'providers' in self.config and 'google' in self.config['providers']:
-                        google_key = self.config['providers']['google'].get('api_key')
-                    if not google_key:
-                        google_key = self.config.get('google_api_key')
-                    if google_key:
-                        api_config['google_api_key'] = google_key
-
-                    logger.debug(f"API keys configured: OpenAI={bool(openai_key)}, Anthropic={bool(anthropic_key)}, Google={bool(google_key)}")
-                    logger.debug(f"api_config keys: {list(api_config.keys())}")
-
-                    # Check if the selected LLM provider has an API key
-                    provider_key_map = {
-                        'openai': 'openai_api_key',
-                        'anthropic': 'anthropic_api_key',
-                        'google': 'google_api_key',
-                        'gemini': 'google_api_key'
-                    }
-
-                    required_key = provider_key_map.get(self.provider.lower())
-                    if required_key and required_key not in api_config:
-                        error_msg = f"No API key configured for {self.provider}. Please add your API key in Settings."
-                        logger.error(error_msg)
-                        self.error_signal.emit(error_msg)
-                        return
-
-                    llm = UnifiedLLMProvider(api_config)
-                    enhancer = PromptEnhancerLLM(llm)
-
-                    # Get the image provider (not LLM provider) from config
-                    image_provider = self.config.get('provider', 'google').lower()
-                    logger.info(f"Target image provider: {image_provider}")
-
-                    # Enhance the prompt using GPT-5 methodology
-                    logger.info("Calling enhance_with_llm...")
-                    enhanced_data = enhancer.enhance_with_llm(
-                        prompt=self.prompt,
-                        provider=image_provider,  # Target image provider
-                        model=self.model,  # LLM model
-                        enhancement_level=self.enhancement_level,
-                        aspect_ratio=self.aspect_ratio,
-                        style_preset=self.style_preset,
-                        num_variants=0,  # No variants for now
-                        llm_provider=self.provider  # LLM provider for the call
-                    )
-
-                    logger.info(f"Enhanced data type: {type(enhanced_data)}")
-                    logger.debug(f"Enhanced data: {enhanced_data}")
-
-                    # Extract the appropriate prompt for the image provider
-                    logger.info("Extracting enhanced prompt for provider...")
-                    enhanced_prompt = enhancer.get_enhanced_prompt_for_provider(
-                        enhanced_data, image_provider
-                    )
-
-                    logger.info(f"Enhanced prompt type: {type(enhanced_prompt)}")
-                    if enhanced_prompt and isinstance(enhanced_prompt, str):
-                        logger.info(f"Enhanced prompt: {enhanced_prompt}")
-                        self.finished_signal.emit(enhanced_prompt)
-                    elif enhanced_prompt:
-                        # Try to convert to string if it's not None
-                        logger.warning(f"Enhanced prompt is not a string, attempting conversion from {type(enhanced_prompt)}")
-                        try:
-                            enhanced_str = str(enhanced_prompt)
-                            logger.info(f"Converted to string: {enhanced_str}")
-                            self.finished_signal.emit(enhanced_str)
-                        except Exception as conv_err:
-                            logger.error(f"Failed to convert enhanced prompt to string: {conv_err}")
-                            self.error_signal.emit("Failed to convert enhanced prompt to string")
-                    else:
-                        logger.error("Enhanced prompt is None or empty")
-                        self.error_signal.emit("No enhanced prompt was generated")
-                except TypeError as e:
-                    # Handle NoneType errors specifically
-                    logger.error(f"TypeError in enhancement: {e}", exc_info=True)
-                    error_msg = "Enhancement failed due to type error"
-                    if "NoneType" in str(e) and "os.environ" in str(e):
-                        error_msg = "Enhancement failed - API key configuration error. Please check your API keys in Settings."
-                    elif "NoneType" in str(e):
-                        error_msg = "Enhancement failed - received invalid response from LLM"
-                    self.error_signal.emit(error_msg)
-                except Exception as e:
-                    logger.error(f"Enhancement failed with exception: {e}", exc_info=True)
-                    # Ensure we always have a valid error message
-                    error_msg = str(e) if e else "Unknown error during enhancement"
-                    self.error_signal.emit(error_msg)
-
-        # Create progress dialog
-        progress_dialog = QDialog(self)
-        progress_dialog.setWindowTitle("Enhancing Prompt")
-        progress_dialog.setModal(True)
-        progress_dialog.setMinimumWidth(400)
-
-        layout = QVBoxLayout(progress_dialog)
-        layout.addWidget(QLabel("Enhancing prompt with " + self.llm_provider_combo.currentText() + "..."))
-
-        progress_bar = QProgressBar()
-        progress_bar.setRange(0, 0)  # Indeterminate progress
-        layout.addWidget(progress_bar)
-
-        # Start enhancement thread
-        enhance_thread = EnhanceThread(current_prompt, llm_provider, llm_model, self.config.config,
-                                      enhancement_level, style_preset, aspect_ratio)
-
-        def on_enhancement_finished(enhanced_prompt):
-            progress_dialog.close()
-
-            # Ensure enhanced_prompt is a valid string
-            if not enhanced_prompt or not isinstance(enhanced_prompt, str):
-                self._append_to_console("ERROR: No enhanced prompt generated or invalid type", "#ff6666")  # Red
-                QMessageBox.warning(self, "Enhancement Failed", "Failed to generate an enhanced prompt.")
-                return
-
-            # Convert to string just to be safe
-            enhanced_prompt = str(enhanced_prompt)
-
-            self._append_to_console("Enhancement complete!", "#00ff00")  # Green
-            self._append_to_console(f"Enhanced prompt: {enhanced_prompt}", "#ffff66")  # Yellow
-
-            # Show enhanced prompt dialog
-            dlg = QDialog(self)
-            dlg.setWindowTitle("Enhanced Prompt")
-            dlg.setModal(True)
-            dlg.setMinimumWidth(600)
-            dlg.setMinimumHeight(400)
-
-            layout = QVBoxLayout(dlg)
-
-            layout.addWidget(QLabel("Original prompt:"))
-            original_text = QTextEdit()
-            original_text.setPlainText(current_prompt)
-            original_text.setReadOnly(True)
-            original_text.setMaximumHeight(100)
-            layout.addWidget(original_text)
-
-            layout.addWidget(QLabel("Enhanced prompt:"))
-            enhanced_text = QTextEdit()
-            enhanced_text.setPlainText(enhanced_prompt)
-            enhanced_text.setReadOnly(True)
-            layout.addWidget(enhanced_text)
-
-            buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-            buttons.accepted.connect(dlg.accept)
-            buttons.rejected.connect(dlg.reject)
-            layout.addWidget(buttons)
-
-            if dlg.exec() == QDialog.Accepted:
-                # Replace the prompt with enhanced version
-                self.prompt_edit.setPlainText(enhanced_prompt)
-                self._append_to_console("Prompt updated with enhanced version", "#00ff00")
-            else:
-                self._append_to_console("Enhancement cancelled by user", "#ffaa00")  # Orange
-
-        def on_enhancement_error(error_msg):
-            progress_dialog.close()
-            self._append_to_console(f"ERROR: Enhancement failed - {error_msg}", "#ff6666")  # Red
-            QMessageBox.warning(self, "Enhancement Failed",
-                               f"Failed to enhance prompt: {error_msg}")
-
-        enhance_thread.finished_signal.connect(on_enhancement_finished)
-        enhance_thread.error_signal.connect(on_enhancement_error)
-        enhance_thread.start()
-
-        progress_dialog.exec()
 
     def _open_examples(self):
         """Open examples dialog."""
@@ -3093,7 +2859,82 @@ For more detailed information, please refer to the full documentation.
                     self.prompt_edit.setPlainText(f"{current}\n{prompt}")
                 else:
                     self.prompt_edit.setPlainText(prompt)
-    
+
+    def _open_prompt_generator(self):
+        """Open prompt generation dialog."""
+        dlg = PromptGenerationDialog(self, self.config)
+        dlg.promptSelected.connect(self.prompt_edit.setPlainText)
+        dlg.exec()
+
+    def _open_prompt_question(self):
+        """Open prompt question dialog."""
+        current_prompt = self.prompt_edit.toPlainText().strip()
+        if not current_prompt:
+            QMessageBox.warning(self, APP_NAME, "Please enter a prompt first.")
+            return
+
+        dlg = PromptQuestionDialog(self, self.config, current_prompt)
+        dlg.exec()
+
+    def _open_find_dialog(self):
+        """Open find dialog for prompt text."""
+        if not hasattr(self, '_find_dialog') or not self._find_dialog:
+            self._find_dialog = FindDialog(self, self.prompt_edit)
+        self._find_dialog.show()
+        self._find_dialog.raise_()
+        self._find_dialog.activateWindow()
+
+    def _on_upscaling_changed(self, settings: dict):
+        """Handle upscaling settings change."""
+        self.upscaling_settings = settings
+        self._update_cost_estimate()
+
+    def _get_target_resolution(self) -> tuple:
+        """Get target resolution from UI settings."""
+        if hasattr(self, 'resolution_selector') and self.resolution_selector:
+            resolution = self.resolution_selector.get_resolution()
+            if resolution and 'x' in resolution and resolution != 'auto':
+                try:
+                    width, height = map(int, resolution.split('x'))
+                    return width, height
+                except:
+                    pass
+        return None, None
+
+    def _update_upscaling_visibility(self):
+        """Update upscaling selector visibility based on current settings."""
+        if not hasattr(self, 'upscaling_selector'):
+            return
+
+        target_width, target_height = self._get_target_resolution()
+        if not target_width or not target_height:
+            self.upscaling_selector.setVisible(False)
+            return
+
+        # Get expected output size for current provider
+        expected_width = 1024  # Default for Google
+        expected_height = 1024
+
+        if self.current_provider == "google":
+            # Google always outputs 1024x1024, then crops
+            if target_width != target_height:
+                # Will be cropped to aspect ratio
+                aspect = target_width / target_height
+                if aspect > 1:
+                    expected_height = int(1024 / aspect)
+                else:
+                    expected_width = int(1024 * aspect)
+        elif self.current_provider == "openai":
+            # OpenAI has specific sizes
+            expected_width = 1024
+            expected_height = 1024
+
+        # Update the upscaling selector
+        self.upscaling_selector.update_resolution_info(
+            expected_width, expected_height,
+            target_width, target_height
+        )
+
     def _generate(self):
         """Generate image from prompt."""
         # Add separator for new generation
@@ -3589,6 +3430,36 @@ For more detailed information, please refer to the full documentation.
                     processed_images.append(processed_result)
                     original_paths.append(None)
 
+            # Apply upscaling if enabled and needed
+            if hasattr(self, 'upscaling_settings') and self.upscaling_settings.get('enabled'):
+                target_width, target_height = self._get_target_resolution()
+                if target_width and target_height:
+                    upscaled_images = []
+                    for image_data in processed_images:
+                        # Check if upscaling is needed
+                        from PIL import Image
+                        import io
+                        from core.upscaling import needs_upscaling, upscale_image
+
+                        img = Image.open(io.BytesIO(image_data))
+                        if needs_upscaling(img.width, img.height, target_width, target_height):
+                            self._append_to_console(
+                                f"Upscaling from {img.width}x{img.height} to {target_width}x{target_height}...",
+                                "#66ccff"
+                            )
+                            upscaled = upscale_image(
+                                image_data,
+                                target_width,
+                                target_height,
+                                method=self.upscaling_settings.get('method', 'lanczos'),
+                                model_name=self.upscaling_settings.get('model_name'),
+                                api_key=self.config.get_api_key('stability') if self.upscaling_settings.get('method') == 'stability_api' else None
+                            )
+                            upscaled_images.append(upscaled)
+                        else:
+                            upscaled_images.append(image_data)
+                    processed_images = upscaled_images
+
             # Save processed images
             stub = sanitize_stub_from_prompt(self.current_prompt)
             saved_paths = auto_save_images(processed_images, base_stub=stub)
@@ -4063,6 +3934,10 @@ For more detailed information, please refer to the full documentation.
                 if self.btn_generate.isEnabled():
                     self._generate()
                     return True  # Event handled
+            # Handle Ctrl+F for find
+            elif event.key() == Qt.Key_F and event.modifiers() & Qt.ControlModifier:
+                self._open_find_dialog()
+                return True  # Event handled
 
         return super().eventFilter(obj, event)
 
@@ -4665,7 +4540,7 @@ For more detailed information, please refer to the full documentation.
                     if provider != "None":
                         self.llm_model_combo.setEnabled(True)
                         if provider == "OpenAI":
-                            self.llm_model_combo.addItems(["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
+                            self.llm_model_combo.addItems(["gpt-5-chat-latest", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
                         elif provider == "Claude":
                             self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
                         elif provider == "Gemini":

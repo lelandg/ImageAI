@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.13.0**
+**Version 0.14.0**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -48,6 +48,13 @@
 - **Google Cloud Authentication** - Enterprise-ready with Application Default Credentials
 - **Hugging Face Authentication** - Built-in token management for model downloads
 - Secure credential storage in platform-specific directories
+
+### 🚀 AI Image Upscaling
+- **Real-ESRGAN** - State-of-the-art AI upscaling for enhanced image quality
+- **GPU Acceleration** - Automatic NVIDIA GPU detection for faster processing
+- **GUI Installation** - One-click installation directly from the application
+- **Multiple Methods** - Choose between AI upscaling, Lanczos, or cloud services
+- Smart upscaling when target resolution exceeds provider capabilities
 - Environment variable support for CI/CD integration
 - Per-provider API key management
 
@@ -117,7 +124,23 @@
 ### 🤖 LLM Integration (NEW!)
 - **Global LLM Provider Selection** - Unified provider across Image and Video tabs
 - **Multi-Provider Support** - OpenAI GPT-5, Claude, Gemini, Ollama, LM Studio
+  - **GPT-5 Model Support** - `gpt-5-chat-latest` (auto-updating to newest version)
+  - Correctly uses `max_completion_tokens` parameter for GPT-5 and GPT-4+ models
+  - **GPT-5 Specific Controls** (UI ready for future API support):
+    - Reasoning effort selector (low/medium/high) - prepared for when API supports it
+    - Verbosity control (low/medium/high) - prepared for when API supports it
+    - Auto-shows/hides based on selected model
 - **Prompt Enhancement** - One-click prompt improvement using selected LLM
+  - Automatic fallback when LLM returns empty response
+  - Configurable temperature and max tokens for fine-tuning
+  - Works across both Image and Video tabs with shared enhancement engine
+- **Ask Questions About Prompts** - Interactive Q&A dialog for prompt analysis
+  - Pre-defined questions for quick insights
+  - Custom question support with detailed answers
+  - User-adjustable temperature (0-2) and max tokens (100-4000)
+  - GPT-5 reasoning and verbosity controls when using GPT-5 models
+  - Session persistence - remembers last question, settings, and GPT-5 parameters
+  - History tracking of all Q&A interactions
 - **Automatic Model Syncing** - Provider and model selections sync between tabs
 - **Smart Model Detection** - Automatically populates available models per provider
 
@@ -1400,7 +1423,45 @@ ImageAI/
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history and release notes.
 
-### Latest Release: v0.13.0 (2025-01-13)
+### Latest Release: v0.14.0 (2025-01-14)
+
+**Real-ESRGAN AI Upscaling & Installation System**
+- **AI Upscaling Integration**:
+  - Real-ESRGAN support for state-of-the-art image upscaling
+  - Automatic NVIDIA GPU detection (CUDA acceleration for RTX cards)
+  - Smart upscaling when target resolution exceeds provider limits
+  - Multiple upscaling methods: AI, Lanczos, Stability API, or none
+- **GUI Installation System**:
+  - One-click installation directly from the upscaling widget
+  - Progress tracking with real-time output and elapsed time
+  - Automatic PyTorch version selection (CUDA vs CPU)
+  - Compatible version pinning to avoid dependency conflicts
+  - Automatic requirements.txt updates with GPU info
+  - System tray notifications on completion
+- **Installation Features**:
+  - Detects RTX 4090 and other NVIDIA GPUs automatically
+  - Installs CUDA-accelerated PyTorch for GPU users
+  - CPU-only fallback for systems without NVIDIA GPUs
+  - Time estimates: ~30 seconds (cached) to 3-5 minutes (fresh)
+  - Disk space: ~7GB (mostly PyTorch)
+
+### Previous Release: v0.13.1 (2025-01-14)
+
+**GPT-5 Support & Enhanced Prompt Question Dialog**
+- **Full GPT-5 Support**:
+  - Fixed model name to use `gpt-5-chat-latest`
+  - Correctly uses `max_completion_tokens` parameter (not `max_output_tokens`)
+  - Added reasoning effort controls (low/medium/high) for GPT-5
+  - Added verbosity controls (low/medium/high) for GPT-5
+- **Enhanced Prompt Question Dialog**:
+  - User-adjustable temperature and max tokens controls
+  - GPT-5-specific parameters auto-show when GPT-5 selected
+  - Session persistence saves all settings including GPT-5 params
+  - Improved empty response handling with fallback messages
+  - Better console window expansion with splitters
+- **Video Tab Updates**: Same GPT-5 fixes applied to video prompt enhancement
+
+### Previous Release: v0.13.0 (2025-01-13)
 
 **Enhanced Settings UI, Full Prompt Logging & Improved Google Provider**
 - **Reorganized Settings Tab**: All provider API keys now visible simultaneously
