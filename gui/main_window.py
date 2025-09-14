@@ -747,13 +747,13 @@ class MainWindow(QMainWindow):
     def _open_social_sizes_dialog(self):
         """Open the Social Media Image Sizes dialog and apply selection."""
         try:
-            from gui.social_sizes_dialog import SocialSizesDialog
+            from gui.social_sizes_tree_dialog import SocialSizesTreeDialog
         except Exception as e:
             from gui.dialog_utils import show_error
             show_error(self, APP_NAME, f"Unable to open sizes dialog: {e}", exception=e)
             return
         try:
-            dlg = SocialSizesDialog(self)
+            dlg = SocialSizesTreeDialog(self)
             from PySide6.QtWidgets import QDialog
             if dlg.exec() == QDialog.Accepted:
                 res = dlg.selected_resolution()
