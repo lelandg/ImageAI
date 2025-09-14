@@ -124,6 +124,75 @@ def auto_crop_solid_borders(image_data: bytes, variance_threshold: float = 5.0) 
         return image_data
 
 
+def crop_to_aspect_ratio(image_data: bytes, target_width: int, target_height: int) -> bytes:
+    """
+    Crop an image to match a target aspect ratio, centering the crop.
+
+    Args:
+        image_data: Raw image bytes
+        target_width: Target width (used for aspect ratio calculation)
+        target_height: Target height (used for aspect ratio calculation)
+
+    Returns:
+        Cropped image as bytes
+    """
+    try:
+        # Load image
+        img = Image.open(io.BytesIO(image_data))
+        orig_width, orig_height = img.size
+
+        # Calculate target aspect ratio
+        target_ratio = target_width / target_height
+        orig_ratio = orig_width / orig_height
+
+        logger.debug(f"Crop to aspect: Original {orig_width}x{orig_height} (ratio {orig_ratio:.2f}), "
+                    f"Target ratio {target_ratio:.2f} from {target_width}x{target_height}")
+
+        # If ratios are very close (within 2%), don't crop
+        if abs(target_ratio - orig_ratio) < 0.02:
+            logger.debug("Crop to aspect: Ratios match, no cropping needed")
+            return image_data
+
+        # Calculate new dimensions maintaining aspect ratio
+        if orig_ratio > target_ratio:
+            # Image is wider than target ratio - crop width
+            new_width = int(orig_height * target_ratio)
+            new_height = orig_height
+            # Center the crop horizontally
+            left = (orig_width - new_width) // 2
+            top = 0
+            right = left + new_width
+            bottom = orig_height
+        else:
+            # Image is taller than target ratio - crop height
+            new_width = orig_width
+            new_height = int(orig_width / target_ratio)
+            # Center the crop vertically
+            left = 0
+            top = (orig_height - new_height) // 2
+            right = orig_width
+            bottom = top + new_height
+
+        # Crop the image
+        cropped = img.crop((left, top, right, bottom))
+        logger.info(f"Crop to aspect: Cropped from {orig_width}x{orig_height} to {cropped.width}x{cropped.height}")
+
+        # Convert back to bytes
+        output = io.BytesIO()
+        # Use PNG for lossless or JPEG for smaller size
+        if cropped.mode in ('RGBA', 'LA', 'P'):
+            cropped.save(output, format='PNG')
+        else:
+            cropped.save(output, format='JPEG', quality=95)
+
+        return output.getvalue()
+
+    except Exception as e:
+        logger.error(f"Crop to aspect ratio failed: {e}")
+        # If any error occurs, return original image
+        return image_data
+
+
 def detect_aspect_ratio(image_data: bytes) -> Tuple[int, int]:
     """
     Detect the actual aspect ratio of image content (after auto-cropping).
