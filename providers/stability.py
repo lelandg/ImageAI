@@ -124,11 +124,11 @@ class StabilityProvider(ImageProvider):
             selected_model = model or self.model
             
             # Parse parameters
-            # Handle size parameter
-            size_str = kwargs.get("size", "1024x1024")
-            if isinstance(size_str, str) and 'x' in size_str:
+            # Handle resolution/size parameter (resolution takes precedence)
+            resolution_str = kwargs.get("resolution", kwargs.get("size", "1024x1024"))
+            if isinstance(resolution_str, str) and 'x' in resolution_str:
                 try:
-                    width, height = map(int, size_str.split('x'))
+                    width, height = map(int, resolution_str.split('x'))
                 except:
                     width = height = 1024
             else:

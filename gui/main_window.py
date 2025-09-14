@@ -3115,18 +3115,20 @@ For more detailed information, please refer to the full documentation.
                     aspect_ratio = self.aspect_selector.get_ratio()
                     kwargs['aspect_ratio'] = aspect_ratio
 
-                    # For OpenAI, also provide resolution string for proper size mapping
-                    if self.current_provider == "openai":
-                        if aspect_ratio == "1:1":
-                            kwargs['resolution'] = "1024x1024"
-                        elif aspect_ratio == "16:9":
-                            kwargs['resolution'] = "1792x1024"
-                        elif aspect_ratio == "9:16":
-                            kwargs['resolution'] = "1024x1792"
-                        else:
-                            kwargs['resolution'] = "1024x1024"
+                    # For non-Google providers, provide resolution string for proper size mapping
+                    if self.current_provider != "google":
+                        # Map aspect ratios to appropriate resolutions per provider
+                        resolution_map = self._get_resolution_for_aspect_ratio(aspect_ratio, self.current_provider)
+                        if resolution_map:
+                            kwargs['resolution'] = resolution_map
+
+                        # Store target for potential scaling/cropping later
+                        if hasattr(self.resolution_selector, 'get_width_height'):
+                            width, height = self.resolution_selector.get_width_height()
+                            if width and height:
+                                self.target_resolution = (width, height)
                     else:
-                        # For other providers, get custom width/height if specified
+                        # For Google, get custom width/height if specified
                         if hasattr(self.resolution_selector, 'get_width_height'):
                             width, height = self.resolution_selector.get_width_height()
                             if width:
@@ -3163,16 +3165,11 @@ For more detailed information, please refer to the full documentation.
                             "#ffaa00"  # Orange for info
                         )
 
-                        # For OpenAI, provide resolution string for proper handling
-                        if self.current_provider == "openai":
-                            if closest_ar == "1:1":
-                                kwargs['resolution'] = "1024x1024"
-                            elif closest_ar == "16:9":
-                                kwargs['resolution'] = "1792x1024"
-                            elif closest_ar == "9:16":
-                                kwargs['resolution'] = "1024x1792"
-                            # Keep aspect_ratio for fallback
-                            # Don't delete it - provider uses it as fallback
+                        # For non-Google providers, provide resolution string for proper handling
+                        resolution_map = self._get_resolution_for_aspect_ratio(closest_ar, self.current_provider)
+                        if resolution_map:
+                            kwargs['resolution'] = resolution_map
+                        # Keep aspect_ratio for fallback - providers use it
                     else:
                         # Gemini: use exact dimensions
                         kwargs['width'] = width
@@ -3251,6 +3248,38 @@ For more detailed information, please refer to the full documentation.
         self.current_prompt = prompt
         self.current_model = model
     
+    def _get_resolution_for_aspect_ratio(self, aspect_ratio: str, provider: str) -> str:
+        """Get the appropriate resolution string for a given aspect ratio and provider."""
+        # Provider-specific resolution mappings
+        resolution_maps = {
+            "openai": {
+                "1:1": "1024x1024",
+                "16:9": "1792x1024",
+                "9:16": "1024x1792",
+                "4:3": "1792x1024",  # Map to closest landscape
+                "3:4": "1024x1792",  # Map to closest portrait
+            },
+            "stability": {
+                "1:1": "1024x1024",
+                "16:9": "1344x768",
+                "9:16": "768x1344",
+                "4:3": "1152x896",
+                "3:4": "896x1152",
+                "3:2": "1216x832",
+                "2:3": "832x1216",
+            },
+            "local_sd": {
+                "1:1": "512x512",
+                "16:9": "768x432",
+                "9:16": "432x768",
+                "4:3": "512x384",
+                "3:4": "384x512",
+            }
+        }
+
+        provider_map = resolution_maps.get(provider, resolution_maps.get("openai"))
+        return provider_map.get(aspect_ratio, "1024x1024")
+
     def _find_closest_aspect_ratio(self, target_width: int, target_height: int, provider: str) -> str:
         """Find the closest supported aspect ratio for the given resolution."""
         target_ratio = target_width / target_height
