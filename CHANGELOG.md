@@ -5,6 +5,46 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2025-01-14
+
+### Added
+- **Real-ESRGAN AI Upscaling Integration**
+  - State-of-the-art AI upscaling support with Real-ESRGAN
+  - Automatic NVIDIA GPU detection (CUDA acceleration for RTX cards)
+  - Smart upscaling when target resolution exceeds provider limits
+  - Multiple upscaling methods: AI, Lanczos, Stability API, or none
+- **GUI Installation System**
+  - One-click installation directly from the upscaling widget
+  - Progress tracking with real-time output and elapsed time
+  - Automatic PyTorch version selection (CUDA vs CPU)
+  - Compatible version pinning to avoid dependency conflicts
+  - Automatic requirements.txt updates with GPU info
+  - System tray notifications on completion
+- **Installation Features**
+  - Detects RTX 4090 and other NVIDIA GPUs automatically
+  - Installs CUDA-accelerated PyTorch for GPU users
+  - CPU-only fallback for systems without NVIDIA GPUs
+  - Time estimates: ~30 seconds (cached) to 3-5 minutes (fresh)
+  - Disk space: ~7GB (mostly PyTorch)
+
+## [0.13.1] - 2025-01-14
+
+### Added
+- **Full GPT-5 Support**
+  - Fixed model name to use `gpt-5-chat-latest`
+  - Correctly uses `max_completion_tokens` parameter (not `max_output_tokens`)
+  - Added reasoning effort controls (low/medium/high) for GPT-5
+  - Added verbosity controls (low/medium/high) for GPT-5
+- **Enhanced Prompt Question Dialog**
+  - User-adjustable temperature and max tokens controls
+  - GPT-5-specific parameters auto-show when GPT-5 selected
+  - Session persistence saves all settings including GPT-5 params
+  - Improved empty response handling with fallback messages
+  - Better console window expansion with splitters
+
+### Changed
+- **Video Tab Updates** - Same GPT-5 fixes applied to video prompt enhancement
+
 ## [0.13.0] - 2025-01-13
 
 ### Added
@@ -43,11 +83,168 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Algorithm now properly identifies uniform borders
   - Currently disabled pending further testing
 
+## [0.12.0] - 2025-01-13
+
+### Added
+- **Social Media Sizes Dialog** - New dialog for quick access to platform-specific image dimensions
+  - Comprehensive list of sizes for Instagram, Twitter/X, Facebook, LinkedIn, YouTube, TikTok
+  - One-click application of social media dimensions to image generation
+  - Searchable and categorized by platform
+  - "Social Sizes..." button next to resolution selector for easy access
+- **Comprehensive Keyboard Shortcuts** - Full keyboard accessibility
+  - Alt+key mnemonics for all buttons (Alt+G to Generate, Alt+S to Save, etc.)
+  - Ctrl+Enter to generate from anywhere, even while typing in prompt field
+  - Ctrl+S to save image, Ctrl+Shift+C to copy to clipboard
+  - F1 for instant help access
+  - All shortcuts shown in button tooltips
+- **Protobuf v5+ Compatibility** - Fixed AttributeError with MessageFactory.GetPrototype
+  - Added runtime compatibility patch for protobuf v5 changes
+  - Suppresses initialization errors during startup
+  - Allows installation with latest protobuf versions
+  - No more version conflicts with other packages
+
+### Changed
+- **Provider Improvements**
+  - Google Gemini (Nano Banana) now supports aspect ratios via prompt specification
+  - Resolution and aspect ratio settings are preserved when switching providers
+  - No more forced 1:1 aspect ratio for Google - all ratios now work
+- **UI Improvements**
+  - Fixed status console auto-resizing - now stays at user-set size
+  - Removed white lines between console messages for cleaner output
+  - Console starts at fixed 100px height, resizable via splitter only
+- **Code Organization**
+  - Added comprehensive code map documentation at `Docs/CodeMap.md`
+  - Created code map generator agent for maintaining navigation
+  - Updated CLAUDE.md with modularized structure information
+
+## [0.11.0] - 2025-01-13
+
+### Added
+- **Global LLM Provider System** - Unified LLM provider selection across Image and Video tabs
+  - Support for OpenAI (GPT-5), Claude, Gemini, Ollama, and LM Studio
+  - Automatic model detection and population per provider
+  - Bidirectional syncing between Image and Video tabs
+  - Persistent LLM provider settings across sessions
+- **Prompt Enhancement** - One-click prompt improvement using selected LLM
+  - Works on both Image and Video tabs
+  - Shows original and enhanced prompts side-by-side
+  - Integrated with the new console output for progress tracking
+- **Console Output Window** - New terminal-style status console
+  - Color-coded messages (green for success, red for errors, blue for progress)
+  - Timestamped entries for all operations
+  - Visual separators between operations
+  - Resizable with vertical splitter
+  - Shows LLM interactions and provider communications
+
+### Changed
+- **UI Improvements**
+  - Added status bar for real-time feedback
+  - Startup progress messages
+  - Lazy loading for Video tab (faster startup)
+  - Improved layout with LLM provider at top of tabs
+
+## [0.10.5] - 2025-01-13
+
+### Added
+- **Visual Continuity Features** - New optional features for maintaining consistency across video scenes
+  - Provider-specific continuity techniques (Gemini iterative refinement, OpenAI reference IDs, Claude style guides)
+  - Checkbox controls to enable/disable continuity and enhanced storyboard generation
+  - Automatic aspect ratio hints for Gemini provider
+  - Project-level continuity tracking for multi-scene consistency
+- **Improved Lyric Enhancement** - Smart detection and processing of lyric lines vs. regular text
+  - Lyric-specific prompts create detailed visual scene descriptions
+  - Fallback generation ensures all scenes get visual prompts even with empty LLM responses
+  - Better handling of short text fragments from song lyrics
+
+### Changed
+- **UI Improvements** - New continuity control checkboxes with informative tooltips
+- **GPT-5 Confirmed Working** - Full integration tested with OpenAI's GPT-5 model
+  - Successful time synchronization using Strict Lyric Timing Contract v1.0
+  - Robust fallback handling for prompt enhancement
+
+## [0.10.4] - 2025-01-12
+
+### Added
+- **Strict Lyric Timing Contract v1.0** - Implemented standardized format for GPT-5 lyric synchronization
+  - No fragmentation - one-to-one mapping between lyrics and timing entries
+  - Consistent millisecond integer format
+  - Order preservation without reordering
+- **Multi-Format LLM Response Handling** - Smart parsing for various GPT-5 response formats
+  - Handles `startMs`/`endMs`, `start`/`end` in seconds, and mixed formats
+  - Intelligent fragment merging for karaoke-style timing
+  - Automatic detection of Strict Contract v1.0 format
+- **Gemini Response Optimization** - Adjusted prompts to avoid response size limits
+  - Line-level timing for longer songs (>20 lines)
+  - Emphasis on including all lyrics in response
+
+### Fixed
+- **Critical Scene Table Update Bug** - Resolved indentation issue preventing UI updates after storyboard generation
+- **Enhanced Settings Persistence** - All video tab settings now properly saved
+  - LLM provider and model selection
+  - Image provider and model selection
+  - Variants, Ken Burns, transitions, captions settings
+
 ## [0.10.3] - 2025-01-12
 
 ### Added
 - **Custom Aspect Ratio Input** - New manual input field for entering custom aspect ratios
   - Supports ratio format (e.g., "16:10") and decimal format (e.g., "1.6")
+- **Smart Mode Switching** - Clear visual indicators showing whether aspect ratio or resolution is controlling dimensions
+- **Improved UI Feedback**
+  - Green badge for aspect ratio mode, blue badge for resolution mode
+  - Auto mode in resolution selector calculates from aspect ratio
+  - Selecting a manual resolution automatically clears aspect ratio selection
+- **Provider-Aware Calculations** - Resolution automatically calculated based on provider capabilities (DALL·E, Gemini, Stability)
+
+## [0.10.2] - 2025-01-12
+
+### Added
+- **Project Browser** - New dialog for easy project management with double-click to open
+- **Auto-reload** - Last opened project automatically loads on startup (configurable)
+- **MIDI Support** - Fixed MIDI import errors by adding setuptools dependency
+- **Enhanced Logging** - Comprehensive error logging with automatic log/project file copying on exit
+
+### Changed
+- **UI Improvements**
+  - Renamed "Generate" tab to "Image" for clarity
+  - Moved Templates tab next to Image tab for better workflow
+  - Made Video Project header more compact
+  - Added development notice to Video tab
+
+### Fixed
+- **Project save/load** - Fixed not preserving lyrics and settings
+- **`timing_combo` AttributeError** - Fixed error on project load
+- **Error logging** - Added proper error logging for all dialog messages
+
+## [0.10.0] - 2025-01-11
+
+### Added
+- **Complete Video Pipeline** - Full implementation of text-to-video generation workflow
+- **Workspace and History Tabs** - Dual-tab interface for editing and version control
+- **Event Sourcing** - Complete project history with time-travel restoration
+- **LLM Integration** - Multi-provider prompt enhancement (GPT-5, Claude, Gemini)
+- **Scene Management** - Interactive storyboard with timing controls
+- **Image Generation** - Batch generation with caching and thumbnails
+- **FFmpeg Rendering** - Slideshow video with Ken Burns effects and transitions
+- **Version Control** - Restore projects to any point in history
+- **Audio Support** - Audio track integration with sync options
+
+## [0.9.4] - 2025-01-10
+
+### Added
+- **Local Stable Diffusion Provider** - Run AI models locally without API keys
+  - Automatic model detection from Hugging Face cache
+  - Support for SD XL, SD 2.1, SD 1.5 models
+  - GPU acceleration with CUDA support
+  - Model browser and downloader UI
+  - Popular model recommendations with descriptions
+  - Progress tracking for model downloads
+  - Automatic dependency installation
+- **Enhanced Model Management**
+  - Cached model detection (~/.cache/huggingface)
+  - One-click model installation
+  - Size indicators for downloads (1-7GB typical)
+  - Support for custom Hugging Face models
   - Input validation ensures only valid formats are accepted
   - Custom button with visual indicator when active
 - **Resolution/Aspect Ratio Mode Indicator** - Clear visual feedback showing which control is active

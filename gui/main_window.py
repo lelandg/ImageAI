@@ -1080,17 +1080,83 @@ class MainWindow(QMainWindow):
             import webbrowser
             
             class CustomWebPage(QWebEnginePage):
-                """Custom page to handle external links."""
+                """Custom page to handle external links and local markdown files."""
+                def __init__(self, parent=None, main_window=None):
+                    super().__init__(parent)
+                    self.main_window = main_window
+
                 def acceptNavigationRequest(self, url, nav_type, is_main_frame):
+                    from PySide6.QtWebEngineCore import QWebEnginePage
+                    from PySide6.QtCore import QTimer
+
                     # Open external links in system browser
                     if url.scheme() in ('http', 'https', 'ftp'):
                         webbrowser.open(url.toString())
                         return False
+
+                    # Handle local markdown file links (like CHANGELOG.md and README.md)
+                    url_str = url.toString()
+
+                    # Check if this is a markdown file URL
+                    if (url_str.endswith('.md') or 'README.md' in url_str or 'CHANGELOG.md' in url_str) and not url_str.startswith('#'):
+                        from pathlib import Path
+
+                        # Parse the file path from URL
+                        if url_str.startswith('file:///'):
+                            file_path = url_str.replace('file:///', '')
+                        else:
+                            file_path = url_str
+
+                        # Handle special case for going back to README
+                        if file_path in ['', '/', 'README.md']:
+                            file_path = 'README.md'
+
+                        # Get the project root directory
+                        project_root = Path(__file__).parent.parent
+
+                        # Resolve relative to project root
+                        full_path = project_root / file_path
+
+                        if full_path.exists() and full_path.suffix.lower() == '.md':
+                            try:
+                                # Load the markdown file
+                                if 'README' in file_path.upper():
+                                    # Load README content
+                                    content = self.main_window._load_readme_content(replace_emojis=False) if self.main_window else full_path.read_text(encoding='utf-8')
+                                else:
+                                    # Load other markdown files
+                                    content = full_path.read_text(encoding='utf-8')
+
+                                    # Add a "Back to README" link at the top
+                                    back_link = '<p><a href="README.md">← Back to README</a></p><hr>'
+                                    content = back_link + '\n\n' + content
+
+                                # Convert to HTML using the main window's method
+                                if self.main_window:
+                                    html = self.main_window._markdown_to_html_with_anchors(content, use_webengine=True)
+
+                                    # Get the browser
+                                    browser = self.parent()
+
+                                    # Load the formatted content
+                                    def load_formatted_content():
+                                        # Set a proper URL for history tracking
+                                        display_url = QUrl(f"file:///{file_path}")
+                                        browser.setHtml(html, display_url)
+
+                                    # Load the formatted content immediately
+                                    QTimer.singleShot(0, load_formatted_content)
+
+                                # Prevent the raw markdown from loading
+                                return False
+                            except Exception as e:
+                                print(f"Error loading markdown file {file_path}: {e}")
+
                     return super().acceptNavigationRequest(url, nav_type, is_main_frame)
             
             # Create web view for help with full emoji support
             self.help_browser = QWebEngineView()
-            self.help_browser.setPage(CustomWebPage(self.help_browser))
+            self.help_browser.setPage(CustomWebPage(self.help_browser, main_window=self))
             
             # Create navigation toolbar container widget with fixed height
             nav_widget = QWidget()
@@ -4299,6 +4365,15 @@ For more detailed information, please refer to the full documentation.
             except Exception:
                 pass
     
+    def _update_help_nav_buttons(self):
+        """Update the state of help navigation buttons based on browser history."""
+        if hasattr(self, 'help_browser') and hasattr(self.help_browser, 'history'):
+            try:
+                self.btn_help_back.setEnabled(self.help_browser.history().canGoBack())
+                self.btn_help_forward.setEnabled(self.help_browser.history().canGoForward())
+            except Exception:
+                pass  # Silently ignore if buttons don't exist yet
+
     def _search_help_webengine(self, backward=False):
         """Search in WebEngine-based help browser."""
         if not hasattr(self, 'help_browser'):
