@@ -34,6 +34,7 @@ from gui.dialogs import ExamplesDialog
 # Defer video tab import to improve startup speed
 # from gui.video.video_project_tab import VideoProjectTab
 from gui.workers import GenWorker
+from gui.image_crop_dialog import ImageCropDialog
 try:
     from gui.model_browser import ModelBrowserDialog
 except ImportError:
@@ -3007,7 +3008,10 @@ For more detailed information, please refer to the full documentation.
         
         # Gather all generation parameters
         kwargs = {}
-        
+
+        # Store target resolution for later processing
+        self.target_resolution = None
+
         # Get resolution or aspect ratio settings based on which mode is active
         if hasattr(self, 'resolution_selector') and self.resolution_selector:
             if self.resolution_selector.is_using_aspect_ratio():
@@ -3030,19 +3034,45 @@ For more detailed information, please refer to the full documentation.
                             kwargs['width'] = width
                             kwargs['height'] = height
             else:
-                # Using explicit resolution mode - only send resolution
+                # Using explicit resolution mode
+                width = height = None
                 if hasattr(self.resolution_selector, 'get_width_height'):
                     width, height = self.resolution_selector.get_width_height()
-                    if width and height:
-                        kwargs['width'] = width
-                        kwargs['height'] = height
                 else:
                     resolution = self.resolution_selector.get_resolution()
                     if resolution and 'x' in resolution:
                         width, height = map(int, resolution.split('x'))
+
+                if width and height:
+                    # For non-Gemini providers, use closest aspect ratio and store target for scaling
+                    if self.current_provider != "google":
+                        self.target_resolution = (width, height)
+                        closest_ar = self._find_closest_aspect_ratio(width, height, self.current_provider)
+                        kwargs['aspect_ratio'] = closest_ar
+
+                        # Inform user about aspect ratio matching
+                        self._append_to_console(
+                            f"Using aspect ratio {closest_ar} (closest to {width}x{height}), will scale to fit",
+                            "#ffaa00"  # Orange for info
+                        )
+
+                        # For OpenAI, still need to provide dimensions based on aspect ratio
+                        if self.current_provider == "openai":
+                            if closest_ar == "1:1":
+                                kwargs['width'] = 1024
+                                kwargs['height'] = 1024
+                            elif closest_ar == "16:9":
+                                kwargs['width'] = 1792
+                                kwargs['height'] = 1024
+                            elif closest_ar == "9:16":
+                                kwargs['width'] = 1024
+                                kwargs['height'] = 1792
+                            # Remove aspect_ratio as OpenAI uses dimensions
+                            del kwargs['aspect_ratio']
+                    else:
+                        # Gemini: use exact dimensions
                         kwargs['width'] = width
                         kwargs['height'] = height
-                # Don't send aspect_ratio when using explicit resolution
         elif hasattr(self, 'resolution_combo'):
             # Fallback to old resolution combo
             resolution_text = self.resolution_combo.currentText()
@@ -3117,6 +3147,127 @@ For more detailed information, please refer to the full documentation.
         self.current_prompt = prompt
         self.current_model = model
     
+    def _find_closest_aspect_ratio(self, target_width: int, target_height: int, provider: str) -> str:
+        """Find the closest supported aspect ratio for the given resolution."""
+        target_ratio = target_width / target_height
+
+        # Define supported aspect ratios per provider
+        aspect_ratios = {
+            "google": ["1:1", "4:3", "3:4", "16:9", "9:16", "2:1", "1:2"],
+            "openai": ["1:1", "16:9", "9:16"],  # DALL-E 3 only supports these
+            "stability": ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
+        }
+
+        provider_ratios = aspect_ratios.get(provider, ["1:1"])
+
+        # Convert aspect ratio strings to float values
+        def parse_ratio(ratio_str):
+            parts = ratio_str.split(":")
+            return float(parts[0]) / float(parts[1])
+
+        # Find closest ratio
+        closest_ratio = None
+        min_diff = float('inf')
+
+        for ratio_str in provider_ratios:
+            ratio_val = parse_ratio(ratio_str)
+            diff = abs(ratio_val - target_ratio)
+            if diff < min_diff:
+                min_diff = diff
+                closest_ratio = ratio_str
+
+        return closest_ratio or "1:1"
+
+    def _process_image_for_resolution(self, image_data: bytes) -> bytes:
+        """Process image to match selected resolution (scaling/cropping)."""
+        # Skip processing for Gemini provider
+        if self.current_provider == "google":
+            return image_data
+
+        # Get target resolution
+        if hasattr(self, 'target_resolution') and self.target_resolution:
+            target_width, target_height = self.target_resolution
+        else:
+            # Fallback to getting from UI if not stored
+            target_width = None
+            target_height = None
+
+            # Check resolution selector
+            if hasattr(self, 'resolution_selector') and self.resolution_selector:
+                resolution_text = self.resolution_selector.get_resolution()
+                # Parse resolution like "1024x1024"
+                if 'x' in resolution_text:
+                    try:
+                        parts = resolution_text.split('x')
+                        if len(parts) == 2:
+                            target_width = int(parts[0])
+                            target_height = int(parts[1])
+                    except (ValueError, IndexError):
+                        pass
+
+        # If no valid resolution found, return original
+        if not target_width or not target_height:
+            return image_data
+
+        try:
+            from PIL import Image
+            import io
+            from PySide6.QtGui import QImage, QPixmap
+            from PySide6.QtCore import QByteArray, QBuffer, QIODevice
+
+            # Load image
+            img = Image.open(io.BytesIO(image_data))
+            original_width, original_height = img.size
+
+            # Check if scaling is needed
+            if original_width == target_width and original_height == target_height:
+                return image_data
+
+            # Convert PIL image to QImage properly
+            img_rgba = img.convert("RGBA")
+            data = img_rgba.tobytes("raw", "RGBA")
+            bytes_per_line = 4 * original_width
+            qimage = QImage(data, original_width, original_height, bytes_per_line, QImage.Format_RGBA8888)
+            # Need to copy the data since QImage doesn't own it
+            qimage = qimage.copy()
+
+            # Scale to target width
+            scale_factor = target_width / original_width
+            scaled_height = int(original_height * scale_factor)
+
+            # Scale the image
+            scaled_qimage = qimage.scaled(
+                target_width, scaled_height,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+
+            # Check if cropping is needed
+            if scaled_height != target_height:
+                # Show crop dialog
+                dialog = ImageCropDialog(scaled_qimage, target_width, target_height, self)
+                if dialog.exec() == QDialog.Accepted:
+                    # Get cropped image
+                    result_image = dialog.get_result()
+                else:
+                    # User cancelled, use scaled image
+                    result_image = scaled_qimage
+            else:
+                # No cropping needed
+                result_image = scaled_qimage
+
+            # Convert QImage back to bytes
+            byte_array = QByteArray()
+            buffer = QBuffer(byte_array)
+            buffer.open(QIODevice.WriteOnly)
+            result_image.save(buffer, "PNG")
+            return bytes(byte_array)
+
+        except Exception as e:
+            logger.error(f"Error processing image for resolution: {e}")
+            self._append_to_console(f"Warning: Could not process image resolution: {e}", "#ffaa00")
+            return image_data
+
     def _on_progress(self, message: str):
         """Handle progress update."""
         self.status_label.setText(message)
@@ -3137,19 +3288,25 @@ For more detailed information, please refer to the full documentation.
         self.status_label.setText("Generation complete.")
         self.status_bar.showMessage("Image generated successfully")
         self._append_to_console("Generation complete!", "#00ff00")  # Green
-        
+
         # Log any text responses from the provider
         if texts:
             for text in texts:
                 self._append_to_console(f"Response: {text}", "#ffff66")  # Yellow
-        
+
         # Display and save images
         if images:
             self._append_to_console(f"Received {len(images)} image(s)", "#66ccff")
 
-            # Save images
+            # Process images for scaling/cropping if needed (non-Gemini providers only)
+            processed_images = []
+            for image_data in images:
+                processed_image = self._process_image_for_resolution(image_data)
+                processed_images.append(processed_image)
+
+            # Save processed images
             stub = sanitize_stub_from_prompt(self.current_prompt)
-            saved_paths = auto_save_images(images, base_stub=stub)
+            saved_paths = auto_save_images(processed_images, base_stub=stub)
 
             if saved_paths:
                 self._append_to_console(f"Saved to: {saved_paths[0].name}", "#00ff00")
@@ -3157,13 +3314,13 @@ For more detailed information, please refer to the full documentation.
             # Calculate cost for this generation
             generation_cost = 0.0
             settings = {}
-            settings["num_images"] = len(images)
-            
-            # Get resolution from image data if possible
+            settings["num_images"] = len(processed_images)
+
+            # Get resolution from processed image data
             try:
                 from PIL import Image
                 import io
-                img = Image.open(io.BytesIO(images[0]))
+                img = Image.open(io.BytesIO(processed_images[0]))
                 settings["width"] = img.width
                 settings["height"] = img.height
                 settings["resolution"] = f"{img.width}x{img.height}"
@@ -3202,9 +3359,9 @@ For more detailed information, please refer to the full documentation.
                 
                 write_image_sidecar(path, meta)
             
-            # Display first image
-            self.current_image_data = images[0]
-            self._display_image(images[0])
+            # Display first processed image
+            self.current_image_data = processed_images[0]
+            self._display_image(processed_images[0])
             if saved_paths:
                 self._last_displayed_image_path = saved_paths[0]  # Track last displayed image
             
