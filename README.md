@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.14.0**
+**Version 0.16.0**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
@@ -30,7 +30,7 @@
 - [Changelog](CHANGELOG.md)
 - [Screenshots Gallery](#17-screenshots-gallery)
 
-![screenshot_20250914.png](Screenshots/screenshot_20250914.png)
+![screenshot_20250915.png](screenshot_20250915.png)
 
 ## Key Features
 
@@ -480,7 +480,11 @@ python main.py video --in script.txt --veo-model veo-3.0-generate-001 \
 
 #### Image Tab (Primary)
 - **Model Selection**: Dropdown with provider-specific models
-- **Prompt Input**: Multi-line text area for detailed prompts
+- **Prompt Input**: Multi-line text area with built-in search (Ctrl+F)
+- **AI Prompt Tools**:
+  - Enhance Prompt: Improve your prompt with AI assistance
+  - Generate Prompts: Create multiple prompt variations
+  - Ask About Prompt: Get AI guidance on prompt writing
 - **Generate Button**: Start image generation with progress tracking
 - **Image Display**: High-quality preview with automatic scaling
 - **Generation Controls**:
@@ -489,6 +493,17 @@ python main.py video --in script.txt --veo-model veo-3.0-generate-001 \
   - Quality settings (Standard/HD)
   - Batch size selector (1-4 images)
   - Cost estimator showing real-time pricing
+- **Reference Image** (Google Gemini only):
+  - Select a starting image to guide generation
+  - Visual preview thumbnail with controls
+  - Style options: Natural blend, Blurred edges, In circle, In frame, As background, etc.
+  - Position options: Auto, Left, Center, Right, Top, Bottom, corners
+  - Auto-inserts natural language instructions into prompt
+  - Shows preview of what will be inserted
+  - Tip: Press Ctrl+F to search text in prompt field
+  - Includes resolution info automatically
+  - Enable/disable checkbox
+  - Clear button to remove reference
 - **Advanced Settings** (collapsible panel):
   - Inference steps slider (1-50)
   - Guidance scale (CFG) control
@@ -857,6 +872,10 @@ The template system allows you to create consistent, reusable prompts with varia
 
 **GUI Mode**:
 - **Ctrl+Enter**: Generate image
+- **Ctrl+F**: Find/search in prompt text
+- **F3**: Find next match
+- **Shift+F3**: Find previous match
+- **Escape**: Close find dialog
 - **Ctrl+S**: Save current image as...
 - **Ctrl+Q**: Quit application
 - **Ctrl+N**: Clear prompt
@@ -1425,6 +1444,11 @@ ImageAI/
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history and release notes.
 
 ## 17. Screenshots Gallery
+
+### UI when using a reference image for Facebook cover photo.
+Sizes are automatically set when using the "Social Sizes" button!
+
+![screenshot_20250915.png](screenshot_20250915.png)
 
 ### Generation Workflow
 

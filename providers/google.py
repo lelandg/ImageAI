@@ -291,19 +291,43 @@ class GoogleProvider(ImageProvider):
         # Seed for reproducibility (if supported)
         if kwargs.get('seed') is not None:
             config['seed'] = kwargs['seed']
-        
+
+        # Handle reference image if provided
+        reference_image = kwargs.get('reference_image')
+        contents = prompt  # Default to just the text prompt
+
+        if reference_image:
+            # Create multimodal content with reference image
+            try:
+                from PIL import Image
+                import io
+
+                # Convert bytes to PIL Image if needed
+                if isinstance(reference_image, bytes):
+                    img = Image.open(io.BytesIO(reference_image))
+                else:
+                    img = reference_image
+
+                # Create content list with image and prompt
+                contents = [img, prompt]
+                logger.info("Using reference image for generation")
+            except Exception as e:
+                logger.warning(f"Failed to process reference image: {e}")
+                # Fall back to text-only prompt
+                contents = prompt
+
         try:
             # Try to use generation_config parameter if supported
             if config:
                 response = self.client.models.generate_content(
                     model=model,
-                    contents=prompt,
+                    contents=contents,
                     generation_config=config
                 )
             else:
                 response = self.client.models.generate_content(
                     model=model,
-                    contents=prompt,
+                    contents=contents,
                 )
             
             if response and response.candidates:
@@ -327,7 +351,7 @@ class GoogleProvider(ImageProvider):
             try:
                 response = self.client.models.generate_content(
                     model=model,
-                    contents=prompt,
+                    contents=contents,
                 )
                 
                 if response and response.candidates:

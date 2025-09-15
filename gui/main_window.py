@@ -456,9 +456,18 @@ class MainWindow(QMainWindow):
         prompt_layout.setContentsMargins(0, 0, 0, 0)
         prompt_layout.setSpacing(2)
         
+        # Prompt label with tips
+        prompt_header_layout = QHBoxLayout()
         prompt_label = QLabel("Prompt:")
-        prompt_layout.addWidget(prompt_label)
-        
+        prompt_header_layout.addWidget(prompt_label)
+
+        # Add find tip
+        find_tip = QLabel("(Ctrl+F to search)")
+        find_tip.setStyleSheet("color: #888; font-size: 9pt;")
+        prompt_header_layout.addWidget(find_tip)
+        prompt_header_layout.addStretch()
+        prompt_layout.addLayout(prompt_header_layout)
+
         self.prompt_edit = QTextEdit()
         self.prompt_edit.setPlaceholderText("Describe what to generate... (Ctrl+Enter to generate)")
         self.prompt_edit.setAcceptRichText(False)
@@ -481,54 +490,55 @@ class MainWindow(QMainWindow):
         bottom_layout.setContentsMargins(0, 0, 0, 0)
         bottom_layout.setSpacing(5)
 
-        # Buttons row - below splitter, above Image Settings
+        # Single buttons row - below splitter, above Image Settings
         buttons_container = QWidget()
-        buttons_layout = QVBoxLayout(buttons_container)
+        buttons_layout = QHBoxLayout(buttons_container)
         buttons_layout.setContentsMargins(0, 5, 0, 5)
-        buttons_layout.setSpacing(5)
+        buttons_layout.setSpacing(3)
 
-        # First row of buttons
-        hb1 = QHBoxLayout()
-        self.btn_examples = QPushButton("E&xamples")  # Alt+X
+        # All buttons in one row
+        self.btn_examples = QPushButton("E&xamples")
         self.btn_examples.setToolTip("Browse example prompts (Alt+X)")
-        self.btn_enhance_prompt = QPushButton("&Enhance Prompt")  # Alt+E
+        buttons_layout.addWidget(self.btn_examples)
+
+        self.btn_enhance_prompt = QPushButton("&Enhance")
         self.btn_enhance_prompt.setToolTip("Improve prompt with AI (Alt+E)")
-        self.btn_generate_prompts = QPushButton("Generate &Prompts")  # Alt+P
+        buttons_layout.addWidget(self.btn_enhance_prompt)
+
+        self.btn_generate_prompts = QPushButton("Generate &Prompts")
         self.btn_generate_prompts.setToolTip("Generate multiple prompt variations (Alt+P)")
-        self.btn_ask_about = QPushButton("&Ask About Prompt")  # Alt+A
+        buttons_layout.addWidget(self.btn_generate_prompts)
+
+        self.btn_ask_about = QPushButton("&Ask")
         self.btn_ask_about.setToolTip("Ask questions about your prompt (Alt+A)")
+        buttons_layout.addWidget(self.btn_ask_about)
 
-        hb1.addWidget(self.btn_examples)
-        hb1.addWidget(self.btn_enhance_prompt)
-        hb1.addWidget(self.btn_generate_prompts)
-        hb1.addWidget(self.btn_ask_about)
-        hb1.addStretch()
-        buttons_layout.addLayout(hb1)
+        # Separator
+        buttons_layout.addSpacing(10)
 
-        # Second row of buttons
-        hb2 = QHBoxLayout()
-        self.btn_generate = QPushButton("&Generate")  # Alt+G
+        self.btn_generate = QPushButton("&Generate")
         self.btn_generate.setToolTip("Generate image (Alt+G or Ctrl+Enter)")
-        self.btn_save_image = QPushButton("&Save Image")  # Alt+S
-        self.btn_save_image.setToolTip("Save generated image (Alt+S or Ctrl+S)")
-        self.btn_copy_image = QPushButton("&Copy to Clipboard")  # Alt+C
-        self.btn_copy_image.setToolTip("Copy image to clipboard (Alt+C)")
-        self.btn_save_image.setEnabled(False)
-        self.btn_copy_image.setEnabled(False)
+        buttons_layout.addWidget(self.btn_generate)
 
-        hb2.addWidget(self.btn_generate)
-        hb2.addStretch()
+        # Spacer
+        buttons_layout.addStretch()
 
         # Toggle button for original/cropped (initially hidden)
         self.btn_toggle_original = QPushButton("Show Original")
         self.btn_toggle_original.setEnabled(False)
         self.btn_toggle_original.setVisible(False)
         self.btn_toggle_original.clicked.connect(self._toggle_original_image)
-        hb2.addWidget(self.btn_toggle_original)
+        buttons_layout.addWidget(self.btn_toggle_original)
 
-        hb2.addWidget(self.btn_save_image)
-        hb2.addWidget(self.btn_copy_image)
-        buttons_layout.addLayout(hb2)
+        self.btn_save_image = QPushButton("&Save")
+        self.btn_save_image.setToolTip("Save generated image (Alt+S or Ctrl+S)")
+        self.btn_save_image.setEnabled(False)
+        buttons_layout.addWidget(self.btn_save_image)
+
+        self.btn_copy_image = QPushButton("&Copy")
+        self.btn_copy_image.setToolTip("Copy image to clipboard (Alt+C)")
+        self.btn_copy_image.setEnabled(False)
+        buttons_layout.addWidget(self.btn_copy_image)
 
         bottom_layout.addWidget(buttons_container)
         
@@ -641,6 +651,123 @@ class MainWindow(QMainWindow):
                 stability=stability_available
             )
         image_settings_layout.addWidget(self.upscaling_selector)
+
+        # Add reference image section
+        ref_image_group = QGroupBox("Reference Image")
+        ref_image_layout = QVBoxLayout()
+        ref_image_layout.setSpacing(5)
+
+        # Horizontal layout for reference image controls
+        ref_controls_layout = QHBoxLayout()
+
+        # Reference image button
+        self.btn_select_ref_image = QPushButton("Select Reference Image...")
+        self.btn_select_ref_image.setToolTip("Choose a starting image for generation (Google Gemini only)")
+        self.btn_select_ref_image.clicked.connect(self._select_reference_image)
+        ref_controls_layout.addWidget(self.btn_select_ref_image)
+
+        # Enable/disable checkbox
+        self.ref_image_enabled = QCheckBox("Use reference")
+        self.ref_image_enabled.setChecked(False)
+        self.ref_image_enabled.setEnabled(False)  # Disabled until image selected
+        self.ref_image_enabled.toggled.connect(self._on_ref_image_toggled)
+        ref_controls_layout.addWidget(self.ref_image_enabled)
+
+        # Clear button
+        self.btn_clear_ref_image = QPushButton("Clear")
+        self.btn_clear_ref_image.setEnabled(False)
+        self.btn_clear_ref_image.clicked.connect(self._clear_reference_image)
+        ref_controls_layout.addWidget(self.btn_clear_ref_image)
+
+        ref_controls_layout.addStretch()
+        ref_image_layout.addLayout(ref_controls_layout)
+
+        # Container for image preview and controls
+        ref_preview_container = QHBoxLayout()
+
+        # Reference image preview (initially hidden)
+        self.ref_image_preview = QLabel()
+        self.ref_image_preview.setAlignment(Qt.AlignCenter)
+        self.ref_image_preview.setMaximumHeight(150)
+        self.ref_image_preview.setMaximumWidth(200)
+        self.ref_image_preview.setStyleSheet("border: 1px solid #ccc; background-color: #f9f9f9;")
+        self.ref_image_preview.setScaledContents(False)
+        self.ref_image_preview.setVisible(False)
+        ref_preview_container.addWidget(self.ref_image_preview)
+
+        # Reference image options (initially hidden)
+        self.ref_options_widget = QWidget()
+        self.ref_options_widget.setVisible(False)
+        ref_options_layout = QVBoxLayout(self.ref_options_widget)
+        ref_options_layout.setSpacing(3)
+
+        # Placement style dropdown
+        style_layout = QHBoxLayout()
+        style_label = QLabel("Style:")
+        style_label.setMinimumWidth(60)
+        style_layout.addWidget(style_label)
+
+        self.ref_style_combo = QComboBox()
+        self.ref_style_combo.addItems([
+            "Natural blend",
+            "In center",
+            "Blurred edges",
+            "In circle",
+            "In frame",
+            "Seamless merge",
+            "As background",
+            "As overlay",
+            "Split screen"
+        ])
+        self.ref_style_combo.currentTextChanged.connect(self._on_ref_style_changed)
+        style_layout.addWidget(self.ref_style_combo)
+        ref_options_layout.addLayout(style_layout)
+
+        # Position dropdown
+        position_layout = QHBoxLayout()
+        position_label = QLabel("Position:")
+        position_label.setMinimumWidth(60)
+        position_layout.addWidget(position_label)
+
+        self.ref_position_combo = QComboBox()
+        self.ref_position_combo.addItems([
+            "Auto",
+            "Left",
+            "Center",
+            "Right",
+            "Top",
+            "Bottom",
+            "Top-left",
+            "Top-right",
+            "Bottom-left",
+            "Bottom-right"
+        ])
+        self.ref_position_combo.currentTextChanged.connect(self._on_ref_position_changed)
+        position_layout.addWidget(self.ref_position_combo)
+        ref_options_layout.addLayout(position_layout)
+
+        # Tips label
+        tips_label = QLabel("Tips: Gemini understands natural language\ninstructions about your reference image.")
+        tips_label.setStyleSheet("color: #666; font-size: 9pt; padding: 5px 0;")
+        tips_label.setWordWrap(True)
+        ref_options_layout.addWidget(tips_label)
+
+        # Auto-insert preview
+        self.ref_instruction_label = QLabel("Will insert: [nothing]")
+        self.ref_instruction_label.setStyleSheet("color: #0066cc; font-size: 9pt; padding: 5px; background: #f0f8ff; border: 1px solid #cce0ff; border-radius: 3px;")
+        self.ref_instruction_label.setWordWrap(True)
+        ref_options_layout.addWidget(self.ref_instruction_label)
+
+        ref_preview_container.addWidget(self.ref_options_widget)
+        ref_preview_container.addStretch()
+        ref_image_layout.addLayout(ref_preview_container)
+
+        ref_image_group.setLayout(ref_image_layout)
+        image_settings_layout.addWidget(ref_image_group)
+
+        # Store reference image data
+        self.reference_image_path = None
+        self.reference_image_data = None
 
         bottom_layout.addWidget(self.image_settings_container)
         
@@ -785,6 +912,18 @@ class MainWindow(QMainWindow):
         # F1 for help
         shortcut_help = QShortcut(QKeySequence.StandardKey.HelpContents, self)
         shortcut_help.activated.connect(lambda: self.tabs.setCurrentWidget(self.tab_help))
+
+        # Load reference image from config if available
+        self._load_reference_image_from_config()
+
+        # Check provider support for reference images
+        if hasattr(self, 'btn_select_ref_image'):
+            is_google = self.current_provider == "google"
+            self.btn_select_ref_image.setEnabled(is_google)
+            if is_google:
+                self.btn_select_ref_image.setToolTip("Choose a starting image for generation (Google Gemini)")
+            else:
+                self.btn_select_ref_image.setToolTip(f"Reference images not supported by {self.current_provider} provider")
 
     def _open_social_sizes_dialog(self):
         """Open the Social Media Image Sizes dialog and apply selection."""
@@ -1298,12 +1437,12 @@ class MainWindow(QMainWindow):
                 """Handle all anchor/link clicks."""
                 import webbrowser
                 from pathlib import Path
-                
+
                 # Check if it's an external link
                 if url.scheme() in ('http', 'https', 'ftp'):
                     webbrowser.open(url.toString())
                     return
-                
+
                 # Check if it's a local file link (like CHANGELOG.md)
                 url_str = url.toString()
                 if url.scheme() in ('', 'file') and not url_str.startswith('#'):
@@ -1311,36 +1450,42 @@ class MainWindow(QMainWindow):
                     try:
                         # Get the project root directory
                         project_root = Path(__file__).parent.parent
-                        
+
                         # Parse the file path from URL
                         if url_str.startswith('file:///'):
                             file_path = url_str.replace('file:///', '')
                         else:
                             file_path = url_str
-                        
+
                         # Resolve relative to project root
                         full_path = project_root / file_path
-                        
+
                         if full_path.exists() and full_path.suffix.lower() == '.md':
+                            # Before navigating away, ensure current position is in history
+                            # This fixes the back button being disabled on first navigation
+                            if len(self.anchor_history) <= 1:
+                                # We're at the initial README, add it to history
+                                self.add_to_history("README.md")
+
                             # Load and display the markdown file
                             content = full_path.read_text(encoding='utf-8')
-                            
+
                             # Convert to HTML and display
                             parent = self.parent()
                             while parent and not hasattr(parent, '_markdown_to_html_with_anchors'):
                                 parent = parent.parent()
-                            
+
                             if parent:
                                 # Convert to HTML
                                 html = parent._markdown_to_html_with_anchors(content, use_webengine=False)
                                 self.setHtml(html)
                                 self.verticalScrollBar().setValue(0)
                                 self.add_to_history(file_path)
-                                
+
                                 # Update the window/tab title or status to show current file
                                 if hasattr(parent, 'status_label'):
                                     parent.status_label.setText(f"Viewing: {file_path}")
-                                
+
                                 return
                     except Exception as e:
                         print(f"Error loading local file: {e}")
@@ -1377,42 +1522,94 @@ class MainWindow(QMainWindow):
                 """Navigate back in history."""
                 if self.history_index > 0:
                     from PySide6.QtCore import QTimer
+                    from pathlib import Path
                     self._navigating_history = True
                     self.history_index -= 1
                     anchor = self.anchor_history[self.history_index]
-                    
+
                     # Use QTimer to delay scrolling to avoid focus-related timing issues
-                    def do_scroll():
-                        if anchor:
+                    def do_navigation():
+                        # Check if anchor is a file path (like README.md or CHANGELOG.md)
+                        if anchor and (anchor.endswith('.md') or anchor == "README.md"):
+                            # Reload the file
+                            parent = self.parent()
+                            while parent and not hasattr(parent, '_load_readme_content'):
+                                parent = parent.parent()
+
+                            if parent and anchor == "README.md":
+                                # Reload README
+                                readme_content = parent._load_readme_content(replace_emojis=False)
+                                html = parent._markdown_to_html_with_anchors(readme_content, use_webengine=False)
+                                self.setHtml(html)
+                                self.verticalScrollBar().setValue(0)
+                            elif anchor.endswith('.md'):
+                                # Load other markdown file
+                                try:
+                                    project_root = Path(__file__).parent.parent
+                                    full_path = project_root / anchor
+                                    if full_path.exists():
+                                        content = full_path.read_text(encoding='utf-8')
+                                        html = parent._markdown_to_html_with_anchors(content, use_webengine=False)
+                                        self.setHtml(html)
+                                        self.verticalScrollBar().setValue(0)
+                                except Exception as e:
+                                    print(f"Error loading {anchor}: {e}")
+                        elif anchor:
                             self.scrollToAnchor(anchor)
                         else:
                             # Scroll to top
                             self.verticalScrollBar().setValue(0)
                         self._navigating_history = False
-                    
+
                     # Small delay to let Qt process focus events
-                    QTimer.singleShot(10, do_scroll)
+                    QTimer.singleShot(10, do_navigation)
                     self.update_nav_buttons()
             
             def go_forward(self):
                 """Navigate forward in history."""
                 if self.history_index < len(self.anchor_history) - 1:
                     from PySide6.QtCore import QTimer
+                    from pathlib import Path
                     self._navigating_history = True
                     self.history_index += 1
                     anchor = self.anchor_history[self.history_index]
-                    
+
                     # Use QTimer to delay scrolling to avoid focus-related timing issues
-                    def do_scroll():
-                        if anchor:
+                    def do_navigation():
+                        # Check if anchor is a file path (like README.md or CHANGELOG.md)
+                        if anchor and (anchor.endswith('.md') or anchor == "README.md"):
+                            # Reload the file
+                            parent = self.parent()
+                            while parent and not hasattr(parent, '_load_readme_content'):
+                                parent = parent.parent()
+
+                            if parent and anchor == "README.md":
+                                # Reload README
+                                readme_content = parent._load_readme_content(replace_emojis=False)
+                                html = parent._markdown_to_html_with_anchors(readme_content, use_webengine=False)
+                                self.setHtml(html)
+                                self.verticalScrollBar().setValue(0)
+                            elif anchor.endswith('.md'):
+                                # Load other markdown file
+                                try:
+                                    project_root = Path(__file__).parent.parent
+                                    full_path = project_root / anchor
+                                    if full_path.exists():
+                                        content = full_path.read_text(encoding='utf-8')
+                                        html = parent._markdown_to_html_with_anchors(content, use_webengine=False)
+                                        self.setHtml(html)
+                                        self.verticalScrollBar().setValue(0)
+                                except Exception as e:
+                                    print(f"Error loading {anchor}: {e}")
+                        elif anchor:
                             self.scrollToAnchor(anchor)
                         else:
                             # Scroll to top
                             self.verticalScrollBar().setValue(0)
                         self._navigating_history = False
-                    
+
                     # Small delay to let Qt process focus events
-                    QTimer.singleShot(10, do_scroll)
+                    QTimer.singleShot(10, do_navigation)
                     self.update_nav_buttons()
             
             def go_home(self):
@@ -2561,6 +2758,16 @@ For more detailed information, please refer to the full documentation.
                 self.aspect_selector.setEnabled(True)
                 self.aspect_selector.setToolTip("Aspect ratio is preserved across provider changes")
 
+            # Update reference image availability based on provider
+            # Currently only Google Gemini supports reference images
+            if hasattr(self, 'btn_select_ref_image'):
+                is_google = provider_name == "google"
+                self.btn_select_ref_image.setEnabled(is_google)
+                if is_google:
+                    self.btn_select_ref_image.setToolTip("Choose a starting image for generation (Google Gemini)")
+                else:
+                    self.btn_select_ref_image.setToolTip(f"Reference images not supported by {provider_name} provider")
+
             # Preload the new provider
             auth_mode_internal = self.config.get("auth_mode", "api-key")
             if auth_mode_internal in ["api_key", "API Key"]:
@@ -3255,6 +3462,51 @@ For more detailed information, please refer to the full documentation.
             if hasattr(self, 'guidance_spin'):
                 kwargs['cfg_scale'] = self.guidance_spin.value()
         
+        # Add reference image if enabled and available (Google Gemini only)
+        if (self.current_provider == "google" and
+            hasattr(self, 'reference_image_data') and
+            self.reference_image_data and
+            hasattr(self, 'ref_image_enabled') and
+            self.ref_image_enabled.isChecked()):
+            kwargs['reference_image'] = self.reference_image_data
+
+            # Build and prepend instruction to prompt
+            style = self.ref_style_combo.currentText() if hasattr(self, 'ref_style_combo') else "Natural blend"
+            position = self.ref_position_combo.currentText() if hasattr(self, 'ref_position_combo') else "Auto"
+
+            instruction_parts = []
+            if position != "Auto":
+                instruction_parts.append(f"Attached photo on the {position.lower()}")
+            else:
+                instruction_parts.append("Attached photo")
+
+            style_map = {
+                "Natural blend": "naturally blended into the scene",
+                "In center": "placed in the center",
+                "Blurred edges": "with blurred edges",
+                "In circle": "inside a circular frame",
+                "In frame": "in a decorative frame",
+                "Seamless merge": "seamlessly merged",
+                "As background": "as the background",
+                "As overlay": "as an overlay",
+                "Split screen": "in split-screen style"
+            }
+
+            if style in style_map:
+                instruction_parts.append(style_map[style])
+
+            # Get resolution if available
+            resolution_text = ""
+            if 'width' in kwargs and 'height' in kwargs:
+                resolution_text = f" (Image will be {kwargs['width']}x{kwargs['height']}, scale to fit.)"
+
+            # Build instruction and prepend to prompt
+            instruction = f"{', '.join(instruction_parts)}.{resolution_text}"
+            prompt = f"{instruction} {prompt}"
+
+            self._append_to_console(f"Using reference image: {self.reference_image_path.name if self.reference_image_path else 'Unknown'}", "#66ccff")
+            self._append_to_console(f"Auto-inserted: \"{instruction}\"", "#9966ff")
+
         # Show status for provider loading
         self.status_bar.showMessage(f"Connecting to {self.current_provider}...")
         self._append_to_console(f"Connecting to {self.current_provider}...", "#66ccff")  # Blue
@@ -4591,7 +4843,229 @@ For more detailed information, please refer to the full documentation.
         is_visible = self.image_settings_container.isVisible()
         self.image_settings_container.setVisible(not is_visible)
         self.image_settings_toggle.setText("▼ Image Settings" if not is_visible else "▶ Image Settings")
-    
+
+    def _select_reference_image(self):
+        """Open dialog to select a reference image."""
+        from PySide6.QtGui import QImage
+        import base64
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Reference Image",
+            str(images_output_dir()),
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp);;All files (*.*)"
+        )
+
+        if file_path:
+            try:
+                # Load and display the image
+                pixmap = QPixmap(file_path)
+                if pixmap.isNull():
+                    QMessageBox.warning(self, "Error", "Failed to load image")
+                    return
+
+                # Scale for preview (maintain aspect ratio)
+                scaled_pixmap = pixmap.scaled(
+                    300, 150,
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                self.ref_image_preview.setPixmap(scaled_pixmap)
+                self.ref_image_preview.setVisible(True)
+
+                # Store the image data
+                self.reference_image_path = Path(file_path)
+                with open(file_path, 'rb') as f:
+                    self.reference_image_data = f.read()
+
+                # Enable controls
+                self.ref_image_enabled.setEnabled(True)
+                self.ref_image_enabled.setChecked(True)
+                self.btn_clear_ref_image.setEnabled(True)
+
+                # Show options widget
+                self.ref_options_widget.setVisible(True)
+                self._update_ref_instruction_preview()
+
+                # Update button text to show filename
+                filename = self.reference_image_path.name
+                if len(filename) > 30:
+                    filename = filename[:27] + "..."
+                self.btn_select_ref_image.setText(f"Reference: {filename}")
+
+                # Save to project/settings
+                self._save_reference_image_to_config()
+
+                # Update status
+                self.status_bar.showMessage(f"Reference image loaded: {self.reference_image_path.name}")
+
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load reference image: {str(e)}")
+
+    def _clear_reference_image(self):
+        """Clear the selected reference image."""
+        self.reference_image_path = None
+        self.reference_image_data = None
+        self.ref_image_preview.setPixmap(QPixmap())
+        self.ref_image_preview.setVisible(False)
+        self.ref_image_enabled.setChecked(False)
+        self.ref_image_enabled.setEnabled(False)
+        self.btn_clear_ref_image.setEnabled(False)
+        self.btn_select_ref_image.setText("Select Reference Image...")
+
+        # Hide options widget
+        self.ref_options_widget.setVisible(False)
+
+        # Remove from project/settings
+        self._clear_reference_image_from_config()
+
+        self.status_bar.showMessage("Reference image cleared")
+
+    def _on_ref_image_toggled(self, checked):
+        """Handle reference image checkbox toggle."""
+        if self.reference_image_path:
+            status = "enabled" if checked else "disabled"
+            self.status_bar.showMessage(f"Reference image {status}")
+            # Save state to config
+            self._save_reference_image_to_config()
+            # Update instruction preview
+            self._update_ref_instruction_preview()
+
+    def _on_ref_style_changed(self, style):
+        """Handle reference image style change."""
+        self._update_ref_instruction_preview()
+        if self.reference_image_path:
+            self._save_reference_image_to_config()
+
+    def _on_ref_position_changed(self, position):
+        """Handle reference image position change."""
+        self._update_ref_instruction_preview()
+        if self.reference_image_path:
+            self._save_reference_image_to_config()
+
+    def _update_ref_instruction_preview(self):
+        """Update the preview of what will be inserted into the prompt."""
+        if not hasattr(self, 'ref_instruction_label'):
+            return
+
+        if not self.reference_image_path or not self.ref_image_enabled.isChecked():
+            self.ref_instruction_label.setText("Will insert: [nothing]")
+            return
+
+        # Get selected style and position
+        style = self.ref_style_combo.currentText() if hasattr(self, 'ref_style_combo') else "Natural blend"
+        position = self.ref_position_combo.currentText() if hasattr(self, 'ref_position_combo') else "Auto"
+
+        # Build the instruction text
+        instruction_parts = []
+
+        # Add base text
+        if position != "Auto":
+            instruction_parts.append(f"Attached photo on the {position.lower()}")
+        else:
+            instruction_parts.append("Attached photo")
+
+        # Add style
+        style_map = {
+            "Natural blend": "naturally blended into the scene",
+            "In center": "placed in the center",
+            "Blurred edges": "with blurred edges",
+            "In circle": "inside a circular frame",
+            "In frame": "in a decorative frame",
+            "Seamless merge": "seamlessly merged",
+            "As background": "as the background",
+            "As overlay": "as an overlay",
+            "Split screen": "in split-screen style"
+        }
+
+        if style in style_map:
+            instruction_parts.append(style_map[style])
+
+        # Get resolution if available
+        resolution_text = ""
+        if hasattr(self, 'resolution_selector') and self.resolution_selector:
+            if hasattr(self.resolution_selector, 'get_width_height'):
+                width, height = self.resolution_selector.get_width_height()
+                if width and height:
+                    resolution_text = f" (Image will be {width}x{height}, scale to fit.)"
+
+        # Combine the instruction
+        instruction = f"{', '.join(instruction_parts)}.{resolution_text}"
+
+        # Update the preview label
+        self.ref_instruction_label.setText(f"Will insert: \"{instruction}\"")
+
+    def _save_reference_image_to_config(self):
+        """Save reference image path to settings."""
+        # Save to global settings (project support can be added later)
+        ref_images = self.config.get('reference_images', {})
+        ref_images['image_tab'] = {
+            'path': str(self.reference_image_path) if self.reference_image_path else None,
+            'enabled': self.ref_image_enabled.isChecked(),
+            'style': self.ref_style_combo.currentText() if hasattr(self, 'ref_style_combo') else "Natural blend",
+            'position': self.ref_position_combo.currentText() if hasattr(self, 'ref_position_combo') else "Auto"
+        }
+        self.config.set('reference_images', ref_images)
+        self.config.save()
+
+    def _clear_reference_image_from_config(self):
+        """Remove reference image from settings."""
+        # Remove from global settings
+        ref_images = self.config.get('reference_images', {})
+        if 'image_tab' in ref_images:
+            del ref_images['image_tab']
+            self.config.set('reference_images', ref_images)
+            self.config.save()
+
+    def _load_reference_image_from_config(self):
+        """Load reference image from settings."""
+        # Load from global settings
+        ref_images = self.config.get('reference_images', {})
+        ref_image_data = ref_images.get('image_tab')
+
+        # Load the image if found
+        if ref_image_data and ref_image_data.get('path'):
+            path = Path(ref_image_data['path'])
+            if path.exists():
+                try:
+                    # Load and display the image
+                    pixmap = QPixmap(str(path))
+                    if not pixmap.isNull():
+                        scaled_pixmap = pixmap.scaled(
+                            300, 150,
+                            Qt.KeepAspectRatio,
+                            Qt.SmoothTransformation
+                        )
+                        self.ref_image_preview.setPixmap(scaled_pixmap)
+                        self.ref_image_preview.setVisible(True)
+
+                        # Store the image data
+                        self.reference_image_path = path
+                        with open(path, 'rb') as f:
+                            self.reference_image_data = f.read()
+
+                        # Update controls
+                        self.ref_image_enabled.setEnabled(True)
+                        self.ref_image_enabled.setChecked(ref_image_data.get('enabled', False))
+                        self.btn_clear_ref_image.setEnabled(True)
+
+                        # Update button text
+                        filename = path.name
+                        if len(filename) > 30:
+                            filename = filename[:27] + "..."
+                        self.btn_select_ref_image.setText(f"Reference: {filename}")
+
+                        # Show options widget and restore settings
+                        self.ref_options_widget.setVisible(True)
+                        if 'style' in ref_image_data:
+                            self.ref_style_combo.setCurrentText(ref_image_data['style'])
+                        if 'position' in ref_image_data:
+                            self.ref_position_combo.setCurrentText(ref_image_data['position'])
+                        self._update_ref_instruction_preview()
+
+                except Exception as e:
+                    logger.warning(f"Failed to load reference image from config: {e}")
+
     def _save_ui_state(self):
         """Save all UI widget states to config."""
         ui_state = {}

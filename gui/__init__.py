@@ -11,8 +11,39 @@ def launch_gui():
     try:
         print("Loading Qt framework...")
         from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import QtMsgType, qInstallMessageHandler
     except ImportError:
         raise ImportError("PySide6 is required for GUI mode. Install with: pip install PySide6")
+
+    # Custom Qt message handler to suppress benign monitor errors
+    def qt_message_handler(msg_type, context, msg):
+        """Filter out benign Qt warnings about monitor interfaces."""
+        # Suppress monitor interface errors (happens when displays are off/disconnected)
+        if "Unable to open monitor interface" in msg and "DISPLAY" in msg:
+            return  # Silently ignore these benign errors
+
+        # Suppress other known benign Qt warnings
+        if "QWindowsWindow::setGeometry" in msg:
+            return  # Window geometry warnings during resize
+
+        # Log other Qt messages normally
+        import logging
+        logger = logging.getLogger("qt")
+
+        if msg_type == QtMsgType.QtDebugMsg:
+            logger.debug(f"Qt: {msg}")
+        elif msg_type == QtMsgType.QtInfoMsg:
+            logger.info(f"Qt: {msg}")
+        elif msg_type == QtMsgType.QtWarningMsg:
+            # Only log non-suppressed warnings
+            logger.warning(f"Qt: {msg}")
+        elif msg_type == QtMsgType.QtCriticalMsg:
+            logger.error(f"Qt Critical: {msg}")
+        elif msg_type == QtMsgType.QtFatalMsg:
+            logger.critical(f"Qt Fatal: {msg}")
+
+    # Install the custom message handler
+    qInstallMessageHandler(qt_message_handler)
 
     # Use the modular MainWindow
     print("Initializing main window...")

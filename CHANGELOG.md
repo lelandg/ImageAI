@@ -5,6 +5,79 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2025-01-15
+
+### Fixed
+- **Find Dialog**
+  - Fixed `QTextCursor.FindFlag` error in PySide6 by using `QTextDocument.FindFlag`
+  - Find dialog now starts with clean state (empty search, disabled buttons)
+  - Search text cleared on close for fresh start next time
+  - Fixed button enable/disable state management
+  - Proper case-sensitive and whole-word search support
+- **Help Viewer Navigation**
+  - Fixed back button being disabled when first navigating to Changelog
+  - Now properly adds README to history before navigating away
+  - Back/Forward buttons correctly reload markdown files when navigating between documents
+- **Qt Warning Suppression**
+  - Suppressed benign "Unable to open monitor interface" errors when displays are off
+  - Filtered out window geometry warnings during resize
+  - Added custom Qt message handler for cleaner console output
+
+### Changed
+- **Requirements.txt**
+  - AI upscaling modules (torch, torchvision, etc.) now commented out
+  - These are installed at runtime via GUI when needed
+  - Reduces initial installation size significantly
+
+## [0.15.1] - 2025-01-14
+
+### Added
+- **Advanced Reference Image Controls** (Google Gemini)
+  - Style dropdown: Natural blend, Blurred edges, In circle, In frame, As background, etc.
+  - Position dropdown: Auto, Left, Center, Right, Top, Bottom, corners
+  - Auto-insert instructions into prompt based on selections
+  - Preview of text that will be inserted
+  - Resolution info automatically added when available
+  - Settings persist across sessions
+- **Improved Reference Image Workflow**
+  - Instructions automatically prepended to prompt
+  - Visual preview shows what will be inserted
+  - Natural language instructions that Gemini understands
+  - Tips displayed to help users
+
+### Changed
+- Reference image preview now shows alongside control options
+- Console shows auto-inserted instructions in purple
+
+## [0.15.0] - 2025-01-14
+
+### Added
+- **Reference Image Support** (Google Gemini)
+  - Select a starting image to guide generation
+  - Visual preview thumbnail in Image Settings panel
+  - Enable/disable checkbox for quick toggling
+  - Clear button to remove reference image
+  - Automatic save/restore from settings
+  - Provider detection (currently Google Gemini only)
+- **Enhanced Find Dialog**
+  - Fixed text highlighting to preserve original colors
+  - Yellow highlight for current match
+  - Orange highlight for other matches
+  - Ctrl+F tip displayed above prompt box
+  - F3/Shift+F3 for next/previous navigation
+
+### Changed
+- **Compact UI Layout**
+  - All prompt buttons now on single row for space efficiency
+  - Shortened button labels (Enhance, Ask, Save, Copy)
+  - Generate button moved inline with prompt tools
+  - Improved button spacing and organization
+
+### Fixed
+- Find dialog no longer causes black-on-black text
+- Text color preservation when clearing search highlights
+- Proper background-only highlight clearing
+
 ## [0.14.0] - 2025-01-14
 
 ### Added

@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QPushButton, QCheckBox, QTextEdit
 )
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor
+from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QTextDocument
 
 
 class FindDialog(QDialog):
@@ -16,6 +16,7 @@ class FindDialog(QDialog):
         self.text_widget = text_widget
         self.current_match = 0
         self.matches = []
+        self.match_length = 0  # Store the length of matched text
 
         self.setWindowTitle("Find")
         self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint)
@@ -75,6 +76,11 @@ class FindDialog(QDialog):
         self.next_btn.setDefault(True)
         buttons_layout.addWidget(self.next_btn)
 
+        self.clear_btn = QPushButton("Clear")
+        self.clear_btn.clicked.connect(self.clear_search)
+        self.clear_btn.setToolTip("Clear search and highlights")
+        buttons_layout.addWidget(self.clear_btn)
+
         self.close_btn = QPushButton("Close")
         self.close_btn.clicked.connect(self.close)
         buttons_layout.addWidget(self.close_btn)
@@ -106,10 +112,14 @@ class FindDialog(QDialog):
         if not search_text:
             return
 
-        # Clear previous highlights
+        # Clear previous highlights BEFORE clearing matches array
+        # (clear_highlights needs the matches array to find positions)
         self.clear_highlights()
+
+        # Now clear the matches array and reset state
         self.matches.clear()
         self.current_match = 0
+        self.match_length = len(search_text)
 
         # Get search options
         case_sensitive = self.case_sensitive_check.isChecked()
@@ -119,22 +129,22 @@ class FindDialog(QDialog):
         document = self.text_widget.document()
         cursor = QTextCursor(document)
 
-        # Search flags
-        flags = QTextCursor.FindFlag(0)
+        # Search flags - use QTextDocument.FindFlag in PySide6
+        flags = QTextDocument.FindFlag(0)
         if case_sensitive:
-            flags |= QTextCursor.FindCaseSensitively
+            flags |= QTextDocument.FindFlag.FindCaseSensitively
         if whole_words:
-            flags |= QTextCursor.FindWholeWords
+            flags |= QTextDocument.FindFlag.FindWholeWords
 
-        # Find all matches
-        highlight_format = QTextCharFormat()
-        highlight_format.setBackground(QColor("#ffff00"))  # Yellow
-
+        # Find all matches - apply background ONLY
         while not cursor.isNull():
             cursor = document.find(search_text, cursor, flags)
             if not cursor.isNull():
                 self.matches.append(cursor.position())
-                cursor.mergeCharFormat(highlight_format)
+                # Get current format to preserve text color
+                current_format = cursor.charFormat()
+                current_format.setBackground(QColor("#ffaa00"))  # Orange for all matches
+                cursor.setCharFormat(current_format)
 
         # Update results
         num_matches = len(self.matches)
@@ -147,6 +157,7 @@ class FindDialog(QDialog):
             self.prev_btn.setEnabled(False)
             self.next_btn.setEnabled(False)
             self.highlight_current_match()
+            # Don't auto-close - let user see the result and close manually
         else:
             self.results_label.setText(f"{num_matches} results")
             self.prev_btn.setEnabled(True)
@@ -168,13 +179,13 @@ class FindDialog(QDialog):
 
         # Move cursor to match
         cursor = self.text_widget.textCursor()
-        cursor.setPosition(position - len(self.search_input.text()))
-        cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, len(self.search_input.text()))
+        cursor.setPosition(position - self.match_length)
+        cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, self.match_length)
 
-        # Apply highlight
-        current_format = QTextCharFormat()
-        current_format.setBackground(QColor("#ff9900"))  # Orange for current
-        cursor.mergeCharFormat(current_format)
+        # Apply yellow highlight to current match (preserve text color)
+        current_format = cursor.charFormat()
+        current_format.setBackground(QColor("#ffff00"))  # Yellow for current
+        cursor.setCharFormat(current_format)
 
         # Set cursor and ensure visible
         self.text_widget.setTextCursor(cursor)
@@ -216,35 +227,79 @@ class FindDialog(QDialog):
 
         position = self.matches[match_index]
         cursor = self.text_widget.textCursor()
-        cursor.setPosition(position - len(self.search_input.text()))
-        cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, len(self.search_input.text()))
+        cursor.setPosition(position - self.match_length)
+        cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, self.match_length)
 
-        # Apply yellow highlight
-        format = QTextCharFormat()
-        format.setBackground(QColor("#ffff00"))
-        cursor.mergeCharFormat(format)
+        # Apply orange highlight (preserve text color)
+        current_format = cursor.charFormat()
+        current_format.setBackground(QColor("#ffaa00"))  # Orange for other matches
+        cursor.setCharFormat(current_format)
+
+    def clear_search(self):
+        """Clear search input and all highlights."""
+        self.search_input.clear()
+        self.clear_highlights()
+        self.matches.clear()
+        self.current_match = 0
+        self.match_length = 0
+        self.results_label.setText("0 results")
+        self.prev_btn.setEnabled(False)
+        self.next_btn.setEnabled(False)
 
     def clear_highlights(self):
-        """Clear all search highlights."""
+        """Clear all search highlights without affecting text color."""
         if not self.text_widget:
             return
 
-        cursor = self.text_widget.textCursor()
-        cursor.select(QTextCursor.Document)
+        # Use stored match length if available
+        search_len = self.match_length if self.match_length > 0 else len(self.search_input.text())
 
-        # Clear formatting
-        format = QTextCharFormat()
-        format.setBackground(QColor())  # Clear background
-        cursor.mergeCharFormat(format)
+        if search_len > 0 and self.matches:
+            # Clear highlights from each match position
+            for position in self.matches:
+                cursor = self.text_widget.textCursor()
+                cursor.setPosition(position - search_len)
+                cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, search_len)
+
+                # Get current format and only clear background
+                current_format = cursor.charFormat()
+                current_format.clearBackground()
+                cursor.setCharFormat(current_format)
 
         # Clear selection
+        cursor = self.text_widget.textCursor()
         cursor.clearSelection()
         self.text_widget.setTextCursor(cursor)
 
     def closeEvent(self, event):
         """Handle close event."""
-        self.clear_highlights()
+        # Clear search text for fresh start next time
+        self.search_input.clear()
+        # Don't clear highlights - keep them visible after closing
         super().closeEvent(event)
+
+    def showEvent(self, event):
+        """Handle show event - restore state when dialog is shown."""
+        super().showEvent(event)
+
+        # Clear any stale state from previous session
+        self.matches.clear()
+        self.current_match = 0
+        self.match_length = 0
+
+        # Clear any existing highlights first
+        if self.text_widget:
+            cursor = self.text_widget.textCursor()
+            cursor.clearSelection()
+            self.text_widget.setTextCursor(cursor)
+
+        # Always start with clean UI state
+        self.results_label.setText("0 results")
+        self.prev_btn.setEnabled(False)
+        self.next_btn.setEnabled(False)
+
+        # Focus search input - it should be empty from closeEvent
+        self.search_input.setFocus()
 
     def keyPressEvent(self, event):
         """Handle key press events."""
