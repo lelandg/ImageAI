@@ -28,8 +28,9 @@
 - [API Reference](#14-api-reference)
 - [Development](#15-development)
 - [Changelog](CHANGELOG.md)
+- [Screenshots Gallery](#17-screenshots-gallery)
 
-![screenshot_20250914.png](screenshot_20250914.png)
+![screenshot_20250914.png](Screenshots/screenshot_20250914.png)
 
 ## Key Features
 
@@ -1422,6 +1423,40 @@ ImageAI/
 ## 16. Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete version history and release notes.
+
+## 17. Screenshots Gallery
+
+### Generation Workflow
+
+#### Before Generation
+Starting point with an empty canvas, ready for your creative prompts.
+
+![Before Generation](Screenshots/screenshot_before_generate.png)
+*Clean interface state before generating any images - shows the prompt input area and configuration options*
+
+#### Generate with AI Prompt
+Creating images using AI-powered prompt generation for optimal results.
+
+![Generate Prompt with AI](Screenshots/screenshot_generate_prompt_with_AI.png)
+*Using the AI prompt generation feature to create detailed, optimized prompts for better image quality*
+
+#### Enhance Existing Prompts
+Improving and refining your prompts with AI assistance for more detailed outputs.
+
+![Enhance Prompt with AI](Screenshots/screenshot_enhance_prompt_with_AI.png)
+*The AI enhancement feature taking simple prompts and expanding them with artistic details and style descriptions*
+
+### Features Demonstrated
+
+The screenshots showcase:
+- **Multi-Provider Support**: Switch seamlessly between Google Gemini, OpenAI DALL·E, Stability AI, and Local SD
+- **AI-Powered Prompts**: Generate and enhance prompts using GPT-5, Claude, Gemini, or local LLMs
+- **Flexible Resolution Control**: Aspect ratio presets, custom ratios, and direct resolution input
+- **Real-time Console**: Color-coded status messages showing generation progress and API interactions
+- **Session Persistence**: All settings and history maintained between sessions
+- **Cost Tracking**: Real-time cost estimation for all providers
+- **Tabbed Navigation**: Easy access to Image, Templates, Video, Settings, and Help sections
+- **History Tracking**: Visual timeline of all generated images with metadata
 
 ## Credits
 

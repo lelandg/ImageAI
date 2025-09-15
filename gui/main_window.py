@@ -1097,8 +1097,11 @@ class MainWindow(QMainWindow):
                     # Handle local markdown file links (like CHANGELOG.md and README.md)
                     url_str = url.toString()
 
-                    # Check if this is a markdown file URL
-                    if (url_str.endswith('.md') or 'README.md' in url_str or 'CHANGELOG.md' in url_str) and not url_str.startswith('#'):
+                    # Check if this is a markdown file URL - only process link clicks
+                    if ((url_str.endswith('.md') or 'README.md' in url_str or 'CHANGELOG.md' in url_str)
+                        and not url_str.startswith('#')
+                        and nav_type == QWebEnginePage.NavigationType.NavigationTypeLinkClicked):
+
                         from pathlib import Path
 
                         # Parse the file path from URL
@@ -1106,10 +1109,6 @@ class MainWindow(QMainWindow):
                             file_path = url_str.replace('file:///', '')
                         else:
                             file_path = url_str
-
-                        # Handle special case for going back to README
-                        if file_path in ['', '/', 'README.md']:
-                            file_path = 'README.md'
 
                         # Get the project root directory
                         project_root = Path(__file__).parent.parent
@@ -1119,44 +1118,42 @@ class MainWindow(QMainWindow):
 
                         if full_path.exists() and full_path.suffix.lower() == '.md':
                             try:
-                                # Load the markdown file
+                                # Load the markdown file content
                                 if 'README' in file_path.upper():
-                                    # Load README content
                                     content = self.main_window._load_readme_content(replace_emojis=False) if self.main_window else full_path.read_text(encoding='utf-8')
                                 else:
-                                    # Load other markdown files
                                     content = full_path.read_text(encoding='utf-8')
 
-                                    # Add a "Back to README" link at the top
-                                    back_link = '<p><a href="README.md">← Back to README</a></p><hr>'
-                                    content = back_link + '\n\n' + content
-
-                                # Convert to HTML using the main window's method
+                                # Convert to HTML
                                 if self.main_window:
                                     html = self.main_window._markdown_to_html_with_anchors(content, use_webengine=True)
-
-                                    # Get the browser
                                     browser = self.parent()
 
-                                    # Load the formatted content
-                                    def load_formatted_content():
-                                        # Set a proper URL for history tracking
-                                        display_url = QUrl(f"file:///{file_path}")
-                                        browser.setHtml(html, display_url)
+                                    # Load the formatted HTML immediately
+                                    browser.setHtml(html, url)
 
-                                    # Load the formatted content immediately
-                                    QTimer.singleShot(0, load_formatted_content)
+                                    # Trigger scroll after content loads
+                                    QTimer.singleShot(200, lambda: browser.page().runJavaScript("""
+                                        window.scrollTo(0, 0);
+                                        setTimeout(function() {
+                                            window.scrollBy(0, 1);
+                                            window.scrollBy(0, -1);
+                                        }, 50);
+                                    """))
 
-                                # Prevent the raw markdown from loading
+                                # Prevent default navigation
                                 return False
                             except Exception as e:
-                                print(f"Error loading markdown file {file_path}: {e}")
+                                print(f"Error loading markdown file: {e}")
+                                return True
 
                     return super().acceptNavigationRequest(url, nav_type, is_main_frame)
             
             # Create web view for help with full emoji support
             self.help_browser = QWebEngineView()
-            self.help_browser.setPage(CustomWebPage(self.help_browser, main_window=self))
+            custom_page = CustomWebPage(self.help_browser, main_window=self)
+            self.help_browser.setPage(custom_page)
+
             
             # Create navigation toolbar container widget with fixed height
             nav_widget = QWidget()
@@ -1172,12 +1169,28 @@ class MainWindow(QMainWindow):
             self.btn_help_back.clicked.connect(self.help_browser.back)
             self.btn_help_back.setToolTip("Go back (Alt+Left, Backspace)")
             nav_layout.addWidget(self.btn_help_back)
-            
+
             # Forward button
             self.btn_help_forward = QPushButton("Forward ▶")
             self.btn_help_forward.clicked.connect(self.help_browser.forward)
             self.btn_help_forward.setToolTip("Go forward (Alt+Right)")
             nav_layout.addWidget(self.btn_help_forward)
+
+            # Add keyboard shortcuts for navigation when help tab is active
+            from PySide6.QtGui import QShortcut, QKeySequence
+            from PySide6.QtCore import Qt
+
+            # Alt+Left for back (only when help tab is active)
+            shortcut_back = QShortcut(QKeySequence("Alt+Left"), self.tab_help)
+            shortcut_back.activated.connect(self.help_browser.back)
+
+            # Alt+Right for forward (only when help tab is active)
+            shortcut_forward = QShortcut(QKeySequence("Alt+Right"), self.tab_help)
+            shortcut_forward.activated.connect(self.help_browser.forward)
+
+            # Backspace for back as well
+            shortcut_backspace = QShortcut(QKeySequence(Qt.Key_Backspace), self.tab_help)
+            shortcut_backspace.activated.connect(self.help_browser.back)
             
             # Home button
             self.btn_help_home = QPushButton("⌂ Home")
@@ -1227,19 +1240,38 @@ class MainWindow(QMainWindow):
             # Load content
             readme_content = self._load_readme_content(replace_emojis=False)  # Don't replace - WebEngine handles emojis!
             html_content = self._markdown_to_html_with_anchors(readme_content, use_webengine=True)
-            
+
+            # Define a function to trigger the scroll after load
+            def trigger_initial_scroll():
+                # More aggressive scroll to force render
+                self.help_browser.page().runJavaScript("""
+                    window.scrollTo(0, 0);
+                    setTimeout(function() {
+                        window.scrollBy(0, 1);
+                        window.scrollBy(0, -1);
+                    }, 50);
+                """)
+
+            # Connect to loadFinished signal for one-time trigger
+            def on_initial_load_finished():
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(100, trigger_initial_scroll)
+                # Disconnect after use to avoid multiple triggers
+                try:
+                    self.help_browser.loadFinished.disconnect(on_initial_load_finished)
+                except:
+                    pass
+
+            self.help_browser.loadFinished.connect(on_initial_load_finished)
+
             # Load HTML with base URL for relative links
             self.help_browser.setHtml(html_content, QUrl("file:///"))
-            
+
             v.addWidget(self.help_browser)
-            
+
             # Enable initial button states
             self.btn_help_back.setEnabled(False)
             self.btn_help_forward.setEnabled(False)
-            
-            # Trigger initial render with minimal scroll (for QWebEngineView)
-            from PySide6.QtCore import QTimer
-            QTimer.singleShot(100, lambda: self.help_browser.page().runJavaScript("window.scrollBy(0, 1); window.scrollBy(0, -1);"))
             
             return  # Exit early if WebEngine works
             
@@ -1299,11 +1331,7 @@ class MainWindow(QMainWindow):
                                 parent = parent.parent()
                             
                             if parent:
-                                # Add a "Back to README" link at the top if not viewing README
-                                if 'README' not in file_path.upper():
-                                    back_link = '<p><a href="README.md">← Back to README</a></p><hr>'
-                                    content = back_link + '\n\n' + content
-                                
+                                # Convert to HTML
                                 html = parent._markdown_to_html_with_anchors(content, use_webengine=False)
                                 self.setHtml(html)
                                 self.verticalScrollBar().setValue(0)
@@ -1581,22 +1609,50 @@ class MainWindow(QMainWindow):
         # Fallback help text if README.md can't be loaded
         return self._get_fallback_help()
     
-    def _markdown_to_html_with_anchors(self, markdown_text: str, use_webengine: bool = False) -> str:
-        """Convert markdown to HTML with proper GitHub-style anchor IDs."""
+    def _markdown_to_html_with_anchors(self, markdown_text: str, use_webengine: bool = False, base_path: str = None) -> str:
+        """Convert markdown to HTML with proper GitHub-style anchor IDs.
+
+        Args:
+            markdown_text: The markdown text to convert
+            use_webengine: Whether to format for QWebEngineView (vs QTextBrowser)
+            base_path: Base path for resolving relative image URLs
+        """
         try:
             # Try to use the markdown library if available
             import markdown
             from markdown.extensions.toc import TocExtension
-            
+            from pathlib import Path
+
+            # If base_path not specified, use project root
+            if base_path is None:
+                base_path = str(Path(__file__).parent.parent)
+
             # Configure to generate GitHub-style anchors
             md = markdown.Markdown(extensions=[
                 'fenced_code',
                 'tables',
                 TocExtension(slugify=self._github_slugify),
             ])
-            
+
             # Process the markdown
             html_body = md.convert(markdown_text)
+
+            # Fix image paths to be absolute file:/// URLs for local images
+            import re
+            def fix_image_path(match):
+                img_path = match.group(1)
+                # Skip if already an absolute URL
+                if img_path.startswith(('http://', 'https://', 'file:///')):
+                    return match.group(0)
+                # Convert to absolute path
+                full_path = Path(base_path) / img_path
+                if full_path.exists():
+                    # Convert to file:/// URL
+                    file_url = full_path.as_uri()
+                    return f'<img src="{file_url}"'
+                return match.group(0)
+
+            html_body = re.sub(r'<img src="([^"]+)"', fix_image_path, html_body)
             
             # Add explicit anchors for headers that might not have them
             html_body = self._add_explicit_anchors(html_body)
@@ -1650,9 +1706,33 @@ class MainWindow(QMainWindow):
         tr:nth-child(even) {{ 
             background-color: #f9f9f9;
         }}
-        td:first-child {{ 
-            background-color: #f5f5f5; 
+        td:first-child {{
+            background-color: #f5f5f5;
             font-weight: 500;
+        }}
+        img {{
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 20px auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }}
+        hr {{
+            border: 0;
+            height: 1px;
+            background: #e1e4e8;
+            margin: 30px 0;
+        }}
+        em {{
+            color: #666;
+            font-style: italic;
+            display: block;
+            text-align: center;
+            margin-top: -15px;
+            margin-bottom: 20px;
+            font-size: 12pt;
         }}
     </style>
 </head>
@@ -1706,9 +1786,33 @@ class MainWindow(QMainWindow):
         tr:nth-child(even) {{ 
             background-color: #f9f9f9;
         }}
-        td:first-child {{ 
-            background-color: #f5f5f5; 
+        td:first-child {{
+            background-color: #f5f5f5;
             font-weight: 500;
+        }}
+        img {{
+            max-width: 100%;
+            height: auto;
+            display: block;
+            margin: 20px auto;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }}
+        hr {{
+            border: 0;
+            height: 1px;
+            background: #e1e4e8;
+            margin: 30px 0;
+        }}
+        em {{
+            color: #666;
+            font-style: italic;
+            display: block;
+            text-align: center;
+            margin-top: -15px;
+            margin-bottom: 20px;
+            font-size: 12pt;
         }}
     </style>
 </head>
