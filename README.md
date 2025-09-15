@@ -1485,6 +1485,7 @@ The screenshots showcase:
 ## Credits
 
 Created by Leland Green | [LelandGreen.com](https://www.lelandgreen.com)
+Contact: | [contact@lelandgreen.com](mailto:contact@lelandgreen.com)
 
 Built with:
 - JetBrains PyCharm
@@ -1499,7 +1500,7 @@ See LICENSE file for details.
 ## Support
 
 For issues, feature requests, or questions:
-- GitHub Issues: [Create an issue](https://github.com/yourusername/ImageAI/issues)
+- GitHub Issues: [Create an issue](https://github.com/lelandg/ImageAI/issues)
 - Email: support@lelandgreen.com
 
 ---
