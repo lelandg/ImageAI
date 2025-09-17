@@ -132,7 +132,21 @@ class OpenAIProvider(ImageProvider):
             # Add style parameter for DALL-E 3
             if model == "dall-e-3":
                 gen_params["style"] = style
-            
+
+            # Log the request being sent to OpenAI
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("=" * 60)
+            logger.info(f"SENDING TO OPENAI API")
+            logger.info(f"Model: {model}")
+            logger.info(f"Prompt: {prompt}")
+            logger.info(f"Size: {size}")
+            logger.info(f"Quality: {quality}")
+            if model == "dall-e-3":
+                logger.info(f"Style: {style}")
+            logger.info(f"Number of images: {n}")
+            logger.info("=" * 60)
+
             # Generate images
             response = self.client.images.generate(**gen_params)
             

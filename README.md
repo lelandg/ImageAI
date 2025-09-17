@@ -1,6 +1,6 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.16.0**
+**Version 0.16.2**
 
 ###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.

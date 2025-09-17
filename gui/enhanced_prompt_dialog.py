@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QPushButton, QComboBox, QGroupBox, QDialogButtonBox,
     QMessageBox, QSplitter, QWidget, QDoubleSpinBox, QSpinBox
 )
-from PySide6.QtCore import Qt, Signal, QThread, QObject
+from PySide6.QtCore import Qt, Signal, QThread, QObject, QSettings
 from PySide6.QtGui import QKeySequence, QShortcut
 
 from .llm_utils import DialogStatusConsole
@@ -41,6 +41,11 @@ class EnhanceWorker(QObject):
         self.max_tokens = max_tokens
         self.reasoning_effort = reasoning_effort
         self.verbosity = verbosity
+        self._stopped = False
+
+    def stop(self):
+        """Stop the worker."""
+        self._stopped = True
 
     def run(self):
         """Run the enhancement operation."""
@@ -162,13 +167,20 @@ class EnhancedPromptDialog(QDialog):
         self.current_prompt = current_prompt
         self.worker = None
         self.thread = None
+        self.enhanced_prompt = None
+        self.settings = QSettings("ImageAI", "EnhancedPromptDialog")
 
         self.setWindowTitle("Enhance Prompt with AI")
         self.setMinimumWidth(700)
         self.setMinimumHeight(600)
 
+        # Restore window geometry
+        self.restore_settings()
+
         self.init_ui()
         self.load_llm_settings()
+        # Restore dialog settings after UI is created
+        self.restore_dialog_settings()
 
     def init_ui(self):
         """Initialize the UI."""
@@ -561,3 +573,97 @@ class EnhancedPromptDialog(QDialog):
                 self, "No Enhancement",
                 "Please enhance the prompt first or click Cancel to close."
             )
+
+    def reject(self):
+        """Override reject to save settings before closing."""
+        self.save_dialog_settings()
+        self.save_settings()
+        super().reject()
+
+    def save_settings(self):
+        """Save window geometry and splitter state."""
+        self.settings.setValue("geometry", self.saveGeometry())
+        # Find and save splitter state
+        splitters = self.findChildren(QSplitter)
+        if splitters:
+            self.settings.setValue("splitter_state", splitters[0].saveState())
+
+    def restore_settings(self):
+        """Restore window geometry."""
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
+    def save_dialog_settings(self):
+        """Save dialog-specific settings (application-wide)."""
+        if self.config:
+            # Save LLM provider and model
+            self.config.set('llm_provider', self.llm_provider_combo.currentText())
+            self.config.set('llm_model', self.llm_model_combo.currentText())
+
+            # Save temperature and max tokens
+            self.settings.setValue("temperature", self.temperature_spin.value())
+            self.settings.setValue("max_tokens", self.max_tokens_spin.value())
+
+            # Save enhancement level
+            self.settings.setValue("enhancement_level", self.level_combo.currentIndex())
+
+            # Save style preset
+            self.settings.setValue("style_preset", self.style_combo.currentIndex())
+
+            # Save GPT-5 specific settings
+            self.settings.setValue("reasoning_effort", self.reasoning_combo.currentText())
+            self.settings.setValue("verbosity", self.verbosity_combo.currentText())
+
+    def restore_dialog_settings(self):
+        """Restore dialog-specific settings."""
+        # Restore temperature
+        temperature = self.settings.value("temperature", type=float)
+        if temperature is not None:
+            self.temperature_spin.setValue(temperature)
+
+        # Restore max tokens
+        max_tokens = self.settings.value("max_tokens", type=int)
+        if max_tokens is not None:
+            self.max_tokens_spin.setValue(max_tokens)
+
+        # Restore enhancement level
+        enhancement_level = self.settings.value("enhancement_level", type=int)
+        if enhancement_level is not None and enhancement_level < self.level_combo.count():
+            self.level_combo.setCurrentIndex(enhancement_level)
+
+        # Restore style preset
+        style_preset = self.settings.value("style_preset", type=int)
+        if style_preset is not None and style_preset < self.style_combo.count():
+            self.style_combo.setCurrentIndex(style_preset)
+
+        # Restore GPT-5 specific settings
+        reasoning = self.settings.value("reasoning_effort", "medium")
+        index = self.reasoning_combo.findText(reasoning)
+        if index >= 0:
+            self.reasoning_combo.setCurrentIndex(index)
+
+        verbosity = self.settings.value("verbosity", "medium")
+        index = self.verbosity_combo.findText(verbosity)
+        if index >= 0:
+            self.verbosity_combo.setCurrentIndex(index)
+
+        # Restore splitter state after UI is created
+        splitters = self.findChildren(QSplitter)
+        if splitters:
+            splitter_state = self.settings.value("splitter_state")
+            if splitter_state:
+                splitters[0].restoreState(splitter_state)
+
+    def closeEvent(self, event):
+        """Handle close event."""
+        # Stop any running worker
+        if self.worker and self.thread and self.thread.isRunning():
+            self.worker.stop()
+            self.thread.quit()
+            self.thread.wait()
+
+        # Save settings
+        self.save_dialog_settings()
+        self.save_settings()
+        super().closeEvent(event)

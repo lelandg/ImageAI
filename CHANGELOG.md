@@ -5,6 +5,80 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.2] - 2025-01-16
+
+### Fixed
+- **Google Gemini Aspect Ratio Support** (Complete Implementation)
+  - For non-1:1 aspect ratios, dimensions are now properly sent in parentheses (e.g., "(1024x576)") per CLAUDE.md spec
+  - When dimensions exceed 1024px, they are automatically scaled down proportionally for Gemini
+  - After generation, images are automatically upscaled back to the target resolution
+  - Added comprehensive logging for all resolution operations
+- **Aspect Ratio Calculation Logic**
+  - Fixed recursion prevention that was blocking height recalculation when aspect ratio changed
+  - Width/height spinners now properly update when switching between aspect ratios
+  - Added `force` parameter to ensure recalculation happens during aspect ratio changes
+- **Upscaling Visibility Detection**
+  - Added detailed logging for upscaling widget visibility changes
+  - Logs now show aspect ratio, target dimensions, provider limits, and visibility decisions
+  - Each dimension check is logged separately for debugging
+
+### Added
+- **Smart Gemini Scaling**
+  - Automatic scaling: If width or height > 1024, scales proportionally so max = 1024
+  - Example: 2048×1152 → 1024×576 sent to Gemini → 2048×1152 after upscaling
+  - Preserves aspect ratio during scaling operations
+- **Enhanced Logging**
+  - "Scaling down for Gemini: 2048x1152 -> 1024x576 (factor: 0.500)"
+  - "Sending to Gemini with aspect ratio 16:9: prompt ends with '(1024x576)'"
+  - "Upscaling Gemini output back to target: 2048x1152"
+  - Logs for square images: "Sending to Gemini with square aspect (1:1): 1024x1024"
+- **Dimension Event Tracking**
+  - WIDTH/HEIGHT SPINBOX VALUE CHANGED events logged
+  - ASPECT RATIO CHANGED events with old/new values
+  - Complete upscaling visibility check logs with separators
+- **Comprehensive API Request Logging**
+  - All requests to Google Gemini API now logged with full prompt and parameters
+  - All requests to OpenAI DALL·E API logged with model, prompt, size, quality, style
+  - Complete request/response logging for all LLM conversations already in place
+- **Image Save Status Enhancement**
+  - Console now shows dimensions when saving: "Saved 1024×768 image to: filename.png"
+  - Provides immediate visual confirmation of output resolution
+
+### Changed
+- Resolution selector now forces recalculation when aspect ratio changes
+- Width/height change handlers properly update the opposite dimension
+- Improved signal connection to use lambda functions for proper parameter passing
+
+## [0.16.1] - 2025-01-16
+
+### Fixed
+- **Resolution and Aspect Ratio System** (Complete Refactor)
+  - Width/Height spinners now properly update proportionally when aspect ratio is selected
+  - When entering width, height automatically calculates based on aspect ratio (and vice versa)
+  - Upscaling selector now properly shows when EITHER dimension exceeds provider maximum:
+    - Google: > 1024 pixels
+    - OpenAI: > 1792 pixels
+    - Stability: > 1536 pixels
+  - Fixed initialization order - aspect ratio is now set before dimensions are calculated
+  - Fixed missing `valueChanged` signal connections that prevented upscaling from triggering
+- **Dimension Handling**
+  - Added proper dimension prompting to Google provider (e.g., "1024x576 resolution, 16:9 aspect ratio composition")
+  - Fixed cropping logic - only crops when explicitly in aspect ratio mode
+  - Added `crop_to_aspect` parameter to control when cropping should occur
+- **UI Improvements**
+  - Resolution combo box moved below width/height spinners for better flow
+  - Added "Reset" button to set dimensions to provider maximum for current aspect ratio
+  - Persistent settings - aspect ratio and dimensions saved/restored between sessions
+  - Upscaling settings now persist across sessions (saved in config)
+- **Video Project Tab**
+  - Fixed `AttributeError: 'dict' object has no attribute 'get_api_key'` in workspace widget
+  - Config is now properly accessed as dictionary
+
+### Changed
+- Width/Height spinners no longer use "Auto" - they always show calculated values
+- When typing in one dimension field, the other immediately updates proportionally
+- Clearer upscaling messages showing provider maximum capabilities
+
 ## [0.16.0] - 2025-01-15
 
 ### Fixed

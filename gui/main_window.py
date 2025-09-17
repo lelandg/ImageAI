@@ -596,6 +596,18 @@ class MainWindow(QMainWindow):
                 self.resolution_selector.modeChanged.connect(self._on_resolution_mode_changed)
                 # Initialize resolution selector with current aspect ratio
                 self.resolution_selector.update_aspect_ratio(self.aspect_selector.get_ratio())
+
+                # Restore saved aspect ratio if available
+                saved_aspect = self.config.config.get('last_aspect_ratio')
+                if saved_aspect:
+                    self.aspect_selector.set_ratio(saved_aspect)
+
+                # Restore saved resolution dimensions
+                saved_width = self.config.config.get('last_resolution_width')
+                if saved_width:
+                    self.resolution_selector._last_edited = "width"
+                    self.resolution_selector.width_spin.setValue(saved_width)
+                    # Height will be calculated automatically from aspect ratio
             # Wrap selector with a button for social sizes
             from PySide6.QtWidgets import QWidget as _W, QHBoxLayout as _HB
             res_container = _W()
@@ -650,6 +662,11 @@ class MainWindow(QMainWindow):
                 realesrgan=realesrgan_available,
                 stability=stability_available
             )
+            # Load saved upscaling settings
+            saved_upscaling = self.config.config.get('upscaling_settings')
+            if saved_upscaling:
+                self.upscaling_selector.set_settings(saved_upscaling)
+                self.upscaling_settings = saved_upscaling
         image_settings_layout.addWidget(self.upscaling_selector)
 
         # Add reference image section
@@ -1337,7 +1354,13 @@ class MainWindow(QMainWindow):
                 "window.scrollTo(0, 0);"))
             self.btn_help_home.setToolTip("Go to top (Ctrl+Home)")
             nav_layout.addWidget(self.btn_help_home)
-            
+
+            # Report Problem button
+            self.btn_report_problem = QPushButton("🐛 Report Problem")
+            self.btn_report_problem.clicked.connect(lambda: webbrowser.open("https://github.com/lelandg/ImageAI/issues"))
+            self.btn_report_problem.setToolTip("Report an issue on GitHub")
+            nav_layout.addWidget(self.btn_report_problem)
+
             nav_layout.addStretch()
             
             # Search controls - compact layout
@@ -2874,17 +2897,30 @@ For more detailed information, please refer to the full documentation.
     
     def _on_aspect_ratio_changed(self, ratio: str):
         """Handle aspect ratio change."""
+        logger.info(f"ASPECT RATIO CHANGED EVENT: {ratio}")
         # Store for use in generation
         self.current_aspect_ratio = ratio
+        # Save to config
+        self.config.config['last_aspect_ratio'] = ratio
+        self.config.save()
         # When aspect ratio changes, switch resolution selector to auto mode
         if hasattr(self, 'resolution_selector') and self.resolution_selector:
             self.resolution_selector.set_mode_aspect_ratio()
         # Could update resolution options based on aspect ratio
+        # Update upscaling visibility
+        self._update_upscaling_visibility()
         self._update_cost_estimate()
     
     def _on_resolution_changed(self, resolution: str):
         """Handle resolution change."""
         self.current_resolution = resolution
+        # Save resolution settings including custom width/height
+        if hasattr(self, 'resolution_selector'):
+            width, height = self.resolution_selector.get_width_height()
+            if width and height:
+                self.config.config['last_resolution_width'] = width
+                self.config.config['last_resolution_height'] = height
+                self.config.save()
         self._update_cost_estimate()
         self._update_upscaling_visibility()
     
@@ -3264,6 +3300,9 @@ For more detailed information, please refer to the full documentation.
     def _on_upscaling_changed(self, settings: dict):
         """Handle upscaling settings change."""
         self.upscaling_settings = settings
+        # Save upscaling settings to config
+        self.config.config['upscaling_settings'] = settings
+        self.config.save()
         self._update_cost_estimate()
 
     def _get_target_resolution(self) -> tuple:
@@ -3278,39 +3317,131 @@ For more detailed information, please refer to the full documentation.
                     pass
         return None, None
 
+    def test_dimension_logic(self):
+        """Test function to verify dimension and upscaling logic."""
+        print("\n=== Testing Dimension and Upscaling Logic ===\n")
+
+        if not hasattr(self, 'resolution_selector'):
+            print("ERROR: No resolution selector found")
+            return
+
+        # Test cases for each provider
+        test_cases = [
+            # (provider, aspect_ratio, width, height, expected_show_upscaling)
+            ("google", "16:9", 1024, 0, False),  # 1024x576 - no upscaling
+            ("google", "16:9", 2048, 0, True),   # 2048x1152 - needs upscaling
+            ("google", "16:9", 0, 1152, True),   # 2048x1152 - needs upscaling
+            ("google", "1:1", 1024, 0, False),   # 1024x1024 - no upscaling
+            ("google", "1:1", 1025, 0, True),    # 1025x1025 - needs upscaling
+            ("openai", "16:9", 1792, 0, False),  # 1792x1008 - no upscaling
+            ("openai", "16:9", 1793, 0, True),   # 1793x1008 - needs upscaling
+            ("openai", "9:16", 0, 1792, False),  # 1008x1792 - no upscaling
+            ("openai", "9:16", 0, 1793, True),   # 1008x1793 - needs upscaling
+        ]
+
+        for provider, aspect_ratio, width, height, expected in test_cases:
+            # Set provider
+            self.current_provider = provider
+            self.resolution_selector.update_provider(provider)
+
+            # Set aspect ratio
+            if hasattr(self, 'aspect_selector'):
+                self.aspect_selector.set_ratio(aspect_ratio)
+            self.resolution_selector._aspect_ratio = aspect_ratio
+
+            # Set dimensions - only set the primary one
+            if width > 0:
+                self.resolution_selector._last_edited = "width"
+                self.resolution_selector.width_spin.setValue(width)
+            else:
+                self.resolution_selector._last_edited = "height"
+                self.resolution_selector.height_spin.setValue(height)
+
+            # Wait for signals to propagate
+            QApplication.processEvents()
+
+            # Get results
+            calc_w, calc_h = self.resolution_selector.get_width_height()
+            visible = self.upscaling_selector.isVisible()
+
+            # Check
+            result = "✓" if visible == expected else "✗"
+            print(f"{result} Provider: {provider:8} AR: {aspect_ratio:5} Input: W={width:4} H={height:4} → "
+                  f"Calculated: {calc_w}x{calc_h} Upscaling: {visible} (expected: {expected})")
+
+        print("\n=== Test Complete ===\n")
+
     def _update_upscaling_visibility(self):
         """Update upscaling selector visibility based on current settings."""
         if not hasattr(self, 'upscaling_selector'):
             return
 
-        target_width, target_height = self._get_target_resolution()
-        if not target_width or not target_height:
+        logger.info("=" * 60)
+        logger.info("UPSCALING VISIBILITY CHECK")
+
+        # Get target dimensions from resolution selector
+        target_width = target_height = None
+
+        if hasattr(self, 'resolution_selector'):
+            width, height = self.resolution_selector.get_width_height()
+            if width and height:
+                target_width, target_height = width, height
+                aspect_ratio = self.aspect_selector.get_ratio() if hasattr(self, 'aspect_selector') else "unknown"
+                logger.info(f"Current aspect ratio: {aspect_ratio}")
+                logger.info(f"Target dimensions: {target_width}×{target_height}px")
+
+        if not (target_width and target_height):
+            logger.info("No dimensions available - hiding upscaling widget")
             self.upscaling_selector.setVisible(False)
+            logger.info("=" * 60)
             return
 
-        # Get expected output size for current provider
-        expected_width = 1024  # Default for Google
-        expected_height = 1024
-
+        # Get provider maximum resolution
+        provider_max = 1024  # Default
         if self.current_provider == "google":
-            # Google always outputs 1024x1024, then crops
-            if target_width != target_height:
-                # Will be cropped to aspect ratio
-                aspect = target_width / target_height
-                if aspect > 1:
-                    expected_height = int(1024 / aspect)
-                else:
-                    expected_width = int(1024 * aspect)
+            provider_max = 1024
         elif self.current_provider == "openai":
-            # OpenAI has specific sizes
-            expected_width = 1024
-            expected_height = 1024
+            provider_max = 1792
+        elif self.current_provider == "stability":
+            provider_max = 1536
 
-        # Update the upscaling selector
-        self.upscaling_selector.update_resolution_info(
-            expected_width, expected_height,
-            target_width, target_height
-        )
+        logger.info(f"Provider: {self.current_provider} (max: {provider_max}px)")
+
+        # RULE: Show upscaling if EITHER dimension > provider max
+        needs_upscaling = target_width > provider_max or target_height > provider_max
+
+        logger.info(f"  Width check: {target_width} > {provider_max}? {target_width > provider_max}")
+        logger.info(f"  Height check: {target_height} > {provider_max}? {target_height > provider_max}")
+        logger.info(f"  Needs upscaling: {needs_upscaling}")
+
+        old_visibility = self.upscaling_selector.isVisible()
+        self.upscaling_selector.setVisible(needs_upscaling)
+
+        if old_visibility != needs_upscaling:
+            logger.info(f"UPSCALING WIDGET VISIBILITY CHANGED: {old_visibility} → {needs_upscaling}")
+        logger.info("=" * 60)
+
+        if needs_upscaling:
+            # Calculate what the provider will actually output
+            if self.current_provider == "google":
+                # Google outputs 1024x1024 then crops to aspect
+                expected_width = expected_height = 1024
+                if target_width != target_height:
+                    aspect = target_width / target_height
+                    if aspect > 1:
+                        expected_height = int(1024 / aspect)
+                    else:
+                        expected_width = int(1024 * aspect)
+            else:
+                # Other providers output at their max, maintaining aspect
+                scale = min(provider_max / target_width, provider_max / target_height)
+                expected_width = int(target_width * scale)
+                expected_height = int(target_height * scale)
+
+            self.upscaling_selector.update_resolution_info(
+                expected_width, expected_height,
+                target_width, target_height
+            )
 
     def _generate(self):
         """Generate image from prompt."""
@@ -3363,6 +3494,9 @@ For more detailed information, please refer to the full documentation.
                 if hasattr(self, 'aspect_selector') and self.aspect_selector:
                     aspect_ratio = self.aspect_selector.get_ratio()
                     kwargs['aspect_ratio'] = aspect_ratio
+                    # Enable cropping for Google provider when aspect ratio is selected
+                    if self.current_provider == "google":
+                        kwargs['crop_to_aspect'] = True
 
                     # For non-Google providers, provide resolution string for proper size mapping
                     if self.current_provider != "google":
@@ -3887,7 +4021,16 @@ For more detailed information, please refer to the full documentation.
             saved_paths = auto_save_images(processed_images, base_stub=stub)
 
             if saved_paths:
-                self._append_to_console(f"Saved to: {saved_paths[0].name}", "#00ff00")
+                # Get dimensions of saved image
+                try:
+                    from PIL import Image
+                    import io
+                    img = Image.open(io.BytesIO(processed_images[0]))
+                    width, height = img.width, img.height
+                    self._append_to_console(f"Saved {width}×{height} image to: {saved_paths[0].name}", "#00ff00")
+                except:
+                    # Fallback if we can't get dimensions
+                    self._append_to_console(f"Saved to: {saved_paths[0].name}", "#00ff00")
             
             # Calculate cost for this generation
             generation_cost = 0.0

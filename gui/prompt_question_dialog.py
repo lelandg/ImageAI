@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QPushButton, QComboBox, QGroupBox, QDialogButtonBox,
     QMessageBox, QSplitter, QWidget, QSpinBox, QDoubleSpinBox
 )
-from PySide6.QtCore import Qt, Signal, QThread, QObject
+from PySide6.QtCore import Qt, Signal, QThread, QObject, QSettings
 from PySide6.QtGui import QKeySequence, QShortcut
 
 from .llm_utils import (
@@ -392,12 +392,16 @@ class PromptQuestionDialog(QDialog):
         self.current_prompt = current_prompt
         self.worker = None
         self.thread = None
+        self.settings = QSettings("ImageAI", "PromptQuestionDialog")
         self.last_session = self.load_last_session()
         self.question_history = self.load_history()
 
         self.setWindowTitle("Ask About Prompt")
         self.setMinimumWidth(600)
         self.setMinimumHeight(500)
+
+        # Restore window geometry
+        self.restore_settings()
 
         self.init_ui()
         self.load_llm_settings()
@@ -560,6 +564,11 @@ class PromptQuestionDialog(QDialog):
 
         # Add splitter to main layout
         main_layout.addWidget(splitter)
+
+        # Restore splitter state if saved
+        splitter_state = self.settings.value("splitter_state")
+        if splitter_state:
+            splitter.restoreState(splitter_state)
 
         # Dialog buttons
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
@@ -771,6 +780,10 @@ class PromptQuestionDialog(QDialog):
     def save_last_session(self):
         """Save the current session state."""
         if self.config:
+            # Save LLM settings to config (application-wide)
+            self.config.set('llm_provider', self.llm_provider_combo.currentText())
+            self.config.set('llm_model', self.llm_model_combo.currentText())
+
             from pathlib import Path
             import json
             session = {
@@ -895,3 +908,37 @@ class PromptQuestionDialog(QDialog):
                 except Exception as e:
                     logger.error(f"Failed to load history: {e}")
         return []
+
+    def save_settings(self):
+        """Save window geometry and splitter state."""
+        self.settings.setValue("geometry", self.saveGeometry())
+        # Find and save splitter state
+        splitters = self.findChildren(QSplitter)
+        if splitters:
+            self.settings.setValue("splitter_state", splitters[0].saveState())
+
+    def restore_settings(self):
+        """Restore window geometry and splitter state."""
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
+    def reject(self):
+        """Override reject to save settings before closing."""
+        self.save_last_session()
+        self.save_settings()
+        super().reject()
+
+    def closeEvent(self, event):
+        """Handle close event."""
+        # Stop any running worker
+        if self.worker and self.thread and self.thread.isRunning():
+            self.worker.stop()
+            self.thread.quit()
+            self.thread.wait()
+
+        # Save session state
+        self.save_last_session()
+        # Save window settings
+        self.save_settings()
+        super().closeEvent(event)

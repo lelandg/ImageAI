@@ -238,6 +238,7 @@ class GoogleProvider(ImageProvider):
         width = kwargs.get('width')
         height = kwargs.get('height')
         aspect_ratio = kwargs.get('aspect_ratio')
+        crop_to_aspect = kwargs.get('crop_to_aspect', False)  # Only crop if explicitly requested
 
         # If aspect_ratio is provided without dimensions, calculate them
         if aspect_ratio and not (width and height):
@@ -269,10 +270,42 @@ class GoogleProvider(ImageProvider):
             else:
                 resolution_hint = "crisp and clear"
 
-        # Note: Google Gemini only generates square (1:1) images regardless of aspect ratio hints
-        # Adding aspect ratio to the prompt doesn't change the output and may confuse generation
-        # Only add resolution quality hints which can improve image detail
-        if resolution_hint:
+        # Store original dimensions for later upscaling/cropping
+        original_width = width
+        original_height = height
+
+        # For Gemini, scale down if either dimension > 1024
+        # per CLAUDE.md: "For gemini, if either resolution is greater than 1024, scale proportionally so max is 1024"
+        if width and height:
+            if width > 1024 or height > 1024:
+                # Scale proportionally so max dimension is 1024
+                scale_factor = 1024 / max(width, height)
+                scaled_width = int(width * scale_factor)
+                scaled_height = int(height * scale_factor)
+                logger.info(f"Scaling down for Gemini: {width}x{height} -> {scaled_width}x{scaled_height} (factor: {scale_factor:.3f})")
+                width = scaled_width
+                height = scaled_height
+                # Store that we need to upscale later
+                kwargs['_needs_upscale'] = True
+                kwargs['_target_width'] = original_width
+                kwargs['_target_height'] = original_height
+
+        # For Gemini, add dimensions in parentheses for non-square aspect ratios
+        # per CLAUDE.md: "for all gemini image ratios besides 1:1, send ratio. E.g. LLM prompt like 'brief prompt description (1024x768)'"
+        if aspect_ratio and aspect_ratio != "1:1" and width and height:
+            # Add dimensions in parentheses at end of prompt
+            prompt_with_dims = f"{prompt} ({width}x{height})"
+            logger.info(f"Sending to Gemini with aspect ratio {aspect_ratio}: prompt ends with '({width}x{height})'")
+            logger.info(f"Full prompt: {prompt_with_dims}")
+            prompt = prompt_with_dims
+        elif width and height:
+            # Log even for square images
+            logger.info(f"Sending to Gemini with square aspect (1:1): {width}x{height} - no dimensions added to prompt")
+        else:
+            logger.info(f"Sending to Gemini with default resolution (no dimensions specified)")
+
+        if resolution_hint and aspect_ratio == "1:1":
+            # For square images, we can still add quality hints
             prompt = f"{prompt}. {resolution_hint}."
         
         # Note: These generation_config parameters may not be supported by all Gemini models
@@ -317,6 +350,22 @@ class GoogleProvider(ImageProvider):
                 contents = prompt
 
         try:
+            # Log the full request being sent to Gemini
+            logger.info("=" * 60)
+            logger.info(f"SENDING TO GOOGLE GEMINI API")
+            logger.info(f"Model: {model}")
+            if isinstance(contents, str):
+                logger.info(f"Prompt: {contents}")
+            elif isinstance(contents, list):
+                for item in contents:
+                    if isinstance(item, str):
+                        logger.info(f"Prompt: {item}")
+                    else:
+                        logger.info(f"Additional content: {type(item)}")
+            if config:
+                logger.info(f"Generation config: {config}")
+            logger.info("=" * 60)
+
             # Try to use generation_config parameter if supported
             if config:
                 response = self.client.models.generate_content(
@@ -341,10 +390,49 @@ class GoogleProvider(ImageProvider):
                                 data = getattr(part.inline_data, "data", None)
                                 if isinstance(data, (bytes, bytearray)):
                                     image_bytes = bytes(data)
-                                    # Apply cropping if dimensions are specified and not square
-                                    if width and height and width != height and crop_to_aspect_ratio:
+
+                                    # Handle upscaling back to original dimensions if we scaled down for Gemini
+                                    if kwargs.get('_needs_upscale'):
+                                        target_w = kwargs.get('_target_width')
+                                        target_h = kwargs.get('_target_height')
+                                        if target_w and target_h:
+                                            logger.info(f"Upscaling Gemini output back to target: {target_w}x{target_h}")
+                                            from PIL import Image
+                                            import io
+
+                                            # Open the image
+                                            img = Image.open(io.BytesIO(image_bytes))
+                                            current_w, current_h = img.size
+                                            logger.debug(f"Current Gemini output size: {current_w}x{current_h}")
+
+                                            # First crop to aspect ratio if needed (Gemini outputs square)
+                                            if width and height and width != height:
+                                                # Crop the square output to the scaled aspect ratio
+                                                aspect = width / height
+                                                if aspect > 1:  # Landscape
+                                                    new_h = int(current_w / aspect)
+                                                    crop_top = (current_h - new_h) // 2
+                                                    img = img.crop((0, crop_top, current_w, crop_top + new_h))
+                                                else:  # Portrait
+                                                    new_w = int(current_h * aspect)
+                                                    crop_left = (current_w - new_w) // 2
+                                                    img = img.crop((crop_left, 0, crop_left + new_w, current_h))
+                                                logger.debug(f"Cropped to aspect ratio: {img.size}")
+
+                                            # Now upscale to target dimensions
+                                            img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                                            logger.info(f"Upscaled to final size: {target_w}x{target_h}")
+
+                                            # Convert back to bytes
+                                            output = io.BytesIO()
+                                            img.save(output, format='PNG')
+                                            image_bytes = output.getvalue()
+
+                                    # Apply additional cropping if dimensions are specified and not square and explicitly requested
+                                    elif crop_to_aspect and width and height and width != height and crop_to_aspect_ratio:
                                         logger.debug(f"Cropping Google image to {width}x{height}")
                                         image_bytes = crop_to_aspect_ratio(image_bytes, width, height)
+
                                     images.append(image_bytes)
         except Exception as e:
             # Fallback to basic generation if advanced config fails
@@ -364,10 +452,49 @@ class GoogleProvider(ImageProvider):
                                 data = getattr(part.inline_data, "data", None)
                                 if isinstance(data, (bytes, bytearray)):
                                     image_bytes = bytes(data)
-                                    # Apply cropping if dimensions are specified and not square
-                                    if width and height and width != height and crop_to_aspect_ratio:
+
+                                    # Handle upscaling back to original dimensions if we scaled down for Gemini
+                                    if kwargs.get('_needs_upscale'):
+                                        target_w = kwargs.get('_target_width')
+                                        target_h = kwargs.get('_target_height')
+                                        if target_w and target_h:
+                                            logger.info(f"Upscaling Gemini output back to target: {target_w}x{target_h}")
+                                            from PIL import Image
+                                            import io
+
+                                            # Open the image
+                                            img = Image.open(io.BytesIO(image_bytes))
+                                            current_w, current_h = img.size
+                                            logger.debug(f"Current Gemini output size: {current_w}x{current_h}")
+
+                                            # First crop to aspect ratio if needed (Gemini outputs square)
+                                            if width and height and width != height:
+                                                # Crop the square output to the scaled aspect ratio
+                                                aspect = width / height
+                                                if aspect > 1:  # Landscape
+                                                    new_h = int(current_w / aspect)
+                                                    crop_top = (current_h - new_h) // 2
+                                                    img = img.crop((0, crop_top, current_w, crop_top + new_h))
+                                                else:  # Portrait
+                                                    new_w = int(current_h * aspect)
+                                                    crop_left = (current_w - new_w) // 2
+                                                    img = img.crop((crop_left, 0, crop_left + new_w, current_h))
+                                                logger.debug(f"Cropped to aspect ratio: {img.size}")
+
+                                            # Now upscale to target dimensions
+                                            img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                                            logger.info(f"Upscaled to final size: {target_w}x{target_h}")
+
+                                            # Convert back to bytes
+                                            output = io.BytesIO()
+                                            img.save(output, format='PNG')
+                                            image_bytes = output.getvalue()
+
+                                    # Apply additional cropping if dimensions are specified and not square and explicitly requested
+                                    elif crop_to_aspect and width and height and width != height and crop_to_aspect_ratio:
                                         logger.debug(f"Cropping Google image to {width}x{height}")
                                         image_bytes = crop_to_aspect_ratio(image_bytes, width, height)
+
                                     images.append(image_bytes)
             except Exception as e2:
                 raise RuntimeError(f"Google generation failed: {e2}")

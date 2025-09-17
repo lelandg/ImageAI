@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QComboBox, QGroupBox, QSplitter, QMessageBox,
     QTabWidget, QWidget, QDialogButtonBox, QDoubleSpinBox
 )
-from PySide6.QtCore import Qt, Signal, QThread, QObject
+from PySide6.QtCore import Qt, Signal, QThread, QObject, QSettings
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -506,10 +506,14 @@ class PromptGenerationDialog(QDialog):
         self.last_session = self.load_last_session()
         self.worker = None
         self.thread = None
+        self.settings = QSettings("ImageAI", "PromptGenerationDialog")
 
         self.setWindowTitle("AI Prompt Generator")
         self.setMinimumWidth(800)
         self.setMinimumHeight(700)
+
+        # Restore window geometry
+        self.restore_settings()
 
         self.init_ui()
         self.load_llm_settings()
@@ -673,6 +677,16 @@ class PromptGenerationDialog(QDialog):
 
         # Add splitter to main layout
         main_layout.addWidget(splitter)
+
+        # Restore splitter state if saved
+        splitter_state = self.settings.value("splitter_state")
+        if splitter_state:
+            splitter.restoreState(splitter_state)
+
+        # Restore tab index if saved
+        tab_index = self.settings.value("tab_index", type=int)
+        if tab_index is not None and hasattr(self, 'tab_widget'):
+            self.tab_widget.setCurrentIndex(tab_index)
 
         # Dialog buttons
         buttons = QDialogButtonBox(
@@ -1042,11 +1056,25 @@ class PromptGenerationDialog(QDialog):
     def save_last_session(self):
         """Save the current session state."""
         if self.config:
+            # Save LLM settings to config (application-wide)
+            self.config.set('llm_provider', self.llm_provider_combo.currentText())
+            self.config.set('llm_model', self.llm_model_combo.currentText())
+
+            # Save all settings to QSettings for persistence
+            self.settings.setValue("temperature", self.temperature_spin.value())
+            self.settings.setValue("max_tokens", self.max_tokens_spin.value())
+            self.settings.setValue("reasoning_effort", self.reasoning_combo.currentText())
+            self.settings.setValue("verbosity", self.verbosity_combo.currentText())
+
             session = {
                 "input_text": self.input_text.toPlainText(),
                 "num_variations": self.num_variations_spin.value(),
                 "llm_provider": self.llm_provider_combo.currentText(),
-                "llm_model": self.llm_model_combo.currentText()
+                "llm_model": self.llm_model_combo.currentText(),
+                "temperature": self.temperature_spin.value(),
+                "max_tokens": self.max_tokens_spin.value(),
+                "reasoning_effort": self.reasoning_combo.currentText() if self.gpt5_params_widget.isVisible() else "medium",
+                "verbosity": self.verbosity_combo.currentText() if self.gpt5_params_widget.isVisible() else "medium"
             }
             session_file = Path(self.config.config_dir) / "prompt_gen_session.json"
             try:
@@ -1069,6 +1097,26 @@ class PromptGenerationDialog(QDialog):
 
     def restore_last_session(self):
         """Restore the last session state."""
+        # First restore from QSettings
+        temperature = self.settings.value("temperature", type=float)
+        if temperature is not None:
+            self.temperature_spin.setValue(temperature)
+
+        max_tokens = self.settings.value("max_tokens", type=int)
+        if max_tokens is not None:
+            self.max_tokens_spin.setValue(max_tokens)
+
+        reasoning = self.settings.value("reasoning_effort", "medium")
+        index = self.reasoning_combo.findText(reasoning)
+        if index >= 0:
+            self.reasoning_combo.setCurrentIndex(index)
+
+        verbosity = self.settings.value("verbosity", "medium")
+        index = self.verbosity_combo.findText(verbosity)
+        if index >= 0:
+            self.verbosity_combo.setCurrentIndex(index)
+
+        # Then restore from session file
         if self.last_session:
             # Restore input text
             if "input_text" in self.last_session:
@@ -1089,3 +1137,59 @@ class PromptGenerationDialog(QDialog):
                 index = self.llm_model_combo.findText(self.last_session["llm_model"])
                 if index >= 0:
                     self.llm_model_combo.setCurrentIndex(index)
+
+            # Restore temperature if in session
+            if "temperature" in self.last_session:
+                self.temperature_spin.setValue(self.last_session["temperature"])
+
+            # Restore max tokens if in session
+            if "max_tokens" in self.last_session:
+                self.max_tokens_spin.setValue(self.last_session["max_tokens"])
+
+            # Restore GPT-5 settings if in session
+            if "reasoning_effort" in self.last_session:
+                index = self.reasoning_combo.findText(self.last_session["reasoning_effort"])
+                if index >= 0:
+                    self.reasoning_combo.setCurrentIndex(index)
+
+            if "verbosity" in self.last_session:
+                index = self.verbosity_combo.findText(self.last_session["verbosity"])
+                if index >= 0:
+                    self.verbosity_combo.setCurrentIndex(index)
+
+    def save_settings(self):
+        """Save window geometry and splitter state."""
+        self.settings.setValue("geometry", self.saveGeometry())
+        # Find and save splitter state
+        splitters = self.findChildren(QSplitter)
+        if splitters:
+            self.settings.setValue("splitter_state", splitters[0].saveState())
+        # Save tab index
+        if hasattr(self, 'tab_widget'):
+            self.settings.setValue("tab_index", self.tab_widget.currentIndex())
+
+    def restore_settings(self):
+        """Restore window geometry and splitter state."""
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
+    def reject(self):
+        """Override reject to save settings before closing."""
+        self.save_last_session()
+        self.save_settings()
+        super().reject()
+
+    def closeEvent(self, event):
+        """Handle close event."""
+        # Stop any running worker
+        if self.worker and self.thread and self.thread.isRunning():
+            self.worker.stop()
+            self.thread.quit()
+            self.thread.wait()
+
+        # Save session state
+        self.save_last_session()
+        # Save window settings
+        self.save_settings()
+        super().closeEvent(event)

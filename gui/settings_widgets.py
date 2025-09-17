@@ -1,6 +1,9 @@
 """Advanced settings widgets for ImageAI."""
 
+import logging
 from typing import Dict, Any, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 from PySide6.QtCore import Qt, Signal, QSize
 from PySide6.QtGui import QPixmap, QPainter, QColor, QFont, QRegularExpressionValidator
 from PySide6.QtWidgets import (
@@ -220,12 +223,14 @@ class AspectRatioSelector(QWidget):
     
     def _on_ratio_clicked(self, ratio: str):
         """Handle ratio button click."""
+        logger.info(f"Aspect ratio button clicked: {ratio}")
         # Hide custom input when selecting preset
         self._show_custom_input(False)
         self._using_custom = False
         self.custom_button.setChecked(False)
         self.set_ratio(ratio)
         self.ratioChanged.emit(ratio)
+        logger.debug(f"Aspect ratio changed to: {ratio} (preset button)")
     
     def _on_custom_clicked(self):
         """Handle custom button click."""
@@ -357,6 +362,8 @@ class ResolutionSelector(QWidget):
         self._aspect_ratio = "1:1"
         self._custom_width = None
         self._custom_height = None
+        self._width_mode = "manual"  # "manual" or "auto"
+        self._height_mode = "auto"   # "manual" or "auto"
         self._init_ui()
     
     def _init_ui(self):
@@ -388,7 +395,53 @@ class ResolutionSelector(QWidget):
         
         layout.addLayout(mode_layout)
 
-        # Resolution combo
+        # Width/Height spinboxes for aspect ratio mode
+        size_layout = QHBoxLayout()
+        size_layout.setSpacing(5)
+
+        self.width_label = QLabel("Width:")
+        self.width_spin = QSpinBox()
+        self.width_spin.setRange(256, 4096)
+        self.width_spin.setSingleStep(128)
+        self.width_spin.setValue(1024)
+        self.width_spin.setToolTip("Width - height will be calculated from aspect ratio")
+        self.width_spin.setSuffix(" px")
+        # Connect BOTH valueChanged and editing events
+        self.width_spin.valueChanged.connect(lambda v: self._on_width_value_changed(v))
+        self.width_spin.editingFinished.connect(self._on_width_edited)
+
+        self.height_label = QLabel("Height:")
+        self.height_spin = QSpinBox()
+        self.height_spin.setRange(256, 4096)
+        self.height_spin.setSingleStep(128)
+        self.height_spin.setValue(576)  # Will be calculated
+        self.height_spin.setToolTip("Height - width will be calculated from aspect ratio")
+        self.height_spin.setSuffix(" px")
+        # Connect BOTH valueChanged and editing events
+        self.height_spin.valueChanged.connect(lambda v: self._on_height_value_changed(v))
+        self.height_spin.editingFinished.connect(self._on_height_edited)
+
+        # Track which field was last edited
+        self._last_edited = "width"
+
+        size_layout.addWidget(self.width_label)
+        size_layout.addWidget(self.width_spin)
+        size_layout.addSpacing(10)
+        size_layout.addWidget(self.height_label)
+        size_layout.addWidget(self.height_spin)
+
+        # Reset button
+        self.reset_btn = QPushButton("Reset")
+        self.reset_btn.setToolTip("Reset to provider defaults for this aspect ratio")
+        self.reset_btn.clicked.connect(self._reset_to_defaults)
+        size_layout.addWidget(self.reset_btn)
+        size_layout.addStretch()
+
+        self.size_widget = QWidget()  # Container for show/hide
+        self.size_widget.setLayout(size_layout)
+        layout.addWidget(self.size_widget)
+
+        # Resolution combo (moved below spinners)
         self.combo = QComboBox()
         self.combo.setEditable(True)  # Allow custom input
         self.combo.currentTextChanged.connect(self._on_resolution_changed)
@@ -396,43 +449,15 @@ class ResolutionSelector(QWidget):
             self.combo.lineEdit().editingFinished.connect(self._on_custom_resolution)
         layout.addWidget(self.combo)
 
-        # Width/Height spinboxes for aspect ratio mode
-        size_layout = QHBoxLayout()
-        size_layout.setSpacing(5)
-
-        self.width_label = QLabel("Width:")
-        self.width_spin = QSpinBox()
-        self.width_spin.setRange(512, 4096)
-        self.width_spin.setSingleStep(128)
-        self.width_spin.setValue(1024)
-        self.width_spin.setToolTip("Target width (used with aspect ratio)")
-        self.width_spin.valueChanged.connect(self._on_size_changed)
-
-        self.height_label = QLabel("Height:")
-        self.height_spin = QSpinBox()
-        self.height_spin.setRange(512, 4096)
-        self.height_spin.setSingleStep(128)
-        self.height_spin.setValue(1024)
-        self.height_spin.setToolTip("Target height (used with aspect ratio)")
-        self.height_spin.valueChanged.connect(self._on_size_changed)
-
-        size_layout.addWidget(self.width_label)
-        size_layout.addWidget(self.width_spin)
-        size_layout.addSpacing(10)
-        size_layout.addWidget(self.height_label)
-        size_layout.addWidget(self.height_spin)
-        size_layout.addStretch()
-
-        self.size_widget = QWidget()  # Container for show/hide
-        self.size_widget.setLayout(size_layout)
-        layout.addWidget(self.size_widget)
-
         # Info label
         self.info_label = QLabel()
         self.info_label.setStyleSheet("color: gray; font-size: 10px;")
         layout.addWidget(self.info_label)
-        
+
         self.update_provider(self.provider)
+
+        # Initialize dimensions after UI is set up
+        self._initialize_dimensions()
     
     def update_provider(self, provider: str):
         """Update options based on provider."""
@@ -474,7 +499,16 @@ class ResolutionSelector(QWidget):
     def _update_info_text(self):
         """Update the info label based on current state."""
         if self._using_aspect_ratio:
-            self.info_label.setText(f"Resolution calculated from aspect ratio: {self._aspect_ratio}")
+            if self._custom_width and self._custom_height:
+                info = f"Target: {self._custom_width}×{self._custom_height} ({self._aspect_ratio})"
+                # Add upscaling notice if dimensions exceed typical provider output
+                if self.provider == "google" and (self._custom_width > 1024 or self._custom_height > 1024):
+                    info += " • AI upscaling recommended"
+                elif self.provider == "openai" and (self._custom_width > 1792 or self._custom_height > 1792):
+                    info += " • Will require upscaling"
+                self.info_label.setText(info)
+            else:
+                self.info_label.setText(f"Resolution calculated from aspect ratio: {self._aspect_ratio}")
         else:
             if self.provider == "google":
                 self.info_label.setText("Using manual resolution (overrides aspect ratio)")
@@ -543,20 +577,187 @@ class ResolutionSelector(QWidget):
     
     def update_aspect_ratio(self, ratio: str):
         """Update the current aspect ratio (for display)."""
+        old_ratio = self._aspect_ratio
         self._aspect_ratio = ratio
+        current_width = self.width_spin.value()
+        current_height = self.height_spin.value()
+        logger.info(f"ResolutionSelector: Aspect ratio updating from {old_ratio} to {ratio}")
+        logger.info(f"  Current dimensions before update: {current_width}×{current_height}px")
+        logger.info(f"  Last edited field: {self._last_edited}")
+
         if self._using_aspect_ratio:
+            # Recalculate based on which field was last edited
+            # Force=True to ensure recalculation happens when aspect ratio changes
+            if self._last_edited == "width":
+                logger.debug(f"Recalculating from width: {current_width}px")
+                self._on_width_changed(current_width, force=True)
+            else:
+                logger.debug(f"Recalculating from height: {current_height}px")
+                self._on_height_changed(current_height, force=True)
             self._update_info_text()
             # Calculate suggested resolution based on aspect ratio
             self._update_suggested_resolution(ratio)
 
+    def _on_width_value_changed(self, value: int):
+        """Handle width spinbox value change signal."""
+        logger.info(f"WIDTH SPINBOX VALUE CHANGED: {value}px")
+        self._on_width_changed(value)
+
+    def _on_width_changed(self, value: int, force=False):
+        """When width changes, calculate height from aspect ratio."""
+        if not force and self._last_edited != "width":
+            return  # Avoid recursion
+
+        self._last_edited = "width"
+
+        # Calculate height based on aspect ratio
+        if ':' in self._aspect_ratio:
+            ar_parts = self._aspect_ratio.split(':')
+            ar_width = float(ar_parts[0])
+            ar_height = float(ar_parts[1])
+            calculated_height = int(value * ar_height / ar_width)
+
+            logger.info(f"Width changed: {value}px, AR {self._aspect_ratio} → calculating height: {value} × ({ar_height}/{ar_width}) = {calculated_height}px")
+
+            # Update height without triggering its handler
+            self.height_spin.blockSignals(True)
+            self.height_spin.setValue(calculated_height)
+            self.height_spin.blockSignals(False)
+
+            # Store calculated dimensions
+            self._custom_width = value
+            self._custom_height = calculated_height
+
+            # Log upscaling visibility check
+            if self.provider == "google" and (value > 1024 or calculated_height > 1024):
+                logger.debug(f"Upscaling recommended: {value}×{calculated_height} exceeds Google's 1024px limit")
+            elif self.provider == "openai" and (value > 1792 or calculated_height > 1792):
+                logger.debug(f"Upscaling required: {value}×{calculated_height} exceeds OpenAI's 1792px limit")
+        else:
+            self._custom_width = self._custom_height = value
+            logger.info(f"Width changed to {value}px for square aspect ratio (1:1)")
+
+        # Update display and trigger upscaling check
+        self._update_info_text()
+        self.resolutionChanged.emit("auto")
+        logger.debug(f"Final dimensions: {self._custom_width}×{self._custom_height}px")
+
+    def _on_height_value_changed(self, value: int):
+        """Handle height spinbox value change signal."""
+        logger.info(f"HEIGHT SPINBOX VALUE CHANGED: {value}px")
+        self._on_height_changed(value)
+
+    def _on_height_changed(self, value: int, force=False):
+        """When height changes, calculate width from aspect ratio."""
+        if not force and self._last_edited != "height":
+            return  # Avoid recursion
+
+        self._last_edited = "height"
+
+        # Calculate width based on aspect ratio
+        if ':' in self._aspect_ratio:
+            ar_parts = self._aspect_ratio.split(':')
+            ar_width = float(ar_parts[0])
+            ar_height = float(ar_parts[1])
+            calculated_width = int(value * ar_width / ar_height)
+
+            logger.info(f"Height changed: {value}px, AR {self._aspect_ratio} → calculating width: {value} × ({ar_width}/{ar_height}) = {calculated_width}px")
+
+            # Update width without triggering its handler
+            self.width_spin.blockSignals(True)
+            self.width_spin.setValue(calculated_width)
+            self.width_spin.blockSignals(False)
+
+            # Store calculated dimensions
+            self._custom_width = calculated_width
+            self._custom_height = value
+
+            # Log upscaling visibility check
+            if self.provider == "google" and (calculated_width > 1024 or value > 1024):
+                logger.debug(f"Upscaling recommended: {calculated_width}×{value} exceeds Google's 1024px limit")
+            elif self.provider == "openai" and (calculated_width > 1792 or value > 1792):
+                logger.debug(f"Upscaling required: {calculated_width}×{value} exceeds OpenAI's 1792px limit")
+        else:
+            self._custom_width = self._custom_height = value
+            logger.info(f"Height changed to {value}px for square aspect ratio (1:1)")
+
+        # Update display and trigger upscaling check
+        self._update_info_text()
+        self.resolutionChanged.emit("auto")
+        logger.debug(f"Final dimensions: {self._custom_width}×{self._custom_height}px")
+
+    def _on_width_edited(self):
+        """Mark width as the last edited field."""
+        self._last_edited = "width"
+
+    def _on_height_edited(self):
+        """Mark height as the last edited field."""
+        self._last_edited = "height"
+
+    def _reset_to_defaults(self):
+        """Reset to provider max resolution for current aspect ratio."""
+        max_res = self._get_provider_max()
+
+        # Calculate dimensions based on aspect ratio and provider max
+        if ':' in self._aspect_ratio:
+            ar_parts = self._aspect_ratio.split(':')
+            ar_width = float(ar_parts[0])
+            ar_height = float(ar_parts[1])
+
+            # Use max resolution as the limiting dimension
+            if ar_width >= ar_height:
+                # Landscape or square - width limited
+                self._last_edited = "width"
+                self.width_spin.setValue(max_res)
+                # Height will be calculated automatically
+            else:
+                # Portrait - height limited
+                self._last_edited = "height"
+                self.height_spin.setValue(max_res)
+                # Width will be calculated automatically
+        else:
+            # Square
+            self._last_edited = "width"
+            self.width_spin.setValue(max_res)
+
+    def _get_provider_max(self) -> int:
+        """Get maximum resolution for current provider."""
+        if self.provider == "google":
+            return 1024
+        elif self.provider == "openai":
+            return 1792
+        elif self.provider == "stability":
+            return 1536
+        else:
+            return 1024
+
+    def _initialize_dimensions(self):
+        """Initialize dimensions on startup."""
+        # Set initial dimensions based on width
+        self._custom_width = self.width_spin.value()
+        if ':' in self._aspect_ratio:
+            ar_parts = self._aspect_ratio.split(':')
+            ar_width = float(ar_parts[0])
+            ar_height = float(ar_parts[1])
+            self._custom_height = int(self._custom_width * ar_height / ar_width)
+            # Update height spinner
+            self.height_spin.blockSignals(True)
+            self.height_spin.setValue(self._custom_height)
+            self.height_spin.blockSignals(False)
+        else:
+            self._custom_height = self._custom_width
+
+        self._update_info_text()
+        # Emit signal to trigger initial upscaling check
+        self.resolutionChanged.emit("auto")
+
     def _on_size_changed(self):
-        """Handle width/height change."""
-        if hasattr(self, 'width_spin') and hasattr(self, 'height_spin'):
-            self._custom_width = self.width_spin.value()
-            self._custom_height = self.height_spin.value()
-            self._update_info_text()
-            if self._using_aspect_ratio:
-                self.resolutionChanged.emit("auto")
+        """Compatibility method for when called externally."""
+        # Just trigger based on last edited field
+        if self._last_edited == "width":
+            self._on_width_changed(self.width_spin.value())
+        else:
+            self._on_height_changed(self.height_spin.value())
 
     def _on_custom_resolution(self):
         """Handle custom resolution input."""
@@ -648,10 +849,12 @@ class ResolutionSelector(QWidget):
     def get_width_height(self) -> Tuple[Optional[int], Optional[int]]:
         """Get the width and height to use for generation."""
         if self._using_aspect_ratio:
-            # Return custom width/height if set
-            if hasattr(self, '_custom_width') and hasattr(self, '_custom_height'):
+            # Return custom width/height if they have valid values
+            if (hasattr(self, '_custom_width') and hasattr(self, '_custom_height')
+                and self._custom_width and self._custom_height):
                 return self._custom_width, self._custom_height
-            return None, None
+            # Fallback to default if not initialized
+            return 1024, 1024
         else:
             # Parse resolution from combo
             resolution = self.get_resolution()

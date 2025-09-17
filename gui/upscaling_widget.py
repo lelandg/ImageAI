@@ -162,10 +162,16 @@ class UpscalingSelector(QWidget):
             self.setVisible(needs_upscaling)
 
             if needs_upscaling:
+                # Determine provider name for clearer message
+                provider_info = f"provider maximum ({current_width}×{current_height})"
+                if current_width == 1024 and current_height == 1024:
+                    provider_info = f"Google's maximum (1024×1024)"
+                elif current_width <= 1792 and current_height <= 1792:
+                    provider_info = f"provider maximum ({current_width}×{current_height})"
+
                 self.info_label.setText(
                     f"Target resolution ({target_width}×{target_height}) exceeds "
-                    f"provider output ({current_width}×{current_height}). "
-                    f"Choose upscaling method:"
+                    f"{provider_info}. Choose upscaling method:"
                 )
         else:
             self.setVisible(False)
@@ -191,6 +197,30 @@ class UpscalingSelector(QWidget):
             settings["model_name"] = self.esrgan_model_combo.currentText()
 
         return settings
+
+    def set_settings(self, settings: dict):
+        """Set upscaling settings from saved config."""
+        if not settings:
+            return
+
+        method = settings.get("method", "lanczos")
+        method_map = {
+            "none": 0,
+            "lanczos": 1,
+            "realesrgan": 2,
+            "stability_api": 3
+        }
+
+        method_id = method_map.get(method, 1)
+        button = self.method_group.button(method_id)
+        if button and button.isEnabled():
+            button.setChecked(True)
+
+        # Set Real-ESRGAN model if applicable
+        if method == "realesrgan" and "model_name" in settings:
+            index = self.esrgan_model_combo.findText(settings["model_name"])
+            if index >= 0:
+                self.esrgan_model_combo.setCurrentIndex(index)
 
     def set_enabled_methods(self, lanczos=True, realesrgan=False, stability=False):
         """Enable/disable specific upscaling methods based on availability."""

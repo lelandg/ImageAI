@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QCheckBox, QTextEdit
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QTextDocument
 
 
@@ -17,12 +17,17 @@ class FindDialog(QDialog):
         self.current_match = 0
         self.matches = []
         self.match_length = 0  # Store the length of matched text
+        self.settings = QSettings("ImageAI", "FindDialog")
 
         self.setWindowTitle("Find")
         self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint)
         self.setMinimumWidth(400)
 
+        # Restore window geometry
+        self.restore_settings()
+
         self.init_ui()
+        self.restore_search_settings()
 
     def init_ui(self):
         """Initialize the UI."""
@@ -312,3 +317,29 @@ class FindDialog(QDialog):
                 self.find_next()
         else:
             super().keyPressEvent(event)
+
+    def save_settings(self):
+        """Save window geometry and search options."""
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("case_sensitive", self.case_sensitive_check.isChecked())
+        self.settings.setValue("whole_words", self.whole_words_check.isChecked())
+        self.settings.setValue("last_search", self.search_input.text())
+
+    def restore_settings(self):
+        """Restore window geometry."""
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
+    def restore_search_settings(self):
+        """Restore search options."""
+        self.case_sensitive_check.setChecked(self.settings.value("case_sensitive", False, type=bool))
+        self.whole_words_check.setChecked(self.settings.value("whole_words", False, type=bool))
+        last_search = self.settings.value("last_search", "")
+        if last_search:
+            self.search_input.setText(last_search)
+
+    def closeEvent(self, event):
+        """Handle close event."""
+        self.save_settings()
+        super().closeEvent(event)
