@@ -2910,6 +2910,8 @@ For more detailed information, please refer to the full documentation.
         # Update upscaling visibility
         self._update_upscaling_visibility()
         self._update_cost_estimate()
+        # Update the "Will insert" preview to show resolution
+        self._update_ref_instruction_preview()
     
     def _on_resolution_changed(self, resolution: str):
         """Handle resolution change."""
@@ -2923,6 +2925,8 @@ For more detailed information, please refer to the full documentation.
                 self.config.save()
         self._update_cost_estimate()
         self._update_upscaling_visibility()
+        # Update the "Will insert" preview to show resolution
+        self._update_ref_instruction_preview()
     
     def _on_resolution_mode_changed(self, mode: str):
         """Handle resolution mode change (aspect_ratio vs resolution)."""
@@ -3455,6 +3459,9 @@ For more detailed information, please refer to the full documentation.
             QMessageBox.warning(self, APP_NAME, "Please enter a prompt.")
             return
 
+        # Store original prompt (before reference image modifications)
+        original_prompt = prompt
+
         if not self.current_api_key and self.current_provider != "local_sd":
             self._append_to_console("ERROR: No API key configured", "#ff6666")  # Red
             QMessageBox.warning(self, APP_NAME, "Please set an API key in Settings.")
@@ -3511,20 +3518,38 @@ For more detailed information, please refer to the full documentation.
                             if width and height:
                                 self.target_resolution = (width, height)
                     else:
-                        # For Google, get custom width/height if specified
+                        # For Google, ALWAYS get width/height for any aspect ratio
+                        # This ensures dimensions are sent when resolution != 1024x1024
+                        width = height = None
                         if hasattr(self.resolution_selector, 'get_width_height'):
                             width, height = self.resolution_selector.get_width_height()
-                            if width:
-                                kwargs['width'] = width
-                            if height:
-                                kwargs['height'] = height
-                        else:
-                            # Fallback to calculated resolution
-                            resolution = self.resolution_selector.get_resolution()
+
+                        # If no width/height from selector, calculate from aspect ratio
+                        if not width or not height:
+                            # Try to get resolution from selector
+                            resolution = self.resolution_selector.get_resolution() if hasattr(self.resolution_selector, 'get_resolution') else None
                             if resolution and 'x' in resolution:
                                 width, height = map(int, resolution.split('x'))
-                                kwargs['width'] = width
-                                kwargs['height'] = height
+                            elif aspect_ratio:
+                                # Calculate dimensions based on aspect ratio
+                                if aspect_ratio == '16:9':
+                                    width, height = 1024, 576
+                                elif aspect_ratio == '9:16':
+                                    width, height = 576, 1024
+                                elif aspect_ratio == '4:3':
+                                    width, height = 1024, 768
+                                elif aspect_ratio == '3:4':
+                                    width, height = 768, 1024
+                                elif aspect_ratio == '21:9':
+                                    width, height = 1024, 439
+                                else:
+                                    width, height = 1024, 1024
+
+                        # Always pass dimensions for Google
+                        if width:
+                            kwargs['width'] = width
+                        if height:
+                            kwargs['height'] = height
             else:
                 # Using explicit resolution mode
                 width = height = None
@@ -3634,12 +3659,22 @@ For more detailed information, please refer to the full documentation.
             if 'width' in kwargs and 'height' in kwargs:
                 resolution_text = f" (Image will be {kwargs['width']}x{kwargs['height']}, scale to fit.)"
 
-            # Build instruction and prepend to prompt
+            # Build instruction and prepend to prompt for generation only
             instruction = f"{', '.join(instruction_parts)}.{resolution_text}"
+            # Create modified prompt for generation (original_prompt already stored)
             prompt = f"{instruction} {prompt}"
 
             self._append_to_console(f"Using reference image: {self.reference_image_path.name if self.reference_image_path else 'Unknown'}", "#66ccff")
             self._append_to_console(f"Auto-inserted: \"{instruction}\"", "#9966ff")
+        else:
+            # No reference image, but check if we need to add resolution info
+            if 'width' in kwargs and 'height' in kwargs:
+                width = kwargs['width']
+                height = kwargs['height']
+                if width != 1024 or height != 1024:
+                    resolution_text = f"(Image will be {width}x{height}, scale to fit.)"
+                    prompt = f"{resolution_text} {prompt}"
+                    self._append_to_console(f"Auto-inserted: \"{resolution_text}\"", "#9966ff")
 
         # Show status for provider loading
         self.status_bar.showMessage(f"Connecting to {self.current_provider}...")
@@ -3673,7 +3708,8 @@ For more detailed information, please refer to the full documentation.
 
         # Start generation
         self.gen_thread.start()
-        self.current_prompt = prompt
+        # Save the original prompt (not the modified one with reference image instructions)
+        self.current_prompt = original_prompt
         self.current_model = model
     
     def _get_resolution_for_aspect_ratio(self, aspect_ratio: str, provider: str) -> str:
@@ -5091,8 +5127,20 @@ For more detailed information, please refer to the full documentation.
         if not hasattr(self, 'ref_instruction_label'):
             return
 
+        # Get resolution if available (show this even without reference image)
+        resolution_text = ""
+        if hasattr(self, 'resolution_selector') and self.resolution_selector:
+            if hasattr(self.resolution_selector, 'get_width_height'):
+                width, height = self.resolution_selector.get_width_height()
+                if width and height and (width != 1024 or height != 1024):
+                    resolution_text = f"(Image will be {width}x{height}, scale to fit.)"
+
         if not self.reference_image_path or not self.ref_image_enabled.isChecked():
-            self.ref_instruction_label.setText("Will insert: [nothing]")
+            # Show resolution info even without reference image
+            if resolution_text:
+                self.ref_instruction_label.setText(f"Will insert: \"{resolution_text}\"")
+            else:
+                self.ref_instruction_label.setText("Will insert: [nothing]")
             return
 
         # Get selected style and position
@@ -5124,13 +5172,9 @@ For more detailed information, please refer to the full documentation.
         if style in style_map:
             instruction_parts.append(style_map[style])
 
-        # Get resolution if available
-        resolution_text = ""
-        if hasattr(self, 'resolution_selector') and self.resolution_selector:
-            if hasattr(self.resolution_selector, 'get_width_height'):
-                width, height = self.resolution_selector.get_width_height()
-                if width and height:
-                    resolution_text = f" (Image will be {width}x{height}, scale to fit.)"
+        # Resolution text is already computed above, add space if needed
+        if resolution_text and not resolution_text.startswith(" "):
+            resolution_text = f" {resolution_text}"
 
         # Combine the instruction
         instruction = f"{', '.join(instruction_parts)}.{resolution_text}"

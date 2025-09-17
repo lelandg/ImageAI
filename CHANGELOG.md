@@ -5,6 +5,49 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2025-01-17
+
+### Added
+- **AI-Powered Upscaling** (Local and Free)
+  - Integrated Real-ESRGAN for high-quality image upscaling
+  - Support for multiple upscaling models (RealESRGAN_x4plus, RealESRGAN_x4plus_anime_6B, etc.)
+  - Automatic model download and management
+  - Works with images of any size - no provider limitations
+  - Seamless integration with generation workflow
+  - Upscaling indicator shows when dimensions exceed provider limits
+- **Enhanced Prompt Tools**
+  - Improved prompt enhancement dialog with better LLM integration
+  - Enhanced prompt question dialog with status console
+  - Better error handling and fallback mechanisms
+  - Comprehensive logging of all LLM interactions
+- **Improved Search Functionality**
+  - Enhanced find dialog with better text highlighting
+  - Proper case-sensitive and whole-word search support
+  - Keyboard shortcuts (Ctrl+F, F3, Shift+F3)
+- **Help Tab Improvements**
+  - Better navigation with screenshot gallery
+  - Improved markdown rendering
+  - Fixed back/forward navigation between documents
+- **Image Cropping Dialog**
+  - New image crop functionality
+  - Support for social media sizes
+  - Visual preview of crop area
+- **Discord Integration**
+  - Added Discord server information
+  - Community support links
+
+### Changed
+- Improved settings widgets with better organization
+- Enhanced status console logging across all dialogs
+- Better error messages and user feedback
+- Updated documentation with reference images
+
+### Fixed
+- Fixed AI upscaling dependencies and runtime installation
+- Improved LLM response parsing with robust JSON extraction
+- Better handling of empty LLM responses
+- Fixed various UI consistency issues
+
 ## [0.16.2] - 2025-01-16
 
 ### Fixed

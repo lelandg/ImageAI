@@ -1,11 +1,15 @@
 # ImageAI — Advanced AI Image Generation
 
-**Version 0.16.2**
+### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-##### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff. Under construction. Implementing social links soon. 
-##### Discord server for **The Intersection of Art and AI** [Discord](https://discord.gg/a64xRg9w)
+**Version 0.17.0**
 
-#### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
+**See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
+- **LelandGreen.com on Discord - The Intersection of Art and AI [Discord](https://discord.gg/a64xRg9w)**
+- **Facebook Page: [Leland Green Productions](https://www.facebook.com/LelandGreenProductions)**
+- **Facebook Group: [The Intersection of Art and AI Community](https://www.facebook.com/groups/4047864425428695)**
+ 
+#### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Code, Codex. With Google auth guidance from Gemini CLI.
 ###### Enterprise-ready with multiple authentication methods and provider support  
 
 ## Overview
@@ -1524,7 +1528,16 @@ See LICENSE file for details.
 For issues, feature requests, or questions:
 - GitHub Issues: [Create an issue](https://github.com/lelandg/ImageAI/issues)
 - Support: contact@lelandgreen.com
-- Discord: https://discord.gg/a64xRg9w
+- **LelandGreen.com on Discord -- The Intersection of Art and AI** [Discord](https://discord.gg/a64xRg9w)
+- Fun stuff:
+    - Original Boogie Woogie! [Leland Green's Boogie Woogie (HQ) on SoundCloud](https://soundcloud.com/aboogieman/leland-greens-boogie-woogie-hq)
+    - [Leland's Old Art](https://www.flickr.com/photos/lelandgreen/albums/72177720314118018)
+    - Art Gallery: [Art by Leland](https://www.flickr.com/photos/lelandgreen/albums/72157643063177694/)
+- Fun stuff:
+  - [Leland Green's Boogie Woogie (HQ) on SoundCloud](https://soundcloud.- com/aboogieman/leland-greens-boogie-woogie-hq)
+  - Old art 
+ 
 ---
 
 **Happy Creating!** 🎨
+

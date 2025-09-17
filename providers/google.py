@@ -274,33 +274,65 @@ class GoogleProvider(ImageProvider):
         original_width = width
         original_height = height
 
-        # For Gemini, scale down if either dimension > 1024
+        # For Gemini, scale to optimal size (1024px) if dimensions are too large OR too small
         # per CLAUDE.md: "For gemini, if either resolution is greater than 1024, scale proportionally so max is 1024"
+        # NEW: Also scale up if max dimension is less than 1024 for better quality
         if width and height:
-            if width > 1024 or height > 1024:
+            max_dim = max(width, height)
+            if max_dim != 1024:  # Scale if not already at optimal size
                 # Scale proportionally so max dimension is 1024
-                scale_factor = 1024 / max(width, height)
+                scale_factor = 1024 / max_dim
                 scaled_width = int(width * scale_factor)
                 scaled_height = int(height * scale_factor)
-                logger.info(f"Scaling down for Gemini: {width}x{height} -> {scaled_width}x{scaled_height} (factor: {scale_factor:.3f})")
+
+                if max_dim > 1024:
+                    logger.info(f"Scaling down for Gemini: {width}x{height} -> {scaled_width}x{scaled_height} (factor: {scale_factor:.3f})")
+                else:
+                    logger.info(f"Scaling up for Gemini: {width}x{height} -> {scaled_width}x{scaled_height} (factor: {scale_factor:.3f})")
+
                 width = scaled_width
                 height = scaled_height
-                # Store that we need to upscale later
-                kwargs['_needs_upscale'] = True
+                # Store that we need to scale back later
+                kwargs['_needs_upscale'] = True if max_dim > 1024 else False
+                kwargs['_needs_downscale'] = True if max_dim < 1024 else False
                 kwargs['_target_width'] = original_width
                 kwargs['_target_height'] = original_height
 
-        # For Gemini, add dimensions in parentheses for non-square aspect ratios
-        # per CLAUDE.md: "for all gemini image ratios besides 1:1, send ratio. E.g. LLM prompt like 'brief prompt description (1024x768)'"
-        if aspect_ratio and aspect_ratio != "1:1" and width and height:
-            # Add dimensions in parentheses at end of prompt
-            prompt_with_dims = f"{prompt} ({width}x{height})"
-            logger.info(f"Sending to Gemini with aspect ratio {aspect_ratio}: prompt ends with '({width}x{height})'")
-            logger.info(f"Full prompt: {prompt_with_dims}")
-            prompt = prompt_with_dims
-        elif width and height:
-            # Log even for square images
-            logger.info(f"Sending to Gemini with square aspect (1:1): {width}x{height} - no dimensions added to prompt")
+        # For Gemini, add dimensions in parentheses when not using default 1024x1024
+        # per CLAUDE.md: "when resolution is <> 1024x1024 and google is provider, always use resolution"
+        if width and height:
+            # Check if it's not the default 1024x1024
+            if width != 1024 or height != 1024:
+                # Add dimensions in parentheses at end of prompt
+                prompt_with_dims = f"{prompt} ({width}x{height})"
+                logger.info(f"Sending to Gemini with custom resolution: prompt ends with '({width}x{height})'")
+                logger.info(f"Full prompt: {prompt_with_dims}")
+                prompt = prompt_with_dims
+            else:
+                # For default 1024x1024, don't add dimensions to prompt
+                logger.info(f"Sending to Gemini with default resolution 1024x1024 - no dimensions added to prompt")
+        elif aspect_ratio and aspect_ratio != "1:1":
+            # If we have aspect ratio but no dimensions, calculate default dimensions for common ratios
+            # This ensures we always send dimensions for non-square images
+            if aspect_ratio == '16:9':
+                width, height = 1024, 576
+            elif aspect_ratio == '9:16':
+                width, height = 576, 1024
+            elif aspect_ratio == '4:3':
+                width, height = 1024, 768
+            elif aspect_ratio == '3:4':
+                width, height = 768, 1024
+            elif aspect_ratio == '21:9':
+                width, height = 1024, 439
+            else:
+                # Default fallback
+                width, height = 1024, 1024
+
+            if width != 1024 or height != 1024:
+                prompt_with_dims = f"{prompt} ({width}x{height})"
+                logger.info(f"Sending to Gemini with aspect ratio {aspect_ratio}: prompt ends with '({width}x{height})'")
+                logger.info(f"Full prompt: {prompt_with_dims}")
+                prompt = prompt_with_dims
         else:
             logger.info(f"Sending to Gemini with default resolution (no dimensions specified)")
 
@@ -391,12 +423,16 @@ class GoogleProvider(ImageProvider):
                                 if isinstance(data, (bytes, bytearray)):
                                     image_bytes = bytes(data)
 
-                                    # Handle upscaling back to original dimensions if we scaled down for Gemini
-                                    if kwargs.get('_needs_upscale'):
+                                    # Handle scaling back to original dimensions if we scaled for Gemini
+                                    if kwargs.get('_needs_upscale') or kwargs.get('_needs_downscale'):
                                         target_w = kwargs.get('_target_width')
                                         target_h = kwargs.get('_target_height')
                                         if target_w and target_h:
-                                            logger.info(f"Upscaling Gemini output back to target: {target_w}x{target_h}")
+                                            if kwargs.get('_needs_upscale'):
+                                                logger.info(f"Upscaling Gemini output back to target: {target_w}x{target_h}")
+                                            else:
+                                                logger.info(f"Downscaling Gemini output back to target: {target_w}x{target_h}")
+
                                             from PIL import Image
                                             import io
 
@@ -419,9 +455,16 @@ class GoogleProvider(ImageProvider):
                                                     img = img.crop((crop_left, 0, crop_left + new_w, current_h))
                                                 logger.debug(f"Cropped to aspect ratio: {img.size}")
 
-                                            # Now upscale to target dimensions
+                                            # Now scale to target dimensions
                                             img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                                            logger.info(f"Upscaled to final size: {target_w}x{target_h}")
+                                            if kwargs.get('_needs_upscale'):
+                                                logger.info(f"Upscaled to final size: {target_w}x{target_h}")
+                                            else:
+                                                logger.info(f"Downscaled to final size: {target_w}x{target_h}")
+                                                # Apply subtle sharpening for downscaled images to enhance detail
+                                                from PIL import ImageFilter
+                                                img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=100, threshold=3))
+                                                logger.info(f"Applied sharpness enhancement after downscaling")
 
                                             # Convert back to bytes
                                             output = io.BytesIO()
@@ -453,12 +496,16 @@ class GoogleProvider(ImageProvider):
                                 if isinstance(data, (bytes, bytearray)):
                                     image_bytes = bytes(data)
 
-                                    # Handle upscaling back to original dimensions if we scaled down for Gemini
-                                    if kwargs.get('_needs_upscale'):
+                                    # Handle scaling back to original dimensions if we scaled for Gemini
+                                    if kwargs.get('_needs_upscale') or kwargs.get('_needs_downscale'):
                                         target_w = kwargs.get('_target_width')
                                         target_h = kwargs.get('_target_height')
                                         if target_w and target_h:
-                                            logger.info(f"Upscaling Gemini output back to target: {target_w}x{target_h}")
+                                            if kwargs.get('_needs_upscale'):
+                                                logger.info(f"Upscaling Gemini output back to target: {target_w}x{target_h}")
+                                            else:
+                                                logger.info(f"Downscaling Gemini output back to target: {target_w}x{target_h}")
+
                                             from PIL import Image
                                             import io
 
@@ -481,9 +528,16 @@ class GoogleProvider(ImageProvider):
                                                     img = img.crop((crop_left, 0, crop_left + new_w, current_h))
                                                 logger.debug(f"Cropped to aspect ratio: {img.size}")
 
-                                            # Now upscale to target dimensions
+                                            # Now scale to target dimensions
                                             img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                                            logger.info(f"Upscaled to final size: {target_w}x{target_h}")
+                                            if kwargs.get('_needs_upscale'):
+                                                logger.info(f"Upscaled to final size: {target_w}x{target_h}")
+                                            else:
+                                                logger.info(f"Downscaled to final size: {target_w}x{target_h}")
+                                                # Apply subtle sharpening for downscaled images to enhance detail
+                                                from PIL import ImageFilter
+                                                img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=100, threshold=3))
+                                                logger.info(f"Applied sharpness enhancement after downscaling")
 
                                             # Convert back to bytes
                                             output = io.BytesIO()
