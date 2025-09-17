@@ -2,7 +2,9 @@
 
 **Version 0.16.2**
 
-###### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff.
+##### See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff. Under construction. Implementing social links soon. 
+##### Discord server for **The Intersection of Art and AI** [Discord](https://discord.gg/a64xRg9w)
+
 #### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Codex. With Google auth guidance from Gemini CLI.
 ###### Enterprise-ready with multiple authentication methods and provider support  
 
@@ -67,6 +69,14 @@
 - Responsive layout with resizable panels
 
 ### 🎯 Advanced Generation Controls
+
+- **Reference Image Support** - Start with an existing image (provider-dependent):
+    - Select reference image from file
+    - Enable/disable reference with checkbox
+    - Clear reference with one click
+    - Thumbnail preview of selected image
+    - Provider-optimized reference handling
+    - Automatic prompt enhancement with reference context
 - **Enhanced Aspect Ratio Selector** - Interactive preview rectangles with custom input support:
   - Visual preset buttons for common ratios (1:1, 3:4, 4:3, 16:9, 9:16, 21:9)
   - **Custom aspect ratio input** - Enter any ratio like "16:10" or decimal "1.6"
@@ -123,7 +133,12 @@
 - Preview scaling with aspect ratio preservation
 
 ### 🤖 LLM Integration (NEW!)
-- **Global LLM Provider Selection** - Unified provider across Image and Video tabs
+
+- **Global LLM Provider Selection** - Unified provider and model selection across tabs:
+    - Provider dropdown syncs between Image and Video tabs
+    - Model list updates automatically per provider
+    - Remembers selections between sessions
+    - Project-specific provider settings
 - **Multi-Provider Support** - OpenAI GPT-5, Claude, Gemini, Ollama, LM Studio
   - **GPT-5 Model Support** - `gpt-5-chat-latest` (auto-updating to newest version)
   - Correctly uses `max_completion_tokens` parameter for GPT-5 and GPT-4+ models
@@ -146,6 +161,13 @@
 - **Smart Model Detection** - Automatically populates available models per provider
 
 ### 💻 Enhanced UI Features (NEW!)
+
+- **Reference Image Panel** - UI controls for starting with reference images:
+    - File selection dialog
+    - Reference image thumbnail
+    - Enable/disable checkbox
+    - Clear button
+    - Provider compatibility indicators
 - **Status Bar** - Real-time status messages and provider connection feedback
 - **Console Output Window** - Terminal-style log with color-coded messages:
   - Timestamp for each operation
@@ -1501,8 +1523,8 @@ See LICENSE file for details.
 
 For issues, feature requests, or questions:
 - GitHub Issues: [Create an issue](https://github.com/lelandg/ImageAI/issues)
-- Email: support@lelandgreen.com
-
+- Support: contact@lelandgreen.com
+- Discord: https://discord.gg/a64xRg9w
 ---
 
 **Happy Creating!** 🎨
