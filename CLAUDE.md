@@ -186,3 +186,4 @@ When the code map needs updating:
 - for all gemini image ratios besides 1:1, send ratio. E.g. LLM prompt like "brief prompt description (1024x768)
 - For gemini, if either resolution is greater than 1024, scale proportionally so max is 1024, then send that (1024x{n}) resolution to gemini. Then when it comes back, auto-crop and scale proportionally with users selected method
 - Always log what resolution, if any, is sent
+- to send upscale resolution to google always scale numbers proportioanally so largest is 1024

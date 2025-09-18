@@ -3657,7 +3657,21 @@ For more detailed information, please refer to the full documentation.
             # Get resolution if available
             resolution_text = ""
             if 'width' in kwargs and 'height' in kwargs:
-                resolution_text = f" (Image will be {kwargs['width']}x{kwargs['height']}, scale to fit.)"
+                width = kwargs['width']
+                height = kwargs['height']
+
+                # If using Google provider and resolution > 1024, calculate scaled dimensions
+                if self.current_provider == 'google':
+                    max_dim = max(width, height)
+                    if max_dim > 1024:
+                        scale_factor = 1024 / max_dim
+                        scaled_width = int(width * scale_factor)
+                        scaled_height = int(height * scale_factor)
+                        resolution_text = f" (Image will be {scaled_width}x{scaled_height}, scale to fit.)"
+                    else:
+                        resolution_text = f" (Image will be {width}x{height}, scale to fit.)"
+                else:
+                    resolution_text = f" (Image will be {width}x{height}, scale to fit.)"
 
             # Build instruction and prepend to prompt for generation only
             instruction = f"{', '.join(instruction_parts)}.{resolution_text}"
@@ -3672,7 +3686,18 @@ For more detailed information, please refer to the full documentation.
                 width = kwargs['width']
                 height = kwargs['height']
                 if width != 1024 or height != 1024:
-                    resolution_text = f"(Image will be {width}x{height}, scale to fit.)"
+                    # If using Google provider and resolution > 1024, calculate scaled dimensions
+                    if self.current_provider == 'google':
+                        max_dim = max(width, height)
+                        if max_dim > 1024:
+                            scale_factor = 1024 / max_dim
+                            scaled_width = int(width * scale_factor)
+                            scaled_height = int(height * scale_factor)
+                            resolution_text = f"(Image will be {scaled_width}x{scaled_height}, scale to fit.)"
+                        else:
+                            resolution_text = f"(Image will be {width}x{height}, scale to fit.)"
+                    else:
+                        resolution_text = f"(Image will be {width}x{height}, scale to fit.)"
                     prompt = f"{resolution_text} {prompt}"
                     self._append_to_console(f"Auto-inserted: \"{resolution_text}\"", "#9966ff")
 
@@ -5133,7 +5158,18 @@ For more detailed information, please refer to the full documentation.
             if hasattr(self.resolution_selector, 'get_width_height'):
                 width, height = self.resolution_selector.get_width_height()
                 if width and height and (width != 1024 or height != 1024):
-                    resolution_text = f"(Image will be {width}x{height}, scale to fit.)"
+                    # If using Google provider and resolution > 1024, calculate scaled dimensions
+                    if self.current_provider == 'google':
+                        max_dim = max(width, height)
+                        if max_dim > 1024:
+                            scale_factor = 1024 / max_dim
+                            scaled_width = int(width * scale_factor)
+                            scaled_height = int(height * scale_factor)
+                            resolution_text = f"(Image will be {scaled_width}x{scaled_height}, scale to fit.)"
+                        else:
+                            resolution_text = f"(Image will be {width}x{height}, scale to fit.)"
+                    else:
+                        resolution_text = f"(Image will be {width}x{height}, scale to fit.)"
 
         if not self.reference_image_path or not self.ref_image_enabled.isChecked():
             # Show resolution info even without reference image
