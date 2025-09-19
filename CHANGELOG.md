@@ -5,6 +5,36 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.2] - 2025-01-18
+
+### Changed
+- **Google Provider Resolution Handling**: Improved resolution scaling for Gemini API
+  - Now correctly scales resolutions proportionally when either dimension exceeds 1024px
+  - Maintains aspect ratio when scaling down for API compatibility
+  - Automatically scales back up to requested dimensions after generation
+  - Added comprehensive logging of resolution transformations
+
+### Fixed
+- **Resolution Scaling Logic**: Fixed issue where only width was checked for >1024px threshold
+  - Now properly checks both width and height dimensions
+  - Ensures consistent scaling regardless of orientation (portrait/landscape)
+
+## [0.18.1] - 2025-09-18
+
+### Fixed
+- **Google Provider Resolution Bug**: Fixed issue where images with max dimension exactly 1024px (e.g., 1024×576) were not being post-processed to match requested dimensions
+  - Now correctly stores target dimensions for all requests
+  - Post-processes any Gemini output that doesn't match requested size
+  - Ensures consistent aspect ratio handling regardless of scale factor
+
+## [0.18.0] - 2025-09-17
+
+### Changed
+- **Google Provider Resolution Handling**: Enhanced to proportionally scale image resolutions to max 1024px
+  - Automatically scales down larger resolutions for Gemini API compatibility
+  - Scales back up to original requested dimensions after generation
+  - Maintains aspect ratio throughout the process
+
 ## [0.17.0] - 2025-01-17
 
 ### Added

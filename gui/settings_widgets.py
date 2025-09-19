@@ -806,8 +806,8 @@ class ResolutionSelector(QWidget):
             else:  # Square-ish
                 return "1024×1024"
         elif self.provider == "google":
-            # Google only supports square for now
-            return "1024×1024"
+            # Return actual dimensions from width/height spinboxes
+            return f"{self.width_spin.value()}×{self.height_spin.value()}"
         else:  # stability and others
             if ar > 1.3:  # Landscape
                 return "1152×896"
@@ -845,6 +845,10 @@ class ResolutionSelector(QWidget):
     def is_using_aspect_ratio(self) -> bool:
         """Check if using aspect ratio mode."""
         return self._using_aspect_ratio
+
+    def get_aspect_ratio(self) -> str:
+        """Get the current aspect ratio value."""
+        return self._aspect_ratio
 
     def get_width_height(self) -> Tuple[Optional[int], Optional[int]]:
         """Get the width and height to use for generation."""

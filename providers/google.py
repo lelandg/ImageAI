@@ -278,6 +278,10 @@ class GoogleProvider(ImageProvider):
         # per CLAUDE.md: "For gemini, if either resolution is greater than 1024, scale proportionally so max is 1024"
         # NEW: Also scale up if max dimension is less than 1024 for better quality
         if width and height:
+            # Always store original target dimensions for post-processing
+            kwargs['_target_width'] = original_width
+            kwargs['_target_height'] = original_height
+
             max_dim = max(width, height)
             if max_dim != 1024:  # Scale if not already at optimal size
                 # Scale proportionally so max dimension is 1024
@@ -295,22 +299,18 @@ class GoogleProvider(ImageProvider):
                 # Store that we need to scale back later
                 kwargs['_needs_upscale'] = True if max_dim > 1024 else False
                 kwargs['_needs_downscale'] = True if max_dim < 1024 else False
-                kwargs['_target_width'] = original_width
-                kwargs['_target_height'] = original_height
 
-        # For Gemini, add dimensions in parentheses when not using default 1024x1024
-        # per CLAUDE.md: "when resolution is <> 1024x1024 and google is provider, always use resolution"
-        if width and height:
-            # Check if it's not the default 1024x1024
-            if width != 1024 or height != 1024:
-                # Add dimensions in parentheses at end of prompt
-                prompt_with_dims = f"{prompt} ({width}x{height})"
-                logger.info(f"Sending to Gemini with custom resolution: prompt ends with '({width}x{height})'")
-                logger.info(f"Full prompt: {prompt_with_dims}")
-                prompt = prompt_with_dims
-            else:
-                # For default 1024x1024, don't add dimensions to prompt
-                logger.info(f"Sending to Gemini with default resolution 1024x1024 - no dimensions added to prompt")
+        # For Gemini, add dimensions in parentheses for non-square aspect ratios
+        # per CLAUDE.md: "for all gemini image ratios besides 1:1, send ratio. E.g. LLM prompt like 'brief prompt description (1024x768)'"
+        if aspect_ratio and aspect_ratio != "1:1" and width and height:
+            # Use dimension format as specified in CLAUDE.md
+            prompt_with_dims = f"{prompt} ({width}x{height})"
+            logger.info(f"Sending to Gemini with aspect ratio {aspect_ratio}: dimensions ({width}x{height})")
+            logger.info(f"Full prompt: {prompt_with_dims}")
+            prompt = prompt_with_dims
+        elif width and height:
+            # Log even for square images
+            logger.info(f"Sending to Gemini with square aspect (1:1): {width}x{height} - no dimensions added to prompt")
         elif aspect_ratio and aspect_ratio != "1:1":
             # If we have aspect ratio but no dimensions, calculate default dimensions for common ratios
             # This ensures we always send dimensions for non-square images
@@ -328,11 +328,11 @@ class GoogleProvider(ImageProvider):
                 # Default fallback
                 width, height = 1024, 1024
 
-            if width != 1024 or height != 1024:
-                prompt_with_dims = f"{prompt} ({width}x{height})"
-                logger.info(f"Sending to Gemini with aspect ratio {aspect_ratio}: prompt ends with '({width}x{height})'")
-                logger.info(f"Full prompt: {prompt_with_dims}")
-                prompt = prompt_with_dims
+            # Use dimension format as specified in CLAUDE.md
+            prompt_with_dims = f"{prompt} ({width}x{height})"
+            logger.info(f"Sending to Gemini with aspect ratio {aspect_ratio}: dimensions ({width}x{height})")
+            logger.info(f"Full prompt: {prompt_with_dims}")
+            prompt = prompt_with_dims
         else:
             logger.info(f"Sending to Gemini with default resolution (no dimensions specified)")
 
@@ -372,6 +372,28 @@ class GoogleProvider(ImageProvider):
                     img = Image.open(io.BytesIO(reference_image))
                 else:
                     img = reference_image
+
+                # Check for aspect ratio mismatch with reference image
+                if hasattr(img, 'size'):
+                    ref_width, ref_height = img.size
+                    ref_aspect = ref_width / ref_height
+
+                    # Calculate expected aspect ratio
+                    expected_aspect = 1.0
+                    if aspect_ratio and ':' in aspect_ratio:
+                        ar_parts = aspect_ratio.split(':')
+                        expected_aspect = float(ar_parts[0]) / float(ar_parts[1])
+                    elif width and height:
+                        expected_aspect = width / height
+
+                    # Check if there's a significant mismatch (more than 10% difference)
+                    if abs(ref_aspect - expected_aspect) > 0.1:
+                        ar_display = aspect_ratio if aspect_ratio else f"{width}:{height}"
+                        logger.warning(f"⚠️ ASPECT RATIO MISMATCH: Reference image is {ref_width}x{ref_height} "
+                                     f"(aspect {ref_aspect:.2f}) but requesting {ar_display} "
+                                     f"(aspect {expected_aspect:.2f}). Gemini will likely follow the reference image aspect ratio.")
+                        logger.warning("Per Gemini Nano Banana Guide: 'the aspect ratio of any reference images "
+                                     "you use will influence the final output'")
 
                 # Create content list with image and prompt
                 contents = [img, prompt]
@@ -413,68 +435,129 @@ class GoogleProvider(ImageProvider):
             
             if response and response.candidates:
                 # Process all candidates (for multiple images)
-                for cand in response.candidates:
+                logger.info(f"DEBUG: Response has {len(response.candidates)} candidates")
+                for cand_idx, cand in enumerate(response.candidates):
                     if getattr(cand, "content", None) and getattr(cand.content, "parts", None):
-                        for part in cand.content.parts:
+                        logger.info(f"DEBUG: Candidate {cand_idx} has {len(cand.content.parts)} parts")
+                        for part_idx, part in enumerate(cand.content.parts):
                             if getattr(part, "text", None):
+                                logger.info(f"DEBUG: Part {part_idx} is text: {part.text[:100]}...")
                                 texts.append(part.text)
                             elif getattr(part, "inline_data", None) is not None:
+                                logger.info(f"DEBUG: Part {part_idx} is inline_data (image)")
                                 data = getattr(part.inline_data, "data", None)
                                 if isinstance(data, (bytes, bytearray)):
                                     image_bytes = bytes(data)
+                                    logger.info(f"DEBUG: Got image data of {len(image_bytes)} bytes")
 
-                                    # Handle scaling back to original dimensions if we scaled for Gemini
-                                    if kwargs.get('_needs_upscale') or kwargs.get('_needs_downscale'):
-                                        target_w = kwargs.get('_target_width')
-                                        target_h = kwargs.get('_target_height')
-                                        if target_w and target_h:
-                                            if kwargs.get('_needs_upscale'):
-                                                logger.info(f"Upscaling Gemini output back to target: {target_w}x{target_h}")
-                                            else:
-                                                logger.info(f"Downscaling Gemini output back to target: {target_w}x{target_h}")
+                                    # Debug: Check what we actually got from Gemini
+                                    from PIL import Image
+                                    import io
+                                    import time
+                                    from pathlib import Path
+                                    import platform
 
-                                            from PIL import Image
-                                            import io
+                                    # Detect original image format
+                                    img_stream = io.BytesIO(image_bytes)
+                                    debug_img = Image.open(img_stream)
+                                    original_format = debug_img.format or 'PNG'  # Default to PNG if format not detected
+                                    logger.info(f"DEBUG: Gemini returned {original_format} image with dimensions: {debug_img.size}")
 
-                                            # Open the image
-                                            img = Image.open(io.BytesIO(image_bytes))
-                                            current_w, current_h = img.size
-                                            logger.debug(f"Current Gemini output size: {current_w}x{current_h}")
+                                    # Save raw Gemini output for debugging
+                                    if platform.system() == "Windows":
+                                        debug_dir = Path("C:/Users/aboog/AppData/Roaming/ImageAI/generated")
+                                    else:
+                                        debug_dir = Path.home() / ".config" / "ImageAI" / "generated"
 
-                                            # First crop to aspect ratio if needed (Gemini outputs square)
-                                            if width and height and width != height:
-                                                # Crop the square output to the scaled aspect ratio
-                                                aspect = width / height
-                                                if aspect > 1:  # Landscape
-                                                    new_h = int(current_w / aspect)
+                                    # Save in original format
+                                    ext = original_format.lower()
+                                    if ext == 'jpeg':
+                                        ext = 'jpg'
+                                    debug_path = debug_dir / f"DEBUG_RAW_GEMINI_{int(time.time())}.{ext}"
+                                    debug_dir.mkdir(parents=True, exist_ok=True)
+                                    debug_img.save(str(debug_path), format=original_format)
+                                    logger.info(f"DEBUG: Saved raw Gemini output to: {debug_path}")
+                                    debug_img = None  # Clear to avoid confusion
+
+                                    # Handle scaling back to original dimensions if we have target dimensions
+                                    target_w = kwargs.get('_target_width')
+                                    target_h = kwargs.get('_target_height')
+                                    if target_w and target_h:
+                                        # Check if we need to post-process (different dimensions than target)
+                                        img = Image.open(io.BytesIO(image_bytes))
+                                        current_w, current_h = img.size
+
+                                        # Don't crop if Gemini returned larger than 1024px (e.g., 1500x700)
+                                        # Per updated guide, Gemini can sometimes return larger images
+                                        max_current = max(current_w, current_h)
+                                        max_target = max(target_w, target_h)
+
+                                        if max_current > 1024 and max_current > max_target:
+                                            # Gemini returned larger than 1024 and larger than target - use as-is
+                                            logger.info(f"Gemini returned larger image ({current_w}x{current_h}), using as-is without cropping")
+                                            # Don't modify image_bytes, use the original
+                                        elif current_w != target_w or current_h != target_h:
+                                            logger.info(f"Post-processing Gemini output: {current_w}x{current_h} -> {target_w}x{target_h}")
+
+                                            # Check aspect ratio of returned image vs target
+                                            current_aspect = current_w / current_h
+                                            target_aspect = target_w / target_h
+                                            aspect_tolerance = 0.01  # 1% tolerance
+
+                                            if abs(current_aspect - target_aspect) > aspect_tolerance:
+                                                # Aspect ratios don't match - need to crop first
+                                                logger.info(f"Aspect ratio mismatch: Gemini returned {current_aspect:.3f}, user wants {target_aspect:.3f}")
+
+                                                # Crop to match target aspect ratio
+                                                if target_aspect > current_aspect:  # Target is wider
+                                                    # Crop height to match aspect
+                                                    new_h = int(current_w / target_aspect)
                                                     crop_top = (current_h - new_h) // 2
                                                     img = img.crop((0, crop_top, current_w, crop_top + new_h))
-                                                else:  # Portrait
-                                                    new_w = int(current_h * aspect)
+                                                else:  # Target is taller
+                                                    # Crop width to match aspect
+                                                    new_w = int(current_h * target_aspect)
                                                     crop_left = (current_w - new_w) // 2
                                                     img = img.crop((crop_left, 0, crop_left + new_w, current_h))
-                                                logger.debug(f"Cropped to aspect ratio: {img.size}")
+                                                logger.info(f"Cropped to aspect ratio: {img.size}")
 
                                             # Now scale to target dimensions
                                             img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                                            if kwargs.get('_needs_upscale'):
-                                                logger.info(f"Upscaled to final size: {target_w}x{target_h}")
-                                            else:
-                                                logger.info(f"Downscaled to final size: {target_w}x{target_h}")
-                                                # Apply subtle sharpening for downscaled images to enhance detail
+                                            logger.info(f"Resized to target dimensions: {target_w}x{target_h}")
+
+                                            # Apply sharpening if we downscaled
+                                            if current_w > target_w or current_h > target_h:
                                                 from PIL import ImageFilter
                                                 img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=100, threshold=3))
                                                 logger.info(f"Applied sharpness enhancement after downscaling")
 
-                                            # Convert back to bytes
+                                            # Convert back to bytes in original format
                                             output = io.BytesIO()
-                                            img.save(output, format='PNG')
+                                            # Preserve original format if available
+                                            save_format = original_format if 'original_format' in locals() else 'PNG'
+                                            # Use appropriate options for format
+                                            if save_format in ['JPEG', 'JPG']:
+                                                img.save(output, format='JPEG', quality=95, optimize=True)
+                                            else:
+                                                img.save(output, format=save_format)
                                             image_bytes = output.getvalue()
+                                            logger.info(f"Saved processed image in {save_format} format")
 
-                                    # Apply additional cropping if dimensions are specified and not square and explicitly requested
+                                    # Apply additional cropping only if aspect ratio doesn't match
                                     elif crop_to_aspect and width and height and width != height and crop_to_aspect_ratio:
-                                        logger.debug(f"Cropping Google image to {width}x{height}")
-                                        image_bytes = crop_to_aspect_ratio(image_bytes, width, height)
+                                        # Check if returned image already matches the desired aspect ratio
+                                        img = Image.open(io.BytesIO(image_bytes))
+                                        current_w, current_h = img.size
+                                        current_aspect = current_w / current_h
+                                        target_aspect = width / height
+
+                                        # Allow 1% tolerance for aspect ratio comparison
+                                        aspect_tolerance = 0.01
+                                        if abs(current_aspect - target_aspect) > aspect_tolerance:
+                                            logger.debug(f"Image aspect ratio {current_aspect:.3f} doesn't match target {target_aspect:.3f}, cropping to {width}x{height}")
+                                            image_bytes = crop_to_aspect_ratio(image_bytes, width, height)
+                                        else:
+                                            logger.info(f"Image aspect ratio {current_aspect:.3f} matches target {target_aspect:.3f}, skipping crop")
 
                                     images.append(image_bytes)
         except Exception as e:
@@ -486,68 +569,129 @@ class GoogleProvider(ImageProvider):
                 )
                 
                 if response and response.candidates:
+                    logger.info(f"DEBUG (fallback): Response has {len(response.candidates)} candidates")
                     cand = response.candidates[0]
                     if getattr(cand, "content", None) and getattr(cand.content, "parts", None):
-                        for part in cand.content.parts:
+                        logger.info(f"DEBUG (fallback): Candidate 0 has {len(cand.content.parts)} parts")
+                        for part_idx, part in enumerate(cand.content.parts):
                             if getattr(part, "text", None):
+                                logger.info(f"DEBUG (fallback): Part {part_idx} is text: {part.text[:100]}...")
                                 texts.append(part.text)
                             elif getattr(part, "inline_data", None) is not None:
+                                logger.info(f"DEBUG (fallback): Part {part_idx} is inline_data (image)")
                                 data = getattr(part.inline_data, "data", None)
                                 if isinstance(data, (bytes, bytearray)):
                                     image_bytes = bytes(data)
+                                    logger.info(f"DEBUG (fallback): Got image data of {len(image_bytes)} bytes")
 
-                                    # Handle scaling back to original dimensions if we scaled for Gemini
-                                    if kwargs.get('_needs_upscale') or kwargs.get('_needs_downscale'):
-                                        target_w = kwargs.get('_target_width')
-                                        target_h = kwargs.get('_target_height')
-                                        if target_w and target_h:
-                                            if kwargs.get('_needs_upscale'):
-                                                logger.info(f"Upscaling Gemini output back to target: {target_w}x{target_h}")
-                                            else:
-                                                logger.info(f"Downscaling Gemini output back to target: {target_w}x{target_h}")
+                                    # Debug: Check what we actually got from Gemini
+                                    from PIL import Image
+                                    import io
+                                    import time
+                                    from pathlib import Path
+                                    import platform
 
-                                            from PIL import Image
-                                            import io
+                                    # Detect original image format
+                                    img_stream = io.BytesIO(image_bytes)
+                                    debug_img = Image.open(img_stream)
+                                    original_format = debug_img.format or 'PNG'  # Default to PNG if format not detected
+                                    logger.info(f"DEBUG: Gemini returned {original_format} image with dimensions: {debug_img.size}")
 
-                                            # Open the image
-                                            img = Image.open(io.BytesIO(image_bytes))
-                                            current_w, current_h = img.size
-                                            logger.debug(f"Current Gemini output size: {current_w}x{current_h}")
+                                    # Save raw Gemini output for debugging
+                                    if platform.system() == "Windows":
+                                        debug_dir = Path("C:/Users/aboog/AppData/Roaming/ImageAI/generated")
+                                    else:
+                                        debug_dir = Path.home() / ".config" / "ImageAI" / "generated"
 
-                                            # First crop to aspect ratio if needed (Gemini outputs square)
-                                            if width and height and width != height:
-                                                # Crop the square output to the scaled aspect ratio
-                                                aspect = width / height
-                                                if aspect > 1:  # Landscape
-                                                    new_h = int(current_w / aspect)
+                                    # Save in original format
+                                    ext = original_format.lower()
+                                    if ext == 'jpeg':
+                                        ext = 'jpg'
+                                    debug_path = debug_dir / f"DEBUG_RAW_GEMINI_{int(time.time())}.{ext}"
+                                    debug_dir.mkdir(parents=True, exist_ok=True)
+                                    debug_img.save(str(debug_path), format=original_format)
+                                    logger.info(f"DEBUG: Saved raw Gemini output to: {debug_path}")
+                                    debug_img = None  # Clear to avoid confusion
+
+                                    # Handle scaling back to original dimensions if we have target dimensions
+                                    target_w = kwargs.get('_target_width')
+                                    target_h = kwargs.get('_target_height')
+                                    if target_w and target_h:
+                                        # Check if we need to post-process (different dimensions than target)
+                                        img = Image.open(io.BytesIO(image_bytes))
+                                        current_w, current_h = img.size
+
+                                        # Don't crop if Gemini returned larger than 1024px (e.g., 1500x700)
+                                        # Per updated guide, Gemini can sometimes return larger images
+                                        max_current = max(current_w, current_h)
+                                        max_target = max(target_w, target_h)
+
+                                        if max_current > 1024 and max_current > max_target:
+                                            # Gemini returned larger than 1024 and larger than target - use as-is
+                                            logger.info(f"Gemini returned larger image ({current_w}x{current_h}), using as-is without cropping")
+                                            # Don't modify image_bytes, use the original
+                                        elif current_w != target_w or current_h != target_h:
+                                            logger.info(f"Post-processing Gemini output: {current_w}x{current_h} -> {target_w}x{target_h}")
+
+                                            # Check aspect ratio of returned image vs target
+                                            current_aspect = current_w / current_h
+                                            target_aspect = target_w / target_h
+                                            aspect_tolerance = 0.01  # 1% tolerance
+
+                                            if abs(current_aspect - target_aspect) > aspect_tolerance:
+                                                # Aspect ratios don't match - need to crop first
+                                                logger.info(f"Aspect ratio mismatch: Gemini returned {current_aspect:.3f}, user wants {target_aspect:.3f}")
+
+                                                # Crop to match target aspect ratio
+                                                if target_aspect > current_aspect:  # Target is wider
+                                                    # Crop height to match aspect
+                                                    new_h = int(current_w / target_aspect)
                                                     crop_top = (current_h - new_h) // 2
                                                     img = img.crop((0, crop_top, current_w, crop_top + new_h))
-                                                else:  # Portrait
-                                                    new_w = int(current_h * aspect)
+                                                else:  # Target is taller
+                                                    # Crop width to match aspect
+                                                    new_w = int(current_h * target_aspect)
                                                     crop_left = (current_w - new_w) // 2
                                                     img = img.crop((crop_left, 0, crop_left + new_w, current_h))
-                                                logger.debug(f"Cropped to aspect ratio: {img.size}")
+                                                logger.info(f"Cropped to aspect ratio: {img.size}")
 
                                             # Now scale to target dimensions
                                             img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                                            if kwargs.get('_needs_upscale'):
-                                                logger.info(f"Upscaled to final size: {target_w}x{target_h}")
-                                            else:
-                                                logger.info(f"Downscaled to final size: {target_w}x{target_h}")
-                                                # Apply subtle sharpening for downscaled images to enhance detail
+                                            logger.info(f"Resized to target dimensions: {target_w}x{target_h}")
+
+                                            # Apply sharpening if we downscaled
+                                            if current_w > target_w or current_h > target_h:
                                                 from PIL import ImageFilter
                                                 img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=100, threshold=3))
                                                 logger.info(f"Applied sharpness enhancement after downscaling")
 
-                                            # Convert back to bytes
+                                            # Convert back to bytes in original format
                                             output = io.BytesIO()
-                                            img.save(output, format='PNG')
+                                            # Preserve original format if available
+                                            save_format = original_format if 'original_format' in locals() else 'PNG'
+                                            # Use appropriate options for format
+                                            if save_format in ['JPEG', 'JPG']:
+                                                img.save(output, format='JPEG', quality=95, optimize=True)
+                                            else:
+                                                img.save(output, format=save_format)
                                             image_bytes = output.getvalue()
+                                            logger.info(f"Saved processed image in {save_format} format")
 
-                                    # Apply additional cropping if dimensions are specified and not square and explicitly requested
+                                    # Apply additional cropping only if aspect ratio doesn't match
                                     elif crop_to_aspect and width and height and width != height and crop_to_aspect_ratio:
-                                        logger.debug(f"Cropping Google image to {width}x{height}")
-                                        image_bytes = crop_to_aspect_ratio(image_bytes, width, height)
+                                        # Check if returned image already matches the desired aspect ratio
+                                        img = Image.open(io.BytesIO(image_bytes))
+                                        current_w, current_h = img.size
+                                        current_aspect = current_w / current_h
+                                        target_aspect = width / height
+
+                                        # Allow 1% tolerance for aspect ratio comparison
+                                        aspect_tolerance = 0.01
+                                        if abs(current_aspect - target_aspect) > aspect_tolerance:
+                                            logger.debug(f"Image aspect ratio {current_aspect:.3f} doesn't match target {target_aspect:.3f}, cropping to {width}x{height}")
+                                            image_bytes = crop_to_aspect_ratio(image_bytes, width, height)
+                                        else:
+                                            logger.info(f"Image aspect ratio {current_aspect:.3f} matches target {target_aspect:.3f}, skipping crop")
 
                                     images.append(image_bytes)
             except Exception as e2:

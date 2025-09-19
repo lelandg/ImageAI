@@ -353,9 +353,18 @@ class LLMWorker(QObject):
 
                     # Parse litellm response
                     if hasattr(response.choices[0], 'message'):
-                        content = response.choices[0].message.content.strip()
+                        # Handle None content from Gemini models
+                        if response.choices[0].message.content is None:
+                            logger.warning("Received None content from LLM response")
+                            content = "[]"  # Return empty array as fallback
+                        else:
+                            content = response.choices[0].message.content.strip()
                     else:
-                        content = response.choices[0].text.strip()
+                        if response.choices[0].text is None:
+                            logger.warning("Received None text from LLM response")
+                            content = "[]"  # Return empty array as fallback
+                        else:
+                            content = response.choices[0].text.strip()
                 else:
                     # Fallback to direct Gemini SDK
                     import google.generativeai as genai

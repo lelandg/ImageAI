@@ -166,3 +166,41 @@ Today with Claude Code - Sharing just for fun!
 ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   leland@Alienware:/mnt/d/Documents/Code/GitHub/ImageAI [Opus 4.1]                 Context left until auto-compact: 5%
   ⏵⏵ accept edits on (shift+tab to cycle)
+
+2025-09-18 Re: Google aspect ratio handling issue
+
+✻ Thinking…
+
+  The fix is complete. Let me review what was fixed:
+
+  1. Root cause: The recent commit incorrectly changed the logic from checking aspect_ratio != "1:1" to checking width != 1024 or height
+  != 1024
+  2. Impact: Google Gemini was receiving dimension hints for ALL non-default resolutions instead of just non-square aspect ratios
+  3. Solution: Restored the original logic to only add dimensions for non-square aspect ratios, as documented in CLAUDE.md
+
+  The fix is complete and ready for testing in PowerShell where the user has the Google GenAI library installed. The code now correctly
+  follows the CLAUDE.md specification.
+
+● Fix Complete
+
+  I've successfully fixed the Google Gemini aspect ratio handling issue. The problem was introduced in the most recent commit where
+  the logic was incorrectly changed.
+
+  What was broken:
+
+  - The code was adding dimensions (WxH) to ALL prompts except exactly 1024x1024
+  - This confused Gemini, causing it to return wrong aspect ratios (like 928x1120 instead of the requested 1024x576)
+
+  The fix:
+
+  - Restored the correct logic: only add dimensions for non-square aspect ratios (anything besides 1:1)
+  - Fixed the incorrect CLAUDE.md comment reference
+  - Now follows the actual CLAUDE.md specification: "for all gemini image ratios besides 1:1, send ratio"
+
+  Key changes in providers/google.py:
+
+  - Line 305: Changed from if width != 1024 or height != 1024 back to if aspect_ratio and aspect_ratio != "1:1"
+  - Line 304: Fixed comment to correctly quote CLAUDE.md
+
+  The fix is ready to test in PowerShell where you have the Google GenAI library installed. The code should now correctly handle
+  aspect ratios, only adding dimension hints for non-square images as intended

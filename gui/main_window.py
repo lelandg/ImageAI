@@ -3321,6 +3321,19 @@ For more detailed information, please refer to the full documentation.
                     pass
         return None, None
 
+    def _get_provider_max_resolution(self) -> int:
+        """Get maximum resolution for current provider."""
+        if self.current_provider == "google":
+            return 1024
+        elif self.current_provider == "openai":
+            return 1792
+        elif self.current_provider == "stability":
+            return 1536
+        elif self.current_provider == "local_sd":
+            return 2048  # Can vary based on local GPU
+        else:
+            return 1024  # Default conservative limit
+
     def test_dimension_logic(self):
         """Test function to verify dimension and upscaling logic."""
         print("\n=== Testing Dimension and Upscaling Logic ===\n")
@@ -3459,6 +3472,57 @@ For more detailed information, please refer to the full documentation.
             QMessageBox.warning(self, APP_NAME, "Please enter a prompt.")
             return
 
+        # Check for resolution in prompt and warn user
+        import re
+        resolution_patterns = [
+            r'\(\d+\s*[xX]\s*\d+\)',  # (1024x768)
+            r'\[\d+\s*[xX]\s*\d+\]',  # [1024x768]
+            r'\b\d{3,4}\s*[xX]\s*\d{3,4}\b',  # 1024x768 or 1920x1080
+            r'\bat\s+\d+\s*[xX]\s*\d+',  # at 1024x768
+            r'\b\d+\s*[xX]\s*\d+\s*(resolution|pixels?|size)',  # 1024x768 resolution
+            r'\b(4K|8K|HD|FHD|Full\s*HD|UHD)\s*(resolution|size)?',  # 4K resolution
+        ]
+
+        detected_resolutions = []
+        for pattern in resolution_patterns:
+            matches = re.findall(pattern, prompt, re.IGNORECASE)
+            detected_resolutions.extend(matches)
+
+        if detected_resolutions:
+            # Create warning dialog
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Warning)
+            msg.setWindowTitle("Resolution Detected in Prompt")
+            msg.setText("Your prompt contains resolution specifications. Please remove them and use the Resolution/Aspect Ratio controls in the GUI instead.")
+
+            # Show what was detected
+            detected_text = ", ".join(set(detected_resolutions))
+            msg.setInformativeText(f"Detected: {detected_text}\n\nThe GUI controls will handle resolution properly.")
+
+            # Add buttons
+            remove_btn = msg.addButton("Remove and Continue", QMessageBox.AcceptRole)
+            cancel_btn = msg.addButton("Cancel", QMessageBox.RejectRole)
+            msg.setDefaultButton(cancel_btn)
+
+            msg.exec_()
+
+            if msg.clickedButton() == cancel_btn:
+                self.btn_generate.setEnabled(True)
+                self._append_to_console("Generation cancelled - please edit your prompt", "#ffaa00")  # Orange
+                return
+            elif msg.clickedButton() == remove_btn:
+                # Remove all resolution patterns from prompt
+                cleaned_prompt = prompt
+                for pattern in resolution_patterns:
+                    cleaned_prompt = re.sub(pattern, '', cleaned_prompt, flags=re.IGNORECASE)
+                # Clean up extra spaces
+                cleaned_prompt = re.sub(r'\s+', ' ', cleaned_prompt).strip()
+
+                # Update the prompt in the GUI
+                self.prompt_edit.setPlainText(cleaned_prompt)
+                prompt = cleaned_prompt
+                self._append_to_console(f"Removed resolution text from prompt", "#66ccff")  # Blue
+
         # Store original prompt (before reference image modifications)
         original_prompt = prompt
 
@@ -3497,13 +3561,13 @@ For more detailed information, please refer to the full documentation.
         # Get resolution or aspect ratio settings based on which mode is active
         if hasattr(self, 'resolution_selector') and self.resolution_selector:
             if self.resolution_selector.is_using_aspect_ratio():
-                # Using aspect ratio mode - send aspect ratio
-                if hasattr(self, 'aspect_selector') and self.aspect_selector:
-                    aspect_ratio = self.aspect_selector.get_ratio()
-                    kwargs['aspect_ratio'] = aspect_ratio
-                    # Enable cropping for Google provider when aspect ratio is selected
-                    if self.current_provider == "google":
-                        kwargs['crop_to_aspect'] = True
+                # Using aspect ratio mode - get aspect ratio from resolution selector
+                aspect_ratio = self.resolution_selector.get_aspect_ratio()
+                kwargs['aspect_ratio'] = aspect_ratio
+                # Enable cropping for Google provider when aspect ratio is selected
+                # But the provider will now check if the returned image already matches before cropping
+                if self.current_provider == "google":
+                    kwargs['crop_to_aspect'] = True
 
                     # For non-Google providers, provide resolution string for proper size mapping
                     if self.current_provider != "google":
@@ -3545,11 +3609,16 @@ For more detailed information, please refer to the full documentation.
                                 else:
                                     width, height = 1024, 1024
 
-                        # Always pass dimensions for Google
+                        # Pass width/height for all providers including Google
+                        # Google provider needs these to determine if dimensions should be added to prompt
                         if width:
                             kwargs['width'] = width
                         if height:
                             kwargs['height'] = height
+
+                        # Also store for UI message display
+                        if self.current_provider == "google":
+                            self._pending_resolution = (width, height)
             else:
                 # Using explicit resolution mode
                 width = height = None
@@ -3656,10 +3725,16 @@ For more detailed information, please refer to the full documentation.
 
             # Get resolution if available
             resolution_text = ""
+            width = height = None
             if 'width' in kwargs and 'height' in kwargs:
                 width = kwargs['width']
                 height = kwargs['height']
+            elif hasattr(self, '_pending_resolution') and self._pending_resolution:
+                # Use stored resolution from aspect ratio mode (Google provider)
+                width, height = self._pending_resolution
+                # Don't clear here, might be needed for the else block too
 
+            if width and height:
                 # If using Google provider and resolution > 1024, calculate scaled dimensions
                 if self.current_provider == 'google':
                     max_dim = max(width, height)
@@ -3682,10 +3757,17 @@ For more detailed information, please refer to the full documentation.
             self._append_to_console(f"Auto-inserted: \"{instruction}\"", "#9966ff")
         else:
             # No reference image, but check if we need to add resolution info
+            # Check both kwargs and pending_resolution for Google aspect ratio mode
+            width = height = None
             if 'width' in kwargs and 'height' in kwargs:
                 width = kwargs['width']
                 height = kwargs['height']
-                if width != 1024 or height != 1024:
+            elif hasattr(self, '_pending_resolution') and self._pending_resolution:
+                # Use stored resolution from aspect ratio mode (Google provider)
+                width, height = self._pending_resolution
+                self._pending_resolution = None  # Clear it after use
+
+            if width and height and (width != 1024 or height != 1024):
                     # If using Google provider and resolution > 1024, calculate scaled dimensions
                     if self.current_provider == 'google':
                         max_dim = max(width, height)
@@ -4051,6 +4133,11 @@ For more detailed information, please refer to the full documentation.
             if hasattr(self, 'upscaling_settings') and self.upscaling_settings.get('enabled'):
                 target_width, target_height = self._get_target_resolution()
                 if target_width and target_height:
+                    # Only upscale if target exceeds provider capabilities
+                    # Never upscale just because provider returned smaller than expected
+                    provider_max = self._get_provider_max_resolution()
+                    should_enable_upscaling = target_width > provider_max or target_height > provider_max
+
                     upscaled_images = []
                     for image_data in processed_images:
                         # Check if upscaling is needed
@@ -4059,7 +4146,8 @@ For more detailed information, please refer to the full documentation.
                         from core.upscaling import needs_upscaling, upscale_image
 
                         img = Image.open(io.BytesIO(image_data))
-                        if needs_upscaling(img.width, img.height, target_width, target_height):
+                        # Only upscale if target exceeds provider limits AND image is smaller than target
+                        if should_enable_upscaling and needs_upscaling(img.width, img.height, target_width, target_height):
                             self._append_to_console(
                                 f"Upscaling from {img.width}x{img.height} to {target_width}x{target_height}...",
                                 "#66ccff"
