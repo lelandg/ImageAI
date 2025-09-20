@@ -368,9 +368,82 @@ Return one enhanced visual description per line, numbered:
         except Exception as e:
             self.logger.error(f"Batch enhancement failed: {e}")
             # Fall back to individual enhancement
-            return [self.enhance_prompt(text, provider, model, style, temperature) 
+            return [self.enhance_prompt(text, provider, model, style, temperature)
                    for text in texts]
-    
+
+    def analyze_image(self,
+                     messages: List[Dict[str, Any]],
+                     model: str = None,
+                     temperature: float = 0.7,
+                     max_tokens: int = 1000,
+                     reasoning_effort: str = None,
+                     response_format: Dict[str, str] = None) -> str:
+        """
+        Analyze an image using vision-capable models.
+
+        Args:
+            messages: List of message dicts with text and image content
+            model: Model name to use
+            temperature: Temperature for generation
+            max_tokens: Maximum tokens to generate
+            reasoning_effort: For GPT-5 models
+            response_format: Response format specification
+
+        Returns:
+            Generated text description
+        """
+        try:
+            # Set up the model if not specified
+            if not model:
+                model = 'gpt-4o'  # Default vision-capable model
+
+            # Prepare kwargs for litellm
+            kwargs = {
+                'model': model,
+                'messages': messages,
+                'temperature': temperature,
+                'max_tokens': max_tokens
+            }
+
+            # Handle GPT-5 specific parameters
+            if 'gpt-5' in model.lower():
+                # GPT-5 requires temperature=1
+                kwargs['temperature'] = 1.0
+                # Note: reasoning_effort is not yet supported by the API
+                # It's a UI-only parameter for now
+
+            if response_format:
+                kwargs['response_format'] = response_format
+
+            # Get appropriate API configuration
+            if 'gpt' in model.lower() or 'openai' in model.lower():
+                if 'openai_api_key' in self.config:
+                    kwargs['api_key'] = self.config['openai_api_key']
+            elif 'claude' in model.lower():
+                if 'anthropic_api_key' in self.config:
+                    kwargs['api_key'] = self.config['anthropic_api_key']
+            elif 'gemini' in model.lower():
+                if 'google_api_key' in self.config:
+                    kwargs['api_key'] = self.config['google_api_key']
+
+            # Call litellm for vision analysis
+            response = self.litellm.completion(**kwargs)
+
+            # Extract and return the response
+            if response and response.choices:
+                return response.choices[0].message.content.strip()
+            else:
+                raise ValueError("No response from LLM")
+
+        except Exception as e:
+            self.logger.error(f"Image analysis failed: {str(e)}")
+            raise
+
+    # Alias for backward compatibility
+    def generate(self, *args, **kwargs):
+        """Alias for analyze_image for backward compatibility."""
+        return self.analyze_image(*args, **kwargs)
+
     def _get_system_prompt(self, style: PromptStyle) -> str:
         """Get system prompt for a given style"""
         prompts = {

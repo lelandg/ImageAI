@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QTabWidget, QWidget, QDialogButtonBox, QDoubleSpinBox
 )
 from PySide6.QtCore import Qt, Signal, QThread, QObject, QSettings
+from PySide6.QtGui import QKeySequence, QShortcut
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -634,8 +635,29 @@ class PromptGenerationDialog(QDialog):
 
         # Generate button
         self.generate_btn = QPushButton("Generate Prompts")
+        self.generate_btn.setToolTip("Generate creative prompts with AI (Ctrl+Enter)")
+        self.generate_btn.setDefault(True)
+        self.generate_btn.setStyleSheet("""
+            QPushButton {
+                font-weight: bold;
+            }
+        """)
         self.generate_btn.clicked.connect(self.generate_prompts)
         generate_layout.addWidget(self.generate_btn)
+
+        # Add shortcut hint label
+        shortcut_label = QLabel("<small style='color: gray;'>Shortcuts: Ctrl+Enter to generate, Esc to close</small>")
+        shortcut_label.setAlignment(Qt.AlignCenter)
+        generate_layout.addWidget(shortcut_label)
+
+        # Set up keyboard shortcuts
+        # Ctrl+Enter to generate prompts
+        generate_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
+        generate_shortcut.activated.connect(self.generate_prompts)
+
+        # Escape to close
+        escape_shortcut = QShortcut(QKeySequence("Escape"), self)
+        escape_shortcut.activated.connect(self.reject)
 
         # Results section
         results_group = QGroupBox("Generated Prompts")
@@ -692,10 +714,9 @@ class PromptGenerationDialog(QDialog):
         if splitter_state:
             splitter.restoreState(splitter_state)
 
-        # Restore tab index if saved
-        tab_index = self.settings.value("tab_index", type=int)
-        if tab_index is not None and hasattr(self, 'tab_widget'):
-            self.tab_widget.setCurrentIndex(tab_index)
+        # Always start on Generate tab (index 0), not History tab
+        if hasattr(self, 'tab_widget'):
+            self.tab_widget.setCurrentIndex(0)
 
         # Dialog buttons
         buttons = QDialogButtonBox(
@@ -1082,8 +1103,8 @@ class PromptGenerationDialog(QDialog):
                 "llm_model": self.llm_model_combo.currentText(),
                 "temperature": self.temperature_spin.value(),
                 "max_tokens": self.max_tokens_spin.value(),
-                "reasoning_effort": self.reasoning_combo.currentText() if self.gpt5_params_widget.isVisible() else "medium",
-                "verbosity": self.verbosity_combo.currentText() if self.gpt5_params_widget.isVisible() else "medium"
+                "reasoning_effort": self.reasoning_combo.currentText(),
+                "verbosity": self.verbosity_combo.currentText()
             }
             session_file = Path(self.config.config_dir) / "prompt_gen_session.json"
             try:

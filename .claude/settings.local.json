@@ -16,7 +16,9 @@
       "Bash(cat:*)",
       "Bash(done)",
       "Bash(sed:*)",
-      "Bash(.venv/Scripts/python.exe -m pip uninstall:*)"
+      "Bash(.venv/Scripts/python.exe -m pip uninstall:*)",
+      "Bash(git add:*)",
+      "Bash(identify:*)"
     ],
     "deny": [],
     "ask": []

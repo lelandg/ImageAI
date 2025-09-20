@@ -5,6 +5,63 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2025-01-20
+
+### ✅ Added Features
+- 🎨 **Reference Image Analysis Dialog** (`gui/reference_image_dialog.py` - 742 lines)
+  - Upload and analyze images to generate detailed descriptions
+  - Customizable analysis prompts
+  - Option to copy descriptions directly to main prompt
+  - Full LLM integration with all providers
+
+- 📚 **Reusable History Widget** (`gui/history_widget.py` - 259 lines)
+  - Persistent history saved to disk
+  - Export history to JSON
+  - Search and filter capabilities
+  - Double-click to reload previous conversations
+
+- ✨ **Enhanced Ask Dialog**: Complete redesign with new features
+  - "Ask AI Anything" mode - works without a prompt for general questions
+  - Editable prompt field with clear Edit/Save/Reset controls
+  - Continuous conversation mode with context retention
+  - Conversation history with detail view
+  - Different quick questions based on context
+  - Keyboard shortcuts (Ctrl+E for edit mode)
+
+- 🎯 **Dialog Improvements**: Major enhancements across all LLM dialogs
+  - Added Ctrl+Enter shortcut to all dialogs for quick submission
+  - Removed max token settings - let models decide response length
+  - Added status console history with visual separators
+  - Tab-based interfaces with History tabs
+
+### 🐛 Fixed
+- **Google Provider**:
+  - Fixed 1:1 aspect ratio handling - no longer adds dimensions to prompt for square images
+  - **Canvas Centering Fix**: When reference image aspect ratio doesn't match requested ratio, now creates a transparent canvas with the target aspect ratio and centers the reference image within it. This forces Gemini to generate images with the correct aspect ratio instead of following the reference image's aspect ratio
+- **Prompt Generation Dialog**: Now starts on Generate tab instead of History
+- **Dialog Settings Persistence**: Fixed reasoning/verbosity settings not being saved
+- **History Tab**:
+  - Fixed incorrect sorting and now shows full prompts
+  - Added 60x60 pixel image thumbnails for visual reference
+- **Main Window**: Fixed auto-insertion of dimensions for Google square images
+
+### 🔧 Changed
+- **UI Layout**: Reordered AI buttons: Generate Prompts → Reference Image → Enhance → Ask
+- **Ask Dialog Access**: Can now open with empty prompt for general AI assistance
+- **Prompt Editing**: Added explicit edit mode with visual feedback
+- **Quick Questions**: Dynamic questions that change based on context
+- **Status Consoles**: Enhanced with persistent history and better formatting
+- **Social Media Sizes**: Added label display showing selected platform and type
+
+### 📁 File Reorganization
+- Moved `Notes/Development.md` → `Plans/Development.md`
+
+### 📊 Statistics
+- **14 files changed**
+- **2058 insertions(+)**, **764 deletions(-)**
+- **2 new files created**
+- **Net gain: ~1294 lines**
+
 ## [0.18.2] - 2025-01-18
 
 ### Changed

@@ -13,6 +13,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 from PySide6.QtCore import Qt, QSettings
+from PySide6.QtGui import QIcon, QPixmap, QFont, QColor, QBrush, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QTreeWidget, QTreeWidgetItem, QPushButton, QMessageBox
@@ -69,15 +70,79 @@ class SocialSizesTreeDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Social Media Image Sizes")
-        self.resize(800, 600)
+        self.resize(900, 650)
         self._selected_resolution: Optional[str] = None
+        self._selected_platform: Optional[str] = None
+        self._selected_type: Optional[str] = None
         self.settings = QSettings("ImageAI", "SocialSizesDialog")
+        self._platform_icons: Dict[str, QIcon] = {}
+        self._load_icons()
         self._init_ui()
         self._load_data()
         self._restore_expansion_state()
 
+    def _load_icons(self):
+        """Load platform icons from the assets directory."""
+        repo_root = Path(__file__).resolve().parents[1]
+        icons_dir = repo_root / "assets" / "icons" / "social"
+
+        if not icons_dir.exists():
+            logger.info(f"Icons directory not found: {icons_dir}")
+            return
+
+        # Map of platform names to icon filenames
+        platform_mappings = {
+            "Apple Podcasts": "apple-podcasts",
+            "Bandcamp": "bandcamp",
+            "CD Baby": "cd-baby",
+            "Discord": "discord",
+            "Facebook": "facebook",
+            "Instagram": "instagram",
+            "LinkedIn": "linkedin",
+            "Mastodon": "mastodon",
+            "Pinterest": "pinterest",
+            "Reddit": "reddit",
+            "Snapchat": "snapchat",
+            "SoundCloud": "soundcloud",
+            "Spotify": "spotify",
+            "Threads": "threads",
+            "TikTok": "tiktok",
+            "Tumblr": "tumblr",
+            "Twitch": "twitch",
+            "Twitter": "twitter",
+            "X": "x",
+            "YouTube": "youtube",
+            "Vimeo": "vimeo",
+            "WhatsApp": "whatsapp",
+            "Telegram": "telegram",
+        }
+
+        for platform, icon_name in platform_mappings.items():
+            # Try SVG first, then PNG
+            for ext in [".svg", ".png"]:
+                icon_path = icons_dir / f"{icon_name}{ext}"
+                if icon_path.exists():
+                    self._platform_icons[platform] = QIcon(str(icon_path))
+                    break
+
     def _init_ui(self):
         v = QVBoxLayout(self)
+
+        # Selection info panel
+        self.info_panel = QLabel("")
+        self.info_panel.setStyleSheet("""
+            QLabel {
+                background-color: #f0f8ff;
+                border: 2px solid #4a90e2;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 14px;
+                color: #2c3e50;
+                min-height: 40px;
+            }
+        """)
+        self.info_panel.setVisible(False)
+        v.addWidget(self.info_panel)
 
         # Search
         sh = QHBoxLayout()
@@ -91,17 +156,30 @@ class SocialSizesTreeDialog(QDialog):
         # Tree
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Platform / Type", "Size (px)", "Aspect Ratio", "Notes"])
-        self.tree.setColumnWidth(0, 250)
+        self.tree.setColumnWidth(0, 300)
         self.tree.setColumnWidth(1, 150)
         self.tree.setColumnWidth(2, 100)
+        self.tree.setAlternatingRowColors(True)
         self.tree.itemDoubleClicked.connect(self._on_double_click)
         self.tree.itemSelectionChanged.connect(self._on_selection_changed)
         v.addWidget(self.tree)
+
+        # Add shortcut hint label
+        shortcut_label = QLabel("<small style='color: gray;'>Double-click to select, or use Enter key. Esc to close</small>")
+        shortcut_label.setAlignment(Qt.AlignCenter)
+        v.addWidget(shortcut_label)
 
         # Buttons
         bh = QHBoxLayout()
         bh.addStretch()
         self.btn_use = QPushButton("Use Size")
+        self.btn_use.setToolTip("Apply selected size (Enter)")
+        self.btn_use.setDefault(True)
+        self.btn_use.setStyleSheet("""
+            QPushButton {
+                font-weight: bold;
+            }
+        """)
         self.btn_use.setEnabled(False)
         self.btn_use.clicked.connect(self._use_selected)
         self.btn_close = QPushButton("Close")
@@ -109,6 +187,13 @@ class SocialSizesTreeDialog(QDialog):
         bh.addWidget(self.btn_use)
         bh.addWidget(self.btn_close)
         v.addLayout(bh)
+
+        # Set up keyboard shortcuts
+        # Enter to use selected size
+        self.btn_use.setShortcut(QKeySequence("Return"))
+        # Escape to close
+        escape_shortcut = QShortcut(QKeySequence("Escape"), self)
+        escape_shortcut.activated.connect(self.reject)
 
     def _load_data(self):
         # Load markdown
@@ -164,6 +249,13 @@ class SocialSizesTreeDialog(QDialog):
                 platform_item = QTreeWidgetItem(self.tree)
                 platform_item.setText(0, platform)
                 platform_item.setFlags(platform_item.flags() & ~Qt.ItemIsSelectable)
+                # Set icon if available
+                if platform in self._platform_icons:
+                    platform_item.setIcon(0, self._platform_icons[platform])
+                # Bold font for platform headers
+                font = QFont()
+                font.setBold(True)
+                platform_item.setFont(0, font)
                 platform_items[platform] = platform_item
             else:
                 platform_item = platform_items[platform]
@@ -226,8 +318,49 @@ class SocialSizesTreeDialog(QDialog):
             item = items[0]
             resolution = item.data(0, Qt.UserRole)
             self.btn_use.setEnabled(bool(resolution))
+
+            # Update visual feedback
+            if resolution:
+                # Highlight selected item with background color
+                for col in range(4):
+                    item.setBackground(col, QBrush(QColor(220, 240, 255)))
+
+                # Get platform and type info
+                parent = item.parent()
+                if parent:
+                    platform = parent.text(0)
+                    type_name = item.text(0)
+                    size = item.text(1)
+                    aspect = item.text(2)
+
+                    # Update info panel with selection details
+                    info_text = f"<b>Selected:</b> {platform} - {type_name}<br>"
+                    info_text += f"<b>Size:</b> {size} | <b>Aspect Ratio:</b> {aspect}"
+                    self.info_panel.setText(info_text)
+                    self.info_panel.setVisible(True)
+
+                    self._selected_platform = platform
+                    self._selected_type = type_name
+
+            # Clear previous highlights
+            self._clear_all_highlights()
+            # Highlight current selection
+            for col in range(4):
+                item.setBackground(col, QBrush(QColor(220, 240, 255)))
         else:
             self.btn_use.setEnabled(False)
+            self.info_panel.setVisible(False)
+            self._clear_all_highlights()
+
+    def _clear_all_highlights(self):
+        """Clear all item highlights in the tree."""
+        iterator = self.tree.invisibleRootItem()
+        for i in range(iterator.childCount()):
+            platform_item = iterator.child(i)
+            for j in range(platform_item.childCount()):
+                child_item = platform_item.child(j)
+                for col in range(4):
+                    child_item.setBackground(col, QBrush())
 
     def _on_double_click(self, item: QTreeWidgetItem, column: int):
         resolution = item.data(0, Qt.UserRole)

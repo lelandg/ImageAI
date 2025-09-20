@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
                                QDialogButtonBox, QSizePolicy)
 from PySide6.QtCore import Qt, QRectF, QTimer, QPointF, Signal
 from PySide6.QtGui import (QPainter, QPen, QPixmap, QImage, QBrush,
-                           QKeyEvent, QPainterPath)
+                           QKeyEvent, QPainterPath, QKeySequence, QShortcut)
 from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsRectItem
 import logging
 
@@ -227,11 +227,23 @@ class ImageCropDialog(QDialog):
         self.button_box = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
+        self.button_box.button(QDialogButtonBox.Ok).setToolTip("Accept crop and close (Enter)")
+        self.button_box.button(QDialogButtonBox.Ok).setDefault(True)
         self.button_box.accepted.connect(self.accept_crop)
         self.button_box.rejected.connect(self.reject)
         button_layout.addWidget(self.button_box)
 
         layout.addLayout(button_layout)
+
+        # Add shortcut hint label
+        shortcut_label = QLabel("<small style='color: gray;'>Use arrow keys to move selection, R to restore size, Enter to accept, Esc to cancel</small>")
+        shortcut_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(shortcut_label)
+
+        # Set up keyboard shortcuts
+        # R for restore
+        restore_shortcut = QShortcut(QKeySequence("R"), self)
+        restore_shortcut.activated.connect(self.restore_size)
 
         self.setLayout(layout)
 

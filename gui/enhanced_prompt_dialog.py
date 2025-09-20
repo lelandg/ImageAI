@@ -330,9 +330,17 @@ class EnhancedPromptDialog(QDialog):
 
         layout.addWidget(llm_group)
 
-        # Enhance button
+        # Enhance button with hotkey hint
         self.enhance_btn = QPushButton("Enhance Prompt")
+        self.enhance_btn.setToolTip("Enhance the prompt with AI (Ctrl+Enter)")
         self.enhance_btn.clicked.connect(self.enhance_prompt)
+        # Style to show it's the primary action
+        self.enhance_btn.setDefault(True)
+        self.enhance_btn.setStyleSheet("""
+            QPushButton {
+                font-weight: bold;
+            }
+        """)
         layout.addWidget(self.enhance_btn)
 
         # Enhanced prompt display
@@ -360,13 +368,23 @@ class EnhancedPromptDialog(QDialog):
         # Add splitter to main layout
         main_layout.addWidget(splitter)
 
-        # Dialog buttons
+        # Dialog buttons with visual hints
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
+        ok_button = buttons.button(QDialogButtonBox.Ok)
+        ok_button.setText("Use Enhanced Prompt")
+        ok_button.setToolTip("Use the enhanced prompt in the main window")
+        cancel_button = buttons.button(QDialogButtonBox.Cancel)
+        cancel_button.setToolTip("Cancel without using enhanced prompt (Esc)")
         buttons.accepted.connect(self.accept_selection)
         buttons.rejected.connect(self.reject)
         main_layout.addWidget(buttons)
+
+        # Add shortcut hint label
+        shortcut_label = QLabel("<small style='color: gray;'>Shortcuts: Ctrl+Enter to enhance, Esc to cancel</small>")
+        shortcut_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(shortcut_label)
 
         # Connect provider and model changes
         self.llm_provider_combo.currentTextChanged.connect(self.update_llm_models)

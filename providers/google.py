@@ -302,6 +302,28 @@ class GoogleProvider(ImageProvider):
 
         # For Gemini, add dimensions in parentheses for non-square aspect ratios
         # per CLAUDE.md: "for all gemini image ratios besides 1:1, send ratio. E.g. LLM prompt like 'brief prompt description (1024x768)'"
+        # Calculate aspect ratio from dimensions if not provided
+        if width and height and not aspect_ratio:
+            # Calculate the actual aspect ratio for logging
+            ratio = width / height
+            if abs(ratio - 1.0) < 0.01:
+                aspect_ratio = "1:1"
+            elif abs(ratio - 16/9) < 0.05:
+                aspect_ratio = "16:9"
+            elif abs(ratio - 9/16) < 0.05:
+                aspect_ratio = "9:16"
+            elif abs(ratio - 4/3) < 0.05:
+                aspect_ratio = "4:3"
+            elif abs(ratio - 3/4) < 0.05:
+                aspect_ratio = "3:4"
+            elif abs(ratio - 2/1) < 0.1:
+                aspect_ratio = "2:1"
+            elif abs(ratio - 1/2) < 0.1:
+                aspect_ratio = "1:2"
+            else:
+                # For non-standard ratios, create a descriptive string
+                aspect_ratio = f"{width}:{height}"
+
         if aspect_ratio and aspect_ratio != "1:1" and width and height:
             # Use dimension format as specified in CLAUDE.md
             prompt_with_dims = f"{prompt} ({width}x{height})"
@@ -309,7 +331,7 @@ class GoogleProvider(ImageProvider):
             logger.info(f"Full prompt: {prompt_with_dims}")
             prompt = prompt_with_dims
         elif width and height:
-            # Log even for square images
+            # For square images (1:1)
             logger.info(f"Sending to Gemini with square aspect (1:1): {width}x{height} - no dimensions added to prompt")
         elif aspect_ratio and aspect_ratio != "1:1":
             # If we have aspect ratio but no dimensions, calculate default dimensions for common ratios
@@ -391,9 +413,60 @@ class GoogleProvider(ImageProvider):
                         ar_display = aspect_ratio if aspect_ratio else f"{width}:{height}"
                         logger.warning(f"⚠️ ASPECT RATIO MISMATCH: Reference image is {ref_width}x{ref_height} "
                                      f"(aspect {ref_aspect:.2f}) but requesting {ar_display} "
-                                     f"(aspect {expected_aspect:.2f}). Gemini will likely follow the reference image aspect ratio.")
-                        logger.warning("Per Gemini Nano Banana Guide: 'the aspect ratio of any reference images "
-                                     "you use will influence the final output'")
+                                     f"(aspect {expected_aspect:.2f}). Applying canvas centering fix...")
+
+                        # Create a transparent canvas with the target aspect ratio
+                        # Calculate canvas dimensions based on reference image max dimension
+                        max_ref_dim = max(ref_width, ref_height)
+
+                        # Calculate canvas dimensions maintaining target aspect ratio
+                        if expected_aspect >= 1.0:  # Landscape or square
+                            canvas_width = max_ref_dim
+                            canvas_height = int(max_ref_dim / expected_aspect)
+                        else:  # Portrait
+                            canvas_height = max_ref_dim
+                            canvas_width = int(max_ref_dim * expected_aspect)
+
+                        # Make sure canvas is large enough to contain the reference image
+                        if canvas_width < ref_width:
+                            canvas_width = ref_width
+                            canvas_height = int(ref_width / expected_aspect)
+                        if canvas_height < ref_height:
+                            canvas_height = ref_height
+                            canvas_width = int(ref_height * expected_aspect)
+
+                        logger.info(f"Creating transparent canvas: {canvas_width}x{canvas_height} (aspect {expected_aspect:.2f})")
+                        logger.info(f"Reference image will be centered: {ref_width}x{ref_height}")
+
+                        # Create transparent canvas
+                        canvas = Image.new('RGBA', (canvas_width, canvas_height), (0, 0, 0, 0))
+
+                        # Calculate position to center the reference image
+                        x_offset = (canvas_width - ref_width) // 2
+                        y_offset = (canvas_height - ref_height) // 2
+
+                        # Convert reference image to RGBA if needed
+                        if img.mode != 'RGBA':
+                            img_rgba = img.convert('RGBA')
+                        else:
+                            img_rgba = img
+
+                        # Paste the reference image centered on the canvas
+                        canvas.paste(img_rgba, (x_offset, y_offset), img_rgba)
+
+                        # Save the composed canvas for debugging
+                        import time
+                        from pathlib import Path
+                        timestamp = int(time.time())
+                        debug_filename = f"DEBUG_CANVAS_COMPOSED_{timestamp}.png"
+                        generated_dir = Path(self.config.get('output_dir', Path.home() / 'AppData' / 'Roaming' / 'ImageAI' / 'generated'))
+                        debug_path = generated_dir / debug_filename
+                        canvas.save(debug_path, 'PNG')
+                        logger.info(f"Saved composed canvas for debugging: {debug_path}")
+
+                        # Use the composed canvas instead of original image
+                        img = canvas
+                        logger.info(f"Using composed canvas ({canvas_width}x{canvas_height}) instead of original reference image")
 
                 # Create content list with image and prompt
                 contents = [img, prompt]

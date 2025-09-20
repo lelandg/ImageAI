@@ -496,29 +496,33 @@ class MainWindow(QMainWindow):
         buttons_layout.setContentsMargins(0, 5, 0, 5)
         buttons_layout.setSpacing(3)
 
-        # All buttons in one row
-        self.btn_examples = QPushButton("E&xamples")
-        self.btn_examples.setToolTip("Browse example prompts (Alt+X)")
-        buttons_layout.addWidget(self.btn_examples)
+        # All buttons in one row - reordered as requested
+        self.btn_generate_prompts = QPushButton("Generate &Prompts")
+        self.btn_generate_prompts.setToolTip("Generate multiple prompt variations (Alt+P)")
+        buttons_layout.addWidget(self.btn_generate_prompts)
+
+        self.btn_reference_image = QPushButton("&Reference Image")
+        self.btn_reference_image.setToolTip("Analyze reference image with AI (Alt+R)")
+        buttons_layout.addWidget(self.btn_reference_image)
 
         self.btn_enhance_prompt = QPushButton("&Enhance")
         self.btn_enhance_prompt.setToolTip("Improve prompt with AI (Alt+E)")
         buttons_layout.addWidget(self.btn_enhance_prompt)
 
-        self.btn_generate_prompts = QPushButton("Generate &Prompts")
-        self.btn_generate_prompts.setToolTip("Generate multiple prompt variations (Alt+P)")
-        buttons_layout.addWidget(self.btn_generate_prompts)
-
         self.btn_ask_about = QPushButton("&Ask")
         self.btn_ask_about.setToolTip("Ask questions about your prompt (Alt+A)")
         buttons_layout.addWidget(self.btn_ask_about)
 
-        # Separator
-        buttons_layout.addSpacing(10)
-
         self.btn_generate = QPushButton("&Generate")
         self.btn_generate.setToolTip("Generate image (Alt+G or Ctrl+Enter)")
         buttons_layout.addWidget(self.btn_generate)
+
+        # Spacer to center Examples button
+        buttons_layout.addStretch()
+
+        self.btn_examples = QPushButton("E&xamples")
+        self.btn_examples.setToolTip("Browse example prompts (Alt+X)")
+        buttons_layout.addWidget(self.btn_examples)
 
         # Spacer
         buttons_layout.addStretch()
@@ -619,6 +623,22 @@ class MainWindow(QMainWindow):
             self.btn_social_sizes.setToolTip("Browse common social media sizes and apply")
             self.btn_social_sizes.clicked.connect(self._open_social_sizes_dialog)
             res_layout.addWidget(self.btn_social_sizes)
+
+            # Label to show selected social media size
+            self.social_size_label = QLabel("")
+            self.social_size_label.setStyleSheet("""
+                QLabel {
+                    color: #2c5aa0;
+                    font-weight: bold;
+                    padding: 2px 5px;
+                    background-color: #e8f4ff;
+                    border: 1px solid #b3d9ff;
+                    border-radius: 3px;
+                }
+            """)
+            self.social_size_label.setVisible(False)
+            res_layout.addWidget(self.social_size_label)
+
             res_layout.addStretch(1)
             settings_form.addRow("Resolution:", res_container)
         else:
@@ -828,6 +848,8 @@ class MainWindow(QMainWindow):
         
         # Create a vertical splitter for image and status console
         image_console_splitter = QSplitter(Qt.Vertical)
+        # Connect splitter movement to image resize
+        image_console_splitter.splitterMoved.connect(lambda: QTimer.singleShot(10, self._perform_image_resize))
 
         # Output image
         self.output_image_label = QLabel()
@@ -905,6 +927,7 @@ class MainWindow(QMainWindow):
         self.btn_enhance_prompt.clicked.connect(self._enhance_prompt)
         self.btn_generate_prompts.clicked.connect(self._open_prompt_generator)
         self.btn_ask_about.clicked.connect(self._open_prompt_question)
+        self.btn_reference_image.clicked.connect(self._open_reference_image)
         self.btn_generate.clicked.connect(self._generate)
 
         # Add keyboard shortcuts for common actions
@@ -955,6 +978,9 @@ class MainWindow(QMainWindow):
             from PySide6.QtWidgets import QDialog
             if dlg.exec() == QDialog.Accepted:
                 res = dlg.selected_resolution()
+                platform = dlg._selected_platform
+                type_name = dlg._selected_type
+
                 if res and hasattr(self, 'resolution_selector') and self.resolution_selector:
                     # Switch to explicit resolution mode and set the value
                     self.resolution_selector.set_mode_resolution()
@@ -963,6 +989,17 @@ class MainWindow(QMainWindow):
                         self.resolution_selector.set_resolution(res)
                     # Store as current resolution for persistence
                     self.current_resolution = res
+
+                    # Update the label to show selected social media size
+                    if platform and type_name and hasattr(self, 'social_size_label'):
+                        # Truncate if too long
+                        display_text = f"{platform}: {type_name}"
+                        if len(display_text) > 30:
+                            display_text = f"{platform[:15]}: {type_name[:12]}..."
+                        self.social_size_label.setText(display_text)
+                        self.social_size_label.setVisible(True)
+                        # Add tooltip with full info
+                        self.social_size_label.setToolTip(f"{platform} - {type_name}\nSize: {res}")
         except Exception as e:
             from gui.dialog_utils import show_error
             show_error(self, APP_NAME, f"Sizes dialog error: {e}", exception=e)
@@ -2363,9 +2400,9 @@ For more detailed information, please refer to the full documentation.
 
         # Create table widget for better organization
         self.history_table = QTableWidget()
-        self.history_table.setColumnCount(6)
+        self.history_table.setColumnCount(7)
         self.history_table.setHorizontalHeaderLabels([
-            "Date & Time", "Provider", "Model", "Prompt", "Resolution", "Cost"
+            "Thumbnail", "Date & Time", "Provider", "Model", "Prompt", "Resolution", "Cost"
         ])
         
         # Configure table
@@ -2376,17 +2413,37 @@ For more detailed information, please refer to the full documentation.
         
         # Set column widths
         header = self.history_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Date & Time
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Provider
-        header.setSectionResizeMode(2, QHeaderView.Interactive)  # Model
-        header.setSectionResizeMode(3, QHeaderView.Stretch)  # Prompt - takes remaining space
-        header.setSectionResizeMode(4, QHeaderView.ResizeToContents)  # Resolution
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Cost
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Thumbnail
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Date & Time
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Provider
+        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Model
+        header.setSectionResizeMode(4, QHeaderView.Stretch)  # Prompt - takes remaining space
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Resolution
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Cost
         
         # Populate table with history
         self.history_table.setRowCount(len(self.history))
         for row, item in enumerate(self.history):
             if isinstance(item, dict):
+                # Create thumbnail for first column
+                thumbnail_widget = QLabel()
+                thumbnail_widget.setAlignment(Qt.AlignCenter)
+                file_path = item.get('file_path', '')
+                if file_path and Path(file_path).exists():
+                    from PySide6.QtGui import QPixmap
+                    pixmap = QPixmap(file_path)
+                    if not pixmap.isNull():
+                        # Scale to 60x60 thumbnail
+                        scaled = pixmap.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        thumbnail_widget.setPixmap(scaled)
+                    else:
+                        thumbnail_widget.setText("No Image")
+                else:
+                    thumbnail_widget.setText("No Image")
+                self.history_table.setCellWidget(row, 0, thumbnail_widget)
+                # Set row height to accommodate thumbnail
+                self.history_table.setRowHeight(row, 65)
+
                 # Parse timestamp and combine date & time
                 timestamp = item.get('timestamp', '')
                 datetime_str = ''
@@ -2414,42 +2471,45 @@ For more detailed information, please refer to the full documentation.
                 # Store sortable datetime for proper chronological sorting
                 if sortable_datetime:
                     datetime_item.setData(Qt.UserRole + 1, sortable_datetime)
-                self.history_table.setItem(row, 0, datetime_item)
+                self.history_table.setItem(row, 1, datetime_item)
                 
                 # Provider column (now column 1)
                 provider = item.get('provider', '')
                 provider_item = QTableWidgetItem(provider.title() if provider else 'Unknown')
-                self.history_table.setItem(row, 1, provider_item)
+                self.history_table.setItem(row, 2, provider_item)
                 
                 # Model column (now column 2)
                 model = item.get('model', '')
                 model_display = model.split('/')[-1] if '/' in model else model  # Simplify model names
                 model_item = QTableWidgetItem(model_display)
                 model_item.setToolTip(model)  # Full model name in tooltip
-                self.history_table.setItem(row, 2, model_item)
+                self.history_table.setItem(row, 3, model_item)
                 
                 # Prompt column (now column 3)
                 prompt = item.get('prompt', 'No prompt')
-                prompt_item = QTableWidgetItem(prompt[:100] + '...' if len(prompt) > 100 else prompt)
+                prompt_item = QTableWidgetItem(prompt)  # Show full prompt, not truncated
                 prompt_item.setToolTip(f"Full prompt:\n{prompt}")
-                self.history_table.setItem(row, 3, prompt_item)
+                self.history_table.setItem(row, 4, prompt_item)
                 
                 # Resolution column (now column 4)
                 width = item.get('width', '')
                 height = item.get('height', '')
                 resolution = f"{width}x{height}" if width and height else ''
                 resolution_item = QTableWidgetItem(resolution)
-                self.history_table.setItem(row, 4, resolution_item)
+                self.history_table.setItem(row, 5, resolution_item)
                 
                 # Cost column (now column 5)
                 cost = item.get('cost', 0.0)
                 cost_str = f"${cost:.4f}" if cost > 0 else '-'
                 cost_item = QTableWidgetItem(cost_str)
-                self.history_table.setItem(row, 5, cost_item)
+                self.history_table.setItem(row, 6, cost_item)
                 
                 # Store the history item data in the first column for easy retrieval
                 datetime_item.setData(Qt.UserRole, item)
-        
+
+        # Sort by date/time column (1) in descending order (newest first)
+        self.history_table.sortByColumn(1, Qt.DescendingOrder)
+
         v.addWidget(QLabel(f"History ({len(self.history)} items):"))
         v.addWidget(self.history_table)
         
@@ -2569,13 +2629,14 @@ For more detailed information, please refer to the full documentation.
     def get_llm_models_for_provider(provider: str):
         """Get list of models for a specific LLM provider."""
         models = {
-            "OpenAI": ["gpt-5-chat-latest", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"],
-            "Claude": ["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"],
-            "Gemini": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"],
-            "Ollama": ["llama2", "mistral", "mixtral", "phi-2", "neural-chat"],
-            "LM Studio": ["local-model", "custom-model"]
+            "openai": ["gpt-5-chat-latest", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"],
+            "claude": ["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"],
+            "gemini": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"],
+            "ollama": ["llama2", "mistral", "mixtral", "phi-2", "neural-chat"],
+            "lm studio": ["local-model", "custom-model"]
         }
-        return models.get(provider, [])
+        # Handle case-insensitive lookup
+        return models.get(provider.lower(), [])
 
     def populate_llm_combo(self, provider_combo, model_combo, current_provider=None, current_model=None):
         """Populate LLM provider and model combos with all available options.
@@ -2916,6 +2977,10 @@ For more detailed information, please refer to the full documentation.
     def _on_resolution_changed(self, resolution: str):
         """Handle resolution change."""
         self.current_resolution = resolution
+        # Clear social size label when resolution is manually changed
+        if hasattr(self, 'social_size_label'):
+            self.social_size_label.setVisible(False)
+            self.social_size_label.setText("")
         # Save resolution settings including custom width/height
         if hasattr(self, 'resolution_selector'):
             width, height = self.resolution_selector.get_width_height()
@@ -3286,11 +3351,27 @@ For more detailed information, please refer to the full documentation.
     def _open_prompt_question(self):
         """Open prompt question dialog."""
         current_prompt = self.prompt_edit.toPlainText().strip()
-        if not current_prompt:
-            QMessageBox.warning(self, APP_NAME, "Please enter a prompt first.")
-            return
-
+        # Allow opening with empty prompt - dialog becomes "Ask Anything"
         dlg = PromptQuestionDialog(self, self.config, current_prompt)
+        dlg.exec()
+
+    def _open_reference_image(self):
+        """Open reference image analysis dialog."""
+        from .reference_image_dialog import ReferenceImageDialog
+
+        dlg = ReferenceImageDialog(self, self.config)
+
+        # Connect to receive the generated description
+        def on_description_generated(description):
+            # Append to existing prompt or replace if empty
+            current_prompt = self.prompt_edit.toPlainText().strip()
+            if current_prompt:
+                # Append with a newline
+                self.prompt_edit.setPlainText(f"{current_prompt}\n\n{description}")
+            else:
+                self.prompt_edit.setPlainText(description)
+
+        dlg.descriptionGenerated.connect(on_description_generated)
         dlg.exec()
 
     def _open_find_dialog(self):
@@ -3648,9 +3729,12 @@ For more detailed information, please refer to the full documentation.
                             kwargs['resolution'] = resolution_map
                         # Keep aspect_ratio for fallback - providers use it
                     else:
-                        # Gemini: use exact dimensions
+                        # Gemini: use exact dimensions and calculate aspect ratio
                         kwargs['width'] = width
                         kwargs['height'] = height
+                        # Calculate aspect ratio for proper logging and prompt generation
+                        aspect_ratio = self._find_closest_aspect_ratio(width, height, "google")
+                        kwargs['aspect_ratio'] = aspect_ratio
         elif hasattr(self, 'resolution_combo'):
             # Fallback to old resolution combo
             resolution_text = self.resolution_combo.currentText()
@@ -3767,7 +3851,14 @@ For more detailed information, please refer to the full documentation.
                 width, height = self._pending_resolution
                 self._pending_resolution = None  # Clear it after use
 
-            if width and height and (width != 1024 or height != 1024):
+            # For Google provider with 1:1 aspect ratio, don't insert dimensions
+            # For other aspect ratios or providers, insert dimensions
+            if width and height:
+                is_square = (width == height)
+                if self.current_provider == 'google' and is_square:
+                    # Don't insert dimensions for square images with Google
+                    pass
+                elif width != 1024 or height != 1024:
                     # If using Google provider and resolution > 1024, calculate scaled dimensions
                     if self.current_provider == 'google':
                         max_dim = max(width, height)
@@ -4306,14 +4397,17 @@ For more detailed information, please refer to the full documentation.
             pixmap = QPixmap()
             pixmap.loadFromData(image_data)
 
+            # Force layout update before getting size
+            QApplication.processEvents()
+            self.output_image_label.updateGeometry()
+
             # Get the label's current size
             label_size = self.output_image_label.size()
 
             # Ensure we have valid dimensions
             if label_size.width() <= 0 or label_size.height() <= 0:
-                # Label not ready yet, schedule retry
-                QTimer.singleShot(50, lambda: self._display_image(image_data))
-                return
+                # Use minimum size if label not ready
+                label_size = QSize(400, 400)
 
             # Scale to fit the label completely while maintaining aspect ratio
             # Use the full available space
@@ -4333,11 +4427,14 @@ For more detailed information, please refer to the full documentation.
 
             # After layout settles, ensure the image scales to the final size
             # Schedule multiple resize attempts to handle various layout timing
-            for delay in [50, 100, 200, 500]:
+            for delay in [10, 50, 100, 200, 500]:
                 try:
                     QTimer.singleShot(delay, self._perform_image_resize)
                 except Exception:
                     pass
+
+            # Also trigger immediate resize
+            self._perform_image_resize()
         except Exception as e:
             self.output_image_label.setText(f"Error displaying image: {e}")
     
@@ -4352,18 +4449,62 @@ For more detailed information, please refer to the full documentation.
         
         # Get save path
         default_name = f"{sanitize_stub_from_prompt(self.current_prompt)}{ext}"
-        path, _ = QFileDialog.getSaveFileName(
+
+        # Build filter string for multiple formats
+        # Default to current format but allow saving in other formats
+        current_format_filter = f"Current format (*{ext})"
+        other_formats = "PNG (*.png);;JPEG (*.jpg *.jpeg);;WebP (*.webp);;BMP (*.bmp);;TIFF (*.tiff *.tif)"
+        all_formats = f"{current_format_filter};;{other_formats};;All files (*.*)"
+
+        path, selected_filter = QFileDialog.getSaveFileName(
             self,
             "Save Image",
             str(Path.home() / default_name),
-            f"Images (*{ext})"
+            all_formats
         )
         
         if path:
             try:
-                Path(path).write_bytes(self.current_image_data)
+                # Check if we need to convert format
+                path = Path(path)
+                target_ext = path.suffix.lower()
+
+                # If target extension differs from current or user wants specific format
+                if target_ext in ['.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif'] and target_ext != ext:
+                    # Convert using PIL
+                    from PIL import Image
+                    import io
+
+                    # Load current image data
+                    img = Image.open(io.BytesIO(self.current_image_data))
+
+                    # Handle JPEG conversion (no alpha channel)
+                    if target_ext in ['.jpg', '.jpeg']:
+                        # Convert RGBA to RGB
+                        if img.mode == 'RGBA':
+                            # Create white background
+                            background = Image.new('RGB', img.size, (255, 255, 255))
+                            background.paste(img, mask=img.split()[3])  # Use alpha channel as mask
+                            img = background
+                        img.save(str(path), 'JPEG', quality=95)
+                    elif target_ext == '.webp':
+                        img.save(str(path), 'WEBP', quality=90, lossless=False)
+                    elif target_ext in ['.tiff', '.tif']:
+                        img.save(str(path), 'TIFF')
+                    elif target_ext == '.bmp':
+                        img.save(str(path), 'BMP')
+                    else:
+                        img.save(str(path), 'PNG')
+
+                    logger.info(f"Saved image as {target_ext} to: {path}")
+                else:
+                    # Save as-is
+                    path.write_bytes(self.current_image_data)
+                    logger.info(f"Saved image to: {path}")
+
                 QMessageBox.information(self, APP_NAME, f"Image saved to:\n{path}")
             except Exception as e:
+                logger.error(f"Error saving image: {e}")
                 QMessageBox.critical(self, APP_NAME, f"Error saving image:\n{e}")
     
     def _copy_image_to_clipboard(self):
@@ -5145,7 +5286,7 @@ For more detailed information, please refer to the full documentation.
             self,
             "Select Reference Image",
             str(images_output_dir()),
-            "Images (*.png *.jpg *.jpeg *.webp *.bmp);;All files (*.*)"
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tiff *.tif *.ico *.svg);;All files (*.*)"
         )
 
         if file_path:
@@ -5660,6 +5801,25 @@ For more detailed information, please refer to the full documentation.
         
         for row, item in enumerate(self.history):
             if isinstance(item, dict):
+                # Create thumbnail for first column
+                thumbnail_widget = QLabel()
+                thumbnail_widget.setAlignment(Qt.AlignCenter)
+                file_path = item.get('file_path', '')
+                if file_path and Path(file_path).exists():
+                    from PySide6.QtGui import QPixmap
+                    pixmap = QPixmap(file_path)
+                    if not pixmap.isNull():
+                        # Scale to 60x60 thumbnail
+                        scaled = pixmap.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                        thumbnail_widget.setPixmap(scaled)
+                    else:
+                        thumbnail_widget.setText("No Image")
+                else:
+                    thumbnail_widget.setText("No Image")
+                self.history_table.setCellWidget(row, 0, thumbnail_widget)
+                # Set row height to accommodate thumbnail
+                self.history_table.setRowHeight(row, 65)
+
                 # Parse timestamp and combine date & time
                 timestamp = item.get('timestamp', '')
                 datetime_str = ''
@@ -5688,38 +5848,38 @@ For more detailed information, please refer to the full documentation.
                 # Store sortable datetime for proper chronological sorting
                 if sortable_datetime:
                     datetime_item.setData(Qt.UserRole + 1, sortable_datetime)
-                self.history_table.setItem(row, 0, datetime_item)
+                self.history_table.setItem(row, 1, datetime_item)
                 
                 # Provider column (now column 1)
                 provider = item.get('provider', '')
                 provider_item = QTableWidgetItem(provider.title() if provider else 'Unknown')
-                self.history_table.setItem(row, 1, provider_item)
+                self.history_table.setItem(row, 2, provider_item)
                 
                 # Model column (now column 2)
                 model = item.get('model', '')
                 model_display = model.split('/')[-1] if '/' in model else model
                 model_item = QTableWidgetItem(model_display)
                 model_item.setToolTip(model)
-                self.history_table.setItem(row, 2, model_item)
+                self.history_table.setItem(row, 3, model_item)
                 
                 # Prompt column (now column 3)
                 prompt = item.get('prompt', 'No prompt')
-                prompt_item = QTableWidgetItem(prompt[:100] + '...' if len(prompt) > 100 else prompt)
+                prompt_item = QTableWidgetItem(prompt)  # Show full prompt, not truncated
                 prompt_item.setToolTip(f"Full prompt:\n{prompt}")
-                self.history_table.setItem(row, 3, prompt_item)
+                self.history_table.setItem(row, 4, prompt_item)
                 
                 # Resolution column (now column 4)
                 width = item.get('width', '')
                 height = item.get('height', '')
                 resolution = f"{width}x{height}" if width and height else ''
                 resolution_item = QTableWidgetItem(resolution)
-                self.history_table.setItem(row, 4, resolution_item)
+                self.history_table.setItem(row, 5, resolution_item)
                 
                 # Cost column (now column 5)
                 cost = item.get('cost', 0.0)
                 cost_str = f"${cost:.4f}" if cost > 0 else '-'
                 cost_item = QTableWidgetItem(cost_str)
-                self.history_table.setItem(row, 5, cost_item)
+                self.history_table.setItem(row, 6, cost_item)
                 
                 # Store the history item data in the first column for easy retrieval
                 datetime_item.setData(Qt.UserRole, item)

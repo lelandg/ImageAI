@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.18.2**
+**Version 0.19.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **LelandGreen.com on Discord - The Intersection of Art and AI [Discord](https://discord.gg/a64xRg9w)**
@@ -508,9 +508,17 @@ python main.py video --in script.txt --veo-model veo-3.0-generate-001 \
 - **Model Selection**: Dropdown with provider-specific models
 - **Prompt Input**: Multi-line text area with built-in search (Ctrl+F)
 - **AI Prompt Tools**:
-  - Enhance Prompt: Improve your prompt with AI assistance
-  - Generate Prompts: Create multiple prompt variations
-  - Ask About Prompt: Get AI guidance on prompt writing
+  - **Enhance Prompt**: Improve your prompt with AI assistance
+  - **Generate Prompts**: Create multiple prompt variations with history tracking
+  - **Ask AI Anything**: Interactive AI assistant for prompt help or general questions
+    - Works with or without a prompt
+    - Continuous conversation mode with context retention
+    - Editable prompt field with clear edit controls
+    - Conversation history saved across sessions
+  - **Reference Image Analysis**: Analyze images to generate detailed descriptions
+    - Upload any image for AI analysis
+    - Customizable analysis prompts
+    - Copy descriptions directly to main prompt
 - **Generate Button**: Start image generation with progress tracking
 - **Image Display**: High-quality preview with automatic scaling
 - **Generation Controls**:
