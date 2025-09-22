@@ -52,6 +52,22 @@ def launch_gui():
     app = QApplication.instance() or QApplication(sys.argv)
     app.setApplicationName("ImageAI")
 
+    # Always show keyboard shortcut underlines (not just when Alt is pressed)
+    # This makes the mnemonics always visible like in your screenshot
+    from PySide6.QtWidgets import QStyleFactory
+
+    # Set style that shows underlines properly
+    # Windows style shows underlines only when Alt is pressed by default
+    # Fusion style can show them always
+    available_styles = QStyleFactory.keys()
+    if "Fusion" in available_styles:
+        app.setStyle("Fusion")
+
+    # Note: The & character in button text automatically creates underlines for mnemonics
+    # The visibility of these underlines depends on the OS and Qt style settings
+    # On Windows, underlines typically show when Alt is pressed
+    # The Fusion style helps make them more visible
+
     print("Creating application window...")
     window = MainWindow()
     window.show()

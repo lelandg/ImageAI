@@ -155,24 +155,28 @@ class ModelBrowserDialog(QDialog):
         status_layout.addWidget(self.progress_bar)
         
         layout.addWidget(status_group)
-        
+        # Shortcuts hint
+        shortcuts_label = QLabel("<small style='color: gray;'>Shortcuts: Alt+D to download, Alt+C to cancel, Esc to close</small>")
+        shortcuts_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(shortcuts_label)
+
         # Buttons
         button_layout = QHBoxLayout()
         button_layout.addStretch()
-        
-        self.download_btn = QPushButton("Download Selected")
+
+        self.download_btn = QPushButton("&Download Selected")
         self.download_btn.clicked.connect(self._download_selected)
         button_layout.addWidget(self.download_btn)
-        
-        self.cancel_btn = QPushButton("Cancel Download")
+
+        self.cancel_btn = QPushButton("&Cancel Download")
         self.cancel_btn.clicked.connect(self._cancel_download)
         self.cancel_btn.setEnabled(False)
         button_layout.addWidget(self.cancel_btn)
-        
-        self.close_btn = QPushButton("Close")
+
+        self.close_btn = QPushButton("C&lose")
         self.close_btn.clicked.connect(self.accept)
         button_layout.addWidget(self.close_btn)
-        
+
         layout.addLayout(button_layout)
     
     def _create_popular_models_tab(self) -> QWidget:
@@ -239,7 +243,7 @@ class ModelBrowserDialog(QDialog):
         layout.addWidget(self.installed_list)
         
         # Refresh button
-        refresh_btn = QPushButton("Refresh Installed Models")
+        refresh_btn = QPushButton("&Refresh Installed Models")
         refresh_btn.clicked.connect(self._load_installed_models)
         layout.addWidget(refresh_btn)
         
@@ -272,7 +276,7 @@ class ModelBrowserDialog(QDialog):
         layout.addLayout(input_layout)
         
         # Download button
-        custom_download_btn = QPushButton("Download Custom Model")
+        custom_download_btn = QPushButton("Download &Custom Model")
         custom_download_btn.clicked.connect(self._download_custom)
         layout.addWidget(custom_download_btn)
         

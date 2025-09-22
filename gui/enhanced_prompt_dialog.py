@@ -585,6 +585,9 @@ class EnhancedPromptDialog(QDialog):
         enhanced = self.result_display.toPlainText().strip()
         if enhanced:
             self.promptEnhanced.emit(enhanced)
+            # Save settings before accepting
+            self.save_dialog_settings()
+            self.save_settings()
             self.accept()
         else:
             QMessageBox.warning(

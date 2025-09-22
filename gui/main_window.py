@@ -31,6 +31,7 @@ from core import (
 from core.constants import DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT
 from providers import get_provider, preload_provider, list_providers
 from gui.dialogs import ExamplesDialog
+from gui.shortcut_hint_widget import create_shortcut_hint
 # Defer video tab import to improve startup speed
 # from gui.video.video_project_tab import VideoProjectTab
 from gui.workers import GenWorker
@@ -528,7 +529,7 @@ class MainWindow(QMainWindow):
         buttons_layout.addStretch()
 
         # Toggle button for original/cropped (initially hidden)
-        self.btn_toggle_original = QPushButton("Show Original")
+        self.btn_toggle_original = QPushButton("Show &Original")
         self.btn_toggle_original.setEnabled(False)
         self.btn_toggle_original.setVisible(False)
         self.btn_toggle_original.clicked.connect(self._toggle_original_image)
@@ -545,10 +546,14 @@ class MainWindow(QMainWindow):
         buttons_layout.addWidget(self.btn_copy_image)
 
         bottom_layout.addWidget(buttons_container)
-        
+
+        # Add shortcuts hint label with enhanced visibility
+        shortcuts_label = create_shortcut_hint("Ctrl+Enter to generate, Ctrl+S to save, Ctrl+Shift+C to copy, Alt+key for buttons, Ctrl+F to search")
+        bottom_layout.addWidget(shortcuts_label)
+
         # Image Settings - expandable like Advanced Settings
         # Toggle button
-        self.image_settings_toggle = QPushButton("▶ Image Settings")
+        self.image_settings_toggle = QPushButton("▶ &Image Settings")
         self.image_settings_toggle.setCheckable(True)
         self.image_settings_toggle.clicked.connect(self._toggle_image_settings)
         self.image_settings_toggle.setStyleSheet("""
@@ -619,7 +624,7 @@ class MainWindow(QMainWindow):
             res_layout.setContentsMargins(0, 0, 0, 0)
             res_layout.setSpacing(6)
             res_layout.addWidget(self.resolution_selector)
-            self.btn_social_sizes = QPushButton("Social Sizes…")
+            self.btn_social_sizes = QPushButton("&Social Sizes…")
             self.btn_social_sizes.setToolTip("Browse common social media sizes and apply")
             self.btn_social_sizes.clicked.connect(self._open_social_sizes_dialog)
             res_layout.addWidget(self.btn_social_sizes)
@@ -698,10 +703,17 @@ class MainWindow(QMainWindow):
         ref_controls_layout = QHBoxLayout()
 
         # Reference image button
-        self.btn_select_ref_image = QPushButton("Select Reference Image...")
+        self.btn_select_ref_image = QPushButton("Select &Reference Image...")
         self.btn_select_ref_image.setToolTip("Choose a starting image for generation (Google Gemini only)")
         self.btn_select_ref_image.clicked.connect(self._select_reference_image)
         ref_controls_layout.addWidget(self.btn_select_ref_image)
+
+        # Use current image button
+        self.btn_use_current_as_ref = QPushButton("&Use Current Image")
+        self.btn_use_current_as_ref.setToolTip("Use the currently displayed image as reference")
+        self.btn_use_current_as_ref.clicked.connect(self._use_current_as_reference)
+        self.btn_use_current_as_ref.setEnabled(False)  # Initially disabled
+        ref_controls_layout.addWidget(self.btn_use_current_as_ref)
 
         # Enable/disable checkbox
         self.ref_image_enabled = QCheckBox("Use reference")
@@ -711,7 +723,7 @@ class MainWindow(QMainWindow):
         ref_controls_layout.addWidget(self.ref_image_enabled)
 
         # Clear button
-        self.btn_clear_ref_image = QPushButton("Clear")
+        self.btn_clear_ref_image = QPushButton("&Clear")
         self.btn_clear_ref_image.setEnabled(False)
         self.btn_clear_ref_image.clicked.connect(self._clear_reference_image)
         ref_controls_layout.addWidget(self.btn_clear_ref_image)
@@ -965,6 +977,16 @@ class MainWindow(QMainWindow):
             else:
                 self.btn_select_ref_image.setToolTip(f"Reference images not supported by {self.current_provider} provider")
 
+        # Update use current button state on startup
+        self._update_use_current_button_state()
+
+        # Restore Image Settings expansion state from config
+        image_settings_expanded = self.config.get('image_settings_expanded', False)
+        if image_settings_expanded:
+            self.image_settings_container.setVisible(True)
+            self.image_settings_toggle.setText("▼ &Image Settings")
+            self.image_settings_toggle.setChecked(True)
+
     def _open_social_sizes_dialog(self):
         """Open the Social Media Image Sizes dialog and apply selection."""
         try:
@@ -1104,6 +1126,10 @@ class MainWindow(QMainWindow):
         api_buttons.addStretch(1)
         api_buttons.addWidget(self.btn_save_test)
         providers_layout.addLayout(api_buttons)
+
+        # Add shortcuts hint for API keys section with enhanced visibility
+        api_shortcuts_label = create_shortcut_hint("Alt+K to get keys, Alt+S to save & test")
+        providers_layout.addWidget(api_shortcuts_label)
 
         v.addWidget(providers_group)
 
@@ -1358,13 +1384,13 @@ class MainWindow(QMainWindow):
             nav_layout.setContentsMargins(0, 0, 0, 0)
             
             # Back button
-            self.btn_help_back = QPushButton("◀ Back")
+            self.btn_help_back = QPushButton("◀ &Back")
             self.btn_help_back.clicked.connect(self.help_browser.back)
             self.btn_help_back.setToolTip("Go back (Alt+Left, Backspace)")
             nav_layout.addWidget(self.btn_help_back)
 
             # Forward button
-            self.btn_help_forward = QPushButton("Forward ▶")
+            self.btn_help_forward = QPushButton("&Forward ▶")
             self.btn_help_forward.clicked.connect(self.help_browser.forward)
             self.btn_help_forward.setToolTip("Go forward (Alt+Right)")
             nav_layout.addWidget(self.btn_help_forward)
@@ -1386,14 +1412,14 @@ class MainWindow(QMainWindow):
             shortcut_backspace.activated.connect(self.help_browser.back)
             
             # Home button
-            self.btn_help_home = QPushButton("⌂ Home")
+            self.btn_help_home = QPushButton("⌂ &Home")
             self.btn_help_home.clicked.connect(lambda: self.help_browser.page().runJavaScript(
                 "window.scrollTo(0, 0);"))
             self.btn_help_home.setToolTip("Go to top (Ctrl+Home)")
             nav_layout.addWidget(self.btn_help_home)
 
             # Report Problem button
-            self.btn_report_problem = QPushButton("🐛 Report Problem")
+            self.btn_report_problem = QPushButton("🐛 &Report Problem")
             self.btn_report_problem.clicked.connect(lambda: webbrowser.open("https://github.com/lelandg/ImageAI/issues"))
             self.btn_report_problem.setToolTip("Report an issue on GitHub")
             nav_layout.addWidget(self.btn_report_problem)
@@ -1735,19 +1761,19 @@ class MainWindow(QMainWindow):
         nav_layout.setContentsMargins(0, 0, 0, 0)
         
         # Back button
-        self.btn_help_back = QPushButton("◀ Back")
+        self.btn_help_back = QPushButton("◀ &Back")
         self.btn_help_back.setEnabled(False)
         self.btn_help_back.setToolTip("Go back (Alt+Left, Backspace)")
         nav_layout.addWidget(self.btn_help_back)
         
         # Forward button
-        self.btn_help_forward = QPushButton("Forward ▶")
+        self.btn_help_forward = QPushButton("&Forward ▶")
         self.btn_help_forward.setEnabled(False)
         self.btn_help_forward.setToolTip("Go forward (Alt+Right)")
         nav_layout.addWidget(self.btn_help_forward)
         
         # Home button
-        self.btn_help_home = QPushButton("⌂ Home")
+        self.btn_help_home = QPushButton("⌂ &Home")
         self.btn_help_home.setToolTip("Go to top (Ctrl+Home)")
         nav_layout.addWidget(self.btn_help_home)
         
@@ -2378,7 +2404,11 @@ For more detailed information, please refer to the full documentation.
             }
         """)
         v.addWidget(self.btn_insert_prompt)
-        
+
+        # Add shortcuts hint with enhanced visibility
+        templates_shortcuts_label = create_shortcut_hint("Alt+I to insert into prompt")
+        v.addWidget(templates_shortcuts_label)
+
         # Connect signals
         self.template_combo.currentTextChanged.connect(self._on_template_changed)
         self.btn_insert_prompt.clicked.connect(self._apply_template)
@@ -2521,7 +2551,11 @@ For more detailed information, please refer to the full documentation.
         h.addStretch()
         h.addWidget(self.btn_clear_history)
         v.addLayout(h)
-        
+
+        # Add shortcuts hint with enhanced visibility
+        history_shortcuts_label = create_shortcut_hint("Alt+L to load, Alt+L to clear, Double-click to load item")
+        v.addWidget(history_shortcuts_label)
+
         # Connect signals
         self.history_table.selectionModel().selectionChanged.connect(self._on_history_selection_changed)
         self.history_table.itemDoubleClicked.connect(self._load_history_item)
@@ -2891,6 +2925,9 @@ For more detailed information, please refer to the full documentation.
         self.current_provider = provider.lower()
         self.config.set("provider", self.current_provider)
         self.config.save()
+
+        # Update reference image button states
+        self._update_use_current_button_state()
 
         # Show status but don't preload - it will load on first use
         self.status_bar.showMessage(f"Image provider changed to {self.current_provider}")
@@ -4425,6 +4462,17 @@ For more detailed information, please refer to the full documentation.
             # Update current image data
             self.current_image_data = image_data
 
+            # Update use current button state when image changes
+            self._update_use_current_button_state()
+
+            # Auto-expand Image Settings when an image is displayed (if user hasn't manually collapsed it)
+            # Check config to see if user wants it expanded
+            image_settings_should_expand = self.config.get('image_settings_expanded', True)
+            if image_settings_should_expand and not self.image_settings_container.isVisible():
+                self.image_settings_container.setVisible(True)
+                self.image_settings_toggle.setText("▼ &Image Settings")
+                self.image_settings_toggle.setChecked(True)
+
             # After layout settles, ensure the image scales to the final size
             # Schedule multiple resize attempts to handle various layout timing
             for delay in [10, 50, 100, 200, 500]:
@@ -4735,11 +4783,11 @@ For more detailed information, please refer to the full documentation.
             if 'image_settings_expanded' in ui_state:
                 if ui_state['image_settings_expanded']:
                     self.image_settings_container.setVisible(True)
-                    self.image_settings_toggle.setText("▼ Image Settings")
+                    self.image_settings_toggle.setText("▼ &Image Settings")
                     self.image_settings_toggle.setChecked(True)
                 else:
                     self.image_settings_container.setVisible(False)
-                    self.image_settings_toggle.setText("▶ Image Settings")
+                    self.image_settings_toggle.setText("▶ &Image Settings")
                     self.image_settings_toggle.setChecked(False)
             
             # Load and display image
@@ -5057,7 +5105,10 @@ For more detailed information, please refer to the full documentation.
                         
                         # Update status
                         self.status_label.setText("Loaded from history")
-                        
+
+                        # Update use current button state after loading history
+                        self._update_use_current_button_state()
+
                     except Exception as e:
                         self.output_image_label.setText(f"Error loading image: {e}")
     
@@ -5275,7 +5326,11 @@ For more detailed information, please refer to the full documentation.
         """Toggle the image settings panel visibility."""
         is_visible = self.image_settings_container.isVisible()
         self.image_settings_container.setVisible(not is_visible)
-        self.image_settings_toggle.setText("▼ Image Settings" if not is_visible else "▶ Image Settings")
+        self.image_settings_toggle.setText("▼ &Image Settings" if not is_visible else "▶ &Image Settings")
+
+        # Save the expansion state when user manually toggles
+        self.config.set('image_settings_expanded', not is_visible)
+        self.config.save()
 
     def _select_reference_image(self):
         """Open dialog to select a reference image."""
@@ -5329,6 +5384,9 @@ For more detailed information, please refer to the full documentation.
                 # Save to project/settings
                 self._save_reference_image_to_config()
 
+                # Update use current button state
+                self._update_use_current_button_state()
+
                 # Update status
                 self.status_bar.showMessage(f"Reference image loaded: {self.reference_image_path.name}")
 
@@ -5353,6 +5411,80 @@ For more detailed information, please refer to the full documentation.
         self._clear_reference_image_from_config()
 
         self.status_bar.showMessage("Reference image cleared")
+
+        # Update use current button state
+        self._update_use_current_button_state()
+
+    def _use_current_as_reference(self):
+        """Use the currently displayed image as reference image."""
+        if not hasattr(self, 'current_image_data') or not self.current_image_data:
+            return
+
+        try:
+            from PySide6.QtGui import QImage
+
+            # Create QImage from current image data
+            image = QImage()
+            if not image.loadFromData(self.current_image_data):
+                QMessageBox.critical(self, "Error", "Failed to process current image")
+                return
+
+            # Store the image data
+            self.reference_image_path = Path("Current Display Image")  # Virtual path
+            self.reference_image_data = self.current_image_data
+
+            # Update preview
+            pixmap = QPixmap.fromImage(image)
+            preview_pixmap = pixmap.scaled(
+                200, 150,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.ref_image_preview.setPixmap(preview_pixmap)
+            self.ref_image_preview.setVisible(True)
+
+            # Enable controls
+            self.ref_image_enabled.setEnabled(True)
+            self.ref_image_enabled.setChecked(True)
+            self.btn_clear_ref_image.setEnabled(True)
+            self.ref_options_widget.setVisible(True)
+
+            # Update instruction preview
+            self._update_ref_instruction_preview()
+
+            # Update button text
+            self.btn_select_ref_image.setText("Change Reference...")
+
+            # Save to config (with special marker for current image)
+            self._save_reference_image_to_config()
+
+            # Update button state
+            self._update_use_current_button_state()
+
+            self.status_bar.showMessage("Using current image as reference")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to set current image as reference: {str(e)}")
+
+    def _update_use_current_button_state(self):
+        """Update the state of the 'Use Current Image' button."""
+        if not hasattr(self, 'btn_use_current_as_ref'):
+            return
+
+        # Button should be enabled if:
+        # 1. Provider is Google (reference images only work with Google) AND
+        # 2. There is a current image displayed AND
+        # 3. It's not already the reference image (or reference is cleared)
+        is_google = self.current_provider == "google"
+        has_current_image = bool(hasattr(self, 'current_image_data') and self.current_image_data)
+
+        # Check if current image is already the reference
+        is_same_as_reference = False
+        if has_current_image and hasattr(self, 'reference_image_data') and self.reference_image_data:
+            is_same_as_reference = (self.current_image_data == self.reference_image_data)
+
+        # Enable button only if Google provider, we have an image, and it's different from reference
+        self.btn_use_current_as_ref.setEnabled(bool(is_google and has_current_image and not is_same_as_reference))
 
     def _on_ref_image_toggled(self, checked):
         """Handle reference image checkbox toggle."""
@@ -5515,6 +5647,9 @@ For more detailed information, please refer to the full documentation.
                             self.ref_position_combo.setCurrentText(ref_image_data['position'])
                         self._update_ref_instruction_preview()
 
+                        # Update button state after loading reference
+                        self._update_use_current_button_state()
+
                 except Exception as e:
                     logger.warning(f"Failed to load reference image from config: {e}")
 
@@ -5674,7 +5809,7 @@ For more detailed information, please refer to the full documentation.
             if 'image_settings_expanded' in ui_state:
                 if ui_state['image_settings_expanded']:
                     self.image_settings_container.setVisible(True)
-                    self.image_settings_toggle.setText("▼ Image Settings")
+                    self.image_settings_toggle.setText("▼ &Image Settings")
                     self.image_settings_toggle.setChecked(True)
             
             # Restore aspect ratio

@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 
 from core.constants import GEMINI_TEMPLATES_PATH
 from templates import get_gemini_doc_templates
+from gui.shortcut_hint_widget import create_shortcut_hint
 
 
 class ExamplesDialog(QDialog):
@@ -98,11 +99,15 @@ class ExamplesDialog(QDialog):
         self.chkAppend = QCheckBox("Append to current prompt instead of replacing")
         v.addWidget(self.chkAppend)
         
+        # Shortcuts hint with enhanced visibility
+        shortcuts_label = create_shortcut_hint("Double-click or Enter to use, Esc to cancel")
+        v.addWidget(shortcuts_label)
+
         # Buttons
         btns = QHBoxLayout()
         btns.addStretch(1)
-        self.btnCancel = QPushButton("Cancel")
-        self.btnOK = QPushButton("Use Selected")
+        self.btnCancel = QPushButton("&Cancel")
+        self.btnOK = QPushButton("&Use Selected")
         btns.addWidget(self.btnCancel)
         btns.addWidget(self.btnOK)
         v.addLayout(btns)
