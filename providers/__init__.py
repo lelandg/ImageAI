@@ -99,7 +99,17 @@ def _get_providers() -> Dict[str, Type[ImageProvider]]:
             import logging
             logging.debug(f"Could not load Local SD provider: {e}")
             pass
-    
+
+        # Try to import Midjourney provider
+        try:
+            with suppress_stderr():
+                from .midjourney_provider import MidjourneyProvider
+                _PROVIDERS["midjourney"] = MidjourneyProvider
+        except Exception as e:
+            import logging
+            logging.debug(f"Could not load Midjourney provider: {e}")
+            pass
+
     return _PROVIDERS
 
 

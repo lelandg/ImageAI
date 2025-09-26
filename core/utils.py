@@ -195,7 +195,7 @@ def write_image_sidecar(image_path: Path, meta: dict) -> None:
     """Write human-readable JSON beside the image."""
     try:
         p = sidecar_path(image_path)
-        p.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+        p.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     except (OSError, IOError, json.JSONEncodeError):
         pass
 

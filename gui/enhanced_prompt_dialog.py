@@ -5,12 +5,14 @@ from typing import Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QPushButton, QComboBox, QGroupBox, QDialogButtonBox,
-    QMessageBox, QSplitter, QWidget, QDoubleSpinBox, QSpinBox
+    QMessageBox, QSplitter, QWidget, QDoubleSpinBox, QSpinBox,
+    QTabWidget
 )
 from PySide6.QtCore import Qt, Signal, QThread, QObject, QSettings
 from PySide6.QtGui import QKeySequence, QShortcut
 
 from .llm_utils import DialogStatusConsole
+from .history_widget import DialogHistoryWidget
 from core.prompt_enhancer import EnhancementLevel
 
 logger = logging.getLogger(__name__)
@@ -189,9 +191,12 @@ class EnhancedPromptDialog(QDialog):
         # Create splitter for main content and status console
         splitter = QSplitter(Qt.Vertical)
 
-        # Main content widget
-        main_widget = QWidget()
-        layout = QVBoxLayout(main_widget)
+        # Create tab widget
+        self.tab_widget = QTabWidget()
+
+        # Enhance tab
+        enhance_widget = QWidget()
+        layout = QVBoxLayout(enhance_widget)
 
         # Current prompt
         prompt_group = QGroupBox("Current Prompt")
@@ -353,8 +358,16 @@ class EnhancedPromptDialog(QDialog):
 
         layout.addWidget(result_group)
 
-        # Add main widget to splitter
-        splitter.addWidget(main_widget)
+        # Add Enhance tab
+        self.tab_widget.addTab(enhance_widget, "Enhance")
+
+        # History tab
+        self.history_widget = DialogHistoryWidget("enhanced_prompts", self)
+        self.history_widget.itemDoubleClicked.connect(self.load_history_item)
+        self.tab_widget.addTab(self.history_widget, "History")
+
+        # Add tabs to splitter
+        splitter.addWidget(self.tab_widget)
 
         # Status console at the bottom
         self.status_console = DialogStatusConsole("Status", self)
@@ -584,16 +597,60 @@ class EnhancedPromptDialog(QDialog):
         """Accept the enhanced prompt."""
         enhanced = self.result_display.toPlainText().strip()
         if enhanced:
+            self.enhanced_prompt = enhanced  # Store for history
             self.promptEnhanced.emit(enhanced)
             # Save settings before accepting
             self.save_dialog_settings()
             self.save_settings()
-            self.accept()
-        else:
-            QMessageBox.warning(
-                self, "No Enhancement",
-                "Please enhance the prompt first or click Cancel to close."
+            # Save to history
+            self.history_widget.add_entry(
+                self.current_prompt,
+                self.enhanced_prompt,
+                self.llm_provider_combo.currentText(),
+                self.llm_model_combo.currentText(),
+                {
+                    "enhancement_level": self.level_combo.currentText(),
+                    "style_preset": self.style_combo.currentText()
+                }
             )
+            self.accept()
+
+    def load_history_item(self, item):
+        """Load a history item when double-clicked."""
+        # Switch to main tab
+        self.tab_widget.setCurrentIndex(0)
+
+        # Restore the input
+        original_prompt = item.get('input', '')
+        if original_prompt:
+            self.prompt_display.setPlainText(original_prompt)
+
+        # Restore the response
+        self.enhanced_prompt = item.get('response', '')
+        if self.enhanced_prompt:
+            self.result_display.setPlainText(self.enhanced_prompt)
+
+            # Show in status console
+            self.status_console.log("="*60, "INFO")
+            self.status_console.log("Restored from history:", "INFO")
+            self.status_console.log(f"Original Prompt: {original_prompt}", "INFO")
+            self.status_console.log("-"*40, "INFO")
+            self.status_console.log(f"Enhanced Prompt:\n{self.enhanced_prompt}", "SUCCESS")
+            self.status_console.log("="*60, "INFO")
+
+            # Show metadata if available
+            if 'metadata' in item:
+                metadata = item['metadata']
+                if 'enhancement_level' in metadata:
+                    self.status_console.log(f"Enhancement Level: {metadata['enhancement_level']}", "INFO")
+                if 'style_preset' in metadata:
+                    self.status_console.log(f"Style Preset: {metadata['style_preset']}", "INFO")
+            if 'provider' in item and item['provider']:
+                self.status_console.log(f"Provider: {item['provider']} ({item.get('model', 'Unknown')})", "INFO")
+
+            # Enable the Use Enhanced button
+            if hasattr(self, 'use_button'):
+                self.use_button.setEnabled(True)
 
     def reject(self):
         """Override reject to save settings before closing."""

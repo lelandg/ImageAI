@@ -5,7 +5,68 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.19.0] - 2025-01-20
+## [Unreleased] - 2025-09-26
+
+### Added
+- **Use Current Image Feature**: New functionality to use the currently displayed image as reference
+- **Enhanced Shortcut Visibility**: Improved keyboard shortcut hints and display
+- **History Widget Standardization**: All dialogs now use unified DialogHistoryWidget for consistent history management
+- **History Migration Tool**: Script to migrate old JSON history files to new format (`migrate_history.py`)
+- **History Double-Click Restore**: Double-clicking history items now restores the full context without creating duplicates
+
+### Changed
+- **Resolution Handling Improvements**:
+  - Improved Gemini resolution handling and aspect ratio logic
+  - Scale Google image resolutions to max 1024px proportionally
+  - Add robust resolution handling and UI improvements
+- **Button Layout Reorganization**:
+  - Renamed "Reference Image" button to "Ask About Image" for clarity
+  - Moved "Enhance" button next to "Generate Prompts" for better workflow grouping
+  - Improved button naming consistency across the interface
+- **Dialog History Improvements**:
+  - Enhanced Prompt, Ask About Image, and Ask About Prompt dialogs now use DialogHistoryWidget
+  - History items restore both input and output when double-clicked
+  - Added status console output showing restored history details
+  - Fixed platform-specific path handling for Windows/Linux/macOS
+
+### Fixed
+- **History Tab Issues**:
+  - Fixed history not loading in Generate Prompts dialog
+  - Fixed DialogHistoryWidget using incorrect Linux paths on Windows
+  - Fixed double-click creating duplicate history entries
+  - Fixed attribute errors in Enhanced Prompt and Reference Image dialogs
+
+## [0.19.1] - 2025-09-22
+
+### 🐛 Fixed
+- **History Tab Issues**:
+  - Fixed prompt not restoring when clicking history items - corrected data retrieval from table's UserRole storage
+  - Fixed history not refreshing when switching tabs - added automatic refresh on tab change
+  - Fixed Unicode characters in prompts not displaying - added `ensure_ascii=False` to JSON serialization
+  - Fixed thumbnails not displaying - simplified delegate data access and stored image path directly in cell
+
+### ✨ Added
+- **History Tab Enhancements**:
+  - Implemented thumbnail caching system with LRU eviction (200 image cache)
+  - Added custom QStyledItemDelegate for owner-draw thumbnail rendering
+  - Improved performance with cached 64×64 pixel thumbnails
+  - Added single-click prompt restoration from history items
+
+### 🎨 UI Improvements
+- **Image Settings Layout**:
+  - Reorganized layout - moved quality selector next to aspect ratio and social sizes
+  - Reference image settings converted to collapsible flyout panel
+  - Made Reference Image flyout text consistent with other flyouts (removed bold)
+  - Reduced keyboard shortcut hint font size from 11px to 9px for better visual balance
+  - Fixed image redraw when panels expand/collapse
+
+### ⚡ Performance
+- **Startup Improvements**:
+  - Added loading progress display showing "Loading image metadata... (n/total)"
+  - Progress updates every 10 images for better user feedback
+  - Cost display now rounds to cents ($0.03 instead of $0.0300)
+
+## [0.19.0] - 2025-09-20
 
 ### ✅ Added Features
 - 🎨 **Reference Image Analysis Dialog** (`gui/reference_image_dialog.py` - 742 lines)
@@ -62,7 +123,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **2 new files created**
 - **Net gain: ~1294 lines**
 
-## [0.18.2] - 2025-01-18
+## [0.18.2] - 2025-09-18
 
 ### Changed
 - **Google Provider Resolution Handling**: Improved resolution scaling for Gemini API
@@ -92,7 +153,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Scales back up to original requested dimensions after generation
   - Maintains aspect ratio throughout the process
 
-## [0.17.0] - 2025-01-17
+## [0.17.0] - 2025-09-17
 
 ### Added
 - **AI-Powered Upscaling** (Local and Free)
@@ -135,7 +196,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Better handling of empty LLM responses
 - Fixed various UI consistency issues
 
-## [0.16.2] - 2025-01-16
+## [0.16.2] - 2025-09-16
 
 ### Fixed
 - **Google Gemini Aspect Ratio Support** (Complete Implementation)
@@ -179,7 +240,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Width/height change handlers properly update the opposite dimension
 - Improved signal connection to use lambda functions for proper parameter passing
 
-## [0.16.1] - 2025-01-16
+## [0.16.1] - 2025-09-16
 
 ### Fixed
 - **Resolution and Aspect Ratio System** (Complete Refactor)
@@ -209,7 +270,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - When typing in one dimension field, the other immediately updates proportionally
 - Clearer upscaling messages showing provider maximum capabilities
 
-## [0.16.0] - 2025-01-15
+## [0.16.0] - 2025-09-15
 
 ### Fixed
 - **Find Dialog**
@@ -233,7 +294,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - These are installed at runtime via GUI when needed
   - Reduces initial installation size significantly
 
-## [0.15.1] - 2025-01-14
+## [0.15.1] - 2025-09-14
 
 ### Added
 - **Advanced Reference Image Controls** (Google Gemini)
@@ -253,7 +314,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Reference image preview now shows alongside control options
 - Console shows auto-inserted instructions in purple
 
-## [0.15.0] - 2025-01-14
+## [0.15.0] - 2025-09-14
 
 ### Added
 - **Reference Image Support** (Google Gemini)
@@ -282,7 +343,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Text color preservation when clearing search highlights
 - Proper background-only highlight clearing
 
-## [0.14.0] - 2025-01-14
+## [0.14.0] - 2025-09-14
 
 ### Added
 - **Real-ESRGAN AI Upscaling Integration**
@@ -304,7 +365,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Time estimates: ~30 seconds (cached) to 3-5 minutes (fresh)
   - Disk space: ~7GB (mostly PyTorch)
 
-## [0.13.1] - 2025-01-14
+## [0.13.1] - 2025-09-14
 
 ### Added
 - **Full GPT-5 Support**
@@ -322,7 +383,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Video Tab Updates** - Same GPT-5 fixes applied to video prompt enhancement
 
-## [0.13.0] - 2025-01-13
+## [0.13.0] - 2025-09-13
 
 ### Added
 - **Reorganized Settings Tab** - All provider API keys now visible simultaneously
@@ -360,7 +421,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Algorithm now properly identifies uniform borders
   - Currently disabled pending further testing
 
-## [0.12.0] - 2025-01-13
+## [0.12.0] - 2025-09-13
 
 ### Added
 - **Social Media Sizes Dialog** - New dialog for quick access to platform-specific image dimensions
@@ -394,7 +455,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Created code map generator agent for maintaining navigation
   - Updated CLAUDE.md with modularized structure information
 
-## [0.11.0] - 2025-01-13
+## [0.11.0] - 2025-09-13
 
 ### Added
 - **Global LLM Provider System** - Unified LLM provider selection across Image and Video tabs
@@ -420,7 +481,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Lazy loading for Video tab (faster startup)
   - Improved layout with LLM provider at top of tabs
 
-## [0.10.5] - 2025-01-13
+## [0.10.5] - 2025-09-13
 
 ### Added
 - **Visual Continuity Features** - New optional features for maintaining consistency across video scenes
@@ -439,7 +500,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Successful time synchronization using Strict Lyric Timing Contract v1.0
   - Robust fallback handling for prompt enhancement
 
-## [0.10.4] - 2025-01-12
+## [0.10.4] - 2025-09-12
 
 ### Added
 - **Strict Lyric Timing Contract v1.0** - Implemented standardized format for GPT-5 lyric synchronization
@@ -461,7 +522,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Image provider and model selection
   - Variants, Ken Burns, transitions, captions settings
 
-## [0.10.3] - 2025-01-12
+## [0.10.3] - 2025-09-12
 
 ### Added
 - **Custom Aspect Ratio Input** - New manual input field for entering custom aspect ratios
@@ -473,7 +534,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Selecting a manual resolution automatically clears aspect ratio selection
 - **Provider-Aware Calculations** - Resolution automatically calculated based on provider capabilities (DALL·E, Gemini, Stability)
 
-## [0.10.2] - 2025-01-12
+## [0.10.2] - 2025-09-12
 
 ### Added
 - **Project Browser** - New dialog for easy project management with double-click to open
@@ -493,10 +554,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`timing_combo` AttributeError** - Fixed error on project load
 - **Error logging** - Added proper error logging for all dialog messages
 
-## [0.10.0] - 2025-01-11
+## [0.10.1] - 2025-09-11
+
+### Changed
+- Cleaned up development notices from documentation
+- Updated video feature status from "Coming Soon" to "Planned" for Veo integration
+- Enhanced README documentation with comprehensive video feature details
+- Added comprehensive pricing comparison table with free tier details
+
+### Fixed
+- Version number properly incremented to reflect stable UI implementation
+- Google Gemini aspect ratio handling - now correctly indicates only square (1:1) images are supported
+- Disabled aspect ratio selector for Google provider with explanatory tooltip
+- Updated provider code to add aspect ratio hints to prompts for Google (best effort)
+
+### Removed
+- Removed Imagen 3/4 models from UI - these require Vertex AI access, not available through Gemini API
+- Note: Imagen models (imagen-3.0-generate-002, imagen-4.0-generate-001) require Google Cloud Vertex AI, not the standard Gemini API used by ImageAI
+
+### Known Limitations
+- Google Gemini (Nano Banana) only generates square images regardless of aspect ratio settings
+
+## [0.10.0] - 2025-09-11
 
 ### Added
 - **Complete Video Pipeline** - Full implementation of text-to-video generation workflow
+- **Video Project Feature** - New tab for creating AI-powered videos from text/lyrics
+  - Project management system with save/load functionality
+  - Multiple input formats: timestamped lyrics, structured text, plain text
+  - Automatic scene generation with intelligent timing allocation
+  - AI-powered prompt enhancement using multiple LLM providers (OpenAI, Claude, Gemini, Ollama)
+  - Audio track support with volume/fade controls (files linked, not copied)
+  - Storyboard interface for scene management
+  - Export options for both local slideshow and Gemini Veo (prepared for implementation)
+- **Tab Icons** - Added visual icons to all tabs for better UI navigation
+  - 🎨 Generate, 🎬 Video, 📝 Templates, ⚙️ Settings, ❓ Help, 📜 History
 - **Workspace and History Tabs** - Dual-tab interface for editing and version control
 - **Event Sourcing** - Complete project history with time-travel restoration
 - **LLM Integration** - Multi-provider prompt enhancement (GPT-5, Claude, Gemini)
@@ -505,8 +597,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **FFmpeg Rendering** - Slideshow video with Ken Burns effects and transitions
 - **Version Control** - Restore projects to any point in history
 - **Audio Support** - Audio track integration with sync options
+- **Video Dependencies** - Added new requirements for video features:
+  - Jinja2 for template processing
+  - moviepy for video assembly
+  - litellm for unified LLM provider interface
+  - anthropic for Claude API support
 
-## [0.9.4] - 2025-01-10
+### Changed
+- Improved tab visual design with icons for better user experience
+- Updated project structure to support modular video features
+
+### Technical
+- Created comprehensive video module architecture (`core/video/`, `gui/video/`)
+- Implemented data models for video projects with full serialization
+- Added template system for prompt generation
+- Built foundation for FFmpeg slideshow and Veo API integration
+
+### Implementation Status
+- Video UI and project management fully implemented
+- Scene generation and LLM enhancement operational
+- FFmpeg slideshow rendering prepared
+- Veo API integration planned for future release
+
+## [0.9.4] - 2025-09-11
 
 ### Added
 - **Local Stable Diffusion Provider** - Run AI models locally without API keys
@@ -544,63 +657,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Resolution selector properly updates when aspect ratio changes
 - Clear visual feedback prevents confusion about which setting is controlling dimensions
 
-## [0.10.1] - 2025-01-11
-
-### Changed
-- Cleaned up development notices from documentation
-- Updated video feature status from "Coming Soon" to "Planned" for Veo integration
-- Enhanced README documentation with comprehensive video feature details
-- Added comprehensive pricing comparison table with free tier details
-
-### Fixed
-- Version number properly incremented to reflect stable UI implementation
-- Google Gemini aspect ratio handling - now correctly indicates only square (1:1) images are supported
-- Disabled aspect ratio selector for Google provider with explanatory tooltip
-- Updated provider code to add aspect ratio hints to prompts for Google (best effort)
-
-### Removed
-- Removed Imagen 3/4 models from UI - these require Vertex AI access, not available through Gemini API
-- Note: Imagen models (imagen-3.0-generate-002, imagen-4.0-generate-001) require Google Cloud Vertex AI, not the standard Gemini API used by ImageAI
-
-### Known Limitations
-- Google Gemini (Nano Banana) only generates square images regardless of aspect ratio settings
-
-## [0.10.0] - 2025-01-11
-
-### Added
-- **Video Project Feature** - New tab for creating AI-powered videos from text/lyrics
-  - Project management system with save/load functionality
-  - Multiple input formats: timestamped lyrics, structured text, plain text
-  - Automatic scene generation with intelligent timing allocation
-  - AI-powered prompt enhancement using multiple LLM providers (OpenAI, Claude, Gemini, Ollama)
-  - Audio track support with volume/fade controls (files linked, not copied)
-  - Storyboard interface for scene management
-  - Export options for both local slideshow and Gemini Veo (prepared for implementation)
-- **Tab Icons** - Added visual icons to all tabs for better UI navigation
-  - 🎨 Generate, 🎬 Video, 📝 Templates, ⚙️ Settings, ❓ Help, 📜 History
-- **Video Dependencies** - Added new requirements for video features:
-  - Jinja2 for template processing
-  - moviepy for video assembly
-  - litellm for unified LLM provider interface
-  - anthropic for Claude API support
-
-### Changed
-- Improved tab visual design with icons for better user experience
-- Updated project structure to support modular video features
-
-### Technical
-- Created comprehensive video module architecture (`core/video/`, `gui/video/`)
-- Implemented data models for video projects with full serialization
-- Added template system for prompt generation
-- Built foundation for FFmpeg slideshow and Veo API integration
-
-### Implementation Status
-- Video UI and project management fully implemented
-- Scene generation and LLM enhancement operational  
-- FFmpeg slideshow rendering prepared
-- Veo API integration planned for future release
-
-## [0.9.3] - 2025-09-09
+## [0.9.3] - 2025-09-11
 
 ### Added
 - Configuration migration script (`migrate_config.py`) for updating old config formats
@@ -618,11 +675,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Automatic keyring storage attempted when available
 - Fallback to config.json only when keyring unavailable
 
-## [0.9.2] - 2025-09-09
+## [0.9.2] - 2025-09-08
 
 ### Security
 - Added secure API key storage using system keyring (optional)
-- Implemented path traversal validation for file operations  
+- Implemented path traversal validation for file operations
 - Added rate limiting for API calls (configurable per provider)
 
 ### Improved
@@ -703,6 +760,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Improved
 - Enhanced error messages and guidance
+
+## [0.4.0] - 2025-08-29
+
+### Added
+- Initial version tracking
+- Core functionality implementation
 
 ## [0.3.0] - 2025-08-29
 

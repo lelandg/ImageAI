@@ -18,7 +18,15 @@
       "Bash(sed:*)",
       "Bash(.venv/Scripts/python.exe -m pip uninstall:*)",
       "Bash(git add:*)",
-      "Bash(identify:*)"
+      "Bash(identify:*)",
+      "Bash(timeout 3 python3:*)",
+      "Bash(git log:*)",
+      "Read(//mnt/c/Users/aboog/AppData/Roaming/ImageAI/**)",
+      "Bash(pip3 install:*)",
+      "Bash(if [ ! -d .venv_linux ])",
+      "Bash(then python3 -m venv .venv_linux)",
+      "Bash(fi)",
+      "Read(//usr/bin/**)"
     ],
     "deny": [],
     "ask": []

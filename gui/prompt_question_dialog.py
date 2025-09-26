@@ -682,16 +682,37 @@ class PromptQuestionDialog(QDialog):
 
     def load_history_item(self, item):
         """Load a history item into the conversation."""
+        # Switch to main tab
+        self.tab_widget.setCurrentIndex(0)
+
+        # Restore the prompt if available
         if 'metadata' in item and 'prompt' in item['metadata']:
             self.prompt_input.setPlainText(item['metadata']['prompt'])
-        self.question_input.setPlainText(item.get('input', ''))
 
-        # Optionally show the previous answer
+        # Restore the question
+        question = item.get('input', '')
+        self.question_input.setPlainText(question)
+
+        # Restore the conversation
         answer = item.get('response', '')
         if answer:
             self.conversation_display.clear()
-            self.conversation_display.append(f"**Previous Q:** {item.get('input', '')}")
-            self.conversation_display.append(f"**Previous A:** {answer}\n")
+            self.conversation_display.append(f"**Q:** {question}")
+            self.conversation_display.append(f"**A:** {answer}\n")
+
+            # Show in status console
+            self.status_console.log("="*60, "INFO")
+            self.status_console.log("Restored from history:", "INFO")
+            if 'metadata' in item and 'prompt' in item['metadata']:
+                self.status_console.log(f"Prompt: {item['metadata']['prompt']}", "INFO")
+            self.status_console.log(f"Question: {question}", "INFO")
+            self.status_console.log("-"*40, "INFO")
+            self.status_console.log(f"Answer:\n{answer}", "SUCCESS")
+            self.status_console.log("="*60, "INFO")
+
+            # Show provider info if available
+            if 'provider' in item and item['provider']:
+                self.status_console.log(f"Provider: {item['provider']} ({item.get('model', 'Unknown')})", "INFO")
 
     def load_llm_settings(self):
         """Load LLM settings from config."""

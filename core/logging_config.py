@@ -11,6 +11,7 @@ import platform
 import sys
 import atexit
 import shutil
+import warnings
 
 
 def setup_logging(log_level=logging.INFO, log_to_file=True):
@@ -83,7 +84,12 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
         root_logger.info(f"Platform: {platform.platform()}")
         root_logger.info(f"Log file: {log_file}")
         root_logger.info("=" * 60)
-        
+
+        # Capture Python warnings to the log file
+        logging.captureWarnings(True)
+        warnings_logger = logging.getLogger('py.warnings')
+        warnings_logger.setLevel(logging.WARNING)
+
         # Register cleanup function to copy log on exit
         def copy_log_on_exit():
             """Copy log file to current directory on exit"""

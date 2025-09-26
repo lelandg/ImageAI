@@ -1,6 +1,8 @@
 """Reusable history widget for dialog interactions."""
 
 import json
+import os
+import sys
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -208,8 +210,13 @@ class DialogHistoryWidget(QWidget):
         if len(self.history) > 100:
             self.history = self.history[:100]
 
-        # Save to file
-        history_file = Path.home() / '.config' / 'ImageAI' / f'{self.dialog_name}_history.json'
+        # Save to file - use platform-specific path
+        if sys.platform == "win32":
+            history_file = Path(os.environ.get('APPDATA', '')) / 'ImageAI' / f'{self.dialog_name}_history.json'
+        elif sys.platform == "darwin":
+            history_file = Path.home() / 'Library' / 'Application Support' / 'ImageAI' / f'{self.dialog_name}_history.json'
+        else:
+            history_file = Path.home() / '.config' / 'ImageAI' / f'{self.dialog_name}_history.json'
         history_file.parent.mkdir(parents=True, exist_ok=True)
 
         try:
@@ -220,7 +227,13 @@ class DialogHistoryWidget(QWidget):
 
     def load_history(self):
         """Load history from settings."""
-        history_file = Path.home() / '.config' / 'ImageAI' / f'{self.dialog_name}_history.json'
+        # Use platform-specific path
+        if sys.platform == "win32":
+            history_file = Path(os.environ.get('APPDATA', '')) / 'ImageAI' / f'{self.dialog_name}_history.json'
+        elif sys.platform == "darwin":
+            history_file = Path.home() / 'Library' / 'Application Support' / 'ImageAI' / f'{self.dialog_name}_history.json'
+        else:
+            history_file = Path.home() / '.config' / 'ImageAI' / f'{self.dialog_name}_history.json'
 
         if history_file.exists():
             try:

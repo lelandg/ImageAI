@@ -8,10 +8,17 @@ and OpenAI (DALL-E) APIs.
 
 import sys
 import os
+import warnings
 
 # Set environment variables before any imports
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow info messages
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable oneDNN custom operations message
+
+# Suppress warnings before any imports that might trigger them
+warnings.filterwarnings('ignore', category=FutureWarning)
+warnings.filterwarnings('ignore', message='.*GetPrototype.*')
+warnings.filterwarnings('ignore', message='pkg_resources is deprecated as an API')
+warnings.filterwarnings('ignore', category=DeprecationWarning, module='pkg_resources')
 
 # Install import hook to patch protobuf on first import
 import builtins
@@ -51,13 +58,7 @@ def _patched_import(name, *args, **kwargs):
 
 builtins.__import__ = _patched_import
 
-import warnings
 from pathlib import Path
-
-# Suppress warnings
-warnings.filterwarnings('ignore', category=FutureWarning)
-warnings.filterwarnings('ignore', message='.*GetPrototype.*')
-warnings.filterwarnings('ignore', message='pkg_resources is deprecated as an API', category=UserWarning)
 
 # Now safe to import logging
 import logging

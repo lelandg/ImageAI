@@ -11,12 +11,13 @@ from PySide6.QtWidgets import (
     QPushButton, QComboBox, QGroupBox, QDialogButtonBox,
     QMessageBox, QSplitter, QWidget, QFileDialog,
     QScrollArea, QSizePolicy, QDoubleSpinBox, QSpinBox,
-    QCheckBox
+    QCheckBox, QTabWidget
 )
 from PySide6.QtCore import Qt, Signal, QThread, QObject, QSettings, QSize, QTimer
 from PySide6.QtGui import QPixmap, QImage, QKeySequence, QShortcut
 
 from .llm_utils import DialogStatusConsole
+from .history_widget import DialogHistoryWidget
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -240,9 +241,12 @@ class ReferenceImageDialog(QDialog):
         splitter = QSplitter(Qt.Vertical)
         layout.addWidget(splitter)
 
-        # Main content widget
-        main_widget = QWidget()
-        main_layout = QVBoxLayout(main_widget)
+        # Create tab widget
+        self.tab_widget = QTabWidget()
+
+        # Analyze tab
+        analyze_widget = QWidget()
+        main_layout = QVBoxLayout(analyze_widget)
 
         # Image section
         image_group = QGroupBox("Reference Image")
@@ -392,7 +396,16 @@ class ReferenceImageDialog(QDialog):
         shortcut_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(shortcut_label)
 
-        splitter.addWidget(main_widget)
+        # Add Analyze tab
+        self.tab_widget.addTab(analyze_widget, "Analyze")
+
+        # History tab
+        self.history_widget = DialogHistoryWidget("reference_images", self)
+        self.history_widget.itemDoubleClicked.connect(self.load_history_item)
+        self.tab_widget.addTab(self.history_widget, "History")
+
+        # Add tabs to splitter
+        splitter.addWidget(self.tab_widget)
 
         # Status console at bottom
         self.status_console = DialogStatusConsole()
@@ -680,8 +693,20 @@ class ReferenceImageDialog(QDialog):
 
     def accept(self):
         """Override accept to emit description if requested."""
-        if self.generated_description and self.copy_to_prompt_checkbox.isChecked():
-            self.descriptionGenerated.emit(self.generated_description)
+        if self.generated_description:
+            # Save to history
+            self.history_widget.add_entry(
+                self.analysis_prompt.toPlainText() if hasattr(self, 'analysis_prompt') else "Image analysis",
+                self.generated_description,
+                self.llm_provider_combo.currentText() if hasattr(self, 'llm_provider_combo') else "",
+                self.llm_model_combo.currentText() if hasattr(self, 'llm_model_combo') else "",
+                {
+                    "image_path": str(self.image_path) if self.image_path else "No image"
+                }
+            )
+
+            if self.copy_to_prompt_checkbox.isChecked():
+                self.descriptionGenerated.emit(self.generated_description)
 
         self.save_dialog_settings()
         self.save_settings()
@@ -766,6 +791,44 @@ class ReferenceImageDialog(QDialog):
             splitter_state = self.settings.value("splitter_state")
             if splitter_state:
                 splitters[0].restoreState(splitter_state)
+
+    def load_history_item(self, item):
+        """Load a history item when double-clicked."""
+        # Switch to main tab
+        self.tab_widget.setCurrentIndex(0)
+
+        # Restore the input
+        analysis_prompt = item.get('input', '')
+        if analysis_prompt:
+            self.analysis_prompt.setPlainText(analysis_prompt)
+
+        # Restore the response
+        description = item.get('response', '')
+        if description:
+            self.generated_description = description
+            self.result_text.setPlainText(description)
+
+            # Show in status console
+            self.status_console.log("="*60, "INFO")
+            self.status_console.log("Restored from history:", "INFO")
+            self.status_console.log(f"Analysis Prompt: {analysis_prompt}", "INFO")
+            self.status_console.log("-"*40, "INFO")
+            self.status_console.log(f"Generated Description:\n{description}", "SUCCESS")
+            self.status_console.log("="*60, "INFO")
+
+            # Show metadata if available
+            if 'metadata' in item:
+                metadata = item['metadata']
+                if 'image_path' in metadata:
+                    self.status_console.log(f"Image: {metadata['image_path']}", "INFO")
+            if 'provider' in item and item['provider']:
+                self.status_console.log(f"Provider: {item['provider']} ({item.get('model', 'Unknown')})", "INFO")
+
+            # Enable the Use Description button
+            if hasattr(self, 'use_description_button'):
+                self.use_description_button.setEnabled(True)
+
+
 
     def closeEvent(self, event):
         """Handle close event."""

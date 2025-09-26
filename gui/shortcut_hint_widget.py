@@ -36,11 +36,11 @@ class ShortcutHintLabel(QLabel):
         # Lighter gray with slight transparency for subtlety
         self.setText(f"""
             <div style='
-                color: #808080;
-                font-size: 11px;
-                padding: 3px;
-                background-color: rgba(240, 240, 240, 0.3);
-                border-radius: 3px;
+                color: #909090;
+                font-size: 9px;
+                padding: 2px;
+                background-color: rgba(240, 240, 240, 0.2);
+                border-radius: 2px;
             '>
                 {self._text}
             </div>
@@ -58,12 +58,12 @@ class ShortcutHintLabel(QLabel):
         self.setText(f"""
             <div style='
                 color: #2c3e50;
-                font-size: 11px;
+                font-size: 9px;
                 font-weight: 500;
-                padding: 3px;
+                padding: 2px;
                 background-color: #e8f4f8;
                 border: 1px solid #b0c4de;
-                border-radius: 3px;
+                border-radius: 2px;
             '>
                 {self._text}
             </div>

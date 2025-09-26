@@ -9,15 +9,133 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Import additional Qt classes needed for thumbnail delegate
 try:
-    from PySide6.QtCore import Qt, QThread, Signal, QTimer
-    from PySide6.QtGui import QPixmap, QAction
+    from PySide6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QTableWidget, QTableWidgetItem, QStyle
+except ImportError:
+    QStyledItemDelegate = None
+    QStyleOptionViewItem = None
+    QStyle = None
+
+
+class ThumbnailCache:
+    """Cache for thumbnail images to improve performance."""
+
+    def __init__(self, max_size=50):
+        self.cache = {}  # path -> QPixmap
+        self.max_size = max_size
+        self.access_order = []  # LRU tracking
+        self.hits = 0
+        self.misses = 0
+
+    def get(self, path):
+        """Get thumbnail from cache or create and cache it."""
+        path_str = str(path)
+        if path_str in self.cache:
+            # Cache hit
+            self.hits += 1
+            # Move to end for LRU
+            self.access_order.remove(path_str)
+            self.access_order.append(path_str)
+            return self.cache[path_str]
+
+        # Cache miss
+        self.misses += 1
+
+        # Create thumbnail
+        if Path(path_str).exists():
+            pixmap = QPixmap(path_str)
+            if not pixmap.isNull():
+                # Scale to thumbnail size - use faster scaling for performance
+                thumbnail = pixmap.scaled(
+                    64, 64,
+                    Qt.KeepAspectRatio,
+                    Qt.FastTransformation  # Faster scaling
+                )
+
+                # Add to cache
+                self.cache[path_str] = thumbnail
+                self.access_order.append(path_str)
+
+                # Evict oldest if cache is full
+                if len(self.cache) > self.max_size:
+                    oldest = self.access_order.pop(0)
+                    del self.cache[oldest]
+
+                return thumbnail
+
+        return None
+
+    def get_stats(self):
+        """Get cache statistics."""
+        total = self.hits + self.misses
+        hit_rate = (self.hits / total * 100) if total > 0 else 0
+        return {
+            'size': len(self.cache),
+            'hits': self.hits,
+            'misses': self.misses,
+            'hit_rate': hit_rate
+        }
+
+    def clear(self):
+        """Clear the cache."""
+        self.cache.clear()
+        self.access_order.clear()
+
+
+# Only define delegate if imports succeeded
+if QStyledItemDelegate and QStyle:
+    class ThumbnailDelegate(QStyledItemDelegate):
+        """Custom delegate for rendering thumbnails in the history table."""
+
+        def __init__(self, thumbnail_cache, parent=None):
+            super().__init__(parent)
+            self.thumbnail_cache = thumbnail_cache
+
+        def paint(self, painter, option, index):
+            """Custom painting for thumbnail column."""
+            if index.column() == 0:  # Thumbnail column
+                # Get the path directly from this item's UserRole
+                path_str = index.data(Qt.UserRole)
+
+                if path_str and Path(path_str).exists():
+                    # Get thumbnail from cache
+                    thumbnail = self.thumbnail_cache.get(path_str)
+                    if thumbnail:
+                        # Calculate centered position
+                        x = option.rect.center().x() - thumbnail.width() // 2
+                        y = option.rect.center().y() - thumbnail.height() // 2
+
+                        # Draw background if selected
+                        if option.state & QStyle.State_Selected:
+                            painter.fillRect(option.rect, option.palette.highlight())
+
+                        # Draw thumbnail
+                        painter.drawPixmap(x, y, thumbnail)
+                        return
+
+            # Default painting for other columns
+            super().paint(painter, option, index)
+
+        def sizeHint(self, option, index):
+            """Provide size hint for thumbnail column."""
+            if index.column() == 0:  # Thumbnail column
+                return QSize(80, 80)  # Fixed size for thumbnails
+            return super().sizeHint(option, index)
+else:
+    # Fallback when QStyledItemDelegate is not available
+    ThumbnailDelegate = None
+
+try:
+    from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSize, QRect
+    from PySide6.QtGui import QPixmap, QAction, QPainter
     from PySide6.QtWidgets import (
         QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
         QLabel, QTextEdit, QPushButton, QComboBox, QLineEdit,
         QFormLayout, QSizePolicy, QMessageBox, QFileDialog,
         QCheckBox, QTextBrowser, QListWidget, QListWidgetItem, QDialog, QSpinBox,
-        QDoubleSpinBox, QGroupBox, QApplication, QSplitter, QScrollArea
+        QDoubleSpinBox, QGroupBox, QApplication, QSplitter, QScrollArea,
+        QStyledItemDelegate, QStyleOptionViewItem, QSlider
     )
 except ImportError:
     raise ImportError("PySide6 is required for GUI mode")
@@ -48,6 +166,8 @@ try:
     from gui.local_sd_widget import LocalSDWidget
 except ImportError:
     LocalSDWidget = None
+
+# Midjourney has its own dedicated tab now, no longer needs panel import
 try:
     from gui.settings_widgets import (
         AspectRatioSelector, ResolutionSelector, QualitySelector,
@@ -69,10 +189,17 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.config = ConfigManager()
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
+
+        # Initialize thumbnail cache
+        self.thumbnail_cache = ThumbnailCache(max_size=50)
         self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         
         # Initialize provider
         self.current_provider = self.config.get("provider", "google")
+        # If provider is midjourney, default to google (midjourney has its own tab now)
+        if self.current_provider == "midjourney":
+            self.current_provider = "google"
+            self.config.set("provider", "google")
         self.current_api_key = self.config.get_api_key(self.current_provider)
         self.current_model = DEFAULT_MODEL
         self.auto_copy_filename = self.config.get("auto_copy_filename", False)
@@ -91,10 +218,12 @@ class MainWindow(QMainWindow):
         self._video_tab_loaded = False  # Track lazy loading of video tab
         self.upscaling_settings = {}  # Initialize upscaling settings
 
-        # Load history from disk
-        print("Loading image metadata...")
-        self._load_history_from_disk()
-        print(f"Loaded metadata for {len(self.history)} images")
+        # Load history from disk with progress display
+        if self.history_paths:
+            total_images = len(self.history_paths)
+            print(f"Loading image metadata... (0/{total_images})", end='', flush=True)
+            self._load_history_from_disk()
+            print(f"\rLoaded metadata for {len(self.history)}/{total_images} images")
 
         # Create UI first so we have status bar
         print("Creating user interface...")
@@ -265,7 +394,12 @@ class MainWindow(QMainWindow):
 
     def _load_history_from_disk(self):
         """Load history from disk into memory with enhanced metadata."""
-        for path in self.history_paths:
+        total = len(self.history_paths)
+        for i, path in enumerate(self.history_paths):
+            # Update progress every 10 images or on first/last
+            if i == 0 or (i + 1) % 10 == 0 or i == total - 1:
+                print(f"\rLoading image metadata... ({i + 1}/{total})", end='', flush=True)
+
             try:
                 # Try to read sidecar file for metadata
                 sidecar = read_image_sidecar(path)
@@ -313,11 +447,12 @@ class MainWindow(QMainWindow):
         self.tab_settings = QWidget()
         self.tab_help = QWidget()
         self.tab_history = QWidget()
-        
+
         # Create placeholder for video tab - will be loaded lazily
         self.tab_video = QWidget()  # Placeholder widget
         self._video_tab_loaded = False  # Track if real video tab is loaded
 
+        # Add tabs
         self.tabs.addTab(self.tab_generate, "🎨 Image")
         self.tabs.addTab(self.tab_templates, "📝 Templates")
         self.tabs.addTab(self.tab_video, "🎬 Video")
@@ -409,14 +544,15 @@ class MainWindow(QMainWindow):
         # Get available providers with a defensive fallback
         try:
             available_providers = list_providers()
+            # Midjourney is now integrated in the Image tab
             if not available_providers:
                 # Ensure we have at least core providers listed
-                available_providers = ["google", "openai"]
+                available_providers = ["google", "openai", "midjourney"]
         except Exception as e:
             # Avoid bubbling import-time errors (e.g., protobuf incompat)
             import logging as _logging
             _logging.getLogger(__name__).debug(f"Provider discovery failed: {e}")
-            available_providers = ["google", "openai"]
+            available_providers = ["google", "openai", "midjourney"]
         self.image_provider_combo.addItems(available_providers)
         if self.current_provider in available_providers:
             self.image_provider_combo.setCurrentText(self.current_provider)
@@ -502,15 +638,15 @@ class MainWindow(QMainWindow):
         self.btn_generate_prompts.setToolTip("Generate multiple prompt variations (Alt+P)")
         buttons_layout.addWidget(self.btn_generate_prompts)
 
-        self.btn_reference_image = QPushButton("&Reference Image")
-        self.btn_reference_image.setToolTip("Analyze reference image with AI (Alt+R)")
-        buttons_layout.addWidget(self.btn_reference_image)
-
         self.btn_enhance_prompt = QPushButton("&Enhance")
         self.btn_enhance_prompt.setToolTip("Improve prompt with AI (Alt+E)")
         buttons_layout.addWidget(self.btn_enhance_prompt)
 
-        self.btn_ask_about = QPushButton("&Ask")
+        self.btn_reference_image = QPushButton("Ask About &Image")
+        self.btn_reference_image.setToolTip("Analyze reference image with AI (Alt+I)")
+        buttons_layout.addWidget(self.btn_reference_image)
+
+        self.btn_ask_about = QPushButton("&Ask About Prompt")
         self.btn_ask_about.setToolTip("Ask questions about your prompt (Alt+A)")
         buttons_layout.addWidget(self.btn_ask_about)
 
@@ -576,23 +712,88 @@ class MainWindow(QMainWindow):
         image_settings_layout.setSpacing(5)
         image_settings_layout.setContentsMargins(10, 0, 0, 0)  # Indent for hierarchy
         
-        # Aspect Ratio Selector
+        # Create horizontal layout for aspect ratio, quality, and social sizes
+        aspect_quality_layout = QHBoxLayout()
+        aspect_quality_layout.setSpacing(15)
+
+        # Aspect Ratio Selector (left)
         if AspectRatioSelector:
+            aspect_group = QWidget()
+            aspect_v_layout = QVBoxLayout(aspect_group)
+            aspect_v_layout.setContentsMargins(0, 0, 0, 0)
+            aspect_v_layout.setSpacing(3)
+
             aspect_label = QLabel("Aspect Ratio:")
             aspect_label.setMaximumHeight(20)
-            image_settings_layout.addWidget(aspect_label)
-            
+            aspect_v_layout.addWidget(aspect_label)
+
             self.aspect_selector = AspectRatioSelector()
             self.aspect_selector.ratioChanged.connect(self._on_aspect_ratio_changed)
-            image_settings_layout.addWidget(self.aspect_selector)
-            
+            aspect_v_layout.addWidget(self.aspect_selector)
+
             # Aspect ratios are now supported by all providers including Google Gemini
             self.aspect_selector.setEnabled(True)
             self.aspect_selector.setToolTip("Select aspect ratio for your image")
+
+            aspect_quality_layout.addWidget(aspect_group)
         else:
             self.aspect_selector = None
-        
-        # Resolution and Quality
+
+        # Quality Selector (middle)
+        if QualitySelector:
+            quality_group = QWidget()
+            quality_v_layout = QVBoxLayout(quality_group)
+            quality_v_layout.setContentsMargins(0, 0, 0, 0)
+            quality_v_layout.setSpacing(3)
+
+            quality_label = QLabel("Model Quality:")
+            quality_label.setMaximumHeight(20)
+            quality_v_layout.addWidget(quality_label)
+
+            self.quality_selector = QualitySelector(self.current_provider)
+            self.quality_selector.settingsChanged.connect(self._on_quality_settings_changed)
+            quality_v_layout.addWidget(self.quality_selector)
+
+            aspect_quality_layout.addWidget(quality_group)
+        else:
+            self.quality_selector = None
+
+        # Social Sizes Button (right)
+        social_group = QWidget()
+        social_v_layout = QVBoxLayout(social_group)
+        social_v_layout.setContentsMargins(0, 0, 0, 0)
+        social_v_layout.setSpacing(3)
+
+        social_label = QLabel(" ")  # Empty label for alignment
+        social_label.setMaximumHeight(20)
+        social_v_layout.addWidget(social_label)
+
+        self.btn_social_sizes = QPushButton("&Social Sizes…")
+        self.btn_social_sizes.setToolTip("Browse common social media sizes and apply")
+        self.btn_social_sizes.clicked.connect(self._open_social_sizes_dialog)
+        social_v_layout.addWidget(self.btn_social_sizes)
+
+        # Label to show selected social media size
+        self.social_size_label = QLabel("")
+        self.social_size_label.setStyleSheet("""
+            QLabel {
+                color: #2c5aa0;
+                font-weight: bold;
+                padding: 2px 5px;
+                background-color: #e8f4ff;
+                border: 1px solid #b3d9ff;
+                border-radius: 3px;
+            }
+        """)
+        self.social_size_label.setVisible(False)
+        social_v_layout.addWidget(self.social_size_label)
+
+        aspect_quality_layout.addWidget(social_group)
+        aspect_quality_layout.addStretch(1)
+
+        image_settings_layout.addLayout(aspect_quality_layout)
+
+        # Resolution settings
         settings_form = QFormLayout()
         settings_form.setVerticalSpacing(5)
         
@@ -617,35 +818,7 @@ class MainWindow(QMainWindow):
                     self.resolution_selector._last_edited = "width"
                     self.resolution_selector.width_spin.setValue(saved_width)
                     # Height will be calculated automatically from aspect ratio
-            # Wrap selector with a button for social sizes
-            from PySide6.QtWidgets import QWidget as _W, QHBoxLayout as _HB
-            res_container = _W()
-            res_layout = _HB(res_container)
-            res_layout.setContentsMargins(0, 0, 0, 0)
-            res_layout.setSpacing(6)
-            res_layout.addWidget(self.resolution_selector)
-            self.btn_social_sizes = QPushButton("&Social Sizes…")
-            self.btn_social_sizes.setToolTip("Browse common social media sizes and apply")
-            self.btn_social_sizes.clicked.connect(self._open_social_sizes_dialog)
-            res_layout.addWidget(self.btn_social_sizes)
-
-            # Label to show selected social media size
-            self.social_size_label = QLabel("")
-            self.social_size_label.setStyleSheet("""
-                QLabel {
-                    color: #2c5aa0;
-                    font-weight: bold;
-                    padding: 2px 5px;
-                    background-color: #e8f4ff;
-                    border: 1px solid #b3d9ff;
-                    border-radius: 3px;
-                }
-            """)
-            self.social_size_label.setVisible(False)
-            res_layout.addWidget(self.social_size_label)
-
-            res_layout.addStretch(1)
-            settings_form.addRow("Resolution:", res_container)
+            settings_form.addRow("Resolution:", self.resolution_selector)
         else:
             # Fallback to old resolution combo
             self.resolution_selector = None
@@ -658,13 +831,6 @@ class MainWindow(QMainWindow):
             ])
             self.resolution_combo.setCurrentIndex(0)
             settings_form.addRow("Resolution:", self.resolution_combo)
-        
-        if QualitySelector:
-            self.quality_selector = QualitySelector(self.current_provider)
-            self.quality_selector.settingsChanged.connect(self._on_quality_settings_changed)
-            settings_form.addRow(self.quality_selector)
-        else:
-            self.quality_selector = None
         
         if BatchSelector:
             self.batch_selector = BatchSelector()
@@ -694,8 +860,34 @@ class MainWindow(QMainWindow):
                 self.upscaling_settings = saved_upscaling
         image_settings_layout.addWidget(self.upscaling_selector)
 
+        bottom_layout.addWidget(self.image_settings_container)
+
+        # Reference Image Settings (collapsible flyout)
+        self.ref_image_toggle = QPushButton("▶ Reference Image (Google Only)")
+        self.ref_image_toggle.setCheckable(True)
+        self.ref_image_toggle.setChecked(False)
+        self.ref_image_toggle.clicked.connect(lambda checked: self._toggle_ref_image_settings(checked))
+        self.ref_image_toggle.setStyleSheet("""
+            QPushButton {
+                text-align: left;
+                padding: 5px;
+                background: transparent;
+                border: none;
+            }
+            QPushButton:hover {
+                background: rgba(0, 0, 0, 0.05);
+            }
+        """)
+        bottom_layout.addWidget(self.ref_image_toggle)
+
+        # Container for reference image settings (initially hidden)
+        self.ref_image_container = QWidget()
+        self.ref_image_container.setVisible(False)
+        ref_container_layout = QVBoxLayout(self.ref_image_container)
+        ref_container_layout.setContentsMargins(10, 0, 0, 0)  # Indent for hierarchy
+
         # Add reference image section
-        ref_image_group = QGroupBox("Reference Image")
+        ref_image_group = QGroupBox()
         ref_image_layout = QVBoxLayout()
         ref_image_layout.setSpacing(5)
 
@@ -812,13 +1004,12 @@ class MainWindow(QMainWindow):
         ref_image_layout.addLayout(ref_preview_container)
 
         ref_image_group.setLayout(ref_image_layout)
-        image_settings_layout.addWidget(ref_image_group)
+        ref_container_layout.addWidget(ref_image_group)
+        bottom_layout.addWidget(self.ref_image_container)
 
         # Store reference image data
         self.reference_image_path = None
         self.reference_image_data = None
-
-        bottom_layout.addWidget(self.image_settings_container)
         
         # Advanced Settings (collapsible)
         if AdvancedSettingsPanel:
@@ -852,7 +1043,83 @@ class MainWindow(QMainWindow):
         
         # Update visibility based on provider
         self._update_advanced_visibility()
-        
+
+        # Midjourney-specific options (shown when Midjourney is selected)
+        self.midjourney_options_group = QGroupBox("Midjourney Options")
+        mj_layout = QFormLayout()
+
+        # Model Version
+        self.mj_version_combo = QComboBox()
+        self.mj_version_combo.addItems(["v7", "v6.1", "v6", "v5.2", "v5.1", "v5", "niji6", "niji5"])
+        self.mj_version_combo.setCurrentText("v7")
+        self.mj_version_combo.currentTextChanged.connect(lambda: self._update_midjourney_command())
+        mj_layout.addRow("Version:", self.mj_version_combo)
+
+        # Stylize
+        self.mj_stylize_slider = QSlider(Qt.Horizontal)
+        self.mj_stylize_slider.setRange(0, 1000)
+        self.mj_stylize_slider.setValue(100)
+        self.mj_stylize_slider.setTickInterval(100)
+        self.mj_stylize_slider.setTickPosition(QSlider.TicksBelow)
+        self.mj_stylize_label = QLabel("100")
+        stylize_widget = QWidget()
+        stylize_layout = QHBoxLayout(stylize_widget)
+        stylize_layout.setContentsMargins(0, 0, 0, 0)
+        stylize_layout.addWidget(self.mj_stylize_slider)
+        stylize_layout.addWidget(self.mj_stylize_label)
+        self.mj_stylize_slider.valueChanged.connect(lambda v: (self.mj_stylize_label.setText(str(v)), self._update_midjourney_command()))
+        mj_layout.addRow("Stylize:", stylize_widget)
+
+        # Chaos
+        self.mj_chaos_slider = QSlider(Qt.Horizontal)
+        self.mj_chaos_slider.setRange(0, 100)
+        self.mj_chaos_slider.setValue(0)
+        self.mj_chaos_slider.setTickInterval(10)
+        self.mj_chaos_slider.setTickPosition(QSlider.TicksBelow)
+        self.mj_chaos_label = QLabel("0")
+        chaos_widget = QWidget()
+        chaos_layout = QHBoxLayout(chaos_widget)
+        chaos_layout.setContentsMargins(0, 0, 0, 0)
+        chaos_layout.addWidget(self.mj_chaos_slider)
+        chaos_layout.addWidget(self.mj_chaos_label)
+        self.mj_chaos_slider.valueChanged.connect(lambda v: (self.mj_chaos_label.setText(str(v)), self._update_midjourney_command()))
+        mj_layout.addRow("Chaos:", chaos_widget)
+
+        # Weird
+        self.mj_weird_slider = QSlider(Qt.Horizontal)
+        self.mj_weird_slider.setRange(0, 3000)
+        self.mj_weird_slider.setValue(0)
+        self.mj_weird_slider.setTickInterval(250)
+        self.mj_weird_slider.setTickPosition(QSlider.TicksBelow)
+        self.mj_weird_label = QLabel("0")
+        weird_widget = QWidget()
+        weird_layout = QHBoxLayout(weird_widget)
+        weird_layout.setContentsMargins(0, 0, 0, 0)
+        weird_layout.addWidget(self.mj_weird_slider)
+        weird_layout.addWidget(self.mj_weird_label)
+        self.mj_weird_slider.valueChanged.connect(lambda v: (self.mj_weird_label.setText(str(v)), self._update_midjourney_command()))
+        mj_layout.addRow("Weird:", weird_widget)
+
+        # Quality
+        self.mj_quality_combo = QComboBox()
+        self.mj_quality_combo.addItems(["0.25", "0.5", "1", "2"])
+        self.mj_quality_combo.setCurrentText("1")
+        self.mj_quality_combo.currentTextChanged.connect(lambda: self._update_midjourney_command())
+        mj_layout.addRow("Quality:", self.mj_quality_combo)
+
+        # Seed
+        self.mj_seed_spin = QSpinBox()
+        self.mj_seed_spin.setRange(-1, 2147483647)
+        self.mj_seed_spin.setValue(-1)
+        self.mj_seed_spin.setSpecialValueText("Random")
+        self.mj_seed_spin.setSuffix(" (-1 for random)")
+        self.mj_seed_spin.valueChanged.connect(lambda: self._update_midjourney_command())
+        mj_layout.addRow("Seed:", self.mj_seed_spin)
+
+        self.midjourney_options_group.setLayout(mj_layout)
+        bottom_layout.addWidget(self.midjourney_options_group)
+        self.midjourney_options_group.setVisible(False)  # Initially hidden
+
         # Status - compact
         self.status_label = QLabel("Ready.")
         self.status_label.setMaximumHeight(20)
@@ -863,14 +1130,54 @@ class MainWindow(QMainWindow):
         # Connect splitter movement to image resize
         image_console_splitter.splitterMoved.connect(lambda: QTimer.singleShot(10, self._perform_image_resize))
 
-        # Output image
+        # Create stacked widget for image/Midjourney command display
+        from PySide6.QtWidgets import QStackedWidget
+        self.output_stack = QStackedWidget()
+        self.output_stack.setMinimumHeight(200)
+        self.output_stack.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        # Output image widget
         self.output_image_label = QLabel()
         self.output_image_label.setAlignment(Qt.AlignCenter)
-        self.output_image_label.setMinimumHeight(200)
-        self.output_image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.output_image_label.setStyleSheet("border: 1px solid #ccc; background-color: #f5f5f5;")
         self.output_image_label.setScaledContents(False)  # We handle scaling manually
-        image_console_splitter.addWidget(self.output_image_label)
+
+        # Midjourney command display widget
+        self.midjourney_command_widget = QWidget()
+        mj_layout = QVBoxLayout(self.midjourney_command_widget)
+        mj_layout.setContentsMargins(20, 20, 20, 20)
+
+        # Discord-styled command display
+        self.midjourney_command_display = QTextEdit()
+        self.midjourney_command_display.setReadOnly(True)
+        self.midjourney_command_display.setMaximumHeight(120)
+        from PySide6.QtGui import QFont
+        self.midjourney_command_display.setFont(QFont("Consolas", 11))
+        self.midjourney_command_display.setStyleSheet("""
+            QTextEdit {
+                background-color: #40444B;
+                color: #7289DA;
+                border: 2px solid #7289DA;
+                border-radius: 4px;
+                padding: 10px;
+            }
+        """)
+        mj_layout.addWidget(QLabel("Discord Command:"))
+        mj_layout.addWidget(self.midjourney_command_display)
+
+        # Info label
+        mj_info = QLabel("✅ Command will be copied when you click Generate\n📋 Paste in Discord and press Enter")
+        mj_info.setStyleSheet("color: #666; padding: 10px;")
+        mj_info.setAlignment(Qt.AlignCenter)
+        mj_layout.addWidget(mj_info)
+
+        mj_layout.addStretch()
+
+        # Add both to stacked widget
+        self.output_stack.addWidget(self.output_image_label)  # Index 0
+        self.output_stack.addWidget(self.midjourney_command_widget)  # Index 1
+
+        image_console_splitter.addWidget(self.output_stack)
 
         # Status console container
         console_container = QWidget()
@@ -941,6 +1248,9 @@ class MainWindow(QMainWindow):
         self.btn_ask_about.clicked.connect(self._open_prompt_question)
         self.btn_reference_image.clicked.connect(self._open_reference_image)
         self.btn_generate.clicked.connect(self._generate)
+
+        # Connect prompt changes to Midjourney panel
+        self.prompt_edit.textChanged.connect(self._on_prompt_text_changed)
 
         # Add keyboard shortcuts for common actions
         from PySide6.QtGui import QShortcut, QKeySequence
@@ -1049,12 +1359,13 @@ class MainWindow(QMainWindow):
         # Get available providers dynamically, with safe fallback
         try:
             available_providers = list_providers()
+            # Midjourney is now integrated in the Image tab
             if not available_providers:
-                available_providers = ["google", "openai"]
+                available_providers = ["google", "openai", "midjourney"]
         except Exception as e:
             import logging as _logging
             _logging.getLogger(__name__).debug(f"Provider discovery failed (settings tab): {e}")
-            available_providers = ["google", "openai"]
+            available_providers = ["google", "openai", "midjourney"]
         self.provider_combo.addItems(available_providers)
         if self.current_provider in available_providers:
             self.provider_combo.setCurrentText(self.current_provider)
@@ -1248,16 +1559,19 @@ class MainWindow(QMainWindow):
         
         # Local SD model management widget
         if LocalSDWidget:
-            local_sd_group = QGroupBox("Local Stable Diffusion")
-            local_sd_layout = QVBoxLayout(local_sd_group)
+            self.local_sd_group = QGroupBox("Local Stable Diffusion")
+            local_sd_layout = QVBoxLayout(self.local_sd_group)
             self.local_sd_widget = LocalSDWidget()
             self.local_sd_widget.models_changed.connect(self._update_model_list)
             local_sd_layout.addWidget(self.local_sd_widget)
-            v.addWidget(local_sd_group)
+            v.addWidget(self.local_sd_group)
             # Show/hide based on provider
-            local_sd_group.setVisible(self.current_provider == "local_sd")
+            self.local_sd_group.setVisible(self.current_provider == "local_sd")
         else:
             self.local_sd_widget = None
+            self.local_sd_group = None
+
+        # Midjourney now has its own dedicated tab, no settings needed here
 
         v.addStretch(1)
 
@@ -2415,7 +2729,12 @@ For more detailed information, please refer to the full documentation.
     
     def _init_history_tab(self):
         """Initialize history tab with enhanced table display."""
-        from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QHBoxLayout
+        from PySide6.QtWidgets import QHeaderView, QCheckBox, QHBoxLayout
+        # QTableWidget should already be imported at the top, but fallback if needed
+        try:
+            _ = QTableWidget
+        except NameError:
+            from PySide6.QtWidgets import QTableWidget, QTableWidgetItem
 
         v = QVBoxLayout(self.tab_history)
 
@@ -2434,12 +2753,17 @@ For more detailed information, please refer to the full documentation.
         self.history_table.setHorizontalHeaderLabels([
             "Thumbnail", "Date & Time", "Provider", "Model", "Prompt", "Resolution", "Cost"
         ])
-        
+
         # Configure table
         self.history_table.setAlternatingRowColors(True)
         self.history_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.history_table.setSortingEnabled(True)
+
+        # Set custom delegate for thumbnail column (owner draw) if available
+        if ThumbnailDelegate:
+            thumbnail_delegate = ThumbnailDelegate(self.thumbnail_cache, self.history_table)
+            self.history_table.setItemDelegateForColumn(0, thumbnail_delegate)
         
         # Set column widths
         header = self.history_table.horizontalHeader()
@@ -2453,26 +2777,28 @@ For more detailed information, please refer to the full documentation.
         
         # Populate table with history
         self.history_table.setRowCount(len(self.history))
+
+        # Preload thumbnails for first visible rows
+        first_visible = 0
+        last_visible = min(20, len(self.history))  # Preload first 20 thumbnails
+
         for row, item in enumerate(self.history):
             if isinstance(item, dict):
-                # Create thumbnail for first column
-                thumbnail_widget = QLabel()
-                thumbnail_widget.setAlignment(Qt.AlignCenter)
-                file_path = item.get('file_path', '')
-                if file_path and Path(file_path).exists():
-                    from PySide6.QtGui import QPixmap
-                    pixmap = QPixmap(file_path)
-                    if not pixmap.isNull():
-                        # Scale to 60x60 thumbnail
-                        scaled = pixmap.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                        thumbnail_widget.setPixmap(scaled)
-                    else:
-                        thumbnail_widget.setText("No Image")
-                else:
-                    thumbnail_widget.setText("No Image")
-                self.history_table.setCellWidget(row, 0, thumbnail_widget)
+                # Thumbnail column - handled by custom delegate
+                # Store the path in the item so delegate can access it
+                thumbnail_item = QTableWidgetItem()
+                file_path = item.get('path', item.get('file_path', ''))
+                if file_path:
+                    path_str = str(file_path)
+                    thumbnail_item.setData(Qt.UserRole, path_str)
+
+                    # Preload thumbnail for visible rows
+                    if first_visible <= row <= last_visible:
+                        self.thumbnail_cache.get(path_str)  # Load into cache
+
+                self.history_table.setItem(row, 0, thumbnail_item)
                 # Set row height to accommodate thumbnail
-                self.history_table.setRowHeight(row, 65)
+                self.history_table.setRowHeight(row, 80)
 
                 # Parse timestamp and combine date & time
                 timestamp = item.get('timestamp', '')
@@ -2530,7 +2856,7 @@ For more detailed information, please refer to the full documentation.
                 
                 # Cost column (now column 5)
                 cost = item.get('cost', 0.0)
-                cost_str = f"${cost:.4f}" if cost > 0 else '-'
+                cost_str = f"${cost:.2f}" if cost > 0 else '-'
                 cost_item = QTableWidgetItem(cost_str)
                 self.history_table.setItem(row, 6, cost_item)
                 
@@ -2558,6 +2884,7 @@ For more detailed information, please refer to the full documentation.
 
         # Connect signals
         self.history_table.selectionModel().selectionChanged.connect(self._on_history_selection_changed)
+        self.history_table.itemClicked.connect(self._on_history_item_clicked)
         self.history_table.itemDoubleClicked.connect(self._load_history_item)
         self.btn_load_history.clicked.connect(self._load_selected_history)
         self.btn_clear_history.clicked.connect(self._clear_history)
@@ -2641,8 +2968,15 @@ For more detailed information, please refer to the full documentation.
                 self.model_combo.addItem("Stable Diffusion XL (stable-diffusion-xl-1024-v1-0)", 
                                         "stable-diffusion-xl-1024-v1-0")
             elif self.current_provider == "local_sd":
-                self.model_combo.addItem("Stable Diffusion 2.1 (stabilityai/stable-diffusion-2-1)", 
+                self.model_combo.addItem("Stable Diffusion 2.1 (stabilityai/stable-diffusion-2-1)",
                                         "stabilityai/stable-diffusion-2-1")
+            elif self.current_provider == "midjourney":
+                # Midjourney versions
+                self.model_combo.addItem("v6.1 (Latest)", "v6.1")
+                self.model_combo.addItem("v6", "v6")
+                self.model_combo.addItem("v5.2", "v5.2")
+                self.model_combo.addItem("Niji 6 (Anime)", "niji6")
+                self.model_combo.addItem("Niji 5 (Anime)", "niji5")
     
     def _update_advanced_visibility(self):
         """Show/hide advanced settings based on provider."""
@@ -2653,6 +2987,10 @@ For more detailed information, please refer to the full documentation.
         elif hasattr(self, 'advanced_group'):
             # Only show for local_sd provider
             self.advanced_group.setVisible(self.current_provider == "local_sd")
+
+        # Show/hide Midjourney settings
+        if hasattr(self, 'midjourney_group'):
+            self.midjourney_group.setVisible(self.current_provider == "midjourney")
 
     @staticmethod
     def get_llm_providers():
@@ -2854,6 +3192,52 @@ For more detailed information, please refer to the full documentation.
             # Update model list for new provider
             self._update_model_list()
 
+            # Update advanced/Midjourney visibility
+            self._update_advanced_visibility()
+
+            # Switch display between image and Midjourney command
+            if hasattr(self, 'output_stack'):
+                if provider_name == "midjourney":
+                    self.output_stack.setCurrentIndex(1)  # Show Midjourney command widget
+                    # Update the Midjourney command if we have a prompt
+                    if hasattr(self, 'prompt_edit') and self.prompt_edit.toPlainText().strip():
+                        self._update_midjourney_command()
+                else:
+                    self.output_stack.setCurrentIndex(0)  # Show image widget
+
+            # Update Generate button text for Midjourney
+            if hasattr(self, 'btn_generate'):
+                if provider_name == "midjourney":
+                    self.btn_generate.setText("Copy && Open &Discord")
+                    self.btn_generate.setToolTip("Copy command to clipboard and open Discord (Alt+D or Ctrl+Enter)")
+                else:
+                    self.btn_generate.setText("&Generate")
+                    self.btn_generate.setToolTip("Generate image (Alt+G or Ctrl+Enter)")
+
+            # Hide resolution selector for Midjourney (aspect ratio only)
+            if hasattr(self, 'resolution_selector') and self.resolution_selector:
+                if provider_name == "midjourney":
+                    self.resolution_selector.setVisible(False)
+                    # Keep aspect ratio visible and enabled
+                    if hasattr(self, 'aspect_selector') and self.aspect_selector:
+                        self.aspect_selector.setEnabled(True)
+                        self.aspect_selector.setToolTip("Midjourney aspect ratio (e.g., --ar 16:9)")
+                else:
+                    self.resolution_selector.setVisible(True)
+                    if hasattr(self, 'aspect_selector') and self.aspect_selector:
+                        self.aspect_selector.setEnabled(True)
+                        self.aspect_selector.setToolTip("Select aspect ratio for your image")
+
+            # Show/hide Midjourney options
+            if hasattr(self, 'midjourney_options_group'):
+                self.midjourney_options_group.setVisible(provider_name == "midjourney")
+
+            # Hide advanced settings for Midjourney
+            if hasattr(self, 'advanced_panel') and self.advanced_panel:
+                self.advanced_panel.setVisible(provider_name != "midjourney")
+            elif hasattr(self, 'advanced_group'):
+                self.advanced_group.setVisible(provider_name != "midjourney")
+
             # Show status but don't preload - it will load on first use
             self.status_bar.showMessage(f"Image provider changed to {provider_name}")
 
@@ -2877,12 +3261,14 @@ For more detailed information, please refer to the full documentation.
                 self.aspect_selector.setToolTip("Aspect ratio is preserved across provider changes")
 
             # Update reference image availability based on provider
-            # Currently only Google Gemini supports reference images
+            # Google Gemini and Midjourney support reference images
             if hasattr(self, 'btn_select_ref_image'):
-                is_google = provider_name == "google"
-                self.btn_select_ref_image.setEnabled(is_google)
-                if is_google:
+                supports_ref = provider_name in ["google", "midjourney"]
+                self.btn_select_ref_image.setEnabled(supports_ref)
+                if provider_name == "google":
                     self.btn_select_ref_image.setToolTip("Choose a starting image for generation (Google Gemini)")
+                elif provider_name == "midjourney":
+                    self.btn_select_ref_image.setToolTip("Choose a reference image (will be noted in command)")
                 else:
                     self.btn_select_ref_image.setToolTip(f"Reference images not supported by {provider_name} provider")
 
@@ -2901,11 +3287,34 @@ For more detailed information, please refer to the full documentation.
 
             # Update new widgets if available
             if hasattr(self, 'resolution_selector') and self.resolution_selector:
-                self.resolution_selector.update_provider(self.current_provider)
+                # Hide resolution for Midjourney (not yet supported)
+                self.resolution_selector.setVisible(provider_name != "midjourney")
+                if provider_name != "midjourney":
+                    self.resolution_selector.update_provider(self.current_provider)
+
             if hasattr(self, 'quality_selector') and self.quality_selector:
-                self.quality_selector.update_provider(self.current_provider)
+                # Hide quality for Midjourney (has its own quality control)
+                self.quality_selector.setVisible(provider_name != "midjourney")
+                if provider_name != "midjourney":
+                    self.quality_selector.update_provider(self.current_provider)
+
             if hasattr(self, 'advanced_panel') and self.advanced_panel:
-                self.advanced_panel.update_provider(self.current_provider)
+                # Hide advanced panel for Midjourney (has its own settings)
+                self.advanced_panel.setVisible(provider_name != "midjourney")
+                if provider_name != "midjourney":
+                    self.advanced_panel.update_provider(self.current_provider)
+
+            # Hide upscaling for Midjourney
+            if hasattr(self, 'upscaling_selector') and self.upscaling_selector:
+                self.upscaling_selector.setVisible(provider_name != "midjourney")
+
+            # Hide batch selector for Midjourney
+            if hasattr(self, 'batch_selector') and self.batch_selector:
+                self.batch_selector.setVisible(provider_name != "midjourney")
+
+            # Hide social sizes button for Midjourney
+            if hasattr(self, 'btn_social_sizes') and self.btn_social_sizes:
+                self.btn_social_sizes.setVisible(provider_name != "midjourney")
 
     def _on_model_changed(self, model_name: str):
         """Handle model selection change."""
@@ -2928,6 +3337,49 @@ For more detailed information, please refer to the full documentation.
 
         # Update reference image button states
         self._update_use_current_button_state()
+
+        # Switch display between image and Midjourney command
+        if hasattr(self, 'output_stack'):
+            if self.current_provider == "midjourney":
+                self.output_stack.setCurrentIndex(1)  # Show Midjourney command widget
+                # Update the Midjourney command if we have a prompt
+                if hasattr(self, 'prompt_text') and self.prompt_text.toPlainText().strip():
+                    self._update_midjourney_command()
+            else:
+                self.output_stack.setCurrentIndex(0)  # Show image widget
+
+        # Update Generate button text for Midjourney
+        if hasattr(self, 'btn_generate'):
+            if self.current_provider == "midjourney":
+                self.btn_generate.setText("Copy && Open &Discord")
+                self.btn_generate.setToolTip("Copy command to clipboard and open Discord (Alt+D or Ctrl+Enter)")
+            else:
+                self.btn_generate.setText("&Generate")
+                self.btn_generate.setToolTip("Generate image (Alt+G or Ctrl+Enter)")
+
+        # Hide resolution selector for Midjourney (aspect ratio only)
+        if hasattr(self, 'resolution_selector') and self.resolution_selector:
+            if self.current_provider == "midjourney":
+                self.resolution_selector.setVisible(False)
+                # Keep aspect ratio visible and enabled
+                if hasattr(self, 'aspect_selector') and self.aspect_selector:
+                    self.aspect_selector.setEnabled(True)
+                    self.aspect_selector.setToolTip("Midjourney aspect ratio (e.g., --ar 16:9)")
+            else:
+                self.resolution_selector.setVisible(True)
+                if hasattr(self, 'aspect_selector') and self.aspect_selector:
+                    self.aspect_selector.setEnabled(True)
+                    self.aspect_selector.setToolTip("Select aspect ratio for your image")
+
+        # Show/hide Midjourney options
+        if hasattr(self, 'midjourney_options_group'):
+            self.midjourney_options_group.setVisible(self.current_provider == "midjourney")
+
+        # Hide advanced settings for Midjourney
+        if hasattr(self, 'advanced_panel') and self.advanced_panel:
+            self.advanced_panel.setVisible(self.current_provider != "midjourney")
+        elif hasattr(self, 'advanced_group'):
+            self.advanced_group.setVisible(self.current_provider != "midjourney")
 
         # Show status but don't preload - it will load on first use
         self.status_bar.showMessage(f"Image provider changed to {self.current_provider}")
@@ -2985,13 +3437,10 @@ For more detailed information, please refer to the full documentation.
         self._update_auth_visibility()
         
         # Update Local SD widget visibility
-        if hasattr(self, 'local_sd_widget') and self.local_sd_widget:
-            # Get the parent group box if it exists
-            parent = self.local_sd_widget.parent()
-            if parent and isinstance(parent, QGroupBox):
-                parent.setVisible(self.current_provider == "local_sd")
-            else:
-                self.local_sd_widget.setVisible(self.current_provider == "local_sd")
+        if hasattr(self, 'local_sd_group') and self.local_sd_group:
+            self.local_sd_group.setVisible(self.current_provider == "local_sd")
+
+        # Midjourney is now in its own tab, no provider-specific settings needed
     
     def _on_aspect_ratio_changed(self, ratio: str):
         """Handle aspect ratio change."""
@@ -3008,6 +3457,9 @@ For more detailed information, please refer to the full documentation.
         # Update upscaling visibility
         self._update_upscaling_visibility()
         self._update_cost_estimate()
+        # Update Midjourney command if Midjourney is selected
+        if self.current_provider == "midjourney":
+            self._update_midjourney_command()
         # Update the "Will insert" preview to show resolution
         self._update_ref_instruction_preview()
     
@@ -3140,33 +3592,65 @@ For more detailed information, please refer to the full documentation.
             QMessageBox.warning(self, APP_NAME, f"Could not open model browser: {e}")
     
     def _save_and_test(self):
-        """Save API key and test connection."""
-        key = self.api_key_edit.text().strip()
-        
-        # Local SD doesn't need an API key
-        if self.current_provider == "local_sd":
-            key = ""
-        elif not key:
-            QMessageBox.warning(self, APP_NAME, "Please enter an API key.")
-            return
-        
-        # Save key
-        self.config.set_api_key(self.current_provider, key)
+        """Save all API keys and settings, then test the current provider."""
+        # Save all API keys
+        google_key = self.google_key_edit.text().strip()
+        if google_key:
+            self.config.set_api_key("google", google_key)
+            self.config.set("google_api_key", google_key)  # Backward compatibility
+
+        openai_key = self.openai_key_edit.text().strip()
+        if openai_key:
+            self.config.set_api_key("openai", openai_key)
+            self.config.set("openai_api_key", openai_key)  # Backward compatibility
+
+        stability_key = self.stability_key_edit.text().strip()
+        if stability_key:
+            self.config.set_api_key("stability", stability_key)
+            self.config.set("stability_api_key", stability_key)  # Backward compatibility
+
+        anthropic_key = self.anthropic_key_edit.text().strip()
+        if anthropic_key:
+            self.config.set("anthropic_api_key", anthropic_key)
+
+        # Save configuration
         self.config.save()
+
+        # Get the key for the current provider
+        if self.current_provider == "google":
+            key = google_key
+        elif self.current_provider == "openai":
+            key = openai_key
+        elif self.current_provider == "stability":
+            key = stability_key
+        elif self.current_provider == "midjourney":
+            # Midjourney is manual-only, no authentication needed
+            key = ""
+        elif self.current_provider == "local_sd":
+            key = ""
+        else:
+            key = self.api_key_edit.text().strip()
+
+        # Validate we have a key for non-local providers
+        if self.current_provider not in ["local_sd", "midjourney"] and not key:
+            QMessageBox.warning(self, APP_NAME, f"Please enter an API key for {self.current_provider}.")
+            return
+
         self.current_api_key = key
-        
-        # Test connection
+
+        # Test connection for the current provider
         try:
             provider_config = {"api_key": key}
+
             provider = get_provider(self.current_provider, provider_config)
             is_valid, message = provider.validate_auth()
-            
+
             if is_valid:
-                QMessageBox.information(self, APP_NAME, f"API key saved and validated!\n{message}")
+                QMessageBox.information(self, APP_NAME, f"Settings saved and {self.current_provider} validated!\n{message}")
             else:
-                QMessageBox.warning(self, APP_NAME, f"API key test failed:\n{message}")
+                QMessageBox.warning(self, APP_NAME, f"{self.current_provider} test failed:\n{message}")
         except Exception as e:
-            QMessageBox.critical(self, APP_NAME, f"Error testing API key:\n{str(e)}")
+            QMessageBox.critical(self, APP_NAME, f"Error testing {self.current_provider}:\n{str(e)}")
     
     def _toggle_auto_copy(self, checked: bool):
         """Toggle auto-copy filename setting."""
@@ -3205,6 +3689,14 @@ For more detailed information, please refer to the full documentation.
             if not self.config.get("gcloud_auth_validated", False):
                 self._check_gcloud_status()
     
+    # Midjourney settings are now handled in the dedicated Midjourney tab
+
+    def _on_prompt_text_changed(self):
+        """Handle prompt text changes."""
+        # Update Midjourney command if Midjourney is selected
+        if self.current_provider == "midjourney":
+            self._update_midjourney_command()
+
     def _check_gcloud_status(self):
         """Check Google Cloud CLI status and credentials."""
         try:
@@ -3579,7 +4071,12 @@ For more detailed information, please refer to the full documentation.
             )
 
     def _generate(self):
-        """Generate image from prompt."""
+        """Generate image from prompt or handle Midjourney command."""
+        # Handle Midjourney separately
+        if self.current_provider == "midjourney":
+            self._handle_midjourney_generate()
+            return
+
         # Add separator for new generation
         self._append_to_console("", is_separator=True)
         self._append_to_console("Starting image generation...", "#00ff00")  # Green
@@ -3819,6 +4316,12 @@ For more detailed information, please refer to the full documentation.
             self.ref_image_enabled.isChecked()):
             kwargs['reference_image'] = self.reference_image_data
 
+
+        # Check if we have a reference image
+        if (hasattr(self, 'reference_image_data') and
+            self.reference_image_data and
+            hasattr(self, 'ref_image_enabled') and
+            self.ref_image_enabled.isChecked()):
             # Build and prepend instruction to prompt
             style = self.ref_style_combo.currentText() if hasattr(self, 'ref_style_combo') else "Natural blend"
             position = self.ref_position_combo.currentText() if hasattr(self, 'ref_position_combo') else "Auto"
@@ -3910,6 +4413,30 @@ For more detailed information, please refer to the full documentation.
                         resolution_text = f"(Image will be {width}x{height}, scale to fit.)"
                     prompt = f"{resolution_text} {prompt}"
                     self._append_to_console(f"Auto-inserted: \"{resolution_text}\"", "#9966ff")
+
+        # Handle Midjourney-specific setup
+        if self.current_provider == "midjourney":
+            # Add Midjourney parameters
+            if hasattr(self, 'mj_stylize_spin'):
+                kwargs['stylize'] = self.mj_stylize_spin.value()
+                kwargs['chaos'] = self.mj_chaos_spin.value()
+                kwargs['weird'] = self.mj_weird_spin.value()
+
+            # Check mode
+            is_manual = True
+            if hasattr(self, 'mj_mode_combo'):
+                mode = self.mj_mode_combo.currentText()
+                is_manual = "Manual" in mode
+
+            if is_manual:
+                # Build and display command
+                command = self._build_mj_command(prompt)
+                if hasattr(self, 'mj_command_edit'):
+                    self.mj_command_edit.setPlainText(command)
+                    self.btn_copy_mj_command.setEnabled(True)
+
+                self._append_to_console(f"Discord Command: {command}", "#7289DA")
+                self._append_to_console("Copy the command above and paste in Discord", "#ffaa00")
 
         # Show status for provider loading
         self.status_bar.showMessage(f"Connecting to {self.current_provider}...")
@@ -4399,10 +4926,10 @@ For more detailed information, please refer to the full documentation.
                 
                 # Add to history list
                 self.history.append(history_entry)
-            
-            # Update history tab if it exists
+
+            # Add new entries to history table without refreshing everything
             if hasattr(self, 'history_table'):
-                self._refresh_history_table()
+                self._add_to_history_table(history_entry)
             
             # Copy filename if enabled
             if self.auto_copy_filename and saved_paths:
@@ -5020,6 +5547,24 @@ For more detailed information, please refer to the full documentation.
         self.prompt_edit.setPlainText(template_text)
         self.tabs.setCurrentWidget(self.tab_generate)
     
+    def _on_history_item_clicked(self, item):
+        """Handle single click on history item - restore prompt to input box."""
+        row = self.history_table.row(item)
+        if row >= 0:
+            # Get the history data from the DateTime column (column 1) where it's stored
+            datetime_item = self.history_table.item(row, 1)
+            if datetime_item:
+                history_item = datetime_item.data(Qt.UserRole)
+                if isinstance(history_item, dict):
+                    prompt = history_item.get('prompt', '')
+                    if prompt:
+                        # Switch to Generate tab
+                        self.tabs.setCurrentWidget(self.tab_generate)
+                        # Set the prompt in the input box
+                        self.prompt_edit.setPlainText(prompt)
+                        # Show status message
+                        self.status_bar.showMessage(f"Loaded prompt from history", 3000)
+
     def _on_history_selection_changed(self, selected, deselected):
         """Handle history selection change - display the image."""
         indexes = self.history_table.selectionModel().selectedRows()
@@ -5148,6 +5693,11 @@ For more detailed information, please refer to the full documentation.
         # If switching to help tab, trigger a minimal scroll to fix rendering
         if current_widget == self.tab_help:
             self._trigger_help_render()
+
+        # If switching to history tab, check for new images not created by us
+        if current_widget == self.tab_history:
+            # Check if there are new images in the folder that we didn't generate
+            self._check_for_external_images()
 
     def _load_video_tab(self):
         """Lazy load the video tab when first accessed."""
@@ -5322,15 +5872,35 @@ For more detailed information, please refer to the full documentation.
             print(f"Search error: {e}")
             self.help_search_results.setText("Error")
     
-    def _toggle_image_settings(self):
+    def _toggle_image_settings(self, checked=None):
         """Toggle the image settings panel visibility."""
-        is_visible = self.image_settings_container.isVisible()
-        self.image_settings_container.setVisible(not is_visible)
-        self.image_settings_toggle.setText("▼ &Image Settings" if not is_visible else "▶ &Image Settings")
+        if checked is None:
+            is_visible = self.image_settings_container.isVisible()
+        else:
+            is_visible = checked
+        self.image_settings_container.setVisible(is_visible)
+        self.image_settings_toggle.setText("▼ &Image Settings" if is_visible else "▶ &Image Settings")
 
         # Save the expansion state when user manually toggles
-        self.config.set('image_settings_expanded', not is_visible)
+        self.config.set('image_settings_expanded', is_visible)
         self.config.save()
+
+        # Trigger image resize after layout change
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(50, self._perform_image_resize)
+
+    def _toggle_ref_image_settings(self, checked):
+        """Toggle the reference image settings panel visibility."""
+        self.ref_image_container.setVisible(checked)
+        self.ref_image_toggle.setText("▼ Reference Image (Google Only)" if checked else "▶ Reference Image (Google Only)")
+
+        # Save the expansion state
+        self.config.set('ref_image_expanded', checked)
+        self.config.save()
+
+        # Trigger image resize after layout change
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(50, self._perform_image_resize)
 
     def _select_reference_image(self):
         """Open dialog to select a reference image."""
@@ -5373,6 +5943,7 @@ For more detailed information, please refer to the full documentation.
 
                 # Show options widget
                 self.ref_options_widget.setVisible(True)
+                # Don't change style - preserve whatever is currently selected
                 self._update_ref_instruction_preview()
 
                 # Update button text to show filename
@@ -5465,6 +6036,105 @@ For more detailed information, please refer to the full documentation.
 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to set current image as reference: {str(e)}")
+
+    def _handle_midjourney_generate(self):
+        """Handle Midjourney 'generate' - copy command and open Discord."""
+        prompt = self.prompt_edit.toPlainText().strip()
+        if not prompt:
+            QMessageBox.warning(self, APP_NAME, "Please enter a prompt.")
+            return
+
+        # Update command display
+        self._update_midjourney_command()
+
+        # Get the command
+        command = self.midjourney_command_display.toPlainText()
+
+        # Copy to clipboard
+        import platform
+        import subprocess
+        system = platform.system()
+        try:
+            if system == "Windows":
+                subprocess.run("clip", text=True, input=command, check=True)
+            elif system == "Darwin":  # macOS
+                subprocess.run("pbcopy", text=True, input=command, check=True)
+            else:  # Linux
+                # Try xclip first
+                try:
+                    subprocess.run(["xclip", "-selection", "clipboard"], text=True, input=command, check=True)
+                except:
+                    subprocess.run(["xsel", "--clipboard", "--input"], text=True, input=command, check=True)
+
+            self._append_to_console(f"✅ Command copied to clipboard: {command[:50]}...", "#00ff00")
+
+            # Open Discord
+            import webbrowser
+            webbrowser.open_new_tab("https://discord.com/channels/@me")
+            self._append_to_console("📋 Discord opened - paste the command in a Midjourney channel", "#7289DA")
+
+        except Exception as e:
+            self._append_to_console(f"Error: Could not copy to clipboard: {e}", "#ff6666")
+            QMessageBox.warning(self, APP_NAME, f"Command: {command}\n\nCould not copy to clipboard. Please copy manually.")
+
+    def _update_midjourney_command(self):
+        """Update the Midjourney command display based on current prompt and settings."""
+        prompt = self.prompt_edit.toPlainText().strip() if hasattr(self, 'prompt_edit') else ""
+        if not prompt:
+            self.midjourney_command_display.clear()
+            return
+
+        # Build parameters
+        params = []
+
+        # Check for reference image
+        if (hasattr(self, 'reference_image_data') and
+            self.reference_image_data and
+            hasattr(self, 'ref_image_enabled') and
+            self.ref_image_enabled.isChecked()):
+            # Add reference image note to prompt
+            prompt = f"[Reference image attached] {prompt}"
+
+        # Get aspect ratio if available
+        if hasattr(self, 'aspect_selector') and self.aspect_selector and self.aspect_selector.isEnabled():
+            # Get the ratio string directly
+            aspect_ratio = self.aspect_selector.get_ratio() if hasattr(self.aspect_selector, 'get_ratio') else "1:1"
+            if aspect_ratio != "1:1":
+                params.append(f"--ar {aspect_ratio}")
+
+        # Add Midjourney options if available
+        if hasattr(self, 'mj_stylize_slider') and self.mj_stylize_slider.value() != 100:
+            params.append(f"--stylize {self.mj_stylize_slider.value()}")
+
+        if hasattr(self, 'mj_chaos_slider') and self.mj_chaos_slider.value() > 0:
+            params.append(f"--chaos {self.mj_chaos_slider.value()}")
+
+        if hasattr(self, 'mj_weird_slider') and self.mj_weird_slider.value() > 0:
+            params.append(f"--weird {self.mj_weird_slider.value()}")
+
+        if hasattr(self, 'mj_quality_combo') and self.mj_quality_combo.currentText() != "1":
+            params.append(f"--q {self.mj_quality_combo.currentText()}")
+
+        if hasattr(self, 'mj_seed_spin') and self.mj_seed_spin.value() >= 0:
+            params.append(f"--seed {self.mj_seed_spin.value()}")
+
+        # Add version
+        if hasattr(self, 'mj_version_combo'):
+            version = self.mj_version_combo.currentText()
+        else:
+            version = "v7"  # Default
+
+        if version.startswith('niji'):
+            params.append(f"--niji {version.replace('niji', '')}")
+        else:
+            params.append(f"--v {version.replace('v', '')}")
+
+        # Build full command
+        full_prompt = f"{prompt} {' '.join(params)}" if params else prompt
+        command = f"/imagine {full_prompt}"
+
+        # Update display
+        self.midjourney_command_display.setText(command)
 
     def _update_use_current_button_state(self):
         """Update the state of the 'Use Current Image' button."""
@@ -5926,34 +6596,163 @@ For more detailed information, please refer to the full documentation.
         except Exception as e:
             print(f"Error restoring UI state: {e}")
     
+    def _add_to_history_table(self, history_entry):
+        """Add a single new entry to the history table without refreshing everything."""
+        if not hasattr(self, 'history_table'):
+            return
+
+        from PySide6.QtWidgets import QTableWidgetItem
+
+        # Add a new row at the top (newest first)
+        row_count = self.history_table.rowCount()
+        self.history_table.insertRow(0)  # Insert at top
+
+        # Thumbnail column
+        thumbnail_item = QTableWidgetItem()
+        file_path = history_entry.get('path', '')
+        if file_path:
+            path_str = str(file_path)
+            thumbnail_item.setData(Qt.UserRole, path_str)
+            # Preload thumbnail
+            self.thumbnail_cache.get(path_str)
+        self.history_table.setItem(0, 0, thumbnail_item)
+        self.history_table.setRowHeight(0, 80)
+
+        # Parse timestamp
+        timestamp = history_entry.get('timestamp', '')
+        datetime_str = ''
+        sortable_datetime = None
+        if timestamp:
+            try:
+                if isinstance(timestamp, (int, float)):
+                    dt = datetime.fromtimestamp(timestamp)
+                    datetime_str = dt.strftime('%Y-%m-%d %H:%M')
+                    sortable_datetime = dt.isoformat()
+                elif 'T' in str(timestamp):
+                    parts = str(timestamp).split('T')
+                    date_str = parts[0]
+                    time_str = parts[1].split('.')[0] if len(parts) > 1 else ''
+                    datetime_str = f"{date_str} {time_str}"
+            except:
+                datetime_str = str(timestamp)
+
+        # Date & Time column
+        datetime_item = QTableWidgetItem(datetime_str)
+        if sortable_datetime:
+            datetime_item.setData(Qt.UserRole + 1, sortable_datetime)
+        self.history_table.setItem(0, 1, datetime_item)
+
+        # Provider column
+        provider = history_entry.get('provider', '')
+        provider_item = QTableWidgetItem(provider.title() if provider else 'Unknown')
+        self.history_table.setItem(0, 2, provider_item)
+
+        # Model column
+        model = history_entry.get('model', '')
+        model_display = model.split('/')[-1] if '/' in model else model
+        model_item = QTableWidgetItem(model_display)
+        model_item.setToolTip(model)
+        self.history_table.setItem(0, 3, model_item)
+
+        # Prompt column
+        prompt = history_entry.get('prompt', 'No prompt')
+        prompt_item = QTableWidgetItem(prompt)
+        prompt_item.setToolTip(f"Full prompt:\n{prompt}")
+        self.history_table.setItem(0, 4, prompt_item)
+
+        # Resolution column
+        width = history_entry.get('width', '')
+        height = history_entry.get('height', '')
+        resolution = f"{width}x{height}" if width and height else ''
+        resolution_item = QTableWidgetItem(resolution)
+        self.history_table.setItem(0, 5, resolution_item)
+
+        # Cost column
+        cost = history_entry.get('cost', 0.0)
+        cost_str = f"${cost:.2f}" if cost > 0 else '-'
+        cost_item = QTableWidgetItem(cost_str)
+        self.history_table.setItem(0, 6, cost_item)
+
+        # Store the history item data for retrieval
+        datetime_item.setData(Qt.UserRole, history_entry)
+
+    def _check_for_external_images(self):
+        """Check if there are new images in the folder that we didn't generate."""
+        # Get current paths in our history
+        current_paths = {str(item.get('path', '')) for item in self.history if item.get('path')}
+
+        # Scan disk for all images
+        show_all = hasattr(self, 'chk_show_all_images') and self.chk_show_all_images.isChecked()
+        disk_paths = scan_disk_history(project_only=not show_all)
+
+        # Find new images
+        new_images = []
+        for path in disk_paths[:100]:  # Limit scan
+            if str(path) not in current_paths:
+                new_images.append(path)
+
+        # If we found new images, add them
+        if new_images:
+            for path in new_images:
+                # Try to read metadata
+                sidecar = read_image_sidecar(path)
+                if sidecar:
+                    history_entry = {
+                        'path': path,
+                        'prompt': sidecar.get('prompt', ''),
+                        'timestamp': sidecar.get('timestamp', path.stat().st_mtime),
+                        'model': sidecar.get('model', ''),
+                        'provider': sidecar.get('provider', ''),
+                        'width': sidecar.get('width', ''),
+                        'height': sidecar.get('height', ''),
+                        'cost': sidecar.get('cost', 0.0)
+                    }
+                else:
+                    history_entry = {
+                        'path': path,
+                        'prompt': path.stem.replace('_', ' '),
+                        'timestamp': path.stat().st_mtime,
+                        'model': '',
+                        'provider': '',
+                        'cost': 0.0
+                    }
+
+                self.history.append(history_entry)
+                self._add_to_history_table(history_entry)
+
     def _refresh_history_table(self):
         """Refresh the history table with current history data."""
         if not hasattr(self, 'history_table'):
             return
-        
+
+        # Import QTableWidgetItem if needed
+        from PySide6.QtWidgets import QTableWidgetItem
+
         # Clear and repopulate the table
         self.history_table.setRowCount(len(self.history))
-        
+
+        # Preload thumbnails for visible rows to improve performance
+        # Get visible range
+        first_visible = 0
+        last_visible = min(20, len(self.history))  # Preload first 20
+
         for row, item in enumerate(self.history):
             if isinstance(item, dict):
-                # Create thumbnail for first column
-                thumbnail_widget = QLabel()
-                thumbnail_widget.setAlignment(Qt.AlignCenter)
-                file_path = item.get('file_path', '')
-                if file_path and Path(file_path).exists():
-                    from PySide6.QtGui import QPixmap
-                    pixmap = QPixmap(file_path)
-                    if not pixmap.isNull():
-                        # Scale to 60x60 thumbnail
-                        scaled = pixmap.scaled(60, 60, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                        thumbnail_widget.setPixmap(scaled)
-                    else:
-                        thumbnail_widget.setText("No Image")
-                else:
-                    thumbnail_widget.setText("No Image")
-                self.history_table.setCellWidget(row, 0, thumbnail_widget)
+                # Thumbnail column - handled by custom delegate
+                # Store the path in the item so delegate can access it
+                thumbnail_item = QTableWidgetItem()
+                file_path = item.get('path', item.get('file_path', ''))
+                if file_path:
+                    path_str = str(file_path)
+                    thumbnail_item.setData(Qt.UserRole, path_str)
+
+                    # Preload thumbnail for visible rows
+                    if first_visible <= row <= last_visible:
+                        self.thumbnail_cache.get(path_str)  # Load into cache
+
+                self.history_table.setItem(row, 0, thumbnail_item)
                 # Set row height to accommodate thumbnail
-                self.history_table.setRowHeight(row, 65)
+                self.history_table.setRowHeight(row, 80)
 
                 # Parse timestamp and combine date & time
                 timestamp = item.get('timestamp', '')
@@ -5978,7 +6777,6 @@ For more detailed information, please refer to the full documentation.
                         datetime_str = f"{date_str} {time_str}"
                 
                 # Date & Time column (combined)
-                from PySide6.QtWidgets import QTableWidgetItem
                 datetime_item = QTableWidgetItem(datetime_str)
                 # Store sortable datetime for proper chronological sorting
                 if sortable_datetime:
@@ -6012,7 +6810,7 @@ For more detailed information, please refer to the full documentation.
                 
                 # Cost column (now column 5)
                 cost = item.get('cost', 0.0)
-                cost_str = f"${cost:.4f}" if cost > 0 else '-'
+                cost_str = f"${cost:.2f}" if cost > 0 else '-'
                 cost_item = QTableWidgetItem(cost_str)
                 self.history_table.setItem(row, 6, cost_item)
                 
@@ -6061,3 +6859,6 @@ For more detailed information, please refer to the full documentation.
         msg.setText(text)
         msg.setTextFormat(Qt.RichText)
         msg.exec()
+
+    # Midjourney-specific methods
+    # Midjourney methods removed - all functionality is now in the dedicated Midjourney tab

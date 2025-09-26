@@ -528,6 +528,7 @@ class PromptGenerationDialog(QDialog):
         self.init_ui()
         self.load_llm_settings()
         self.restore_last_session()
+        self.update_history_list()  # Populate history list on dialog open
 
     def init_ui(self):
         """Initialize the UI."""
@@ -698,6 +699,7 @@ class PromptGenerationDialog(QDialog):
 
         # Status console at the bottom
         from .llm_utils import DialogStatusConsole
+        from .history_widget import DialogHistoryWidget
         self.status_console = DialogStatusConsole("Status", self)
         splitter.addWidget(self.status_console)
 
