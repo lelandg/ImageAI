@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **History Widget Standardization**: All dialogs now use unified DialogHistoryWidget for consistent history management
 - **History Migration Tool**: Script to migrate old JSON history files to new format (`migrate_history.py`)
 - **History Double-Click Restore**: Double-clicking history items now restores the full context without creating duplicates
+- **Midjourney Provider**: New provider with embedded web interface for manual Midjourney image generation
+  - Automatically builds and copies slash commands to clipboard
+  - Opens embedded web browser (or external browser as fallback)
+  - Supports all Midjourney parameters (model versions, stylize, chaos, weird, etc.)
+- **Midjourney Download Watcher**: Intelligent system to automatically detect and associate downloaded Midjourney images
+  - Monitors Downloads folder for new images when enabled
+  - Smart confidence scoring based on timing, filename patterns, and session tracking
+  - Auto-accepts high-confidence matches (configurable threshold)
+  - Shows confirmation dialog for medium/low confidence matches with image preview
+  - Tracks multiple concurrent Midjourney sessions
+  - Automatically saves images to output directory with proper metadata
 
 ### Changed
 - **Resolution Handling Improvements**:

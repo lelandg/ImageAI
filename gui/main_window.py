@@ -127,7 +127,7 @@ else:
     ThumbnailDelegate = None
 
 try:
-    from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSize, QRect
+    from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSize, QRect, QStandardPaths
     from PySide6.QtGui import QPixmap, QAction, QPainter
     from PySide6.QtWidgets import (
         QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
@@ -194,12 +194,8 @@ class MainWindow(QMainWindow):
         self.thumbnail_cache = ThumbnailCache(max_size=50)
         self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         
-        # Initialize provider
+        # Initialize provider (respect last selection, including Midjourney)
         self.current_provider = self.config.get("provider", "google")
-        # If provider is midjourney, default to google (midjourney has its own tab now)
-        if self.current_provider == "midjourney":
-            self.current_provider = "google"
-            self.config.set("provider", "google")
         self.current_api_key = self.config.get_api_key(self.current_provider)
         self.current_model = DEFAULT_MODEL
         self.auto_copy_filename = self.config.get("auto_copy_filename", False)
@@ -217,6 +213,10 @@ class MainWindow(QMainWindow):
         self._last_template_context: Optional[dict] = None
         self._video_tab_loaded = False  # Track lazy loading of video tab
         self.upscaling_settings = {}  # Initialize upscaling settings
+
+        # Initialize Midjourney watcher
+        self.midjourney_watcher = None
+        self.midjourney_session_id = None  # Track current session
 
         # Load history from disk with progress display
         if self.history_paths:
@@ -266,6 +266,15 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         self._restore_geometry()
         self._restore_ui_state()
+
+        # Initialize Midjourney watcher if enabled
+        self._init_midjourney_watcher()
+
+        # Ensure UI reflects the restored provider (including Midjourney)
+        try:
+            self._on_provider_changed(self.current_provider)
+        except Exception:
+            pass
 
         print("Application ready!")
         self.status_bar.showMessage("Ready")
@@ -1052,7 +1061,7 @@ class MainWindow(QMainWindow):
         self.mj_version_combo = QComboBox()
         self.mj_version_combo.addItems(["v7", "v6.1", "v6", "v5.2", "v5.1", "v5", "niji6", "niji5"])
         self.mj_version_combo.setCurrentText("v7")
-        self.mj_version_combo.currentTextChanged.connect(lambda: self._update_midjourney_command())
+        # Version changes are now handled by the provider
         mj_layout.addRow("Version:", self.mj_version_combo)
 
         # Stylize
@@ -1067,7 +1076,7 @@ class MainWindow(QMainWindow):
         stylize_layout.setContentsMargins(0, 0, 0, 0)
         stylize_layout.addWidget(self.mj_stylize_slider)
         stylize_layout.addWidget(self.mj_stylize_label)
-        self.mj_stylize_slider.valueChanged.connect(lambda v: (self.mj_stylize_label.setText(str(v)), self._update_midjourney_command()))
+        self.mj_stylize_slider.valueChanged.connect(lambda v: self.mj_stylize_label.setText(str(v)))
         mj_layout.addRow("Stylize:", stylize_widget)
 
         # Chaos
@@ -1082,7 +1091,7 @@ class MainWindow(QMainWindow):
         chaos_layout.setContentsMargins(0, 0, 0, 0)
         chaos_layout.addWidget(self.mj_chaos_slider)
         chaos_layout.addWidget(self.mj_chaos_label)
-        self.mj_chaos_slider.valueChanged.connect(lambda v: (self.mj_chaos_label.setText(str(v)), self._update_midjourney_command()))
+        self.mj_chaos_slider.valueChanged.connect(lambda v: self.mj_chaos_label.setText(str(v)))
         mj_layout.addRow("Chaos:", chaos_widget)
 
         # Weird
@@ -1097,14 +1106,14 @@ class MainWindow(QMainWindow):
         weird_layout.setContentsMargins(0, 0, 0, 0)
         weird_layout.addWidget(self.mj_weird_slider)
         weird_layout.addWidget(self.mj_weird_label)
-        self.mj_weird_slider.valueChanged.connect(lambda v: (self.mj_weird_label.setText(str(v)), self._update_midjourney_command()))
+        self.mj_weird_slider.valueChanged.connect(lambda v: self.mj_weird_label.setText(str(v)))
         mj_layout.addRow("Weird:", weird_widget)
 
         # Quality
         self.mj_quality_combo = QComboBox()
         self.mj_quality_combo.addItems(["0.25", "0.5", "1", "2"])
         self.mj_quality_combo.setCurrentText("1")
-        self.mj_quality_combo.currentTextChanged.connect(lambda: self._update_midjourney_command())
+        # Quality changes are now handled by the provider
         mj_layout.addRow("Quality:", self.mj_quality_combo)
 
         # Seed
@@ -1113,7 +1122,7 @@ class MainWindow(QMainWindow):
         self.mj_seed_spin.setValue(-1)
         self.mj_seed_spin.setSpecialValueText("Random")
         self.mj_seed_spin.setSuffix(" (-1 for random)")
-        self.mj_seed_spin.valueChanged.connect(lambda: self._update_midjourney_command())
+        # Seed changes are now handled by the provider
         mj_layout.addRow("Seed:", self.mj_seed_spin)
 
         self.midjourney_options_group.setLayout(mj_layout)
@@ -1509,11 +1518,126 @@ class MainWindow(QMainWindow):
 
         gcloud_layout.addWidget(self.gcloud_help_widget)
         v.addWidget(gcloud_group)
-        
+
+        # === MIDJOURNEY SETTINGS ===
+        midjourney_group = QGroupBox("Midjourney Settings")
+        midjourney_layout = QVBoxLayout(midjourney_group)
+
+        # Enable download watching
+        self.chk_midjourney_watch = QCheckBox("Watch Downloads folder for Midjourney images")
+        self.chk_midjourney_watch.setToolTip("Automatically detect and associate Midjourney images when downloaded")
+        self.chk_midjourney_watch.setChecked(self.config.get("midjourney_watch_enabled", False))
+        midjourney_layout.addWidget(self.chk_midjourney_watch)
+
+        # Downloads folder path
+        downloads_layout = QHBoxLayout()
+        downloads_layout.addWidget(QLabel("Downloads folder:"))
+        self.midjourney_downloads_edit = QLineEdit()
+        default_downloads = QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
+        self.midjourney_downloads_edit.setText(
+            self.config.get("midjourney_downloads_path", default_downloads)
+        )
+        self.midjourney_downloads_edit.setToolTip("Path to watch for downloaded Midjourney images")
+        downloads_layout.addWidget(self.midjourney_downloads_edit)
+
+        self.btn_browse_downloads = QPushButton("Browse...")
+        self.btn_browse_downloads.clicked.connect(self._browse_downloads_folder)
+        downloads_layout.addWidget(self.btn_browse_downloads)
+        midjourney_layout.addLayout(downloads_layout)
+
+        # Auto-accept confidence threshold
+        threshold_layout = QHBoxLayout()
+        threshold_layout.addWidget(QLabel("Auto-accept confidence:"))
+        self.midjourney_threshold_spin = QSpinBox()
+        self.midjourney_threshold_spin.setRange(0, 100)
+        self.midjourney_threshold_spin.setSuffix("%")
+        self.midjourney_threshold_spin.setValue(self.config.get("midjourney_auto_accept", 85))
+        self.midjourney_threshold_spin.setToolTip("Automatically accept matches above this confidence level")
+        threshold_layout.addWidget(self.midjourney_threshold_spin)
+
+        self.midjourney_threshold_label = QLabel("(85% recommended)")
+        threshold_layout.addWidget(self.midjourney_threshold_label)
+        threshold_layout.addStretch()
+        midjourney_layout.addLayout(threshold_layout)
+
+        # Time window
+        window_layout = QHBoxLayout()
+        window_layout.addWidget(QLabel("Detection time window:"))
+        self.midjourney_window_spin = QSpinBox()
+        self.midjourney_window_spin.setRange(30, 600)
+        self.midjourney_window_spin.setSuffix(" seconds")
+        self.midjourney_window_spin.setValue(self.config.get("midjourney_time_window", 300))
+        self.midjourney_window_spin.setToolTip("How long after generation to watch for images")
+        window_layout.addWidget(self.midjourney_window_spin)
+        window_layout.addStretch()
+        midjourney_layout.addLayout(window_layout)
+
+        # Show notifications
+        self.chk_midjourney_notify = QCheckBox("Show notifications when images are detected")
+        self.chk_midjourney_notify.setChecked(self.config.get("midjourney_notifications", True))
+        midjourney_layout.addWidget(self.chk_midjourney_notify)
+
+        # Discord configuration
+        discord_label = QLabel("<b>Discord Configuration (Optional)</b>")
+        midjourney_layout.addWidget(discord_label)
+
+        # Use Discord checkbox
+        self.chk_use_discord = QCheckBox("Use Discord instead of Midjourney web app")
+        self.chk_use_discord.setChecked(self.config.get("midjourney_use_discord", False))
+        self.chk_use_discord.toggled.connect(self._on_midjourney_use_discord_toggled)
+        midjourney_layout.addWidget(self.chk_use_discord)
+
+        # Discord server ID
+        discord_server_layout = QHBoxLayout()
+        discord_server_layout.addWidget(QLabel("Discord Server ID:"))
+        self.discord_server_edit = QLineEdit()
+        self.discord_server_edit.setPlaceholderText("e.g., 662267976984297473")
+        self.discord_server_edit.setText(self.config.get("midjourney_discord_server", ""))
+        self.discord_server_edit.setToolTip("Your Discord server ID (right-click server > Copy Server ID)")
+        self.discord_server_edit.editingFinished.connect(self._on_midjourney_discord_fields_changed)
+        discord_server_layout.addWidget(self.discord_server_edit)
+        discord_server_layout.addStretch()
+        midjourney_layout.addLayout(discord_server_layout)
+
+        # Discord channel ID
+        discord_channel_layout = QHBoxLayout()
+        discord_channel_layout.addWidget(QLabel("Discord Channel ID:"))
+        self.discord_channel_edit = QLineEdit()
+        self.discord_channel_edit.setPlaceholderText("e.g., 989268300185776158")
+        self.discord_channel_edit.setText(self.config.get("midjourney_discord_channel", ""))
+        self.discord_channel_edit.setToolTip("Your Discord channel ID (right-click channel > Copy Channel ID)")
+        self.discord_channel_edit.editingFinished.connect(self._on_midjourney_discord_fields_changed)
+        discord_channel_layout.addWidget(self.discord_channel_edit)
+        discord_channel_layout.addStretch()
+        midjourney_layout.addLayout(discord_channel_layout)
+
+        # Test Discord button
+        self.btn_test_discord = QPushButton("Test Discord Channel")
+        self.btn_test_discord.clicked.connect(self._test_discord_channel)
+        self.btn_test_discord.setToolTip("Open the configured Discord channel to verify it works")
+        midjourney_layout.addWidget(self.btn_test_discord)
+
+        # Use external browser checkbox
+        self.chk_external_browser = QCheckBox("Always use external browser (no embedded view)")
+        self.chk_external_browser.setChecked(self.config.get("midjourney_external_browser", False))
+        self.chk_external_browser.toggled.connect(lambda s: (self.config.set("midjourney_external_browser", bool(s)), self.config.save()))
+        midjourney_layout.addWidget(self.chk_external_browser)
+
+        # Info text
+        info_label = QLabel(
+            "<i>When download watching is enabled, ImageAI will monitor your Downloads folder for new Midjourney images "
+            "and automatically associate them with your prompts based on timing and confidence scoring.</i>"
+        )
+        info_label.setWordWrap(True)
+        info_label.setStyleSheet("color: gray; font-size: 9pt; padding: 10px;")
+        midjourney_layout.addWidget(info_label)
+
+        v.addWidget(midjourney_group)
+
         # Create placeholder for backward compatibility
         self.api_key_widget = QWidget(self.tab_settings)
         self.api_key_widget.setVisible(False)
-        
+
         # === GENERAL OPTIONS ===
         options_group = QGroupBox("Options")
         options_layout = QVBoxLayout(options_group)
@@ -3195,24 +3319,9 @@ For more detailed information, please refer to the full documentation.
             # Update advanced/Midjourney visibility
             self._update_advanced_visibility()
 
-            # Switch display between image and Midjourney command
-            if hasattr(self, 'output_stack'):
-                if provider_name == "midjourney":
-                    self.output_stack.setCurrentIndex(1)  # Show Midjourney command widget
-                    # Update the Midjourney command if we have a prompt
-                    if hasattr(self, 'prompt_edit') and self.prompt_edit.toPlainText().strip():
-                        self._update_midjourney_command()
-                else:
-                    self.output_stack.setCurrentIndex(0)  # Show image widget
-
             # Update Generate button text for Midjourney
             if hasattr(self, 'btn_generate'):
-                if provider_name == "midjourney":
-                    self.btn_generate.setText("Copy && Open &Discord")
-                    self.btn_generate.setToolTip("Copy command to clipboard and open Discord (Alt+D or Ctrl+Enter)")
-                else:
-                    self.btn_generate.setText("&Generate")
-                    self.btn_generate.setToolTip("Generate image (Alt+G or Ctrl+Enter)")
+                self._update_generate_button_for_provider(provider_name)
 
             # Hide resolution selector for Midjourney (aspect ratio only)
             if hasattr(self, 'resolution_selector') and self.resolution_selector:
@@ -3342,20 +3451,13 @@ For more detailed information, please refer to the full documentation.
         if hasattr(self, 'output_stack'):
             if self.current_provider == "midjourney":
                 self.output_stack.setCurrentIndex(1)  # Show Midjourney command widget
-                # Update the Midjourney command if we have a prompt
-                if hasattr(self, 'prompt_text') and self.prompt_text.toPlainText().strip():
-                    self._update_midjourney_command()
+                # Midjourney command is now built by the provider, no update needed
             else:
                 self.output_stack.setCurrentIndex(0)  # Show image widget
 
         # Update Generate button text for Midjourney
         if hasattr(self, 'btn_generate'):
-            if self.current_provider == "midjourney":
-                self.btn_generate.setText("Copy && Open &Discord")
-                self.btn_generate.setToolTip("Copy command to clipboard and open Discord (Alt+D or Ctrl+Enter)")
-            else:
-                self.btn_generate.setText("&Generate")
-                self.btn_generate.setToolTip("Generate image (Alt+G or Ctrl+Enter)")
+            self._update_generate_button_for_provider(self.current_provider)
 
         # Hide resolution selector for Midjourney (aspect ratio only)
         if hasattr(self, 'resolution_selector') and self.resolution_selector:
@@ -3441,6 +3543,22 @@ For more detailed information, please refer to the full documentation.
             self.local_sd_group.setVisible(self.current_provider == "local_sd")
 
         # Midjourney is now in its own tab, no provider-specific settings needed
+
+    def _update_generate_button_for_provider(self, provider_name: str):
+        """Set the Generate button text/tooltip based on provider + settings."""
+        if not hasattr(self, 'btn_generate'):
+            return
+        if provider_name == "midjourney":
+            use_discord = self.config.get("midjourney_use_discord", False)
+            if use_discord:
+                self.btn_generate.setText("Copy && Open &Discord")
+                self.btn_generate.setToolTip("Copy command to clipboard and open Discord (Alt+D or Ctrl+Enter)")
+            else:
+                self.btn_generate.setText("Generate with &Midjourney")
+                self.btn_generate.setToolTip("Open Midjourney web interface (Alt+G or Ctrl+Enter)")
+        else:
+            self.btn_generate.setText("&Generate")
+            self.btn_generate.setToolTip("Generate image (Alt+G or Ctrl+Enter)")
     
     def _on_aspect_ratio_changed(self, ratio: str):
         """Handle aspect ratio change."""
@@ -3457,9 +3575,7 @@ For more detailed information, please refer to the full documentation.
         # Update upscaling visibility
         self._update_upscaling_visibility()
         self._update_cost_estimate()
-        # Update Midjourney command if Midjourney is selected
-        if self.current_provider == "midjourney":
-            self._update_midjourney_command()
+        # Midjourney command is now built by the provider, no update needed
         # Update the "Will insert" preview to show resolution
         self._update_ref_instruction_preview()
     
@@ -3591,6 +3707,37 @@ For more detailed information, please refer to the full documentation.
         except Exception as e:
             QMessageBox.warning(self, APP_NAME, f"Could not open model browser: {e}")
     
+    def _browse_downloads_folder(self):
+        """Browse for Midjourney downloads folder."""
+        current_path = self.midjourney_downloads_edit.text() or QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Select Downloads Folder",
+            current_path,
+            QFileDialog.ShowDirsOnly
+        )
+        if folder:
+            self.midjourney_downloads_edit.setText(folder)
+
+    def _on_midjourney_discord_fields_changed(self):
+        """Persist Discord server/channel IDs immediately when edited."""
+        try:
+            server = self.discord_server_edit.text().strip()
+            channel = self.discord_channel_edit.text().strip()
+            self.config.set("midjourney_discord_server", server)
+            self.config.set("midjourney_discord_channel", channel)
+            self.config.save()
+            # No dialog; keep it quiet
+        except Exception:
+            pass
+
+    def _on_midjourney_use_discord_toggled(self, checked: bool):
+        """Persist Use Discord setting and update button label."""
+        self.config.set("midjourney_use_discord", bool(checked))
+        self.config.save()
+        if hasattr(self, 'btn_generate'):
+            self._update_generate_button_for_provider(self.current_provider)
+
     def _save_and_test(self):
         """Save all API keys and settings, then test the current provider."""
         # Save all API keys
@@ -3613,8 +3760,27 @@ For more detailed information, please refer to the full documentation.
         if anthropic_key:
             self.config.set("anthropic_api_key", anthropic_key)
 
+        # Save Midjourney settings
+        self.config.set("midjourney_watch_enabled", self.chk_midjourney_watch.isChecked())
+        self.config.set("midjourney_downloads_path", self.midjourney_downloads_edit.text())
+        self.config.set("midjourney_auto_accept", self.midjourney_threshold_spin.value())
+        self.config.set("midjourney_time_window", self.midjourney_window_spin.value())
+        self.config.set("midjourney_notifications", self.chk_midjourney_notify.isChecked())
+        self.config.set("midjourney_use_discord", self.chk_use_discord.isChecked())
+        self.config.set("midjourney_discord_server", self.discord_server_edit.text())
+        self.config.set("midjourney_discord_channel", self.discord_channel_edit.text())
+        self.config.set("midjourney_external_browser", self.chk_external_browser.isChecked())
+
         # Save configuration
         self.config.save()
+
+        # Reinitialize watcher if settings changed
+        if self.chk_midjourney_watch.isChecked():
+            self._init_midjourney_watcher()
+        elif self.midjourney_watcher:
+            # Disable watcher if unchecked
+            self.midjourney_watcher.set_enabled(False)
+            self._append_to_console("Midjourney download watcher disabled", "#888888")
 
         # Get the key for the current provider
         if self.current_provider == "google":
@@ -3693,9 +3859,41 @@ For more detailed information, please refer to the full documentation.
 
     def _on_prompt_text_changed(self):
         """Handle prompt text changes."""
-        # Update Midjourney command if Midjourney is selected
-        if self.current_provider == "midjourney":
-            self._update_midjourney_command()
+        # Midjourney command is now built by the provider, no update needed
+        pass
+
+    def _test_discord_channel(self):
+        """Test the Discord channel configuration by opening it."""
+        server_id = self.discord_server_edit.text().strip()
+        channel_id = self.discord_channel_edit.text().strip()
+
+        if not server_id or not channel_id:
+            QMessageBox.warning(
+                self,
+                APP_NAME,
+                "Please enter both Discord Server ID and Channel ID to test."
+            )
+            return
+
+        # Build Discord URL
+        discord_url = f"https://discord.com/channels/{server_id}/{channel_id}"
+
+        try:
+            import webbrowser
+            webbrowser.open(discord_url)
+            self._append_to_console(f"Opening Discord channel: {discord_url}", "#7289DA")
+            QMessageBox.information(
+                self,
+                APP_NAME,
+                f"Discord channel opened in browser.\n\nIf the channel loads correctly, your configuration is valid."
+            )
+        except Exception as e:
+            logger.error(f"Failed to open Discord channel: {e}")
+            QMessageBox.critical(
+                self,
+                APP_NAME,
+                f"Failed to open Discord channel:\n{str(e)}"
+            )
 
     def _check_gcloud_status(self):
         """Check Google Cloud CLI status and credentials."""
@@ -4071,12 +4269,7 @@ For more detailed information, please refer to the full documentation.
             )
 
     def _generate(self):
-        """Generate image from prompt or handle Midjourney command."""
-        # Handle Midjourney separately
-        if self.current_provider == "midjourney":
-            self._handle_midjourney_generate()
-            return
-
+        """Generate image from prompt."""
         # Add separator for new generation
         self._append_to_console("", is_separator=True)
         self._append_to_console("Starting image generation...", "#00ff00")  # Green
@@ -4141,7 +4334,7 @@ For more detailed information, please refer to the full documentation.
         # Store original prompt (before reference image modifications)
         original_prompt = prompt
 
-        if not self.current_api_key and self.current_provider != "local_sd":
+        if not self.current_api_key and self.current_provider not in ["local_sd", "midjourney"]:
             self._append_to_console("ERROR: No API key configured", "#ff6666")  # Red
             QMessageBox.warning(self, APP_NAME, "Please set an API key in Settings.")
             return
@@ -4416,27 +4609,19 @@ For more detailed information, please refer to the full documentation.
 
         # Handle Midjourney-specific setup
         if self.current_provider == "midjourney":
-            # Add Midjourney parameters
-            if hasattr(self, 'mj_stylize_spin'):
-                kwargs['stylize'] = self.mj_stylize_spin.value()
-                kwargs['chaos'] = self.mj_chaos_spin.value()
-                kwargs['weird'] = self.mj_weird_spin.value()
+            # Add Midjourney parameters from UI elements
+            if hasattr(self, 'mj_stylize_slider'):
+                kwargs['stylize'] = self.mj_stylize_slider.value()
+            if hasattr(self, 'mj_chaos_slider'):
+                kwargs['chaos'] = self.mj_chaos_slider.value()
+            if hasattr(self, 'mj_weird_slider'):
+                kwargs['weird'] = self.mj_weird_slider.value()
+            if hasattr(self, 'mj_quality_combo'):
+                kwargs['quality'] = float(self.mj_quality_combo.currentText())
+            if hasattr(self, 'mj_seed_spin') and self.mj_seed_spin.value() >= 0:
+                kwargs['seed'] = self.mj_seed_spin.value()
 
-            # Check mode
-            is_manual = True
-            if hasattr(self, 'mj_mode_combo'):
-                mode = self.mj_mode_combo.currentText()
-                is_manual = "Manual" in mode
-
-            if is_manual:
-                # Build and display command
-                command = self._build_mj_command(prompt)
-                if hasattr(self, 'mj_command_edit'):
-                    self.mj_command_edit.setPlainText(command)
-                    self.btn_copy_mj_command.setEnabled(True)
-
-                self._append_to_console(f"Discord Command: {command}", "#7289DA")
-                self._append_to_console("Copy the command above and paste in Discord", "#ffaa00")
+            # The provider will handle command building and mode selection
 
         # Show status for provider loading
         self.status_bar.showMessage(f"Connecting to {self.current_provider}...")
@@ -4748,6 +4933,26 @@ For more detailed information, please refer to the full documentation.
 
     def _on_generation_finished(self, texts: List[str], images: List[bytes]):
         """Handle successful generation."""
+        # Check if this is a Midjourney mode response
+        if texts:
+            for text in texts:
+                if text.startswith("MIDJOURNEY_WEB_MODE:"):
+                    # Handle embedded web mode
+                    # Parse the response: MIDJOURNEY_WEB_MODE:url|slash_command
+                    parts = text.replace("MIDJOURNEY_WEB_MODE:", "").split("|", 1)
+                    if len(parts) == 2:
+                        web_url, slash_command = parts
+                        self._open_midjourney_web_dialog(web_url, slash_command)
+                        return
+                elif text.startswith("MIDJOURNEY_EXTERNAL_BROWSER:"):
+                    # Handle external browser mode
+                    # Parse the response: MIDJOURNEY_EXTERNAL_BROWSER:url|slash_command
+                    parts = text.replace("MIDJOURNEY_EXTERNAL_BROWSER:", "").split("|", 1)
+                    if len(parts) == 2:
+                        web_url, slash_command = parts
+                        self._open_midjourney_external_browser(web_url, slash_command)
+                        return
+
         self.status_label.setText("Generation complete.")
         self.status_bar.showMessage("Image generated successfully")
         self._append_to_console("Generation complete!", "#00ff00")  # Green
@@ -5107,7 +5312,270 @@ For more detailed information, please refer to the full documentation.
             self.gen_thread.wait()
         self.gen_thread = None
         self.gen_worker = None
-    
+
+    def _open_midjourney_external_browser(self, web_url: str, slash_command: str):
+        """Open Midjourney in external browser."""
+        try:
+            import webbrowser
+            import subprocess
+            import platform
+
+            self._append_to_console("Opening in external browser...", "#66ccff")
+            self.status_label.setText("Opening Midjourney in browser")
+
+            # Copy command to clipboard
+            try:
+                system = platform.system()
+                if system == "Windows":
+                    subprocess.run(['clip'], input=slash_command, text=True, check=True)
+                elif system == "Darwin":
+                    subprocess.run(['pbcopy'], input=slash_command, text=True, check=True)
+                else:
+                    subprocess.run(['xclip', '-selection', 'clipboard'], input=slash_command, text=True, check=True)
+
+                self._append_to_console(f"Command copied: {slash_command}", "#00ff00")
+            except:
+                self._append_to_console(f"Manual copy: {slash_command}", "#ffff66")
+
+            # Open browser
+            webbrowser.open(web_url)
+            self._append_to_console("Midjourney opened in browser. Paste the command there.", "#66ccff")
+
+            # Start download watcher session if enabled
+            if hasattr(self, 'midjourney_watcher') and self.midjourney_watcher.enabled:
+                session_id = self.midjourney_watcher.start_session(
+                    self.current_prompt,
+                    slash_command,
+                    self.cbo_model.currentData()
+                )
+                self.current_midjourney_session = session_id
+                self._append_to_console("Download watcher started for this generation", "#66ccff")
+
+            # Re-enable generate button
+            self.btn_generate.setEnabled(True)
+            self._cleanup_thread()
+
+        except Exception as e:
+            logger.error(f"Failed to open external browser: {e}")
+            self._append_to_console(f"Error opening browser: {e}", "#ff6666")
+            self.btn_generate.setEnabled(True)
+            self._cleanup_thread()
+
+    def _open_midjourney_web_dialog(self, web_url: str, slash_command: str):
+        """Open Midjourney web dialog for manual image generation."""
+        try:
+            # Check if QWebEngineView is available
+            try:
+                from PySide6.QtWebEngineWidgets import QWebEngineView
+                from gui.midjourney_dialog import MidjourneyWebDialog
+
+                self._append_to_console("Opening Midjourney web interface...", "#66ccff")
+                self.status_label.setText("Midjourney web interface opened")
+
+                # Create and show dialog with prompt
+                dialog = MidjourneyWebDialog(web_url, slash_command, self.current_prompt, self)
+
+                # Connect dialog signals
+                dialog.imageGenerated.connect(self._on_midjourney_image_ready)
+                dialog.sessionStarted.connect(self._on_midjourney_session_started)
+                dialog.sessionEnded.connect(self._on_midjourney_session_ended)
+
+                # Show dialog (non-modal)
+                dialog.show()
+
+                # Re-enable generate button
+                self.btn_generate.setEnabled(True)
+                self._cleanup_thread()
+
+            except ImportError:
+                # Fallback: Open in external browser
+                self._append_to_console("Web engine not available, opening in browser...", "#ffff66")
+                import webbrowser
+                import subprocess
+                import platform
+
+                # Copy command to clipboard
+                try:
+                    system = platform.system()
+                    if system == "Windows":
+                        subprocess.run(['clip'], input=slash_command, text=True, check=True)
+                    elif system == "Darwin":
+                        subprocess.run(['pbcopy'], input=slash_command, text=True, check=True)
+                    else:
+                        subprocess.run(['xclip', '-selection', 'clipboard'], input=slash_command, text=True, check=True)
+
+                    self._append_to_console(f"Command copied: {slash_command}", "#00ff00")
+                except:
+                    self._append_to_console(f"Manual copy: {slash_command}", "#ffff66")
+
+                # Open browser
+                webbrowser.open(web_url)
+                self._append_to_console("Midjourney opened in browser. Paste the command there.", "#66ccff")
+
+                # Re-enable generate button
+                self.btn_generate.setEnabled(True)
+                self._cleanup_thread()
+
+        except Exception as e:
+            logger.error(f"Error opening Midjourney dialog: {e}")
+            # Fallback: attempt to open in external browser so user can proceed
+            try:
+                self._append_to_console("Dialog failed; opening Midjourney in external browser...", "#ffff66")
+                self._open_midjourney_external_browser(web_url, slash_command)
+            except Exception as e2:
+                self._append_to_console(f"Error: {str(e2)}", "#ff6666")
+                self.btn_generate.setEnabled(True)
+                self._cleanup_thread()
+
+    def _on_midjourney_image_ready(self, message: str):
+        """Handle when user indicates Midjourney image is ready."""
+        self._append_to_console(message, "#00ff00")
+        self.status_label.setText("Midjourney image generated - save from web interface")
+        self.status_bar.showMessage("Please save your image from the Midjourney interface")
+
+    def _init_midjourney_watcher(self):
+        """Initialize the Midjourney download watcher if enabled."""
+        if self.config.get("midjourney_watch_enabled", False):
+            try:
+                from gui.midjourney_watcher import MidjourneyWatcher
+
+                self.midjourney_watcher = MidjourneyWatcher(self)
+                self.midjourney_watcher.imageDetected.connect(self._on_midjourney_image_detected)
+
+                # Set configuration
+                watch_path = self.config.get("midjourney_downloads_path")
+                if watch_path:
+                    from pathlib import Path
+                    self.midjourney_watcher.set_watch_path(Path(watch_path))
+                else:
+                    self.midjourney_watcher.set_watch_path()  # Use default
+
+                self.midjourney_watcher.set_auto_accept_threshold(
+                    self.config.get("midjourney_auto_accept", 85)
+                )
+                self.midjourney_watcher.set_time_window(
+                    self.config.get("midjourney_time_window", 300)
+                )
+                self.midjourney_watcher.set_enabled(True)
+
+                self._append_to_console("Midjourney download watcher enabled", "#66ccff")
+            except Exception as e:
+                logger.error(f"Failed to initialize Midjourney watcher: {e}")
+                self._append_to_console(f"Failed to start download watcher: {e}", "#ff6666")
+
+    def _on_midjourney_session_started(self, prompt: str, command: str):
+        """Handle Midjourney session start."""
+        if self.midjourney_watcher:
+            self.midjourney_session_id = self.midjourney_watcher.start_session(
+                prompt, command, self.current_model
+            )
+            logger.info(f"Started Midjourney session: {self.midjourney_session_id}")
+
+    def _on_midjourney_session_ended(self):
+        """Handle Midjourney session end."""
+        if self.midjourney_watcher and self.midjourney_session_id:
+            self.midjourney_watcher.end_session(self.midjourney_session_id)
+            logger.info(f"Ended Midjourney session: {self.midjourney_session_id}")
+
+    def _on_midjourney_image_detected(self, image_path, confidence_data):
+        """Handle detected Midjourney image from downloads."""
+        from pathlib import Path
+        from gui.midjourney_match_dialog import MidjourneyMatchDialog
+
+        # Show notification if enabled
+        if self.config.get("midjourney_notifications", True):
+            self.status_bar.showMessage(f"Midjourney image detected: {image_path.name}", 5000)
+            self._append_to_console(
+                f"Image detected: {image_path.name} ({confidence_data['confidence']:.0f}%)",
+                "#66ccff"
+            )
+
+        # Check if auto-accept
+        if confidence_data.get('auto_accept', False):
+            # Auto-accept the match
+            self._process_midjourney_image(
+                image_path,
+                confidence_data.get('prompt', ''),
+                confidence_data.get('session_id')
+            )
+        else:
+            # Show confirmation dialog
+            all_sessions = []
+            if self.midjourney_watcher:
+                all_sessions = self.midjourney_watcher.get_active_sessions()
+
+            dialog = MidjourneyMatchDialog(
+                image_path, confidence_data, all_sessions, self
+            )
+            dialog.accepted.connect(
+                lambda sid, prompt, path: self._process_midjourney_image(path, prompt, sid)
+            )
+            dialog.rejected.connect(
+                lambda path: self._append_to_console(f"Rejected: {path.name}", "#ffaa00")
+            )
+            dialog.show()
+
+    def _process_midjourney_image(self, image_path, prompt, session_id):
+        """Process an accepted Midjourney image."""
+        try:
+            from pathlib import Path
+            import shutil
+
+            # Read the image
+            image_data = image_path.read_bytes()
+
+            # Save to output directory with metadata
+            stub = sanitize_stub_from_prompt(prompt)
+            saved_paths = auto_save_images([image_data], base_stub=f"mj_{stub}")
+
+            if saved_paths:
+                saved_path = saved_paths[0]
+
+                # Create metadata sidecar
+                from datetime import datetime
+                metadata = {
+                    "prompt": prompt,
+                    "provider": "midjourney",
+                    "model": self.current_model or "midjourney",
+                    "timestamp": datetime.now().isoformat(),
+                    "original_path": str(image_path),
+                    "session_id": session_id
+                }
+                write_image_sidecar(saved_path, metadata)
+
+                # Add to history
+                history_entry = {
+                    'path': saved_path,
+                    'prompt': prompt,
+                    'timestamp': datetime.now().isoformat(),
+                    'model': "midjourney",
+                    'provider': "midjourney",
+                    'cost': 0.0  # Midjourney uses subscription
+                }
+                self.history.append(history_entry)
+
+                # Update UI
+                if hasattr(self, 'history_table'):
+                    self._add_to_history_table(history_entry)
+
+                # Load the image
+                self._load_image_file(saved_path)
+
+                self._append_to_console(f"✓ Saved Midjourney image: {saved_path.name}", "#00ff00")
+                self.status_bar.showMessage(f"Midjourney image saved: {saved_path.name}", 5000)
+
+                # Optionally delete from downloads
+                if self.config.get("midjourney_delete_downloads", False):
+                    try:
+                        image_path.unlink()
+                        self._append_to_console(f"Removed from downloads: {image_path.name}", "#888888")
+                    except:
+                        pass
+
+        except Exception as e:
+            logger.error(f"Error processing Midjourney image: {e}")
+            self._append_to_console(f"Error: {str(e)}", "#ff6666")
+
     def _load_image_file(self, path: Path):
         """Load and display an image file."""
         try:
@@ -6037,104 +6505,8 @@ For more detailed information, please refer to the full documentation.
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to set current image as reference: {str(e)}")
 
-    def _handle_midjourney_generate(self):
-        """Handle Midjourney 'generate' - copy command and open Discord."""
-        prompt = self.prompt_edit.toPlainText().strip()
-        if not prompt:
-            QMessageBox.warning(self, APP_NAME, "Please enter a prompt.")
-            return
-
-        # Update command display
-        self._update_midjourney_command()
-
-        # Get the command
-        command = self.midjourney_command_display.toPlainText()
-
-        # Copy to clipboard
-        import platform
-        import subprocess
-        system = platform.system()
-        try:
-            if system == "Windows":
-                subprocess.run("clip", text=True, input=command, check=True)
-            elif system == "Darwin":  # macOS
-                subprocess.run("pbcopy", text=True, input=command, check=True)
-            else:  # Linux
-                # Try xclip first
-                try:
-                    subprocess.run(["xclip", "-selection", "clipboard"], text=True, input=command, check=True)
-                except:
-                    subprocess.run(["xsel", "--clipboard", "--input"], text=True, input=command, check=True)
-
-            self._append_to_console(f"✅ Command copied to clipboard: {command[:50]}...", "#00ff00")
-
-            # Open Discord
-            import webbrowser
-            webbrowser.open_new_tab("https://discord.com/channels/@me")
-            self._append_to_console("📋 Discord opened - paste the command in a Midjourney channel", "#7289DA")
-
-        except Exception as e:
-            self._append_to_console(f"Error: Could not copy to clipboard: {e}", "#ff6666")
-            QMessageBox.warning(self, APP_NAME, f"Command: {command}\n\nCould not copy to clipboard. Please copy manually.")
-
-    def _update_midjourney_command(self):
-        """Update the Midjourney command display based on current prompt and settings."""
-        prompt = self.prompt_edit.toPlainText().strip() if hasattr(self, 'prompt_edit') else ""
-        if not prompt:
-            self.midjourney_command_display.clear()
-            return
-
-        # Build parameters
-        params = []
-
-        # Check for reference image
-        if (hasattr(self, 'reference_image_data') and
-            self.reference_image_data and
-            hasattr(self, 'ref_image_enabled') and
-            self.ref_image_enabled.isChecked()):
-            # Add reference image note to prompt
-            prompt = f"[Reference image attached] {prompt}"
-
-        # Get aspect ratio if available
-        if hasattr(self, 'aspect_selector') and self.aspect_selector and self.aspect_selector.isEnabled():
-            # Get the ratio string directly
-            aspect_ratio = self.aspect_selector.get_ratio() if hasattr(self.aspect_selector, 'get_ratio') else "1:1"
-            if aspect_ratio != "1:1":
-                params.append(f"--ar {aspect_ratio}")
-
-        # Add Midjourney options if available
-        if hasattr(self, 'mj_stylize_slider') and self.mj_stylize_slider.value() != 100:
-            params.append(f"--stylize {self.mj_stylize_slider.value()}")
-
-        if hasattr(self, 'mj_chaos_slider') and self.mj_chaos_slider.value() > 0:
-            params.append(f"--chaos {self.mj_chaos_slider.value()}")
-
-        if hasattr(self, 'mj_weird_slider') and self.mj_weird_slider.value() > 0:
-            params.append(f"--weird {self.mj_weird_slider.value()}")
-
-        if hasattr(self, 'mj_quality_combo') and self.mj_quality_combo.currentText() != "1":
-            params.append(f"--q {self.mj_quality_combo.currentText()}")
-
-        if hasattr(self, 'mj_seed_spin') and self.mj_seed_spin.value() >= 0:
-            params.append(f"--seed {self.mj_seed_spin.value()}")
-
-        # Add version
-        if hasattr(self, 'mj_version_combo'):
-            version = self.mj_version_combo.currentText()
-        else:
-            version = "v7"  # Default
-
-        if version.startswith('niji'):
-            params.append(f"--niji {version.replace('niji', '')}")
-        else:
-            params.append(f"--v {version.replace('v', '')}")
-
-        # Build full command
-        full_prompt = f"{prompt} {' '.join(params)}" if params else prompt
-        command = f"/imagine {full_prompt}"
-
-        # Update display
-        self.midjourney_command_display.setText(command)
+    # Note: _handle_midjourney_generate and _update_midjourney_command methods removed
+    # as they are now handled by the Midjourney provider
 
     def _update_use_current_button_state(self):
         """Update the state of the 'Use Current Image' button."""

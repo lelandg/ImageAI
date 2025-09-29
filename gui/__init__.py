@@ -68,6 +68,32 @@ def launch_gui():
     # On Windows, underlines typically show when Alt is pressed
     # The Fusion style helps make them more visible
 
+    # Log GUI environment details
+    try:
+        import logging
+        from PySide6 import __version__ as PYSIDE_VERSION  # type: ignore
+        from PySide6.QtCore import qVersion
+        logger = logging.getLogger(__name__)
+        logger.info(f"GUI environment -> PySide6: {PYSIDE_VERSION}, Qt: {qVersion()}")
+        # QPA platform + style
+        try:
+            platform_name = app.platformName()
+        except Exception:
+            platform_name = "<unknown>"
+        try:
+            current_style = app.style().objectName()
+        except Exception:
+            current_style = "<unknown>"
+        logger.info(f"QPA platform: {platform_name}, Style: {current_style}")
+        # QtWebEngine availability
+        try:
+            import PySide6.QtWebEngineWidgets  # noqa: F401
+            logger.info("QtWebEngineWidgets import: OK")
+        except Exception as e:
+            logger.info(f"QtWebEngineWidgets import: FAILED ({e})")
+    except Exception:
+        pass
+
     print("Creating application window...")
     window = MainWindow()
     window.show()

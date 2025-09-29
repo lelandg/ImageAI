@@ -103,7 +103,7 @@ def _get_providers() -> Dict[str, Type[ImageProvider]]:
         # Try to import Midjourney provider
         try:
             with suppress_stderr():
-                from .midjourney_provider import MidjourneyProvider
+                from .midjourney import MidjourneyProvider
                 _PROVIDERS["midjourney"] = MidjourneyProvider
         except Exception as e:
             import logging

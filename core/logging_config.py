@@ -85,6 +85,30 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
         root_logger.info(f"Log file: {log_file}")
         root_logger.info("=" * 60)
 
+        # Optional: Log GUI/Qt environment if available
+        try:
+            import PySide6  # type: ignore
+            from PySide6 import QtCore  # type: ignore
+            pyside_ver = getattr(PySide6, "__version__", None) or getattr(QtCore, "__version__", None)
+            qt_ver = None
+            try:
+                qt_ver = QtCore.qVersion()  # runtime Qt version
+            except Exception:
+                pass
+            root_logger.info("PySide6 detected: True")
+            if pyside_ver:
+                root_logger.info(f"PySide6 version: {pyside_ver}")
+            if qt_ver:
+                root_logger.info(f"Qt version: {qt_ver}")
+            # Check QtWebEngine availability
+            try:
+                import PySide6.QtWebEngineWidgets  # type: ignore
+                root_logger.info("QtWebEngine: available (QtWebEngineWidgets import succeeded)")
+            except Exception as _we:
+                root_logger.info(f"QtWebEngine: NOT available ({_we})")
+        except Exception as _e:
+            root_logger.info(f"PySide6 not detected at startup: {_e}")
+
         # Capture Python warnings to the log file
         logging.captureWarnings(True)
         warnings_logger = logging.getLogger('py.warnings')

@@ -36,6 +36,15 @@ class GenWorker(QObject):
                 "api_key": api_key,
                 "auth_mode": self.auth_mode,
             }
+
+            # Add Midjourney-specific configuration
+            if self.provider == "midjourney":
+                provider_config.update({
+                    "use_discord": config.get("midjourney_use_discord", False),
+                    "discord_server_id": config.get("midjourney_discord_server", ""),
+                    "discord_channel_id": config.get("midjourney_discord_channel", ""),
+                    "open_in_external_browser": config.get("midjourney_external_browser", False),
+                })
             
             # Get provider and generate
             provider_instance = get_provider(self.provider, provider_config)
