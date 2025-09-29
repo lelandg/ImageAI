@@ -5,7 +5,7 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 2025-09-26
+## [0.20.0] - 2025-09-29
 
 ### Added
 - **Use Current Image Feature**: New functionality to use the currently displayed image as reference
@@ -40,7 +40,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added status console output showing restored history details
   - Fixed platform-specific path handling for Windows/Linux/macOS
 
+### Added
+- **Midjourney Auto-Import Downloaded Images**:
+  - Automatically imports downloaded Midjourney images when dialog closes
+  - Matches images by prompt keywords in filename (no time limit needed)
+  - Manual import button also available for on-demand imports
+  - Creates proper metadata files with prompt, command, and provider info
+  - Auto-refreshes history after import
+
 ### Fixed
+- **Midjourney Login and Web Interface**:
+  - Fixed infinite recursion loop when clicking login button
+  - Fixed OAuth authentication flow getting interrupted by premature reloads
+  - Fixed session cookies not persisting across dialog instances (added shared persistent QWebEngineProfile)
+  - Fixed keyboard input not working in embedded web view (added proper focus policies)
+  - Fixed incorrect command format showing Discord `/imagine prompt:` prefix in web UI
+  - Fixed download button not working (added proper download request handler with state tracking)
 - **History Tab Issues**:
   - Fixed history not loading in Generate Prompts dialog
   - Fixed DialogHistoryWidget using incorrect Linux paths on Windows

@@ -33,6 +33,58 @@ console = logging.getLogger("console")
 _SHARED_MIDJOURNEY_PROFILE = None
 
 
+def _handle_download(download):
+    """Handle file downloads from Midjourney."""
+    try:
+        from PySide6.QtCore import QStandardPaths
+        import os
+
+        # Get default download location
+        download_path = QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
+        if not download_path:
+            download_path = os.path.expanduser("~/Downloads")
+
+        # Get suggested filename
+        suggested_name = download.downloadFileName() if hasattr(download, 'downloadFileName') else download.suggestedFileName()
+        file_path = os.path.join(download_path, suggested_name)
+
+        # Set download path
+        download.setDownloadDirectory(download_path)
+        download.setDownloadFileName(suggested_name)
+
+        # Accept the download
+        download.accept()
+
+        logger.info(f"Download started: {suggested_name} -> {file_path}")
+        console.info(f"Downloading: {suggested_name}")
+
+        # Connect state changed signal to track completion
+        def on_state_change(state):
+            try:
+                # QWebEngineDownloadRequest.DownloadCompleted = 2
+                if int(state) == 2:
+                    logger.info(f"Download finished: {suggested_name}")
+                    console.info(f"✓ Downloaded: {suggested_name}")
+                elif int(state) == 3:  # DownloadCancelled
+                    logger.warning(f"Download cancelled: {suggested_name}")
+                elif int(state) == 4:  # DownloadInterrupted
+                    logger.error(f"Download interrupted: {suggested_name}")
+            except Exception as e:
+                logger.debug(f"State change handler error: {e}")
+
+        try:
+            download.stateChanged.connect(on_state_change)
+        except Exception as e:
+            logger.debug(f"Could not connect state change handler: {e}")
+
+    except Exception as e:
+        logger.error(f"Download handler error: {e}")
+        try:
+            download.accept()  # Try to accept anyway
+        except Exception:
+            pass
+
+
 def get_shared_midjourney_profile():
     """Get or create the shared persistent Midjourney profile."""
     global _SHARED_MIDJOURNEY_PROFILE
@@ -73,6 +125,13 @@ def get_shared_midjourney_profile():
             profile.setCachePath(cache_path)
             profile.setPersistentStoragePath(storage_path)
             profile.setPersistentCookiesPolicy(QWebEngineProfile.AllowPersistentCookies)
+
+            # Enable downloads
+            try:
+                profile.downloadRequested.connect(_handle_download)
+                logger.info("Download handler connected")
+            except Exception as e:
+                logger.warning(f"Could not connect download handler: {e}")
 
             _SHARED_MIDJOURNEY_PROFILE = profile
             logger.info("Created persistent shared Midjourney profile")
@@ -274,6 +333,13 @@ class MidjourneyWebDialog(QDialog):
         discord_popup_btn.setToolTip("Opens an embedded Discord login window using the same session/profile")
         discord_popup_btn.clicked.connect(self._open_discord_login_popup)
         right_layout.addWidget(discord_popup_btn)
+
+        # Import downloaded images button
+        import_btn = QPushButton("📥 Import Downloaded Images")
+        import_btn.setToolTip("Scan Downloads folder for Midjourney images and import them to ImageAI")
+        import_btn.clicked.connect(self._import_downloaded_images)
+        import_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 8px; }")
+        right_layout.addWidget(import_btn)
 
         # Add stretch to push buttons to bottom
         right_layout.addStretch()
@@ -627,6 +693,159 @@ class MidjourneyWebDialog(QDialog):
         except Exception as e:
             logger.error(f"Failed to open Discord login popup: {e}")
 
+    def _import_downloaded_images(self, auto_import=False):
+        """Scan Downloads folder and import Midjourney images matching the prompt.
+
+        Args:
+            auto_import: If True, auto-imports matches without showing dialog
+        """
+        try:
+            from PySide6.QtCore import QStandardPaths
+            from PySide6.QtWidgets import QFileDialog, QMessageBox
+            from pathlib import Path
+            import shutil
+            from datetime import datetime
+            import re
+
+            # Get downloads folder
+            downloads_path = QStandardPaths.writableLocation(QStandardPaths.DownloadLocation)
+            if not downloads_path:
+                downloads_path = str(Path.home() / "Downloads")
+
+            downloads_dir = Path(downloads_path)
+            if not downloads_dir.exists():
+                if not auto_import:
+                    QMessageBox.warning(self, "Not Found", f"Downloads folder not found: {downloads_dir}")
+                return
+
+            # Extract key words from prompt to match against filenames
+            # Clean the prompt and get significant words (4+ chars, first 5 words)
+            prompt_words = re.findall(r'\b\w{4,}\b', self.prompt.lower())[:5]
+
+            midjourney_images = []
+
+            for img_file in downloads_dir.glob("*.png"):
+                # Check if it's a Midjourney image (contains job ID pattern with underscores)
+                if "_" in img_file.stem and len(img_file.stem) > 20:
+                    filename_lower = img_file.stem.lower()
+                    # Match if filename contains some of our prompt words
+                    matches = sum(1 for word in prompt_words if word in filename_lower)
+                    if matches >= min(2, len(prompt_words)):  # At least 2 words match, or all if less than 2
+                        midjourney_images.append(img_file)
+
+            if not midjourney_images:
+                if not auto_import:
+                    QMessageBox.information(self, "No Images Found",
+                        f"No Midjourney images found matching this prompt.\n\n"
+                        f"Looking for files containing: {', '.join(prompt_words[:3])}")
+                return
+
+            # Sort by modification time (newest first)
+            midjourney_images.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+
+            # If auto-importing, skip the selection dialog
+            if auto_import:
+                selected_images = midjourney_images
+            else:
+                # Let user select which images to import
+                from PySide6.QtWidgets import QListWidget, QDialog, QVBoxLayout, QDialogButtonBox
+
+                dialog = QDialog(self)
+                dialog.setWindowTitle("Select Images to Import")
+                dialog.resize(600, 400)
+
+                layout = QVBoxLayout(dialog)
+                layout.addWidget(QLabel(f"Found {len(midjourney_images)} Midjourney image(s) matching this prompt:"))
+
+                list_widget = QListWidget()
+                list_widget.setSelectionMode(QListWidget.MultiSelection)
+                for img in midjourney_images:
+                    mtime = datetime.fromtimestamp(img.stat().st_mtime)
+                    time_str = mtime.strftime("%I:%M:%S %p")
+                    list_widget.addItem(f"{img.name} ({time_str})")
+                list_widget.selectAll()  # Select all by default
+                layout.addWidget(list_widget)
+
+                buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+                buttons.accepted.connect(dialog.accept)
+                buttons.rejected.connect(dialog.reject)
+                layout.addWidget(buttons)
+
+                if dialog.exec() != QDialog.Accepted:
+                    return
+
+                # Get selected indices
+                selected_indices = [item.row() for item in list_widget.selectedIndexes()]
+                if not selected_indices:
+                    return
+
+                selected_images = [midjourney_images[idx] for idx in selected_indices]
+
+            # Import selected images
+            parent = self.parent()
+            if not parent or not hasattr(parent, 'output_dir'):
+                if not auto_import:
+                    QMessageBox.warning(self, "Error", "Cannot access output directory")
+                return
+
+            output_dir = Path(parent.output_dir)
+            imported_count = 0
+
+            for src_path in selected_images:
+                dest_path = output_dir / src_path.name
+
+                # Avoid overwriting - add number if needed
+                counter = 1
+                while dest_path.exists():
+                    dest_path = output_dir / f"{src_path.stem}_{counter}{src_path.suffix}"
+                    counter += 1
+
+                try:
+                    shutil.copy2(src_path, dest_path)
+
+                    # Create metadata file
+                    metadata = {
+                        "prompt": self.prompt,
+                        "provider": "midjourney",
+                        "model": "midjourney",
+                        "timestamp": datetime.now().isoformat(),
+                        "command": self.slash_command,
+                        "source_file": str(src_path)
+                    }
+
+                    import json
+                    metadata_path = dest_path.with_suffix('.json')
+                    with open(metadata_path, 'w', encoding='utf-8') as f:
+                        json.dump(metadata, f, indent=2)
+
+                    logger.info(f"Imported Midjourney image: {dest_path.name}")
+                    imported_count += 1
+
+                except Exception as e:
+                    logger.error(f"Failed to import {src_path.name}: {e}")
+
+            if imported_count > 0:
+                console.info(f"✓ Imported {imported_count} Midjourney image(s)")
+                if not auto_import:
+                    QMessageBox.information(self, "Import Complete",
+                        f"Successfully imported {imported_count} image(s) to:\n{output_dir}")
+
+                # Refresh parent window history if possible
+                if hasattr(parent, 'load_history'):
+                    try:
+                        parent.load_history()
+                    except Exception:
+                        pass
+
+            return imported_count
+
+        except Exception as e:
+            logger.error(f"Failed to import images: {e}")
+            if not auto_import:
+                console.error(f"Import failed: {e}")
+                QMessageBox.critical(self, "Import Error", f"Failed to import images:\n{str(e)}")
+            return 0
+
     # ---- Helpers for external auth / popups ----
     def _post_load_check(self, ok: bool):
         """After-load sanity checks to recover from blank/404 pages.
@@ -741,6 +960,14 @@ class MidjourneyWebDialog(QDialog):
 
     def closeEvent(self, event):
         """Handle close event."""
+        # Auto-import any downloaded images matching this prompt
+        try:
+            imported = self._import_downloaded_images(auto_import=True)
+            if imported > 0:
+                logger.info(f"Auto-imported {imported} Midjourney image(s) on dialog close")
+        except Exception as e:
+            logger.debug(f"Auto-import on close failed: {e}")
+
         # Emit session ended signal
         self.sessionEnded.emit()
 
