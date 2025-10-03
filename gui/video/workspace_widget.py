@@ -24,6 +24,7 @@ from core.video.storyboard import StoryboardGenerator
 from core.video.config import VideoConfig
 from core.security import SecureKeyStorage
 from gui.common.dialog_manager import get_dialog_manager
+from core.llm_models import get_provider_models, get_all_provider_ids, get_provider_display_name
 
 
 class WorkspaceWidget(QWidget):
@@ -140,7 +141,8 @@ class WorkspaceWidget(QWidget):
         # LLM provider for prompts
         layout.addWidget(QLabel("LLM Provider:"))
         self.llm_provider_combo = QComboBox()
-        self.llm_provider_combo.addItems(["None", "OpenAI", "Claude", "Gemini", "Ollama", "LM Studio"])
+        provider_names = [get_provider_display_name(pid) for pid in get_all_provider_ids()]
+        self.llm_provider_combo.addItems(["None"] + provider_names)
         self.llm_provider_combo.currentTextChanged.connect(self.on_llm_provider_changed)
         layout.addWidget(self.llm_provider_combo)
 
@@ -215,7 +217,7 @@ class WorkspaceWidget(QWidget):
         img_layout = QHBoxLayout()
         img_layout.addWidget(QLabel("Image Provider:"))
         self.img_provider_combo = QComboBox()
-        self.img_provider_combo.addItems(["Gemini", "OpenAI", "Stability", "Local SD"])
+        self.img_provider_combo.addItems(["Google", "OpenAI", "Stability", "Local SD"])
         self.img_provider_combo.currentTextChanged.connect(self.on_img_provider_changed)
         img_layout.addWidget(self.img_provider_combo)
         
@@ -1385,19 +1387,13 @@ class WorkspaceWidget(QWidget):
             self.llm_model_combo.setEnabled(False)
         else:
             self.llm_model_combo.setEnabled(True)
-            # Populate with actual models for provider
-            if provider == "OpenAI":
-                self.llm_model_combo.addItems(["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
-            elif provider == "Claude":
-                self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
-            elif provider == "Gemini":
-                self.llm_model_combo.addItems(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"])
-            elif provider == "Ollama":
-                # Add common Ollama models
-                self.llm_model_combo.addItems(["llama2", "mistral", "mixtral", "phi-2", "neural-chat"])
-            elif provider == "LM Studio":
-                # Add common LM Studio models
-                self.llm_model_combo.addItems(["local-model", "custom-model"])
+            # Populate with actual models for provider using centralized lists
+            provider_map = {"claude": "anthropic", "lm studio": "lmstudio"}
+            provider_id = provider_map.get(provider.lower(), provider.lower())
+
+            models = get_provider_models(provider_id)
+            if models:
+                self.llm_model_combo.addItems(models)
 
         # Emit signal to notify other tabs
         model = self.llm_model_combo.currentText() if provider != "None" else None
@@ -1412,7 +1408,7 @@ class WorkspaceWidget(QWidget):
         self.img_model_combo.clear()
 
         # Populate with models based on provider
-        if provider == "Gemini":
+        if provider in ["Google", "Gemini"]:  # Support both new and old naming
             self.img_model_combo.addItems([
                 "gemini-2.5-flash-image-preview",
                 "gemini-2.5-flash",
@@ -1803,38 +1799,37 @@ class WorkspaceWidget(QWidget):
                     provider_text = self.current_project.llm_provider
                     
                     # First try exact match (new format)
-                    if provider_text in ["OpenAI", "Gemini", "Claude", "Ollama", "LM Studio"]:
-                        pass  # Use as-is
+                    if provider_text in ["OpenAI", "Google", "Gemini", "Anthropic", "Ollama", "LM Studio"]:
+                        # Map legacy "Gemini" to "Google"
+                        if provider_text == "Gemini":
+                            provider_text = "Google"
                     # Then handle legacy lowercase format
                     elif provider_text.lower() == 'openai':
                         provider_text = 'OpenAI'
-                    elif provider_text.lower() == 'claude':
-                        provider_text = 'Claude'
-                    elif provider_text.lower() == 'gemini':
-                        provider_text = 'Gemini'
+                    elif provider_text.lower() in ['claude', 'anthropic']:
+                        provider_text = 'Anthropic'
+                    elif provider_text.lower() in ['gemini', 'google']:
+                        provider_text = 'Google'
                     elif provider_text.lower() == 'ollama':
                         provider_text = 'Ollama'
                     elif provider_text.lower() == 'lm studio':
                         provider_text = 'LM Studio'
-                    
+
                     index = self.llm_provider_combo.findText(provider_text)
                     if index >= 0:
                         self.llm_provider_combo.setCurrentIndex(index)
-                        
+
                         # Populate the model combo based on provider without clearing
                         self.llm_model_combo.clear()
                         if provider_text != "None":
                             self.llm_model_combo.setEnabled(True)
-                            if provider_text == "OpenAI":
-                                self.llm_model_combo.addItems(["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
-                            elif provider_text == "Claude":
-                                self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
-                            elif provider_text == "Gemini":
-                                self.llm_model_combo.addItems(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"])
-                            elif provider_text == "Ollama":
-                                self.llm_model_combo.addItems(["llama2", "mistral", "mixtral", "phi-2", "neural-chat"])
-                            elif provider_text == "LM Studio":
-                                self.llm_model_combo.addItems(["local-model", "custom-model"])
+                            # Use centralized model lists
+                            provider_map = {"claude": "anthropic", "google": "gemini", "lm studio": "lmstudio"}
+                            provider_id = provider_map.get(provider_text.lower(), provider_text.lower())
+
+                            models = get_provider_models(provider_id)
+                            if models:
+                                self.llm_model_combo.addItems(models)
                         else:
                             self.llm_model_combo.setEnabled(False)
                         
@@ -1857,25 +1852,27 @@ class WorkspaceWidget(QWidget):
                     provider_text = self.current_project.image_provider
                     
                     # First try exact match (new format)
-                    if provider_text in ["OpenAI", "Gemini", "Stability", "Local SD"]:
-                        pass  # Use as-is
+                    if provider_text in ["OpenAI", "Google", "Gemini", "Stability", "Local SD"]:
+                        # Map legacy "Gemini" to "Google"
+                        if provider_text == "Gemini":
+                            provider_text = "Google"
                     # Then handle legacy lowercase format
                     elif provider_text.lower() == 'openai':
                         provider_text = 'OpenAI'
-                    elif provider_text.lower() == 'gemini':
-                        provider_text = 'Gemini'
+                    elif provider_text.lower() in ['gemini', 'google']:
+                        provider_text = 'Google'
                     elif provider_text.lower() == 'stability':
                         provider_text = 'Stability'
                     elif provider_text.lower() == 'local sd':
                         provider_text = 'Local SD'
-                    
+
                     index = self.img_provider_combo.findText(provider_text)
                     if index >= 0:
                         self.img_provider_combo.setCurrentIndex(index)
-                        
+
                         # Populate the model combo based on provider without clearing
                         self.img_model_combo.clear()
-                        if provider_text == "Gemini":
+                        if provider_text in ["Google", "Gemini"]:  # Support both new and old naming
                             self.img_model_combo.addItems(["gemini-2.5-flash-image-preview", "gemini-2.5-flash", "gemini-2.5-pro"])
                         elif provider_text == "OpenAI":
                             self.img_model_combo.addItems(["dall-e-3", "dall-e-2"])

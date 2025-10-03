@@ -462,10 +462,160 @@ class LLMWorker(QObject):
                         self.finished.emit(prompts)
 
             elif self.llm_provider.lower() == "claude":
-                # Add Claude support
                 logger.info("Using Claude for prompt generation")
-                # Claude implementation would go here
-                self.error.emit(f"Claude support coming soon")
+                console.info("Using Claude for prompt generation")
+
+                model_name = self.llm_model or "claude-sonnet-4-5"
+
+                if use_litellm:
+                    # Use litellm with Anthropic provider - must prefix with "anthropic/"
+                    litellm_model = f"anthropic/{model_name}"
+                    request_data = {
+                        "model": litellm_model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "temperature": self.temperature,
+                        "max_tokens": self.max_tokens,
+                        "api_key": self.api_key  # Pass API key directly to LiteLLM
+                    }
+
+                    logger.info(f"LLM Request - Sending via LiteLLM to Claude:")
+                    console.info(f"LLM Request - Sending via LiteLLM to Claude:")
+
+                    logger.info(f"  Model: {litellm_model} (original: {model_name})")
+                    console.info(f"  Model: {litellm_model} (original: {model_name})")
+
+                    logger.info(f"  Temperature: {request_data['temperature']}")
+                    console.info(f"  Temperature: {request_data['temperature']}")
+
+                    logger.info(f"  Max tokens: {request_data['max_tokens']}")
+                    console.info(f"  Max tokens: {request_data['max_tokens']}")
+
+                    # Clean up multi-line strings for logging
+                    clean_system = system_prompt.replace('\n', ' ').strip()
+                    clean_user = user_prompt.replace('\n', ' ').strip()
+
+                    logger.info(f"  System prompt: {clean_system}")
+                    console.info(f"  System prompt: {clean_system}")
+
+                    logger.info(f"  User prompt: {clean_user}")
+                    console.info(f"  User prompt: {clean_user}")
+
+                    response = litellm.completion(**request_data)
+                else:
+                    # Fallback to direct Anthropic SDK
+                    from anthropic import Anthropic
+                    client = Anthropic(api_key=self.api_key)
+
+                    request_data = {
+                        "model": model_name,
+                        "messages": [
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "system": system_prompt,
+                        "temperature": self.temperature,
+                        "max_tokens": self.max_tokens
+                    }
+
+                    logger.info(f"LLM Request - Sending to Claude API:")
+                    console.info(f"LLM Request - Sending to Claude API:")
+
+                    logger.info(f"  Model: {request_data['model']}")
+                    console.info(f"  Model: {request_data['model']}")
+
+                    logger.info(f"  Temperature: {request_data['temperature']}")
+                    console.info(f"  Temperature: {request_data['temperature']}")
+
+                    logger.info(f"  Max tokens: {request_data['max_tokens']}")
+                    console.info(f"  Max tokens: {request_data['max_tokens']}")
+
+                    # Clean up multi-line strings for logging
+                    clean_system = system_prompt.replace('\n', ' ').strip()
+                    clean_user = user_prompt.replace('\n', ' ').strip()
+
+                    logger.info(f"  System prompt: {clean_system}")
+                    console.info(f"  System prompt: {clean_system}")
+
+                    logger.info(f"  User prompt: {clean_user}")
+                    console.info(f"  User prompt: {clean_user}")
+
+                    response = client.messages.create(**request_data)
+
+                # Log raw response to both log file and console
+                logger.info(f"LLM Response - Status: Success")
+                console.info(f"LLM Response - Status: Success")
+
+                # Handle both litellm and direct SDK response formats
+                if hasattr(response, 'model'):
+                    logger.info(f"LLM Response - Model used: {response.model}")
+                    console.info(f"LLM Response - Model used: {response.model}")
+
+                if hasattr(response, 'usage'):
+                    logger.info(f"LLM Response - Tokens used: {response.usage}")
+                    console.info(f"LLM Response - Tokens used: {response.usage}")
+
+                # Extract content - handle both formats
+                if use_litellm and hasattr(response, 'choices'):
+                    content = response.choices[0].message.content
+                elif hasattr(response, 'content'):
+                    # Direct Anthropic SDK returns content as list of blocks
+                    content = response.content[0].text if isinstance(response.content, list) else response.content
+                else:
+                    content = str(response)
+
+                logger.info(f"LLM Response - Raw content: {content}")
+                console.info(f"LLM Response - Raw content: {content}")
+
+                # Handle None content
+                if not content:
+                    logger.warning("LLM returned empty content")
+                    console.warning("LLM returned empty content")
+                    self.error.emit("Claude returned empty response")
+                    return
+
+                # Parse JSON response
+                # Clean any markdown formatting
+                content = content.strip()
+                if content.startswith('```'):
+                    # Remove markdown code blocks
+                    lines = content.split('\n')
+                    content = '\n'.join(lines[1:-1] if len(lines) > 2 else lines)
+
+                # Try to parse as JSON
+                try:
+                    prompts = json.loads(content)
+                except json.JSONDecodeError:
+                    # If direct parsing fails, try to extract JSON array
+                    import re
+                    json_match = re.search(r'\[.*\]', content, re.DOTALL)
+                    if json_match:
+                        prompts = json.loads(json_match.group())
+                    else:
+                        # Fallback: split by newlines and clean
+                        lines = [line.strip() for line in content.split('\n') if line.strip()]
+                        prompts = [line.strip('"').strip("'").strip('- ').strip() for line in lines]
+                        prompts = [p for p in prompts if p][:self.num_variations]
+
+                # Ensure we have a list
+                if not isinstance(prompts, list):
+                    prompts = [str(prompts)]
+
+                logger.info(f"LLM Response - Parsed {len(prompts)} prompts:")
+                console.info(f"LLM Response - Parsed {len(prompts)} prompts:")
+
+                logger.info("=" * 60)
+                console.info("=" * 60)
+
+                for i, p in enumerate(prompts, 1):
+                    logger.info(f"  {i}. {p}")
+                    console.info(f"  {i}. {p}")
+
+                logger.info("=" * 60)
+                console.info("=" * 60)
+
+                self.finished.emit(prompts)
 
             elif self.llm_provider.lower() == "ollama":
                 # Add Ollama support
@@ -600,10 +750,10 @@ class PromptGenerationDialog(QDialog):
 
         standard_layout.addWidget(QLabel("Max Tokens:"))
         self.max_tokens_spin = QSpinBox()
-        self.max_tokens_spin.setRange(100, 4000)
+        self.max_tokens_spin.setRange(200, 4000)
         self.max_tokens_spin.setSingleStep(100)
-        self.max_tokens_spin.setValue(1000)
-        self.max_tokens_spin.setToolTip("Maximum length of the response")
+        self.max_tokens_spin.setValue(1500)
+        self.max_tokens_spin.setToolTip("Maximum length of the response (recommended: ~150 tokens per variation)")
         standard_layout.addWidget(self.max_tokens_spin)
 
         standard_layout.addStretch()
@@ -869,12 +1019,20 @@ class PromptGenerationDialog(QDialog):
             reasoning = self.reasoning_combo.currentText()
             verbosity = self.verbosity_combo.currentText()
             temperature = 1.0  # GPT-5 only supports temperature=1
-            max_tokens = 1000  # Default for GPT-5
+            max_tokens = 1500  # Default for GPT-5
         else:
             reasoning = "medium"
             verbosity = "medium"
             temperature = self.temperature_spin.value()
             max_tokens = self.max_tokens_spin.value()
+
+        # Ensure sufficient tokens for the requested number of variations
+        # Each detailed prompt needs ~150 tokens, plus overhead for JSON formatting
+        min_tokens = num_variations * 150 + 100
+        if max_tokens < min_tokens:
+            max_tokens = min_tokens
+            logger.warning(f"Increased max_tokens from {self.max_tokens_spin.value()} to {max_tokens} for {num_variations} variations")
+            console.warning(f"Increased max_tokens to {max_tokens} to accommodate {num_variations} variations")
 
         # Create worker thread
         self.thread = QThread()
@@ -1136,6 +1294,9 @@ class PromptGenerationDialog(QDialog):
 
         max_tokens = self.settings.value("max_tokens", type=int)
         if max_tokens is not None:
+            # Enforce minimum of 200 tokens (old sessions may have had 100)
+            if max_tokens < 200:
+                max_tokens = 1500  # Reset to default if too low
             self.max_tokens_spin.setValue(max_tokens)
 
         reasoning = self.settings.value("reasoning_effort", "medium")
@@ -1176,7 +1337,11 @@ class PromptGenerationDialog(QDialog):
 
             # Restore max tokens if in session
             if "max_tokens" in self.last_session:
-                self.max_tokens_spin.setValue(self.last_session["max_tokens"])
+                max_tokens_session = self.last_session["max_tokens"]
+                # Enforce minimum of 200 tokens (old sessions may have had 100)
+                if max_tokens_session < 200:
+                    max_tokens_session = 1500  # Reset to default if too low
+                self.max_tokens_spin.setValue(max_tokens_session)
 
             # Restore GPT-5 settings if in session
             if "reasoning_effort" in self.last_session:

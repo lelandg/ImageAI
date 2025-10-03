@@ -355,8 +355,141 @@ class QuestionWorker(QObject):
 
             elif self.llm_provider.lower() == "claude":
                 logger.info("Using Claude for prompt question")
-                # Claude implementation would go here
-                self.error.emit(f"Claude support coming soon")
+                console.info("Using Claude for prompt question")
+
+                model_name = self.llm_model or "claude-sonnet-4-5"
+
+                if use_litellm:
+                    # Use litellm with Anthropic provider - must prefix with "anthropic/"
+                    litellm_model = f"anthropic/{model_name}"
+                    request_data = {
+                        "model": litellm_model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "temperature": self.temperature,
+                        "max_tokens": self.max_tokens,
+                        "api_key": self.api_key  # Pass API key directly to LiteLLM
+                    }
+
+                    logger.info(f"LLM Request - Sending via LiteLLM to Claude:")
+                    console.info(f"LLM Request - Sending via LiteLLM to Claude:")
+
+                    logger.info(f"  Model: {litellm_model} (original: {model_name})")
+                    console.info(f"  Model: {litellm_model} (original: {model_name})")
+
+                    logger.info(f"  Temperature: {request_data['temperature']}")
+                    console.info(f"  Temperature: {request_data['temperature']}")
+
+                    logger.info(f"  Max tokens: {request_data['max_tokens']}")
+                    console.info(f"  Max tokens: {request_data['max_tokens']}")
+
+                    # Clean up multi-line strings for logging
+                    clean_system = system_prompt.replace('\n', ' ').strip()
+                    clean_user = user_prompt.replace('\n', ' ').strip()
+
+                    logger.info(f"  System prompt: {clean_system}")
+                    console.info(f"  System prompt: {clean_system}")
+
+                    logger.info(f"  User prompt: {clean_user}")
+                    console.info(f"  User prompt: {clean_user}")
+
+                    response = litellm.completion(**request_data)
+
+                    # Parse litellm response
+                    answer = ""
+                    if response and hasattr(response, 'choices') and len(response.choices) > 0:
+                        choice = response.choices[0]
+                        if hasattr(choice, 'message') and hasattr(choice.message, 'content'):
+                            answer = choice.message.content or ""
+                        elif hasattr(choice, 'text'):
+                            answer = choice.text or ""
+
+                    answer = answer.strip() if answer else ""
+
+                    # Check for empty response
+                    if not answer:
+                        logger.warning("Empty response from Claude, generating fallback")
+                        answer = f"I apologize, but I received an empty response. Based on your question about '{self.question[:50]}...', I can say that this prompt is designed for image generation. It contains detailed visual descriptions and should produce an image."
+                else:
+                    # Fallback to direct Anthropic SDK
+                    from anthropic import Anthropic
+                    client = Anthropic(api_key=self.api_key)
+
+                    request_data = {
+                        "model": model_name,
+                        "messages": [
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "system": system_prompt,
+                        "temperature": self.temperature,
+                        "max_tokens": self.max_tokens
+                    }
+
+                    logger.info(f"LLM Request - Sending to Claude API:")
+                    console.info(f"LLM Request - Sending to Claude API:")
+
+                    logger.info(f"  Model: {request_data['model']}")
+                    console.info(f"  Model: {request_data['model']}")
+
+                    logger.info(f"  Temperature: {request_data['temperature']}")
+                    console.info(f"  Temperature: {request_data['temperature']}")
+
+                    logger.info(f"  Max tokens: {request_data['max_tokens']}")
+                    console.info(f"  Max tokens: {request_data['max_tokens']}")
+
+                    # Clean up multi-line strings for logging
+                    clean_system = system_prompt.replace('\n', ' ').strip()
+                    clean_user = user_prompt.replace('\n', ' ').strip()
+
+                    logger.info(f"  System prompt: {clean_system}")
+                    console.info(f"  System prompt: {clean_system}")
+
+                    logger.info(f"  User prompt: {clean_user}")
+                    console.info(f"  User prompt: {clean_user}")
+
+                    response = client.messages.create(**request_data)
+
+                    # Parse Anthropic SDK response
+                    answer = ""
+                    if hasattr(response, 'content'):
+                        # Anthropic SDK returns content as list of blocks
+                        if isinstance(response.content, list) and len(response.content) > 0:
+                            answer = response.content[0].text
+                        else:
+                            answer = str(response.content)
+
+                    answer = answer.strip() if answer else ""
+
+                    # Check for empty response
+                    if not answer:
+                        logger.warning("Empty response from Claude, generating fallback")
+                        answer = f"I apologize, but I received an empty response. Based on your question about '{self.question[:50]}...', I can say that this prompt is designed for image generation. It contains detailed visual descriptions and should produce an image."
+
+                # Log response
+                logger.info("=" * 40)
+                logger.info("LLM Response:")
+                for line in answer.split('\n'):
+                    if line.strip():
+                        logger.info(line.strip())
+                logger.info("=" * 40)
+
+                console.info("=" * 40)
+                console.info("LLM Response:")
+                for line in answer.split('\n'):
+                    if line.strip():
+                        console.info(line.strip())
+                console.info("=" * 40)
+
+                self.log_message.emit("=" * 40, "INFO")
+                self.log_message.emit("LLM Response:", "INFO")
+                for line in answer.split('\n'):
+                    if line.strip():
+                        self.log_message.emit(line.strip(), "INFO")
+                self.log_message.emit("=" * 40, "INFO")
+
+                self.finished.emit(answer)
 
             elif self.llm_provider.lower() == "ollama":
                 logger.info("Using Ollama for prompt question")

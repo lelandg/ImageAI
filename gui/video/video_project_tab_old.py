@@ -23,6 +23,7 @@ from core.video.project_manager import ProjectManager
 from core.video.storyboard import StoryboardGenerator
 from core.video.prompt_engine import PromptEngine, UnifiedLLMProvider, PromptStyle
 from core.video.config import VideoConfig
+from core.llm_models import get_provider_models
 
 
 class VideoGenerationThread(QThread):
@@ -331,7 +332,7 @@ class VideoProjectTab(QWidget):
         llm_layout = QHBoxLayout()
         llm_layout.addWidget(QLabel("Prompt LLM:"))
         self.llm_provider_combo = QComboBox()
-        self.llm_provider_combo.addItems(["None", "OpenAI", "Claude", "Gemini", "Ollama", "LM Studio"])
+        self.llm_provider_combo.addItems(["None", "OpenAI", "Anthropic", "Gemini", "Ollama", "LM Studio"])
         self.llm_provider_combo.currentTextChanged.connect(self.on_llm_provider_changed)
         llm_layout.addWidget(self.llm_provider_combo)
         
@@ -804,13 +805,13 @@ class VideoProjectTab(QWidget):
             self.llm_model_combo.setEnabled(False)
         else:
             self.llm_model_combo.setEnabled(True)
-            # Populate with actual models for provider
-            if provider == "OpenAI":
-                self.llm_model_combo.addItems(["gpt-5", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
-            elif provider == "Claude":
-                self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
-            elif provider == "Gemini":
-                self.llm_model_combo.addItems(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"])
+            # Populate with actual models for provider using centralized lists
+            provider_map = {"claude": "anthropic", "lm studio": "lmstudio"}
+            provider_id = provider_map.get(provider.lower(), provider.lower())
+
+            models = get_provider_models(provider_id)
+            if models:
+                self.llm_model_combo.addItems(models)
     
     def on_video_provider_changed(self, provider: str):
         """Handle video provider change"""

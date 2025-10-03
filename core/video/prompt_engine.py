@@ -12,6 +12,7 @@ from enum import Enum
 from jinja2 import Template, Environment, FileSystemLoader
 
 from .project import Scene
+from core.llm_models import get_provider_models, get_provider_prefix
 
 
 class PromptStyle(Enum):
@@ -53,23 +54,9 @@ class UnifiedLLMProvider:
     """
     Unified interface for all LLM providers using LiteLLM.
     Supports OpenAI, Anthropic, Google Gemini, Ollama, and LM Studio.
+
+    Note: Provider/model lists now centralized in core.llm_models
     """
-    
-    PROVIDER_MODELS = {
-        'openai': ['gpt-5-chat-latest', 'gpt-4o', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano'],
-        'anthropic': ['claude-opus-4.1', 'claude-opus-4', 'claude-sonnet-4', 'claude-3.7-sonnet', 'claude-3.5-sonnet', 'claude-3.5-haiku'],
-        'gemini': ['gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite', 'gemini-2.0-flash', 'gemini-2.0-pro'],
-        'ollama': ['llama3.2:latest', 'llama3.1:8b', 'mistral:7b', 'mixtral:8x7b', 'phi3:medium'],
-        'lmstudio': ['local-model']  # Uses OpenAI-compatible endpoint
-    }
-    
-    PROVIDER_PREFIXES = {
-        'openai': '',  # No prefix needed for OpenAI
-        'anthropic': 'claude-opus-4.1',  # Use full model name for default
-        'gemini': 'gemini/',
-        'ollama': 'ollama/',
-        'lmstudio': 'openai/'  # LM Studio uses OpenAI-compatible API
-    }
     
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         """
@@ -144,14 +131,14 @@ class UnifiedLLMProvider:
     def list_models(self, provider: str) -> List[str]:
         """
         List available models for a provider.
-        
+
         Args:
             provider: Provider name
-            
+
         Returns:
             List of model names
         """
-        return self.PROVIDER_MODELS.get(provider, [])
+        return get_provider_models(provider)
     
     def enhance_prompt(self, 
                       text: str,
@@ -211,7 +198,7 @@ Keep it under 100 words but highly descriptive."""
             api_base = self.lmstudio_base
         else:
             # Use provider prefix if needed
-            prefix = self.PROVIDER_PREFIXES.get(provider, '')
+            prefix = get_provider_prefix(provider)
             model_id = f"{prefix}{model}" if prefix else model
             api_base = None
         
@@ -327,7 +314,7 @@ Return one enhanced visual description per line, numbered:
                 model_id = model
                 api_base = self.lmstudio_base
             else:
-                prefix = self.PROVIDER_PREFIXES.get(provider, '')
+                prefix = get_provider_prefix(provider)
                 model_id = f"{prefix}{model}" if prefix else model
                 api_base = None
             

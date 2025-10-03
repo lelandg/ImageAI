@@ -364,6 +364,7 @@ class ResolutionSelector(QWidget):
         self._custom_height = None
         self._width_mode = "manual"  # "manual" or "auto"
         self._height_mode = "auto"   # "manual" or "auto"
+        self._lock_aspect_ratio = True  # Lock aspect ratio by default
         self._init_ui()
     
     def _init_ui(self):
@@ -435,6 +436,16 @@ class ResolutionSelector(QWidget):
         self.reset_btn.setToolTip("Reset to provider defaults for this aspect ratio")
         self.reset_btn.clicked.connect(self._reset_to_defaults)
         size_layout.addWidget(self.reset_btn)
+
+        # Lock aspect ratio button
+        self.lock_btn = QPushButton("🔒")
+        self.lock_btn.setCheckable(True)
+        self.lock_btn.setChecked(True)  # Locked by default
+        self.lock_btn.setMaximumWidth(40)
+        self.lock_btn.setToolTip("Lock aspect ratio (linked width/height)\nClick to unlock for independent width/height entry")
+        self.lock_btn.clicked.connect(self._toggle_lock_aspect_ratio)
+        size_layout.addWidget(self.lock_btn)
+
         size_layout.addStretch()
 
         self.size_widget = QWidget()  # Container for show/hide
@@ -500,7 +511,12 @@ class ResolutionSelector(QWidget):
         """Update the info label based on current state."""
         if self._using_aspect_ratio:
             if self._custom_width and self._custom_height:
-                info = f"Target: {self._custom_width}×{self._custom_height} ({self._aspect_ratio})"
+                # Show lock state
+                if self._lock_aspect_ratio:
+                    info = f"Target: {self._custom_width}×{self._custom_height} ({self._aspect_ratio})"
+                else:
+                    info = f"Free resolution: {self._custom_width}×{self._custom_height}"
+
                 # Add upscaling notice if dimensions exceed typical provider output
                 if self.provider == "google" and (self._custom_width > 1024 or self._custom_height > 1024):
                     info += " • AI upscaling recommended"
@@ -508,7 +524,10 @@ class ResolutionSelector(QWidget):
                     info += " • Will require upscaling"
                 self.info_label.setText(info)
             else:
-                self.info_label.setText(f"Resolution calculated from aspect ratio: {self._aspect_ratio}")
+                if self._lock_aspect_ratio:
+                    self.info_label.setText(f"Resolution calculated from aspect ratio: {self._aspect_ratio}")
+                else:
+                    self.info_label.setText("Free resolution mode (aspect ratio unlocked)")
         else:
             if self.provider == "google":
                 self.info_label.setText("Using manual resolution (overrides aspect ratio)")
@@ -604,38 +623,49 @@ class ResolutionSelector(QWidget):
         self._on_width_changed(value)
 
     def _on_width_changed(self, value: int, force=False):
-        """When width changes, calculate height from aspect ratio."""
+        """When width changes, calculate height from aspect ratio (if locked)."""
         if not force and self._last_edited != "width":
             return  # Avoid recursion
 
         self._last_edited = "width"
 
-        # Calculate height based on aspect ratio
-        if ':' in self._aspect_ratio:
-            ar_parts = self._aspect_ratio.split(':')
-            ar_width = float(ar_parts[0])
-            ar_height = float(ar_parts[1])
-            calculated_height = int(value * ar_height / ar_width)
+        # Store width
+        self._custom_width = value
 
-            logger.info(f"Width changed: {value}px, AR {self._aspect_ratio} → calculating height: {value} × ({ar_height}/{ar_width}) = {calculated_height}px")
+        # If aspect ratio is locked, calculate height from aspect ratio
+        if self._lock_aspect_ratio:
+            if ':' in self._aspect_ratio:
+                ar_parts = self._aspect_ratio.split(':')
+                ar_width = float(ar_parts[0])
+                ar_height = float(ar_parts[1])
+                calculated_height = int(value * ar_height / ar_width)
 
-            # Update height without triggering its handler
-            self.height_spin.blockSignals(True)
-            self.height_spin.setValue(calculated_height)
-            self.height_spin.blockSignals(False)
+                logger.info(f"Width changed: {value}px, AR {self._aspect_ratio} (locked) → calculating height: {value} × ({ar_height}/{ar_width}) = {calculated_height}px")
 
-            # Store calculated dimensions
-            self._custom_width = value
-            self._custom_height = calculated_height
+                # Update height without triggering its handler
+                self.height_spin.blockSignals(True)
+                self.height_spin.setValue(calculated_height)
+                self.height_spin.blockSignals(False)
 
-            # Log upscaling visibility check
-            if self.provider == "google" and (value > 1024 or calculated_height > 1024):
-                logger.debug(f"Upscaling recommended: {value}×{calculated_height} exceeds Google's 1024px limit")
-            elif self.provider == "openai" and (value > 1792 or calculated_height > 1792):
-                logger.debug(f"Upscaling required: {value}×{calculated_height} exceeds OpenAI's 1792px limit")
+                # Store calculated height
+                self._custom_height = calculated_height
+
+                # Log upscaling visibility check
+                if self.provider == "google" and (value > 1024 or calculated_height > 1024):
+                    logger.debug(f"Upscaling recommended: {value}×{calculated_height} exceeds Google's 1024px limit")
+                elif self.provider == "openai" and (value > 1792 or calculated_height > 1792):
+                    logger.debug(f"Upscaling required: {value}×{calculated_height} exceeds OpenAI's 1792px limit")
+            else:
+                # Square aspect ratio
+                self._custom_height = value
+                self.height_spin.blockSignals(True)
+                self.height_spin.setValue(value)
+                self.height_spin.blockSignals(False)
+                logger.info(f"Width changed to {value}px for square aspect ratio (1:1)")
         else:
-            self._custom_width = self._custom_height = value
-            logger.info(f"Width changed to {value}px for square aspect ratio (1:1)")
+            # Unlocked - keep existing height value
+            self._custom_height = self.height_spin.value()
+            logger.info(f"Width changed to {value}px (unlocked, height unchanged at {self._custom_height}px)")
 
         # Update display and trigger upscaling check
         self._update_info_text()
@@ -648,38 +678,49 @@ class ResolutionSelector(QWidget):
         self._on_height_changed(value)
 
     def _on_height_changed(self, value: int, force=False):
-        """When height changes, calculate width from aspect ratio."""
+        """When height changes, calculate width from aspect ratio (if locked)."""
         if not force and self._last_edited != "height":
             return  # Avoid recursion
 
         self._last_edited = "height"
 
-        # Calculate width based on aspect ratio
-        if ':' in self._aspect_ratio:
-            ar_parts = self._aspect_ratio.split(':')
-            ar_width = float(ar_parts[0])
-            ar_height = float(ar_parts[1])
-            calculated_width = int(value * ar_width / ar_height)
+        # Store height
+        self._custom_height = value
 
-            logger.info(f"Height changed: {value}px, AR {self._aspect_ratio} → calculating width: {value} × ({ar_width}/{ar_height}) = {calculated_width}px")
+        # If aspect ratio is locked, calculate width from aspect ratio
+        if self._lock_aspect_ratio:
+            if ':' in self._aspect_ratio:
+                ar_parts = self._aspect_ratio.split(':')
+                ar_width = float(ar_parts[0])
+                ar_height = float(ar_parts[1])
+                calculated_width = int(value * ar_width / ar_height)
 
-            # Update width without triggering its handler
-            self.width_spin.blockSignals(True)
-            self.width_spin.setValue(calculated_width)
-            self.width_spin.blockSignals(False)
+                logger.info(f"Height changed: {value}px, AR {self._aspect_ratio} (locked) → calculating width: {value} × ({ar_width}/{ar_height}) = {calculated_width}px")
 
-            # Store calculated dimensions
-            self._custom_width = calculated_width
-            self._custom_height = value
+                # Update width without triggering its handler
+                self.width_spin.blockSignals(True)
+                self.width_spin.setValue(calculated_width)
+                self.width_spin.blockSignals(False)
 
-            # Log upscaling visibility check
-            if self.provider == "google" and (calculated_width > 1024 or value > 1024):
-                logger.debug(f"Upscaling recommended: {calculated_width}×{value} exceeds Google's 1024px limit")
-            elif self.provider == "openai" and (calculated_width > 1792 or value > 1792):
-                logger.debug(f"Upscaling required: {calculated_width}×{value} exceeds OpenAI's 1792px limit")
+                # Store calculated width
+                self._custom_width = calculated_width
+
+                # Log upscaling visibility check
+                if self.provider == "google" and (calculated_width > 1024 or value > 1024):
+                    logger.debug(f"Upscaling recommended: {calculated_width}×{value} exceeds Google's 1024px limit")
+                elif self.provider == "openai" and (calculated_width > 1792 or value > 1792):
+                    logger.debug(f"Upscaling required: {calculated_width}×{value} exceeds OpenAI's 1792px limit")
+            else:
+                # Square aspect ratio
+                self._custom_width = value
+                self.width_spin.blockSignals(True)
+                self.width_spin.setValue(value)
+                self.width_spin.blockSignals(False)
+                logger.info(f"Height changed to {value}px for square aspect ratio (1:1)")
         else:
-            self._custom_width = self._custom_height = value
-            logger.info(f"Height changed to {value}px for square aspect ratio (1:1)")
+            # Unlocked - keep existing width value
+            self._custom_width = self.width_spin.value()
+            logger.info(f"Height changed to {value}px (unlocked, width unchanged at {self._custom_width}px)")
 
         # Update display and trigger upscaling check
         self._update_info_text()
@@ -719,6 +760,49 @@ class ResolutionSelector(QWidget):
             # Square
             self._last_edited = "width"
             self.width_spin.setValue(max_res)
+
+    def _toggle_lock_aspect_ratio(self):
+        """Toggle aspect ratio lock on/off."""
+        self._lock_aspect_ratio = self.lock_btn.isChecked()
+
+        # Update button appearance and tooltip
+        if self._lock_aspect_ratio:
+            self.lock_btn.setText("🔒")
+            self.lock_btn.setToolTip("Aspect ratio locked (linked width/height)\nClick to unlock for independent entry")
+            logger.info("Aspect ratio lock enabled - width/height are linked")
+
+            # Update mode indicator back to using aspect ratio
+            self.mode_indicator.setText("Using Aspect Ratio")
+            self.mode_indicator.setStyleSheet("""
+                QLabel {
+                    color: #4CAF50;
+                    font-weight: bold;
+                    padding: 2px 6px;
+                    border: 1px solid #4CAF50;
+                    border-radius: 3px;
+                    background: rgba(76, 175, 80, 0.1);
+                }
+            """)
+        else:
+            self.lock_btn.setText("🔓")
+            self.lock_btn.setToolTip("Aspect ratio unlocked (independent width/height)\nClick to lock and maintain aspect ratio")
+            logger.info("Aspect ratio lock disabled - width/height are independent")
+
+            # Update mode indicator to show free resolution
+            self.mode_indicator.setText("Free Resolution")
+            self.mode_indicator.setStyleSheet("""
+                QLabel {
+                    color: #FF9800;
+                    font-weight: bold;
+                    padding: 2px 6px;
+                    border: 1px solid #FF9800;
+                    border-radius: 3px;
+                    background: rgba(255, 152, 0, 0.1);
+                }
+            """)
+
+        # Update info text to reflect lock state
+        self._update_info_text()
 
     def _get_provider_max(self) -> int:
         """Get maximum resolution for current provider."""

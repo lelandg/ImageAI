@@ -6,6 +6,7 @@ import webbrowser
 from pathlib import Path
 from typing import Optional, List
 from datetime import datetime
+from core.llm_models import get_provider_models, get_all_provider_ids, get_provider_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -528,7 +529,7 @@ class MainWindow(QMainWindow):
         llm_provider_layout.addWidget(QLabel("LLM Provider:"))
         self.llm_provider_combo = QComboBox()
         self.llm_provider_combo.setMinimumWidth(150)
-        self.llm_provider_combo.addItems(["None", "OpenAI", "Claude", "Gemini", "Ollama", "LM Studio"])
+        self.llm_provider_combo.addItems(self.get_llm_providers())
         self.llm_provider_combo.currentTextChanged.connect(self._on_llm_provider_changed)
         llm_provider_layout.addWidget(self.llm_provider_combo)
 
@@ -3119,20 +3120,21 @@ For more detailed information, please refer to the full documentation.
     @staticmethod
     def get_llm_providers():
         """Get list of all available LLM providers."""
-        return ["None", "OpenAI", "Claude", "Gemini", "Ollama", "LM Studio"]
+        # Get provider IDs, convert to display names, add "None" option
+        provider_names = [get_provider_display_name(pid) for pid in get_all_provider_ids()]
+        return ["None"] + provider_names
 
     @staticmethod
     def get_llm_models_for_provider(provider: str):
         """Get list of models for a specific LLM provider."""
-        models = {
-            "openai": ["gpt-5-chat-latest", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"],
-            "claude": ["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"],
-            "gemini": ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"],
-            "ollama": ["llama2", "mistral", "mixtral", "phi-2", "neural-chat"],
-            "lm studio": ["local-model", "custom-model"]
+        # Handle display name -> provider ID mapping
+        provider_map = {
+            "claude": "anthropic",
+            "google": "gemini",
+            "lm studio": "lmstudio"
         }
-        # Handle case-insensitive lookup
-        return models.get(provider.lower(), [])
+        provider_id = provider_map.get(provider.lower(), provider.lower())
+        return get_provider_models(provider_id)
 
     def populate_llm_combo(self, provider_combo, model_combo, current_provider=None, current_model=None):
         """Populate LLM provider and model combos with all available options.
@@ -3245,12 +3247,10 @@ For more detailed information, please refer to the full documentation.
                 if provider_name != "None":
                     self.llm_model_combo.setEnabled(True)
                     # Populate with actual models for provider
-                    if provider_name == "OpenAI":
-                        self.llm_model_combo.addItems(["gpt-5-chat-latest", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
-                    elif provider_name == "Claude":
-                        self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
-                    elif provider_name == "Gemini":
-                        self.llm_model_combo.addItems(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"])
+                    # Use centralized model lists
+                    models = self.get_llm_models_for_provider(provider_name)
+                    if models:
+                        self.llm_model_combo.addItems(models)
                     elif provider_name == "Ollama":
                         self.llm_model_combo.addItems(["llama2", "mistral", "mixtral", "phi-2", "neural-chat"])
                     elif provider_name == "LM Studio":
@@ -3318,6 +3318,13 @@ For more detailed information, please refer to the full documentation.
 
             # Update advanced/Midjourney visibility
             self._update_advanced_visibility()
+
+            # Switch display between image and Midjourney command
+            if hasattr(self, 'output_stack'):
+                if provider_name == "midjourney":
+                    self.output_stack.setCurrentIndex(1)  # Show Midjourney command widget
+                else:
+                    self.output_stack.setCurrentIndex(0)  # Show image widget
 
             # Update Generate button text for Midjourney
             if hasattr(self, 'btn_generate'):
@@ -6038,10 +6045,10 @@ For more detailed information, please refer to the full documentation.
         indexes = self.history_table.selectionModel().selectedRows()
         if not indexes:
             return
-        
+
         # Get the selected history item from the table
         row = indexes[0].row()
-        date_item = self.history_table.item(row, 0)
+        date_item = self.history_table.item(row, 1)  # Column 1 has the full history data
         if date_item:
             history_item = date_item.data(Qt.UserRole)
             if isinstance(history_item, dict):
@@ -6821,12 +6828,10 @@ For more detailed information, please refer to the full documentation.
                     provider = ui_state['llm_provider']
                     if provider != "None":
                         self.llm_model_combo.setEnabled(True)
-                        if provider == "OpenAI":
-                            self.llm_model_combo.addItems(["gpt-5-chat-latest", "gpt-4o", "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano"])
-                        elif provider == "Claude":
-                            self.llm_model_combo.addItems(["claude-opus-4.1", "claude-opus-4", "claude-sonnet-4", "claude-3.7-sonnet", "claude-3.5-sonnet", "claude-3.5-haiku"])
-                        elif provider == "Gemini":
-                            self.llm_model_combo.addItems(["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-2.0-flash", "gemini-2.0-pro"])
+                        # Use centralized model lists
+                        models = self.get_llm_models_for_provider(provider)
+                        if models:
+                            self.llm_model_combo.addItems(models)
                         elif provider == "Ollama":
                             self.llm_model_combo.addItems(["llama2", "mistral", "mixtral", "phi-2", "neural-chat"])
                         elif provider == "LM Studio":
