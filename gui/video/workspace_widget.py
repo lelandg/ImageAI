@@ -373,40 +373,31 @@ class WorkspaceWidget(QWidget):
         self.img_model_combo.currentTextChanged.connect(lambda: self._auto_save_settings())
         img_layout.addWidget(self.img_model_combo)
 
-        img_layout.addWidget(QLabel("Variants:"))
-        self.variants_spin = QSpinBox()
-        self.variants_spin.setRange(1, 4)
-        self.variants_spin.setValue(3)
-        self.variants_spin.setToolTip("Number of image variants to generate per scene (1-4)")
-        self.variants_spin.valueChanged.connect(lambda: self._auto_save_settings())
-        img_layout.addWidget(self.variants_spin)
-        
         img_layout.addStretch()
         layout.addLayout(img_layout)
         
         # Style settings
         style_layout = QHBoxLayout()
         style_layout.addWidget(QLabel("Style:"))
-        self.prompt_style_combo = QComboBox()
-        self.prompt_style_combo.addItems([
-            "Cinematic", "Artistic", "Photorealistic", "Animated", "Documentary", "Abstract",
-            "Noir", "Fantasy", "Sci-Fi", "Vintage", "Minimalist", "Dramatic"
-        ])
-        self.prompt_style_combo.setToolTip("Visual style for prompt enhancement and image generation")
-        self.prompt_style_combo.currentTextChanged.connect(lambda: self._auto_save_settings())
-        style_layout.addWidget(self.prompt_style_combo)
+        self.prompt_style_input = QLineEdit()
+        self.prompt_style_input.setPlaceholderText("e.g., Cinematic, Artistic, Photorealistic...")
+        self.prompt_style_input.setText("Cinematic")
+        self.prompt_style_input.setToolTip("Freeform visual style for prompt enhancement and image generation\n(e.g., Cinematic, Noir, Animated, Documentary, etc.)")
+        self.prompt_style_input.textChanged.connect(lambda: self._auto_save_settings())
+        self.prompt_style_input.setMinimumWidth(200)
+        style_layout.addWidget(self.prompt_style_input)
 
         style_layout.addWidget(QLabel("Aspect Ratio:"))
         self.aspect_combo = QComboBox()
-        self.aspect_combo.addItems(["16:9", "9:16", "1:1", "4:3"])
-        self.aspect_combo.setToolTip("Image aspect ratio:\n- 16:9: Widescreen (landscape)\n- 9:16: Vertical (portrait)\n- 1:1: Square\n- 4:3: Classic TV format")
+        self.aspect_combo.addItems(["16:9", "9:16", "1:1"])
+        self.aspect_combo.setToolTip("Video aspect ratio (Veo 3 compatible):\n- 16:9: Widescreen (landscape)\n- 9:16: Vertical (portrait)\n- 1:1: Square")
         style_layout.addWidget(self.aspect_combo)
 
         style_layout.addWidget(QLabel("Resolution:"))
         self.resolution_combo = QComboBox()
-        self.resolution_combo.addItems(["720p", "1080p", "4K"])
+        self.resolution_combo.addItems(["720p", "1080p"])
         self.resolution_combo.setCurrentIndex(1)
-        self.resolution_combo.setToolTip("Target resolution for generated images")
+        self.resolution_combo.setToolTip("Target resolution (Veo 3 compatible):\n- 720p: HD (1280x720)\n- 1080p: Full HD (1920x1080)")
         style_layout.addWidget(self.resolution_combo)
 
         style_layout.addWidget(QLabel("Seed:"))
@@ -639,6 +630,12 @@ class WorkspaceWidget(QWidget):
         self.enhance_prompts_btn.setEnabled(False)
         controls_layout.addWidget(self.enhance_prompts_btn)
 
+        self.enhance_video_prompts_btn = QPushButton("Enhance for Video")
+        self.enhance_video_prompts_btn.setToolTip("Add camera movement and motion to prompts for video generation")
+        self.enhance_video_prompts_btn.clicked.connect(self.enhance_for_video)
+        self.enhance_video_prompts_btn.setEnabled(False)
+        controls_layout.addWidget(self.enhance_video_prompts_btn)
+
         self.generate_images_btn = QPushButton("Generate Images")
         self.generate_images_btn.setToolTip("Generate images for all scenes with prompts")
         self.generate_images_btn.clicked.connect(self.generate_images)
@@ -661,9 +658,9 @@ class WorkspaceWidget(QWidget):
         
         # Scene table
         self.scene_table = QTableWidget()
-        self.scene_table.setColumnCount(10)
+        self.scene_table.setColumnCount(11)
         self.scene_table.setHorizontalHeaderLabels([
-            "#", "🖼️", "✨", "🔄", "📷", "🎬", "Source", "Duration", "Prompt", "⤵️"
+            "#", "🖼️", "✨", "🔄", "📷", "🎬", "Source", "Duration", "Image Prompt", "Video Prompt", "⤵️"
         ])
         # Make table non-selectable
         self.scene_table.setSelectionMode(QTableWidget.NoSelection)
@@ -680,8 +677,9 @@ class WorkspaceWidget(QWidget):
         self.scene_table.horizontalHeaderItem(5).setToolTip("Generate Video\nGenerate video clip for this scene")
         self.scene_table.horizontalHeaderItem(6).setToolTip("Source\nOriginal lyrics or text")
         self.scene_table.horizontalHeaderItem(7).setToolTip("Duration\nScene duration in seconds")
-        self.scene_table.horizontalHeaderItem(8).setToolTip("Prompt\nAI-enhanced image generation prompt")
-        self.scene_table.horizontalHeaderItem(9).setToolTip("Wrap\nToggle prompt text wrapping for this row")
+        self.scene_table.horizontalHeaderItem(8).setToolTip("Image Prompt\nAI-enhanced prompt for image generation")
+        self.scene_table.horizontalHeaderItem(9).setToolTip("Video Prompt\nAI-enhanced prompt with camera movement for video generation")
+        self.scene_table.horizontalHeaderItem(10).setToolTip("Wrap\nToggle prompt text wrapping for this row")
         # Configure columns - all resizable by user
         header = self.scene_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)  # All columns user-resizable
@@ -831,15 +829,17 @@ class WorkspaceWidget(QWidget):
     def auto_load_last_project(self):
         """Auto-load the last opened project if enabled"""
         from gui.video.project_browser import get_last_project_path
-        
+
         self.logger.info("Checking for last project to auto-load...")
         last_project = get_last_project_path()
         if last_project:
             self.logger.info(f"Auto-loading last project: {last_project}")
             try:
-                self.load_project_from_path(last_project)
+                # Suppress error dialogs during auto-load on startup
+                self.load_project_from_path(last_project, show_error_dialog=False)
             except Exception as e:
                 self.logger.warning(f"Could not auto-load last project: {e}")
+                # User will start with a clean slate instead
         else:
             self.logger.info("No last project to auto-load")
     
@@ -851,23 +851,49 @@ class WorkspaceWidget(QWidget):
         dialog.project_selected.connect(self.load_project_from_path)
         dialog.exec()
     
-    def load_project_from_path(self, project_path):
-        """Load a project from a given path"""
+    def load_project_from_path(self, project_path, show_error_dialog=True):
+        """Load a project from a given path
+
+        Args:
+            project_path: Path to the project file
+            show_error_dialog: Whether to show error dialogs (False for auto-load on startup)
+        """
         try:
             self.current_project = self.project_manager.load_project(project_path)
             self.load_project_to_ui()
             self.update_ui_state()
             self.project_changed.emit(self.current_project)
             self.status_label.setText(f"Loaded: {self.current_project.name}")
-            
+
             # Save as last opened project
             from PySide6.QtCore import QSettings
             settings = QSettings("ImageAI", "VideoProjects")
             settings.setValue("last_project", str(project_path))
+        except (ValueError, FileNotFoundError) as e:
+            # Handle corrupted/empty project files
+            self.logger.error(f"Failed to load project from {project_path}: {e}", exc_info=True)
+
+            if show_error_dialog:
+                dialog_manager = get_dialog_manager(self)
+                dialog_manager.show_error("Project Load Error", f"Failed to open project:\n\n{e}\n\nThe project file may be corrupted or empty.")
+
+            # Clear the last project setting so we don't try to auto-load it again
+            from PySide6.QtCore import QSettings
+            settings = QSettings("ImageAI", "VideoProjects")
+            settings.remove("last_project")
+            self.logger.info("Cleared auto-load setting for corrupted project")
+
+            # Re-raise so caller knows it failed
+            raise
         except Exception as e:
             self.logger.error(f"Failed to load project from {project_path}: {e}", exc_info=True)
-            dialog_manager = get_dialog_manager(self)
-            dialog_manager.show_error("Error", f"Failed to open project: {e}")
+
+            if show_error_dialog:
+                dialog_manager = get_dialog_manager(self)
+                dialog_manager.show_error("Error", f"Failed to open project: {e}")
+
+            # Re-raise so caller knows it failed
+            raise
     
     def open_project(self):
         """Open existing project"""
@@ -898,7 +924,6 @@ class WorkspaceWidget(QWidget):
 
         try:
             self.update_project_from_ui()
-            self.logger.info(f"Saving Variants: {self.current_project.variants}")
             self.logger.info(f"Saving Ken Burns: {self.current_project.ken_burns}")
             
             self.project_manager.save_project(self.current_project)
@@ -1534,23 +1559,31 @@ class WorkspaceWidget(QWidget):
             duration_item.setToolTip(f"Duration: {scene.duration_sec:.1f} seconds")
             self.scene_table.setItem(i, 7, duration_item)
 
-            # Column 8: Prompt (shows full text, no wrap by default)
+            # Column 8: Image Prompt (shows full text, no wrap by default)
             display_prompt = (scene.prompt or "").replace("\n\n", "\n")
             prompt_item = QTableWidgetItem(display_prompt)
             # Wrap tooltip in <qt> tags to enable automatic wrapping
-            tooltip_text = f"<qt>{display_prompt}</qt>" if display_prompt else "No prompt yet - enhance to generate"
+            tooltip_text = f"<qt>{display_prompt}</qt>" if display_prompt else "No image prompt yet"
             prompt_item.setToolTip(tooltip_text)
             self.scene_table.setItem(i, 8, prompt_item)
 
-            # Column 9: Wrap toggle button
+            # Column 9: Video Prompt (shows full text, no wrap by default)
+            display_video_prompt = (scene.video_prompt or "").replace("\n\n", "\n")
+            video_prompt_item = QTableWidgetItem(display_video_prompt)
+            # Wrap tooltip in <qt> tags to enable automatic wrapping
+            video_tooltip = f"<qt>{display_video_prompt}</qt>" if display_video_prompt else "No video prompt yet"
+            video_prompt_item.setToolTip(video_tooltip)
+            self.scene_table.setItem(i, 9, video_prompt_item)
+
+            # Column 10: Wrap toggle button
             wrap_btn = QPushButton("⤵️")
-            wrap_btn.setToolTip("Toggle prompt text wrapping for this row")
+            wrap_btn.setToolTip("Toggle text wrapping for this row")
             wrap_btn.setMaximumWidth(35)
             wrap_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
             wrap_btn.setCheckable(True)
             wrap_btn.setChecked(False)  # Start unwrapped
             wrap_btn.clicked.connect(lambda checked, idx=i: self.toggle_row_wrap(idx, checked))
-            self.scene_table.setCellWidget(i, 9, wrap_btn)
+            self.scene_table.setCellWidget(i, 10, wrap_btn)
 
             total_duration += scene.duration_sec
 
@@ -1657,50 +1690,74 @@ class WorkspaceWidget(QWidget):
         self.logger.info(f"Reverted prompt for scene {scene_index + 1}")
 
     def toggle_row_wrap(self, row_index: int, wrap_enabled: bool):
-        """Toggle text wrapping for a specific row's prompt column"""
+        """Toggle text wrapping for both prompt columns in a specific row"""
         if row_index >= self.scene_table.rowCount():
             return
-        # Get the current scene and prompt text
+        # Get the current scene and prompts
         if not self.current_project or row_index >= len(self.current_project.scenes):
             return
         scene = self.current_project.scenes[row_index]
-        prompt_text = (scene.prompt or "").replace("\n\n", "\n")
+        image_prompt_text = (scene.prompt or "").replace("\n\n", "\n")
+        video_prompt_text = (scene.video_prompt or "").replace("\n\n", "\n")
+
         if wrap_enabled:
             # Add to tracked wrapped rows
             self.wrapped_rows.add(row_index)
-            # Calculate number of rows needed
-            column_width = self.scene_table.columnWidth(7)
-            num_lines = self._calculate_wrapped_lines(prompt_text, column_width)
-            # Replace table item with a wrapping QTextEdit widget
-            text_widget = QTextEdit()
-            text_widget.setPlainText(prompt_text)
-            text_widget.setReadOnly(True)
-            text_widget.setWordWrapMode(QTextOption.WordWrap)
-            text_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            text_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            text_widget.setFrameStyle(QTextEdit.NoFrame)
-            # Wrap tooltip in <qt> tags to enable automatic wrapping
-            text_widget.setToolTip(f"<qt>{prompt_text}</qt>" if prompt_text else "No prompt yet - enhance to generate")
+
+            # Wrap column 8 (Image Prompt)
+            col8_width = self.scene_table.columnWidth(8)
+            img_widget = QTextEdit()
+            img_widget.setPlainText(image_prompt_text)
+            img_widget.setReadOnly(True)
+            img_widget.setWordWrapMode(QTextOption.WordWrap)
+            img_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            img_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            img_widget.setFrameStyle(QTextEdit.NoFrame)
+            img_widget.setToolTip(f"<qt>{image_prompt_text}</qt>" if image_prompt_text else "No image prompt yet")
             # Calculate height based on content
-            doc = text_widget.document()
-            doc.setTextWidth(column_width)
-            height = int(doc.size().height() + 10)
-            self.scene_table.setCellWidget(row_index, 7, text_widget)
-            self.scene_table.setRowHeight(row_index, height)
-            self.logger.debug(f"Row {row_index + 1} prompt wrap enabled ({num_lines} lines)")
+            img_doc = img_widget.document()
+            img_doc.setTextWidth(col8_width)
+            img_height = int(img_doc.size().height() + 10)
+            self.scene_table.setCellWidget(row_index, 8, img_widget)
+
+            # Wrap column 9 (Video Prompt)
+            col9_width = self.scene_table.columnWidth(9)
+            vid_widget = QTextEdit()
+            vid_widget.setPlainText(video_prompt_text)
+            vid_widget.setReadOnly(True)
+            vid_widget.setWordWrapMode(QTextOption.WordWrap)
+            vid_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            vid_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            vid_widget.setFrameStyle(QTextEdit.NoFrame)
+            vid_widget.setToolTip(f"<qt>{video_prompt_text}</qt>" if video_prompt_text else "No video prompt yet")
+            vid_doc = vid_widget.document()
+            vid_doc.setTextWidth(col9_width)
+            vid_height = int(vid_doc.size().height() + 10)
+            self.scene_table.setCellWidget(row_index, 9, vid_widget)
+
+            # Set row height to accommodate the tallest column
+            max_height = max(img_height, vid_height)
+            self.scene_table.setRowHeight(row_index, max_height)
+            self.logger.debug(f"Row {row_index + 1} prompts wrap enabled")
         else:
             # Remove from tracked wrapped rows
             self.wrapped_rows.discard(row_index)
-            # Remove widget and restore regular table item
-            self.scene_table.removeCellWidget(row_index, 7)
-            prompt_item = QTableWidgetItem(prompt_text)
-            # Wrap tooltip in <qt> tags to enable automatic wrapping
-            tooltip_text = f"<qt>{prompt_text}</qt>" if prompt_text else "No prompt yet - enhance to generate"
-            prompt_item.setToolTip(tooltip_text)
-            self.scene_table.setItem(row_index, 7, prompt_item)
+
+            # Remove widgets and restore regular table items for column 8
+            self.scene_table.removeCellWidget(row_index, 8)
+            img_item = QTableWidgetItem(image_prompt_text)
+            img_item.setToolTip(f"<qt>{image_prompt_text}</qt>" if image_prompt_text else "No image prompt yet")
+            self.scene_table.setItem(row_index, 8, img_item)
+
+            # Remove widgets and restore regular table items for column 9
+            self.scene_table.removeCellWidget(row_index, 9)
+            vid_item = QTableWidgetItem(video_prompt_text)
+            vid_item.setToolTip(f"<qt>{video_prompt_text}</qt>" if video_prompt_text else "No video prompt yet")
+            self.scene_table.setItem(row_index, 9, vid_item)
+
             # Reset to default row height
             self.scene_table.resizeRowToContents(row_index)
-            self.logger.debug(f"Row {row_index + 1} prompt wrap disabled")
+            self.logger.debug(f"Row {row_index + 1} prompts wrap disabled")
 
     def _calculate_wrapped_lines(self, text: str, width: int) -> int:
         """Calculate number of lines needed for wrapped text"""
@@ -1914,7 +1971,11 @@ class WorkspaceWidget(QWidget):
     def enhance_all_prompts(self):
         """Request prompt enhancement"""
         self.generation_requested.emit("enhance_prompts", self.gather_generation_params())
-    
+
+    def enhance_for_video(self):
+        """Request video prompt enhancement"""
+        self.generation_requested.emit("enhance_for_video", self.gather_generation_params())
+
     def generate_images(self):
         """Request image generation"""
         self.generation_requested.emit("generate_images", self.gather_generation_params())
@@ -1935,15 +1996,19 @@ class WorkspaceWidget(QWidget):
         anthropic_key = self.config.get_api_key('anthropic')
         stability_key = self.config.get_api_key('stability')
 
+        # Get auth mode from config (for Google Cloud authentication support)
+        auth_mode = self.config.get('auth_mode', 'api-key')
+
         self.logger.debug(f"Gathering generation params - API keys: google={google_key is not None}, openai={openai_key is not None}, anthropic={anthropic_key is not None}, stability={stability_key is not None}")
+        self.logger.debug(f"Auth mode: {auth_mode}")
 
         return {
             'provider': self.img_provider_combo.currentText().lower(),
             'model': self.img_model_combo.currentText(),
             'llm_provider': self.llm_provider_combo.currentText().lower(),
             'llm_model': self.llm_model_combo.currentText(),
-            'prompt_style': self.prompt_style_combo.currentText(),
-            'variants': self.variants_spin.value(),
+            'prompt_style': self.prompt_style_input.text(),
+            'variants': 1,  # Always generate 1 image per scene
             'aspect_ratio': self.aspect_combo.currentText(),
             'resolution': self.resolution_combo.currentText(),
             'seed': self.seed_spin.value() if self.seed_spin.value() >= 0 else None,
@@ -1953,6 +2018,7 @@ class WorkspaceWidget(QWidget):
             'ken_burns': self.ken_burns_check.isChecked(),
             'transitions': self.transitions_check.isChecked(),
             'captions': self.captions_check.isChecked(),
+            'auth_mode': auth_mode,  # Include auth mode for Google Cloud support
             'google_api_key': google_key,
             'openai_api_key': openai_key,
             'anthropic_api_key': anthropic_key,
@@ -2320,6 +2386,9 @@ class WorkspaceWidget(QWidget):
         self.save_as_btn.setEnabled(has_project)
         self.generate_storyboard_btn.setEnabled(True)
         self.enhance_prompts_btn.setEnabled(has_scenes)
+        # Enable video enhancement when scenes have prompts (image prompts are used as base)
+        has_prompts = has_scenes and any(s.prompt for s in self.current_project.scenes)
+        self.enhance_video_prompts_btn.setEnabled(has_prompts)
         self.generate_images_btn.setEnabled(has_scenes)
         self.preview_btn.setEnabled(has_images)
         # Enable render button if there are either images OR video clips
@@ -2372,12 +2441,11 @@ class WorkspaceWidget(QWidget):
         self.current_project.resolution = self.resolution_combo.currentText()
         self.current_project.seed = self.seed_spin.value() if self.seed_spin.value() >= 0 else None
         self.current_project.negative_prompt = self.negative_prompt.text()
-        
+
         # Save prompt template/style
-        self.current_project.prompt_style = self.prompt_style_combo.currentText()
-        
-        # Save generation settings
-        self.current_project.variants = self.variants_spin.value()
+        self.current_project.prompt_style = self.prompt_style_input.text()
+
+        # Save generation settings (variants always 1)
         self.current_project.ken_burns = self.ken_burns_check.isChecked()
         self.current_project.transitions = self.transitions_check.isChecked()
         self.current_project.captions = self.captions_check.isChecked()
@@ -2559,13 +2627,9 @@ class WorkspaceWidget(QWidget):
                 self.negative_prompt.setText(self.current_project.negative_prompt)
             
             if hasattr(self.current_project, 'prompt_style') and self.current_project.prompt_style:
-                index = self.prompt_style_combo.findText(self.current_project.prompt_style)
-                if index >= 0:
-                    self.prompt_style_combo.setCurrentIndex(index)
-            
-            # Load generation settings
-            if hasattr(self.current_project, 'variants'):
-                self.variants_spin.setValue(self.current_project.variants)
+                self.prompt_style_input.setText(self.current_project.prompt_style)
+
+            # Load generation settings (variants always 1)
             
             if hasattr(self.current_project, 'ken_burns'):
                 self.ken_burns_check.setChecked(self.current_project.ken_burns)

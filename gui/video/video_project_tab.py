@@ -11,7 +11,8 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QMessageBox, QTableWidgetItem
 )
-from PySide6.QtCore import QThread, Signal, Slot
+from PySide6.QtCore import QThread, Signal, Slot, Qt
+from PySide6.QtGui import QPixmap
 
 from gui.common.dialog_manager import get_dialog_manager
 from core.config import ConfigManager
@@ -45,6 +46,8 @@ class VideoGenerationThread(QThread):
                 self._generate_storyboard()
             elif self.operation == "enhance_prompts":
                 self._enhance_prompts()
+            elif self.operation == "enhance_for_video":
+                self._enhance_for_video()
             elif self.operation == "generate_images":
                 self._generate_images()
             elif self.operation == "generate_video_clip":
@@ -65,43 +68,44 @@ class VideoGenerationThread(QThread):
         """Enhance prompts using LLM"""
         try:
             from core.video.prompt_engine import PromptEngine, UnifiedLLMProvider, PromptStyle
-            
+
             # Get LLM configuration
             llm_provider = self.kwargs.get('llm_provider', 'none')
             llm_model = self.kwargs.get('llm_model', '')
             prompt_style = self.kwargs.get('prompt_style', 'Cinematic')
-            
+
             if llm_provider == 'none':
                 self.generation_complete.emit(False, "Please select an LLM provider")
                 return
-            
+
             # Initialize LLM provider
             llm_config = {
                 'openai_api_key': self.kwargs.get('openai_api_key'),
                 'anthropic_api_key': self.kwargs.get('anthropic_api_key'),
                 'google_api_key': self.kwargs.get('google_api_key'),
             }
-            
+
             llm = UnifiedLLMProvider(llm_config)
             engine = PromptEngine(llm_provider=llm)
-            
-            # Map style string to enum
+
+            # Map style string to enum (support both predefined and custom styles)
             style_map = {
-                'Cinematic': PromptStyle.CINEMATIC,
-                'Artistic': PromptStyle.ARTISTIC,
-                'Photorealistic': PromptStyle.PHOTOREALISTIC,
-                'Animated': PromptStyle.ANIMATED,
-                'Documentary': PromptStyle.DOCUMENTARY,
-                'Abstract': PromptStyle.ABSTRACT,
-                'Noir': PromptStyle.NOIR,
-                'Fantasy': PromptStyle.FANTASY,
-                'Sci-Fi': PromptStyle.SCIFI,
-                'Vintage': PromptStyle.VINTAGE,
-                'Minimalist': PromptStyle.MINIMALIST,
-                'Dramatic': PromptStyle.DRAMATIC
+                'cinematic': PromptStyle.CINEMATIC,
+                'artistic': PromptStyle.ARTISTIC,
+                'photorealistic': PromptStyle.PHOTOREALISTIC,
+                'animated': PromptStyle.ANIMATED,
+                'documentary': PromptStyle.DOCUMENTARY,
+                'abstract': PromptStyle.ABSTRACT,
+                'noir': PromptStyle.NOIR,
+                'fantasy': PromptStyle.FANTASY,
+                'sci-fi': PromptStyle.SCIFI,
+                'scifi': PromptStyle.SCIFI,
+                'vintage': PromptStyle.VINTAGE,
+                'minimalist': PromptStyle.MINIMALIST,
+                'dramatic': PromptStyle.DRAMATIC
             }
-            style = style_map.get(prompt_style, PromptStyle.CINEMATIC)
-            
+            style = style_map.get(prompt_style.lower(), PromptStyle.CINEMATIC)
+
             # Enhance prompts for each scene
             total_scenes = len(self.project.scenes)
             for i, scene in enumerate(self.project.scenes):
@@ -112,12 +116,13 @@ class VideoGenerationThread(QThread):
                 scene_preview = scene.source[:40] + "..." if len(scene.source) > 40 else scene.source
                 self.progress_update.emit(progress, f"Scene {i+1}/{total_scenes}: '{scene_preview}' - Enhancing...")
 
-                # Generate enhanced prompt using the engine (not llm directly)
+                # Generate enhanced prompt using the engine with console callback
                 enhanced = engine.enhance_prompt(
                     scene.source,
                     provider=llm_provider,
                     model=llm_model,
-                    style=style
+                    style=style,
+                    console_callback=lambda msg, level: self.progress_update.emit(progress, msg)
                 )
 
                 scene.prompt = enhanced
@@ -128,7 +133,92 @@ class VideoGenerationThread(QThread):
                 
         except Exception as e:
             self.generation_complete.emit(False, f"Prompt enhancement failed: {e}")
-    
+
+    def _enhance_for_video(self):
+        """Enhance prompts for video generation with camera movement and continuity"""
+        try:
+            from core.video.prompt_engine import PromptEngine, UnifiedLLMProvider, PromptStyle
+            import logging
+
+            logger = logging.getLogger(__name__)
+
+            # Get LLM configuration
+            llm_provider = self.kwargs.get('llm_provider', 'none')
+            llm_model = self.kwargs.get('llm_model', '')
+            prompt_style = self.kwargs.get('prompt_style', 'Cinematic')
+
+            if llm_provider == 'none':
+                self.generation_complete.emit(False, "Please select an LLM provider")
+                return
+
+            # Initialize LLM provider
+            llm_config = {
+                'openai_api_key': self.kwargs.get('openai_api_key'),
+                'anthropic_api_key': self.kwargs.get('anthropic_api_key'),
+                'google_api_key': self.kwargs.get('google_api_key'),
+            }
+
+            llm = UnifiedLLMProvider(llm_config)
+            engine = PromptEngine(llm_provider=llm)
+
+            # Map style string to enum (support both predefined and custom styles)
+            style_map = {
+                'cinematic': PromptStyle.CINEMATIC,
+                'artistic': PromptStyle.ARTISTIC,
+                'photorealistic': PromptStyle.PHOTOREALISTIC,
+                'animated': PromptStyle.ANIMATED,
+                'documentary': PromptStyle.DOCUMENTARY,
+                'abstract': PromptStyle.ABSTRACT,
+                'noir': PromptStyle.NOIR,
+                'fantasy': PromptStyle.FANTASY,
+                'sci-fi': PromptStyle.SCIFI,
+                'scifi': PromptStyle.SCIFI,
+                'vintage': PromptStyle.VINTAGE,
+                'minimalist': PromptStyle.MINIMALIST,
+                'dramatic': PromptStyle.DRAMATIC
+            }
+            style = style_map.get(prompt_style.lower(), PromptStyle.CINEMATIC)
+
+            # Enhance video prompts for each scene with continuity
+            total_scenes = len(self.project.scenes)
+            previous_context = None
+
+            for i, scene in enumerate(self.project.scenes):
+                if self.cancelled:
+                    break
+
+                progress = int((i / total_scenes) * 100)
+                scene_preview = scene.source[:40] + "..." if len(scene.source) > 40 else scene.source
+                self.progress_update.emit(progress, f"Scene {i+1}/{total_scenes}: '{scene_preview}' - Enhancing for video...")
+
+                # Use image prompt as base if available, otherwise use source
+                base_text = scene.prompt if scene.prompt else scene.source
+
+                # Generate video-enhanced prompt with continuity
+                video_prompt = engine.enhance_for_video(
+                    base_text,
+                    provider=llm_provider,
+                    model=llm_model,
+                    style=style,
+                    previous_scene_context=previous_context,
+                    console_callback=lambda msg, level: self.progress_update.emit(progress, msg)
+                )
+
+                scene.video_prompt = video_prompt
+
+                # Update context for next scene
+                if i < total_scenes - 1:
+                    previous_context = f"{scene.source}: {video_prompt[:100]}..."
+
+                self.progress_update.emit(progress, f"Scene {i+1}/{total_scenes}: '{scene_preview}' - ✓ Video enhanced")
+
+            if not self.cancelled:
+                self.generation_complete.emit(True, "Video prompt enhancement complete")
+
+        except Exception as e:
+            logger.error(f"Video prompt enhancement failed: {e}")
+            self.generation_complete.emit(False, f"Video prompt enhancement failed: {e}")
+
     def _generate_images(self):
         """Generate images for all scenes"""
         try:
@@ -183,6 +273,46 @@ class VideoGenerationThread(QThread):
             aspect_ratio = self.kwargs.get('aspect_ratio', '16:9')
             resolution = self.kwargs.get('resolution', '1920x1080')
 
+            # Parse resolution string to width/height
+            width = height = None
+            if resolution and 'x' in resolution:
+                parts = resolution.split('x')
+                width, height = int(parts[0]), int(parts[1])
+            elif resolution:
+                # Handle "720p", "1080p" format
+                if '720' in resolution:
+                    if aspect_ratio == '16:9':
+                        width, height = 1280, 720
+                    elif aspect_ratio == '9:16':
+                        width, height = 720, 1280
+                    elif aspect_ratio == '1:1':
+                        width, height = 720, 720
+                elif '1080' in resolution:
+                    if aspect_ratio == '16:9':
+                        width, height = 1920, 1080
+                    elif aspect_ratio == '9:16':
+                        width, height = 1080, 1920
+                    elif aspect_ratio == '1:1':
+                        width, height = 1080, 1080
+
+            # For Gemini provider: scale to max 1024 and track target for post-processing
+            gemini_scaled_width = width
+            gemini_scaled_height = height
+            original_width = width
+            original_height = height
+            needs_upscale = False
+
+            if provider == 'google' and width and height:
+                max_dim = max(width, height)
+                if max_dim > 1024:
+                    # Scale proportionally so max dimension is 1024
+                    scale_factor = 1024 / max_dim
+                    gemini_scaled_width = int(width * scale_factor)
+                    gemini_scaled_height = int(height * scale_factor)
+                    needs_upscale = True
+                    logger.info(f"Scaling down for Gemini: {width}x{height} -> {gemini_scaled_width}x{gemini_scaled_height} (factor: {scale_factor:.3f})")
+                    self.progress_update.emit(0, f"Note: Scaling request to {gemini_scaled_width}x{gemini_scaled_height} for Gemini, will upscale to {width}x{height}")
+
             # Generate images for each scene
             for i, scene in enumerate(scenes_to_generate):
                 if self.cancelled:
@@ -199,12 +329,35 @@ class VideoGenerationThread(QThread):
                     for v in range(variants):
                         logger.info(f"Generating variant {v+1}/{variants} for scene {i+1}")
 
+                        # Prepare generation kwargs
+                        gen_kwargs = {
+                            'aspect_ratio': aspect_ratio,
+                            'num_images': 1
+                        }
+
+                        # For Gemini: use scaled dimensions and enable cropping
+                        if provider == 'google':
+                            gen_kwargs['width'] = gemini_scaled_width
+                            gen_kwargs['height'] = gemini_scaled_height
+                            gen_kwargs['crop_to_aspect'] = True
+                            gen_kwargs['_target_width'] = original_width
+                            gen_kwargs['_target_height'] = original_height
+                            gen_kwargs['_needs_upscale'] = needs_upscale
+
+                            # Log what we're sending
+                            if aspect_ratio != '1:1':
+                                logger.info(f"Sending to Gemini with aspect ratio {aspect_ratio}: dimensions ({gemini_scaled_width}x{gemini_scaled_height})")
+                        else:
+                            # For other providers, use original dimensions
+                            if width and height:
+                                gen_kwargs['width'] = width
+                                gen_kwargs['height'] = height
+
                         # Generate single image using provider (same as image tab)
                         texts, images = provider_instance.generate(
                             prompt=scene.prompt,
                             model=model,
-                            aspect_ratio=aspect_ratio,
-                            num_images=1
+                            **gen_kwargs
                         )
 
                         if images:
@@ -292,7 +445,17 @@ class VideoGenerationThread(QThread):
 
             # Get generation parameters
             seed_image_path = self.kwargs.get('seed_image')
-            prompt = scene.prompt
+            # Use video_prompt if available, otherwise fall back to regular prompt
+            prompt = scene.video_prompt if scene.video_prompt else scene.prompt
+            aspect_ratio = self.kwargs.get('aspect_ratio', '16:9')
+
+            # Log which prompt is being used
+            import logging
+            logger = logging.getLogger(__name__)
+            if scene.video_prompt:
+                logger.info(f"Using video_prompt for scene {scene_index}: {prompt[:100]}...")
+            else:
+                logger.info(f"Using regular prompt for scene {scene_index} (no video_prompt): {prompt[:100]}...")
 
             self.progress_update.emit(10, f"Generating video clip for scene {scene_index + 1}...")
 
@@ -304,11 +467,87 @@ class VideoGenerationThread(QThread):
 
             veo_client = VeoClient(api_key=google_api_key)
 
+            # If using seed image, check aspect ratio match and apply transparent canvas fix if needed
+            processed_seed_path = None
+            if seed_image_path and Path(seed_image_path).exists():
+                from PIL import Image
+                import logging
+                logger = logging.getLogger(__name__)
+
+                try:
+                    img = Image.open(seed_image_path)
+                    ref_width, ref_height = img.size
+                    ref_aspect = ref_width / ref_height
+
+                    # Calculate expected aspect ratio
+                    expected_aspect = 1.0
+                    if aspect_ratio and ':' in aspect_ratio:
+                        ar_parts = aspect_ratio.split(':')
+                        expected_aspect = float(ar_parts[0]) / float(ar_parts[1])
+
+                    # Check if there's a significant mismatch (more than 10% difference)
+                    if abs(ref_aspect - expected_aspect) > 0.1:
+                        logger.warning(f"⚠️ ASPECT RATIO MISMATCH: Reference image is {ref_width}x{ref_height} "
+                                     f"(aspect {ref_aspect:.2f}) but requesting {aspect_ratio} "
+                                     f"(aspect {expected_aspect:.2f}). Applying canvas centering fix...")
+
+                        # Create a transparent canvas with the target aspect ratio
+                        # Calculate canvas dimensions based on reference image max dimension
+                        max_ref_dim = max(ref_width, ref_height)
+
+                        # Calculate canvas dimensions maintaining target aspect ratio
+                        if expected_aspect >= 1.0:  # Landscape or square
+                            canvas_width = max_ref_dim
+                            canvas_height = int(max_ref_dim / expected_aspect)
+                        else:  # Portrait
+                            canvas_height = max_ref_dim
+                            canvas_width = int(max_ref_dim * expected_aspect)
+
+                        # Make sure canvas is large enough to contain the reference image
+                        if canvas_width < ref_width:
+                            canvas_width = ref_width
+                            canvas_height = int(ref_width / expected_aspect)
+                        if canvas_height < ref_height:
+                            canvas_height = ref_height
+                            canvas_width = int(ref_height * expected_aspect)
+
+                        logger.info(f"Creating transparent canvas: {canvas_width}x{canvas_height} (aspect {expected_aspect:.2f})")
+                        logger.info(f"Reference image will be centered: {ref_width}x{ref_height}")
+                        self.progress_update.emit(15, f"Applying canvas centering fix for aspect ratio...")
+
+                        # Create transparent canvas
+                        canvas = Image.new('RGBA', (canvas_width, canvas_height), (0, 0, 0, 0))
+
+                        # Calculate position to center the reference image
+                        x_offset = (canvas_width - ref_width) // 2
+                        y_offset = (canvas_height - ref_height) // 2
+
+                        # Convert reference image to RGBA if needed
+                        if img.mode != 'RGBA':
+                            img_rgba = img.convert('RGBA')
+                        else:
+                            img_rgba = img
+
+                        # Paste the reference image centered on the canvas
+                        canvas.paste(img_rgba, (x_offset, y_offset), img_rgba)
+
+                        # Save the composed canvas
+                        project_dir = Path.home() / ".imageai" / "video_projects" / self.project.name / "temp"
+                        project_dir.mkdir(parents=True, exist_ok=True)
+                        processed_seed_path = project_dir / f"canvas_seed_scene_{scene_index}.png"
+                        canvas.save(processed_seed_path, 'PNG')
+                        logger.info(f"Saved composed canvas: {processed_seed_path}")
+
+                        seed_image_path = processed_seed_path
+                except Exception as e:
+                    logger.warning(f"Failed to process reference image: {e}")
+                    # Fall back to original seed image
+
             # Configure generation
             config = VeoGenerationConfig(
                 model=VeoModel.VEO_3_0,
                 duration=int(scene.duration_sec),
-                aspect_ratio=self.kwargs.get('aspect_ratio', '16:9')
+                aspect_ratio=aspect_ratio
             )
 
             self.progress_update.emit(20, "Submitting to Veo...")
@@ -633,18 +872,23 @@ class VideoProjectTab(QWidget):
                 if scene.id == scene_id:
                     if result.get('status') == 'completed':
                         # Handle image generation results
+                        # Note: scene.images is already set with ImageVariant objects in _generate_images
+                        # Don't overwrite it here, just use the paths for UI display
                         if 'images' in result:
-                            scene.images = result.get('images', [])
+                            image_paths = result.get('images', [])
                             # Display the first image in the image view
                             if scene.images and len(scene.images) > 0:
                                 from pathlib import Path
                                 from PySide6.QtGui import QPixmap
                                 from core.utils import read_image_sidecar
-                                img_path = scene.images[0]
-                                # Handle both Path objects and string paths
-                                if hasattr(img_path, 'path'):
-                                    img_path = img_path.path
-                                img_path = Path(img_path)
+                                from core.video.project import ImageVariant
+
+                                # Get the path from the first image (could be ImageVariant or Path)
+                                first_img = scene.images[0]
+                                if isinstance(first_img, ImageVariant):
+                                    img_path = first_img.path
+                                else:
+                                    img_path = Path(first_img)
                                 if img_path.exists():
                                     pixmap = QPixmap(str(img_path))
                                     if not pixmap.isNull():

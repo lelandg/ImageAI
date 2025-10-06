@@ -146,6 +146,29 @@ class UnifiedLLMProvider:
         """
         return get_provider_models(provider)
 
+    def _strip_markdown_headers(self, text: str) -> str:
+        """
+        Strip markdown headers and formatting from LLM responses.
+        Removes lines starting with # and removes ** bold markers.
+        """
+        import re
+
+        # Remove lines that start with # (markdown headers)
+        lines = text.split('\n')
+        filtered_lines = []
+        for line in lines:
+            stripped = line.strip()
+            # Skip lines that are just markdown headers (e.g., "# Cinematic visual prompt")
+            if not stripped.startswith('#'):
+                filtered_lines.append(line)
+
+        result = '\n'.join(filtered_lines).strip()
+
+        # Remove ** bold markers (e.g., "**Visual Scene Description:**")
+        result = re.sub(r'\*\*([^*]+)\*\*:?\s*', '', result)
+
+        return result.strip()
+
     def _create_smart_fallback(self, text: str, style: PromptStyle) -> str:
         """
         Create a context-aware fallback prompt when LLM fails.
@@ -200,10 +223,11 @@ class UnifiedLLMProvider:
                       model: str,
                       style: PromptStyle = PromptStyle.CINEMATIC,
                       temperature: float = 0.7,
-                      max_tokens: int = 500) -> str:
+                      max_tokens: int = 500,
+                      console_callback=None) -> str:
         """
         Enhance a text prompt using an LLM.
-        
+
         Args:
             text: Original text to enhance
             provider: LLM provider (openai, anthropic, gemini, etc.)
@@ -211,7 +235,8 @@ class UnifiedLLMProvider:
             style: Style of enhancement
             temperature: Creativity parameter (0-1)
             max_tokens: Maximum tokens in response
-            
+            console_callback: Optional callback function(message, level) for console logging
+
         Returns:
             Enhanced prompt text
         """
@@ -279,6 +304,12 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
                 self.logger.info(f"User: {user_prompt}")
                 self.logger.info(f"Temperature: {temperature}, Max tokens: {max_tokens}")
 
+            # Also log to console if callback provided
+            if console_callback:
+                console_callback(f"=== LLM Request to {provider}/{model_id} ===", "INFO")
+                console_callback(f"System: {system_prompt[:200]}..." if len(system_prompt) > 200 else f"System: {system_prompt}", "INFO")
+                console_callback(f"User: {user_prompt}", "INFO")
+
             # Call LiteLLM
             response = self.litellm.completion(**kwargs)
 
@@ -291,18 +322,31 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
                 else:
                     self.logger.info(f"=== LLM Response from {provider}/{model_id} ===")
                     self.logger.info("Response: Empty or no choices")
+
+            # Also log to console if callback provided
+            if console_callback:
+                if response and response.choices and len(response.choices) > 0:
+                    content = response.choices[0].message.content if response.choices[0].message else "No content"
+                    console_callback(f"=== LLM Response from {provider}/{model_id} ===", "SUCCESS")
+                    console_callback(f"Response: {content}", "INFO")
+                else:
+                    console_callback(f"=== LLM Response from {provider}/{model_id} ===", "WARNING")
+                    console_callback("Response: Empty or no choices", "WARNING")
             
             # Check if response has content
-            if (response and response.choices and len(response.choices) > 0 
-                and response.choices[0].message 
+            if (response and response.choices and len(response.choices) > 0
+                and response.choices[0].message
                 and response.choices[0].message.content):
                 enhanced = response.choices[0].message.content.strip()
-                
+
+                # Strip markdown headers and formatting
+                enhanced = self._strip_markdown_headers(enhanced)
+
                 # If we still got an empty or very short response for a lyric, create a basic visual
                 if is_lyric and len(enhanced) < 20:
                     self.logger.warning(f"Got minimal response for lyric, creating basic visual")
                     enhanced = f"A cinematic scene visualizing: {text}. Dramatic lighting, professional photography, high detail."
-                
+
                 self.logger.info(f"Enhanced prompt using {provider}/{model}")
                 return enhanced
             else:
@@ -719,7 +763,8 @@ class PromptEngine:
                       model: str,
                       style: PromptStyle = PromptStyle.CINEMATIC,
                       temperature: float = 0.7,
-                      max_tokens: int = 150) -> str:
+                      max_tokens: int = 150,
+                      console_callback=None) -> str:
         """
         Enhance a text prompt using an LLM.
 
@@ -730,12 +775,13 @@ class PromptEngine:
             style: Style of enhancement
             temperature: Creativity parameter (0-1)
             max_tokens: Maximum tokens in response
+            console_callback: Optional callback function(message, level) for console logging
 
         Returns:
             Enhanced prompt text
         """
         return self.llm_provider.enhance_prompt(
-            text, provider, model, style, temperature, max_tokens
+            text, provider, model, style, temperature, max_tokens, console_callback
         )
 
     def regenerate_prompt(self,
@@ -772,3 +818,131 @@ class PromptEngine:
         scene.metadata["prompt_regenerated"] = True
 
         return new_prompt
+
+    def enhance_for_video(self,
+                         text: str,
+                         provider: str,
+                         model: str,
+                         style: PromptStyle = PromptStyle.CINEMATIC,
+                         previous_scene_context: str = None,
+                         console_callback=None) -> str:
+        """
+        Enhance a text prompt specifically for video generation.
+        Adds camera movements, motion, and temporal progression.
+
+        Args:
+            text: Original text (can be an image prompt)
+            provider: LLM provider
+            model: Model name
+            style: Style of enhancement
+            previous_scene_context: Context from previous scene for continuity
+            console_callback: Optional callback for logging
+
+        Returns:
+            Enhanced video prompt with motion and camera work
+        """
+        if not self.llm_provider.is_available():
+            # Fallback: add basic motion to the prompt
+            return f"{text}. Camera movement: gentle pan and subtle motion."
+
+        # Build system prompt for video enhancement
+        system_prompt = f"""You are a video prompt engineer. Transform image descriptions into dynamic video prompts by adding:
+
+1. **Camera Movements**:
+   - Pans (left/right), tilts (up/down), zooms (in/out), dolly moves
+   - Orbiting, tracking shots, crane movements
+   - Keep movements smooth and purposeful
+
+2. **Subject Motion**:
+   - Character actions (walking, gesturing, turning)
+   - Environmental movement (wind, water, clouds)
+   - Object interactions
+
+3. **Temporal Progression**:
+   - Light changes, transitions
+   - Emotional progression
+   - Scene development over time
+
+Style: {style.value}
+
+IMPORTANT:
+- Return ONLY the enhanced video prompt, no preamble
+- Keep the core scene description intact
+- Add 2-3 motion elements maximum
+- Make camera work subtle and cinematic
+- DO NOT use markdown formatting"""
+
+        # Build user prompt
+        if previous_scene_context:
+            user_prompt = f"""Previous scene: {previous_scene_context}
+
+Current scene description: {text}
+
+Transform this into a video prompt that:
+1. Maintains visual continuity with the previous scene
+2. Adds appropriate camera movement
+3. Includes natural motion and action
+4. Creates smooth temporal flow
+
+Return only the enhanced video prompt."""
+        else:
+            user_prompt = f"""Scene description: {text}
+
+Transform this into a dynamic video prompt by adding:
+1. Appropriate camera movement (pan, tilt, zoom, etc.)
+2. Subject or environmental motion
+3. Temporal progression if appropriate
+
+Return only the enhanced video prompt."""
+
+        try:
+            # Prepare model identifier
+            if provider == 'lmstudio':
+                model_id = model
+                api_base = self.llm_provider.lmstudio_base
+            else:
+                from core.llm_models import get_provider_prefix
+                prefix = get_provider_prefix(provider)
+                model_id = f"{prefix}{model}" if prefix else model
+                api_base = None
+
+            kwargs = {
+                "model": model_id,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                "temperature": 0.7,
+                "max_tokens": 300
+            }
+
+            if api_base:
+                kwargs["api_base"] = api_base
+
+            # Log to console if callback provided
+            if console_callback:
+                console_callback(f"=== Video Prompt Enhancement ({provider}/{model}) ===", "INFO")
+                console_callback(f"Original: {text[:100]}...", "INFO")
+
+            # Call LiteLLM
+            response = self.llm_provider.litellm.completion(**kwargs)
+
+            if response and response.choices and len(response.choices) > 0:
+                enhanced = response.choices[0].message.content.strip()
+
+                # Strip markdown headers and formatting
+                enhanced = self.llm_provider._strip_markdown_headers(enhanced)
+
+                if console_callback:
+                    console_callback(f"Video Enhanced: {enhanced[:100]}...", "SUCCESS")
+
+                self.logger.info(f"Enhanced for video using {provider}/{model}")
+                return enhanced
+            else:
+                # Fallback
+                return f"{text}. Camera movement: gentle pan and subtle motion."
+
+        except Exception as e:
+            self.logger.error(f"Video enhancement failed: {e}")
+            # Fallback
+            return f"{text}. Camera movement: gentle pan and subtle motion."

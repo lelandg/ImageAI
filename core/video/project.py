@@ -118,7 +118,8 @@ class Scene:
     """A single scene in the video project"""
     id: str = field(default_factory=lambda: f"scene-{uuid.uuid4().hex[:8]}")
     source: str = ""  # Original text/lyric line
-    prompt: str = ""  # AI-enhanced or user-edited prompt
+    prompt: str = ""  # AI-enhanced prompt for image generation
+    video_prompt: str = ""  # AI-enhanced prompt for video generation with motion/camera
     prompt_history: List[str] = field(default_factory=list)  # All previous prompt versions
     duration_sec: float = 4.0  # Scene duration in seconds
     images: List[ImageVariant] = field(default_factory=list)  # Generated image variants
@@ -137,6 +138,7 @@ class Scene:
             "id": self.id,
             "source": self.source,
             "prompt": self.prompt,
+            "video_prompt": self.video_prompt,
             "prompt_history": self.prompt_history,
             "duration_sec": self.duration_sec,
             "images": [img.to_dict() for img in self.images],
@@ -157,6 +159,7 @@ class Scene:
             id=data.get("id", f"scene-{uuid.uuid4().hex[:8]}"),
             source=data.get("source", ""),
             prompt=data.get("prompt", ""),
+            video_prompt=data.get("video_prompt", ""),
             prompt_history=data.get("prompt_history", []),
             duration_sec=data.get("duration_sec", 4.0),
             images=[ImageVariant.from_dict(img) for img in data.get("images", [])],
@@ -414,12 +417,48 @@ class VideoProject:
     @classmethod
     def load(cls, path: Path) -> "VideoProject":
         """Load project from JSON file"""
-        with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-        
+        import logging
+        logger = logging.getLogger(__name__)
+
+        path = Path(path)
+
+        # Check if file exists and is not empty
+        if not path.exists():
+            raise FileNotFoundError(f"Project file not found: {path}")
+
+        if path.stat().st_size == 0:
+            logger.error(f"Project file is empty: {path}")
+            # Try to create a backup of the empty file
+            backup_path = path.with_suffix('.json.empty')
+            try:
+                import shutil
+                shutil.copy2(path, backup_path)
+                logger.info(f"Backed up empty file to: {backup_path}")
+            except Exception:
+                pass
+            raise ValueError(f"Project file is empty. A backup was created.")
+
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if not content.strip():
+                    raise ValueError(f"Project file contains no data: {path}")
+                data = json.loads(content)
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in project file {path}: {e}")
+            # Try to create a backup of the corrupted file
+            backup_path = path.with_suffix('.json.corrupted')
+            try:
+                import shutil
+                shutil.copy2(path, backup_path)
+                logger.info(f"Backed up corrupted file to: {backup_path}")
+            except Exception as backup_error:
+                logger.warning(f"Could not create backup: {backup_error}")
+            raise ValueError(f"Project file contains invalid JSON. Backup saved to {backup_path.name}") from e
+
         project = cls.from_dict(data)
         project.project_dir = path.parent
-        
+
         return project
     
     def add_scene(self, source: str, prompt: str = "", duration: float = 4.0) -> Scene:

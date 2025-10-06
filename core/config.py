@@ -19,6 +19,9 @@ class ConfigManager:
         self.config_path = self.config_dir / "config.json"
         self.details_path = self.config_dir / "details.jsonl"
         self.config = self._load_config()
+
+        # Normalize auth_mode on load (handle legacy display values)
+        self._normalize_auth_mode()
     
     def _get_config_dir(self) -> Path:
         """Get platform-specific configuration directory."""
@@ -37,13 +40,27 @@ class ConfigManager:
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from disk."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
-        
+
         if self.config_path.exists():
             try:
                 return json.loads(self.config_path.read_text(encoding="utf-8"))
             except (OSError, IOError, json.JSONDecodeError):
                 return {}
         return {}
+
+    def _normalize_auth_mode(self) -> None:
+        """Normalize auth_mode values to internal format."""
+        auth_mode = self.config.get("auth_mode", "api-key")
+
+        # Map legacy/display values to internal values
+        if auth_mode in ["api_key", "API Key"]:
+            self.config["auth_mode"] = "api-key"
+        elif auth_mode == "Google Cloud Account":
+            self.config["auth_mode"] = "gcloud"
+
+        # Save if we made changes
+        if self.config.get("auth_mode") != auth_mode:
+            self.save()
     
     def save(self) -> None:
         """Save current configuration to disk."""
