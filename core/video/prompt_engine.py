@@ -23,6 +23,12 @@ class PromptStyle(Enum):
     ANIMATED = "animated"
     DOCUMENTARY = "documentary"
     ABSTRACT = "abstract"
+    NOIR = "noir"
+    FANTASY = "fantasy"
+    SCIFI = "scifi"
+    VINTAGE = "vintage"
+    MINIMALIST = "minimalist"
+    DRAMATIC = "dramatic"
 
 
 @dataclass
@@ -139,14 +145,62 @@ class UnifiedLLMProvider:
             List of model names
         """
         return get_provider_models(provider)
-    
-    def enhance_prompt(self, 
+
+    def _create_smart_fallback(self, text: str, style: PromptStyle) -> str:
+        """
+        Create a context-aware fallback prompt when LLM fails.
+        Analyzes the text to detect scene type and generates appropriate visual description.
+        """
+        text_lower = text.lower()
+
+        # Detect scene type from keywords
+        action_keywords = ['run', 'jump', 'fight', 'dance', 'walk', 'fly', 'swim', 'chase', 'move', 'swing']
+        emotion_keywords = ['love', 'sad', 'happy', 'angry', 'fear', 'joy', 'cry', 'smile', 'laugh', 'weep']
+        setting_keywords = ['night', 'day', 'morning', 'evening', 'sunset', 'sunrise', 'dark', 'light', 'city', 'forest']
+        nature_keywords = ['rain', 'snow', 'wind', 'storm', 'cloud', 'sun', 'moon', 'star', 'ocean', 'mountain']
+
+        is_action = any(kw in text_lower for kw in action_keywords)
+        is_emotion = any(kw in text_lower for kw in emotion_keywords)
+        is_setting = any(kw in text_lower for kw in setting_keywords)
+        is_nature = any(kw in text_lower for kw in nature_keywords)
+
+        # Style-specific prefixes
+        style_prefixes = {
+            PromptStyle.CINEMATIC: "Cinematic wide shot of",
+            PromptStyle.ARTISTIC: "Artistic interpretation showing",
+            PromptStyle.PHOTOREALISTIC: "Photorealistic scene depicting",
+            PromptStyle.ANIMATED: "Vibrant animated scene with",
+            PromptStyle.DOCUMENTARY: "Candid documentary-style image of",
+            PromptStyle.ABSTRACT: "Abstract visual representation of",
+            PromptStyle.NOIR: "Film noir scene with",
+            PromptStyle.FANTASY: "Epic fantasy scene showing",
+            PromptStyle.SCIFI: "Futuristic sci-fi scene featuring",
+            PromptStyle.VINTAGE: "Vintage photograph of",
+            PromptStyle.MINIMALIST: "Minimalist composition with",
+            PromptStyle.DRAMATIC: "Dramatic scene depicting"
+        }
+
+        # Build context-aware description
+        prefix = style_prefixes.get(style, "Cinematic scene showing")
+
+        if is_action:
+            return f"{prefix} {text}. Dynamic movement, motion blur, energetic composition. Professional photography, dramatic lighting, high detail."
+        elif is_emotion:
+            return f"{prefix} {text}. Expressive faces, emotional depth, intimate framing. Soft lighting, shallow depth of field, evocative mood."
+        elif is_setting:
+            return f"{prefix} {text}. Atmospheric environment, rich ambiance, detailed background. Environmental storytelling, cinematic lighting."
+        elif is_nature:
+            return f"{prefix} {text}. Natural beauty, organic textures, environmental drama. Golden hour lighting, epic scale, breathtaking vista."
+        else:
+            return f"{prefix} {text}. Dramatic lighting, professional photography, high detail, cinematic composition."
+
+    def enhance_prompt(self,
                       text: str,
                       provider: str,
                       model: str,
                       style: PromptStyle = PromptStyle.CINEMATIC,
                       temperature: float = 0.7,
-                      max_tokens: int = 150) -> str:
+                      max_tokens: int = 500) -> str:
         """
         Enhance a text prompt using an LLM.
         
@@ -187,7 +241,7 @@ Describe what we should see in the image that represents this lyric visually. In
 - Lighting and mood
 - Visual style and composition
 
-Keep it under 100 words but highly descriptive."""
+Be highly descriptive and detailed. Aim for 75-150 words."""
         else:
             user_prompt = f"Transform this into an image generation prompt: {text}"
         
@@ -253,16 +307,16 @@ Keep it under 100 words but highly descriptive."""
                 return enhanced
             else:
                 self.logger.warning(f"Empty response from {provider}/{model}, creating fallback")
-                # For lyrics, create a basic visual description
+                # For lyrics, use smart fallback
                 if is_lyric:
-                    return f"A cinematic scene visualizing: {text}. Dramatic lighting, professional photography, high detail."
+                    return self._create_smart_fallback(text, style)
                 return text
             
         except Exception as e:
             self.logger.error(f"Failed to enhance prompt with {provider}/{model}: {e}")
-            # For lyrics, still try to create something visual
+            # Use smart fallback for lyrics
             if is_lyric:
-                return f"A cinematic scene visualizing: {text}. Dramatic lighting, professional photography, high detail."
+                return self._create_smart_fallback(text, style)
             return text
     
     def batch_enhance(self,
@@ -440,7 +494,7 @@ Return one enhanced visual description per line, numbered:
 - Cinematic elements (depth of field, lens type, film grain)
 - Mood and atmosphere
 - Visual composition
-Keep prompts under 100 words but highly descriptive.""",
+Be highly descriptive and detailed.""",
             
             PromptStyle.ARTISTIC: """You are an artistic prompt engineer. Transform text into artistic image generation prompts with:
 - Art style references (impressionist, surreal, abstract, etc.)
@@ -480,9 +534,57 @@ Keep prompts grounded and authentic.""",
 - Symbolic representations
 - Emotional essence over literal depiction
 - Experimental visual techniques
-Keep prompts open to interpretation and artistic."""
+Keep prompts open to interpretation and artistic.""",
+
+            PromptStyle.NOIR: """You are a film noir prompt engineer. Transform text into noir-style prompts with:
+- High contrast black and white aesthetics
+- Dramatic shadows and venetian blind effects
+- Moody, atmospheric lighting
+- Urban decay and rain-slicked streets
+- Mystery and suspense elements
+Keep prompts dark and atmospheric.""",
+
+            PromptStyle.FANTASY: """You are a fantasy prompt engineer. Transform text into epic fantasy prompts with:
+- Magical and mystical elements
+- Epic landscapes and grand vistas
+- Mythical creatures and enchanted settings
+- Rich, saturated colors and ethereal lighting
+- Sense of wonder and adventure
+Keep prompts imaginative and otherworldly.""",
+
+            PromptStyle.SCIFI: """You are a science fiction prompt engineer. Transform text into sci-fi prompts with:
+- Futuristic technology and advanced machinery
+- Sleek, modern designs and neon lighting
+- Space settings or cyberpunk cities
+- Holographic displays and high-tech elements
+- Clean lines and technological sophistication
+Keep prompts forward-thinking and innovative.""",
+
+            PromptStyle.VINTAGE: """You are a vintage photography prompt engineer. Transform text into retro-style prompts with:
+- Classic film photography aesthetics
+- Warm, faded colors or sepia tones
+- Grain and texture of old photographs
+- Period-appropriate clothing and settings
+- Nostalgic, timeless quality
+Keep prompts evocative of past eras.""",
+
+            PromptStyle.MINIMALIST: """You are a minimalist prompt engineer. Transform text into minimal prompts with:
+- Clean, simple compositions
+- Limited color palettes
+- Negative space and balance
+- Essential elements only
+- Modern, uncluttered aesthetics
+Keep prompts refined and elegant.""",
+
+            PromptStyle.DRAMATIC: """You are a dramatic prompt engineer. Transform text into high-impact prompts with:
+- High contrast and bold lighting
+- Intense emotions and expressions
+- Theatrical staging and composition
+- Dynamic angles and perspectives
+- Powerful visual impact
+Keep prompts emotionally charged and striking."""
         }
-        
+
         return prompts.get(style, prompts[PromptStyle.CINEMATIC])
 
 
@@ -611,6 +713,31 @@ class PromptEngine:
             self.logger.error(f"Failed to apply template {template_name}: {e}")
             return scene.source
     
+    def enhance_prompt(self,
+                      text: str,
+                      provider: str,
+                      model: str,
+                      style: PromptStyle = PromptStyle.CINEMATIC,
+                      temperature: float = 0.7,
+                      max_tokens: int = 150) -> str:
+        """
+        Enhance a text prompt using an LLM.
+
+        Args:
+            text: Original text to enhance
+            provider: LLM provider
+            model: Model name
+            style: Style of enhancement
+            temperature: Creativity parameter (0-1)
+            max_tokens: Maximum tokens in response
+
+        Returns:
+            Enhanced prompt text
+        """
+        return self.llm_provider.enhance_prompt(
+            text, provider, model, style, temperature, max_tokens
+        )
+
     def regenerate_prompt(self,
                          scene: Scene,
                          provider: str,
@@ -618,13 +745,13 @@ class PromptEngine:
                          style: Optional[PromptStyle] = None) -> str:
         """
         Regenerate a single scene's prompt.
-        
+
         Args:
             scene: Scene to regenerate prompt for
             provider: LLM provider
             model: Model name
             style: Optional style override
-            
+
         Returns:
             New prompt text
         """
@@ -633,15 +760,15 @@ class PromptEngine:
             style = PromptStyle(scene.metadata["prompt_style"])
         else:
             style = style or PromptStyle.CINEMATIC
-        
+
         # Generate new prompt
         new_prompt = self.llm_provider.enhance_prompt(
             scene.source, provider, model, style
         )
-        
+
         # Update scene
         scene.add_prompt_to_history(scene.prompt)
         scene.prompt = new_prompt
         scene.metadata["prompt_regenerated"] = True
-        
+
         return new_prompt

@@ -3004,13 +3004,12 @@ For more detailed information, please refer to the full documentation.
         v.addLayout(h)
 
         # Add shortcuts hint with enhanced visibility
-        history_shortcuts_label = create_shortcut_hint("Alt+L to load, Alt+L to clear, Double-click to load item")
+        history_shortcuts_label = create_shortcut_hint("Alt+L to load, Alt+C to clear, Click to select and load item")
         v.addWidget(history_shortcuts_label)
 
         # Connect signals
         self.history_table.selectionModel().selectionChanged.connect(self._on_history_selection_changed)
         self.history_table.itemClicked.connect(self._on_history_item_clicked)
-        self.history_table.itemDoubleClicked.connect(self._load_history_item)
         self.btn_load_history.clicked.connect(self._load_selected_history)
         self.btn_clear_history.clicked.connect(self._clear_history)
     
@@ -5128,9 +5127,10 @@ For more detailed information, please refer to the full documentation.
                     'timestamp': datetime.now().isoformat(),
                     'model': self.current_model,
                     'provider': self.current_provider,
-                    'cost': generation_cost / len(images) if generation_cost else 0.0
+                    'cost': generation_cost / len(images) if generation_cost else 0.0,
+                    'source_tab': 'image'  # Mark as from image tab
                 }
-                
+
                 # Add resolution if available
                 if 'width' in settings:
                     history_entry['width'] = settings['width']
@@ -6023,7 +6023,7 @@ For more detailed information, please refer to the full documentation.
         self.tabs.setCurrentWidget(self.tab_generate)
     
     def _on_history_item_clicked(self, item):
-        """Handle single click on history item - restore prompt to input box."""
+        """Handle single click on history item - restore prompt and switch to appropriate tab."""
         row = self.history_table.row(item)
         if row >= 0:
             # Get the history data from the DateTime column (column 1) where it's stored
@@ -6031,17 +6031,39 @@ For more detailed information, please refer to the full documentation.
             if datetime_item:
                 history_item = datetime_item.data(Qt.UserRole)
                 if isinstance(history_item, dict):
-                    prompt = history_item.get('prompt', '')
-                    if prompt:
-                        # Switch to Generate tab
-                        self.tabs.setCurrentWidget(self.tab_generate)
-                        # Set the prompt in the input box
-                        self.prompt_edit.setPlainText(prompt)
-                        # Show status message
+                    # Check which tab the image came from
+                    source_tab = history_item.get('source_tab', 'image')
+
+                    if source_tab == 'video':
+                        # Switch to video tab and display image there
+                        if hasattr(self, 'tab_video'):
+                            self.tabs.setCurrentWidget(self.tab_video)
+                            # Display image in video tab's image view
+                            path = history_item.get('path')
+                            if path and path.exists():
+                                from PySide6.QtGui import QPixmap
+                                pixmap = QPixmap(str(path))
+                                if not pixmap.isNull() and hasattr(self.tab_video, 'workspace_widget'):
+                                    scaled = pixmap.scaled(
+                                        self.tab_video.workspace_widget.output_image_label.size(),
+                                        Qt.KeepAspectRatio,
+                                        Qt.SmoothTransformation
+                                    )
+                                    self.tab_video.workspace_widget.output_image_label.setPixmap(scaled)
+                                    self.tab_video.workspace_widget._log_to_console(f"Loaded from history: {path.name}", "INFO")
+                    else:
+                        # Default to image tab
+                        prompt = history_item.get('prompt', '')
+                        if prompt:
+                            # Switch to Generate tab
+                            self.tabs.setCurrentWidget(self.tab_generate)
+                            # Set the prompt in the input box
+                            self.prompt_edit.setPlainText(prompt)
+                            # Show status message
                         self.status_bar.showMessage(f"Loaded prompt from history", 3000)
 
     def _on_history_selection_changed(self, selected, deselected):
-        """Handle history selection change - display the image."""
+        """Handle history selection change - display the image in appropriate tab."""
         indexes = self.history_table.selectionModel().selectedRows()
         if not indexes:
             return
@@ -6052,12 +6074,21 @@ For more detailed information, please refer to the full documentation.
         if date_item:
             history_item = date_item.data(Qt.UserRole)
             if isinstance(history_item, dict):
+                # Check which tab the image came from
+                source_tab = history_item.get('source_tab', 'image')
+
                 path = history_item.get('path')
                 if path and path.exists():
                     try:
                         # Read and display the image
                         image_data = path.read_bytes()
                         self._last_displayed_image_path = path  # Track last displayed image
+
+                        # Display in the appropriate tab
+                        if source_tab == 'video' and hasattr(self, 'tab_video'):
+                            # Display in video tab - handled by _on_history_item_clicked
+                            return
+                        # Otherwise display in image tab (default)
 
                         # TODO: Re-enable auto-crop after fixing the algorithm
                         # Currently disabled as it's cropping incorrectly
@@ -6190,13 +6221,15 @@ For more detailed information, please refer to the full documentation.
             video_index = self.tabs.indexOf(self.tab_video)
 
             # Create the real video tab
-            real_video_tab = VideoProjectTab(self.config.config, providers_dict)
+            real_video_tab = VideoProjectTab(self.config, providers_dict)
 
             # Connect signals
             if hasattr(real_video_tab, 'image_provider_changed'):
                 real_video_tab.image_provider_changed.connect(self._on_video_image_provider_changed)
             if hasattr(real_video_tab, 'llm_provider_changed'):
                 real_video_tab.llm_provider_changed.connect(self._on_video_llm_provider_changed)
+            if hasattr(real_video_tab, 'add_to_history_signal'):
+                real_video_tab.add_to_history_signal.connect(self.add_to_history)
 
             # Replace the placeholder with the real tab
             self.tabs.removeTab(video_index)
@@ -7052,6 +7085,11 @@ For more detailed information, please refer to the full documentation.
 
         # Store the history item data for retrieval
         datetime_item.setData(Qt.UserRole, history_entry)
+
+    def add_to_history(self, history_entry):
+        """Public method to add an entry to history from other tabs."""
+        self.history.append(history_entry)
+        self._add_to_history_table(history_entry)
 
     def _check_for_external_images(self):
         """Check if there are new images in the folder that we didn't generate."""

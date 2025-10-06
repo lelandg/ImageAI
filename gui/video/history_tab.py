@@ -492,8 +492,24 @@ class HistoryTab(QWidget):
         )
         
         if reply == QMessageBox.Yes:
-            # TODO: Implement cleanup
-            QMessageBox.information(self, "Info", "Feature coming soon")
+            from datetime import datetime, timedelta
+            cutoff_date = datetime.now() - timedelta(days=30)
+
+            # Filter events older than 30 days
+            original_count = len(self.all_events)
+            self.all_events = [
+                event for event in self.all_events
+                if event.timestamp >= cutoff_date or event.event_type == EventType.PROJECT_RESTORED
+            ]
+            removed_count = original_count - len(self.all_events)
+
+            # Update display
+            self._apply_filters()
+            QMessageBox.information(
+                self,
+                "Cleanup Complete",
+                f"Removed {removed_count} old events.\nRestored points preserved."
+            )
     
     def _get_event_display_name(self, event_type: EventType) -> str:
         """Get display name for event type"""

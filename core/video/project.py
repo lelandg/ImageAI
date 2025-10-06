@@ -123,6 +123,9 @@ class Scene:
     duration_sec: float = 4.0  # Scene duration in seconds
     images: List[ImageVariant] = field(default_factory=list)  # Generated image variants
     approved_image: Optional[Path] = None  # Selected image for final video
+    video_clip: Optional[Path] = None  # Generated video clip path
+    last_frame: Optional[Path] = None  # Last frame extracted from video clip
+    use_last_frame_as_seed: bool = False  # Use last frame for continuous video
     caption: Optional[str] = None  # Optional caption overlay
     status: SceneStatus = SceneStatus.PENDING
     order: int = 0  # Scene order in timeline
@@ -138,6 +141,9 @@ class Scene:
             "duration_sec": self.duration_sec,
             "images": [img.to_dict() for img in self.images],
             "approved_image": str(self.approved_image) if self.approved_image else None,
+            "video_clip": str(self.video_clip) if self.video_clip else None,
+            "last_frame": str(self.last_frame) if self.last_frame else None,
+            "use_last_frame_as_seed": self.use_last_frame_as_seed,
             "caption": self.caption,
             "status": self.status.value,
             "order": self.order,
@@ -155,6 +161,9 @@ class Scene:
             duration_sec=data.get("duration_sec", 4.0),
             images=[ImageVariant.from_dict(img) for img in data.get("images", [])],
             approved_image=Path(data["approved_image"]) if data.get("approved_image") else None,
+            video_clip=Path(data["video_clip"]) if data.get("video_clip") else None,
+            last_frame=Path(data["last_frame"]) if data.get("last_frame") else None,
+            use_last_frame_as_seed=data.get("use_last_frame_as_seed", False),
             caption=data.get("caption"),
             status=SceneStatus(data.get("status", "pending")),
             order=data.get("order", 0),

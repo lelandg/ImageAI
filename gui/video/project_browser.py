@@ -254,25 +254,17 @@ class ProjectBrowserDialog(QDialog):
 def get_last_project_path():
     """Get the path to the last opened project if auto-reload is enabled"""
     settings = QSettings("ImageAI", "VideoProjects")
-    
+
     auto_reload = settings.value("auto_reload_last", True, type=bool)
-    logger.debug(f"Auto-reload setting: {auto_reload}")
-    
+
     if not auto_reload:
-        logger.debug("Auto-reload disabled")
         return None
-    
+
     last_project = settings.value("last_project")
-    logger.debug(f"Last project setting: {last_project}")
-    
+
     if last_project:
         path = Path(last_project)
         if path.exists():
-            logger.debug(f"Last project exists: {path}")
             return path
-        else:
-            logger.debug(f"Last project does not exist: {path}")
-    else:
-        logger.debug("No last project saved")
-    
+
     return None

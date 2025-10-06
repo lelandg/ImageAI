@@ -15,8 +15,8 @@ from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime
 import time
 
-from ..providers import get_provider_instance
-from .models import Scene
+from providers import get_provider
+from .project import Scene
 from .event_store import EventStore, ProjectEvent, EventType
 
 
@@ -150,7 +150,7 @@ class ImageGenerator:
                 'auth_mode': kwargs.get('auth_mode', 'api-key')
             }
             
-            provider_instance = get_provider_instance(provider, provider_config)
+            provider_instance = get_provider(provider, provider_config)
             
             # Prepare generation parameters
             gen_params = self._prepare_generation_params(provider, model, scene, kwargs)
@@ -277,10 +277,12 @@ class ImageGenerator:
             'stability': 'stability_api_key',
             'local_sd': None  # No API key needed
         }
-        
+
         key_field = key_mappings.get(provider)
         if key_field:
-            return self.config.get(key_field)
+            api_key = self.config.get(key_field)
+            self.logger.debug(f"Getting API key for provider '{provider}': field='{key_field}', has_key={api_key is not None}, config_keys={list(self.config.keys())}")
+            return api_key
         return None
     
     def _prepare_generation_params(self,

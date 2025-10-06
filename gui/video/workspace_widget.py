@@ -14,10 +14,12 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QLineEdit, QTextEdit, QComboBox,
     QSpinBox, QDoubleSpinBox, QTableWidget, QTableWidgetItem,
     QFileDialog, QMessageBox, QSplitter, QProgressBar,
-    QCheckBox, QSlider, QHeaderView
+    QCheckBox, QSlider, QHeaderView, QSizePolicy
 )
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import Qt, Signal, Slot, QEvent, QPoint
+from PySide6.QtGui import QPixmap, QImage, QTextOption, QColor
 
+from core.config import ConfigManager
 from core.video.project import VideoProject, Scene
 from core.video.project_manager import ProjectManager
 from core.video.storyboard import StoryboardGenerator
@@ -25,6 +27,58 @@ from core.video.config import VideoConfig
 from core.security import SecureKeyStorage
 from gui.common.dialog_manager import get_dialog_manager
 from core.llm_models import get_provider_models, get_all_provider_ids, get_provider_display_name
+
+
+class ImageHoverPreview(QLabel):
+    """A popup label that shows full-size image preview on hover"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+        self.setStyleSheet("""
+            QLabel {
+                background-color: white;
+                border: 2px solid #333;
+                border-radius: 5px;
+                padding: 5px;
+            }
+        """)
+        self.setScaledContents(True)
+        self.hide()
+
+    def show_preview(self, image_path: str, cursor_pos: QPoint):
+        """Show preview at cursor position"""
+        try:
+            pixmap = QPixmap(image_path)
+            if pixmap.isNull():
+                return
+
+            # Scale down if image is too large (max 800x600)
+            max_width = 800
+            max_height = 600
+            if pixmap.width() > max_width or pixmap.height() > max_height:
+                pixmap = pixmap.scaled(max_width, max_height, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+            self.setPixmap(pixmap)
+            self.adjustSize()
+
+            # Position the preview near cursor but ensure it stays on screen
+            from PySide6.QtWidgets import QApplication
+            screen_geometry = QApplication.primaryScreen().geometry()
+            x = cursor_pos.x() + 20
+            y = cursor_pos.y() + 20
+
+            # Adjust if preview would go off screen
+            if x + self.width() > screen_geometry.right():
+                x = cursor_pos.x() - self.width() - 20
+            if y + self.height() > screen_geometry.bottom():
+                y = cursor_pos.y() - self.height() - 20
+
+            self.move(x, y)
+            self.show()
+        except Exception as e:
+            logging.getLogger(__name__).error(f"Failed to show image preview: {e}")
 
 
 class WorkspaceWidget(QWidget):
@@ -36,7 +90,7 @@ class WorkspaceWidget(QWidget):
     image_provider_changed = Signal(str)  # provider name
     llm_provider_changed = Signal(str, str)  # provider name, model name
     
-    def __init__(self, config: Dict[str, Any], providers: Dict[str, Any]):
+    def __init__(self, config: ConfigManager, providers: Dict[str, Any]):
         super().__init__()
         self.config = config
         self.providers = providers
@@ -44,9 +98,12 @@ class WorkspaceWidget(QWidget):
         self.project_manager = ProjectManager(self.video_config.get_projects_dir())
         self.current_project = None
         self.logger = logging.getLogger(__name__)
-        
+
+        # Create image preview widget
+        self.image_preview = ImageHoverPreview(self)
+
         self.init_ui()
-        
+
         # Auto-reload last project if enabled
         self.auto_load_last_project()
     
@@ -54,14 +111,25 @@ class WorkspaceWidget(QWidget):
         """Initialize the workspace UI"""
         layout = QVBoxLayout(self)
 
+        # Enable tooltip text wrapping globally for this widget
+        self.setStyleSheet("QToolTip { white-space: pre-wrap; max-width: 400px; }")
+
         # LLM Provider at the top (global setting)
         layout.addWidget(self.create_llm_provider_panel())
 
         # Project header
         layout.addWidget(self.create_project_header())
 
-        # Main content area with splitter
-        splitter = QSplitter(Qt.Horizontal)
+        # Main vertical splitter - top for workspace, bottom for image/console
+        main_splitter = QSplitter(Qt.Vertical)
+
+        # Top section - existing workspace
+        workspace_widget = QWidget()
+        workspace_layout = QVBoxLayout(workspace_widget)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Horizontal splitter for workspace
+        h_splitter = QSplitter(Qt.Horizontal)
 
         # Left panel - Input and settings
         left_panel = QWidget()
@@ -70,22 +138,89 @@ class WorkspaceWidget(QWidget):
         left_layout.addWidget(self.create_settings_panel())
         left_layout.addWidget(self.create_audio_panel())
         left_layout.addStretch()
-        splitter.addWidget(left_panel)
-        
+        h_splitter.addWidget(left_panel)
+
         # Right panel - Storyboard and export
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.addWidget(self.create_storyboard_panel())
         right_layout.addWidget(self.create_export_panel())
         right_layout.addStretch()
-        splitter.addWidget(right_panel)
-        
+        h_splitter.addWidget(right_panel)
+
         # Set initial splitter sizes
-        splitter.setSizes([400, 600])
-        layout.addWidget(splitter)
-        
+        h_splitter.setSizes([400, 600])
+        workspace_layout.addWidget(h_splitter)
+
         # Status bar
-        layout.addWidget(self.create_status_bar())
+        workspace_layout.addWidget(self.create_status_bar())
+
+        main_splitter.addWidget(workspace_widget)
+
+        # Bottom section - Image view and status console
+        bottom_widget = QWidget()
+        bottom_layout = QVBoxLayout(bottom_widget)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Image view and status console in vertical splitter
+        image_console_splitter = QSplitter(Qt.Vertical)
+
+        # Image view
+        self.output_image_label = QLabel()
+        self.output_image_label.setAlignment(Qt.AlignCenter)
+        self.output_image_label.setStyleSheet("border: 1px solid #ccc; background-color: #f5f5f5;")
+        self.output_image_label.setScaledContents(False)
+        self.output_image_label.setMinimumHeight(150)
+        image_console_splitter.addWidget(self.output_image_label)
+
+        # Status console container
+        console_container = QWidget()
+        console_layout = QVBoxLayout(console_container)
+        console_layout.setContentsMargins(0, 0, 0, 0)
+        console_layout.setSpacing(0)
+
+        # Console header
+        console_header = QLabel("Status Console")
+        console_header.setStyleSheet("color: #666; font-size: 9pt; padding: 0px; margin: 0px;")
+        console_header.setMaximumHeight(16)
+        console_layout.addWidget(console_header)
+
+        # Status console - styled like a terminal
+        self.status_console = QTextEdit()
+        self.status_console.setReadOnly(True)
+        self.status_console.setMinimumHeight(50)
+        self.status_console.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.status_console.setStyleSheet("""
+            QTextEdit {
+                background-color: #1e1e1e;
+                color: #cccccc;
+                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+                font-size: 10pt;
+                border: 1px solid #444;
+                padding: 4px;
+                line-height: 1.0;
+            }
+        """)
+        doc = self.status_console.document()
+        doc.setDocumentMargin(0)
+        console_layout.addWidget(self.status_console)
+
+        image_console_splitter.addWidget(console_container)
+
+        # Set initial splitter sizes
+        image_console_splitter.setSizes([300, 100])
+        image_console_splitter.setStretchFactor(0, 3)
+        image_console_splitter.setStretchFactor(1, 1)
+
+        bottom_layout.addWidget(image_console_splitter)
+        main_splitter.addWidget(bottom_widget)
+
+        # Set main splitter sizes (workspace gets more space initially)
+        main_splitter.setSizes([500, 400])
+        main_splitter.setStretchFactor(0, 2)
+        main_splitter.setStretchFactor(1, 1)
+
+        layout.addWidget(main_splitter)
     
     def create_project_header(self) -> QWidget:
         """Create project header with name and controls"""
@@ -141,8 +276,10 @@ class WorkspaceWidget(QWidget):
         # LLM provider for prompts
         layout.addWidget(QLabel("LLM Provider:"))
         self.llm_provider_combo = QComboBox()
-        provider_names = [get_provider_display_name(pid) for pid in get_all_provider_ids()]
-        self.llm_provider_combo.addItems(["None"] + provider_names)
+        # Get available providers based on configured API keys
+        available_providers = self._get_available_llm_providers()
+        self.llm_provider_combo.addItems(available_providers)
+        self.llm_provider_combo.setToolTip("Select the AI provider for prompt enhancement and storyboard generation")
         self.llm_provider_combo.currentTextChanged.connect(self.on_llm_provider_changed)
         layout.addWidget(self.llm_provider_combo)
 
@@ -152,6 +289,7 @@ class WorkspaceWidget(QWidget):
         # Set minimum width to ensure model names are fully visible
         self.llm_model_combo.setMinimumWidth(250)
         self.llm_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.llm_model_combo.setToolTip("Select the specific AI model to use for prompt enhancement")
         self.llm_model_combo.currentTextChanged.connect(lambda: self._auto_save_settings())
         layout.addWidget(self.llm_model_combo)
 
@@ -168,9 +306,11 @@ class WorkspaceWidget(QWidget):
         format_layout.addWidget(QLabel("Format:"))
         self.format_combo = QComboBox()
         self.format_combo.addItems(["Auto-detect", "Timestamped", "Structured", "Plain text"])
+        self.format_combo.setToolTip("Select the format of your input text:\n- Auto-detect: Automatically detect format\n- Timestamped: Text with [MM:SS] timestamps\n- Structured: JSON or structured data\n- Plain text: Unformatted lyrics or text")
         format_layout.addWidget(self.format_combo)
-        
+
         self.load_file_btn = QPushButton("Load File")
+        self.load_file_btn.setToolTip("Load lyrics or text from a file")
         self.load_file_btn.clicked.connect(self.load_input_file)
         format_layout.addWidget(self.load_file_btn)
         
@@ -190,15 +330,18 @@ class WorkspaceWidget(QWidget):
         self.duration_spin.setRange(10, 600)
         self.duration_spin.setValue(120)
         self.duration_spin.setSuffix(" sec")
+        self.duration_spin.setToolTip("Target video length in seconds")
         timing_layout.addWidget(self.duration_spin)
-        
+
         timing_layout.addWidget(QLabel("Pacing:"))
         self.pacing_combo = QComboBox()
         self.pacing_combo.addItems(["Fast", "Medium", "Slow"])
         self.pacing_combo.setCurrentIndex(1)
+        self.pacing_combo.setToolTip("Scene transition pacing:\n- Fast: Quick cuts, energetic\n- Medium: Balanced pacing\n- Slow: Longer scenes, contemplative")
         timing_layout.addWidget(self.pacing_combo)
-        
+
         self.generate_storyboard_btn = QPushButton("Generate Storyboard")
+        self.generate_storyboard_btn.setToolTip("Generate scene breakdown from input text")
         self.generate_storyboard_btn.clicked.connect(self.generate_storyboard)
         timing_layout.addWidget(self.generate_storyboard_btn)
         
@@ -218,20 +361,23 @@ class WorkspaceWidget(QWidget):
         img_layout.addWidget(QLabel("Image Provider:"))
         self.img_provider_combo = QComboBox()
         self.img_provider_combo.addItems(["Google", "OpenAI", "Stability", "Local SD"])
+        self.img_provider_combo.setToolTip("Select the AI provider for image generation")
         self.img_provider_combo.currentTextChanged.connect(self.on_img_provider_changed)
         img_layout.addWidget(self.img_provider_combo)
-        
+
         self.img_model_combo = QComboBox()
         # Set minimum width for image model combo too
         self.img_model_combo.setMinimumWidth(250)
         self.img_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.img_model_combo.setToolTip("Select the specific image generation model")
         self.img_model_combo.currentTextChanged.connect(lambda: self._auto_save_settings())
         img_layout.addWidget(self.img_model_combo)
-        
+
         img_layout.addWidget(QLabel("Variants:"))
         self.variants_spin = QSpinBox()
         self.variants_spin.setRange(1, 4)
         self.variants_spin.setValue(3)
+        self.variants_spin.setToolTip("Number of image variants to generate per scene (1-4)")
         self.variants_spin.valueChanged.connect(lambda: self._auto_save_settings())
         img_layout.addWidget(self.variants_spin)
         
@@ -242,19 +388,25 @@ class WorkspaceWidget(QWidget):
         style_layout = QHBoxLayout()
         style_layout.addWidget(QLabel("Style:"))
         self.prompt_style_combo = QComboBox()
-        self.prompt_style_combo.addItems(["Cinematic", "Artistic", "Photorealistic", "Animated", "Documentary", "Abstract"])
+        self.prompt_style_combo.addItems([
+            "Cinematic", "Artistic", "Photorealistic", "Animated", "Documentary", "Abstract",
+            "Noir", "Fantasy", "Sci-Fi", "Vintage", "Minimalist", "Dramatic"
+        ])
+        self.prompt_style_combo.setToolTip("Visual style for prompt enhancement and image generation")
         self.prompt_style_combo.currentTextChanged.connect(lambda: self._auto_save_settings())
         style_layout.addWidget(self.prompt_style_combo)
 
         style_layout.addWidget(QLabel("Aspect Ratio:"))
         self.aspect_combo = QComboBox()
         self.aspect_combo.addItems(["16:9", "9:16", "1:1", "4:3"])
+        self.aspect_combo.setToolTip("Image aspect ratio:\n- 16:9: Widescreen (landscape)\n- 9:16: Vertical (portrait)\n- 1:1: Square\n- 4:3: Classic TV format")
         style_layout.addWidget(self.aspect_combo)
 
         style_layout.addWidget(QLabel("Resolution:"))
         self.resolution_combo = QComboBox()
         self.resolution_combo.addItems(["720p", "1080p", "4K"])
         self.resolution_combo.setCurrentIndex(1)
+        self.resolution_combo.setToolTip("Target resolution for generated images")
         style_layout.addWidget(self.resolution_combo)
 
         style_layout.addWidget(QLabel("Seed:"))
@@ -262,6 +414,7 @@ class WorkspaceWidget(QWidget):
         self.seed_spin.setRange(-1, 999999)
         self.seed_spin.setValue(-1)
         self.seed_spin.setSpecialValueText("Random")
+        self.seed_spin.setToolTip("Generation seed for reproducibility (-1 for random)")
         style_layout.addWidget(self.seed_spin)
 
         style_layout.addStretch()
@@ -272,6 +425,7 @@ class WorkspaceWidget(QWidget):
         neg_layout.addWidget(QLabel("Negative:"))
         self.negative_prompt = QLineEdit()
         self.negative_prompt.setPlaceholderText("Things to avoid in generation...")
+        self.negative_prompt.setToolTip("Negative prompt: describe what you DON'T want in the images\n(e.g., 'blurry, low quality, text, watermark')")
         neg_layout.addWidget(self.negative_prompt)
         layout.addLayout(neg_layout)
         
@@ -480,39 +634,85 @@ class WorkspaceWidget(QWidget):
         controls_layout = QHBoxLayout()
         
         self.enhance_prompts_btn = QPushButton("Enhance All Prompts")
+        self.enhance_prompts_btn.setToolTip("Use AI to enhance all scene prompts for better image generation")
         self.enhance_prompts_btn.clicked.connect(self.enhance_all_prompts)
         self.enhance_prompts_btn.setEnabled(False)
         controls_layout.addWidget(self.enhance_prompts_btn)
-        
+
         self.generate_images_btn = QPushButton("Generate Images")
+        self.generate_images_btn.setToolTip("Generate images for all scenes with prompts")
         self.generate_images_btn.clicked.connect(self.generate_images)
         self.generate_images_btn.setEnabled(False)
         controls_layout.addWidget(self.generate_images_btn)
-        
+
+        # Use last frame checkbox
+        self.use_last_frame_checkbox = QCheckBox("Use last frame for continuous video")
+        self.use_last_frame_checkbox.setToolTip("When enabled, uses the last frame of the previous clip as the seed image for the next clip")
+        self.use_last_frame_checkbox.setChecked(False)
+        controls_layout.addWidget(self.use_last_frame_checkbox)
+
         controls_layout.addStretch()
-        
+
         self.total_duration_label = QLabel("Total: 0:00")
+        self.total_duration_label.setToolTip("Total video duration based on all scenes")
         controls_layout.addWidget(self.total_duration_label)
         
         layout.addLayout(controls_layout)
         
         # Scene table
         self.scene_table = QTableWidget()
-        self.scene_table.setColumnCount(6)
+        self.scene_table.setColumnCount(10)
         self.scene_table.setHorizontalHeaderLabels([
-            "Scene", "Source", "Duration", "Prompt", "Images", "Status"
+            "#", "🖼️", "✨", "🔄", "📷", "🎬", "Source", "Duration", "Prompt", "⤵️"
         ])
-        
-        # Configure columns
+        # Make table non-selectable
+        self.scene_table.setSelectionMode(QTableWidget.NoSelection)
+        self.scene_table.setFocusPolicy(Qt.NoFocus)
+        # Disable word wrap by default - individual rows can be toggled
+        self.scene_table.setWordWrap(False)
+        self.scene_table.setTextElideMode(Qt.ElideRight)
+        # Set tooltips for headers
+        self.scene_table.horizontalHeaderItem(0).setToolTip("Scene number")
+        self.scene_table.horizontalHeaderItem(1).setToolTip("Generate image for this scene")
+        self.scene_table.horizontalHeaderItem(2).setToolTip("Enhance prompt with AI")
+        self.scene_table.horizontalHeaderItem(3).setToolTip("Undo prompt enhancement")
+        self.scene_table.horizontalHeaderItem(4).setToolTip("Preview\nImage/last frame thumbnail (hover to see full size)")
+        self.scene_table.horizontalHeaderItem(5).setToolTip("Generate Video\nGenerate video clip for this scene")
+        self.scene_table.horizontalHeaderItem(6).setToolTip("Source\nOriginal lyrics or text")
+        self.scene_table.horizontalHeaderItem(7).setToolTip("Duration\nScene duration in seconds")
+        self.scene_table.horizontalHeaderItem(8).setToolTip("Prompt\nAI-enhanced image generation prompt")
+        self.scene_table.horizontalHeaderItem(9).setToolTip("Wrap\nToggle prompt text wrapping for this row")
+        # Configure columns - all resizable by user
         header = self.scene_table.horizontalHeader()
-        header.resizeSection(0, 60)   # Scene
-        header.resizeSection(1, 150)  # Source
-        header.resizeSection(2, 80)   # Duration
+        header.setSectionResizeMode(QHeaderView.Interactive)  # All columns user-resizable
         header.setStretchLastSection(False)
-        header.setSectionResizeMode(3, QHeaderView.Stretch)  # Prompt stretches
-        header.resizeSection(4, 80)   # Images
-        header.resizeSection(5, 80)   # Status
-        
+        # Enable auto-resize of row heights to fit wrapped text
+        self.scene_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # Set initial widths (minimized button/scene columns, moved thumbnail)
+        header.resizeSection(0, 35)   # Scene # - minimized
+        header.resizeSection(1, 40)   # Generate image button - minimized to fit icon
+        header.resizeSection(2, 40)   # Enhance button - minimized to fit icon
+        header.resizeSection(3, 40)   # Undo button - minimized to fit icon
+        header.resizeSection(4, 35)   # Preview icon - minimized
+        header.resizeSection(5, 40)   # Generate video button - minimized to fit icon
+        header.resizeSection(6, 150)  # Source
+        header.resizeSection(7, 80)   # Duration
+        header.resizeSection(8, 400)  # Prompt - wider to show full text
+        header.resizeSection(9, 40)   # Wrap button - minimized to fit icon
+        # Connect to column resize to update wrapped rows dynamically
+        header.sectionResized.connect(self._on_column_resized)
+        # Enable double-click to auto-resize and Ctrl+double-click for all columns
+        header.sectionDoubleClicked.connect(self._on_header_double_clicked)
+        # Track which rows have wrapping enabled
+        self.wrapped_rows = set()
+
+        # Install event filter for hover preview
+        self.scene_table.viewport().installEventFilter(self)
+        self.scene_table.setMouseTracking(True)
+
+        # Connect cell click to show image in image view
+        self.scene_table.cellClicked.connect(self._on_cell_clicked)
+
         layout.addWidget(self.scene_table)
         
         group.setLayout(layout)
@@ -528,15 +728,19 @@ class WorkspaceWidget(QWidget):
         provider_layout.addWidget(QLabel("Render Method:"))
         self.video_provider_combo = QComboBox()
         self.video_provider_combo.addItems(["FFmpeg Slideshow", "Gemini Veo"])
+        self.video_provider_combo.setCurrentIndex(1)  # Default to Gemini Veo
+        self.video_provider_combo.setToolTip("Video rendering method:\n- FFmpeg Slideshow: Traditional slideshow with transitions\n- Gemini Veo: AI-powered video generation")
         self.video_provider_combo.currentTextChanged.connect(self.on_video_provider_changed)
         provider_layout.addWidget(self.video_provider_combo)
-        
+
         self.veo_model_combo = QComboBox()
         self.veo_model_combo.addItems(["veo-3.0-generate-001", "veo-3.0-fast-generate-001", "veo-2.0-generate-001"])
-        self.veo_model_combo.setVisible(False)
+        self.veo_model_combo.setCurrentIndex(0)  # Default to veo-3.0-generate-001
+        self.veo_model_combo.setVisible(True)  # Make visible by default since Veo is default
         # Set minimum width for Veo model combo
         self.veo_model_combo.setMinimumWidth(250)
         self.veo_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.veo_model_combo.setToolTip("Veo model version:\n- veo-3.0: Latest quality\n- veo-3.0-fast: Faster generation\n- veo-2.0: Previous generation")
         provider_layout.addWidget(self.veo_model_combo)
         
         provider_layout.addStretch()
@@ -544,16 +748,19 @@ class WorkspaceWidget(QWidget):
         
         # Export settings
         export_layout = QHBoxLayout()
-        
+
         self.ken_burns_check = QCheckBox("Ken Burns Effect")
         self.ken_burns_check.setChecked(True)
+        self.ken_burns_check.setToolTip("Add slow pan and zoom motion to static images")
         export_layout.addWidget(self.ken_burns_check)
-        
+
         self.transitions_check = QCheckBox("Transitions")
         self.transitions_check.setChecked(True)
+        self.transitions_check.setToolTip("Add crossfade transitions between scenes")
         export_layout.addWidget(self.transitions_check)
-        
+
         self.captions_check = QCheckBox("Captions")
+        self.captions_check.setToolTip("Include lyrics/text as captions in the video")
         export_layout.addWidget(self.captions_check)
         
         export_layout.addStretch()
@@ -561,13 +768,15 @@ class WorkspaceWidget(QWidget):
         
         # Export buttons
         button_layout = QHBoxLayout()
-        
+
         self.preview_btn = QPushButton("Preview")
+        self.preview_btn.setToolTip("Generate a quick preview of the video")
         self.preview_btn.clicked.connect(self.preview_video)
         self.preview_btn.setEnabled(False)
         button_layout.addWidget(self.preview_btn)
-        
+
         self.render_btn = QPushButton("Render Video")
+        self.render_btn.setToolTip("Render the final video with all settings applied")
         self.render_btn.clicked.connect(self.render_video)
         self.render_btn.setEnabled(False)
         button_layout.addWidget(self.render_btn)
@@ -677,7 +886,7 @@ class WorkspaceWidget(QWidget):
             except Exception as e:
                 self.logger.error(f"Failed to open project: {e}", exc_info=True)
                 dialog_manager = get_dialog_manager(self)
-            dialog_manager.show_error("Error", f"Failed to open project: {e}")
+                dialog_manager.show_error("Error", f"Failed to open project: {e}")
     
     def save_project(self):
         """Save current project"""
@@ -686,25 +895,9 @@ class WorkspaceWidget(QWidget):
             project_name = self.project_name.text().strip() or "Untitled"
             self.current_project = VideoProject(name=project_name)
             self.update_ui_state()
-        
-        # Debug: Log combo values BEFORE update
-        self.logger.info("=== BEFORE update_project_from_ui ===")
-        self.logger.info(f"LLM combo index: {self.llm_provider_combo.currentIndex()}, text: '{self.llm_provider_combo.currentText()}'")
-        self.logger.info(f"LLM model combo index: {self.llm_model_combo.currentIndex()}, text: '{self.llm_model_combo.currentText()}'")
-        self.logger.info(f"Image combo index: {self.img_provider_combo.currentIndex()}, text: '{self.img_provider_combo.currentText()}'")
-        self.logger.info(f"Image model combo index: {self.img_model_combo.currentIndex()}, text: '{self.img_model_combo.currentText()}'")
-        self.logger.info(f"Current project LLM: {self.current_project.llm_provider}/{self.current_project.llm_model}")
-        self.logger.info(f"Current project Image: {self.current_project.image_provider}/{self.current_project.image_model}")
-        
+
         try:
             self.update_project_from_ui()
-            
-            # Debug: Log what we're saving AFTER update
-            self.logger.info("=== AFTER update_project_from_ui ===")
-            num_scenes = len(self.current_project.scenes) if self.current_project.scenes else 0
-            self.logger.info(f"Saving project with {num_scenes} scenes")
-            self.logger.info(f"Saving LLM: {self.current_project.llm_provider}/{self.current_project.llm_model}")
-            self.logger.info(f"Saving Image: {self.current_project.image_provider}/{self.current_project.image_model}")
             self.logger.info(f"Saving Variants: {self.current_project.variants}")
             self.logger.info(f"Saving Ken Burns: {self.current_project.ken_burns}")
             
@@ -937,9 +1130,6 @@ class WorkspaceWidget(QWidget):
                         scene.metadata['llm_end_time'] = timed_lyric.end_time
                         if timed_lyric.section_type:
                             scene.metadata['section'] = timed_lyric.section_type
-                        
-                        self.logger.debug(f"Scene {i}: Updated duration {old_duration:.2f}s -> {scene.duration_sec:.2f}s")
-                        self.logger.debug(f"  Text: '{scene.source[:50]}...' Time: {timed_lyric.start_time:.2f}-{timed_lyric.end_time:.2f}")
                         
                         lyric_index += 1
                         updated_count += 1
@@ -1272,7 +1462,6 @@ class WorkspaceWidget(QWidget):
                             )
                         scene.prompt = enhanced
                         enhanced_count += 1
-                        self.logger.debug(f"Enhanced: '{original[:30]}...' -> '{enhanced[:50]}...'")
                 except Exception as e:
                     self.logger.warning(f"Failed to enhance prompt for scene: {e}")
             
@@ -1285,25 +1474,443 @@ class WorkspaceWidget(QWidget):
         """Populate scene table with project scenes"""
         if not self.current_project:
             return
-        
+
         self.scene_table.setRowCount(len(self.current_project.scenes))
-        
+
         total_duration = 0
         for i, scene in enumerate(self.current_project.scenes):
+            # Column 0: Scene number
             self.scene_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
-            self.scene_table.setItem(i, 1, QTableWidgetItem(scene.source[:50] if scene.source else ""))
-            self.scene_table.setItem(i, 2, QTableWidgetItem(f"{scene.duration_sec:.1f}s"))
-            self.scene_table.setItem(i, 3, QTableWidgetItem(scene.prompt or ""))
-            self.scene_table.setItem(i, 4, QTableWidgetItem(str(len(scene.images))))
-            self.scene_table.setItem(i, 5, QTableWidgetItem("Ready" if scene.images else "Pending"))
-            
+
+            # Column 1: Generate image button
+            generate_btn = QPushButton("🖼️")
+            generate_btn.setToolTip("Generate image for this scene")
+            generate_btn.setMaximumWidth(35)
+            generate_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
+            generate_btn.clicked.connect(lambda checked, idx=i: self.generate_single_scene(idx))
+            self.scene_table.setCellWidget(i, 1, generate_btn)
+            # Column 2: Enhance prompt button
+            enhance_btn = QPushButton("✨")
+            enhance_btn.setToolTip("Enhance this prompt with AI")
+            enhance_btn.setMaximumWidth(35)
+            enhance_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
+            enhance_btn.clicked.connect(lambda checked, idx=i: self.enhance_single_prompt(idx))
+            self.scene_table.setCellWidget(i, 2, enhance_btn)
+            # Column 3: Undo/Revert button
+            revert_btn = QPushButton("🔄")
+            revert_btn.setToolTip("Undo prompt enhancement (revert to original)")
+            revert_btn.setMaximumWidth(35)
+            revert_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
+            revert_btn.setEnabled(scene.prompt != scene.source)  # Only enable if prompt was modified
+            revert_btn.clicked.connect(lambda checked, idx=i: self.revert_single_prompt(idx))
+            self.scene_table.setCellWidget(i, 3, revert_btn)
+
+            # Column 4: Preview thumbnail
+            preview_item = QTableWidgetItem("🎞️" if scene.video_clip else ("🖼️" if scene.images else "⬜"))
+            if scene.video_clip:
+                preview_item.setToolTip("Video clip generated - hover to preview last frame")
+            elif scene.images:
+                preview_item.setToolTip("Hover to preview full-size image")
+            else:
+                preview_item.setToolTip("No image generated yet")
+            self.scene_table.setItem(i, 4, preview_item)
+
+            # Column 5: Generate video button
+            video_btn = QPushButton("🎬")
+            video_btn.setToolTip("Generate video clip for this scene")
+            video_btn.setMaximumWidth(35)
+            video_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
+            video_btn.setEnabled(scene.prompt and len(scene.prompt) > 0)  # Only enable if prompt exists
+            video_btn.clicked.connect(lambda checked, idx=i: self.generate_video_clip(idx))
+            self.scene_table.setCellWidget(i, 5, video_btn)
+
+            # Column 6: Source text
+            source_item = QTableWidgetItem(scene.source[:50] if scene.source else "")
+            source_item.setToolTip(scene.source if scene.source else "")
+            self.scene_table.setItem(i, 6, source_item)
+
+            # Column 7: Duration
+            duration_item = QTableWidgetItem(f"{scene.duration_sec:.1f}s")
+            duration_item.setToolTip(f"Duration: {scene.duration_sec:.1f} seconds")
+            self.scene_table.setItem(i, 7, duration_item)
+
+            # Column 8: Prompt (shows full text, no wrap by default)
+            display_prompt = (scene.prompt or "").replace("\n\n", "\n")
+            prompt_item = QTableWidgetItem(display_prompt)
+            # Wrap tooltip in <qt> tags to enable automatic wrapping
+            tooltip_text = f"<qt>{display_prompt}</qt>" if display_prompt else "No prompt yet - enhance to generate"
+            prompt_item.setToolTip(tooltip_text)
+            self.scene_table.setItem(i, 8, prompt_item)
+
+            # Column 9: Wrap toggle button
+            wrap_btn = QPushButton("⤵️")
+            wrap_btn.setToolTip("Toggle prompt text wrapping for this row")
+            wrap_btn.setMaximumWidth(35)
+            wrap_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
+            wrap_btn.setCheckable(True)
+            wrap_btn.setChecked(False)  # Start unwrapped
+            wrap_btn.clicked.connect(lambda checked, idx=i: self.toggle_row_wrap(idx, checked))
+            self.scene_table.setCellWidget(i, 9, wrap_btn)
+
             total_duration += scene.duration_sec
-        
+
         # Update total duration
         minutes = int(total_duration // 60)
         seconds = int(total_duration % 60)
         self.total_duration_label.setText(f"Total: {minutes}:{seconds:02d}")
     
+    def enhance_single_prompt(self, scene_index: int):
+        """Enhance a single scene's prompt with AI"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        try:
+            # Get LLM settings
+            provider = self.llm_provider_combo.currentText()
+            model = self.llm_model_combo.currentText()
+            prompt_style = self.prompt_style_combo.currentText()
+
+            # Map style to enum
+            from core.video.prompt_engine import PromptStyle
+            style_map = {
+                "Cinematic": PromptStyle.CINEMATIC,
+                "Artistic": PromptStyle.ARTISTIC,
+                "Photorealistic": PromptStyle.PHOTOREALISTIC,
+                "Animated": PromptStyle.ANIMATED,
+                "Documentary": PromptStyle.DOCUMENTARY,
+                "Abstract": PromptStyle.ABSTRACT
+            }
+            style = style_map.get(prompt_style, PromptStyle.CINEMATIC)
+
+            # Create LLM provider
+            from core.video.prompt_engine import UnifiedLLMProvider
+            api_config = {
+                'openai_api_key': self.config.get('openai_api_key'),
+                'anthropic_api_key': self.config.get('anthropic_api_key'),
+                'google_api_key': self.config.get('google_api_key')
+            }
+            llm = UnifiedLLMProvider(api_config)
+
+            # Get aspect ratio for resolution hint
+            aspect_ratio = self.aspect_combo.currentText()
+
+            # Enhance the prompt
+            original = scene.source
+            enhanced = llm.enhance_prompt(
+                original,
+                provider=provider.lower(),
+                model=model,
+                style=style,
+                temperature=0.7,
+                max_tokens=150
+            )
+
+            if enhanced and enhanced != original:
+                # Add continuity hints if enabled
+                if self.enable_continuity_checkbox.isChecked():
+                    from core.video.continuity import ContinuityManager
+                    continuity = ContinuityManager()
+                    project_name = self.current_project.metadata.get('title', 'Untitled')
+                    enhanced = continuity.enhance_prompt_for_continuity(
+                        enhanced,
+                        scene_index=scene_index,
+                        project_id=project_name,
+                        provider=provider,
+                        aspect_ratio=aspect_ratio
+                    )
+
+                # Update scene
+                scene.prompt = enhanced
+
+                # Save project
+                self.save_project()
+
+                # Refresh table
+                self.populate_scene_table()
+
+                self.logger.info(f"Enhanced prompt for scene {scene_index + 1}")
+            else:
+                self.logger.warning(f"No enhancement for scene {scene_index + 1}")
+
+        except Exception as e:
+            self.logger.error(f"Failed to enhance prompt for scene {scene_index + 1}: {e}")
+            QMessageBox.warning(self, "Enhancement Failed", f"Failed to enhance prompt: {e}")
+
+    def revert_single_prompt(self, scene_index: int):
+        """Revert a single scene's prompt to original source text"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        # Revert to source
+        scene.prompt = scene.source
+
+        # Save project
+        self.save_current_project()
+
+        # Refresh table
+        self.populate_scene_table()
+
+        self.logger.info(f"Reverted prompt for scene {scene_index + 1}")
+
+    def toggle_row_wrap(self, row_index: int, wrap_enabled: bool):
+        """Toggle text wrapping for a specific row's prompt column"""
+        if row_index >= self.scene_table.rowCount():
+            return
+        # Get the current scene and prompt text
+        if not self.current_project or row_index >= len(self.current_project.scenes):
+            return
+        scene = self.current_project.scenes[row_index]
+        prompt_text = (scene.prompt or "").replace("\n\n", "\n")
+        if wrap_enabled:
+            # Add to tracked wrapped rows
+            self.wrapped_rows.add(row_index)
+            # Calculate number of rows needed
+            column_width = self.scene_table.columnWidth(7)
+            num_lines = self._calculate_wrapped_lines(prompt_text, column_width)
+            # Replace table item with a wrapping QTextEdit widget
+            text_widget = QTextEdit()
+            text_widget.setPlainText(prompt_text)
+            text_widget.setReadOnly(True)
+            text_widget.setWordWrapMode(QTextOption.WordWrap)
+            text_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            text_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+            text_widget.setFrameStyle(QTextEdit.NoFrame)
+            # Wrap tooltip in <qt> tags to enable automatic wrapping
+            text_widget.setToolTip(f"<qt>{prompt_text}</qt>" if prompt_text else "No prompt yet - enhance to generate")
+            # Calculate height based on content
+            doc = text_widget.document()
+            doc.setTextWidth(column_width)
+            height = int(doc.size().height() + 10)
+            self.scene_table.setCellWidget(row_index, 7, text_widget)
+            self.scene_table.setRowHeight(row_index, height)
+            self.logger.debug(f"Row {row_index + 1} prompt wrap enabled ({num_lines} lines)")
+        else:
+            # Remove from tracked wrapped rows
+            self.wrapped_rows.discard(row_index)
+            # Remove widget and restore regular table item
+            self.scene_table.removeCellWidget(row_index, 7)
+            prompt_item = QTableWidgetItem(prompt_text)
+            # Wrap tooltip in <qt> tags to enable automatic wrapping
+            tooltip_text = f"<qt>{prompt_text}</qt>" if prompt_text else "No prompt yet - enhance to generate"
+            prompt_item.setToolTip(tooltip_text)
+            self.scene_table.setItem(row_index, 7, prompt_item)
+            # Reset to default row height
+            self.scene_table.resizeRowToContents(row_index)
+            self.logger.debug(f"Row {row_index + 1} prompt wrap disabled")
+
+    def _calculate_wrapped_lines(self, text: str, width: int) -> int:
+        """Calculate number of lines needed for wrapped text"""
+        if not text:
+            return 1
+        # Create a temporary QTextEdit to calculate wrapped height (keep reference alive)
+        temp_edit = QTextEdit()
+        temp_doc = temp_edit.document()
+        temp_doc.setPlainText(text)
+        temp_doc.setTextWidth(width)
+        # Estimate lines based on height (assuming ~20px per line)
+        height = temp_doc.size().height()
+        return max(1, int(height / 20))
+
+    def _on_column_resized(self, logical_index: int, old_size: int, new_size: int):
+        """Handle column resize to update wrapped text dynamically"""
+        if logical_index != 7:  # Only care about prompt column
+            return
+        # Update all wrapped rows
+        for row_index in self.wrapped_rows:
+            widget = self.scene_table.cellWidget(row_index, 7)
+            if isinstance(widget, QTextEdit):
+                # Recalculate height based on new width
+                doc = widget.document()
+                doc.setTextWidth(new_size)
+                height = int(doc.size().height() + 10)
+                self.scene_table.setRowHeight(row_index, height)
+
+    def eventFilter(self, obj, event):
+        """Event filter for scene table to handle image preview on hover"""
+        # Safety check: ensure scene_table still exists
+        try:
+            if not hasattr(self, 'scene_table') or not self.scene_table:
+                return super().eventFilter(obj, event)
+
+            viewport = self.scene_table.viewport()
+        except (RuntimeError, AttributeError):
+            # Widget has been deleted, remove event filter
+            return super().eventFilter(obj, event)
+
+        if obj == viewport:
+            if event.type() == QEvent.MouseMove:
+                # Get the item under the cursor
+                pos = event.pos()
+                item = self.scene_table.itemAt(pos)
+
+                if item and item.column() == 4:  # Preview column (now column 4, swapped with video button)
+                    row = item.row()
+                    if self.current_project and row < len(self.current_project.scenes):
+                        scene = self.current_project.scenes[row]
+                        # Prioritize last frame if available, otherwise show first image
+                        preview_path = None
+                        if scene.last_frame and scene.last_frame.exists():
+                            preview_path = scene.last_frame
+                        elif scene.images and len(scene.images) > 0:
+                            # Handle both Path objects and ImageVariant objects
+                            img = scene.images[0]
+                            preview_path = img.path if hasattr(img, 'path') else img
+
+                        if preview_path:
+                            # Show preview
+                            global_pos = viewport.mapToGlobal(pos)
+                            self.image_preview.show_preview(str(preview_path), global_pos)
+                            return True
+
+                # Hide preview if not over preview column with image
+                self.image_preview.hide()
+
+            elif event.type() == QEvent.Leave:
+                # Hide preview when mouse leaves table
+                self.image_preview.hide()
+
+        return super().eventFilter(obj, event)
+
+    def _on_header_double_clicked(self, logical_index: int):
+        """Handle header double-click to auto-resize columns"""
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import Qt
+
+        modifiers = QApplication.keyboardModifiers()
+
+        if modifiers & Qt.ControlModifier:
+            # Ctrl+double-click: resize all columns to contents
+            for col in range(self.scene_table.columnCount()):
+                self.scene_table.resizeColumnToContents(col)
+        else:
+            # Normal double-click: resize only the clicked column
+            self.scene_table.resizeColumnToContents(logical_index)
+
+    def _on_cell_clicked(self, row: int, column: int):
+        """Handle cell click to display image in image view"""
+        # Column 4 is the preview column
+        if column == 4 and self.current_project and row < len(self.current_project.scenes):
+            scene = self.current_project.scenes[row]
+
+            # Display the first image if available
+            if scene.images and len(scene.images) > 0:
+                from pathlib import Path
+                from PySide6.QtGui import QPixmap
+
+                img_path = scene.images[0]
+                # Handle both Path objects and string paths
+                if hasattr(img_path, 'path'):
+                    img_path = img_path.path
+                img_path = Path(img_path)
+
+                if img_path.exists():
+                    pixmap = QPixmap(str(img_path))
+                    if not pixmap.isNull():
+                        # Scale to fit the image view
+                        scaled = pixmap.scaled(
+                            self.output_image_label.size(),
+                            Qt.KeepAspectRatio,
+                            Qt.SmoothTransformation
+                        )
+                        self.output_image_label.setPixmap(scaled)
+
+                        # Log to status console
+                        self._log_to_console(f"Displaying image: {img_path.name}")
+            elif scene.last_frame and scene.last_frame.exists():
+                # Display last frame if no images but video clip exists
+                from pathlib import Path
+                from PySide6.QtGui import QPixmap
+
+                pixmap = QPixmap(str(scene.last_frame))
+                if not pixmap.isNull():
+                    scaled = pixmap.scaled(
+                        self.output_image_label.size(),
+                        Qt.KeepAspectRatio,
+                        Qt.SmoothTransformation
+                    )
+                    self.output_image_label.setPixmap(scaled)
+
+                    # Log to status console
+                    self._log_to_console(f"Displaying last frame: {scene.last_frame.name}")
+
+    def _log_to_console(self, message: str, level: str = "INFO"):
+        """Log a message to the status console"""
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%H:%M:%S")
+
+        # Color coding based on level
+        colors = {
+            "INFO": "#cccccc",
+            "SUCCESS": "#4CAF50",
+            "WARNING": "#FFC107",
+            "ERROR": "#F44336"
+        }
+        color = colors.get(level, "#cccccc")
+
+        html = f'<span style="color: {color};">[{timestamp}] {message}</span>'
+        self.status_console.append(html)
+
+    def generate_single_scene(self, scene_index: int):
+        """Generate image for a single scene"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        # Ensure scene has a prompt
+        if not scene.prompt:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Prompt", "Please enhance the prompt first before generating images.")
+            return
+
+        # Emit generation request for just this scene
+        params = self.gather_generation_params()
+        params['scene_indices'] = [scene_index]  # Only generate for this scene
+        self.generation_requested.emit("generate_images", params)
+
+    def generate_video_clip(self, scene_index: int):
+        """Generate video clip for a single scene"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        # Ensure scene has a prompt
+        if not scene.prompt:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Prompt", "Please enhance the prompt first before generating video clips.")
+            return
+
+        # Determine seed image
+        seed_image = None
+        if self.use_last_frame_checkbox.isChecked() and scene_index > 0:
+            # Use last frame from previous scene if available
+            prev_scene = self.current_project.scenes[scene_index - 1]
+            if prev_scene.last_frame and prev_scene.last_frame.exists():
+                seed_image = prev_scene.last_frame
+                scene.use_last_frame_as_seed = True
+
+        # If no seed from previous scene, use scene's approved image or first image
+        if not seed_image:
+            if scene.approved_image and scene.approved_image.exists():
+                seed_image = scene.approved_image
+            elif scene.images and len(scene.images) > 0:
+                seed_image = scene.images[0].path if hasattr(scene.images[0], 'path') else scene.images[0]
+            scene.use_last_frame_as_seed = False
+
+        # Emit generation request for video clip
+        params = self.gather_generation_params()
+        params['scene_indices'] = [scene_index]  # Only generate for this scene
+        params['seed_image'] = str(seed_image) if seed_image else None
+        params['generate_video'] = True  # Flag to indicate video generation
+        self.generation_requested.emit("generate_video_clip", params)
+
     def enhance_all_prompts(self):
         """Request prompt enhancement"""
         self.generation_requested.emit("enhance_prompts", self.gather_generation_params())
@@ -1322,6 +1929,14 @@ class WorkspaceWidget(QWidget):
     
     def gather_generation_params(self) -> Dict[str, Any]:
         """Gather all generation parameters"""
+        # Get API keys
+        google_key = self.config.get_api_key('google')
+        openai_key = self.config.get_api_key('openai')
+        anthropic_key = self.config.get_api_key('anthropic')
+        stability_key = self.config.get_api_key('stability')
+
+        self.logger.debug(f"Gathering generation params - API keys: google={google_key is not None}, openai={openai_key is not None}, anthropic={anthropic_key is not None}, stability={stability_key is not None}")
+
         return {
             'provider': self.img_provider_combo.currentText().lower(),
             'model': self.img_model_combo.currentText(),
@@ -1338,9 +1953,10 @@ class WorkspaceWidget(QWidget):
             'ken_burns': self.ken_burns_check.isChecked(),
             'transitions': self.transitions_check.isChecked(),
             'captions': self.captions_check.isChecked(),
-            'google_api_key': self.config.get('google_api_key'),
-            'openai_api_key': self.config.get('openai_api_key'),
-            'stability_api_key': self.config.get('stability_api_key'),
+            'google_api_key': google_key,
+            'openai_api_key': openai_key,
+            'anthropic_api_key': anthropic_key,
+            'stability_api_key': stability_key,
         }
     
     def set_image_provider(self, provider_name: str):
@@ -1401,7 +2017,27 @@ class WorkspaceWidget(QWidget):
 
         # Auto-save if we have a project
         self._auto_save_settings()
-    
+
+    def _get_available_llm_providers(self) -> list:
+        """Get list of LLM providers with configured API keys"""
+        available = ["None"]
+
+        # Map providers to their API key config names
+        key_map = {
+            "OpenAI": "openai_api_key",
+            "Anthropic": "anthropic_api_key",
+            "Google": "google_api_key",
+            "Ollama": None,  # No key needed (local)
+            "LM Studio": None  # No key needed (local)
+        }
+
+        for provider, key_name in key_map.items():
+            # If no key needed (local providers) or key is configured
+            if key_name is None or self.config.get(key_name):
+                available.append(provider)
+
+        return available
+
     def on_img_provider_changed(self, provider: str):
         """Handle image provider change"""
         # Clear the model combo first
@@ -1458,9 +2094,8 @@ class WorkspaceWidget(QWidget):
             try:
                 self.update_project_from_ui()
                 self.project_manager.save_project(self.current_project)
-                self.logger.debug("Auto-saved project settings")
             except Exception as e:
-                self.logger.debug(f"Could not auto-save: {e}")
+                pass
     
     def load_input_file(self):
         """Load input from file"""
@@ -1679,14 +2314,16 @@ class WorkspaceWidget(QWidget):
         has_project = self.current_project is not None
         has_scenes = has_project and len(self.current_project.scenes) > 0
         has_images = has_scenes and any(s.images for s in self.current_project.scenes)
-        
+        has_video_clips = has_scenes and any(s.video_clip for s in self.current_project.scenes)
+
         self.save_btn.setEnabled(has_project)
         self.save_as_btn.setEnabled(has_project)
         self.generate_storyboard_btn.setEnabled(True)
         self.enhance_prompts_btn.setEnabled(has_scenes)
         self.generate_images_btn.setEnabled(has_scenes)
         self.preview_btn.setEnabled(has_images)
-        self.render_btn.setEnabled(has_images)
+        # Enable render button if there are either images OR video clips
+        self.render_btn.setEnabled(has_images or has_video_clips)
     
     def update_project_from_ui(self):
         """Update project from UI values"""
@@ -1708,10 +2345,7 @@ class WorkspaceWidget(QWidget):
         # Save LLM provider settings - preserve exact case
         llm_provider = self.llm_provider_combo.currentText()
         llm_model = self.llm_model_combo.currentText() if llm_provider != "None" else None
-        
-        # Debug logging
-        self.logger.info(f"Saving LLM combo values - Provider: '{llm_provider}', Model: '{llm_model}'")
-        
+
         if llm_provider != "None":
             self.current_project.llm_provider = llm_provider  # Keep exact case
             self.current_project.llm_model = llm_model
@@ -1722,10 +2356,7 @@ class WorkspaceWidget(QWidget):
         # Save image provider settings - preserve exact case
         img_provider = self.img_provider_combo.currentText()
         img_model = self.img_model_combo.currentText()
-        
-        # Debug logging
-        self.logger.info(f"Saving Image combo values - Provider: '{img_provider}', Model: '{img_model}'")
-        
+
         self.current_project.image_provider = img_provider  # Keep exact case
         self.current_project.image_model = img_model
         
@@ -2038,14 +2669,7 @@ class WorkspaceWidget(QWidget):
             if not hasattr(self.current_project, 'variants'):
                 self.logger.info("Upgrading project format and saving...")
                 self.save_project()
-            
-            # Debug: Log combo values AFTER loading
-            self.logger.info("=== AFTER load_project_to_ui ===")
-            self.logger.info(f"LLM combo index: {self.llm_provider_combo.currentIndex()}, text: '{self.llm_provider_combo.currentText()}'")
-            self.logger.info(f"LLM model combo index: {self.llm_model_combo.currentIndex()}, text: '{self.llm_model_combo.currentText()}'")
-            self.logger.info(f"Image combo index: {self.img_provider_combo.currentIndex()}, text: '{self.img_provider_combo.currentText()}'")
-            self.logger.info(f"Image model combo index: {self.img_model_combo.currentIndex()}, text: '{self.img_model_combo.currentText()}'")
-            
+
         except Exception as e:
             self.logger.error(f"Error loading project to UI: {e}", exc_info=True)
             dialog_manager = get_dialog_manager(self)

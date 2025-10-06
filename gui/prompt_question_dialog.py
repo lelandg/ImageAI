@@ -565,6 +565,8 @@ class PromptQuestionDialog(QDialog):
                 api_key = self.config.get_api_key('openai')
             elif llm_provider.lower() in ["google", "gemini"]:
                 api_key = self.config.get_api_key('google')
+            elif llm_provider.lower() in ["anthropic", "claude"]:
+                api_key = self.config.get_api_key('anthropic')
 
         if not api_key:
             QMessageBox.warning(self, "API Key Missing",

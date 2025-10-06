@@ -5,6 +5,21 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2025-01-06
+
+### Fixed
+- **Video Tab Image Generation**: Fixed critical API key retrieval issue preventing image generation in video projects
+  - Refactored video generation to use fresh ConfigManager instance like image tab
+  - Bypassed provider cache to ensure proper client initialization with `use_cache=False` parameter
+  - Now calls providers directly instead of through ImageGenerator wrapper
+  - Fixed Scene.images storage to use ImageVariant objects instead of raw Path objects
+  - Fixed error handler indentation issue in workspace_widget.py
+  - Successfully restored corrupted project file from backup
+
+### Notes
+- Video generation is not fully functional but still in active development
+- Some advanced video features remain incomplete
+
 ## [0.20.0] - 2025-09-29
 
 ### Added
