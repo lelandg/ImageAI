@@ -14,9 +14,10 @@ from PySide6.QtWidgets import (
     QPushButton, QLabel, QLineEdit, QTextEdit, QComboBox,
     QSpinBox, QDoubleSpinBox, QTableWidget, QTableWidgetItem,
     QFileDialog, QMessageBox, QSplitter, QProgressBar,
-    QCheckBox, QSlider, QHeaderView, QSizePolicy
+    QCheckBox, QSlider, QHeaderView, QSizePolicy, QDialog,
+    QDialogButtonBox, QListWidget, QListWidgetItem, QInputDialog
 )
-from PySide6.QtCore import Qt, Signal, Slot, QEvent, QPoint
+from PySide6.QtCore import Qt, Signal, Slot, QEvent, QPoint, QTimer
 from PySide6.QtGui import QPixmap, QImage, QTextOption, QColor
 
 from core.config import ConfigManager
@@ -81,6 +82,160 @@ class ImageHoverPreview(QLabel):
             logging.getLogger(__name__).error(f"Failed to show image preview: {e}")
 
 
+class ManageStylesDialog(QDialog):
+    """Dialog for managing custom prompt styles"""
+
+    def __init__(self, config: ConfigManager, parent=None):
+        super().__init__(parent)
+        self.config = config
+        self.setWindowTitle("Manage Custom Styles")
+        self.setMinimumWidth(400)
+        self.setMinimumHeight(300)
+
+        layout = QVBoxLayout(self)
+
+        # Instructions
+        info_label = QLabel("Manage your custom prompt styles. Built-in styles cannot be edited.")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+
+        # List widget
+        self.list_widget = QListWidget()
+        self.list_widget.itemDoubleClicked.connect(self._edit_style)
+        layout.addWidget(self.list_widget)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+
+        self.add_btn = QPushButton("Add")
+        self.add_btn.clicked.connect(self._add_style)
+        button_layout.addWidget(self.add_btn)
+
+        self.edit_btn = QPushButton("Edit")
+        self.edit_btn.clicked.connect(self._edit_style)
+        button_layout.addWidget(self.edit_btn)
+
+        self.delete_btn = QPushButton("Delete")
+        self.delete_btn.clicked.connect(self._delete_style)
+        button_layout.addWidget(self.delete_btn)
+
+        button_layout.addStretch()
+        layout.addLayout(button_layout)
+
+        # Dialog buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Close)
+        button_box.rejected.connect(self.accept)
+        layout.addWidget(button_box)
+
+        # Load styles
+        self._load_styles()
+
+        # Update button states
+        self.list_widget.itemSelectionChanged.connect(self._update_buttons)
+        self._update_buttons()
+
+    def _load_styles(self):
+        """Load custom styles into the list"""
+        self.list_widget.clear()
+        custom_styles = self.config.get('custom_prompt_styles', [])
+        for style in custom_styles:
+            self.list_widget.addItem(style)
+
+    def _update_buttons(self):
+        """Update button states based on selection"""
+        has_selection = bool(self.list_widget.selectedItems())
+        self.edit_btn.setEnabled(has_selection)
+        self.delete_btn.setEnabled(has_selection)
+
+    def _add_style(self):
+        """Add a new custom style"""
+        text, ok = QInputDialog.getText(
+            self, "Add Custom Style", "Enter style name:",
+            QLineEdit.Normal, ""
+        )
+        if ok and text.strip():
+            text = text.strip()
+            # Check for duplicates
+            custom_styles = self.config.get('custom_prompt_styles', [])
+            if text in custom_styles:
+                QMessageBox.warning(self, "Duplicate", f"Style '{text}' already exists.")
+                return
+
+            # Add to config
+            custom_styles.append(text)
+            self.config.set('custom_prompt_styles', custom_styles)
+            self.config.save()
+
+            # Refresh list
+            self._load_styles()
+
+    def _edit_style(self):
+        """Edit selected custom style"""
+        selected_items = self.list_widget.selectedItems()
+        if not selected_items:
+            return
+
+        item = selected_items[0]
+        old_text = item.text()
+
+        text, ok = QInputDialog.getText(
+            self, "Edit Custom Style", "Enter new style name:",
+            QLineEdit.Normal, old_text
+        )
+        if ok and text.strip() and text.strip() != old_text:
+            text = text.strip()
+            # Check for duplicates
+            custom_styles = self.config.get('custom_prompt_styles', [])
+            if text in custom_styles:
+                QMessageBox.warning(self, "Duplicate", f"Style '{text}' already exists.")
+                return
+
+            # Update in config
+            try:
+                index = custom_styles.index(old_text)
+                custom_styles[index] = text
+                self.config.set('custom_prompt_styles', custom_styles)
+                self.config.save()
+
+                # Refresh list
+                self._load_styles()
+            except ValueError:
+                pass
+
+    def _delete_style(self):
+        """Delete selected custom style"""
+        selected_items = self.list_widget.selectedItems()
+        if not selected_items:
+            return
+
+        item = selected_items[0]
+        text = item.text()
+
+        reply = QMessageBox.question(
+            self, "Confirm Delete",
+            f"Delete custom style '{text}'?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            # Remove from config
+            custom_styles = self.config.get('custom_prompt_styles', [])
+            try:
+                custom_styles.remove(text)
+                self.config.set('custom_prompt_styles', custom_styles)
+                self.config.save()
+
+                # Refresh list
+                self._load_styles()
+            except ValueError:
+                pass
+
+    def get_custom_styles(self):
+        """Get list of custom styles"""
+        return self.config.get('custom_prompt_styles', [])
+
+
 class WorkspaceWidget(QWidget):
     """Main workspace for video project editing"""
 
@@ -92,20 +247,26 @@ class WorkspaceWidget(QWidget):
     
     def __init__(self, config: ConfigManager, providers: Dict[str, Any]):
         super().__init__()
+        self.logger = logging.getLogger(__name__)
+        self.logger.info("=== WorkspaceWidget.__init__ CALLED ===")
+
         self.config = config
         self.providers = providers
         self.video_config = VideoConfig()
         self.project_manager = ProjectManager(self.video_config.get_projects_dir())
         self.current_project = None
-        self.logger = logging.getLogger(__name__)
 
         # Create image preview widget
         self.image_preview = ImageHoverPreview(self)
 
+        self.logger.info("Calling init_ui()...")
         self.init_ui()
+        self.logger.info("init_ui() complete")
 
-        # Auto-reload last project if enabled
-        self.auto_load_last_project()
+        # Auto-reload last project if enabled (deferred until widget is shown)
+        self.logger.info("Scheduling auto_load_last_project in 100ms...")
+        QTimer.singleShot(100, self.auto_load_last_project)
+        self.logger.info("=== WorkspaceWidget.__init__ COMPLETE ===")
     
     def init_ui(self):
         """Initialize the workspace UI"""
@@ -379,13 +540,46 @@ class WorkspaceWidget(QWidget):
         # Style settings
         style_layout = QHBoxLayout()
         style_layout.addWidget(QLabel("Style:"))
-        self.prompt_style_input = QLineEdit()
-        self.prompt_style_input.setPlaceholderText("e.g., Cinematic, Artistic, Photorealistic...")
-        self.prompt_style_input.setText("Cinematic")
-        self.prompt_style_input.setToolTip("Freeform visual style for prompt enhancement and image generation\n(e.g., Cinematic, Noir, Animated, Documentary, etc.)")
-        self.prompt_style_input.textChanged.connect(lambda: self._auto_save_settings())
+
+        # Built-in styles (read-only)
+        self.builtin_styles = [
+            "Cinematic",
+            "Artistic",
+            "Photorealistic",
+            "Animated",
+            "Noir",
+            "Documentary",
+            "Vintage",
+            "Modern",
+            "Abstract",
+            "Minimalist"
+        ]
+
+        self.prompt_style_input = QComboBox()
+        self.prompt_style_input.setEditable(False)  # Read-only selection
+        self._populate_styles_combo()
+        # Set default to first item (Cinematic)
+        if self.prompt_style_input.count() > 0:
+            self.prompt_style_input.setCurrentIndex(0)
+        self.prompt_style_input.setToolTip("Visual style for prompt enhancement and image generation\nSelect from built-in or custom styles, or choose (Custom) to enter freeform text")
+        self.prompt_style_input.currentTextChanged.connect(self._on_style_changed)
         self.prompt_style_input.setMinimumWidth(200)
         style_layout.addWidget(self.prompt_style_input)
+
+        # Add/manage custom styles button
+        self.manage_styles_btn = QPushButton("+")
+        self.manage_styles_btn.setMaximumWidth(30)
+        self.manage_styles_btn.setToolTip("Manage custom styles")
+        self.manage_styles_btn.clicked.connect(self._manage_custom_styles)
+        style_layout.addWidget(self.manage_styles_btn)
+
+        # Custom text input (hidden by default, shown when (Custom) is selected)
+        self.custom_style_input = QLineEdit()
+        self.custom_style_input.setPlaceholderText("Enter custom style...")
+        self.custom_style_input.setMinimumWidth(200)
+        self.custom_style_input.hide()
+        self.custom_style_input.textChanged.connect(lambda: self._auto_save_settings())
+        style_layout.addWidget(self.custom_style_input)
 
         style_layout.addWidget(QLabel("Aspect Ratio:"))
         self.aspect_combo = QComboBox()
@@ -830,13 +1024,17 @@ class WorkspaceWidget(QWidget):
         """Auto-load the last opened project if enabled"""
         from gui.video.project_browser import get_last_project_path
 
-        self.logger.info("Checking for last project to auto-load...")
+        self.logger.info("=== AUTO-LOAD TRIGGERED ===")
+        self.logger.info(f"Widget visible: {self.isVisible()}")
+        self.logger.info(f"Widget has parent: {self.parent() is not None}")
+
         last_project = get_last_project_path()
         if last_project:
             self.logger.info(f"Auto-loading last project: {last_project}")
             try:
                 # Suppress error dialogs during auto-load on startup
                 self.load_project_from_path(last_project, show_error_dialog=False)
+                self.logger.info(f"=== AUTO-LOAD COMPLETE - Style after load: {self._get_current_style()} ===")
             except Exception as e:
                 self.logger.warning(f"Could not auto-load last project: {e}")
                 # User will start with a clean slate instead
@@ -858,8 +1056,14 @@ class WorkspaceWidget(QWidget):
             project_path: Path to the project file
             show_error_dialog: Whether to show error dialogs (False for auto-load on startup)
         """
+        self.logger.info(f"=== load_project_from_path CALLED ===")
+        self.logger.info(f"project_path: {project_path} (type: {type(project_path)})")
+        self.logger.info(f"show_error_dialog: {show_error_dialog}")
+
         try:
+            self.logger.info(f"Calling project_manager.load_project({project_path})...")
             self.current_project = self.project_manager.load_project(project_path)
+            self.logger.info(f"Project loaded: {self.current_project.name}")
             self.load_project_to_ui()
             self.update_ui_state()
             self.project_changed.emit(self.current_project)
@@ -868,7 +1072,12 @@ class WorkspaceWidget(QWidget):
             # Save as last opened project
             from PySide6.QtCore import QSettings
             settings = QSettings("ImageAI", "VideoProjects")
+            self.logger.info(f"Saving last_project to QSettings: {project_path}")
             settings.setValue("last_project", str(project_path))
+            settings.sync()  # Force write to disk
+            # Verify it was saved
+            saved_value = settings.value("last_project")
+            self.logger.info(f"Verified last_project in QSettings: {saved_value}")
         except (ValueError, FileNotFoundError) as e:
             # Handle corrupted/empty project files
             self.logger.error(f"Failed to load project from {project_path}: {e}", exc_info=True)
@@ -897,18 +1106,31 @@ class WorkspaceWidget(QWidget):
     
     def open_project(self):
         """Open existing project"""
+        self.logger.info("=== open_project CALLED ===")
         filename, _ = QFileDialog.getOpenFileName(
             self, "Open Project",
             str(self.video_config.get_projects_dir()),
             "ImageAI Projects (*.iaproj.json)"
         )
+        self.logger.info(f"Selected filename: {filename}")
         if filename:
             try:
+                self.logger.info(f"Loading project from: {filename}")
                 self.current_project = self.project_manager.load_project(Path(filename))
                 self.project_name.setText(self.current_project.name)
                 self.load_project_to_ui()
                 self.update_ui_state()
                 self.project_changed.emit(self.current_project)
+
+                # Save as last opened project
+                from PySide6.QtCore import QSettings
+                settings = QSettings("ImageAI", "VideoProjects")
+                self.logger.info(f"Saving last_project to QSettings: {filename}")
+                settings.setValue("last_project", str(filename))
+                settings.sync()  # Force write to disk
+                # Verify it was saved
+                saved_value = settings.value("last_project")
+                self.logger.info(f"Verified last_project in QSettings: {saved_value}")
             except Exception as e:
                 self.logger.error(f"Failed to open project: {e}", exc_info=True)
                 dialog_manager = get_dialog_manager(self)
@@ -925,8 +1147,9 @@ class WorkspaceWidget(QWidget):
         try:
             self.update_project_from_ui()
             self.logger.info(f"Saving Ken Burns: {self.current_project.ken_burns}")
-            
+
             self.project_manager.save_project(self.current_project)
+            num_scenes = len(self.current_project.scenes) if self.current_project.scenes else 0
             self.status_label.setText(f"Project saved: {self.current_project.name} ({num_scenes} scenes)")
             self.project_changed.emit(self.current_project)
         except Exception as e:
@@ -1261,7 +1484,7 @@ class WorkspaceWidget(QWidget):
             target_duration = self.duration_spin.value()
             
             # Get style settings
-            prompt_style = self.prompt_style_combo.currentText()
+            prompt_style = self._get_current_style()
             aspect_ratio = self.aspect_combo.currentText()
             
             # Initialize enhanced generator
@@ -1448,7 +1671,7 @@ class WorkspaceWidget(QWidget):
             project_name = self.project_name.text() or "untitled"
             
             # Get prompt style
-            prompt_style = self.prompt_style_combo.currentText()
+            prompt_style = self._get_current_style()
             style_map = {
                 "Cinematic": PromptStyle.CINEMATIC,
                 "Artistic": PromptStyle.ARTISTIC,
@@ -1603,7 +1826,7 @@ class WorkspaceWidget(QWidget):
             # Get LLM settings
             provider = self.llm_provider_combo.currentText()
             model = self.llm_model_combo.currentText()
-            prompt_style = self.prompt_style_combo.currentText()
+            prompt_style = self._get_current_style()
 
             # Map style to enum
             from core.video.prompt_engine import PromptStyle
@@ -2007,7 +2230,7 @@ class WorkspaceWidget(QWidget):
             'model': self.img_model_combo.currentText(),
             'llm_provider': self.llm_provider_combo.currentText().lower(),
             'llm_model': self.llm_model_combo.currentText(),
-            'prompt_style': self.prompt_style_input.text(),
+            'prompt_style': self._get_current_style(),
             'variants': 1,  # Always generate 1 image per scene
             'aspect_ratio': self.aspect_combo.currentText(),
             'resolution': self.resolution_combo.currentText(),
@@ -2151,10 +2374,10 @@ class WorkspaceWidget(QWidget):
         # Skip auto-save during initial loading
         if not hasattr(self, '_loading_project'):
             self._loading_project = False
-            
+
         if self._loading_project:
             return
-            
+
         # Only auto-save if we have a project with a name
         if self.current_project and self.project_name.text().strip():
             try:
@@ -2162,7 +2385,110 @@ class WorkspaceWidget(QWidget):
                 self.project_manager.save_project(self.current_project)
             except Exception as e:
                 pass
-    
+
+    def _populate_styles_combo(self):
+        """Populate the styles combo box with built-in and custom styles"""
+        current = self.prompt_style_input.currentText()
+        self.logger.debug(f"_populate_styles_combo: current='{current}', count={self.prompt_style_input.count()}")
+        self.prompt_style_input.clear()
+
+        # Add built-in styles
+        self.prompt_style_input.addItems(self.builtin_styles)
+
+        # Add separator if we have custom styles
+        custom_styles = self.config.get('custom_prompt_styles', [])
+        if custom_styles:
+            self.prompt_style_input.insertSeparator(self.prompt_style_input.count())
+            self.prompt_style_input.addItems(custom_styles)
+            self.logger.debug(f"_populate_styles_combo: Added {len(custom_styles)} custom styles")
+
+        # Add (Custom) option at the end
+        self.prompt_style_input.insertSeparator(self.prompt_style_input.count())
+        self.prompt_style_input.addItem("(Custom)")
+        self.logger.debug(f"_populate_styles_combo: Total items={self.prompt_style_input.count()}")
+
+        # Restore selection if still valid
+        if current:
+            index = self.prompt_style_input.findText(current)
+            if index >= 0:
+                self.prompt_style_input.setCurrentIndex(index)
+                self.logger.debug(f"_populate_styles_combo: Restored selection to '{current}' at index {index}")
+
+    def _on_style_changed(self):
+        """Handle style selection change"""
+        import traceback
+        selected = self.prompt_style_input.currentText()
+        self.logger.debug(f"_on_style_changed: selected='{selected}', loading={getattr(self, '_loading_project', False)}")
+        self.logger.debug(f"_on_style_changed: Called from:\n{''.join(traceback.format_stack()[-4:-1])}")
+
+        # Show/hide custom input based on selection
+        if selected == "(Custom)":
+            self.custom_style_input.show()
+            self.custom_style_input.setFocus()
+            self.logger.debug(f"_on_style_changed: Showed custom input, current value='{self.custom_style_input.text()}'")
+        else:
+            self.logger.debug(f"_on_style_changed: Hiding and clearing custom input")
+            self.custom_style_input.hide()
+            self.custom_style_input.clear()
+
+        # Auto-save
+        self._auto_save_settings()
+
+    def _manage_custom_styles(self):
+        """Open dialog to manage custom styles"""
+        dialog = ManageStylesDialog(self.config, self)
+        if dialog.exec() == QDialog.Accepted:
+            # Refresh the combo box
+            self._populate_styles_combo()
+
+    def _get_current_style(self) -> str:
+        """Get the current style value (from combo or custom input)"""
+        selected = self.prompt_style_input.currentText()
+        if selected == "(Custom)":
+            custom_value = self.custom_style_input.text().strip() or "Cinematic"
+            self.logger.debug(f"_get_current_style: (Custom) selected, returning: '{custom_value}'")
+            return custom_value
+        self.logger.debug(f"_get_current_style: Returning preset: '{selected}'")
+        return selected
+
+    def _set_current_style(self, style: str):
+        """Set the current style value"""
+        self.logger.debug(f"_set_current_style called with: '{style}'")
+
+        if not style:
+            # No style set, use default
+            self.logger.debug("No style provided, using default (index 0)")
+            self.prompt_style_input.setCurrentIndex(0)
+            self.custom_style_input.hide()
+            self.custom_style_input.clear()
+            return
+
+        # Check if it's a built-in or custom style in the combo
+        index = self.prompt_style_input.findText(style)
+        self.logger.debug(f"Found style '{style}' at index: {index}")
+
+        if index >= 0 and style != "(Custom)":
+            self.logger.debug(f"Setting combo to index {index} (preset style)")
+            self.prompt_style_input.setCurrentIndex(index)
+            self.custom_style_input.hide()
+            self.custom_style_input.clear()
+        else:
+            # It's a custom/freeform style - select (Custom) and populate input
+            custom_index = self.prompt_style_input.findText("(Custom)")
+            self.logger.debug(f"Style not in preset list, using (Custom) at index: {custom_index}")
+
+            if custom_index >= 0:
+                self.prompt_style_input.setCurrentIndex(custom_index)
+                self.custom_style_input.setText(style)
+                self.custom_style_input.show()
+                self.logger.debug(f"Set custom input to: '{style}'")
+            else:
+                # Fallback: just set to first item if (Custom) not found
+                self.logger.warning("(Custom) option not found in combo, using default")
+                self.prompt_style_input.setCurrentIndex(0)
+                self.custom_style_input.hide()
+                self.custom_style_input.clear()
+
     def load_input_file(self):
         """Load input from file"""
         filename, _ = QFileDialog.getOpenFileName(
@@ -2443,7 +2769,7 @@ class WorkspaceWidget(QWidget):
         self.current_project.negative_prompt = self.negative_prompt.text()
 
         # Save prompt template/style
-        self.current_project.prompt_style = self.prompt_style_input.text()
+        self.current_project.prompt_style = self._get_current_style()
 
         # Save generation settings (variants always 1)
         self.current_project.ken_burns = self.ken_burns_check.isChecked()
@@ -2490,7 +2816,8 @@ class WorkspaceWidget(QWidget):
             # Disconnect signals during restoration to prevent cascading changes
             self.llm_provider_combo.currentTextChanged.disconnect()
             self.img_provider_combo.currentTextChanged.disconnect()
-            
+            self.prompt_style_input.currentTextChanged.disconnect()
+
             try:
                 # Load LLM provider settings
                 if self.current_project.llm_provider:
@@ -2590,11 +2917,18 @@ class WorkspaceWidget(QWidget):
                                 self.logger.warning(f"Image model not found in combo: {self.current_project.image_model}")
                     else:
                         self.logger.warning(f"Image provider not found in combo: {provider_text}")
+
+                # Load prompt style (before reconnecting signals)
+                if hasattr(self.current_project, 'prompt_style') and self.current_project.prompt_style:
+                    self.logger.info(f"Loading prompt style: {self.current_project.prompt_style}")
+                    self._set_current_style(self.current_project.prompt_style)
+
             finally:
                 # Reconnect signals after restoration
                 self.llm_provider_combo.currentTextChanged.connect(self.on_llm_provider_changed)
                 self.img_provider_combo.currentTextChanged.connect(self.on_img_provider_changed)
-            
+                self.prompt_style_input.currentTextChanged.connect(self._on_style_changed)
+
             # Load video provider settings
             if self.current_project.video_provider:
                 if self.current_project.video_provider == "slideshow":
@@ -2625,9 +2959,8 @@ class WorkspaceWidget(QWidget):
             
             if hasattr(self.current_project, 'negative_prompt') and self.current_project.negative_prompt:
                 self.negative_prompt.setText(self.current_project.negative_prompt)
-            
-            if hasattr(self.current_project, 'prompt_style') and self.current_project.prompt_style:
-                self.prompt_style_input.setText(self.current_project.prompt_style)
+
+            # Prompt style is now loaded earlier (before signal reconnection)
 
             # Load generation settings (variants always 1)
             
@@ -2742,3 +3075,9 @@ class WorkspaceWidget(QWidget):
         finally:
             # Clear loading flag to enable auto-save
             self._loading_project = False
+
+            # Log final state
+            self.logger.info("=== LOAD_PROJECT_TO_UI COMPLETE ===")
+            self.logger.info(f"Style combo: '{self.prompt_style_input.currentText()}' (index {self.prompt_style_input.currentIndex()})")
+            self.logger.info(f"Custom input: visible={self.custom_style_input.isVisible()}, text='{self.custom_style_input.text()}'")
+            self.logger.info(f"Final style value: '{self._get_current_style()}'")

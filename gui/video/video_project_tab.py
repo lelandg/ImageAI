@@ -710,8 +710,10 @@ class VideoProjectTab(QWidget):
         self.generation_thread = None
 
         self.logger = logging.getLogger(__name__)
+        self.logger.info("=== VideoProjectTab.__init__ CALLED ===")
 
         self.init_ui()
+        self.logger.info("=== VideoProjectTab.__init__ COMPLETE ===")
     
     def init_ui(self):
         """Initialize the user interface with sub-tabs"""
@@ -738,9 +740,11 @@ class VideoProjectTab(QWidget):
         
         # Create tab widget for sub-tabs
         self.tab_widget = QTabWidget()
-        
+
         # Create workspace tab
+        self.logger.info("Creating WorkspaceWidget...")
         self.workspace_widget = WorkspaceWidget(self.config, self.providers)
+        self.logger.info("WorkspaceWidget created successfully")
         self.workspace_widget.project_changed.connect(self.on_project_changed)
         self.workspace_widget.generation_requested.connect(self.on_generation_requested)
         # Forward the image provider change signal

@@ -188,6 +188,8 @@ class MainWindow(QMainWindow):
     
     def __init__(self):
         super().__init__()
+        import logging
+        self.logger = logging.getLogger(__name__)
         self.config = ConfigManager()
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
 
@@ -6192,8 +6194,14 @@ For more detailed information, please refer to the full documentation.
         """Handle tab change events."""
         current_widget = self.tabs.widget(index)
 
+        self.logger.info(f"=== TAB CHANGED to index {index} ===")
+        self.logger.info(f"Current widget: {current_widget.__class__.__name__ if current_widget else 'None'}")
+        self.logger.info(f"Is video tab: {current_widget == self.tab_video}")
+        self.logger.info(f"Video tab loaded: {self._video_tab_loaded}")
+
         # Lazy load video tab on first access
         if current_widget == self.tab_video and not self._video_tab_loaded:
+            self.logger.info("Triggering video tab lazy load...")
             self._load_video_tab()
 
         # If switching to help tab, trigger a minimal scroll to fix rendering
@@ -6207,6 +6215,7 @@ For more detailed information, please refer to the full documentation.
 
     def _load_video_tab(self):
         """Lazy load the video tab when first accessed."""
+        self.logger.info("=== _LOAD_VIDEO_TAB CALLED ===")
         try:
             # Import and create the real video tab
             from gui.video.video_project_tab import VideoProjectTab
@@ -6219,9 +6228,12 @@ For more detailed information, please refer to the full documentation.
 
             # Store the index before replacing
             video_index = self.tabs.indexOf(self.tab_video)
+            self.logger.info(f"Video tab index for replacement: {video_index}")
 
             # Create the real video tab
+            self.logger.info("Creating VideoProjectTab instance...")
             real_video_tab = VideoProjectTab(self.config, providers_dict)
+            self.logger.info("VideoProjectTab instance created")
 
             # Connect signals
             if hasattr(real_video_tab, 'image_provider_changed'):
@@ -6232,13 +6244,17 @@ For more detailed information, please refer to the full documentation.
                 real_video_tab.add_to_history_signal.connect(self.add_to_history)
 
             # Replace the placeholder with the real tab
+            self.logger.info(f"Removing placeholder tab at index {video_index}")
             self.tabs.removeTab(video_index)
+            self.logger.info(f"Inserting real video tab at index {video_index}")
             self.tabs.insertTab(video_index, real_video_tab, "🎬 Video")
+            self.logger.info(f"Setting current index to {video_index}")
             self.tabs.setCurrentIndex(video_index)
 
             # Update references
             self.tab_video = real_video_tab
             self._video_tab_loaded = True
+            self.logger.info("Video tab loading complete, _video_tab_loaded = True")
 
             # Sync LLM provider to video tab if it's set
             if hasattr(self, 'llm_provider_combo') and self.llm_provider_combo.currentText() != "None":
@@ -6985,12 +7001,45 @@ For more detailed information, please refer to the full documentation.
             
             # Output console height is auto-managed; nothing to restore
             
-            # Restore current tab (do this last so all content is ready)
-            if 'current_tab' in ui_state:
-                if ui_state['current_tab'] < self.tabs.count():
-                    self.tabs.setCurrentIndex(ui_state['current_tab'])
-            
-            # Restore last project if saved
+            # Check if there's a last video project to restore
+            # If so, switch to Video tab to trigger creation and auto-load
+            from PySide6.QtCore import QSettings
+            video_settings = QSettings("ImageAI", "VideoProjects")
+            last_video_project = video_settings.value("last_project")
+
+            self.logger.info("=== STARTUP VIDEO PROJECT CHECK ===")
+            self.logger.info(f"Last video project from QSettings: {last_video_project}")
+
+            if last_video_project:
+                project_path = Path(last_video_project)
+                self.logger.info(f"Project path exists: {project_path.exists()}")
+
+                if project_path.exists():
+                    # Switch to Video tab to trigger creation and auto-load
+                    video_tab_index = self.tabs.indexOf(self.tab_video)
+                    self.logger.info(f"Video tab index: {video_tab_index}")
+                    self.logger.info(f"Video tab loaded: {self._video_tab_loaded}")
+                    self.logger.info(f"Current tab index before switch: {self.tabs.currentIndex()}")
+
+                    if video_tab_index >= 0:
+                        self.logger.info(f"Switching to Video tab (index {video_tab_index})")
+                        self.tabs.setCurrentIndex(video_tab_index)
+                        self.logger.info(f"Current tab index after switch: {self.tabs.currentIndex()}")
+                    else:
+                        self.logger.warning("Video tab index not found!")
+                else:
+                    self.logger.info("Video project path does not exist, skipping")
+            else:
+                self.logger.info("No last video project found")
+
+            # Otherwise restore current tab (do this last so all content is ready)
+            if not (last_video_project and Path(last_video_project).exists()):
+                if 'current_tab' in ui_state:
+                    if ui_state['current_tab'] < self.tabs.count():
+                        self.logger.info(f"Restoring UI state tab: {ui_state['current_tab']}")
+                        self.tabs.setCurrentIndex(ui_state['current_tab'])
+
+            # Restore last IMAGE project if saved
             if 'last_project' in ui_state:
                 project_path = Path(ui_state['last_project'])
                 if project_path.exists():

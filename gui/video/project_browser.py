@@ -239,10 +239,22 @@ class ProjectBrowserDialog(QDialog):
     
     def open_selected(self):
         """Open the selected project"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== open_selected CALLED ===")
+        logger.info(f"selected_project_path: {self.selected_project_path}")
+
         if self.selected_project_path:
             # Save as last opened project
+            logger.info(f"Saving to QSettings: {self.selected_project_path}")
             self.settings.setValue("last_project", str(self.selected_project_path))
+            self.settings.sync()
+            saved = self.settings.value("last_project")
+            logger.info(f"Verified in QSettings: {saved}")
+
+            logger.info(f"Emitting project_selected signal with: {self.selected_project_path}")
             self.project_selected.emit(self.selected_project_path)
+            logger.info("Calling accept() to close dialog")
             self.accept()
     
     def on_auto_reload_toggled(self, checked):
@@ -253,18 +265,30 @@ class ProjectBrowserDialog(QDialog):
 
 def get_last_project_path():
     """Get the path to the last opened project if auto-reload is enabled"""
+    import logging
+    logger = logging.getLogger(__name__)
+
     settings = QSettings("ImageAI", "VideoProjects")
 
     auto_reload = settings.value("auto_reload_last", True, type=bool)
+    logger.info(f"get_last_project_path: auto_reload={auto_reload}")
 
     if not auto_reload:
+        logger.info("get_last_project_path: auto_reload is disabled, returning None")
         return None
 
     last_project = settings.value("last_project")
+    logger.info(f"get_last_project_path: last_project from QSettings={last_project}")
 
     if last_project:
         path = Path(last_project)
+        logger.info(f"get_last_project_path: path exists={path.exists()}")
         if path.exists():
+            logger.info(f"get_last_project_path: Returning path={path}")
             return path
+        else:
+            logger.info("get_last_project_path: Path doesn't exist, returning None")
+    else:
+        logger.info("get_last_project_path: No last_project in QSettings, returning None")
 
     return None
