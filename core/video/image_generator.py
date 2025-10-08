@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
@@ -109,7 +110,44 @@ class ImageGenerator:
                 results.append(error_result)
         
         return results
-    
+
+    @staticmethod
+    def _clean_prompt_for_generation(prompt: str) -> str:
+        """
+        Clean prompt for image generation by removing scene numbers and lyrics.
+
+        Handles formats like:
+        - "**1.** *lyrics* — description" -> "description"
+        - "1. lyrics - description" -> "description"
+
+        Args:
+            prompt: Original prompt possibly containing scene number and lyrics
+
+        Returns:
+            Cleaned prompt with only the visual description
+        """
+        if not prompt:
+            return prompt
+
+        # Pattern: optional bold/italic markdown, number, dot, optional space,
+        # optional italic lyrics, em dash or regular dash, then the description
+        # Examples:
+        # "**1.** *lyrics* — description"
+        # "1. lyrics - description"
+        # "**5.** *some text here* — A wide shot of..."
+
+        # Try to find em dash (—) or regular dash (-) after potential lyric content
+        # Look for: number + dot + (anything) + dash + description
+        pattern = r'^(?:\*\*)?(?:\d+)\.(?:\*\*)?\s*(?:\*[^*]*\*)?\s*[—\-]\s*(.+)$'
+        match = re.match(pattern, prompt, re.DOTALL)
+
+        if match:
+            # Return everything after the dash
+            return match.group(1).strip()
+
+        # If no match, return original prompt (backward compatibility)
+        return prompt
+
     def _generate_scene_images(self,
                                scene: Scene,
                                provider: str,
@@ -131,10 +169,13 @@ class ImageGenerator:
         """
         result = ImageGenerationResult(scene.id)
         start_time = time.time()
-        
+
         try:
-            # Check cache first
-            cache_key = self._get_cache_key(scene.prompt, provider, model, kwargs)
+            # Clean the prompt before generation (remove scene numbers and lyrics)
+            clean_prompt = self._clean_prompt_for_generation(scene.prompt)
+
+            # Check cache first (use clean prompt for cache key)
+            cache_key = self._get_cache_key(clean_prompt, provider, model, kwargs)
             cached_images = self._get_cached_images(cache_key, variants)
             
             if cached_images and len(cached_images) >= variants:
@@ -154,14 +195,16 @@ class ImageGenerator:
             
             # Prepare generation parameters
             gen_params = self._prepare_generation_params(provider, model, scene, kwargs)
-            
+
             # Generate images
             self.logger.info(f"Generating {variants} images for scene {scene.id}")
-            
+            self.logger.debug(f"Original prompt: {scene.prompt[:100]}...")
+            self.logger.debug(f"Cleaned prompt: {clean_prompt[:100]}...")
+
             if variants == 1:
                 # Single generation
                 texts, images = provider_instance.generate(
-                    prompt=scene.prompt,
+                    prompt=clean_prompt,
                     model=model,
                     **gen_params
                 )
@@ -172,7 +215,7 @@ class ImageGenerator:
                 for i in range(variants):
                     try:
                         # Add variation to prompt for diversity
-                        varied_prompt = self._add_prompt_variation(scene.prompt, i)
+                        varied_prompt = self._add_prompt_variation(clean_prompt, i)
                         texts, images = provider_instance.generate(
                             prompt=varied_prompt,
                             model=model,

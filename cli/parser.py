@@ -63,7 +63,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Launch graphical user interface"
     )
-    
+    action_group.add_argument(
+        "--lyrics-to-prompts",
+        metavar="LYRICS_FILE",
+        help="Convert lyrics file to image prompts using AI"
+    )
+
     # Generation options
     gen_group = parser.add_argument_group("generation options")
     gen_group.add_argument(
@@ -91,7 +96,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=1,
         help="Number of images to generate"
     )
-    
+
+    # Lyrics-to-prompts options
+    lyrics_group = parser.add_argument_group("lyrics-to-prompts options")
+    lyrics_group.add_argument(
+        "--lyrics-model",
+        help="LLM model for lyrics-to-prompts (e.g., gpt-4o, gemini/gemini-2.0-flash-exp)"
+    )
+    lyrics_group.add_argument(
+        "--lyrics-temperature",
+        type=float,
+        default=0.7,
+        help="Temperature for lyrics generation (default: 0.7)"
+    )
+    lyrics_group.add_argument(
+        "--lyrics-style",
+        help="Style hint for prompt generation (e.g., cinematic, photorealistic)"
+    )
+    lyrics_group.add_argument(
+        "--lyrics-output",
+        help="Output JSON file for generated prompts"
+    )
+
     # Help options
     help_group = parser.add_argument_group("help")
     help_group.add_argument(

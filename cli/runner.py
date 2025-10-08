@@ -6,6 +6,7 @@ from typing import Optional, Tuple, List
 
 from core import ConfigManager, get_api_key_url, sanitize_filename, read_key_file
 from core.utils import read_readme_text, extract_api_key_help
+from core.lyrics_to_prompts import LyricsToPromptsGenerator, load_lyrics_from_file
 from providers import get_provider, preload_provider
 
 
@@ -66,6 +67,119 @@ def store_api_key(api_key: str, provider: str = "google") -> None:
     config.save()
 
 
+def handle_lyrics_to_prompts(args) -> int:
+    """
+    Handle lyrics-to-prompts generation.
+
+    Args:
+        args: Parsed command-line arguments
+
+    Returns:
+        Exit code (0 for success)
+    """
+    lyrics_file = args.lyrics_to_prompts
+
+    # Validate file
+    lyrics_path = Path(lyrics_file).expanduser()
+    if not lyrics_path.exists():
+        print(f"Error: Lyrics file not found: {lyrics_file}")
+        return 2
+
+    # Load lyrics
+    try:
+        print(f"Loading lyrics from {lyrics_path}...")
+        lyrics = load_lyrics_from_file(str(lyrics_path))
+        print(f"Loaded {len(lyrics)} lyric lines")
+    except Exception as e:
+        print(f"Error loading lyrics: {e}")
+        return 2
+
+    # Get model (default to gpt-4o)
+    model = getattr(args, "lyrics_model", None) or "gpt-4o"
+    temperature = getattr(args, "lyrics_temperature", 0.7)
+    style_hint = getattr(args, "lyrics_style", None)
+    output_file = getattr(args, "lyrics_output", None)
+
+    # Get API keys from config
+    config = ConfigManager()
+    config_dict = {}
+
+    try:
+        # Try to get API keys for different providers
+        for provider_name in ["openai", "google", "anthropic"]:
+            try:
+                key = config.get_api_key(provider_name)
+                if key:
+                    config_dict[f"{provider_name}_api_key"] = key
+            except:
+                pass
+    except Exception as e:
+        print(f"Warning: Could not load API keys from config: {e}")
+
+    if not config_dict:
+        print("Error: No API keys found. Please set API keys using --set-key first.")
+        print("Example: python main.py --provider openai --api-key YOUR_KEY --set-key")
+        return 2
+
+    # Create generator
+    print(f"Initializing generator with model: {model}")
+    print(f"Temperature: {temperature}")
+    if style_hint:
+        print(f"Style: {style_hint}")
+
+    try:
+        generator = LyricsToPromptsGenerator(config=config_dict)
+    except Exception as e:
+        print(f"Error initializing generator: {e}")
+        print("Make sure LiteLLM is installed: pip install litellm")
+        return 2
+
+    # Generate prompts
+    print("\nGenerating image prompts...")
+    print("=" * 60)
+
+    try:
+        result = generator.generate(
+            lyrics=lyrics,
+            model=model,
+            temperature=temperature,
+            style_hint=style_hint
+        )
+
+        if not result.success:
+            print(f"Error: {result.error}")
+            return 3
+
+        # Display results
+        print(f"\n✅ Successfully generated {len(result.prompts)} image prompts\n")
+        print("=" * 60)
+
+        for i, prompt in enumerate(result.prompts, 1):
+            print(f"\n{i}. Lyric: {prompt.line}")
+            print(f"   Prompt: {prompt.image_prompt}")
+
+        print("\n" + "=" * 60)
+
+        # Save to file if requested
+        if output_file:
+            output_path = Path(output_file).expanduser()
+            generator.save_to_json(result, str(output_path))
+            print(f"\n💾 Saved to: {output_path}")
+        else:
+            # Auto-save with default name
+            default_output = lyrics_path.with_suffix('.prompts.json')
+            generator.save_to_json(result, str(default_output))
+            print(f"\n💾 Saved to: {default_output}")
+
+        return 0
+
+    except Exception as e:
+        print(f"Error during generation: {e}")
+        import traceback
+        traceback.print_exc()
+        return 3
+
+
 def run_cli(args) -> int:
     """
     Run CLI with parsed arguments.
@@ -86,7 +200,11 @@ def run_cli(args) -> int:
         section = extract_api_key_help(md)
         print(section)
         return 0
-    
+
+    # Handle --lyrics-to-prompts
+    if getattr(args, "lyrics_to_prompts", None):
+        return handle_lyrics_to_prompts(args)
+
     # Validate auth mode for provider
     if provider != "google" and auth_mode == "gcloud":
         print(f"Warning: --auth-mode=gcloud is only supported for Google provider.")

@@ -1263,26 +1263,37 @@ class WorkspaceWidget(QWidget):
         if format_type == "Auto-detect":
             format_type = None
         
-        # Get target duration
-        target_duration = f"00:{self.duration_spin.value():02d}:00"
-        preset = self.pacing_combo.currentText().lower()
-        
-        self.logger.info(f"Settings: format={format_type}, duration={target_duration}, preset={preset}")
-        
-        # Get MIDI sync settings
+        # Get MIDI sync settings first (before calculating target duration)
         midi_timing = None
         sync_mode = "none"
         snap_strength = 0.8
-        
+        midi_duration_sec = None
+
         if self.current_project and self.current_project.midi_timing_data:
             midi_timing = self.current_project.midi_timing_data
             sync_mode = self.sync_mode_combo.currentText().lower()
             snap_strength = self.snap_strength_slider.value() / 100.0
             self.logger.info(f"MIDI sync enabled: mode={sync_mode}, snap={snap_strength:.0%}")
             if hasattr(midi_timing, 'duration_sec'):
-                self.logger.info(f"MIDI duration: {midi_timing.duration_sec:.1f}s")
+                midi_duration_sec = midi_timing.duration_sec
+                self.logger.info(f"MIDI duration: {midi_duration_sec:.1f}s")
         else:
             self.logger.info("No MIDI timing data available")
+
+        # Get target duration - use MIDI duration if available, otherwise use GUI spinner
+        if midi_duration_sec:
+            # Use MIDI duration
+            minutes = int(midi_duration_sec // 60)
+            seconds = int(midi_duration_sec % 60)
+            target_duration = f"00:{minutes:02d}:{seconds:02d}"
+            self.logger.info(f"Using MIDI duration for scene generation: {target_duration} ({midi_duration_sec:.1f}s)")
+        else:
+            # Use GUI spinner value
+            target_duration = f"00:{self.duration_spin.value():02d}:00"
+            self.logger.info(f"Using GUI spinner duration for scene generation: {target_duration}")
+
+        preset = self.pacing_combo.currentText().lower()
+        self.logger.info(f"Settings: format={format_type}, duration={target_duration}, preset={preset}")
         
         # Check if LLM sync should be used
         llm_provider = self.llm_provider_combo.currentText()
@@ -1439,25 +1450,26 @@ class WorkspaceWidget(QWidget):
     def get_provider_config(self) -> Dict[str, Any]:
         """Get provider configuration including API keys."""
         config = {}
-        
-        # Try to get API keys from secure storage
-        key_storage = SecureKeyStorage()
-        
-        # Get OpenAI key
-        openai_key = key_storage.retrieve_key('openai')
+
+        # Use ConfigManager to get API keys (has keyring + config file fallback)
+        from core import ConfigManager
+        config_manager = ConfigManager()
+
+        # Get OpenAI key (with both keyring and config file fallback)
+        openai_key = config_manager.get_api_key('openai')
         if openai_key:
             config['openai_api_key'] = openai_key
-        
-        # Get Anthropic/Claude key
-        anthropic_key = key_storage.retrieve_key('anthropic') or key_storage.retrieve_key('claude')
+
+        # Get Anthropic/Claude key (with both keyring and config file fallback)
+        anthropic_key = config_manager.get_api_key('anthropic')
         if anthropic_key:
             config['anthropic_api_key'] = anthropic_key
-        
-        # Get Google/Gemini key
-        google_key = key_storage.retrieve_key('google') or key_storage.retrieve_key('gemini')
+
+        # Get Google/Gemini key (with both keyring and config file fallback)
+        google_key = config_manager.get_api_key('google')
         if google_key:
             config['google_api_key'] = google_key
-        
+
         # Add LM Studio and Ollama endpoints if configured
         if hasattr(self.video_config, 'config'):
             llm_providers = self.video_config.config.get('llm_providers', {})
@@ -1465,7 +1477,7 @@ class WorkspaceWidget(QWidget):
                 config['ollama_endpoint'] = llm_providers['ollama'].get('endpoint', 'http://localhost:11434')
             if 'lmstudio' in llm_providers:
                 config['lmstudio_endpoint'] = llm_providers['lmstudio'].get('endpoint', 'http://localhost:1234/v1')
-        
+
         return config
     
     def _generate_enhanced_storyboard(self, text: str):
@@ -1657,11 +1669,31 @@ class WorkspaceWidget(QWidget):
         try:
             from core.video.prompt_engine import UnifiedLLMProvider, PromptStyle
             from core.video.continuity_helper import get_continuity_helper
-            
+
             # Get API keys
             config = self.get_provider_config()
+
+            # Validate API key for selected provider BEFORE starting
+            provider_key_map = {
+                'openai': 'openai_api_key',
+                'anthropic': 'anthropic_api_key',
+                'claude': 'anthropic_api_key',
+                'google': 'google_api_key',
+                'gemini': 'google_api_key'
+            }
+
+            provider_lower = provider.lower()
+            required_key = provider_key_map.get(provider_lower)
+
+            if required_key and not config.get(required_key):
+                error_msg = f"⚠️ {provider} API key not found. Please set it in Settings tab."
+                self.logger.warning(error_msg)
+                self._log_to_console(error_msg, "WARNING")
+                self._log_to_console("Using fallback prompts (original lyrics with basic enhancements)", "INFO")
+                # Continue anyway - will use fallback prompts
+
             llm = UnifiedLLMProvider(config)
-            
+
             if not llm.is_available():
                 self.logger.warning("LLM provider not available for prompt enhancement")
                 return
@@ -1684,21 +1716,28 @@ class WorkspaceWidget(QWidget):
             
             # Get aspect ratio for continuity
             aspect_ratio = self.aspect_combo.currentText()
-            
-            # Enhance each scene prompt
+
+            # BATCH ENHANCE: Process all scene prompts in ONE API call
             enhanced_count = 0
-            for i, scene in enumerate(scenes):
-                try:
-                    original = scene.source
-                    enhanced = llm.enhance_prompt(
-                        original,
-                        provider=provider.lower(),
-                        model=model,
-                        style=style,
-                        temperature=0.7,
-                        max_tokens=150
-                    )
-                    if enhanced and enhanced != original:
+            try:
+                # Collect all original scene texts
+                original_texts = [scene.source for scene in scenes]
+
+                self.logger.info(f"🚀 BATCH enhancing {len(original_texts)} scene prompts in ONE API call...")
+                self._log_to_console(f"🚀 BATCH processing {len(original_texts)} scenes in 1 API call...", "INFO")
+
+                # Use batch_enhance for efficiency (ONE API call for all scenes)
+                enhanced_prompts = llm.batch_enhance(
+                    original_texts,
+                    provider=provider.lower(),
+                    model=model,
+                    style=style,
+                    temperature=0.7
+                )
+
+                # Apply enhanced prompts to scenes
+                for i, (scene, enhanced) in enumerate(zip(scenes, enhanced_prompts)):
+                    if enhanced and enhanced != scene.source:
                         # Add continuity hints only if enabled
                         if self.enable_continuity_checkbox.isChecked():
                             enhanced = continuity.enhance_prompt_for_continuity(
@@ -1710,10 +1749,22 @@ class WorkspaceWidget(QWidget):
                             )
                         scene.prompt = enhanced
                         enhanced_count += 1
-                except Exception as e:
-                    self.logger.warning(f"Failed to enhance prompt for scene: {e}")
-            
-            self.logger.info(f"Enhanced {enhanced_count}/{len(scenes)} scene prompts")
+
+                if enhanced_count == len(scenes):
+                    self.logger.info(f"✅ Successfully enhanced {enhanced_count}/{len(scenes)} scenes with LLM")
+                    self._log_to_console(f"✅ Successfully enhanced {enhanced_count}/{len(scenes)} scenes with LLM", "SUCCESS")
+                elif enhanced_count > 0:
+                    self.logger.info(f"⚠️ Enhanced {enhanced_count}/{len(scenes)} scenes (some used fallback)")
+                    self._log_to_console(f"⚠️ Enhanced {enhanced_count}/{len(scenes)} scenes (some used fallback)", "WARNING")
+                else:
+                    self.logger.warning(f"⚠️ All scenes using fallback prompts (LLM unavailable)")
+                    self._log_to_console(f"⚠️ All scenes using fallback prompts (check API key)", "WARNING")
+
+            except Exception as e:
+                self.logger.error(f"❌ Batch enhancement failed: {e}")
+                self._log_to_console(f"❌ Batch enhancement failed: {str(e)}", "ERROR")
+                self._log_to_console(f"Please check your API key and try again", "WARNING")
+                return  # Stop processing - don't fall back to individual calls
             
         except Exception as e:
             self.logger.error(f"Failed to enhance prompts: {e}")

@@ -90,6 +90,8 @@ class LLMSyncAssistant:
                 return self._sync_with_openai(lyrics, audio_path, total_duration, sections)
             elif self.provider.lower() == 'gemini':
                 return self._sync_with_gemini(lyrics, audio_path, total_duration, sections)
+            elif self.provider.lower() == 'anthropic':
+                return self._sync_with_anthropic(lyrics, audio_path, total_duration, sections)
             else:
                 # Default fallback for other providers
                 self.logger.warning(f"Provider {self.provider} doesn't have specific sync implementation, using fallback")
@@ -334,7 +336,141 @@ class LLMSyncAssistant:
         except Exception as e:
             self.logger.error(f"GPT-5 sync failed: {e}")
             raise  # Re-raise to trigger fallback in main method
-    
+
+    def _sync_with_anthropic(self, lyrics: str, audio_path: Optional[str] = None,
+                             total_duration: Optional[float] = None,
+                             sections: Optional[Dict[str, List[Tuple[float, float]]]] = None) -> List[TimedLyric]:
+        """
+        Anthropic Claude specific implementation for lyric timing.
+        Uses JSON format similar to OpenAI but tailored for Claude's strengths.
+        """
+        self.logger.info("Using Anthropic Claude for lyric timing alignment")
+
+        try:
+            # System prompt optimized for Claude
+            system_prompt = (
+                'You are a lyric timing specialist. Given lyrics and timing information, '
+                'align each lyric line to appropriate timestamps. Output must be valid JSON only, '
+                'no commentary or markdown. Return format: {"lyrics": [{"text": "...", "start_ms": int, "end_ms": int}]}'
+            )
+
+            # Count lyric lines
+            lyric_lines = [line.strip() for line in lyrics.split('\n') if line.strip()]
+            num_lines = len(lyric_lines)
+
+            # Build user message
+            user_message = "Align these lyrics to the timing data provided.\n\n"
+
+            # Add audio/MIDI info
+            if audio_path and Path(audio_path).exists():
+                user_message += f"Audio file: {Path(audio_path).name}\n"
+
+            if total_duration:
+                user_message += f"Total duration: {int(total_duration * 1000)} ms\n"
+
+            # Add MIDI section timing if available
+            if sections:
+                user_message += "\nSection timing from MIDI:\n"
+                for section_type, timings in sections.items():
+                    for start, end in timings:
+                        user_message += f"  {section_type}: {int(start * 1000)}-{int(end * 1000)} ms\n"
+
+            user_message += f"\nLyrics ({num_lines} lines):\n{lyrics}\n\n"
+            user_message += "Return JSON with 'lyrics' array. Each entry: {\"text\": \"line text\", \"start_ms\": integer, \"end_ms\": integer}\n"
+            user_message += "Preserve line order. Times in milliseconds. No code fences."
+
+            # Log request
+            self.logger.info("=== LLM REQUEST ===")
+            self.logger.info(f"System prompt: {system_prompt[:200]}...")
+            self.logger.info(f"User message ({len(user_message)} chars):")
+            self.logger.info(user_message)
+            self.logger.info("=== END LLM REQUEST ===")
+
+            import time
+            api_start = time.time()
+
+            # Get provider prefix - Anthropic doesn't need a prefix for LiteLLM
+            model_id = self.model
+
+            self.logger.info(f"Making LLM API call with model: {model_id}")
+            response = self.llm_provider.litellm.completion(
+                model=model_id,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_message}
+                ],
+                temperature=0.1,  # Low temperature for consistent timing
+                max_tokens=4000
+            )
+
+            api_elapsed = time.time() - api_start
+            self.logger.info(f"LLM API call completed in {api_elapsed:.1f} seconds")
+
+            response_text = response.choices[0].message.content.strip()
+            self.logger.info("=== LLM RESPONSE ===")
+            self.logger.info(f"Response length: {len(response_text)} characters")
+            self.logger.info(f"Full response:")
+            self.logger.info(response_text)
+            self.logger.info("=== END LLM RESPONSE ===")
+
+            # Parse JSON response
+            try:
+                # Clean up response if needed
+                if response_text.startswith('```'):
+                    lines = response_text.split('\n')
+                    response_text = '\n'.join(lines[1:-1] if lines[-1] == '```' else lines[1:])
+
+                timing_data = json.loads(response_text)
+
+                # Extract lyrics array
+                if isinstance(timing_data, dict) and 'lyrics' in timing_data:
+                    items = timing_data['lyrics']
+                elif isinstance(timing_data, list):
+                    items = timing_data
+                else:
+                    self.logger.warning("Unexpected response format from Claude")
+                    items = []
+
+                self.logger.info(f"Parsing {len(items)} timing entries from Claude response")
+
+                timed_lyrics = []
+                for i, item in enumerate(items):
+                    if isinstance(item, dict) and 'text' in item:
+                        start_ms = item.get('start_ms')
+                        end_ms = item.get('end_ms')
+
+                        if start_ms is None or end_ms is None:
+                            self.logger.warning(f"Line {i+1} missing timing, skipping")
+                            continue
+
+                        start_time = float(start_ms) / 1000.0
+                        end_time = float(end_ms) / 1000.0
+
+                        timed_lyric = TimedLyric(
+                            text=item['text'],
+                            start_time=start_time,
+                            end_time=end_time,
+                            section_type=item.get('section_type')
+                        )
+                        timed_lyrics.append(timed_lyric)
+
+                        if i < 3 or i >= len(items) - 3:
+                            self.logger.debug(f"  Line {i+1}: '{timed_lyric.text[:40]}...' @ {timed_lyric.start_time:.2f}-{timed_lyric.end_time:.2f}s")
+
+                if timed_lyrics:
+                    self.logger.info(f"Successfully synchronized {len(timed_lyrics)} lyrics using Claude")
+                    return timed_lyrics
+                else:
+                    self.logger.warning("No valid timing data in Claude response")
+
+            except json.JSONDecodeError as e:
+                self.logger.error(f"Failed to parse Claude JSON response: {e}")
+                self.logger.error(f"Response that failed to parse: {response_text[:1000]}...")
+
+        except Exception as e:
+            self.logger.error(f"Claude sync failed: {e}")
+            raise  # Re-raise to trigger fallback
+
     def _sync_with_gemini(self, lyrics: str, audio_path: Optional[str] = None,
                           total_duration: Optional[float] = None,
                           sections: Optional[Dict[str, List[Tuple[float, float]]]] = None) -> List[TimedLyric]:

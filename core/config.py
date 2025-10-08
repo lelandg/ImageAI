@@ -22,6 +22,9 @@ class ConfigManager:
 
         # Normalize auth_mode on load (handle legacy display values)
         self._normalize_auth_mode()
+
+        # Migrate legacy API keys to providers structure
+        self._migrate_api_keys()
     
     def _get_config_dir(self) -> Path:
         """Get platform-specific configuration directory."""
@@ -60,6 +63,30 @@ class ConfigManager:
 
         # Save if we made changes
         if self.config.get("auth_mode") != auth_mode:
+            self.save()
+
+    def _migrate_api_keys(self) -> None:
+        """Migrate legacy top-level API keys to providers structure."""
+        migrated = False
+
+        # List of providers to migrate
+        providers_to_migrate = ["anthropic", "google", "openai", "stability"]
+
+        for provider in providers_to_migrate:
+            # Check if key exists at top level but not in providers structure
+            top_level_key = f"{provider}_api_key"
+            if top_level_key in self.config:
+                key_value = self.config[top_level_key]
+                if key_value:  # Only migrate non-empty keys
+                    # Check if already in providers
+                    provider_config = self.get_provider_config(provider)
+                    if "api_key" not in provider_config:
+                        # Migrate to providers structure
+                        provider_config["api_key"] = key_value
+                        self.set_provider_config(provider, provider_config)
+                        migrated = True
+
+        if migrated:
             self.save()
     
     def save(self) -> None:

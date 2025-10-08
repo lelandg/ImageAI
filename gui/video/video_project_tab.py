@@ -106,30 +106,46 @@ class VideoGenerationThread(QThread):
             }
             style = style_map.get(prompt_style.lower(), PromptStyle.CINEMATIC)
 
-            # Enhance prompts for each scene
+            # BATCH ENHANCE: Process all scenes in ONE API call
             total_scenes = len(self.project.scenes)
-            for i, scene in enumerate(self.project.scenes):
-                if self.cancelled:
-                    break
 
-                progress = int((i / total_scenes) * 100)
-                scene_preview = scene.source[:40] + "..." if len(scene.source) > 40 else scene.source
-                self.progress_update.emit(progress, f"Scene {i+1}/{total_scenes}: '{scene_preview}' - Enhancing...")
+            if self.cancelled:
+                return
 
-                # Generate enhanced prompt using the engine with console callback
-                enhanced = engine.enhance_prompt(
-                    scene.source,
+            # Collect all scene sources for batch processing
+            original_texts = [scene.source for scene in self.project.scenes]
+
+            self.progress_update.emit(10, f"🚀 BATCH processing {total_scenes} scenes in 1 API call...")
+
+            # Use batch_enhance for efficiency (ONE API call for all scenes)
+            try:
+                enhanced_prompts = llm.batch_enhance(
+                    original_texts,
                     provider=llm_provider,
                     model=llm_model,
                     style=style,
-                    console_callback=lambda msg, level: self.progress_update.emit(progress, msg)
+                    temperature=0.7
                 )
 
-                scene.prompt = enhanced
-                self.progress_update.emit(progress, f"Scene {i+1}/{total_scenes}: '{scene_preview}' - ✓ Complete")
-            
-            if not self.cancelled:
-                self.generation_complete.emit(True, "Prompt enhancement complete")
+                # Apply enhanced prompts to scenes
+                if not self.cancelled:
+                    for i, (scene, enhanced) in enumerate(zip(self.project.scenes, enhanced_prompts)):
+                        progress = int(((i + 1) / total_scenes) * 90) + 10  # 10-100%
+                        scene_preview = scene.source[:40] + "..." if len(scene.source) > 40 else scene.source
+                        scene.prompt = enhanced
+                        self.progress_update.emit(progress, f"Scene {i+1}/{total_scenes}: '{scene_preview}' - ✓")
+
+                if not self.cancelled:
+                    self.progress_update.emit(100, f"✅ Batch enhanced {total_scenes} scenes")
+                    self.generation_complete.emit(True, "Prompt enhancement complete")
+
+            except Exception as batch_error:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.error(f"❌ Batch enhancement failed: {batch_error}")
+                self.progress_update.emit(0, f"❌ Batch enhancement failed: {str(batch_error)}")
+                self.generation_complete.emit(False, f"Batch enhancement failed: {str(batch_error)}")
+                return  # Stop processing - don't fall back to individual calls
                 
         except Exception as e:
             self.generation_complete.emit(False, f"Prompt enhancement failed: {e}")

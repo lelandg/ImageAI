@@ -500,13 +500,16 @@ class MainWindow(QMainWindow):
         act_save = QAction("Save Image As...", self)
         act_save.triggered.connect(self._save_image_as)
         file_menu.addAction(act_save)
-        
+
         file_menu.addSeparator()
-        
+
         act_quit = QAction("Quit", self)
         act_quit.triggered.connect(self.close)
         file_menu.addAction(act_quit)
-        
+
+        # Tools menu
+        tools_menu = mb.addMenu("Tools")
+
         # Help menu
         help_menu = mb.addMenu("Help")
         
@@ -3766,7 +3769,8 @@ For more detailed information, please refer to the full documentation.
 
         anthropic_key = self.anthropic_key_edit.text().strip()
         if anthropic_key:
-            self.config.set("anthropic_api_key", anthropic_key)
+            self.config.set_api_key("anthropic", anthropic_key)
+            self.config.set("anthropic_api_key", anthropic_key)  # Backward compatibility
 
         # Save Midjourney settings
         self.config.set("midjourney_watch_enabled", self.chk_midjourney_watch.isChecked())

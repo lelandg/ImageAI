@@ -371,20 +371,46 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
                      temperature: float = 0.7) -> List[str]:
         """
         Enhance multiple prompts in batch.
-        
+
         Args:
             texts: List of texts to enhance
             provider: LLM provider
             model: Model name
             style: Style of enhancement
             temperature: Creativity parameter
-            
+
         Returns:
             List of enhanced prompts
         """
         if not self.is_available():
             return texts
-        
+
+        # Anthropic has issues with large batches - split into smaller chunks
+        if provider.lower() == 'anthropic' and len(texts) > 5:
+            self.logger.info(f"Splitting {len(texts)} texts into batches of 5 for Anthropic")
+            all_enhanced = []
+            batch_size = 5
+
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i:i + batch_size]
+                self.logger.info(f"Processing Anthropic batch {i//batch_size + 1}/{(len(texts) + batch_size - 1)//batch_size} ({len(batch)} items)")
+                enhanced_batch = self._batch_enhance_single(batch, provider, model, style, temperature)
+                all_enhanced.extend(enhanced_batch)
+
+            return all_enhanced
+
+        # For other providers or small batches, process in one call
+        return self._batch_enhance_single(texts, provider, model, style, temperature)
+
+    def _batch_enhance_single(self,
+                              texts: List[str],
+                              provider: str,
+                              model: str,
+                              style: PromptStyle,
+                              temperature: float) -> List[str]:
+        """
+        Enhance a single batch of prompts (internal method).
+        """
         # For efficiency, try to batch in a single call if provider supports it
         system_prompt = self._get_system_prompt(style)
         
@@ -416,6 +442,13 @@ Return one enhanced visual description per line, numbered:
                 model_id = f"{prefix}{model}" if prefix else model
                 api_base = None
             
+            # Adjust max_tokens based on provider and batch size
+            if provider.lower() == 'anthropic':
+                # More conservative for Anthropic to avoid timeouts
+                max_tokens = min(100 * len(texts), 4000)
+            else:
+                max_tokens = 150 * len(texts)
+
             kwargs = {
                 "model": model_id,
                 "messages": [
@@ -423,31 +456,54 @@ Return one enhanced visual description per line, numbered:
                     {"role": "user", "content": batch_prompt}
                 ],
                 "temperature": temperature,
-                "max_tokens": 150 * len(texts)  # Scale max tokens
+                "max_tokens": max_tokens,
+                "timeout": 120  # 2 minute timeout to prevent hanging
             }
-            
+
             if api_base:
                 kwargs["api_base"] = api_base
-            
+
+            self.logger.debug(f"Batch enhancing {len(texts)} texts with max_tokens={max_tokens}")
             response = self.litellm.completion(**kwargs)
-            
+
             # Parse the response
             enhanced_text = response.choices[0].message.content.strip()
-            enhanced_lines = enhanced_text.split('\n')
-            
-            # Extract prompts (skip numbering)
+
+            # Extract prompts - handle multi-line descriptions
+            import re
             results = []
-            for line in enhanced_lines:
-                # Remove numbering like "1. " or "1) "
-                import re
-                cleaned = re.sub(r'^\d+[\.\)]\s*', '', line.strip())
-                if cleaned:
-                    results.append(cleaned)
-            
+
+            # Split by numbered markers like "1. ", "2. ", "**2.**", etc.
+            # Pattern: line starts with optional bold markers, number followed by dot or paren
+            parts = re.split(r'\n(?=\*{0,2}\d+\.)', enhanced_text)
+
+            for part in parts:
+                part = part.strip()
+                if not part:
+                    continue
+
+                # Remove the number prefix (e.g., "1. " or "1) " or "**2.**")
+                cleaned = re.sub(r'^\*{0,2}\d+[\.\)]\s*\*{0,2}', '', part, count=1)
+
+                # Remove markdown headers and other noise
+                cleaned = re.sub(r'^#+\s*', '', cleaned)  # Remove "# Header"
+                cleaned = re.sub(r'^\*\*.*?\*\*\s*', '', cleaned)  # Remove "**Bold**"
+
+                # Skip common preamble phrases
+                if cleaned and not any(skip in cleaned.lower()[:100] for skip in [
+                    'here are', 'i\'d be happy', 'i appreciate',
+                    'instead,', 'option 1', 'option 2', 'option 3'
+                ]):
+                    results.append(cleaned.strip())
+
+            # Log for debugging
+            self.logger.debug(f"Parsed {len(results)} results from {len(parts)} parts")
+
             # Ensure we have the right number of results
             while len(results) < len(texts):
+                self.logger.warning(f"Missing result {len(results) + 1}, using original text")
                 results.append(texts[len(results)])  # Fallback to original
-            
+
             return results[:len(texts)]
             
         except Exception as e:
@@ -532,13 +588,14 @@ Return one enhanced visual description per line, numbered:
     def _get_system_prompt(self, style: PromptStyle) -> str:
         """Get system prompt for a given style"""
         prompts = {
-            PromptStyle.CINEMATIC: """You are a cinematic prompt engineer. Transform text into detailed image generation prompts with:
+            PromptStyle.CINEMATIC: """You are a cinematic prompt engineer creating visual scene descriptions for a personal music video project. Transform the provided text into detailed image generation prompts with:
 - Specific camera angles (wide shot, close-up, aerial, etc.)
 - Lighting descriptions (golden hour, dramatic shadows, soft lighting)
 - Cinematic elements (depth of field, lens type, film grain)
 - Mood and atmosphere
 - Visual composition
-Be highly descriptive and detailed.""",
+
+Important: You are creating original visual descriptions inspired by the text's themes and emotions, not reproducing copyrighted content. Focus on the visual storytelling. Be highly descriptive and detailed.""",
             
             PromptStyle.ARTISTIC: """You are an artistic prompt engineer. Transform text into artistic image generation prompts with:
 - Art style references (impressionist, surreal, abstract, etc.)
