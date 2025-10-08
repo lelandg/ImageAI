@@ -402,6 +402,57 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
         # For other providers or small batches, process in one call
         return self._batch_enhance_single(texts, provider, model, style, temperature)
 
+    def _parse_batch_response(self, response: str, expected_count: int) -> list:
+        """Parse numbered responses from LLM, handling various formats."""
+        import re
+
+        # Split by numbered markers
+        parts = re.split(r'\n(?=\*{0,2}\d+\.)', response)
+        results = []
+
+        # Common header/preamble phrases to skip
+        skip_phrases = [
+            'here are', "i'd be happy", 'i appreciate', "instead,",
+            'option 1', 'option 2', 'option 3',
+            'cinematic visual scene', 'visual scene description',
+            'image generation prompt', 'scene description',
+            'music video', 'enhanced prompt'
+        ]
+
+        # Minimum viable prompt length
+        MIN_PROMPT_LENGTH = 80
+
+        for part in parts:
+            # Remove number prefix and markdown
+            cleaned = re.sub(r'^\*{0,2}\d+[\.\)]\s*\*{0,2}', '', part)
+            cleaned = re.sub(r'^#+\s*', '', cleaned)
+            cleaned = re.sub(r'^\*\*.*?\*\*\s*', '', cleaned)
+            cleaned = cleaned.strip()
+
+            # Skip empty or too-short results
+            if not cleaned or len(cleaned) < MIN_PROMPT_LENGTH:
+                continue
+
+            # Skip preambles and headers
+            cleaned_lower = cleaned.lower()
+            if any(phrase in cleaned_lower for phrase in skip_phrases):
+                # Double-check: if it's long and contains visual keywords, keep it
+                visual_keywords = ['camera', 'shot', 'lighting', 'lens', 'frame', 'depth']
+                if len(cleaned) > 150 and any(kw in cleaned_lower for kw in visual_keywords):
+                    results.append(cleaned)
+                continue
+
+            results.append(cleaned)
+
+        # Log parsing results
+        if len(results) != expected_count:
+            self.logger.warning(
+                f"Expected {expected_count} results, got {len(results)}. "
+                f"Will pad with smart fallbacks."
+            )
+
+        return results
+
     def _batch_enhance_single(self,
                               texts: List[str],
                               provider: str,
@@ -413,24 +464,45 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
         """
         # For efficiency, try to batch in a single call if provider supports it
         system_prompt = self._get_system_prompt(style)
-        
+
         # Check if these look like lyrics
         avg_words = sum(len(text.split()) for text in texts) / len(texts) if texts else 0
         likely_lyrics = avg_words < 15
-        
-        # Create a batch prompt
-        if likely_lyrics:
-            batch_prompt = """Create detailed visual scene descriptions for each lyric line below.
+
+        # Create a batch prompt with strict formatting for Anthropic
+        if provider.lower() == 'anthropic':
+            batch_prompt = (
+                f"Transform these {len(texts)} texts into {style.value} image generation prompts.\n\n"
+                f"CRITICAL FORMATTING RULES:\n"
+                f"- Return EXACTLY {len(texts)} prompts\n"
+                f"- Number them 1-{len(texts)}\n"
+                f"- NO headers, titles, or section markers\n"
+                f"- NO introductory text or explanations\n"
+                f"- Start immediately with: 1. [prompt]\n"
+                f"- Each prompt must be at least 100 characters\n\n"
+                f"Texts to transform:\n\n"
+            )
+            for i, text in enumerate(texts, 1):
+                batch_prompt += f"{i}. {text}\n"
+
+            batch_prompt += (
+                f"\n\nNow return {len(texts)} numbered prompts ONLY. "
+                f"No headers, no explanations, just numbered visual descriptions."
+            )
+        else:
+            # Create a batch prompt for other providers
+            if likely_lyrics:
+                batch_prompt = """Create detailed visual scene descriptions for each lyric line below.
 For each line, describe what we should see in the image that represents the lyric visually.
 Include specific details about the main subject, setting, lighting, and visual style.
 Return one enhanced visual description per line, numbered:
 
 """
-        else:
-            batch_prompt = "Transform each of these lines into cinematic image generation prompts. Return one enhanced prompt per line:\n\n"
-        
-        for i, text in enumerate(texts, 1):
-            batch_prompt += f"{i}. {text}\n"
+            else:
+                batch_prompt = "Transform each of these lines into cinematic image generation prompts. Return one enhanced prompt per line:\n\n"
+
+            for i, text in enumerate(texts, 1):
+                batch_prompt += f"{i}. {text}\n"
         
         try:
             # Prepare model identifier
@@ -444,8 +516,8 @@ Return one enhanced visual description per line, numbered:
             
             # Adjust max_tokens based on provider and batch size
             if provider.lower() == 'anthropic':
-                # More conservative for Anthropic to avoid timeouts
-                max_tokens = min(100 * len(texts), 4000)
+                # Increase token allocation for Anthropic (was too conservative)
+                max_tokens = min(150 * len(texts), 4000)
             else:
                 max_tokens = 150 * len(texts)
 
@@ -469,40 +541,16 @@ Return one enhanced visual description per line, numbered:
             # Parse the response
             enhanced_text = response.choices[0].message.content.strip()
 
-            # Extract prompts - handle multi-line descriptions
-            import re
-            results = []
+            # Use the new enhanced parser
+            results = self._parse_batch_response(enhanced_text, len(texts))
 
-            # Split by numbered markers like "1. ", "2. ", "**2.**", etc.
-            # Pattern: line starts with optional bold markers, number followed by dot or paren
-            parts = re.split(r'\n(?=\*{0,2}\d+\.)', enhanced_text)
-
-            for part in parts:
-                part = part.strip()
-                if not part:
-                    continue
-
-                # Remove the number prefix (e.g., "1. " or "1) " or "**2.**")
-                cleaned = re.sub(r'^\*{0,2}\d+[\.\)]\s*\*{0,2}', '', part, count=1)
-
-                # Remove markdown headers and other noise
-                cleaned = re.sub(r'^#+\s*', '', cleaned)  # Remove "# Header"
-                cleaned = re.sub(r'^\*\*.*?\*\*\s*', '', cleaned)  # Remove "**Bold**"
-
-                # Skip common preamble phrases
-                if cleaned and not any(skip in cleaned.lower()[:100] for skip in [
-                    'here are', 'i\'d be happy', 'i appreciate',
-                    'instead,', 'option 1', 'option 2', 'option 3'
-                ]):
-                    results.append(cleaned.strip())
-
-            # Log for debugging
-            self.logger.debug(f"Parsed {len(results)} results from {len(parts)} parts")
-
-            # Ensure we have the right number of results
+            # Ensure we have the right number of results with smart fallbacks
             while len(results) < len(texts):
-                self.logger.warning(f"Missing result {len(results) + 1}, using original text")
-                results.append(texts[len(results)])  # Fallback to original
+                missing_idx = len(results)
+                self.logger.warning(f"Missing result {missing_idx + 1}, using smart fallback")
+                # Use smart fallback instead of original text
+                fallback = self._create_smart_fallback(texts[missing_idx], style)
+                results.append(fallback)
 
             return results[:len(texts)]
             
