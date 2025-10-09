@@ -461,9 +461,9 @@ class LLMWorker(QObject):
                         console.info("=" * 60)
                         self.finished.emit(prompts)
 
-            elif self.llm_provider.lower() == "claude":
-                logger.info("Using Claude for prompt generation")
-                console.info("Using Claude for prompt generation")
+            elif self.llm_provider.lower() in ["claude", "anthropic"]:
+                logger.info("Using Claude/Anthropic for prompt generation")
+                console.info("Using Claude/Anthropic for prompt generation")
 
                 model_name = self.llm_model or "claude-sonnet-4-5"
 

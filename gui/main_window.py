@@ -1295,7 +1295,7 @@ class MainWindow(QMainWindow):
 
         # Check provider support for reference images
         if hasattr(self, 'btn_select_ref_image'):
-            is_google = self.current_provider == "google"
+            is_google = self.current_provider.lower() == "google"
             self.btn_select_ref_image.setEnabled(is_google)
             if is_google:
                 self.btn_select_ref_image.setToolTip("Choose a starting image for generation (Google Gemini)")
@@ -1676,7 +1676,7 @@ class MainWindow(QMainWindow):
         self._update_auth_visibility()
         
         # Check and display cached auth status if in Google Cloud mode
-        if self.current_provider == "google" and auth_mode_display == "Google Cloud Account":
+        if self.current_provider.lower() == "google" and auth_mode_display == "Google Cloud Account":
             if self.config.get("gcloud_auth_validated", False):
                 project_id = self.config.get("gcloud_project_id", "")
                 if project_id:
@@ -1696,7 +1696,7 @@ class MainWindow(QMainWindow):
             local_sd_layout.addWidget(self.local_sd_widget)
             v.addWidget(self.local_sd_group)
             # Show/hide based on provider
-            self.local_sd_group.setVisible(self.current_provider == "local_sd")
+            self.local_sd_group.setVisible(self.current_provider.lower() == "local_sd")
         else:
             self.local_sd_widget = None
             self.local_sd_group = None
@@ -3088,18 +3088,18 @@ For more detailed information, please refer to the full documentation.
         except Exception as e:
             # Fallback to some basic models if provider fails to load
             print(f"Error loading models for {self.current_provider}: {e}")
-            if self.current_provider == "google":
+            if self.current_provider.lower() == "google":
                 self.model_combo.addItem("Gemini 2.5 Flash Image (gemini-2.5-flash-image-preview)", 
                                         "gemini-2.5-flash-image-preview")
-            elif self.current_provider == "openai":
+            elif self.current_provider.lower() == "openai":
                 self.model_combo.addItem("DALL·E 3 (dall-e-3)", "dall-e-3")
-            elif self.current_provider == "stability":
+            elif self.current_provider.lower() == "stability":
                 self.model_combo.addItem("Stable Diffusion XL (stable-diffusion-xl-1024-v1-0)", 
                                         "stable-diffusion-xl-1024-v1-0")
-            elif self.current_provider == "local_sd":
+            elif self.current_provider.lower() == "local_sd":
                 self.model_combo.addItem("Stable Diffusion 2.1 (stabilityai/stable-diffusion-2-1)",
                                         "stabilityai/stable-diffusion-2-1")
-            elif self.current_provider == "midjourney":
+            elif self.current_provider.lower() == "midjourney":
                 # Midjourney versions
                 self.model_combo.addItem("v6.1 (Latest)", "v6.1")
                 self.model_combo.addItem("v6", "v6")
@@ -3115,11 +3115,11 @@ For more detailed information, please refer to the full documentation.
         # Update old advanced group for fallback
         elif hasattr(self, 'advanced_group'):
             # Only show for local_sd provider
-            self.advanced_group.setVisible(self.current_provider == "local_sd")
+            self.advanced_group.setVisible(self.current_provider.lower() == "local_sd")
 
         # Show/hide Midjourney settings
         if hasattr(self, 'midjourney_group'):
-            self.midjourney_group.setVisible(self.current_provider == "midjourney")
+            self.midjourney_group.setVisible(self.current_provider.lower() == "midjourney")
 
     @staticmethod
     def get_llm_providers():
@@ -3438,7 +3438,7 @@ For more detailed information, please refer to the full documentation.
 
     def _on_model_changed(self, model_name: str):
         """Handle model selection change."""
-        if self.current_provider == "local_sd" and hasattr(self, 'steps_spin'):
+        if self.current_provider.lower() == "local_sd" and hasattr(self, 'steps_spin'):
             # Auto-adjust for Turbo models
             if 'turbo' in model_name.lower():
                 self.steps_spin.setValue(2)  # 1-4 steps for turbo
@@ -3460,7 +3460,7 @@ For more detailed information, please refer to the full documentation.
 
         # Switch display between image and Midjourney command
         if hasattr(self, 'output_stack'):
-            if self.current_provider == "midjourney":
+            if self.current_provider.lower() == "midjourney":
                 self.output_stack.setCurrentIndex(1)  # Show Midjourney command widget
                 # Midjourney command is now built by the provider, no update needed
             else:
@@ -3472,7 +3472,7 @@ For more detailed information, please refer to the full documentation.
 
         # Hide resolution selector for Midjourney (aspect ratio only)
         if hasattr(self, 'resolution_selector') and self.resolution_selector:
-            if self.current_provider == "midjourney":
+            if self.current_provider.lower() == "midjourney":
                 self.resolution_selector.setVisible(False)
                 # Keep aspect ratio visible and enabled
                 if hasattr(self, 'aspect_selector') and self.aspect_selector:
@@ -3486,7 +3486,7 @@ For more detailed information, please refer to the full documentation.
 
         # Show/hide Midjourney options
         if hasattr(self, 'midjourney_options_group'):
-            self.midjourney_options_group.setVisible(self.current_provider == "midjourney")
+            self.midjourney_options_group.setVisible(self.current_provider.lower() == "midjourney")
 
         # Hide advanced settings for Midjourney
         if hasattr(self, 'advanced_panel') and self.advanced_panel:
@@ -3529,13 +3529,13 @@ For more detailed information, please refer to the full documentation.
         self._update_cost_estimate()
         
         # Update API key field reference based on provider
-        if self.current_provider == "google":
+        if self.current_provider.lower() == "google":
             self.api_key_edit = self.google_key_edit
             self.current_api_key = self.google_key_edit.text().strip()
-        elif self.current_provider == "openai":
+        elif self.current_provider.lower() == "openai":
             self.api_key_edit = self.openai_key_edit
             self.current_api_key = self.openai_key_edit.text().strip()
-        elif self.current_provider == "stability":
+        elif self.current_provider.lower() == "stability":
             self.api_key_edit = self.stability_key_edit
             self.current_api_key = self.stability_key_edit.text().strip()
         else:
@@ -3551,7 +3551,7 @@ For more detailed information, please refer to the full documentation.
         
         # Update Local SD widget visibility
         if hasattr(self, 'local_sd_group') and self.local_sd_group:
-            self.local_sd_group.setVisible(self.current_provider == "local_sd")
+            self.local_sd_group.setVisible(self.current_provider.lower() == "local_sd")
 
         # Midjourney is now in its own tab, no provider-specific settings needed
 
@@ -3659,7 +3659,7 @@ For more detailed information, please refer to the full documentation.
             self.batch_selector.set_cost_per_image(cost / settings["num_images"])
         
         # Show/hide appropriate widgets based on provider
-        if self.current_provider == "local_sd":
+        if self.current_provider.lower() == "local_sd":
             if hasattr(self, 'api_key_widget'):
                 self.api_key_widget.setVisible(False)
             if hasattr(self, 'local_sd_widget') and self.local_sd_widget:
@@ -3683,7 +3683,7 @@ For more detailed information, please refer to the full documentation.
         from core import get_api_key_url
         url = get_api_key_url(self.current_provider)
         
-        if self.current_provider == "local_sd":
+        if self.current_provider.lower() == "local_sd":
             # Local SD widget is embedded, no need for separate dialog
             return
         elif url:
@@ -3795,22 +3795,22 @@ For more detailed information, please refer to the full documentation.
             self._append_to_console("Midjourney download watcher disabled", "#888888")
 
         # Get the key for the current provider
-        if self.current_provider == "google":
+        if self.current_provider.lower() == "google":
             key = google_key
-        elif self.current_provider == "openai":
+        elif self.current_provider.lower() == "openai":
             key = openai_key
-        elif self.current_provider == "stability":
+        elif self.current_provider.lower() == "stability":
             key = stability_key
-        elif self.current_provider == "midjourney":
+        elif self.current_provider.lower() == "midjourney":
             # Midjourney is manual-only, no authentication needed
             key = ""
-        elif self.current_provider == "local_sd":
+        elif self.current_provider.lower() == "local_sd":
             key = ""
         else:
             key = self.api_key_edit.text().strip()
 
         # Validate we have a key for non-local providers
-        if self.current_provider not in ["local_sd", "midjourney"] and not key:
+        if self.current_provider.lower() not in ["local_sd", "midjourney"] and not key:
             QMessageBox.warning(self, APP_NAME, f"Please enter an API key for {self.current_provider}.")
             return
 
@@ -3838,7 +3838,7 @@ For more detailed information, please refer to the full documentation.
     
     def _update_auth_visibility(self):
         """Update visibility of auth-related widgets based on provider and auth mode."""
-        is_google = self.current_provider == "google"
+        is_google = self.current_provider.lower() == "google"
         is_gcloud_auth = self.auth_mode_combo.currentText() == "Google Cloud Account"
         
         # Show auth mode only for Google provider
@@ -4143,13 +4143,13 @@ For more detailed information, please refer to the full documentation.
 
     def _get_provider_max_resolution(self) -> int:
         """Get maximum resolution for current provider."""
-        if self.current_provider == "google":
+        if self.current_provider.lower() == "google":
             return 1024
-        elif self.current_provider == "openai":
+        elif self.current_provider.lower() == "openai":
             return 1792
-        elif self.current_provider == "stability":
+        elif self.current_provider.lower() == "stability":
             return 1536
-        elif self.current_provider == "local_sd":
+        elif self.current_provider.lower() == "local_sd":
             return 2048  # Can vary based on local GPU
         else:
             return 1024  # Default conservative limit
@@ -4235,11 +4235,11 @@ For more detailed information, please refer to the full documentation.
 
         # Get provider maximum resolution
         provider_max = 1024  # Default
-        if self.current_provider == "google":
+        if self.current_provider.lower() == "google":
             provider_max = 1024
-        elif self.current_provider == "openai":
+        elif self.current_provider.lower() == "openai":
             provider_max = 1792
-        elif self.current_provider == "stability":
+        elif self.current_provider.lower() == "stability":
             provider_max = 1536
 
         logger.info(f"Provider: {self.current_provider} (max: {provider_max}px)")
@@ -4260,7 +4260,7 @@ For more detailed information, please refer to the full documentation.
 
         if needs_upscaling:
             # Calculate what the provider will actually output
-            if self.current_provider == "google":
+            if self.current_provider.lower() == "google":
                 # Google outputs 1024x1024 then crops to aspect
                 expected_width = expected_height = 1024
                 if target_width != target_height:
@@ -4346,7 +4346,7 @@ For more detailed information, please refer to the full documentation.
         # Store original prompt (before reference image modifications)
         original_prompt = prompt
 
-        if not self.current_api_key and self.current_provider not in ["local_sd", "midjourney"]:
+        if not self.current_api_key and self.current_provider.lower() not in ["local_sd", "midjourney"]:
             self._append_to_console("ERROR: No API key configured", "#ff6666")  # Red
             QMessageBox.warning(self, APP_NAME, "Please set an API key in Settings.")
             return
@@ -4386,7 +4386,7 @@ For more detailed information, please refer to the full documentation.
                 kwargs['aspect_ratio'] = aspect_ratio
                 # Enable cropping for Google provider when aspect ratio is selected
                 # But the provider will now check if the returned image already matches before cropping
-                if self.current_provider == "google":
+                if self.current_provider.lower() == "google":
                     kwargs['crop_to_aspect'] = True
 
                     # For non-Google providers, provide resolution string for proper size mapping
@@ -4437,7 +4437,7 @@ For more detailed information, please refer to the full documentation.
                             kwargs['height'] = height
 
                         # Also store for UI message display
-                        if self.current_provider == "google":
+                        if self.current_provider.lower() == "google":
                             self._pending_resolution = (width, height)
             else:
                 # Using explicit resolution mode
@@ -4506,7 +4506,7 @@ For more detailed information, please refer to the full documentation.
         if hasattr(self, 'advanced_panel') and self.advanced_panel:
             advanced_settings = self.advanced_panel.get_settings()
             kwargs.update(advanced_settings)
-        elif self.current_provider == "local_sd":
+        elif self.current_provider.lower() == "local_sd":
             # Fallback to old advanced settings for local_sd
             if hasattr(self, 'steps_spin'):
                 kwargs['steps'] = self.steps_spin.value()
@@ -4514,7 +4514,7 @@ For more detailed information, please refer to the full documentation.
                 kwargs['cfg_scale'] = self.guidance_spin.value()
         
         # Add reference image if enabled and available (Google Gemini only)
-        if (self.current_provider == "google" and
+        if (self.current_provider.lower() == "google" and
             hasattr(self, 'reference_image_data') and
             self.reference_image_data and
             hasattr(self, 'ref_image_enabled') and
@@ -4565,7 +4565,7 @@ For more detailed information, please refer to the full documentation.
 
             if width and height:
                 # If using Google provider and resolution > 1024, calculate scaled dimensions
-                if self.current_provider == 'google':
+                if self.current_provider.lower() == 'google':
                     max_dim = max(width, height)
                     if max_dim > 1024:
                         scale_factor = 1024 / max_dim
@@ -4600,12 +4600,12 @@ For more detailed information, please refer to the full documentation.
             # For other aspect ratios or providers, insert dimensions
             if width and height:
                 is_square = (width == height)
-                if self.current_provider == 'google' and is_square:
+                if self.current_provider.lower() == 'google' and is_square:
                     # Don't insert dimensions for square images with Google
                     pass
                 elif width != 1024 or height != 1024:
                     # If using Google provider and resolution > 1024, calculate scaled dimensions
-                    if self.current_provider == 'google':
+                    if self.current_provider.lower() == 'google':
                         max_dim = max(width, height)
                         if max_dim > 1024:
                             scale_factor = 1024 / max_dim
@@ -4620,7 +4620,7 @@ For more detailed information, please refer to the full documentation.
                     self._append_to_console(f"Auto-inserted: \"{resolution_text}\"", "#9966ff")
 
         # Handle Midjourney-specific setup
-        if self.current_provider == "midjourney":
+        if self.current_provider.lower() == "midjourney":
             # Add Midjourney parameters from UI elements
             if hasattr(self, 'mj_stylize_slider'):
                 kwargs['stylize'] = self.mj_stylize_slider.value()
@@ -4644,7 +4644,7 @@ For more detailed information, please refer to the full documentation.
         self.gen_thread = QThread()
         # Get the actual auth mode from config
         auth_mode = "api-key"  # default
-        if self.current_provider == "google":
+        if self.current_provider.lower() == "google":
             auth_mode_text = self.auth_mode_combo.currentText()
             if auth_mode_text == "Google Cloud Account":
                 auth_mode = "gcloud"
@@ -4742,7 +4742,7 @@ For more detailed information, please refer to the full documentation.
             - bytes if no processing was needed
         """
         # Skip processing for Gemini provider
-        if self.current_provider == "google":
+        if self.current_provider.lower() == "google":
             return image_data
 
         # Get target resolution
@@ -4841,7 +4841,7 @@ For more detailed information, please refer to the full documentation.
     def _process_image_for_resolution(self, image_data: bytes) -> bytes:
         """Process image to match selected resolution (scaling/cropping)."""
         # Skip processing for Gemini provider
-        if self.current_provider == "google":
+        if self.current_provider.lower() == "google":
             return image_data
 
         # Get target resolution
@@ -5171,7 +5171,7 @@ For more detailed information, please refer to the full documentation.
             # try:
             #     from core.image_utils import auto_crop_solid_borders
             #     # Only auto-crop for Google provider (Nano Banana)
-            #     if hasattr(self, 'current_provider') and self.current_provider == 'google':
+            #     if hasattr(self, 'current_provider') and self.current_provider.lower() == 'google':
             #         image_data = auto_crop_solid_borders(image_data)
             # except ImportError:
             #     pass  # image_utils not available, skip auto-crop
@@ -6577,7 +6577,7 @@ For more detailed information, please refer to the full documentation.
         # 1. Provider is Google (reference images only work with Google) AND
         # 2. There is a current image displayed AND
         # 3. It's not already the reference image (or reference is cleared)
-        is_google = self.current_provider == "google"
+        is_google = self.current_provider.lower() == "google"
         has_current_image = bool(hasattr(self, 'current_image_data') and self.current_image_data)
 
         # Check if current image is already the reference
@@ -6622,7 +6622,7 @@ For more detailed information, please refer to the full documentation.
                 width, height = self.resolution_selector.get_width_height()
                 if width and height and (width != 1024 or height != 1024):
                     # If using Google provider and resolution > 1024, calculate scaled dimensions
-                    if self.current_provider == 'google':
+                    if self.current_provider.lower() == 'google':
                         max_dim = max(width, height)
                         if max_dim > 1024:
                             scale_factor = 1024 / max_dim
