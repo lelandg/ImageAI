@@ -2,6 +2,7 @@
 
 import base64
 import logging
+import mimetypes
 from pathlib import Path
 from typing import Optional
 from io import BytesIO
@@ -21,6 +22,41 @@ from .history_widget import DialogHistoryWidget
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
+
+
+def get_image_mime_type(image_path: str) -> str:
+    """
+    Detect the MIME type of an image file.
+
+    Args:
+        image_path: Path to the image file
+
+    Returns:
+        MIME type string (e.g., 'image/png', 'image/jpeg')
+    """
+    # Initialize mimetypes if needed
+    if not mimetypes.inited:
+        mimetypes.init()
+
+    # Get MIME type from file extension
+    mime_type, _ = mimetypes.guess_type(image_path)
+
+    # If detection failed, try to detect from file extension manually
+    if not mime_type:
+        ext = Path(image_path).suffix.lower()
+        mime_map = {
+            '.png': 'image/png',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.gif': 'image/gif',
+            '.bmp': 'image/bmp',
+            '.webp': 'image/webp',
+            '.tiff': 'image/tiff',
+            '.tif': 'image/tiff',
+        }
+        mime_type = mime_map.get(ext, 'image/jpeg')  # Default to jpeg if unknown
+
+    return mime_type
 
 
 class ImageAnalysisWorker(QObject):
@@ -49,6 +85,74 @@ class ImageAnalysisWorker(QObject):
     def stop(self):
         """Stop the worker."""
         self._stopped = True
+
+    def _analyze_with_google_gemini(self, image_data: bytes, mime_type: str,
+                                     temperature: float, max_tokens: int) -> str:
+        """
+        Analyze image using Google Gemini's direct API (not Vertex AI).
+
+        Args:
+            image_data: Raw image bytes
+            mime_type: MIME type of the image
+            temperature: Temperature parameter
+            max_tokens: Maximum tokens to generate
+
+        Returns:
+            Generated description text
+        """
+        try:
+            import google.genai as genai
+            from google.genai import types
+
+            # Configure with API key
+            genai.configure(api_key=self.api_key)
+
+            # Create client
+            client = genai.Client()
+
+            # Create the system prompt
+            system_prompt = """You are an expert at analyzing images and creating detailed descriptions
+            that can be used as prompts for AI image generation systems. Provide clear, detailed descriptions
+            focusing on visual elements, style, composition, colors, lighting, and mood."""
+
+            # Combine with user's analysis prompt
+            full_prompt = f"{system_prompt}\n\n{self.analysis_prompt}"
+
+            self.log_message.emit("Sending request to Google Gemini...", "INFO")
+
+            # Create the content with image
+            content = types.Content(
+                parts=[
+                    types.Part(text=full_prompt),
+                    types.Part(
+                        inline_data=types.Blob(
+                            mime_type=mime_type,
+                            data=image_data
+                        )
+                    )
+                ]
+            )
+
+            # Generate with vision model
+            response = client.models.generate_content(
+                model=self.llm_model,  # e.g., 'gemini-2.5-pro'
+                contents=content,
+                config=types.GenerateContentConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_tokens
+                )
+            )
+
+            # Extract text from response
+            if response and response.text:
+                return response.text.strip()
+            else:
+                raise ValueError("Empty response from Google Gemini")
+
+        except Exception as e:
+            error_msg = f"Google Gemini analysis failed: {str(e)}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
 
     def run(self):
         """Run the image analysis operation."""
@@ -80,6 +184,10 @@ class ImageAnalysisWorker(QObject):
             # Encode to base64
             image_base64 = base64.b64encode(image_data).decode('utf-8')
 
+            # Detect the correct MIME type
+            mime_type = get_image_mime_type(str(image_path))
+            self.log_message.emit(f"Image MIME type: {mime_type}", "INFO")
+
             # Import required modules
             from core.video.prompt_engine import UnifiedLLMProvider
 
@@ -94,7 +202,23 @@ class ImageAnalysisWorker(QObject):
             elif provider_lower in ["claude", "anthropic"]:
                 api_config['anthropic_api_key'] = self.api_key
 
-            # Create LLM provider
+            # For Google Gemini, use direct API to avoid Vertex AI
+            if provider_lower in ["google", "gemini"]:
+                description = self._analyze_with_google_gemini(
+                    image_data, mime_type, temperature, max_tokens
+                )
+                if self._stopped:
+                    return
+
+                # Log response
+                logger.info(f"LLM Response - Description: {description[:200]}...")
+                console.info(f"LLM Response - Description: {description[:200]}...")
+                self.log_message.emit("Description generated successfully", "INFO")
+
+                self.finished.emit(description)
+                return
+
+            # Create LLM provider for OpenAI and Anthropic
             llm = UnifiedLLMProvider(api_config)
 
             # Log parameters based on model
@@ -131,7 +255,7 @@ class ImageAnalysisWorker(QObject):
             # Combine with user's analysis prompt
             full_prompt = f"{system_prompt}\n\n{self.analysis_prompt}"
 
-            # Prepare messages with image
+            # Prepare messages with image using correct MIME type
             messages = [
                 {
                     "role": "user",
@@ -143,7 +267,7 @@ class ImageAnalysisWorker(QObject):
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/jpeg;base64,{image_base64}"
+                                "url": f"data:{mime_type};base64,{image_base64}"
                             }
                         }
                     ]

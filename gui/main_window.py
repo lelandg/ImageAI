@@ -4390,7 +4390,7 @@ For more detailed information, please refer to the full documentation.
                     kwargs['crop_to_aspect'] = True
 
                     # For non-Google providers, provide resolution string for proper size mapping
-                    if self.current_provider != "google":
+                    if self.current_provider.lower() != "google":
                         # Map aspect ratios to appropriate resolutions per provider
                         resolution_map = self._get_resolution_for_aspect_ratio(aspect_ratio, self.current_provider)
                         if resolution_map:
@@ -4451,7 +4451,7 @@ For more detailed information, please refer to the full documentation.
 
                 if width and height:
                     # For non-Gemini providers, use closest aspect ratio and store target for scaling
-                    if self.current_provider != "google":
+                    if self.current_provider.lower() != "google":
                         self.target_resolution = (width, height)
                         closest_ar = self._find_closest_aspect_ratio(width, height, self.current_provider)
                         kwargs['aspect_ratio'] = closest_ar
