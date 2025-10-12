@@ -7066,78 +7066,89 @@ For more detailed information, please refer to the full documentation.
 
         from PySide6.QtWidgets import QTableWidgetItem
 
-        # Add a new row at the top (newest first)
-        row_count = self.history_table.rowCount()
-        self.history_table.insertRow(0)  # Insert at top
+        # Block selection signals to prevent triggering image display while inserting
+        self.history_table.selectionModel().blockSignals(True)
 
-        # Thumbnail column
-        thumbnail_item = QTableWidgetItem()
-        file_path = history_entry.get('path', '')
-        if file_path:
-            path_str = str(file_path)
-            thumbnail_item.setData(Qt.UserRole, path_str)
-            # Preload thumbnail
-            self.thumbnail_cache.get(path_str)
-        self.history_table.setItem(0, 0, thumbnail_item)
-        self.history_table.setRowHeight(0, 80)
+        try:
+            # Add a new row at the top (newest first)
+            row_count = self.history_table.rowCount()
+            self.history_table.insertRow(0)  # Insert at top
 
-        # Parse timestamp
-        timestamp = history_entry.get('timestamp', '')
-        datetime_str = ''
-        sortable_datetime = None
-        if timestamp:
-            try:
-                if isinstance(timestamp, (int, float)):
-                    dt = datetime.fromtimestamp(timestamp)
-                    datetime_str = dt.strftime('%Y-%m-%d %H:%M')
-                    sortable_datetime = dt.isoformat()
-                elif 'T' in str(timestamp):
-                    parts = str(timestamp).split('T')
-                    date_str = parts[0]
-                    time_str = parts[1].split('.')[0] if len(parts) > 1 else ''
-                    datetime_str = f"{date_str} {time_str}"
-            except:
-                datetime_str = str(timestamp)
+            # Thumbnail column
+            thumbnail_item = QTableWidgetItem()
+            file_path = history_entry.get('path', '')
+            if file_path:
+                path_str = str(file_path)
+                thumbnail_item.setData(Qt.UserRole, path_str)
+                # Preload thumbnail
+                self.thumbnail_cache.get(path_str)
+            self.history_table.setItem(0, 0, thumbnail_item)
+            self.history_table.setRowHeight(0, 80)
 
-        # Date & Time column
-        datetime_item = QTableWidgetItem(datetime_str)
-        if sortable_datetime:
-            datetime_item.setData(Qt.UserRole + 1, sortable_datetime)
-        self.history_table.setItem(0, 1, datetime_item)
+            # Parse timestamp
+            timestamp = history_entry.get('timestamp', '')
+            datetime_str = ''
+            sortable_datetime = None
+            if timestamp:
+                try:
+                    if isinstance(timestamp, (int, float)):
+                        dt = datetime.fromtimestamp(timestamp)
+                        datetime_str = dt.strftime('%Y-%m-%d %H:%M')
+                        sortable_datetime = dt.isoformat()
+                    elif 'T' in str(timestamp):
+                        parts = str(timestamp).split('T')
+                        date_str = parts[0]
+                        time_str = parts[1].split('.')[0] if len(parts) > 1 else ''
+                        datetime_str = f"{date_str} {time_str}"
+                except:
+                    datetime_str = str(timestamp)
 
-        # Provider column
-        provider = history_entry.get('provider', '')
-        provider_item = QTableWidgetItem(provider.title() if provider else 'Unknown')
-        self.history_table.setItem(0, 2, provider_item)
+            # Date & Time column
+            datetime_item = QTableWidgetItem(datetime_str)
+            if sortable_datetime:
+                datetime_item.setData(Qt.UserRole + 1, sortable_datetime)
+            self.history_table.setItem(0, 1, datetime_item)
 
-        # Model column
-        model = history_entry.get('model', '')
-        model_display = model.split('/')[-1] if '/' in model else model
-        model_item = QTableWidgetItem(model_display)
-        model_item.setToolTip(model)
-        self.history_table.setItem(0, 3, model_item)
+            # Provider column
+            provider = history_entry.get('provider', '')
+            provider_item = QTableWidgetItem(provider.title() if provider else 'Unknown')
+            self.history_table.setItem(0, 2, provider_item)
 
-        # Prompt column
-        prompt = history_entry.get('prompt', 'No prompt')
-        prompt_item = QTableWidgetItem(prompt)
-        prompt_item.setToolTip(f"Full prompt:\n{prompt}")
-        self.history_table.setItem(0, 4, prompt_item)
+            # Model column
+            model = history_entry.get('model', '')
+            model_display = model.split('/')[-1] if '/' in model else model
+            model_item = QTableWidgetItem(model_display)
+            model_item.setToolTip(model)
+            self.history_table.setItem(0, 3, model_item)
 
-        # Resolution column
-        width = history_entry.get('width', '')
-        height = history_entry.get('height', '')
-        resolution = f"{width}x{height}" if width and height else ''
-        resolution_item = QTableWidgetItem(resolution)
-        self.history_table.setItem(0, 5, resolution_item)
+            # Prompt column
+            prompt = history_entry.get('prompt', 'No prompt')
+            prompt_item = QTableWidgetItem(prompt)
+            prompt_item.setToolTip(f"Full prompt:\n{prompt}")
+            self.history_table.setItem(0, 4, prompt_item)
 
-        # Cost column
-        cost = history_entry.get('cost', 0.0)
-        cost_str = f"${cost:.2f}" if cost > 0 else '-'
-        cost_item = QTableWidgetItem(cost_str)
-        self.history_table.setItem(0, 6, cost_item)
+            # Resolution column
+            width = history_entry.get('width', '')
+            height = history_entry.get('height', '')
+            resolution = f"{width}x{height}" if width and height else ''
+            resolution_item = QTableWidgetItem(resolution)
+            self.history_table.setItem(0, 5, resolution_item)
 
-        # Store the history item data for retrieval
-        datetime_item.setData(Qt.UserRole, history_entry)
+            # Cost column
+            cost = history_entry.get('cost', 0.0)
+            cost_str = f"${cost:.2f}" if cost > 0 else '-'
+            cost_item = QTableWidgetItem(cost_str)
+            self.history_table.setItem(0, 6, cost_item)
+
+            # Store the history item data for retrieval
+            datetime_item.setData(Qt.UserRole, history_entry)
+
+            # Clear any existing selection to prevent old images from overriding the new one
+            self.history_table.clearSelection()
+
+        finally:
+            # Always unblock signals, even if an error occurred
+            self.history_table.selectionModel().blockSignals(False)
 
     def add_to_history(self, history_entry):
         """Public method to add an entry to history from other tabs."""
