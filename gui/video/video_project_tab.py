@@ -293,6 +293,7 @@ class VideoGenerationThread(QThread):
             # Get additional generation params
             aspect_ratio = self.kwargs.get('aspect_ratio', '16:9')
             resolution = self.kwargs.get('resolution', '1920x1080')
+            prompt_style = self.kwargs.get('prompt_style', 'Cinematic')
 
             # Parse resolution string to width/height
             width = height = None
@@ -346,6 +347,13 @@ class VideoGenerationThread(QThread):
                 scene_images = []
                 image_paths = []
 
+                # Prepend style to prompt for first scene only (others use continuity)
+                prompt_with_style = scene.prompt
+                scene_actual_index = self.project.scenes.index(scene)
+                if scene_actual_index == 0 and prompt_style:
+                    prompt_with_style = f"{prompt_style} style: {scene.prompt}"
+                    logger.info(f"Scene {scene_actual_index}: Prepending style '{prompt_style}' to prompt")
+
                 try:
                     for v in range(variants):
                         logger.info(f"Generating variant {v+1}/{variants} for scene {i+1}")
@@ -376,7 +384,7 @@ class VideoGenerationThread(QThread):
 
                         # Generate single image using provider (same as image tab)
                         texts, images = provider_instance.generate(
-                            prompt=scene.prompt,
+                            prompt=prompt_with_style,
                             model=model,
                             **gen_kwargs
                         )
@@ -385,12 +393,12 @@ class VideoGenerationThread(QThread):
                             scene_images.extend(images)
 
                             # Save image to project directory
-                            project_dir = Path.home() / ".imageai" / "video_projects" / self.project.name / "images"
-                            project_dir.mkdir(parents=True, exist_ok=True)
+                            images_dir = self.project.project_dir / "images"
+                            images_dir.mkdir(parents=True, exist_ok=True)
 
                             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                             img_filename = f"scene_{i}_{timestamp}_v{v}.png"
-                            img_path = project_dir / img_filename
+                            img_path = images_dir / img_filename
                             img_path.write_bytes(images[0])
                             image_paths.append(img_path)
 
@@ -553,9 +561,9 @@ class VideoGenerationThread(QThread):
                         canvas.paste(img_rgba, (x_offset, y_offset), img_rgba)
 
                         # Save the composed canvas
-                        project_dir = Path.home() / ".imageai" / "video_projects" / self.project.name / "temp"
-                        project_dir.mkdir(parents=True, exist_ok=True)
-                        processed_seed_path = project_dir / f"canvas_seed_scene_{scene_index}.png"
+                        temp_dir = self.project.project_dir / "temp"
+                        temp_dir.mkdir(parents=True, exist_ok=True)
+                        processed_seed_path = temp_dir / f"canvas_seed_scene_{scene_index}.png"
                         canvas.save(processed_seed_path, 'PNG')
                         logger.info(f"Saved composed canvas: {processed_seed_path}")
 
@@ -593,13 +601,13 @@ class VideoGenerationThread(QThread):
 
             # Copy video from cache to project directory
             import shutil
-            project_dir = Path.home() / ".imageai" / "video_projects" / self.project.name / "clips"
-            project_dir.mkdir(parents=True, exist_ok=True)
+            clips_dir = self.project.project_dir / "clips"
+            clips_dir.mkdir(parents=True, exist_ok=True)
 
             # Create a proper filename in the project directory
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             video_filename = f"scene_{scene_index}_{timestamp}.mp4"
-            video_path = project_dir / video_filename
+            video_path = clips_dir / video_filename
 
             # Copy the video file to the project directory
             shutil.copy2(cached_video_path, video_path)
@@ -651,8 +659,7 @@ class VideoGenerationThread(QThread):
             raise Exception("Failed to read last frame from video")
 
         # Save the frame
-        project_dir = Path.home() / ".imageai" / "video_projects" / self.project.name
-        frames_dir = project_dir / "frames"
+        frames_dir = self.project.project_dir / "frames"
         frames_dir.mkdir(parents=True, exist_ok=True)
 
         frame_path = frames_dir / f"scene_{scene_index}_last_frame.png"
@@ -694,10 +701,10 @@ class VideoGenerationThread(QThread):
             )
             
             # Define output path
-            project_dir = Path.home() / ".imageai" / "video_projects" / self.project.name
-            project_dir.mkdir(parents=True, exist_ok=True)
+            # Project directory already exists, just ensure it's available
+            self.project.project_dir.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_path = project_dir / f"{self.project.name}_{timestamp}.mp4"
+            output_path = self.project.project_dir / f"{self.project.name}_{timestamp}.mp4"
             
             # Progress callback
             def progress_callback(percent, status):

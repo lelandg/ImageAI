@@ -1816,10 +1816,14 @@ class WorkspaceWidget(QWidget):
 
             # Column 5: Generate video button
             video_btn = QPushButton("🎬")
-            video_btn.setToolTip("Generate video clip for this scene")
+            has_video_prompt = bool(hasattr(scene, 'video_prompt') and scene.video_prompt and len(scene.video_prompt) > 0)
+            if has_video_prompt:
+                video_btn.setToolTip("Generate video clip for this scene")
+            else:
+                video_btn.setToolTip("Generate video prompts first (Enhance for Video button)")
             video_btn.setMaximumWidth(35)
             video_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
-            video_btn.setEnabled(scene.prompt and len(scene.prompt) > 0)  # Only enable if prompt exists
+            video_btn.setEnabled(has_video_prompt)  # Only enable if video_prompt exists
             video_btn.clicked.connect(lambda checked, idx=i: self.generate_video_clip(idx))
             self.scene_table.setCellWidget(i, 5, video_btn)
 
