@@ -585,16 +585,32 @@ class VideoGenerationThread(QThread):
             if not result.success:
                 raise Exception(f"Veo generation failed: {result.error}")
 
-            video_path = result.video_path
-            if not video_path or not video_path.exists():
+            cached_video_path = result.video_path
+            if not cached_video_path or not cached_video_path.exists():
                 raise Exception("Video generation succeeded but no video file was created")
+
+            self.progress_update.emit(70, "Copying video to project folder...")
+
+            # Copy video from cache to project directory
+            import shutil
+            project_dir = Path.home() / ".imageai" / "video_projects" / self.project.name / "clips"
+            project_dir.mkdir(parents=True, exist_ok=True)
+
+            # Create a proper filename in the project directory
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            video_filename = f"scene_{scene_index}_{timestamp}.mp4"
+            video_path = project_dir / video_filename
+
+            # Copy the video file to the project directory
+            shutil.copy2(cached_video_path, video_path)
+            logger.info(f"Copied video from cache to project: {video_path}")
 
             self.progress_update.emit(80, "Extracting last frame...")
 
             # Extract last frame
             last_frame_path = self._extract_last_frame(video_path, scene_index)
 
-            # Update scene with video clip and last frame
+            # Update scene with video clip and last frame (using project path)
             scene.video_clip = video_path
             scene.last_frame = last_frame_path
 
