@@ -367,6 +367,12 @@ class VeoClient:
                                 if hasattr(video, 'uri'):
                                     video_url = video.uri
                                     self.logger.info(f"Retrieved video URL: {video_url[:80]}...")
+
+                                    # Parse and log video metadata if available (VEO3_FIXES enhancement)
+                                    if hasattr(video, 'metadata'):
+                                        metadata = video.metadata
+                                        self.logger.info(f"Video metadata: {metadata}")
+
                                     return video_url
                                 else:
                                     self.logger.error(f"Video object has no 'uri' attribute. Attributes: {dir(video)}")
@@ -400,11 +406,11 @@ class VeoClient:
     
     async def _download_video(self, video_url: str) -> Optional[Path]:
         """
-        Download video from URL to local storage.
-        
+        Download video from URL to local storage with authentication.
+
         Args:
             video_url: URL of generated video
-            
+
         Returns:
             Local path to downloaded video
         """
@@ -412,27 +418,60 @@ class VeoClient:
             # Create cache directory
             cache_dir = Path.home() / ".imageai" / "cache" / "veo_videos"
             cache_dir.mkdir(parents=True, exist_ok=True)
-            
+
             # Generate filename from URL hash
             url_hash = hashlib.sha256(video_url.encode()).hexdigest()[:16]
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"veo_{timestamp}_{url_hash}.mp4"
             video_path = cache_dir / filename
-            
-            # Download video
-            response = requests.get(video_url, stream=True, timeout=30)
+
+            # Download video with API key authentication
+            # For Google API keys (not OAuth), use key parameter instead of Bearer token
+            # Remove any existing query parameters from URL and add our own
+            base_url = video_url.split('?')[0]
+            params = {
+                "key": self.api_key,
+                "alt": "media"  # Request media content
+            }
+
+            self.logger.info(f"Downloading video from {base_url[:80]}...")
+            self.logger.info(f"Using API key authentication with key parameter")
+            response = requests.get(base_url, params=params, stream=True, timeout=30, allow_redirects=True)
             response.raise_for_status()
-            
+
             # Save to file
+            file_size = 0
             with open(video_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
-            
-            self.logger.info(f"Video downloaded to {video_path}")
+                    file_size += len(chunk)
+
+            # Validate downloaded file (VEO3_FIXES enhancement)
+            if file_size == 0:
+                self.logger.error(f"Downloaded file is empty (0 bytes)")
+                video_path.unlink(missing_ok=True)  # Delete empty file
+                return None
+
+            if not video_path.exists():
+                self.logger.error(f"Video file was not created at {video_path}")
+                return None
+
+            actual_size = video_path.stat().st_size
+            if actual_size != file_size:
+                self.logger.warning(f"File size mismatch: wrote {file_size} bytes, file is {actual_size} bytes")
+
+            self.logger.info(f"Video downloaded successfully to {video_path} ({file_size / (1024*1024):.2f} MB)")
             return video_path
-            
+
+        except requests.HTTPError as e:
+            # Enhanced error logging for HTTP errors
+            status_code = e.response.status_code if e.response else "unknown"
+            error_body = e.response.text[:500] if e.response else "no response body"
+            self.logger.error(f"HTTP error {status_code} downloading video: {error_body}")
+            self.logger.error(f"Full exception: {e}", exc_info=True)
+            return None
         except Exception as e:
-            self.logger.error(f"Failed to download video: {e}")
+            self.logger.error(f"Failed to download video: {e}", exc_info=True)
             return None
     
     def generate_batch(self,
