@@ -561,7 +561,7 @@ class VideoGenerationThread(QThread):
 
             # Configure generation
             config = VeoGenerationConfig(
-                model=VeoModel.VEO_3_0,
+                model=VeoModel.VEO_3_GENERATE,
                 duration=int(scene.duration_sec),
                 aspect_ratio=aspect_ratio
             )
@@ -967,7 +967,10 @@ class VideoProjectTab(QWidget):
         if success:
             # Update UI state
             self.workspace_widget.update_ui_state()
-            
+
+            # Refresh scene table to show updated prompts/video_prompts
+            self.workspace_widget.populate_scene_table()
+
             # Save project
             if self.current_project:
                 try:

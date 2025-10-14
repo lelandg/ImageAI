@@ -824,8 +824,8 @@ class WorkspaceWidget(QWidget):
         self.enhance_prompts_btn.setEnabled(False)
         controls_layout.addWidget(self.enhance_prompts_btn)
 
-        self.enhance_video_prompts_btn = QPushButton("Enhance for Video")
-        self.enhance_video_prompts_btn.setToolTip("Add camera movement and motion to prompts for video generation")
+        self.enhance_video_prompts_btn = QPushButton("Generate for Video")
+        self.enhance_video_prompts_btn.setToolTip("Add camera movement and motion to image prompts for video generation")
         self.enhance_video_prompts_btn.clicked.connect(self.enhance_for_video)
         self.enhance_video_prompts_btn.setEnabled(False)
         controls_layout.addWidget(self.enhance_video_prompts_btn)
@@ -2227,9 +2227,12 @@ class WorkspaceWidget(QWidget):
                 seed_image = prev_scene.last_frame
                 scene.use_last_frame_as_seed = True
 
-        # If no seed from previous scene, use scene's approved image or first image
+        # If no seed from previous scene, use scene's own last frame, approved image, or first image
         if not seed_image:
-            if scene.approved_image and scene.approved_image.exists():
+            # First try the scene's own last frame (if it already has a video clip)
+            if scene.last_frame and scene.last_frame.exists():
+                seed_image = scene.last_frame
+            elif scene.approved_image and scene.approved_image.exists():
                 seed_image = scene.approved_image
             elif scene.images and len(scene.images) > 0:
                 seed_image = scene.images[0].path if hasattr(scene.images[0], 'path') else scene.images[0]

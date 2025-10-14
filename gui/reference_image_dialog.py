@@ -104,11 +104,8 @@ class ImageAnalysisWorker(QObject):
             import google.genai as genai
             from google.genai import types
 
-            # Configure with API key
-            genai.configure(api_key=self.api_key)
-
-            # Create client
-            client = genai.Client()
+            # Create client with API key
+            client = genai.Client(api_key=self.api_key)
 
             # Create the system prompt
             system_prompt = """You are an expert at analyzing images and creating detailed descriptions

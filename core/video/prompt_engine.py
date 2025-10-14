@@ -149,7 +149,7 @@ class UnifiedLLMProvider:
     def _strip_markdown_headers(self, text: str) -> str:
         """
         Strip markdown headers and formatting from LLM responses.
-        Removes lines starting with # and removes ** bold markers.
+        Removes lines starting with # and removes ** bold markers and * bullet points.
         """
         import re
 
@@ -159,13 +159,20 @@ class UnifiedLLMProvider:
         for line in lines:
             stripped = line.strip()
             # Skip lines that are just markdown headers (e.g., "# Cinematic visual prompt")
-            if not stripped.startswith('#'):
+            # Also skip lines that are just bullet points with no substantial content
+            if not stripped.startswith('#') and not (stripped.startswith('* ') and len(stripped) < 5):
                 filtered_lines.append(line)
 
         result = '\n'.join(filtered_lines).strip()
 
         # Remove ** bold markers (e.g., "**Visual Scene Description:**")
         result = re.sub(r'\*\*([^*]+)\*\*:?\s*', '', result)
+
+        # Remove standalone * bullet points at start of lines
+        result = re.sub(r'^\*\s+', '', result, flags=re.MULTILINE)
+
+        # Remove any remaining asterisks that aren't part of text (isolated *)
+        result = re.sub(r'(?<!\w)\*(?!\w)', '', result)
 
         return result.strip()
 
@@ -259,12 +266,14 @@ class UnifiedLLMProvider:
         # Adjust user prompt based on whether it's a lyric
         if is_lyric:
             user_prompt = f"""Create a detailed visual scene description for this lyric line: "{text}"
-            
+
 Describe what we should see in the image that represents this lyric visually. Include specific details about:
 - The main subject or action
 - The setting and environment
 - Lighting and mood
 - Visual style and composition
+
+IMPORTANT: Do NOT include the lyric text itself in your response. Only provide the visual description.
 
 Be highly descriptive and detailed. Aim for 75-150 words."""
         else:
@@ -495,6 +504,9 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
                 batch_prompt = """Create detailed visual scene descriptions for each lyric line below.
 For each line, describe what we should see in the image that represents the lyric visually.
 Include specific details about the main subject, setting, lighting, and visual style.
+
+IMPORTANT: Do NOT include the lyric text itself in your responses. Only provide pure visual descriptions.
+
 Return one enhanced visual description per line, numbered:
 
 """

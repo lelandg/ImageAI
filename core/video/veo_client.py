@@ -116,21 +116,23 @@ class VeoClient:
     def __init__(self, api_key: Optional[str] = None, region: Optional[str] = None):
         """
         Initialize Veo client.
-        
+
         Args:
             api_key: Google API key
             region: User's region for restriction checking
         """
         if not GENAI_AVAILABLE:
             raise ImportError("google-generativeai not installed. Run: pip install google-generativeai")
-        
+
         self.api_key = api_key
         self.region = region or self._detect_region()
         self.logger = logging.getLogger(__name__)
-        
+        self.client = None
+
         if api_key:
-            genai.configure(api_key=api_key)
-        
+            # Use the new google.genai Client API instead of configure
+            self.client = genai.Client(api_key=api_key)
+
         # Check regional restrictions
         self.person_generation_allowed = self._check_person_generation()
     
@@ -209,16 +211,19 @@ class VeoClient:
         
         try:
             start_time = time.time()
-            
-            # Initialize the model
-            model = genai.GenerativeModel(config.model.value)
-            
+
+            if not self.client:
+                raise ValueError("No client configured. API key required for video generation.")
+
             # Prepare generation parameters
             gen_params = config.to_dict()
-            
+
             # Start generation (returns operation ID for polling)
             self.logger.info(f"Starting Veo generation with {config.model.value}")
-            response = await model.generate_video_async(**gen_params)
+            response = await self.client.models.generate_video_async(
+                model=config.model.value,
+                **gen_params
+            )
             
             # Store operation ID for polling
             result.operation_id = response.name
