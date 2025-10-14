@@ -20,10 +20,12 @@ import requests
 # Check if google.genai is available
 try:
     import google.genai as genai
+    from google.genai import types
     GENAI_AVAILABLE = True
 except ImportError:
     GENAI_AVAILABLE = False
     genai = None
+    types = None
 
 
 class VeoModel(Enum):
@@ -45,9 +47,10 @@ class VeoGenerationConfig:
     include_audio: bool = True  # Veo 3 can generate audio
     person_generation: bool = False  # May be restricted by region
     seed: Optional[int] = None
-    
+    image: Optional[Path] = None  # Seed image for image-to-video generation
+
     def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary for API calls"""
+        """Convert to dictionary for API calls (excludes image, handled separately)"""
         config = {
             "prompt": self.prompt,
             "aspect_ratio": self.aspect_ratio,
@@ -55,16 +58,19 @@ class VeoGenerationConfig:
             "duration": self.duration,
             "fps": self.fps,
         }
-        
+
         if self.model == VeoModel.VEO_3_GENERATE:
             config["include_audio"] = self.include_audio
-        
+
         if self.person_generation:
             config["person_generation"] = True
-        
+
         if self.seed is not None:
             config["seed"] = self.seed
-        
+
+        # Note: image is handled separately in generate_video_async
+        # as it requires special loading/preparation
+
         return config
 
 
@@ -215,15 +221,54 @@ class VeoClient:
             if not self.client:
                 raise ValueError("No client configured. API key required for video generation.")
 
-            # Prepare generation parameters
-            gen_params = config.to_dict()
+            # Load seed image if provided
+            seed_image = None
+            if config.image and config.image.exists():
+                try:
+                    # Load image bytes
+                    with open(config.image, 'rb') as f:
+                        image_bytes = f.read()
+
+                    # Create Image object for Veo API
+                    # Must be a dict with imageBytes and mimeType
+                    seed_image = {
+                        'imageBytes': image_bytes,
+                        'mimeType': 'image/png'
+                    }
+                    self.logger.info(f"Loaded seed image: {config.image} ({len(image_bytes)} bytes)")
+                except Exception as e:
+                    self.logger.warning(f"Failed to load seed image: {e}, proceeding without it")
+
+            # Create GenerateVideosConfig for additional parameters
+            # Note: Only include parameters that are supported by the API
+            video_config = types.GenerateVideosConfig(
+                aspect_ratio=config.aspect_ratio,
+                resolution=config.resolution
+            )
+
+            # Add duration to prompt since Veo doesn't have a direct duration parameter
+            # Format: "X-second video of [original prompt]"
+            enhanced_prompt = f"{config.duration}-second video of {config.prompt}"
 
             # Start generation (returns operation ID for polling)
             self.logger.info(f"Starting Veo generation with {config.model.value}")
-            response = await self.client.models.generate_video_async(
-                model=config.model.value,
-                **gen_params
-            )
+            self.logger.info(f"Config: {config.aspect_ratio} @ {config.resolution}, duration={config.duration}s")
+            self.logger.info(f"Enhanced prompt with duration: {enhanced_prompt[:100]}...")
+
+            if seed_image:
+                self.logger.info("Using seed image for image-to-video generation")
+                response = self.client.models.generate_videos(
+                    model=config.model.value,
+                    prompt=enhanced_prompt,
+                    config=video_config,
+                    image=seed_image
+                )
+            else:
+                response = self.client.models.generate_videos(
+                    model=config.model.value,
+                    prompt=enhanced_prompt,
+                    config=video_config
+                )
             
             # Store operation ID for polling
             result.operation_id = response.name
@@ -232,8 +277,9 @@ class VeoClient:
             result.metadata["started_at"] = datetime.now().isoformat()
             
             # Poll for completion
+            # Documentation states 1-6 minutes typical, using 8 minutes for buffer
             constraints = self.MODEL_CONSTRAINTS[config.model]
-            max_wait = constraints["generation_time"][1] + 60  # Add buffer
+            max_wait = 480  # 8 minutes
             
             video_url = await self._poll_for_completion(response, max_wait)
             
@@ -281,44 +327,75 @@ class VeoClient:
     
     async def _poll_for_completion(self, operation: Any, max_wait: int) -> Optional[str]:
         """
-        Poll for video generation completion.
-        
+        Poll for video generation completion using official Google API pattern.
+
         Args:
-            operation: Generation operation
+            operation: Generation operation (LRO - Long Running Operation)
             max_wait: Maximum wait time in seconds
-            
+
         Returns:
             Video URL if successful, None otherwise
         """
         start_time = time.time()
-        poll_interval = 10  # Start with 10 second intervals
-        
+        poll_interval = 10  # Google docs recommend 10 second intervals
+        poll_count = 0
+
+        self.logger.info(f"Starting to poll for completion (max wait: {max_wait}s)")
+        self.logger.info(f"Operation ID: {operation.name}")
+
         while time.time() - start_time < max_wait:
             try:
-                # Check operation status
-                if operation.done():
-                    # Get the result
-                    result = operation.result()
-                    if hasattr(result, 'video_url'):
-                        return result.video_url
-                    elif hasattr(result, 'uri'):
-                        return result.uri
-                    else:
-                        self.logger.warning("Operation completed but no video URL found")
+                elapsed = time.time() - start_time
+                poll_count += 1
+
+                # Log every poll attempt for first 5, then every 4th attempt
+                if poll_count <= 5 or poll_count % 4 == 0:
+                    self.logger.info(f"Poll #{poll_count}: Checking operation.done... ({elapsed:.0f}s elapsed, {max_wait - elapsed:.0f}s remaining)")
+
+                # Check if operation is done (official Google pattern)
+                if operation.done:
+                    # Operation completed
+                    elapsed_total = time.time() - start_time
+                    self.logger.info(f"✅ Operation completed after {elapsed_total:.1f} seconds ({poll_count} polls)")
+
+                    # Extract video from response (official structure from docs)
+                    try:
+                        if hasattr(operation, 'response') and hasattr(operation.response, 'generated_videos'):
+                            generated_videos = operation.response.generated_videos
+                            if generated_videos and len(generated_videos) > 0:
+                                video = generated_videos[0].video
+                                if hasattr(video, 'uri'):
+                                    video_url = video.uri
+                                    self.logger.info(f"Retrieved video URL: {video_url[:80]}...")
+                                    return video_url
+                                else:
+                                    self.logger.error(f"Video object has no 'uri' attribute. Attributes: {dir(video)}")
+                                    return None
+                            else:
+                                self.logger.error("No generated_videos in response")
+                                return None
+                        else:
+                            self.logger.error(f"Unexpected response structure. Operation attributes: {dir(operation)}")
+                            if hasattr(operation, 'response'):
+                                self.logger.error(f"Response attributes: {dir(operation.response)}")
+                            return None
+                    except Exception as e:
+                        self.logger.error(f"Error extracting video URL from completed operation: {e}", exc_info=True)
                         return None
-                
-                # Wait before next poll
+
+                # Not done yet - wait and refresh operation status
+                self.logger.debug(f"Poll #{poll_count}: Operation not done yet, waiting {poll_interval}s...")
                 await asyncio.sleep(poll_interval)
-                
-                # Increase poll interval over time (backoff)
-                if time.time() - start_time > 60:
-                    poll_interval = min(30, poll_interval + 5)
-                
+
+                # Refresh operation status (official Google pattern)
+                operation = self.client.operations.get(operation)
+
             except Exception as e:
-                self.logger.error(f"Error polling for completion: {e}")
+                self.logger.error(f"Error polling for completion: {e}", exc_info=True)
                 return None
-        
-        self.logger.warning(f"Generation timed out after {max_wait} seconds")
+
+        total_elapsed = time.time() - start_time
+        self.logger.warning(f"❌ Generation timed out after {total_elapsed:.1f} seconds ({poll_count} polls, max: {max_wait}s)")
         return None
     
     async def _download_video(self, video_url: str) -> Optional[Path]:

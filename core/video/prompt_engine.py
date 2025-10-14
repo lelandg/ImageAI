@@ -572,6 +572,127 @@ Return one enhanced visual description per line, numbered:
             return [self.enhance_prompt(text, provider, model, style, temperature)
                    for text in texts]
 
+    def batch_enhance_for_video(self,
+                                texts: List[str],
+                                provider: str,
+                                model: str,
+                                style: PromptStyle = PromptStyle.CINEMATIC,
+                                temperature: float = 0.7,
+                                console_callback=None) -> List[str]:
+        """
+        Batch enhance multiple prompts for video generation in ONE API call.
+        Adds camera movements, motion, and temporal progression with scene continuity.
+
+        Args:
+            texts: List of texts (image prompts) to enhance for video
+            provider: LLM provider
+            model: Model name
+            style: Style of enhancement
+            temperature: Creativity parameter
+            console_callback: Optional callback for logging
+
+        Returns:
+            List of video-enhanced prompts with camera movements and continuity
+        """
+        if not self.is_available():
+            # Fallback: add basic motion to all prompts
+            return [f"{text}. Camera movement: gentle pan and subtle motion." for text in texts]
+
+        # Build system prompt for video enhancement
+        system_prompt = f"""You are a video prompt engineer. Transform image descriptions into dynamic video prompts that flow together as a sequence.
+
+For each scene, add:
+1. **Camera Movements**: Pans (left/right), tilts (up/down), zooms, dolly moves, tracking shots
+2. **Subject Motion**: Character actions, environmental movement (wind, water, clouds)
+3. **Temporal Progression**: Light changes, emotional progression, scene development
+4. **Scene Continuity**: Ensure smooth transitions between consecutive scenes
+
+Style: {style.value}
+
+CRITICAL FORMATTING:
+- Return EXACTLY {len(texts)} enhanced video prompts
+- Number them 1-{len(texts)}
+- NO headers, NO markdown, NO preamble
+- Each prompt: keep core description + add 2-3 motion elements
+- Make camera work subtle and cinematic
+- Consider scene-to-scene continuity"""
+
+        # Create batch prompt with context about scene flow
+        batch_prompt = f"""Transform these {len(texts)} image descriptions into video prompts with camera movement and continuity.
+
+Image descriptions:
+
+"""
+        for i, text in enumerate(texts, 1):
+            batch_prompt += f"{i}. {text}\n"
+
+        batch_prompt += f"""
+
+Return {len(texts)} numbered video prompts with:
+- Camera movements appropriate to each scene
+- Natural subject/environmental motion
+- Scene-to-scene visual continuity
+- Temporal flow and progression
+
+Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
+
+        try:
+            # Prepare model identifier
+            if provider == 'lmstudio':
+                model_id = model
+                api_base = self.lmstudio_base
+            else:
+                from core.llm_models import get_provider_prefix
+                prefix = get_provider_prefix(provider)
+                model_id = f"{prefix}{model}" if prefix else model
+                api_base = None
+
+            # Adjust max_tokens for video prompts (slightly longer than image prompts)
+            max_tokens = 200 * len(texts)  # ~200 tokens per video prompt
+
+            kwargs = {
+                "model": model_id,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": batch_prompt}
+                ],
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "timeout": 120
+            }
+
+            if api_base:
+                kwargs["api_base"] = api_base
+
+            if console_callback:
+                console_callback(f"🎬 Batch enhancing {len(texts)} prompts for video in ONE API call...", "INFO")
+
+            self.logger.info(f"Batch enhancing {len(texts)} prompts for video with {provider}/{model}")
+            response = self.litellm.completion(**kwargs)
+
+            # Parse the response
+            enhanced_text = response.choices[0].message.content.strip()
+
+            # Use the batch parser
+            results = self._parse_batch_response(enhanced_text, len(texts))
+
+            # Fallback for missing results
+            while len(results) < len(texts):
+                missing_idx = len(results)
+                self.logger.warning(f"Missing video result {missing_idx + 1}, using fallback with motion")
+                fallback = f"{texts[missing_idx]}. Camera movement: gentle pan and subtle motion, natural environmental dynamics."
+                results.append(fallback)
+
+            if console_callback:
+                console_callback(f"✅ Batch video enhancement complete: {len(results)} prompts", "SUCCESS")
+
+            return results[:len(texts)]
+
+        except Exception as e:
+            self.logger.error(f"Batch video enhancement failed: {e}")
+            # Fallback: add basic motion to all prompts
+            return [f"{text}. Camera movement: gentle pan and subtle motion." for text in texts]
+
     def analyze_image(self,
                      messages: List[Dict[str, Any]],
                      model: str = None,

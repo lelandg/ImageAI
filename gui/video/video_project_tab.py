@@ -175,7 +175,6 @@ class VideoGenerationThread(QThread):
             }
 
             llm = UnifiedLLMProvider(llm_config)
-            engine = PromptEngine(llm_provider=llm)
 
             # Map style string to enum (support both predefined and custom styles)
             style_map = {
@@ -195,41 +194,47 @@ class VideoGenerationThread(QThread):
             }
             style = style_map.get(prompt_style.lower(), PromptStyle.CINEMATIC)
 
-            # Enhance video prompts for each scene with continuity
+            # BATCH ENHANCE FOR VIDEO: Process all scenes in ONE API call
             total_scenes = len(self.project.scenes)
-            previous_context = None
 
-            for i, scene in enumerate(self.project.scenes):
-                if self.cancelled:
-                    break
+            if self.cancelled:
+                return
 
-                progress = int((i / total_scenes) * 100)
-                scene_preview = scene.source[:40] + "..." if len(scene.source) > 40 else scene.source
-                self.progress_update.emit(progress, f"Scene {i+1}/{total_scenes}: '{scene_preview}' - Enhancing for video...")
+            # Collect all base texts for batch processing
+            # Use image prompt as base if available, otherwise use source
+            base_texts = [scene.prompt if scene.prompt else scene.source
+                         for scene in self.project.scenes]
 
-                # Use image prompt as base if available, otherwise use source
-                base_text = scene.prompt if scene.prompt else scene.source
+            self.progress_update.emit(10, f"🎬 BATCH processing {total_scenes} scenes for video in 1 API call...")
 
-                # Generate video-enhanced prompt with continuity
-                video_prompt = engine.enhance_for_video(
-                    base_text,
+            # Use batch_enhance_for_video for efficiency (ONE API call for all scenes)
+            try:
+                video_prompts = llm.batch_enhance_for_video(
+                    base_texts,
                     provider=llm_provider,
                     model=llm_model,
                     style=style,
-                    previous_scene_context=previous_context,
-                    console_callback=lambda msg, level: self.progress_update.emit(progress, msg)
+                    temperature=0.7,
+                    console_callback=None  # Progress updates handled by parent
                 )
 
-                scene.video_prompt = video_prompt
+                # Apply video prompts to scenes
+                if not self.cancelled:
+                    for i, (scene, video_prompt) in enumerate(zip(self.project.scenes, video_prompts)):
+                        progress = int(((i + 1) / total_scenes) * 90) + 10  # 10-100%
+                        scene_preview = scene.source[:40] + "..." if len(scene.source) > 40 else scene.source
+                        scene.video_prompt = video_prompt
+                        self.progress_update.emit(progress, f"Scene {i+1}/{total_scenes}: '{scene_preview}' - ✓")
 
-                # Update context for next scene
-                if i < total_scenes - 1:
-                    previous_context = f"{scene.source}: {video_prompt[:100]}..."
+                if not self.cancelled:
+                    self.progress_update.emit(100, f"✅ Batch enhanced {total_scenes} scenes for video")
+                    self.generation_complete.emit(True, "Video prompt enhancement complete")
 
-                self.progress_update.emit(progress, f"Scene {i+1}/{total_scenes}: '{scene_preview}' - ✓ Video enhanced")
-
-            if not self.cancelled:
-                self.generation_complete.emit(True, "Video prompt enhancement complete")
+            except Exception as batch_error:
+                logger.error(f"❌ Batch video enhancement failed: {batch_error}")
+                self.progress_update.emit(0, f"❌ Batch video enhancement failed: {str(batch_error)}")
+                self.generation_complete.emit(False, f"Batch video enhancement failed: {str(batch_error)}")
+                return  # Stop processing - don't fall back to individual calls
 
         except Exception as e:
             logger.error(f"Video prompt enhancement failed: {e}")
@@ -559,27 +564,30 @@ class VideoGenerationThread(QThread):
                     logger.warning(f"Failed to process reference image: {e}")
                     # Fall back to original seed image
 
-            # Configure generation
+            # Configure generation with prompt and optional seed image
             config = VeoGenerationConfig(
                 model=VeoModel.VEO_3_GENERATE,
+                prompt=prompt,
                 duration=int(scene.duration_sec),
-                aspect_ratio=aspect_ratio
+                aspect_ratio=aspect_ratio,
+                image=Path(seed_image_path) if seed_image_path and Path(seed_image_path).exists() else None
             )
 
-            self.progress_update.emit(20, "Submitting to Veo...")
-
-            # Generate video with or without seed image
-            if seed_image_path and Path(seed_image_path).exists():
-                video_path = veo_client.generate_with_image(
-                    prompt=prompt,
-                    image_path=Path(seed_image_path),
-                    config=config
-                )
+            if config.image:
+                logger.info(f"Using seed image for image-to-video generation: {config.image}")
+                self.progress_update.emit(20, "Submitting to Veo with seed image...")
             else:
-                video_path = veo_client.generate(
-                    prompt=prompt,
-                    config=config
-                )
+                self.progress_update.emit(20, "Submitting to Veo...")
+
+            # Generate video (with or without seed image)
+            result = veo_client.generate_video(config)
+
+            if not result.success:
+                raise Exception(f"Veo generation failed: {result.error}")
+
+            video_path = result.video_path
+            if not video_path or not video_path.exists():
+                raise Exception("Video generation succeeded but no video file was created")
 
             self.progress_update.emit(80, "Extracting last frame...")
 
