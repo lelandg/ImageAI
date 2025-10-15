@@ -27,6 +27,7 @@ from core.video.storyboard import StoryboardGenerator
 from core.video.config import VideoConfig
 from core.security import SecureKeyStorage
 from gui.common.dialog_manager import get_dialog_manager
+from gui.video.wizard_widget import WorkflowWizardWidget
 from core.llm_models import get_provider_models, get_all_provider_ids, get_provider_display_name
 
 
@@ -256,6 +257,9 @@ class WorkspaceWidget(QWidget):
         self.project_manager = ProjectManager(self.video_config.get_projects_dir())
         self.current_project = None
 
+        # Wizard widget initialization (will be created when project is loaded)
+        self.wizard_widget = None
+
         # Create image preview widget
         self.image_preview = ImageHoverPreview(self)
 
@@ -270,15 +274,18 @@ class WorkspaceWidget(QWidget):
     
     def init_ui(self):
         """Initialize the workspace UI"""
+        self.logger.info("Creating workspace layout...")
         layout = QVBoxLayout(self)
 
         # Enable tooltip text wrapping globally for this widget
         self.setStyleSheet("QToolTip { white-space: pre-wrap; max-width: 400px; }")
 
         # LLM Provider at the top (global setting)
+        self.logger.info("Creating LLM provider panel...")
         layout.addWidget(self.create_llm_provider_panel())
 
         # Project header
+        self.logger.info("Creating project header...")
         layout.addWidget(self.create_project_header())
 
         # Main vertical splitter - top for workspace, bottom for image/console
@@ -290,28 +297,72 @@ class WorkspaceWidget(QWidget):
         workspace_layout.setContentsMargins(0, 0, 0, 0)
 
         # Horizontal splitter for workspace
-        h_splitter = QSplitter(Qt.Horizontal)
+        self.h_splitter = QSplitter(Qt.Horizontal)
+
+        # Wizard container (far left panel)
+        self.wizard_container = QWidget()
+        self.wizard_layout = QVBoxLayout(self.wizard_container)
+        self.wizard_layout.setContentsMargins(5, 5, 5, 5)
+
+        # Wizard toggle button at top
+        self.wizard_toggle_btn_top = QPushButton("◀ Hide Guide")
+        self.wizard_toggle_btn_top.setCheckable(True)
+        self.wizard_toggle_btn_top.setChecked(True)
+        self.wizard_toggle_btn_top.setMaximumHeight(30)
+        self.wizard_toggle_btn_top.clicked.connect(self._toggle_wizard)
+        self.wizard_layout.addWidget(self.wizard_toggle_btn_top)
+
+        # Content container (collapsible)
+        self.wizard_content = QWidget()
+        self.wizard_content_layout = QVBoxLayout(self.wizard_content)
+        self.wizard_content_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Wizard placeholder (shown when no project is loaded)
+        self.wizard_placeholder = QLabel("Load or create a project to see workflow guide")
+        self.wizard_placeholder.setStyleSheet("color: #666; padding: 20px;")
+        self.wizard_placeholder.setWordWrap(True)
+        self.wizard_placeholder.setAlignment(Qt.AlignCenter)
+        self.wizard_content_layout.addWidget(self.wizard_placeholder)
+
+        self.wizard_layout.addWidget(self.wizard_content)
+
+        self.h_splitter.addWidget(self.wizard_container)
+        self.h_splitter.setCollapsible(0, False)  # Don't allow complete collapse via splitter
 
         # Left panel - Input and settings
+        self.logger.info("Creating left panel (input/settings/audio)...")
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
+        self.logger.info("  - Creating input panel...")
         left_layout.addWidget(self.create_input_panel())
+        self.logger.info("  - Creating settings panel...")
         left_layout.addWidget(self.create_settings_panel())
+        self.logger.info("  - Creating audio panel...")
         left_layout.addWidget(self.create_audio_panel())
         left_layout.addStretch()
-        h_splitter.addWidget(left_panel)
+        self.h_splitter.addWidget(left_panel)
 
         # Right panel - Storyboard and export
+        self.logger.info("Creating right panel (storyboard/export)...")
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
+        self.logger.info("  - Creating storyboard panel...")
         right_layout.addWidget(self.create_storyboard_panel())
+        self.logger.info("  - Creating export panel...")
         right_layout.addWidget(self.create_export_panel())
         right_layout.addStretch()
-        h_splitter.addWidget(right_panel)
+        self.h_splitter.addWidget(right_panel)
 
-        # Set initial splitter sizes
-        h_splitter.setSizes([400, 600])
-        workspace_layout.addWidget(h_splitter)
+        # Set initial splitter sizes (wizard, left panel, right panel)
+        self.h_splitter.setSizes([300, 400, 600])
+        self.h_splitter.setStretchFactor(0, 0)  # Wizard doesn't stretch by default
+        self.h_splitter.setStretchFactor(1, 1)  # Left panel stretches
+        self.h_splitter.setStretchFactor(2, 2)  # Right panel stretches more
+
+        # Allow wizard to expand up to 90% of window width
+        # Set minimum width constraints
+        self.wizard_container.setMinimumWidth(50)  # Minimum when collapsed
+        workspace_layout.addWidget(self.h_splitter)
 
         # Status bar
         workspace_layout.addWidget(self.create_status_bar())
@@ -425,6 +476,7 @@ class WorkspaceWidget(QWidget):
         layout.addWidget(self.save_as_btn)
 
         layout.addStretch()
+
         return widget
 
     def create_llm_provider_panel(self) -> QWidget:
@@ -1017,6 +1069,10 @@ class WorkspaceWidget(QWidget):
         
         self.current_project = VideoProject(name=self.project_name.text() or "Untitled")
         self.project_name.setText(self.current_project.name)
+
+        # Create wizard widget for new project
+        self._create_wizard_widget()
+
         self.update_ui_state()
         self.project_changed.emit(self.current_project)
     
@@ -1065,6 +1121,10 @@ class WorkspaceWidget(QWidget):
             self.current_project = self.project_manager.load_project(project_path)
             self.logger.info(f"Project loaded: {self.current_project.name}")
             self.load_project_to_ui()
+
+            # Create wizard widget for loaded project
+            self._create_wizard_widget()
+
             self.update_ui_state()
             self.project_changed.emit(self.current_project)
             self.status_label.setText(f"Loaded: {self.current_project.name}")
@@ -1152,6 +1212,9 @@ class WorkspaceWidget(QWidget):
             num_scenes = len(self.current_project.scenes) if self.current_project.scenes else 0
             self.status_label.setText(f"Project saved: {self.current_project.name} ({num_scenes} scenes)")
             self.project_changed.emit(self.current_project)
+
+            # Refresh wizard after save
+            self._refresh_wizard()
         except Exception as e:
             self.logger.error(f"Failed to save project: {e}", exc_info=True)
             dialog_manager = get_dialog_manager(self)
@@ -1869,7 +1932,10 @@ class WorkspaceWidget(QWidget):
         minutes = int(total_duration // 60)
         seconds = int(total_duration % 60)
         self.total_duration_label.setText(f"Total: {minutes}:{seconds:02d}")
-    
+
+        # Refresh wizard after populating scenes
+        self._refresh_wizard()
+
     def enhance_single_prompt(self, scene_index: int):
         """Enhance a single scene's prompt with AI"""
         if not self.current_project or scene_index >= len(self.current_project.scenes):
@@ -2127,8 +2193,8 @@ class WorkspaceWidget(QWidget):
 
     def _on_cell_clicked(self, row: int, column: int):
         """Handle cell click to display image in image view"""
-        # Column 4 is the preview column
-        if column == 4 and self.current_project and row < len(self.current_project.scenes):
+        # Clicking any cell in a row displays its image
+        if self.current_project and row < len(self.current_project.scenes):
             scene = self.current_project.scenes[row]
 
             # Display the first image if available
@@ -2154,7 +2220,7 @@ class WorkspaceWidget(QWidget):
                         self.output_image_label.setPixmap(scaled)
 
                         # Log to status console
-                        self._log_to_console(f"Displaying image: {img_path.name}")
+                        self._log_to_console(f"Displaying scene {row + 1} image: {img_path.name}")
             elif scene.last_frame and scene.last_frame.exists():
                 # Display last frame if no images but video clip exists
                 from pathlib import Path
@@ -2170,7 +2236,7 @@ class WorkspaceWidget(QWidget):
                     self.output_image_label.setPixmap(scaled)
 
                     # Log to status console
-                    self._log_to_console(f"Displaying last frame: {scene.last_frame.name}")
+                    self._log_to_console(f"Displaying scene {row + 1} last frame: {scene.last_frame.name}")
 
     def _log_to_console(self, message: str, level: str = "INFO"):
         """Log a message to the status console"""
@@ -2299,6 +2365,7 @@ class WorkspaceWidget(QWidget):
             'ken_burns': self.ken_burns_check.isChecked(),
             'transitions': self.transitions_check.isChecked(),
             'captions': self.captions_check.isChecked(),
+            'use_last_frame_for_next': self.use_last_frame_checkbox.isChecked(),  # For continuous video
             'auth_mode': auth_mode,  # Include auth mode for Google Cloud support
             'google_api_key': google_key,
             'openai_api_key': openai_key,
@@ -2581,6 +2648,9 @@ class WorkspaceWidget(QWidget):
                     fade_in_duration=self.fade_in_spin.value(),
                     fade_out_duration=self.fade_out_spin.value()
                 ))
+
+                # Refresh wizard after audio file is loaded
+                self._refresh_wizard()
     
     def clear_audio(self):
         """Clear audio selection"""
@@ -2618,7 +2688,10 @@ class WorkspaceWidget(QWidget):
                 if self.current_project:
                     self.current_project.midi_file_path = Path(filename)
                     self.current_project.midi_timing_data = timing_data
-                    
+
+                    # Refresh wizard after MIDI file is loaded
+                    self._refresh_wizard()
+
             except Exception as e:
                 self.logger.error(f"Failed to process MIDI file: {e}", exc_info=True)
                 dialog_manager = get_dialog_manager(self)
@@ -2758,7 +2831,96 @@ class WorkspaceWidget(QWidget):
         
         # Auto-save the fixed timing
         self.save_project()
-    
+
+    # ========== Wizard Management Methods ==========
+
+    def _toggle_wizard(self, checked):
+        """Toggle wizard visibility"""
+        self.wizard_content.setVisible(checked)
+        self.wizard_toggle_btn_top.setText("◀ Hide Guide" if checked else "▶ Show Guide")
+
+    def _create_wizard_widget(self):
+        """Create wizard widget for current project"""
+        if not self.current_project:
+            return
+
+        # Remove old wizard if exists
+        if self.wizard_widget:
+            self.wizard_content_layout.removeWidget(self.wizard_widget)
+            self.wizard_widget.deleteLater()
+
+        # Remove placeholder
+        if self.wizard_placeholder:
+            self.wizard_placeholder.setVisible(False)
+
+        # Create new wizard
+        self.wizard_widget = WorkflowWizardWidget(self.current_project, self)
+        self.wizard_widget.action_requested.connect(self._on_wizard_action)
+        self.wizard_widget.step_skipped.connect(self._on_wizard_step_skipped)
+
+        self.wizard_content_layout.addWidget(self.wizard_widget)
+
+    def _on_wizard_action(self, step, choice):
+        """Handle wizard action request"""
+        from core.video.workflow_wizard import WorkflowStep
+
+        # Map wizard steps to actual actions
+        if step == WorkflowStep.INPUT_TEXT:
+            # Focus on input text field
+            if hasattr(self, 'input_text'):
+                self.input_text.setFocus()
+
+        elif step == WorkflowStep.MIDI_FILE:
+            # Open MIDI file dialog
+            self.browse_midi_file()
+
+        elif step == WorkflowStep.AUDIO_FILE:
+            # Open audio file dialog
+            self.browse_audio_file()
+
+        elif step == WorkflowStep.GENERATE_STORYBOARD:
+            # Trigger storyboard generation
+            self.generate_storyboard()
+
+        elif step == WorkflowStep.ENHANCE_PROMPTS:
+            # Trigger prompt enhancement
+            if choice == "enhance":
+                self.enhance_all_prompts()
+            elif choice == "skip":
+                if self.wizard_widget:
+                    self.wizard_widget.wizard.mark_step_skipped(step)
+                    self.wizard_widget.refresh_wizard_display()
+
+        elif step == WorkflowStep.GENERATE_MEDIA:
+            # Trigger media generation based on choice
+            if choice == "images":
+                self.generate_images()
+            elif choice == "videos":
+                self.enhance_for_video()  # This generates video clips
+
+        elif step == WorkflowStep.REVIEW_APPROVE:
+            # Focus on scene table for review
+            if hasattr(self, 'scene_table'):
+                self.scene_table.setFocus()
+
+        elif step == WorkflowStep.EXPORT_VIDEO:
+            # Trigger video export
+            self.render_video()
+
+    def _on_wizard_step_skipped(self, step):
+        """Handle wizard step skipped"""
+        self.logger.info(f"Skipped workflow step: {step.value}")
+        # Save project with updated state
+        if self.current_project:
+            self.save_project()
+
+    def _refresh_wizard(self):
+        """Refresh wizard display after project changes"""
+        if self.wizard_widget and self.wizard_widget.isVisible():
+            self.wizard_widget.refresh_wizard_display()
+
+    # ========== End Wizard Management Methods ==========
+
     def update_ui_state(self):
         """Update UI element states based on project"""
         has_project = self.current_project is not None
@@ -2837,7 +2999,8 @@ class WorkspaceWidget(QWidget):
         # Save continuity settings
         self.current_project.enable_continuity = self.enable_continuity_checkbox.isChecked()
         self.current_project.enable_enhanced_storyboard = self.enable_enhanced_storyboard.isChecked()
-        
+        self.current_project.use_last_frame_for_continuous = self.use_last_frame_checkbox.isChecked()
+
         # IMPORTANT: Save audio and MIDI file information
         # These are already set when browsing, but we need to ensure they're preserved
         # The audio_track and midi_file_path are already set in browse_audio_file and browse_midi_file
@@ -3037,7 +3200,10 @@ class WorkspaceWidget(QWidget):
             
             if hasattr(self.current_project, 'enable_enhanced_storyboard'):
                 self.enable_enhanced_storyboard.setChecked(self.current_project.enable_enhanced_storyboard)
-            
+
+            if hasattr(self.current_project, 'use_last_frame_for_continuous'):
+                self.use_last_frame_checkbox.setChecked(self.current_project.use_last_frame_for_continuous)
+
             # Load target duration
             if self.current_project.target_duration:
                 try:

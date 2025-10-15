@@ -42,12 +42,22 @@ class VeoGenerationConfig:
     prompt: str = ""
     aspect_ratio: str = "16:9"  # 16:9, 9:16, 1:1
     resolution: str = "1080p"  # 720p, 1080p
-    duration: int = 8  # seconds (model-specific limits)
+    duration: int = 8  # seconds (model-specific limits: 4, 6, or 8 for Veo 3)
     fps: int = 24  # frames per second
     include_audio: bool = True  # Veo 3 can generate audio
     person_generation: bool = False  # May be restricted by region
     seed: Optional[int] = None
     image: Optional[Path] = None  # Seed image for image-to-video generation
+
+    def __post_init__(self):
+        """Validate configuration after initialization"""
+        # Validate duration for Veo 3 models (must be 4, 6, or 8 seconds)
+        if self.model in [VeoModel.VEO_3_GENERATE, VeoModel.VEO_3_FAST]:
+            if self.duration not in [4, 6, 8]:
+                raise ValueError(
+                    f"Veo 3 duration must be 4, 6, or 8 seconds, got {self.duration}. "
+                    f"Use snap_duration_to_veo() to convert float durations."
+                )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API calls (excludes image, handled separately)"""
@@ -240,33 +250,30 @@ class VeoClient:
                     self.logger.warning(f"Failed to load seed image: {e}, proceeding without it")
 
             # Create GenerateVideosConfig for additional parameters
-            # Note: Only include parameters that are supported by the API
+            # Note: Veo 3 supports duration parameter (4, 6, or 8 seconds)
             video_config = types.GenerateVideosConfig(
                 aspect_ratio=config.aspect_ratio,
-                resolution=config.resolution
+                resolution=config.resolution,
+                duration=config.duration  # Pass duration as API parameter
             )
-
-            # Add duration to prompt since Veo doesn't have a direct duration parameter
-            # Format: "X-second video of [original prompt]"
-            enhanced_prompt = f"{config.duration}-second video of {config.prompt}"
 
             # Start generation (returns operation ID for polling)
             self.logger.info(f"Starting Veo generation with {config.model.value}")
             self.logger.info(f"Config: {config.aspect_ratio} @ {config.resolution}, duration={config.duration}s")
-            self.logger.info(f"Enhanced prompt with duration: {enhanced_prompt[:100]}...")
+            self.logger.info(f"Prompt: {config.prompt[:100]}...")
 
             if seed_image:
                 self.logger.info("Using seed image for image-to-video generation")
                 response = self.client.models.generate_videos(
                     model=config.model.value,
-                    prompt=enhanced_prompt,
+                    prompt=config.prompt,  # Use original prompt, not enhanced
                     config=video_config,
                     image=seed_image
                 )
             else:
                 response = self.client.models.generate_videos(
                     model=config.model.value,
-                    prompt=enhanced_prompt,
+                    prompt=config.prompt,  # Use original prompt, not enhanced
                     config=video_config
                 )
             

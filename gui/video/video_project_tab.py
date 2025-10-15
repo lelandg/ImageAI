@@ -976,6 +976,25 @@ class VideoProjectTab(QWidget):
                             from pathlib import Path
                             scene.last_frame = Path(result['last_frame'])
 
+                            # If "use last frame for continuous video" is checked,
+                            # set last frame as image for NEXT scene (not current scene)
+                            use_last_frame_for_next = self.generation_thread.kwargs.get('use_last_frame_for_next', False)
+                            if use_last_frame_for_next and i < len(self.current_project.scenes) - 1:
+                                next_scene = self.current_project.scenes[i + 1]
+                                # Add last frame as an image for the next scene
+                                from core.video.project import ImageVariant
+                                last_frame_variant = ImageVariant(
+                                    path=scene.last_frame,
+                                    provider='veo_last_frame',
+                                    model='continuous',
+                                    cost=0.0
+                                )
+                                # Prepend to images list so it's the first image
+                                if not next_scene.images:
+                                    next_scene.images = [last_frame_variant]
+                                else:
+                                    next_scene.images.insert(0, last_frame_variant)
+
                         # Update the preview column (column 4) to show video clip icon or image
                         preview_item = QTableWidgetItem("🎞️" if scene.video_clip else ("🖼️" if scene.images else "⬜"))
                         if scene.video_clip:

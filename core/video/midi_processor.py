@@ -441,5 +441,149 @@ class MidiProcessor:
                     'text': word,
                     'duration': 0.5
                 })
-        
+
         return result
+
+
+# Utility functions for Veo video generation
+
+def snap_duration_to_veo(duration: float, allowed_durations: List[int] = None) -> int:
+    """
+    Snap a float duration to the nearest Veo-compatible duration.
+
+    Args:
+        duration: Target duration in seconds (float)
+        allowed_durations: List of valid Veo durations (default: [4, 6, 8])
+
+    Returns:
+        Nearest allowed duration as integer
+
+    Example:
+        >>> snap_duration_to_veo(5.2)
+        6
+        >>> snap_duration_to_veo(3.8)
+        4
+        >>> snap_duration_to_veo(7.5)
+        8
+    """
+    if allowed_durations is None:
+        allowed_durations = [4, 6, 8]
+
+    if not allowed_durations:
+        raise ValueError("allowed_durations cannot be empty")
+
+    # Find closest allowed duration
+    closest = min(allowed_durations, key=lambda d: abs(d - duration))
+    return closest
+
+
+def align_scene_durations_for_veo(
+    scenes: List[Dict[str, Any]],
+    timing: MidiTimingData,
+    alignment: str = "measure",
+    allowed_durations: List[int] = None,
+    total_duration_target: Optional[float] = None
+) -> List[Dict[str, Any]]:
+    """
+    Align scene durations to MIDI timing and snap to Veo-compatible values.
+
+    This combines MIDI-driven timing with Veo's duration constraints (4, 6, or 8 seconds).
+
+    Args:
+        scenes: List of scene dictionaries with at least 'prompt' key
+        timing: MIDI timing data
+        alignment: "beat", "measure", or "section"
+        allowed_durations: Valid Veo durations (default: [4, 6, 8])
+        total_duration_target: Optional target total duration to match
+
+    Returns:
+        List of scenes with duration_sec set to Veo-compatible values
+
+    Example:
+        >>> scenes = [{"prompt": "Scene 1"}, {"prompt": "Scene 2"}]
+        >>> timing = midi_processor.extract_timing(Path("song.mid"))
+        >>> aligned = align_scene_durations_for_veo(scenes, timing, "measure")
+        >>> [s["duration_sec"] for s in aligned]
+        [8, 6, 8, 4]  # All values are 4, 6, or 8
+    """
+    if allowed_durations is None:
+        allowed_durations = [4, 6, 8]
+
+    if not MIDI_AVAILABLE:
+        # Fallback: distribute duration evenly with Veo constraints
+        target_duration = total_duration_target or (len(scenes) * 6)  # Default to 6s per scene
+        duration_per_scene = target_duration / len(scenes)
+
+        aligned_scenes = []
+        for scene in scenes:
+            scene_copy = scene.copy()
+            scene_copy["duration_sec"] = snap_duration_to_veo(duration_per_scene, allowed_durations)
+            aligned_scenes.append(scene_copy)
+
+        return aligned_scenes
+
+    # Use MIDI processor to align to musical boundaries (returns float durations)
+    processor = MidiProcessor()
+    midi_aligned_scenes = processor.align_scenes_to_beats(
+        scenes=scenes,
+        timing=timing,
+        alignment=alignment,
+        snap_strength=0.8  # Strong snap to musical grid
+    )
+
+    # Snap each scene's duration to nearest Veo-compatible value
+    veo_aligned_scenes = []
+    total_assigned = 0.0
+
+    for i, scene in enumerate(midi_aligned_scenes):
+        scene_copy = scene.copy()
+        float_duration = scene.get("duration_sec", 6.0)
+
+        # Snap to Veo duration
+        veo_duration = snap_duration_to_veo(float_duration, allowed_durations)
+
+        # If we have a total target, adjust last scenes to fit
+        if total_duration_target and i == len(midi_aligned_scenes) - 1:
+            remaining = total_duration_target - total_assigned
+            if remaining > 0:
+                veo_duration = snap_duration_to_veo(remaining, allowed_durations)
+
+        scene_copy["duration_sec"] = veo_duration
+        scene_copy["veo_duration"] = veo_duration  # Mark as Veo-compatible
+        scene_copy["midi_aligned_duration"] = float_duration  # Preserve original MIDI timing
+
+        veo_aligned_scenes.append(scene_copy)
+        total_assigned += veo_duration
+
+    return veo_aligned_scenes
+
+
+def estimate_veo_scene_count(
+    total_duration: float,
+    average_scene_duration: int = 6,
+    allowed_durations: List[int] = None
+) -> int:
+    """
+    Estimate number of Veo scenes needed for a target total duration.
+
+    Args:
+        total_duration: Target video duration in seconds
+        average_scene_duration: Average scene duration (default: 6s)
+        allowed_durations: Valid Veo durations
+
+    Returns:
+        Estimated number of scenes
+
+    Example:
+        >>> estimate_veo_scene_count(45.0, average_scene_duration=6)
+        8  # 8 scenes averaging 6s ≈ 48s (close to 45s)
+    """
+    if allowed_durations is None:
+        allowed_durations = [4, 6, 8]
+
+    if average_scene_duration not in allowed_durations:
+        average_scene_duration = allowed_durations[len(allowed_durations) // 2]  # Use middle value
+
+    # Simple estimation: divide by average
+    estimate = max(1, round(total_duration / average_scene_duration))
+    return estimate

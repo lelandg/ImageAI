@@ -248,6 +248,9 @@ class VideoProject:
     
     # Cost tracking
     total_cost: float = 0.0
+
+    # Wizard configuration (not persisted - dynamically created)
+    wizard_enabled: bool = True  # Enable/disable wizard mode
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
@@ -490,10 +493,42 @@ class VideoProject:
         """Add an audio track to the project"""
         if not audio_file.exists():
             raise FileNotFoundError(f"Audio file not found: {audio_file}")
-        
+
         track = AudioTrack(
             file_path=audio_file.absolute(),
             track_type=track_type
         )
         self.audio_tracks.append(track)
         return track
+
+    def get_workflow_wizard(self):
+        """
+        Get workflow wizard for guided video generation.
+
+        Returns:
+            WorkflowWizard instance for this project
+
+        Note:
+            Wizard is created dynamically and analyzes current project state.
+            It's not persisted - fresh wizard is created each time project is loaded.
+        """
+        try:
+            from .workflow_wizard import WorkflowWizard
+            return WorkflowWizard(self)
+        except ImportError as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Workflow wizard not available: {e}")
+            return None
+
+    def get_wizard_next_step(self) -> Optional[str]:
+        """
+        Quick helper to get next workflow step without creating full wizard.
+
+        Returns:
+            Human-readable next step description, or None if wizard unavailable
+        """
+        wizard = self.get_workflow_wizard()
+        if wizard:
+            next_action = wizard.get_next_action()
+            return f"{next_action['step_title']}: {next_action['action']}"
+        return None
