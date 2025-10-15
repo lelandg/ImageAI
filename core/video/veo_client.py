@@ -250,16 +250,28 @@ class VeoClient:
                     self.logger.warning(f"Failed to load seed image: {e}, proceeding without it")
 
             # Create GenerateVideosConfig for additional parameters
-            # Note: Veo 3 supports duration parameter (4, 6, or 8 seconds)
-            video_config = types.GenerateVideosConfig(
-                aspect_ratio=config.aspect_ratio,
-                resolution=config.resolution,
-                duration=config.duration  # Pass duration as API parameter
-            )
+            # Note: Resolution is determined automatically by the model based on aspect_ratio
+            # Veo 3 supports duration_seconds parameter (4, 6, or 8 seconds)
+            video_config_params = {
+                "aspect_ratio": config.aspect_ratio,
+                "duration_seconds": config.duration,  # int, not string
+            }
+
+            # Add optional parameters if set
+            # Note: Only send person_generation if explicitly enabled
+            # The API doesn't support "dont_allow" - omit parameter to disable
+            if config.person_generation:
+                video_config_params["person_generation"] = "allow_adult"
+
+            if config.seed is not None:
+                video_config_params["seed"] = config.seed
+
+            video_config = types.GenerateVideosConfig(**video_config_params)
 
             # Start generation (returns operation ID for polling)
             self.logger.info(f"Starting Veo generation with {config.model.value}")
-            self.logger.info(f"Config: {config.aspect_ratio} @ {config.resolution}, duration={config.duration}s")
+            self.logger.info(f"Config: {config.aspect_ratio}, duration={config.duration}s")
+            self.logger.info(f"Note: Resolution determined automatically by model (typically 720p)")
             self.logger.info(f"Prompt: {config.prompt[:100]}...")
 
             if seed_image:

@@ -456,6 +456,7 @@ class VideoGenerationThread(QThread):
         """Generate video clip for a single scene using Veo"""
         try:
             from core.video.veo_client import VeoClient, VeoGenerationConfig, VeoModel
+            from core.video.midi_processor import snap_duration_to_veo
             from pathlib import Path
             import cv2
 
@@ -572,11 +573,17 @@ class VideoGenerationThread(QThread):
                     logger.warning(f"Failed to process reference image: {e}")
                     # Fall back to original seed image
 
+            # Snap duration to Veo-compatible value (4, 6, or 8 seconds)
+            veo_duration = snap_duration_to_veo(scene.duration_sec)
+            if veo_duration != scene.duration_sec:
+                logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s for Veo 3 compatibility")
+                self.progress_update.emit(12, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3 requires 4/6/8s)")
+
             # Configure generation with prompt and optional seed image
             config = VeoGenerationConfig(
                 model=VeoModel.VEO_3_GENERATE,
                 prompt=prompt,
-                duration=int(scene.duration_sec),
+                duration=veo_duration,
                 aspect_ratio=aspect_ratio,
                 image=Path(seed_image_path) if seed_image_path and Path(seed_image_path).exists() else None
             )

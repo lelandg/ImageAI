@@ -599,26 +599,30 @@ Return one enhanced visual description per line, numbered:
             return [f"{text}. Camera movement: gentle pan and subtle motion." for text in texts]
 
         # Build system prompt for video enhancement
-        system_prompt = f"""You are a video prompt engineer. Transform image descriptions into dynamic video prompts that flow together as a sequence.
+        system_prompt = f"""You are a video prompt engineer. Transform image descriptions into dynamic video prompts for continuous single-shot video generation.
 
 For each scene, add:
 1. **Camera Movements**: Pans (left/right), tilts (up/down), zooms, dolly moves, tracking shots
 2. **Subject Motion**: Character actions, environmental movement (wind, water, clouds)
 3. **Temporal Progression**: Light changes, emotional progression, scene development
-4. **Scene Continuity**: Ensure smooth transitions between consecutive scenes
 
 Style: {style.value}
+
+CRITICAL REQUIREMENTS:
+- Each scene MUST be a SINGLE CONTINUOUS SHOT with NO CUTS or scene changes
+- NEVER use words like "transition," "cut to," "next shot," or "scene change"
+- Describe smooth camera movement within ONE unified scene only
+- Keep all action within the same continuous space and time
 
 CRITICAL FORMATTING:
 - Return EXACTLY {len(texts)} enhanced video prompts
 - Number them 1-{len(texts)}
 - NO headers, NO markdown, NO preamble
 - Each prompt: keep core description + add 2-3 motion elements
-- Make camera work subtle and cinematic
-- Consider scene-to-scene continuity"""
+- Make camera work subtle and cinematic"""
 
         # Create batch prompt with context about scene flow
-        batch_prompt = f"""Transform these {len(texts)} image descriptions into video prompts with camera movement and continuity.
+        batch_prompt = f"""Transform these {len(texts)} image descriptions into video prompts with camera movement for continuous single-shot videos.
 
 Image descriptions:
 
@@ -629,10 +633,10 @@ Image descriptions:
         batch_prompt += f"""
 
 Return {len(texts)} numbered video prompts with:
-- Camera movements appropriate to each scene
-- Natural subject/environmental motion
-- Scene-to-scene visual continuity
-- Temporal flow and progression
+- Camera movements appropriate to each scene (single continuous shot)
+- Natural subject/environmental motion within the same scene
+- NO transitions, NO cuts, NO scene changes
+- Each prompt describes ONE continuous unified shot only
 
 Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
 
@@ -1084,26 +1088,32 @@ class PromptEngine:
             return f"{text}. Camera movement: gentle pan and subtle motion."
 
         # Build system prompt for video enhancement
-        system_prompt = f"""You are a video prompt engineer. Transform image descriptions into dynamic video prompts by adding:
+        system_prompt = f"""You are a video prompt engineer. Transform image descriptions into dynamic video prompts for continuous single-shot video generation by adding:
 
 1. **Camera Movements**:
    - Pans (left/right), tilts (up/down), zooms (in/out), dolly moves
    - Orbiting, tracking shots, crane movements
-   - Keep movements smooth and purposeful
+   - Keep movements smooth and purposeful within ONE continuous shot
 
 2. **Subject Motion**:
    - Character actions (walking, gesturing, turning)
    - Environmental movement (wind, water, clouds)
-   - Object interactions
+   - Object interactions within the same scene
 
 3. **Temporal Progression**:
-   - Light changes, transitions
+   - Light changes within the shot
    - Emotional progression
    - Scene development over time
 
 Style: {style.value}
 
-IMPORTANT:
+CRITICAL REQUIREMENTS:
+- The video MUST be a SINGLE CONTINUOUS SHOT with NO CUTS or scene changes
+- NEVER use words like "transition," "cut to," "next shot," or "scene change"
+- Describe smooth camera movement within ONE unified scene only
+- Keep all action within the same continuous space and time
+
+FORMATTING:
 - Return ONLY the enhanced video prompt, no preamble
 - Keep the core scene description intact
 - Add 2-3 motion elements maximum
@@ -1116,20 +1126,23 @@ IMPORTANT:
 
 Current scene description: {text}
 
-Transform this into a video prompt that:
-1. Maintains visual continuity with the previous scene
-2. Adds appropriate camera movement
-3. Includes natural motion and action
-4. Creates smooth temporal flow
+Transform this into a single continuous shot video prompt that:
+1. Adds appropriate camera movement (no cuts, one continuous shot)
+2. Includes natural motion and action within the same scene
+3. Creates smooth temporal flow within one unified space
+
+CRITICAL: This must be ONE CONTINUOUS SHOT with NO scene changes, NO cuts, NO transitions.
 
 Return only the enhanced video prompt."""
         else:
             user_prompt = f"""Scene description: {text}
 
 Transform this into a dynamic video prompt by adding:
-1. Appropriate camera movement (pan, tilt, zoom, etc.)
-2. Subject or environmental motion
-3. Temporal progression if appropriate
+1. Appropriate camera movement (pan, tilt, zoom, etc.) within ONE continuous shot
+2. Subject or environmental motion within the same scene
+3. Temporal progression within the same unified space
+
+CRITICAL: This must be ONE CONTINUOUS SHOT with NO scene changes, NO cuts, NO transitions.
 
 Return only the enhanced video prompt."""
 
