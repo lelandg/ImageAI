@@ -5,6 +5,62 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2025-01-15
+
+### Added
+- **Video Project Workflow Wizard**: New step-by-step wizard for creating video projects
+  - Interactive guide through project setup and configuration
+  - Streamlined workflow for new users
+  - Context-aware help and tooltips
+- **Veo 3 Music Synchronization**: Advanced music integration for AI-generated videos
+  - MIDI-based timing alignment with Veo 3 video generation
+  - Musical structure detection for scene transitions
+  - Beat/measure synchronization support
+  - Audio track integration with volume and fade controls
+- **Enhanced Video Project Management**:
+  - Automatic video copying to project directory for organization
+  - Improved project directory structure and file management
+  - Refactored project path handling for consistency
+- **Batch Video Prompt Enhancement**:
+  - Process multiple video prompts simultaneously
+  - Support for multiple LLM providers (OpenAI, Claude, Gemini)
+  - Improved prompt parsing and validation
+  - Better error handling for batch operations
+- **MIDI Synchronization Design**:
+  - Comprehensive MIDI event extraction and timing
+  - Lyric-to-video scene synchronization
+  - Advanced timing controls with adjustable snap strength
+  - Support for complex musical structures (verse, chorus, bridge)
+
+### Changed
+- **Video Provider Improvements**:
+  - Updated Veo client with enhanced authentication
+  - Improved prompt handling and validation
+  - Better error messages and logging
+  - Normalized provider string comparisons to lowercase
+- **LLM Integration**:
+  - Centralized LLM provider and model definitions
+  - Better support for Anthropic Claude models
+  - Improved batch prompt parsing across providers
+- **UI Enhancements**:
+  - Prevented unwanted selection signals during history row insertion
+  - Added MIME type detection for better file handling
+  - Improved Gemini API support and error handling
+
+### Fixed
+- **Video Generation**:
+  - Fixed authentication issues with Veo-3 video downloads
+  - Enhanced logging for video generation operations
+  - Improved error handling in video workflow
+- **History Management**:
+  - Fixed selection issues when inserting history rows
+  - Improved history tracking and restoration
+
+### Notes
+- Video project features continue to evolve with active development
+- Veo 3 integration provides foundation for advanced music-synced video generation
+- Enhanced batch processing capabilities improve workflow efficiency
+
 ## [0.20.1] - 2025-01-06
 
 ### Fixed

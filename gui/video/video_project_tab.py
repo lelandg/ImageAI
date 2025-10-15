@@ -995,14 +995,19 @@ class VideoProjectTab(QWidget):
                                 else:
                                     next_scene.images.insert(0, last_frame_variant)
 
-                        # Update the preview column (column 4) to show video clip icon or image
-                        preview_item = QTableWidgetItem("🎞️" if scene.video_clip else ("🖼️" if scene.images else "⬜"))
-                        if scene.video_clip:
-                            preview_item.setToolTip("Video clip generated - hover to preview last frame")
-                        elif scene.images:
-                            preview_item.setToolTip("Hover to preview full-size image")
+                        # Update the preview column (column 4) - always show image icon if image exists
+                        if scene.images:
+                            preview_item = QTableWidgetItem("🖼️")
+                            if scene.video_clip:
+                                preview_item.setToolTip("Image and video available - Click row to view, click again to toggle between them")
+                            else:
+                                preview_item.setToolTip("Image available - Click row to view (hover for preview)")
+                        elif scene.video_clip:
+                            preview_item = QTableWidgetItem("🎞️")
+                            preview_item.setToolTip("Video clip generated - Click row to view first frame")
                         else:
-                            preview_item.setToolTip("No image generated yet")
+                            preview_item = QTableWidgetItem("⬜")
+                            preview_item.setToolTip("No image or video generated yet")
                         self.workspace_widget.scene_table.setItem(i, 4, preview_item)
                     break
     

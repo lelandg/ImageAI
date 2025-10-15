@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.20.1**
+**Version 0.22.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **LelandGreen.com on Discord - The Intersection of Art and AI [Discord](https://discord.gg/a64xRg9w)**

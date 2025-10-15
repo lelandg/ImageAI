@@ -214,6 +214,7 @@ class VideoProject:
     ken_burns: bool = True  # Enable Ken Burns effect
     transitions: bool = True  # Enable transitions
     captions: bool = False  # Enable captions
+    video_muted: bool = True  # Video playback muted by default
     
     # Input configuration
     input_text: str = ""
@@ -289,7 +290,8 @@ class VideoProject:
                 "variants": self.variants,
                 "ken_burns": self.ken_burns,
                 "transitions": self.transitions,
-                "captions": self.captions
+                "captions": self.captions,
+                "video_muted": self.video_muted
             },
             "audio": {
                 "tracks": [track.to_dict() for track in self.audio_tracks]
@@ -348,12 +350,14 @@ class VideoProject:
             project.ken_burns = gen.get("ken_burns", True)
             project.transitions = gen.get("transitions", True)
             project.captions = gen.get("captions", False)
+            project.video_muted = gen.get("video_muted", True)
         else:
             # Fallback for older projects
             project.variants = 3
             project.ken_burns = True
             project.transitions = True
             project.captions = False
+            project.video_muted = True
         
         # Load input configuration
         if "input" in data:

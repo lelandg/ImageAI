@@ -17,8 +17,10 @@ from PySide6.QtWidgets import (
     QCheckBox, QSlider, QHeaderView, QSizePolicy, QDialog,
     QDialogButtonBox, QListWidget, QListWidgetItem, QInputDialog
 )
-from PySide6.QtCore import Qt, Signal, Slot, QEvent, QPoint, QTimer
+from PySide6.QtCore import Qt, Signal, Slot, QEvent, QPoint, QTimer, QUrl
 from PySide6.QtGui import QPixmap, QImage, QTextOption, QColor
+from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from core.config import ConfigManager
 from core.video.project import VideoProject, Scene
@@ -263,6 +265,10 @@ class WorkspaceWidget(QWidget):
         # Create image preview widget
         self.image_preview = ImageHoverPreview(self)
 
+        # Track row clicks for image/video toggle
+        self.last_clicked_row = None
+        self.showing_video = False  # True if showing video, False if showing image
+
         self.logger.info("Calling init_ui()...")
         self.init_ui()
         self.logger.info("init_ui() complete")
@@ -296,21 +302,30 @@ class WorkspaceWidget(QWidget):
         workspace_layout = QVBoxLayout(workspace_widget)
         workspace_layout.setContentsMargins(0, 0, 0, 0)
 
+        # Horizontal layout for wizard button + splitter
+        h_container = QWidget()
+        h_container_layout = QHBoxLayout(h_container)
+        h_container_layout.setContentsMargins(0, 0, 0, 0)
+        h_container_layout.setSpacing(0)
+
+        # Wizard toggle button (fixed on left side, outside splitter)
+        self.wizard_toggle_btn_top = QPushButton("◀ Hide")
+        self.wizard_toggle_btn_top.setCheckable(True)
+        self.wizard_toggle_btn_top.setChecked(True)
+        self.wizard_toggle_btn_top.setMaximumWidth(60)
+        self.wizard_toggle_btn_top.setMaximumHeight(30)
+        self.wizard_toggle_btn_top.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.wizard_toggle_btn_top.setStyleSheet("QPushButton { font-size: 8pt; padding: 2px; }")
+        self.wizard_toggle_btn_top.clicked.connect(self._toggle_wizard)
+        h_container_layout.addWidget(self.wizard_toggle_btn_top, 0, Qt.AlignTop)
+
         # Horizontal splitter for workspace
         self.h_splitter = QSplitter(Qt.Horizontal)
 
-        # Wizard container (far left panel)
+        # Wizard container (far left panel in splitter)
         self.wizard_container = QWidget()
         self.wizard_layout = QVBoxLayout(self.wizard_container)
         self.wizard_layout.setContentsMargins(5, 5, 5, 5)
-
-        # Wizard toggle button at top
-        self.wizard_toggle_btn_top = QPushButton("◀ Hide Guide")
-        self.wizard_toggle_btn_top.setCheckable(True)
-        self.wizard_toggle_btn_top.setChecked(True)
-        self.wizard_toggle_btn_top.setMaximumHeight(30)
-        self.wizard_toggle_btn_top.clicked.connect(self._toggle_wizard)
-        self.wizard_layout.addWidget(self.wizard_toggle_btn_top)
 
         # Content container (collapsible)
         self.wizard_content = QWidget()
@@ -328,6 +343,9 @@ class WorkspaceWidget(QWidget):
 
         self.h_splitter.addWidget(self.wizard_container)
         self.h_splitter.setCollapsible(0, False)  # Don't allow complete collapse via splitter
+
+        # Store original width for restoring
+        self.wizard_original_width = 300
 
         # Left panel - Input and settings
         self.logger.info("Creating left panel (input/settings/audio)...")
@@ -355,14 +373,23 @@ class WorkspaceWidget(QWidget):
 
         # Set initial splitter sizes (wizard, left panel, right panel)
         self.h_splitter.setSizes([300, 400, 600])
-        self.h_splitter.setStretchFactor(0, 0)  # Wizard doesn't stretch by default
-        self.h_splitter.setStretchFactor(1, 1)  # Left panel stretches
-        self.h_splitter.setStretchFactor(2, 2)  # Right panel stretches more
+        # Equal stretch factors so manual resizing works smoothly
+        self.h_splitter.setStretchFactor(0, 1)  # Wizard can stretch
+        self.h_splitter.setStretchFactor(1, 1)  # Left panel stretches equally
+        self.h_splitter.setStretchFactor(2, 1)  # Right panel stretches equally
 
-        # Allow wizard to expand up to 90% of window width
-        # Set minimum width constraints
-        self.wizard_container.setMinimumWidth(50)  # Minimum when collapsed
-        workspace_layout.addWidget(self.h_splitter)
+        # Set minimum width constraint for wizard container
+        self.wizard_container.setMinimumWidth(50)  # Minimum when visible
+        # Remove any maximum width constraint to allow manual resizing
+        self.wizard_container.setMaximumWidth(16777215)  # Qt's QWIDGETSIZE_MAX
+
+        # Connect to splitter moved signal to enforce max 50% width constraint
+        self.h_splitter.splitterMoved.connect(self._on_splitter_moved)
+
+        # Add splitter to h_container
+        h_container_layout.addWidget(self.h_splitter)
+
+        workspace_layout.addWidget(h_container)
 
         # Status bar
         workspace_layout.addWidget(self.create_status_bar())
@@ -377,13 +404,93 @@ class WorkspaceWidget(QWidget):
         # Image view and status console in vertical splitter
         image_console_splitter = QSplitter(Qt.Vertical)
 
-        # Image view
+        # Media viewer container (holds both image and video player)
+        media_viewer_container = QWidget()
+        media_viewer_layout = QHBoxLayout(media_viewer_container)
+        media_viewer_layout.setContentsMargins(0, 0, 0, 0)
+        media_viewer_layout.setSpacing(0)
+
+        # Image view (for static images)
         self.output_image_label = QLabel()
         self.output_image_label.setAlignment(Qt.AlignCenter)
         self.output_image_label.setStyleSheet("border: 1px solid #ccc; background-color: #f5f5f5;")
         self.output_image_label.setScaledContents(False)
         self.output_image_label.setMinimumHeight(150)
-        image_console_splitter.addWidget(self.output_image_label)
+        media_viewer_layout.addWidget(self.output_image_label)
+
+        # Video player container with controls on the right
+        self.video_player_container = QWidget()
+        video_player_layout = QHBoxLayout(self.video_player_container)
+        video_player_layout.setContentsMargins(0, 0, 0, 0)
+        video_player_layout.setSpacing(0)
+
+        # Video widget (for video playback)
+        self.video_widget = QVideoWidget()
+        self.video_widget.setStyleSheet("border: 1px solid #ccc; background-color: #000;")
+        self.video_widget.setMinimumHeight(150)
+        video_player_layout.addWidget(self.video_widget)
+
+        # Video player instance
+        self.media_player = QMediaPlayer()
+        self.audio_output = QAudioOutput()
+        self.media_player.setAudioOutput(self.audio_output)
+        self.media_player.setVideoOutput(self.video_widget)
+        # Default to muted
+        self.audio_output.setMuted(True)
+
+        # Video controls (vertical layout on right side)
+        video_controls = QWidget()
+        video_controls.setMaximumWidth(120)
+        video_controls_layout = QVBoxLayout(video_controls)
+        video_controls_layout.setContentsMargins(5, 5, 5, 5)
+        video_controls_layout.setSpacing(5)
+
+        self.play_pause_btn = QPushButton("▶ Play")
+        self.play_pause_btn.clicked.connect(self._toggle_play_pause)
+        video_controls_layout.addWidget(self.play_pause_btn)
+
+        self.mute_btn = QPushButton("🔇 Unmute")
+        self.mute_btn.setCheckable(True)
+        self.mute_btn.setChecked(True)  # Muted by default
+        self.mute_btn.clicked.connect(self._toggle_mute)
+        video_controls_layout.addWidget(self.mute_btn)
+
+        # Position slider (vertical)
+        position_container = QWidget()
+        position_layout = QVBoxLayout(position_container)
+        position_layout.setContentsMargins(0, 0, 0, 0)
+        position_label = QLabel("Position")
+        position_label.setAlignment(Qt.AlignCenter)
+        position_label.setStyleSheet("font-size: 8pt;")
+        position_layout.addWidget(position_label)
+
+        self.video_position_slider = QSlider(Qt.Vertical)
+        self.video_position_slider.setRange(0, 0)
+        self.video_position_slider.sliderMoved.connect(self._set_position)
+        self.video_position_slider.setInvertedAppearance(True)  # Top is start
+        position_layout.addWidget(self.video_position_slider)
+
+        video_controls_layout.addWidget(position_container)
+
+        self.video_time_label = QLabel("00:00\n/\n00:00")
+        self.video_time_label.setAlignment(Qt.AlignCenter)
+        self.video_time_label.setStyleSheet("font-size: 8pt;")
+        video_controls_layout.addWidget(self.video_time_label)
+
+        video_controls_layout.addStretch()
+
+        video_player_layout.addWidget(video_controls)
+
+        self.video_controls = video_controls
+        self.video_player_container.hide()  # Hidden by default
+        media_viewer_layout.addWidget(self.video_player_container)
+
+        # Connect media player signals
+        self.media_player.positionChanged.connect(self._update_position)
+        self.media_player.durationChanged.connect(self._update_duration)
+        self.media_player.playbackStateChanged.connect(self._update_play_button)
+
+        image_console_splitter.addWidget(media_viewer_container)
 
         # Status console container
         console_container = QWidget()
@@ -906,7 +1013,7 @@ class WorkspaceWidget(QWidget):
         self.scene_table = QTableWidget()
         self.scene_table.setColumnCount(11)
         self.scene_table.setHorizontalHeaderLabels([
-            "#", "🖼️", "✨", "🔄", "📷", "🎬", "Source", "Duration", "Image Prompt", "Video Prompt", "⤵️"
+            "#", "🖼️", "✨", "🔄", "🖼️", "🎬", "Source", "Duration", "Image Prompt", "Video Prompt", "⤵️"
         ])
         # Make table non-selectable
         self.scene_table.setSelectionMode(QTableWidget.NoSelection)
@@ -919,7 +1026,7 @@ class WorkspaceWidget(QWidget):
         self.scene_table.horizontalHeaderItem(1).setToolTip("Generate image for this scene")
         self.scene_table.horizontalHeaderItem(2).setToolTip("Enhance prompt with AI")
         self.scene_table.horizontalHeaderItem(3).setToolTip("Undo prompt enhancement")
-        self.scene_table.horizontalHeaderItem(4).setToolTip("Preview\nImage/last frame thumbnail (hover to see full size)")
+        self.scene_table.horizontalHeaderItem(4).setToolTip("Preview/Reference Image\nGenerated image or last frame from previous video (hover to see full size)")
         self.scene_table.horizontalHeaderItem(5).setToolTip("Generate Video\nGenerate video clip for this scene")
         self.scene_table.horizontalHeaderItem(6).setToolTip("Source\nOriginal lyrics or text")
         self.scene_table.horizontalHeaderItem(7).setToolTip("Duration\nScene duration in seconds")
@@ -1867,14 +1974,19 @@ class WorkspaceWidget(QWidget):
             revert_btn.clicked.connect(lambda checked, idx=i: self.revert_single_prompt(idx))
             self.scene_table.setCellWidget(i, 3, revert_btn)
 
-            # Column 4: Preview thumbnail
-            preview_item = QTableWidgetItem("🎞️" if scene.video_clip else ("🖼️" if scene.images else "⬜"))
-            if scene.video_clip:
-                preview_item.setToolTip("Video clip generated - hover to preview last frame")
-            elif scene.images:
-                preview_item.setToolTip("Hover to preview full-size image")
+            # Column 4: Preview thumbnail (always show image icon if image exists)
+            if scene.images:
+                preview_item = QTableWidgetItem("🖼️")
+                if scene.video_clip:
+                    preview_item.setToolTip("Image and video available - Click row to view, click again to toggle between them")
+                else:
+                    preview_item.setToolTip("Image available - Click row to view (hover for preview)")
+            elif scene.video_clip:
+                preview_item = QTableWidgetItem("🎞️")
+                preview_item.setToolTip("Video clip generated - Click row to view first frame")
             else:
-                preview_item.setToolTip("No image generated yet")
+                preview_item = QTableWidgetItem("⬜")
+                preview_item.setToolTip("No image or video generated yet")
             self.scene_table.setItem(i, 4, preview_item)
 
             # Column 5: Generate video button
@@ -2152,14 +2264,15 @@ class WorkspaceWidget(QWidget):
                     row = item.row()
                     if self.current_project and row < len(self.current_project.scenes):
                         scene = self.current_project.scenes[row]
-                        # Prioritize last frame if available, otherwise show first image
+                        # ALWAYS prioritize source images first (the generated image), not last frame
                         preview_path = None
-                        if scene.last_frame and scene.last_frame.exists():
-                            preview_path = scene.last_frame
-                        elif scene.images and len(scene.images) > 0:
+                        if scene.images and len(scene.images) > 0:
                             # Handle both Path objects and ImageVariant objects
                             img = scene.images[0]
                             preview_path = img.path if hasattr(img, 'path') else img
+                        elif scene.last_frame and scene.last_frame.exists():
+                            # Only show last frame if no images available
+                            preview_path = scene.last_frame
 
                         if preview_path:
                             # Show preview
@@ -2192,51 +2305,146 @@ class WorkspaceWidget(QWidget):
             self.scene_table.resizeColumnToContents(logical_index)
 
     def _on_cell_clicked(self, row: int, column: int):
-        """Handle cell click to display image in image view"""
-        # Clicking any cell in a row displays its image
-        if self.current_project and row < len(self.current_project.scenes):
-            scene = self.current_project.scenes[row]
+        """Handle cell click to display image/video with toggle functionality"""
+        if not self.current_project or row >= len(self.current_project.scenes):
+            return
 
-            # Display the first image if available
-            if scene.images and len(scene.images) > 0:
-                from pathlib import Path
-                from PySide6.QtGui import QPixmap
+        scene = self.current_project.scenes[row]
 
-                img_path = scene.images[0]
-                # Handle both Path objects and string paths
-                if hasattr(img_path, 'path'):
-                    img_path = img_path.path
-                img_path = Path(img_path)
+        # Check if we have both image and video
+        has_image = scene.images and len(scene.images) > 0
+        has_video = scene.video_clip and scene.video_clip.exists()
 
-                if img_path.exists():
-                    pixmap = QPixmap(str(img_path))
-                    if not pixmap.isNull():
-                        # Scale to fit the image view
-                        scaled = pixmap.scaled(
-                            self.output_image_label.size(),
-                            Qt.KeepAspectRatio,
-                            Qt.SmoothTransformation
-                        )
-                        self.output_image_label.setPixmap(scaled)
+        # If clicking the same row again AND we have both image and video, toggle
+        if row == self.last_clicked_row and has_image and has_video:
+            self.showing_video = not self.showing_video
+        else:
+            # Different row or first click - reset to show image (or video if no image)
+            self.last_clicked_row = row
+            self.showing_video = False if has_image else True
 
-                        # Log to status console
-                        self._log_to_console(f"Displaying scene {row + 1} image: {img_path.name}")
-            elif scene.last_frame and scene.last_frame.exists():
-                # Display last frame if no images but video clip exists
-                from pathlib import Path
-                from PySide6.QtGui import QPixmap
+        # Display based on current state
+        if self.showing_video and has_video:
+            self._show_video(scene, row)
+        elif has_image:
+            self._show_image(scene, row)
+        elif scene.last_frame and scene.last_frame.exists():
+            # Fallback to last frame if no image or video
+            self._show_last_frame(scene, row)
 
-                pixmap = QPixmap(str(scene.last_frame))
-                if not pixmap.isNull():
-                    scaled = pixmap.scaled(
-                        self.output_image_label.size(),
-                        Qt.KeepAspectRatio,
-                        Qt.SmoothTransformation
-                    )
-                    self.output_image_label.setPixmap(scaled)
+    def _show_image(self, scene, row):
+        """Display the scene's image in the viewer"""
+        from pathlib import Path
+        from PySide6.QtGui import QPixmap
 
-                    # Log to status console
-                    self._log_to_console(f"Displaying scene {row + 1} last frame: {scene.last_frame.name}")
+        # Hide video player, show image label
+        self.video_player_container.hide()
+        self.output_image_label.show()
+        self.media_player.stop()
+
+        img_path = scene.images[0]
+        # Handle both Path objects and ImageVariant objects
+        if hasattr(img_path, 'path'):
+            img_path = img_path.path
+        img_path = Path(img_path)
+
+        if img_path.exists():
+            pixmap = QPixmap(str(img_path))
+            if not pixmap.isNull():
+                # Scale to fit the image view
+                scaled = pixmap.scaled(
+                    self.output_image_label.size(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                self.output_image_label.setPixmap(scaled)
+                self._log_to_console(f"🖼️ Scene {row + 1}: Displaying image ({img_path.name})")
+
+    def _show_video(self, scene, row):
+        """Display the scene's video in the video player"""
+        from pathlib import Path
+
+        video_path = scene.video_clip
+
+        try:
+            # Hide image label, show video player
+            self.output_image_label.hide()
+            self.video_player_container.show()
+
+            # Load and play the video
+            self.media_player.setSource(QUrl.fromLocalFile(str(video_path)))
+            self.media_player.play()
+
+            self._log_to_console(f"🎬 Scene {row + 1}: Playing video ({video_path.name})")
+        except Exception as e:
+            self.logger.error(f"Failed to play video: {e}")
+            self._log_to_console(f"❌ Failed to play video: {e}", "ERROR")
+
+    def _toggle_play_pause(self):
+        """Toggle video playback"""
+        if self.media_player.playbackState() == QMediaPlayer.PlayingState:
+            self.media_player.pause()
+        else:
+            self.media_player.play()
+
+    def _toggle_mute(self):
+        """Toggle audio mute"""
+        is_muted = self.audio_output.isMuted()
+        self.audio_output.setMuted(not is_muted)
+        self.mute_btn.setText("🔊 Mute" if not is_muted else "🔇 Unmute")
+        self.mute_btn.setChecked(not is_muted)
+
+    def _set_position(self, position):
+        """Set video playback position"""
+        self.media_player.setPosition(position)
+
+    def _update_position(self, position):
+        """Update position slider when video position changes"""
+        self.video_position_slider.setValue(position)
+        self._update_time_label(position, self.media_player.duration())
+
+    def _update_duration(self, duration):
+        """Update slider range when video duration is known"""
+        self.video_position_slider.setRange(0, duration)
+        self._update_time_label(self.media_player.position(), duration)
+
+    def _update_play_button(self, state):
+        """Update play/pause button text based on playback state"""
+        if state == QMediaPlayer.PlayingState:
+            self.play_pause_btn.setText("⏸ Pause")
+        else:
+            self.play_pause_btn.setText("▶ Play")
+
+    def _update_time_label(self, position, duration):
+        """Update time label with current position and duration"""
+        def format_time(ms):
+            seconds = ms // 1000
+            minutes = seconds // 60
+            seconds = seconds % 60
+            return f"{minutes:02d}:{seconds:02d}"
+
+        pos_str = format_time(position)
+        dur_str = format_time(duration)
+        self.video_time_label.setText(f"{pos_str}\n/\n{dur_str}")
+
+    def _show_last_frame(self, scene, row):
+        """Display the scene's last frame in the viewer"""
+        from PySide6.QtGui import QPixmap
+
+        # Hide video player, show image label
+        self.video_player_container.hide()
+        self.output_image_label.show()
+        self.media_player.stop()
+
+        pixmap = QPixmap(str(scene.last_frame))
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                self.output_image_label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.output_image_label.setPixmap(scaled)
+            self._log_to_console(f"🖼️ Scene {row + 1}: Displaying last frame ({scene.last_frame.name})")
 
     def _log_to_console(self, message: str, level: str = "INFO"):
         """Log a message to the status console"""
@@ -2835,9 +3043,74 @@ class WorkspaceWidget(QWidget):
     # ========== Wizard Management Methods ==========
 
     def _toggle_wizard(self, checked):
-        """Toggle wizard visibility"""
-        self.wizard_content.setVisible(checked)
-        self.wizard_toggle_btn_top.setText("◀ Hide Guide" if checked else "▶ Show Guide")
+        """Toggle wizard visibility and collapse/expand width"""
+        if checked:
+            # Show the wizard content
+            self.wizard_container.setVisible(True)
+            self.wizard_toggle_btn_top.setText("◀ Hide")
+
+            # Restore to original width (or 300 if not set)
+            sizes = self.h_splitter.sizes()
+            sizes[0] = self.wizard_original_width
+            self.h_splitter.setSizes(sizes)
+        else:
+            # Hide the wizard content
+            self.wizard_container.setVisible(False)
+            self.wizard_toggle_btn_top.setText("▶ Show")
+
+            # Save current width before collapsing
+            current_width = self.h_splitter.sizes()[0]
+            if current_width > 50:  # Only save if not already collapsed
+                self.wizard_original_width = current_width
+
+            # Collapse to minimal width (just 1px for hidden)
+            sizes = self.h_splitter.sizes()
+            sizes[0] = 1  # Set to 1px (minimum visible size)
+            self.h_splitter.setSizes(sizes)
+
+    def _on_splitter_moved(self, pos, index):
+        """Enforce max width constraint for wizard panel (50% of window)"""
+        # Only check first splitter handle (between wizard and left panel)
+        if index != 0:
+            return
+
+        # Only check when wizard is visible
+        if not self.wizard_container.isVisible():
+            return
+
+        # Get current sizes
+        sizes = self.h_splitter.sizes()
+        total_width = sum(sizes)
+
+        # Only enforce if total width is reasonable (splitter has been sized)
+        if total_width < 100:
+            return
+
+        max_wizard_width = total_width // 2  # 50% of total width
+
+        # Only adjust if wizard panel exceeds the maximum
+        if sizes[0] > max_wizard_width:
+            # Calculate how much to redistribute
+            excess = sizes[0] - max_wizard_width
+
+            # Limit wizard to max 50% width
+            sizes[0] = max_wizard_width
+
+            # Redistribute excess to other panels proportionally
+            if len(sizes) > 2:
+                # Calculate proportional distribution
+                other_total = sizes[1] + sizes[2]
+                if other_total > 0:
+                    ratio_1 = sizes[1] / other_total
+                    ratio_2 = sizes[2] / other_total
+                    sizes[1] += int(excess * ratio_1)
+                    sizes[2] += excess - int(excess * ratio_1)
+                else:
+                    sizes[1] += excess // 2
+                    sizes[2] += excess - (excess // 2)
+
+            # Apply the adjusted sizes
+            self.h_splitter.setSizes(sizes)
 
     def _create_wizard_widget(self):
         """Create wizard widget for current project"""
@@ -2995,7 +3268,10 @@ class WorkspaceWidget(QWidget):
         self.current_project.ken_burns = self.ken_burns_check.isChecked()
         self.current_project.transitions = self.transitions_check.isChecked()
         self.current_project.captions = self.captions_check.isChecked()
-        
+
+        # Save video player settings
+        self.current_project.video_muted = self.audio_output.isMuted()
+
         # Save continuity settings
         self.current_project.enable_continuity = self.enable_continuity_checkbox.isChecked()
         self.current_project.enable_enhanced_storyboard = self.enable_enhanced_storyboard.isChecked()
@@ -3193,7 +3469,14 @@ class WorkspaceWidget(QWidget):
             
             if hasattr(self.current_project, 'captions'):
                 self.captions_check.setChecked(self.current_project.captions)
-            
+
+            # Load video player settings
+            if hasattr(self.current_project, 'video_muted'):
+                is_muted = self.current_project.video_muted
+                self.audio_output.setMuted(is_muted)
+                self.mute_btn.setChecked(is_muted)
+                self.mute_btn.setText("🔇 Unmute" if is_muted else "🔊 Mute")
+
             # Load continuity settings
             if hasattr(self.current_project, 'enable_continuity'):
                 self.enable_continuity_checkbox.setChecked(self.current_project.enable_continuity)

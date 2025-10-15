@@ -26,7 +26,9 @@
       "Bash(if [ ! -d .venv_linux ])",
       "Bash(then python3 -m venv .venv_linux)",
       "Bash(fi)",
-      "Read(//usr/bin/**)"
+      "Read(//usr/bin/**)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --no-decorate -10)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --no-decorate -20)"
     ],
     "deny": [],
     "ask": []
