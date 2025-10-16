@@ -52,9 +52,31 @@ class VideoButton(QPushButton):
         self.preview_popup: Optional[FramePreviewPopup] = None
         self.logger = logging.getLogger(__name__)
 
-        # Configure button appearance
-        self.setMaximumWidth(40)
-        self.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
+        # Configure button appearance - match LLM button height
+        self.setFixedHeight(30)  # Match PromptFieldWidget button height
+        self.setMinimumWidth(40)
+        self.setMaximumWidth(50)
+        self.setStyleSheet("""
+            QPushButton {
+                font-size: 18px;
+                padding: 2px;
+                border: 2px solid #ccc;
+                border-radius: 3px;
+                background-color: #f5f5f5;
+            }
+            QPushButton:hover {
+                border-color: #999;
+                background-color: #e8e8e8;
+            }
+            QPushButton:pressed {
+                background-color: #d0d0d0;
+            }
+            QPushButton:disabled {
+                background-color: #f9f9f9;
+                color: #aaa;
+                border-color: #ddd;
+            }
+        """)
 
         # Enable mouse tracking for hover
         self.setMouseTracking(True)

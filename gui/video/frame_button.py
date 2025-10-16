@@ -105,14 +105,16 @@ class FrameButton(QPushButton):
         self.preview_popup: Optional[FramePreviewPopup] = None
         self.logger = logging.getLogger(__name__)
 
-        # Configure button appearance
-        self.setFixedSize(60, 60)  # 60-80px as per plan
+        # Configure button appearance - match LLM button height
+        self.setFixedHeight(30)  # Match PromptFieldWidget button height
+        self.setMinimumWidth(50)
+        self.setMaximumWidth(70)
         self.setStyleSheet("""
             QPushButton {
-                font-size: 24px;
-                padding: 5px;
+                font-size: 18px;
+                padding: 2px;
                 border: 2px solid #ccc;
-                border-radius: 5px;
+                border-radius: 3px;
                 background-color: #f5f5f5;
             }
             QPushButton:hover {

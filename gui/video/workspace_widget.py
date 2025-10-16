@@ -1055,8 +1055,9 @@ class WorkspaceWidget(QWidget):
         header = self.scene_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)  # All columns user-resizable
         header.setStretchLastSection(False)
-        # Enable auto-resize of row heights to fit wrapped text
-        self.scene_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        # Set fixed row height to match PromptFieldWidget button height
+        self.scene_table.verticalHeader().setDefaultSectionSize(30)  # Match LLM button height
+        self.scene_table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
         # Set initial widths for 10-column optimized layout
         header.resizeSection(0, 35)   # Scene # - minimized
         header.resizeSection(1, 70)   # Start Frame - FrameButton widget
@@ -2034,8 +2035,29 @@ class WorkspaceWidget(QWidget):
             # Column 5: Wrap button (⤵️)
             wrap_btn = QPushButton("⤵️")
             wrap_btn.setToolTip("Toggle text wrapping for this row")
-            wrap_btn.setMaximumWidth(40)
-            wrap_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
+            wrap_btn.setFixedHeight(30)  # Match LLM button height
+            wrap_btn.setMinimumWidth(40)
+            wrap_btn.setMaximumWidth(50)
+            wrap_btn.setStyleSheet("""
+                QPushButton {
+                    font-size: 18px;
+                    padding: 2px;
+                    border: 2px solid #ccc;
+                    border-radius: 3px;
+                    background-color: #f5f5f5;
+                }
+                QPushButton:hover {
+                    border-color: #999;
+                    background-color: #e8e8e8;
+                }
+                QPushButton:pressed {
+                    background-color: #d0d0d0;
+                }
+                QPushButton:checked {
+                    background-color: #d0e8ff;
+                    border-color: #0078d4;
+                }
+            """)
             wrap_btn.setCheckable(True)
 
             # Check if row is already wrapped (from metadata or previous state)
