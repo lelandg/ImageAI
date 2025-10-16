@@ -944,5 +944,130 @@ class GoogleProvider(ImageProvider):
                                 images.append(bytes(data))
         except Exception as e:
             raise RuntimeError(f"Google image editing failed: {e}")
-        
+
         return texts, images
+
+    def generate_video(
+        self,
+        prompt: str,
+        start_frame: Path,
+        duration: float,
+        model: str = "veo-3",
+        end_frame: Optional[Path] = None,
+        aspect_ratio: str = "9:16",
+        **kwargs
+    ) -> Tuple[Optional[Path], Dict[str, Any]]:
+        """Generate video using Google Veo 3 or Veo 3.1.
+
+        Args:
+            prompt: Text description for video generation
+            start_frame: Path to starting frame image (required)
+            duration: Video duration in seconds (will be snapped to valid values)
+            model: "veo-3" for single-frame or "veo-3.1" for start+end frame
+            end_frame: Optional path to ending frame (triggers Veo 3.1 mode)
+            aspect_ratio: Video aspect ratio (9:16, 16:9, etc.)
+            **kwargs: Additional parameters
+
+        Returns:
+            Tuple of (video_path, metadata_dict) or (None, error_dict) on failure
+        """
+        # Validate inputs
+        if not start_frame or not start_frame.exists():
+            return None, {"error": "Start frame image is required and must exist"}
+
+        # Determine which Veo version to use
+        use_veo_31 = end_frame is not None and end_frame.exists()
+        actual_model = "veo-3.1" if use_veo_31 else "veo-3"
+
+        logger.info(f"Starting video generation with {actual_model}")
+        logger.info(f"  Prompt: {prompt}")
+        logger.info(f"  Start frame: {start_frame}")
+        logger.info(f"  End frame: {end_frame if use_veo_31 else 'None (single-frame mode)'}")
+        logger.info(f"  Duration: {duration}s")
+        logger.info(f"  Aspect ratio: {aspect_ratio}")
+
+        # Snap duration to valid Veo values (6s or 12s for Veo 3/3.1)
+        # Per Google docs: Veo supports 6s and 12s durations
+        if duration <= 6:
+            snapped_duration = 6.0
+        else:
+            snapped_duration = 12.0
+
+        if snapped_duration != duration:
+            logger.info(f"Duration snapped: {duration}s -> {snapped_duration}s")
+
+        try:
+            # Initialize Google Cloud client if not already done
+            if self.auth_mode == "gcloud" and not self.client:
+                self._init_gcloud_client(raise_on_error=True)
+            elif not self.client:
+                raise ValueError("No client configured for video generation")
+
+            # Prepare video generation request
+            # NOTE: This is a placeholder - actual Vertex AI Video API integration needed
+            # The real implementation would use:
+            # from google.cloud import aiplatform
+            # from google.cloud.aiplatform import VideoGenerationModel
+
+            logger.warning("⚠️ STUB IMPLEMENTATION: Actual Veo API integration not yet complete")
+            logger.info("To complete this implementation:")
+            logger.info("1. Add google-cloud-aiplatform Video API imports")
+            logger.info("2. Create video generation request with proper parameters")
+            logger.info(f"3. Upload start_frame (and end_frame if using {actual_model})")
+            logger.info("4. Submit generation job and poll for completion")
+            logger.info("5. Download generated video and save to project directory")
+
+            # Placeholder response
+            metadata = {
+                "model": actual_model,
+                "prompt": prompt,
+                "duration": snapped_duration,
+                "aspect_ratio": aspect_ratio,
+                "start_frame": str(start_frame),
+                "end_frame": str(end_frame) if use_veo_31 else None,
+                "status": "stub_implementation",
+                "message": "Veo API integration pending - see logs for implementation steps"
+            }
+
+            return None, metadata
+
+            # TODO: Real implementation would look like this:
+            #
+            # # Upload frames to GCS bucket
+            # start_frame_uri = self._upload_to_gcs(start_frame)
+            # end_frame_uri = self._upload_to_gcs(end_frame) if use_veo_31 else None
+            #
+            # # Create video generation request
+            # if use_veo_31:
+            #     request = {
+            #         "model": "veo-3.1",
+            #         "prompt": prompt,
+            #         "start_image_uri": start_frame_uri,
+            #         "end_image_uri": end_frame_uri,
+            #         "duration_seconds": snapped_duration,
+            #         "aspect_ratio": aspect_ratio,
+            #     }
+            # else:
+            #     request = {
+            #         "model": "veo-3",
+            #         "prompt": prompt,
+            #         "seed_image_uri": start_frame_uri,
+            #         "duration_seconds": snapped_duration,
+            #         "aspect_ratio": aspect_ratio,
+            #     }
+            #
+            # # Submit generation job
+            # operation = video_model.generate_video(**request)
+            #
+            # # Poll for completion
+            # result = operation.result(timeout=600)  # 10 min timeout
+            #
+            # # Download video
+            # video_bytes = result.video_data
+            # video_path = self._save_video(video_bytes, prompt)
+            #
+            # return video_path, metadata
+
+        except Exception as e:
+            logger.error(f"Video generation failed: {e}", exc_info=True)
+            return None, {"error": str(e)}

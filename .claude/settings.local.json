@@ -28,7 +28,10 @@
       "Bash(fi)",
       "Read(//usr/bin/**)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --no-decorate -10)",
-      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --no-decorate -20)"
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --no-decorate -20)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/video/workspace_widget.py)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/video/video_project_tab.py)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI status --short)"
     ],
     "deny": [],
     "ask": []

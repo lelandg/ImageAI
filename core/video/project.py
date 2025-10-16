@@ -76,6 +76,74 @@ class AudioTrack:
         )
 
 
+class PromptHistory:
+    """Manages undo/redo history for a single prompt field (max 256 levels)"""
+
+    def __init__(self, max_size: int = 256):
+        self.history: List[str] = []
+        self.current_index: int = -1
+        self.max_size = max_size
+
+    def add(self, prompt: str):
+        """Add a new prompt to history"""
+        # If we're not at the end of history, discard everything after current position
+        if self.current_index < len(self.history) - 1:
+            self.history = self.history[:self.current_index + 1]
+
+        # Add new prompt
+        self.history.append(prompt)
+        self.current_index = len(self.history) - 1
+
+        # Trim to max size if needed (remove oldest)
+        if len(self.history) > self.max_size:
+            self.history = self.history[-self.max_size:]
+            self.current_index = len(self.history) - 1
+
+    def can_undo(self) -> bool:
+        """Check if undo is available"""
+        return self.current_index > 0
+
+    def can_redo(self) -> bool:
+        """Check if redo is available"""
+        return self.current_index < len(self.history) - 1
+
+    def undo(self) -> Optional[str]:
+        """Undo to previous prompt, returns the prompt or None"""
+        if self.can_undo():
+            self.current_index -= 1
+            return self.history[self.current_index]
+        return None
+
+    def redo(self) -> Optional[str]:
+        """Redo to next prompt, returns the prompt or None"""
+        if self.can_redo():
+            self.current_index += 1
+            return self.history[self.current_index]
+        return None
+
+    def get_current(self) -> Optional[str]:
+        """Get current prompt"""
+        if 0 <= self.current_index < len(self.history):
+            return self.history[self.current_index]
+        return None
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            "history": self.history,
+            "current_index": self.current_index,
+            "max_size": self.max_size
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PromptHistory":
+        """Create from dictionary"""
+        ph = cls(max_size=data.get("max_size", 256))
+        ph.history = data.get("history", [])
+        ph.current_index = data.get("current_index", -1)
+        return ph
+
+
 @dataclass
 class ImageVariant:
     """A single generated image variant for a scene"""
@@ -118,19 +186,26 @@ class Scene:
     """A single scene in the video project"""
     id: str = field(default_factory=lambda: f"scene-{uuid.uuid4().hex[:8]}")
     source: str = ""  # Original text/lyric line
-    prompt: str = ""  # AI-enhanced prompt for image generation
+    prompt: str = ""  # AI-enhanced prompt for image generation (start frame)
     video_prompt: str = ""  # AI-enhanced prompt for video generation with motion/camera
     prompt_history: List[str] = field(default_factory=list)  # All previous prompt versions
     duration_sec: float = 4.0  # Scene duration in seconds
-    images: List[ImageVariant] = field(default_factory=list)  # Generated image variants
-    approved_image: Optional[Path] = None  # Selected image for final video
+    images: List[ImageVariant] = field(default_factory=list)  # Generated image variants (start frames)
+    approved_image: Optional[Path] = None  # Selected image for final video (start frame)
     video_clip: Optional[Path] = None  # Generated video clip path
+    first_frame: Optional[Path] = None  # First frame extracted from video clip
     last_frame: Optional[Path] = None  # Last frame extracted from video clip
     use_last_frame_as_seed: bool = False  # Use last frame for continuous video
     caption: Optional[str] = None  # Optional caption overlay
     status: SceneStatus = SceneStatus.PENDING
     order: int = 0  # Scene order in timeline
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    # Veo 3.1 Frames-to-Video fields
+    end_prompt: str = ""  # Optional end scene description for Veo 3.1
+    end_frame_images: List[ImageVariant] = field(default_factory=list)  # Generated end frame variants
+    end_frame: Optional[Path] = None  # Selected end frame for Veo 3.1
+    end_frame_auto_linked: bool = False  # True if using next scene's start frame as end frame
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
@@ -144,12 +219,18 @@ class Scene:
             "images": [img.to_dict() for img in self.images],
             "approved_image": str(self.approved_image) if self.approved_image else None,
             "video_clip": str(self.video_clip) if self.video_clip else None,
+            "first_frame": str(self.first_frame) if self.first_frame else None,
             "last_frame": str(self.last_frame) if self.last_frame else None,
             "use_last_frame_as_seed": self.use_last_frame_as_seed,
             "caption": self.caption,
             "status": self.status.value,
             "order": self.order,
-            "metadata": self.metadata
+            "metadata": self.metadata,
+            # Veo 3.1 end frame fields
+            "end_prompt": self.end_prompt,
+            "end_frame_images": [img.to_dict() for img in self.end_frame_images],
+            "end_frame": str(self.end_frame) if self.end_frame else None,
+            "end_frame_auto_linked": self.end_frame_auto_linked
         }
     
     @classmethod
@@ -165,12 +246,18 @@ class Scene:
             images=[ImageVariant.from_dict(img) for img in data.get("images", [])],
             approved_image=Path(data["approved_image"]) if data.get("approved_image") else None,
             video_clip=Path(data["video_clip"]) if data.get("video_clip") else None,
+            first_frame=Path(data["first_frame"]) if data.get("first_frame") else None,
             last_frame=Path(data["last_frame"]) if data.get("last_frame") else None,
             use_last_frame_as_seed=data.get("use_last_frame_as_seed", False),
             caption=data.get("caption"),
             status=SceneStatus(data.get("status", "pending")),
             order=data.get("order", 0),
-            metadata=data.get("metadata", {})
+            metadata=data.get("metadata", {}),
+            # Veo 3.1 end frame fields
+            end_prompt=data.get("end_prompt", ""),
+            end_frame_images=[ImageVariant.from_dict(img) for img in data.get("end_frame_images", [])],
+            end_frame=Path(data["end_frame"]) if data.get("end_frame") else None,
+            end_frame_auto_linked=data.get("end_frame_auto_linked", False)
         )
     
     def add_prompt_to_history(self, prompt: str):
@@ -179,6 +266,16 @@ class Scene:
             if self.prompt:  # Save current prompt to history before updating
                 self.prompt_history.append(self.prompt)
             self.prompt = prompt
+
+    def uses_veo_31(self) -> bool:
+        """Check if this scene will use Veo 3.1 (has end frame)"""
+        return self.end_frame is not None
+
+    def can_generate_video(self) -> bool:
+        """Check if scene is ready for video generation"""
+        # Need at least start frame (approved_image or first image in images list)
+        has_start_frame = self.approved_image is not None or (self.images and len(self.images) > 0)
+        return has_start_frame
 
 
 @dataclass
@@ -215,6 +312,7 @@ class VideoProject:
     transitions: bool = True  # Enable transitions
     captions: bool = False  # Enable captions
     video_muted: bool = True  # Video playback muted by default
+    auto_link_enabled: bool = False  # Veo 3.1: Auto-link end frames to next scene's start
     
     # Input configuration
     input_text: str = ""
@@ -291,7 +389,8 @@ class VideoProject:
                 "ken_burns": self.ken_burns,
                 "transitions": self.transitions,
                 "captions": self.captions,
-                "video_muted": self.video_muted
+                "video_muted": self.video_muted,
+                "auto_link_enabled": self.auto_link_enabled
             },
             "audio": {
                 "tracks": [track.to_dict() for track in self.audio_tracks]
@@ -351,6 +450,7 @@ class VideoProject:
             project.transitions = gen.get("transitions", True)
             project.captions = gen.get("captions", False)
             project.video_muted = gen.get("video_muted", True)
+            project.auto_link_enabled = gen.get("auto_link_enabled", False)
         else:
             # Fallback for older projects
             project.variants = 3
@@ -358,6 +458,7 @@ class VideoProject:
             project.transitions = True
             project.captions = False
             project.video_muted = True
+            project.auto_link_enabled = False
         
         # Load input configuration
         if "input" in data:

@@ -30,6 +30,11 @@ from core.video.config import VideoConfig
 from core.security import SecureKeyStorage
 from gui.common.dialog_manager import get_dialog_manager
 from gui.video.wizard_widget import WorkflowWizardWidget
+from gui.video.frame_button import FrameButton
+from gui.video.video_button import VideoButton
+from gui.video.end_prompt_dialog import EndPromptDialog
+from gui.video.prompt_field_widget import PromptFieldWidget
+from core.video.end_prompt_generator import EndPromptGenerator, EndPromptContext
 from core.llm_models import get_provider_models, get_all_provider_ids, get_provider_display_name
 
 
@@ -1001,6 +1006,16 @@ class WorkspaceWidget(QWidget):
         self.use_last_frame_checkbox.setChecked(False)
         controls_layout.addWidget(self.use_last_frame_checkbox)
 
+        # Veo 3.1 Auto-link checkbox
+        self.auto_link_checkbox = QCheckBox("Auto-link end frames (Veo 3.1)")
+        self.auto_link_checkbox.setToolTip(
+            "When enabled, automatically uses next scene's start frame as current scene's end frame.\n"
+            "Creates seamless transitions between scenes when generating videos with Veo 3.1."
+        )
+        self.auto_link_checkbox.setChecked(False)
+        self.auto_link_checkbox.stateChanged.connect(self._on_auto_link_changed)
+        controls_layout.addWidget(self.auto_link_checkbox)
+
         controls_layout.addStretch()
 
         self.total_duration_label = QLabel("Total: 0:00")
@@ -1009,53 +1024,52 @@ class WorkspaceWidget(QWidget):
         
         layout.addLayout(controls_layout)
         
-        # Scene table
+        # Scene table (10 columns - optimized for Veo 3.1)
         self.scene_table = QTableWidget()
-        self.scene_table.setColumnCount(11)
+        self.scene_table.setColumnCount(10)
         self.scene_table.setHorizontalHeaderLabels([
-            "#", "🖼️", "✨", "🔄", "🖼️", "🎬", "Source", "Duration", "Image Prompt", "Video Prompt", "⤵️"
+            "#", "Start Frame", "End Frame", "🎬", "Time", "⤵️",
+            "Source", "Start Prompt", "End Prompt", "Video Prompt"
         ])
         # Make table non-selectable
         self.scene_table.setSelectionMode(QTableWidget.NoSelection)
         self.scene_table.setFocusPolicy(Qt.NoFocus)
+        # Disable auto-scroll on mouse hover
+        self.scene_table.setAutoScroll(False)
+        self.scene_table.setAutoScrollMargin(0)
         # Disable word wrap by default - individual rows can be toggled
         self.scene_table.setWordWrap(False)
         self.scene_table.setTextElideMode(Qt.ElideRight)
-        # Set tooltips for headers
+        # Set tooltips for headers (10 columns: 0-9)
         self.scene_table.horizontalHeaderItem(0).setToolTip("Scene number")
-        self.scene_table.horizontalHeaderItem(1).setToolTip("Generate image for this scene")
-        self.scene_table.horizontalHeaderItem(2).setToolTip("Enhance prompt with AI")
-        self.scene_table.horizontalHeaderItem(3).setToolTip("Undo prompt enhancement")
-        self.scene_table.horizontalHeaderItem(4).setToolTip("Preview/Reference Image\nGenerated image or last frame from previous video (hover to see full size)")
-        self.scene_table.horizontalHeaderItem(5).setToolTip("Generate Video\nGenerate video clip for this scene")
+        self.scene_table.horizontalHeaderItem(1).setToolTip("Start Frame\nFirst frame of video (hover for preview, click to view, right-click for options)")
+        self.scene_table.horizontalHeaderItem(2).setToolTip("End Frame\nLast frame of video (hover for preview, click to view, right-click for options)\nLeave empty for Veo 3 single-frame video")
+        self.scene_table.horizontalHeaderItem(3).setToolTip("Generate Video\nClick to view first frame when video exists, double-click to regenerate")
+        self.scene_table.horizontalHeaderItem(4).setToolTip("Time\nScene duration in seconds")
+        self.scene_table.horizontalHeaderItem(5).setToolTip("Wrap\nToggle prompt text wrapping for this row")
         self.scene_table.horizontalHeaderItem(6).setToolTip("Source\nOriginal lyrics or text")
-        self.scene_table.horizontalHeaderItem(7).setToolTip("Duration\nScene duration in seconds")
-        self.scene_table.horizontalHeaderItem(8).setToolTip("Image Prompt\nAI-enhanced prompt for image generation")
-        self.scene_table.horizontalHeaderItem(9).setToolTip("Video Prompt\nAI-enhanced prompt with camera movement for video generation")
-        self.scene_table.horizontalHeaderItem(10).setToolTip("Wrap\nToggle prompt text wrapping for this row")
+        self.scene_table.horizontalHeaderItem(7).setToolTip("Start Prompt\nAI-enhanced prompt for start frame generation (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(8).setToolTip("End Prompt\nOptional: describe the ending frame for Veo 3.1 transition (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(9).setToolTip("Video Prompt\nAI-enhanced prompt with camera movement for video generation (✨ LLM + ↶↷ undo/redo)")
         # Configure columns - all resizable by user
         header = self.scene_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)  # All columns user-resizable
         header.setStretchLastSection(False)
         # Enable auto-resize of row heights to fit wrapped text
         self.scene_table.verticalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
-        # Set initial widths (minimized button/scene columns, moved thumbnail)
+        # Set initial widths for 10-column optimized layout
         header.resizeSection(0, 35)   # Scene # - minimized
-        header.resizeSection(1, 40)   # Generate image button - minimized to fit icon
-        header.resizeSection(2, 40)   # Enhance button - minimized to fit icon
-        header.resizeSection(3, 40)   # Undo button - minimized to fit icon
-        header.resizeSection(4, 35)   # Preview icon - minimized
-        header.resizeSection(5, 40)   # Generate video button - minimized to fit icon
-        header.resizeSection(6, 150)  # Source
-        header.resizeSection(7, 80)   # Duration
-        header.resizeSection(8, 400)  # Prompt - wider to show full text
-        header.resizeSection(9, 40)   # Wrap button - minimized to fit icon
-        # Connect to column resize to update wrapped rows dynamically
-        header.sectionResized.connect(self._on_column_resized)
+        header.resizeSection(1, 70)   # Start Frame - FrameButton widget
+        header.resizeSection(2, 70)   # End Frame - FrameButton widget
+        header.resizeSection(3, 40)   # Video button
+        header.resizeSection(4, 45)   # Time - narrow
+        header.resizeSection(5, 40)   # Wrap button - minimized
+        header.resizeSection(6, 120)  # Source - compact
+        header.resizeSection(7, 360)  # Start Prompt - wide (text + ✨ + ↶↷)
+        header.resizeSection(8, 360)  # End Prompt - wide (text + ✨ + ↶↷)
+        header.resizeSection(9, 360)  # Video Prompt - wide (text + ✨ + ↶↷)
         # Enable double-click to auto-resize and Ctrl+double-click for all columns
         header.sectionDoubleClicked.connect(self._on_header_double_clicked)
-        # Track which rows have wrapping enabled
-        self.wrapped_rows = set()
 
         # Install event filter for hover preview
         self.scene_table.viewport().installEventFilter(self)
@@ -1085,13 +1099,19 @@ class WorkspaceWidget(QWidget):
         provider_layout.addWidget(self.video_provider_combo)
 
         self.veo_model_combo = QComboBox()
-        self.veo_model_combo.addItems(["veo-3.0-generate-001", "veo-3.0-fast-generate-001", "veo-2.0-generate-001"])
-        self.veo_model_combo.setCurrentIndex(0)  # Default to veo-3.0-generate-001
+        self.veo_model_combo.addItems([
+            "veo-3.1-generate-001",  # Veo 3.1 - supports frames-to-video
+            "veo-3.0-generate-001",
+            "veo-3.0-fast-generate-001",
+            "veo-2.0-generate-001"
+        ])
+        self.veo_model_combo.setCurrentIndex(0)  # Default to veo-3.1-generate-001
         self.veo_model_combo.setVisible(True)  # Make visible by default since Veo is default
         # Set minimum width for Veo model combo
         self.veo_model_combo.setMinimumWidth(250)
         self.veo_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
-        self.veo_model_combo.setToolTip("Veo model version:\n- veo-3.0: Latest quality\n- veo-3.0-fast: Faster generation\n- veo-2.0: Previous generation")
+        self.veo_model_combo.setToolTip("Veo model version:\n- veo-3.1: Frames-to-video (start + end frames)\n- veo-3.0: Latest quality\n- veo-3.0-fast: Faster generation\n- veo-2.0: Previous generation")
+        self.veo_model_combo.currentTextChanged.connect(self.on_veo_model_changed)
         provider_layout.addWidget(self.veo_model_combo)
         
         provider_layout.addStretch()
@@ -1940,7 +1960,7 @@ class WorkspaceWidget(QWidget):
             self.logger.error(f"Failed to enhance prompts: {e}")
     
     def populate_scene_table(self):
-        """Populate scene table with project scenes"""
+        """Populate scene table with project scenes (10-column Veo 3.1 layout)"""
         if not self.current_project:
             return
 
@@ -1948,95 +1968,149 @@ class WorkspaceWidget(QWidget):
 
         total_duration = 0
         for i, scene in enumerate(self.current_project.scenes):
-            # Column 0: Scene number
-            self.scene_table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
+            # Column 0: Scene # (unchanged)
+            scene_num_item = QTableWidgetItem(str(i + 1))
+            scene_num_item.setTextAlignment(Qt.AlignCenter)
+            self.scene_table.setItem(i, 0, scene_num_item)
 
-            # Column 1: Generate image button
-            generate_btn = QPushButton("🖼️")
-            generate_btn.setToolTip("Generate image for this scene")
-            generate_btn.setMaximumWidth(35)
-            generate_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
-            generate_btn.clicked.connect(lambda checked, idx=i: self.generate_single_scene(idx))
-            self.scene_table.setCellWidget(i, 1, generate_btn)
-            # Column 2: Enhance prompt button
-            enhance_btn = QPushButton("✨")
-            enhance_btn.setToolTip("Enhance this prompt with AI")
-            enhance_btn.setMaximumWidth(35)
-            enhance_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
-            enhance_btn.clicked.connect(lambda checked, idx=i: self.enhance_single_prompt(idx))
-            self.scene_table.setCellWidget(i, 2, enhance_btn)
-            # Column 3: Undo/Revert button
-            revert_btn = QPushButton("🔄")
-            revert_btn.setToolTip("Undo prompt enhancement (revert to original)")
-            revert_btn.setMaximumWidth(35)
-            revert_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
-            revert_btn.setEnabled(scene.prompt != scene.source)  # Only enable if prompt was modified
-            revert_btn.clicked.connect(lambda checked, idx=i: self.revert_single_prompt(idx))
-            self.scene_table.setCellWidget(i, 3, revert_btn)
+            # Column 1: Start Frame (FrameButton widget)
+            start_frame_btn = FrameButton(frame_type="start", parent=self)
+            start_frame_path = scene.approved_image or (scene.images[0].path if scene.images else None)
+            if start_frame_path:
+                start_frame_btn.set_frame(start_frame_path, auto_linked=False)
 
-            # Column 4: Preview thumbnail (always show image icon if image exists)
-            if scene.images:
-                preview_item = QTableWidgetItem("🖼️")
-                if scene.video_clip:
-                    preview_item.setToolTip("Image and video available - Click row to view, click again to toggle between them")
-                else:
-                    preview_item.setToolTip("Image available - Click row to view (hover for preview)")
-            elif scene.video_clip:
-                preview_item = QTableWidgetItem("🎞️")
-                preview_item.setToolTip("Video clip generated - Click row to view first frame")
-            else:
-                preview_item = QTableWidgetItem("⬜")
-                preview_item.setToolTip("No image or video generated yet")
-            self.scene_table.setItem(i, 4, preview_item)
+            # Connect ALL frame operations through FrameButton's built-in signals
+            start_frame_btn.generate_requested.connect(lambda idx=i: self.generate_single_scene(idx))
+            start_frame_btn.view_requested.connect(lambda idx=i: self._view_start_frame(idx))
+            start_frame_btn.select_requested.connect(lambda idx=i: self._select_start_frame_variant(idx))
+            start_frame_btn.clear_requested.connect(lambda idx=i: self._clear_start_frame(idx))
 
-            # Column 5: Generate video button
-            video_btn = QPushButton("🎬")
+            self.scene_table.setCellWidget(i, 1, start_frame_btn)
+
+            # Column 2: End Frame (FrameButton widget)
+            end_frame_btn = FrameButton(frame_type="end", parent=self)
+            is_auto_linked = scene.end_frame_auto_linked
+            end_frame_path = scene.end_frame
+            if end_frame_path:
+                end_frame_btn.set_frame(end_frame_path, auto_linked=is_auto_linked)
+
+            # Connect ALL end frame operations through FrameButton
+            end_frame_btn.generate_requested.connect(lambda idx=i: self._generate_end_frame(idx))
+            end_frame_btn.view_requested.connect(lambda idx=i: self._view_end_frame(idx))
+            end_frame_btn.select_requested.connect(lambda idx=i: self._select_end_frame_variant(idx))
+            end_frame_btn.clear_requested.connect(lambda idx=i: self._clear_end_frame(idx))
+            end_frame_btn.auto_link_requested.connect(lambda idx=i: self._auto_link_end_frame(idx))
+
+            self.scene_table.setCellWidget(i, 2, end_frame_btn)
+
+            # Column 3: Video button (VideoButton widget with preview)
+            video_btn = VideoButton(parent=self)
             has_video_prompt = bool(hasattr(scene, 'video_prompt') and scene.video_prompt and len(scene.video_prompt) > 0)
-            if has_video_prompt:
-                video_btn.setToolTip("Generate video clip for this scene")
-            else:
-                video_btn.setToolTip("Generate video prompts first (Enhance for Video button)")
-            video_btn.setMaximumWidth(35)
-            video_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
-            video_btn.setEnabled(has_video_prompt)  # Only enable if video_prompt exists
-            video_btn.clicked.connect(lambda checked, idx=i: self.generate_video_clip(idx))
-            self.scene_table.setCellWidget(i, 5, video_btn)
+            video_path = scene.video_clip if scene.video_clip else None
+            first_frame_path = scene.first_frame if hasattr(scene, 'first_frame') else None
+            uses_veo_31 = scene.uses_veo_31() if hasattr(scene, 'uses_veo_31') else False
+
+            video_btn.set_video_state(video_path, first_frame_path, has_video_prompt, uses_veo_31)
+
+            # Install event filter for double-click detection
+            video_btn.installEventFilter(self)
+            video_btn.setProperty("scene_index", i)
+            video_btn.setProperty("is_video_btn", True)
+
+            # Connect signals
+            video_btn.clicked_load_frame.connect(lambda idx=i: self._load_video_first_frame_in_panel(idx))
+            video_btn.regenerate_requested.connect(lambda idx=i: self.generate_video_clip(idx))
+            video_btn.clear_requested.connect(lambda idx=i: self._clear_video(idx))
+            video_btn.play_requested.connect(lambda idx=i: self._play_video_in_panel(idx))
+
+            self.scene_table.setCellWidget(i, 3, video_btn)
+
+            # Column 4: Time (narrowed, no 's' suffix)
+            time_item = QTableWidgetItem(f"{scene.duration_sec:.1f}")
+            time_item.setToolTip(f"Duration: {scene.duration_sec:.1f} seconds")
+            time_item.setTextAlignment(Qt.AlignCenter)
+            self.scene_table.setItem(i, 4, time_item)
+
+            # Column 5: Wrap button (⤵️)
+            wrap_btn = QPushButton("⤵️")
+            wrap_btn.setToolTip("Toggle text wrapping for this row")
+            wrap_btn.setMaximumWidth(40)
+            wrap_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
+            wrap_btn.setCheckable(True)
+
+            # Check if row is already wrapped (from metadata or previous state)
+            is_wrapped = scene.metadata.get('wrapped', False)
+            wrap_btn.setChecked(is_wrapped)
+
+            # Connect to toggle handler
+            wrap_btn.clicked.connect(lambda checked, idx=i: self._toggle_row_wrap(idx, checked))
+            self.scene_table.setCellWidget(i, 5, wrap_btn)
 
             # Column 6: Source text
             source_item = QTableWidgetItem(scene.source[:50] if scene.source else "")
             source_item.setToolTip(scene.source if scene.source else "")
             self.scene_table.setItem(i, 6, source_item)
 
-            # Column 7: Duration
-            duration_item = QTableWidgetItem(f"{scene.duration_sec:.1f}s")
-            duration_item.setToolTip(f"Duration: {scene.duration_sec:.1f} seconds")
-            self.scene_table.setItem(i, 7, duration_item)
+            # Column 7: Start Prompt (PromptFieldWidget with LLM + undo/redo)
+            start_prompt_widget = PromptFieldWidget(
+                placeholder="Click ✨ to generate start frame prompt",
+                parent=self
+            )
+            start_prompt_widget.set_text(scene.prompt)
 
-            # Column 8: Image Prompt (shows full text, no wrap by default)
-            display_prompt = (scene.prompt or "").replace("\n\n", "\n")
-            prompt_item = QTableWidgetItem(display_prompt)
-            # Wrap tooltip in <qt> tags to enable automatic wrapping
-            tooltip_text = f"<qt>{display_prompt}</qt>" if display_prompt else "No image prompt yet"
-            prompt_item.setToolTip(tooltip_text)
-            self.scene_table.setItem(i, 8, prompt_item)
+            # Connect text changes to auto-save
+            start_prompt_widget.text_changed.connect(
+                lambda text, idx=i: self._on_start_prompt_changed(idx, text)
+            )
 
-            # Column 9: Video Prompt (shows full text, no wrap by default)
-            display_video_prompt = (scene.video_prompt or "").replace("\n\n", "\n")
-            video_prompt_item = QTableWidgetItem(display_video_prompt)
-            # Wrap tooltip in <qt> tags to enable automatic wrapping
-            video_tooltip = f"<qt>{display_video_prompt}</qt>" if display_video_prompt else "No video prompt yet"
-            video_prompt_item.setToolTip(video_tooltip)
-            self.scene_table.setItem(i, 9, video_prompt_item)
+            # Connect LLM button to dialog
+            start_prompt_widget.llm_requested.connect(
+                lambda idx=i: self._show_start_prompt_llm_dialog(idx)
+            )
 
-            # Column 10: Wrap toggle button
-            wrap_btn = QPushButton("⤵️")
-            wrap_btn.setToolTip("Toggle text wrapping for this row")
-            wrap_btn.setMaximumWidth(35)
-            wrap_btn.setStyleSheet("QPushButton { padding: 0px; margin: 0px; }")
-            wrap_btn.setCheckable(True)
-            wrap_btn.setChecked(False)  # Start unwrapped
-            wrap_btn.clicked.connect(lambda checked, idx=i: self.toggle_row_wrap(idx, checked))
-            self.scene_table.setCellWidget(i, 10, wrap_btn)
+            self.scene_table.setCellWidget(i, 7, start_prompt_widget)
+
+            # Column 8: End Prompt (PromptFieldWidget with LLM + undo/redo)
+            end_prompt_widget = PromptFieldWidget(
+                placeholder="Optional: click ✨ for end frame prompt",
+                parent=self
+            )
+            end_prompt_widget.set_text(scene.end_prompt)
+
+            # Connect text changes to auto-save
+            end_prompt_widget.text_changed.connect(
+                lambda text, idx=i: self._on_end_prompt_changed(idx, text)
+            )
+
+            # Connect LLM button to dialog
+            end_prompt_widget.llm_requested.connect(
+                lambda idx=i: self._show_end_prompt_llm_dialog(idx)
+            )
+
+            self.scene_table.setCellWidget(i, 8, end_prompt_widget)
+
+            # Column 9: Video Prompt (PromptFieldWidget with LLM + undo/redo)
+            video_prompt_widget = PromptFieldWidget(
+                placeholder="Click ✨ to generate video motion prompt",
+                parent=self
+            )
+            video_prompt_widget.set_text(scene.video_prompt if hasattr(scene, 'video_prompt') else "")
+
+            # Connect text changes to auto-save
+            video_prompt_widget.text_changed.connect(
+                lambda text, idx=i: self._on_video_prompt_changed(idx, text)
+            )
+
+            # Connect LLM button to dialog
+            video_prompt_widget.llm_requested.connect(
+                lambda idx=i: self._show_video_prompt_llm_dialog(idx)
+            )
+
+            self.scene_table.setCellWidget(i, 9, video_prompt_widget)
+
+            # Apply initial wrap state
+            if is_wrapped:
+                self._apply_row_wrap(i, True)
 
             total_duration += scene.duration_sec
 
@@ -2145,105 +2219,16 @@ class WorkspaceWidget(QWidget):
 
         self.logger.info(f"Reverted prompt for scene {scene_index + 1}")
 
-    def toggle_row_wrap(self, row_index: int, wrap_enabled: bool):
-        """Toggle text wrapping for both prompt columns in a specific row"""
-        if row_index >= self.scene_table.rowCount():
-            return
-        # Get the current scene and prompts
-        if not self.current_project or row_index >= len(self.current_project.scenes):
-            return
-        scene = self.current_project.scenes[row_index]
-        image_prompt_text = (scene.prompt or "").replace("\n\n", "\n")
-        video_prompt_text = (scene.video_prompt or "").replace("\n\n", "\n")
-
-        if wrap_enabled:
-            # Add to tracked wrapped rows
-            self.wrapped_rows.add(row_index)
-
-            # Wrap column 8 (Image Prompt)
-            col8_width = self.scene_table.columnWidth(8)
-            img_widget = QTextEdit()
-            img_widget.setPlainText(image_prompt_text)
-            img_widget.setReadOnly(True)
-            img_widget.setWordWrapMode(QTextOption.WordWrap)
-            img_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            img_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            img_widget.setFrameStyle(QTextEdit.NoFrame)
-            img_widget.setToolTip(f"<qt>{image_prompt_text}</qt>" if image_prompt_text else "No image prompt yet")
-            # Calculate height based on content
-            img_doc = img_widget.document()
-            img_doc.setTextWidth(col8_width)
-            img_height = int(img_doc.size().height() + 10)
-            self.scene_table.setCellWidget(row_index, 8, img_widget)
-
-            # Wrap column 9 (Video Prompt)
-            col9_width = self.scene_table.columnWidth(9)
-            vid_widget = QTextEdit()
-            vid_widget.setPlainText(video_prompt_text)
-            vid_widget.setReadOnly(True)
-            vid_widget.setWordWrapMode(QTextOption.WordWrap)
-            vid_widget.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            vid_widget.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-            vid_widget.setFrameStyle(QTextEdit.NoFrame)
-            vid_widget.setToolTip(f"<qt>{video_prompt_text}</qt>" if video_prompt_text else "No video prompt yet")
-            vid_doc = vid_widget.document()
-            vid_doc.setTextWidth(col9_width)
-            vid_height = int(vid_doc.size().height() + 10)
-            self.scene_table.setCellWidget(row_index, 9, vid_widget)
-
-            # Set row height to accommodate the tallest column
-            max_height = max(img_height, vid_height)
-            self.scene_table.setRowHeight(row_index, max_height)
-            self.logger.debug(f"Row {row_index + 1} prompts wrap enabled")
-        else:
-            # Remove from tracked wrapped rows
-            self.wrapped_rows.discard(row_index)
-
-            # Remove widgets and restore regular table items for column 8
-            self.scene_table.removeCellWidget(row_index, 8)
-            img_item = QTableWidgetItem(image_prompt_text)
-            img_item.setToolTip(f"<qt>{image_prompt_text}</qt>" if image_prompt_text else "No image prompt yet")
-            self.scene_table.setItem(row_index, 8, img_item)
-
-            # Remove widgets and restore regular table items for column 9
-            self.scene_table.removeCellWidget(row_index, 9)
-            vid_item = QTableWidgetItem(video_prompt_text)
-            vid_item.setToolTip(f"<qt>{video_prompt_text}</qt>" if video_prompt_text else "No video prompt yet")
-            self.scene_table.setItem(row_index, 9, vid_item)
-
-            # Reset to default row height
-            self.scene_table.resizeRowToContents(row_index)
-            self.logger.debug(f"Row {row_index + 1} prompts wrap disabled")
-
-    def _calculate_wrapped_lines(self, text: str, width: int) -> int:
-        """Calculate number of lines needed for wrapped text"""
-        if not text:
-            return 1
-        # Create a temporary QTextEdit to calculate wrapped height (keep reference alive)
-        temp_edit = QTextEdit()
-        temp_doc = temp_edit.document()
-        temp_doc.setPlainText(text)
-        temp_doc.setTextWidth(width)
-        # Estimate lines based on height (assuming ~20px per line)
-        height = temp_doc.size().height()
-        return max(1, int(height / 20))
-
-    def _on_column_resized(self, logical_index: int, old_size: int, new_size: int):
-        """Handle column resize to update wrapped text dynamically"""
-        if logical_index != 7:  # Only care about prompt column
-            return
-        # Update all wrapped rows
-        for row_index in self.wrapped_rows:
-            widget = self.scene_table.cellWidget(row_index, 7)
-            if isinstance(widget, QTextEdit):
-                # Recalculate height based on new width
-                doc = widget.document()
-                doc.setTextWidth(new_size)
-                height = int(doc.size().height() + 10)
-                self.scene_table.setRowHeight(row_index, height)
-
     def eventFilter(self, obj, event):
-        """Event filter for scene table to handle image preview on hover"""
+        """Event filter for scene table to handle image preview on hover and video button double-clicks"""
+        # Handle double-click on video button to regenerate
+        if isinstance(obj, QPushButton) and obj.property("is_video_btn"):
+            if event.type() == QEvent.MouseButtonDblClick:
+                scene_index = obj.property("scene_index")
+                if scene_index is not None:
+                    self.generate_video_clip(scene_index)
+                    return True
+
         # Safety check: ensure scene_table still exists
         try:
             if not hasattr(self, 'scene_table') or not self.scene_table:
@@ -2483,45 +2468,678 @@ class WorkspaceWidget(QWidget):
         self.generation_requested.emit("generate_images", params)
 
     def generate_video_clip(self, scene_index: int):
-        """Generate video clip for a single scene"""
+        """Generate video clip for a single scene using Veo 3 or Veo 3.1"""
         if not self.current_project or scene_index >= len(self.current_project.scenes):
             return
 
         scene = self.current_project.scenes[scene_index]
 
-        # Ensure scene has a prompt
-        if not scene.prompt:
+        # Ensure scene has a video prompt
+        if not hasattr(scene, 'video_prompt') or not scene.video_prompt:
             from gui.common.dialog_manager import get_dialog_manager
             dialog_manager = get_dialog_manager(self)
-            dialog_manager.show_warning("No Prompt", "Please enhance the prompt first before generating video clips.")
+            dialog_manager.show_warning("No Video Prompt", "Please enhance the prompts for video first (Enhance for Video button).")
             return
 
-        # Determine seed image
-        seed_image = None
-        if self.use_last_frame_checkbox.isChecked() and scene_index > 0:
-            # Use last frame from previous scene if available
-            prev_scene = self.current_project.scenes[scene_index - 1]
-            if prev_scene.last_frame and prev_scene.last_frame.exists():
-                seed_image = prev_scene.last_frame
-                scene.use_last_frame_as_seed = True
+        # Determine start frame (required for Veo 3/3.1)
+        start_frame = None
+        if scene.approved_image and scene.approved_image.exists():
+            start_frame = scene.approved_image
+        elif scene.images and len(scene.images) > 0:
+            start_frame = scene.images[0].path if hasattr(scene.images[0], 'path') else scene.images[0]
 
-        # If no seed from previous scene, use scene's own last frame, approved image, or first image
-        if not seed_image:
-            # First try the scene's own last frame (if it already has a video clip)
-            if scene.last_frame and scene.last_frame.exists():
-                seed_image = scene.last_frame
-            elif scene.approved_image and scene.approved_image.exists():
-                seed_image = scene.approved_image
-            elif scene.images and len(scene.images) > 0:
-                seed_image = scene.images[0].path if hasattr(scene.images[0], 'path') else scene.images[0]
-            scene.use_last_frame_as_seed = False
+        if not start_frame:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Start Frame", "Please generate an image for this scene first.")
+            return
+
+        # Check for end frame (determines Veo 3 vs 3.1)
+        end_frame = scene.end_frame if scene.end_frame and scene.end_frame.exists() else None
+        use_veo_31 = end_frame is not None
+
+        # Log what we're about to generate
+        if use_veo_31:
+            self.logger.info(f"Generating video with Veo 3.1 (start + end frames) for scene {scene_index + 1}")
+            self.logger.info(f"  Start frame: {start_frame}")
+            self.logger.info(f"  End frame: {end_frame}")
+            self.logger.info(f"  Auto-linked: {scene.end_frame_auto_linked}")
+        else:
+            self.logger.info(f"Generating video with Veo 3 (single frame) for scene {scene_index + 1}")
+            self.logger.info(f"  Start frame: {start_frame}")
 
         # Emit generation request for video clip
         params = self.gather_generation_params()
         params['scene_indices'] = [scene_index]  # Only generate for this scene
-        params['seed_image'] = str(seed_image) if seed_image else None
+        params['start_frame'] = str(start_frame)  # Veo 3/3.1 start frame
+        params['end_frame'] = str(end_frame) if end_frame else None  # Veo 3.1 end frame
+        params['use_veo_31'] = use_veo_31  # Flag for Veo 3.1 mode
+        params['video_prompt'] = scene.video_prompt  # Use video-specific prompt
+        params['duration'] = scene.duration_sec  # Scene duration
         params['generate_video'] = True  # Flag to indicate video generation
         self.generation_requested.emit("generate_video_clip", params)
+
+    # Veo 3.1 Frame Interaction Methods
+
+    def _view_start_frame(self, scene_index: int):
+        """View start frame in full-size image viewer"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+        image_path = scene.approved_image or (scene.images[0].path if scene.images else None)
+
+        if not image_path or not image_path.exists():
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Image", "No start frame image available to view.")
+            return
+
+        # Open image viewer dialog
+        from gui.video.image_viewer_dialog import ImageViewerDialog
+        dialog = ImageViewerDialog(image_path, f"Start Frame - Scene {scene_index + 1}", self)
+        dialog.exec_()
+
+    def _select_start_frame_variant(self, scene_index: int):
+        """Select start frame from generated variants"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        if not scene.images:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Variants", "No image variants available. Generate images first.")
+            return
+
+        # Show variant selector dialog
+        from gui.video.variant_selector_dialog import VariantSelectorDialog
+        dialog = VariantSelectorDialog(
+            scene.images,
+            scene.approved_image,
+            f"Select Start Frame - Scene {scene_index + 1}",
+            self
+        )
+
+        if dialog.exec_():
+            selected_path = dialog.get_selected_image()
+            if selected_path:
+                scene.approved_image = selected_path
+                self.save_project()
+                self.populate_scene_table()
+
+    def _clear_start_frame(self, scene_index: int):
+        """Clear the start frame selection"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        from gui.common.dialog_manager import get_dialog_manager
+        dialog_manager = get_dialog_manager(self)
+
+        if dialog_manager.show_question(
+            "Clear Start Frame",
+            "Clear the selected start frame? This won't delete generated images."
+        ):
+            scene.approved_image = None
+            self.save_project()
+            self.populate_scene_table()
+
+    def _show_end_prompt_llm_dialog(self, scene_index: int):
+        """Show LLM dialog for generating end prompt"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        if not scene.prompt:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Start Prompt", "Please enhance the start prompt first.")
+            return
+
+        # Get next scene's start prompt if available
+        next_start_prompt = None
+        if scene_index + 1 < len(self.current_project.scenes):
+            next_scene = self.current_project.scenes[scene_index + 1]
+            next_start_prompt = next_scene.prompt
+
+        # Get LLM provider/model
+        llm_provider = self.llm_provider_combo.currentText().lower()
+        llm_model = self.llm_model_combo.currentText()
+
+        # Create end prompt generator
+        end_prompt_gen = EndPromptGenerator(llm_provider=None)  # Will use litellm directly
+
+        # Show dialog
+        dialog = EndPromptDialog(
+            end_prompt_gen,
+            scene.prompt,
+            next_start_prompt,
+            scene.duration_sec,
+            llm_provider,
+            llm_model,
+            self
+        )
+
+        if dialog.exec_():
+            generated_prompt = dialog.get_prompt()
+            if generated_prompt:
+                scene.end_prompt = generated_prompt
+                self.save_project()
+                self.populate_scene_table()
+
+    def _generate_end_frame(self, scene_index: int):
+        """Generate end frame image from end_prompt"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        if not scene.end_prompt:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No End Prompt", "Please create an end prompt first.")
+            return
+
+        # Emit generation request for end frame
+        params = self.gather_generation_params()
+        params['scene_indices'] = [scene_index]
+        params['generate_end_frame'] = True  # Flag for end frame generation
+        params['prompt_override'] = scene.end_prompt  # Use end_prompt instead of start prompt
+        self.generation_requested.emit("generate_end_frame", params)
+
+    def _view_end_frame(self, scene_index: int):
+        """View end frame in full-size image viewer"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        if not scene.end_frame or not scene.end_frame.exists():
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Image", "No end frame image available to view.")
+            return
+
+        # Open image viewer dialog
+        from gui.video.image_viewer_dialog import ImageViewerDialog
+        dialog = ImageViewerDialog(scene.end_frame, f"End Frame - Scene {scene_index + 1}", self)
+        dialog.exec_()
+
+    def _view_video_first_frame(self, scene_index: int):
+        """View first frame of generated video in full-size image viewer"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        if not scene.video_clip or not scene.video_clip.exists():
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Video", "No video clip available to view.")
+            return
+
+        # Extract first frame if not already extracted
+        if not scene.first_frame or not scene.first_frame.exists():
+            self._extract_video_first_frame(scene_index)
+
+        if not scene.first_frame or not scene.first_frame.exists():
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("Extraction Failed", "Could not extract first frame from video.")
+            return
+
+        # Open image viewer dialog
+        from gui.video.image_viewer_dialog import ImageViewerDialog
+        dialog = ImageViewerDialog(scene.first_frame, f"Video First Frame - Scene {scene_index + 1}", self)
+        dialog.exec_()
+
+    def _load_video_first_frame_in_panel(self, scene_index: int):
+        """Load video's first frame in the lower image panel"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        if not scene.first_frame or not scene.first_frame.exists():
+            # Try to extract first frame if not already extracted
+            if scene.video_clip and scene.video_clip.exists():
+                self._extract_video_first_frame(scene_index)
+                scene = self.current_project.scenes[scene_index]  # Refresh
+
+        if not scene.first_frame or not scene.first_frame.exists():
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No First Frame", "Could not load first frame from video.")
+            return
+
+        # Hide video player, show image label
+        self.video_player_container.hide()
+        self.output_image_label.show()
+        self.media_player.stop()
+
+        # Load first frame in image panel
+        pixmap = QPixmap(str(scene.first_frame))
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(
+                self.output_image_label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.output_image_label.setPixmap(scaled)
+            self._log_to_console(f"🖼️ Scene {scene_index + 1}: Displaying video first frame ({scene.first_frame.name})")
+
+    def _play_video_in_panel(self, scene_index: int):
+        """Play video in the lower video panel"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        if not scene.video_clip or not scene.video_clip.exists():
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Video", "Video not found. Generate video first.")
+            return
+
+        try:
+            # Hide image label, show video player
+            self.output_image_label.hide()
+            self.video_player_container.show()
+
+            # Load and play the video
+            self.media_player.setSource(QUrl.fromLocalFile(str(scene.video_clip)))
+            self.media_player.play()
+
+            self._log_to_console(f"🎬 Scene {scene_index + 1}: Playing video ({scene.video_clip.name})")
+        except Exception as e:
+            self.logger.error(f"Failed to play video: {e}")
+            self._log_to_console(f"❌ Failed to play video: {e}", "ERROR")
+
+    def _clear_video(self, scene_index: int):
+        """Clear the video clip"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        from gui.common.dialog_manager import get_dialog_manager
+        dialog_manager = get_dialog_manager(self)
+
+        if dialog_manager.show_question(
+            "Clear Video",
+            f"Clear the video clip for Scene {scene_index + 1}? This will remove the generated video file."
+        ):
+            # Delete video file if it exists
+            if scene.video_clip and scene.video_clip.exists():
+                try:
+                    scene.video_clip.unlink()
+                    self.logger.info(f"Deleted video file: {scene.video_clip}")
+                except Exception as e:
+                    self.logger.error(f"Failed to delete video file: {e}")
+
+            # Clear video clip and first frame references
+            scene.video_clip = None
+            scene.first_frame = None
+            self.save_project()
+            self.populate_scene_table()
+            self._log_to_console(f"🗑️ Scene {scene_index + 1}: Video cleared")
+
+    def _select_end_frame_variant(self, scene_index: int):
+        """Select end frame from generated variants"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        if not scene.end_frame_images:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Variants", "No end frame variants available. Generate end frame first.")
+            return
+
+        # Show variant selector dialog
+        from gui.video.variant_selector_dialog import VariantSelectorDialog
+        dialog = VariantSelectorDialog(
+            scene.end_frame_images,
+            scene.end_frame,
+            f"Select End Frame - Scene {scene_index + 1}",
+            self
+        )
+
+        if dialog.exec_():
+            selected_path = dialog.get_selected_image()
+            if selected_path:
+                scene.end_frame = selected_path
+                scene.end_frame_auto_linked = False  # Clear auto-link when manually selecting
+                self.save_project()
+                self.populate_scene_table()
+
+    def _clear_end_frame(self, scene_index: int):
+        """Clear the end frame and end_prompt"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        from gui.common.dialog_manager import get_dialog_manager
+        dialog_manager = get_dialog_manager(self)
+
+        if dialog_manager.show_question(
+            "Clear End Frame",
+            "Clear the end frame and end prompt? This will revert to Veo 3 single-frame mode."
+        ):
+            scene.end_frame = None
+            scene.end_frame_auto_linked = False
+            scene.end_prompt = ""
+            # Note: Not clearing end_frame_images so user can re-select if desired
+            self.save_project()
+            self.populate_scene_table()
+
+    def _auto_link_end_frame(self, scene_index: int):
+        """Auto-link end frame to next scene's start frame"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        # Check if there's a next scene
+        if scene_index + 1 >= len(self.current_project.scenes):
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Next Scene", "Cannot auto-link: this is the last scene.")
+            return
+
+        next_scene = self.current_project.scenes[scene_index + 1]
+        next_start_frame = next_scene.approved_image or (next_scene.images[0].path if next_scene.images else None)
+
+        if not next_start_frame or not next_start_frame.exists():
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning(
+                "No Next Start Frame",
+                "The next scene doesn't have a start frame yet. Generate it first."
+            )
+            return
+
+        # Set auto-link
+        scene.end_frame = next_start_frame
+        scene.end_frame_auto_linked = True
+
+        # Also set end_prompt to match next scene's start if available
+        if next_scene.prompt:
+            scene.end_prompt = f"transitioning toward: {next_scene.prompt}"
+
+        self.save_project()
+        self.populate_scene_table()
+
+        from gui.common.dialog_manager import get_dialog_manager
+        dialog_manager = get_dialog_manager(self)
+        dialog_manager.show_info(
+            "Auto-Linked",
+            f"End frame auto-linked to Scene {scene_index + 2}'s start frame.\n"
+            "This will create a seamless transition when generating video."
+        )
+
+    def _extract_video_first_frame(self, scene_index: int):
+        """Extract first frame from video clip using OpenCV"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        if not scene.video_clip or not scene.video_clip.exists():
+            self.logger.warning(f"Cannot extract first frame: video clip not found for scene {scene_index + 1}")
+            return
+
+        try:
+            import cv2
+
+            # Create first_frames directory in project directory
+            first_frames_dir = self.current_project.project_dir / "first_frames"
+            first_frames_dir.mkdir(exist_ok=True)
+
+            # Generate output path
+            output_path = first_frames_dir / f"scene_{scene_index + 1:03d}_first_frame.png"
+
+            self.logger.info(f"Extracting first frame from {scene.video_clip.name}...")
+
+            # Open video file
+            cap = cv2.VideoCapture(str(scene.video_clip))
+            if not cap.isOpened():
+                self.logger.error(f"Failed to open video: {scene.video_clip}")
+                return
+
+            # Read the first frame
+            ret, frame = cap.read()
+            cap.release()
+
+            if not ret:
+                self.logger.error("Failed to read first frame from video")
+                return
+
+            # Save the frame
+            cv2.imwrite(str(output_path), frame)
+
+            if output_path.exists():
+                scene.first_frame = output_path
+                self.save_project()
+                self.logger.info(f"First frame extracted to {output_path}")
+            else:
+                self.logger.error("Failed to save first frame")
+
+        except ImportError:
+            self.logger.error("OpenCV (cv2) not available. Please install opencv-python to extract video frames.")
+        except Exception as e:
+            self.logger.error(f"Error extracting first frame: {e}")
+
+    def _extract_all_first_frames(self):
+        """Extract first frames for all scenes with videos but no first frame"""
+        if not self.current_project:
+            return
+
+        extracted_count = 0
+        for i, scene in enumerate(self.current_project.scenes):
+            # Check if scene has video but no first frame
+            has_video = scene.video_clip is not None and scene.video_clip.exists() if scene.video_clip else False
+            has_first_frame = scene.first_frame is not None and scene.first_frame.exists() if scene.first_frame else False
+
+            if has_video and not has_first_frame:
+                self.logger.info(f"Scene {i + 1} has video but no first frame, extracting...")
+                self._extract_video_first_frame(i)
+                extracted_count += 1
+
+        if extracted_count > 0:
+            self.logger.info(f"Extracted first frames for {extracted_count} scene(s)")
+            # Refresh the UI to show the updated button states
+            self.populate_scene_table()
+
+    def _on_end_prompt_changed(self, scene_index: int, text: str):
+        """Handle end prompt text change"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+        scene.end_prompt = text.strip()
+        self.save_project()
+
+        # Note: This method is now called from PromptFieldWidget in column 4
+
+    def _on_start_prompt_changed(self, scene_index: int, text: str):
+        """Handle start prompt text change"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+        scene.prompt = text.strip()
+        self.save_project()
+
+    def _show_start_prompt_llm_dialog(self, scene_index: int):
+        """Show LLM dialog for generating start prompt"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        if not scene.source:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Source Text", "Please enter source text first.")
+            return
+
+        # Get LLM provider/model
+        llm_provider = self.llm_provider_combo.currentText().lower()
+        llm_model = self.llm_model_combo.currentText()
+
+        # Create generator (can reuse EndPromptGenerator)
+        from gui.video.start_prompt_dialog import StartPromptDialog
+        generator = EndPromptGenerator(llm_provider=None)  # Will use litellm directly
+
+        # Show dialog
+        dialog = StartPromptDialog(
+            generator,
+            scene.source,
+            scene.prompt,
+            llm_provider,
+            llm_model,
+            self
+        )
+
+        if dialog.exec_():
+            generated_prompt = dialog.get_prompt()
+            if generated_prompt:
+                # Get widget and update it (with history)
+                start_prompt_widget = self.scene_table.cellWidget(scene_index, 3)
+                if isinstance(start_prompt_widget, PromptFieldWidget):
+                    start_prompt_widget.set_text(generated_prompt, add_to_history=True)
+
+                scene.prompt = generated_prompt
+                self.save_project()
+
+    def _on_video_prompt_changed(self, scene_index: int, text: str):
+        """Handle video prompt text change"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+        scene.video_prompt = text.strip()
+        self.save_project()
+
+        # Update video button enabled state
+        video_btn = self.scene_table.cellWidget(scene_index, 6)
+        if video_btn:
+            video_btn.setEnabled(bool(text.strip()))
+
+    def _show_video_prompt_llm_dialog(self, scene_index: int):
+        """Show LLM dialog for generating video prompt"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        if not scene.prompt:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Start Prompt", "Please generate a start prompt first.")
+            return
+
+        # Get LLM provider/model
+        llm_provider = self.llm_provider_combo.currentText().lower()
+        llm_model = self.llm_model_combo.currentText()
+
+        # Create generator
+        from gui.video.video_prompt_dialog import VideoPromptDialog
+        generator = EndPromptGenerator(llm_provider=None)  # Reuse for simplicity
+
+        # Show dialog
+        dialog = VideoPromptDialog(
+            generator,
+            scene.prompt,
+            scene.duration_sec,
+            llm_provider,
+            llm_model,
+            self
+        )
+
+        if dialog.exec_():
+            generated_prompt = dialog.get_prompt()
+            if generated_prompt:
+                # Get widget and update it (with history)
+                video_prompt_widget = self.scene_table.cellWidget(scene_index, 8)
+                if isinstance(video_prompt_widget, PromptFieldWidget):
+                    video_prompt_widget.set_text(generated_prompt, add_to_history=True)
+
+                scene.video_prompt = generated_prompt
+                self.save_project()
+
+                # Enable video button
+                video_btn = self.scene_table.cellWidget(scene_index, 6)
+                if video_btn:
+                    video_btn.setEnabled(True)
+
+    def _toggle_row_wrap(self, row_index: int, wrapped: bool):
+        """Toggle text wrapping for a row"""
+        if not self.current_project or row_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[row_index]
+        scene.metadata['wrapped'] = wrapped
+
+        self._apply_row_wrap(row_index, wrapped)
+        self.save_project()
+
+    def _apply_row_wrap(self, row_index: int, wrapped: bool):
+        """Apply wrap state to all text fields in a row"""
+        # For PromptFieldWidget, we need to access the internal QLineEdit
+        for col in [3, 4, 8]:  # Start Prompt, End Prompt, Video Prompt
+            widget = self.scene_table.cellWidget(row_index, col)
+            if isinstance(widget, PromptFieldWidget):
+                # Note: PromptFieldWidget uses QLineEdit which doesn't wrap
+                # We might need to enhance PromptFieldWidget to support QTextEdit instead
+                # For now, this is a placeholder
+                pass
+
+    def _on_auto_link_changed(self, state):
+        """Handle auto-link checkbox state change"""
+        if not self.current_project:
+            return
+
+        enabled = state == Qt.Checked
+        self.current_project.auto_link_enabled = enabled
+        self.save_project()
+
+        # Log the change
+        self.logger.info(f"Auto-link end frames: {'enabled' if enabled else 'disabled'}")
+
+        # Optionally, apply auto-linking immediately if enabled
+        if enabled:
+            self._apply_auto_linking_to_all_scenes()
+
+    def _apply_auto_linking_to_all_scenes(self):
+        """Apply auto-linking to all eligible scenes"""
+        if not self.current_project or not self.current_project.scenes:
+            return
+
+        linked_count = 0
+        for i, scene in enumerate(self.current_project.scenes[:-1]):  # Skip last scene
+            # Check if next scene has a start frame
+            next_scene = self.current_project.scenes[i + 1]
+            next_start_frame = next_scene.approved_image or (next_scene.images[0].path if next_scene.images else None)
+
+            if next_start_frame and next_start_frame.exists():
+                scene.end_frame = next_start_frame
+                scene.end_frame_auto_linked = True
+                if next_scene.prompt:
+                    scene.end_prompt = f"transitioning toward: {next_scene.prompt}"
+                linked_count += 1
+
+        if linked_count > 0:
+            self.save_project()
+            self.populate_scene_table()
+            self.logger.info(f"Auto-linked {linked_count} scenes")
 
     def enhance_all_prompts(self):
         """Request prompt enhancement"""
@@ -2701,7 +3319,11 @@ class WorkspaceWidget(QWidget):
     def on_video_provider_changed(self, provider: str):
         """Handle video provider change"""
         self.veo_model_combo.setVisible(provider == "Gemini Veo")
-    
+
+    def on_veo_model_changed(self, model: str):
+        """Handle Veo model selection change"""
+        self._auto_save_settings()
+
     def _auto_save_settings(self):
         """Auto-save settings to project if we have one"""
         # Skip auto-save during initial loading
@@ -3277,6 +3899,9 @@ class WorkspaceWidget(QWidget):
         self.current_project.enable_enhanced_storyboard = self.enable_enhanced_storyboard.isChecked()
         self.current_project.use_last_frame_for_continuous = self.use_last_frame_checkbox.isChecked()
 
+        # Save Veo 3.1 settings
+        self.current_project.auto_link_enabled = self.auto_link_checkbox.isChecked()
+
         # IMPORTANT: Save audio and MIDI file information
         # These are already set when browsing, but we need to ensure they're preserved
         # The audio_track and midi_file_path are already set in browse_audio_file and browse_midi_file
@@ -3487,6 +4112,10 @@ class WorkspaceWidget(QWidget):
             if hasattr(self.current_project, 'use_last_frame_for_continuous'):
                 self.use_last_frame_checkbox.setChecked(self.current_project.use_last_frame_for_continuous)
 
+            # Load Veo 3.1 auto-link setting
+            if hasattr(self.current_project, 'auto_link_enabled'):
+                self.auto_link_checkbox.setChecked(self.current_project.auto_link_enabled)
+
             # Load target duration
             if self.current_project.target_duration:
                 try:
@@ -3574,10 +4203,13 @@ class WorkspaceWidget(QWidget):
                 self.logger.info("Upgrading project format and saving...")
                 self.save_project()
 
+            # Extract first frames from videos if they exist but frames haven't been extracted yet
+            self._extract_all_first_frames()
+
         except Exception as e:
             self.logger.error(f"Error loading project to UI: {e}", exc_info=True)
             dialog_manager = get_dialog_manager(self)
-            dialog_manager.show_error("Load Error", 
+            dialog_manager.show_error("Load Error",
                               f"Some project data could not be loaded.\nCheck logs for details.\nError: {e}")
         finally:
             # Clear loading flag to enable auto-save

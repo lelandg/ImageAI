@@ -474,7 +474,8 @@ class VideoGenerationThread(QThread):
             scene = self.project.scenes[scene_index]
 
             # Get generation parameters
-            seed_image_path = self.kwargs.get('seed_image')
+            # Check for 'start_frame' (new parameter name) or fall back to 'seed_image' (old name)
+            seed_image_path = self.kwargs.get('start_frame') or self.kwargs.get('seed_image')
             # Use video_prompt if available, otherwise fall back to regular prompt
             prompt = scene.video_prompt if scene.video_prompt else scene.prompt
             aspect_ratio = self.kwargs.get('aspect_ratio', '16:9')
@@ -625,8 +626,13 @@ class VideoGenerationThread(QThread):
             # Extract last frame
             last_frame_path = self._extract_last_frame(video_path, scene_index)
 
-            # Update scene with video clip and last frame (using project path)
+            # Extract first frame
+            self.progress_update.emit(85, "Extracting first frame...")
+            first_frame_path = self._extract_first_frame(video_path, scene_index)
+
+            # Update scene with video clip and frames (using project path)
             scene.video_clip = video_path
+            scene.first_frame = first_frame_path
             scene.last_frame = last_frame_path
 
             self.progress_update.emit(100, f"Video clip generated for scene {scene_index + 1}")
@@ -670,6 +676,30 @@ class VideoGenerationThread(QThread):
         frames_dir.mkdir(parents=True, exist_ok=True)
 
         frame_path = frames_dir / f"scene_{scene_index}_last_frame.png"
+        cv2.imwrite(str(frame_path), frame)
+
+        return frame_path
+
+    def _extract_first_frame(self, video_path: Path, scene_index: int) -> Path:
+        """Extract the first frame from a video clip"""
+        import cv2
+
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            raise Exception(f"Failed to open video: {video_path}")
+
+        # Read the first frame
+        ret, frame = cap.read()
+        cap.release()
+
+        if not ret:
+            raise Exception("Failed to read first frame from video")
+
+        # Save the frame
+        first_frames_dir = self.project.project_dir / "first_frames"
+        first_frames_dir.mkdir(parents=True, exist_ok=True)
+
+        frame_path = first_frames_dir / f"scene_{scene_index + 1:03d}_first_frame.png"
         cv2.imwrite(str(frame_path), frame)
 
         return frame_path

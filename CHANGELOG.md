@@ -5,6 +5,44 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2025-01-16
+
+### Added
+- **Veo 3.1 Support**: Added Google Veo 3.1 frames-to-video model to dropdown
+  - New model `veo-3.1-generate-001` with support for start + end frame transitions
+  - **Note**: Start and end frame transitions require Veo 3.1 - older Veo models only support single-frame animation
+  - Set as default model with per-project persistence
+  - Automatically saves/loads model selection when projects are opened
+- **Enhanced Video Button Interactions**:
+  - Created VideoButton widget with hover preview showing first frame thumbnail
+  - Click video button to load first frame in lower preview panel
+  - Double-click to regenerate video
+  - Right-click menu with Play Video, Regenerate Video, and Clear Video options
+  - Hover preview shows 200x200px thumbnail (consistent with frame buttons)
+- **Image Viewer Dialog**: Simple full-screen dialog for viewing video first frames
+  - Clean interface with ESC key to close
+  - Automatic image scaling to fit window
+  - Responsive resizing
+
+### Changed
+- **Storyboard Table Improvements**:
+  - Disabled autoscroll behavior when mouse hovers over bottom row
+  - Prevents unwanted scrolling during interaction
+- **Video Button Tooltips**: Enhanced tooltips showing available actions and keyboard shortcuts
+- **Frame Button Integration**: Start and end frame buttons now open full-size image viewer on click
+
+### Fixed
+- **Video Button Click Error**: Fixed missing `ImageViewerDialog` module preventing video button clicks
+- **Veo 3.0 Compatibility**: Fixed start frame parameter naming for backward compatibility
+  - Now checks both 'start_frame' (Veo 3.1) and 'seed_image' (Veo 3.0) parameters
+  - Ensures Veo 3.0 projects continue working with proper start frame support
+
+### Technical
+- Created `gui/video/video_button.py` - Specialized button widget for video interactions
+- Created `gui/video/image_viewer_dialog.py` - Simple image viewing dialog
+- Updated video button implementation in `gui/video/workspace_widget.py` with signal-based architecture
+- Added hover preview system reusing FramePreviewPopup from FrameButton
+
 ## [0.22.0] - 2025-01-15
 
 ### Added
