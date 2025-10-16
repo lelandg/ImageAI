@@ -1009,6 +1009,15 @@ class VideoProjectTab(QWidget):
                         if 'video_clip' in result:
                             from pathlib import Path
                             scene.video_clip = Path(result['video_clip'])
+
+                            # Auto-load video after generation to show first frame
+                            if scene.first_frame and scene.first_frame.exists():
+                                self.workspace_widget._load_video_first_frame_in_panel(i)
+                                # Reset the video button toggle state so first click plays video
+                                video_btn = self.workspace_widget.scene_table.cellWidget(i, 3)
+                                if video_btn and hasattr(video_btn, 'reset_toggle_state'):
+                                    video_btn.reset_toggle_state()
+
                         if 'last_frame' in result:
                             from pathlib import Path
                             scene.last_frame = Path(result['last_frame'])

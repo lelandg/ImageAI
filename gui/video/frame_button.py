@@ -160,7 +160,10 @@ class FrameButton(QPushButton):
         else:
             # Empty state
             self.setText("➕")
-            tooltip = f"Generate {self.frame_type} frame\nClick to generate, right-click for options"
+            if self.frame_type == "start":
+                tooltip = "Generate start frame (Optional but recommended for Veo 3.0 and 3.1)\nClick to generate, right-click for options"
+            else:  # end frame
+                tooltip = "Generate end frame (Optional)\nClick to generate, right-click for options"
 
         self.setToolTip(tooltip)
 

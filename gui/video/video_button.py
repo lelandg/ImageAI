@@ -116,7 +116,7 @@ class VideoButton(QPushButton):
         if has_video:
             # Video exists - show view icon
             self.setText("👁️")
-            tooltip = "Click to view first frame\nRight-click for options (Play, Regenerate, Clear)\nDouble-click to regenerate\nHover for preview"
+            tooltip = "Click to play video\nRight-click for options (Play, Regenerate, Clear)\nDouble-click to regenerate\nHover for preview"
             self.setEnabled(True)
         else:
             # No video - show generate icon
@@ -162,13 +162,18 @@ class VideoButton(QPushButton):
             self.preview_popup.hide()
 
     def _on_clicked(self):
-        """Handle button click"""
+        """Handle button click - play video or request generation"""
         if self.has_video():
-            # Has video: load first frame in lower panel
-            self.clicked_load_frame.emit()
+            # Has video: always play video (restart from beginning)
+            self.play_requested.emit()
         else:
             # No video: request generation
             self.regenerate_requested.emit()
+
+    def reset_toggle_state(self):
+        """Reset state (e.g., after video generation completes)"""
+        # No state to reset - method kept for compatibility
+        pass
 
     def contextMenuEvent(self, event):
         """Show context menu on right-click"""

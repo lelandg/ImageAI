@@ -258,6 +258,10 @@ class WorkspaceWidget(QWidget):
         self.logger = logging.getLogger(__name__)
         self.logger.info("=== WorkspaceWidget.__init__ CALLED ===")
 
+        # Suppress FFmpeg console output (set before creating media player)
+        import os
+        os.environ['QT_LOGGING_RULES'] = 'qt.multimedia.ffmpeg=false'
+
         self.config = config
         self.providers = providers
         self.video_config = VideoConfig()
@@ -370,10 +374,12 @@ class WorkspaceWidget(QWidget):
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         self.logger.info("  - Creating storyboard panel...")
-        right_layout.addWidget(self.create_storyboard_panel())
+        # Add storyboard with stretch factor so it expands to fill available space
+        right_layout.addWidget(self.create_storyboard_panel(), stretch=3)
         self.logger.info("  - Creating export panel...")
-        right_layout.addWidget(self.create_export_panel())
-        right_layout.addStretch()
+        # Export panel stays compact at bottom
+        right_layout.addWidget(self.create_export_panel(), stretch=0)
+        # Remove addStretch() so storyboard can grow to fill available vertical space
         self.h_splitter.addWidget(right_panel)
 
         # Set initial splitter sizes (wizard, left panel, right panel)
@@ -1029,8 +1035,10 @@ class WorkspaceWidget(QWidget):
         self.scene_table.setColumnCount(10)
         self.scene_table.setHorizontalHeaderLabels([
             "#", "Start Frame", "End Frame", "🎬", "Time", "⤵️",
-            "Source", "Start Prompt", "End Prompt", "Video Prompt"
+            "Source", "Start Prompt", "End Prompt (Optional)", "Video Prompt"
         ])
+        # Set size policy to expand vertically to show more rows
+        self.scene_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # Make table non-selectable
         self.scene_table.setSelectionMode(QTableWidget.NoSelection)
         self.scene_table.setFocusPolicy(Qt.NoFocus)
@@ -2303,12 +2311,32 @@ class WorkspaceWidget(QWidget):
 
         modifiers = QApplication.keyboardModifiers()
 
+        # Define default widths for prompt columns
+        default_widths = {
+            7: 360,  # Start Prompt
+            8: 360,  # End Prompt
+            9: 360,  # Video Prompt
+        }
+
         if modifiers & Qt.ControlModifier:
             # Ctrl+double-click: resize all columns to contents
             for col in range(self.scene_table.columnCount()):
                 self.scene_table.resizeColumnToContents(col)
+        elif logical_index in default_widths:
+            # Prompt columns (7, 8, 9): toggle between default and content width
+            header = self.scene_table.horizontalHeader()
+            current_width = header.sectionSize(logical_index)
+            default_width = default_widths[logical_index]
+
+            # If currently at or near default width, expand to fit content
+            # Allow 20px tolerance for "near default"
+            if abs(current_width - default_width) < 20:
+                self.scene_table.resizeColumnToContents(logical_index)
+            else:
+                # Otherwise, return to default width
+                header.resizeSection(logical_index, default_width)
         else:
-            # Normal double-click: resize only the clicked column
+            # Other columns: resize to contents
             self.scene_table.resizeColumnToContents(logical_index)
 
     def _on_cell_clicked(self, row: int, column: int):
@@ -2772,8 +2800,12 @@ class WorkspaceWidget(QWidget):
             self.output_image_label.hide()
             self.video_player_container.show()
 
-            # Load and play the video
+            # Stop any currently playing video
+            self.media_player.stop()
+
+            # Load the video and restart from beginning
             self.media_player.setSource(QUrl.fromLocalFile(str(scene.video_clip)))
+            self.media_player.setPosition(0)  # Ensure playback starts at beginning
             self.media_player.play()
 
             self._log_to_console(f"🎬 Scene {scene_index + 1}: Playing video ({scene.video_clip.name})")
@@ -3115,14 +3147,21 @@ class WorkspaceWidget(QWidget):
 
     def _apply_row_wrap(self, row_index: int, wrapped: bool):
         """Apply wrap state to all text fields in a row"""
-        # For PromptFieldWidget, we need to access the internal QLineEdit
-        for col in [3, 4, 8]:  # Start Prompt, End Prompt, Video Prompt
-            widget = self.scene_table.cellWidget(row_index, col)
-            if isinstance(widget, PromptFieldWidget):
-                # Note: PromptFieldWidget uses QLineEdit which doesn't wrap
-                # We might need to enhance PromptFieldWidget to support QTextEdit instead
-                # For now, this is a placeholder
-                pass
+        # Adjust row height based on wrap state
+        # When wrapped, make row taller to show more of the prompt text
+        if wrapped:
+            # Make row 3x taller when wrapped
+            self.scene_table.setRowHeight(row_index, 90)
+        else:
+            # Return to default height
+            self.scene_table.setRowHeight(row_index, 30)
+
+        # Enable word wrap for text items in Source column (column 6)
+        source_item = self.scene_table.item(row_index, 6)
+        if source_item:
+            # QTableWidget doesn't support per-cell word wrap, but we can adjust the row height
+            # The text will still be elided, but the taller row provides visual feedback
+            pass
 
     def _on_auto_link_changed(self, state):
         """Handle auto-link checkbox state change"""
