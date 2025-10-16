@@ -1984,7 +1984,7 @@ class WorkspaceWidget(QWidget):
 
             # Column 1: Start Frame (FrameButton widget)
             start_frame_btn = FrameButton(frame_type="start", parent=self)
-            start_frame_path = scene.approved_image or (scene.images[0].path if scene.images else None)
+            start_frame_path = scene.approved_image  # Only use explicitly approved image, not fallback to variants
             if start_frame_path:
                 start_frame_btn.set_frame(start_frame_path, auto_linked=False)
 
@@ -1993,6 +1993,8 @@ class WorkspaceWidget(QWidget):
             start_frame_btn.view_requested.connect(lambda idx=i: self._view_start_frame(idx))
             start_frame_btn.select_requested.connect(lambda idx=i: self._select_start_frame_variant(idx))
             start_frame_btn.clear_requested.connect(lambda idx=i: self._clear_start_frame(idx))
+            start_frame_btn.load_image_requested.connect(lambda idx=i: self._load_start_frame_image(idx))
+            start_frame_btn.use_last_generated_requested.connect(lambda idx=i: self._use_last_generated_for_start_frame(idx))
 
             self.scene_table.setCellWidget(i, 1, start_frame_btn)
 
@@ -2009,6 +2011,8 @@ class WorkspaceWidget(QWidget):
             end_frame_btn.select_requested.connect(lambda idx=i: self._select_end_frame_variant(idx))
             end_frame_btn.clear_requested.connect(lambda idx=i: self._clear_end_frame(idx))
             end_frame_btn.auto_link_requested.connect(lambda idx=i: self._auto_link_end_frame(idx))
+            end_frame_btn.load_image_requested.connect(lambda idx=i: self._load_end_frame_image(idx))
+            end_frame_btn.use_last_generated_requested.connect(lambda idx=i: self._use_last_generated_for_end_frame(idx))
 
             self.scene_table.setCellWidget(i, 2, end_frame_btn)
 
@@ -2572,12 +2576,12 @@ class WorkspaceWidget(QWidget):
     # Veo 3.1 Frame Interaction Methods
 
     def _view_start_frame(self, scene_index: int):
-        """View start frame in full-size image viewer"""
+        """View start frame in lower preview panel"""
         if not self.current_project or scene_index >= len(self.current_project.scenes):
             return
 
         scene = self.current_project.scenes[scene_index]
-        image_path = scene.approved_image or (scene.images[0].path if scene.images else None)
+        image_path = scene.approved_image
 
         if not image_path or not image_path.exists():
             from gui.common.dialog_manager import get_dialog_manager
@@ -2585,10 +2589,24 @@ class WorkspaceWidget(QWidget):
             dialog_manager.show_warning("No Image", "No start frame image available to view.")
             return
 
-        # Open image viewer dialog
-        from gui.video.image_viewer_dialog import ImageViewerDialog
-        dialog = ImageViewerDialog(image_path, f"Start Frame - Scene {scene_index + 1}", self)
-        dialog.exec_()
+        # Display image in lower preview panel
+        from PySide6.QtGui import QPixmap
+
+        # Hide video player, show image label
+        self.video_player_container.hide()
+        self.output_image_label.show()
+        self.media_player.stop()
+
+        pixmap = QPixmap(str(image_path))
+        if not pixmap.isNull():
+            # Scale to fit the image view
+            scaled = pixmap.scaled(
+                self.output_image_label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.output_image_label.setPixmap(scaled)
+            self._log_to_console(f"Displaying start frame: {image_path.name}", "INFO")
 
     def _select_start_frame_variant(self, scene_index: int):
         """Select start frame from generated variants"""
@@ -2636,6 +2654,54 @@ class WorkspaceWidget(QWidget):
             scene.approved_image = None
             self.save_project()
             self.populate_scene_table()
+
+    def _load_start_frame_image(self, scene_index: int):
+        """Load an image from disk for start frame"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        from PySide6.QtWidgets import QFileDialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Start Frame Image",
+            str(Path.home()),
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+        )
+
+        if file_path:
+            scene.approved_image = Path(file_path)
+            self.save_project()
+            self.populate_scene_table()
+            self._log_to_console(f"Loaded start frame from: {file_path}", "INFO")
+
+    def _use_last_generated_for_start_frame(self, scene_index: int):
+        """Use the last generated image from history as start frame"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        # Get the last generated image from history
+        from core.utils import scan_disk_history
+        history_paths = scan_disk_history(project_only=False)
+
+        if not history_paths:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning(
+                "No History",
+                "No generated images found in history."
+            )
+            return
+
+        # Use the most recent image (first in list, since it's sorted by time)
+        last_image_path = history_paths[0]
+        scene.approved_image = last_image_path
+        self.save_project()
+        self.populate_scene_table()
+        self._log_to_console(f"Using last generated image: {last_image_path.name}", "INFO")
 
     def _show_end_prompt_llm_dialog(self, scene_index: int):
         """Show LLM dialog for generating end prompt"""
@@ -2702,7 +2768,7 @@ class WorkspaceWidget(QWidget):
         self.generation_requested.emit("generate_end_frame", params)
 
     def _view_end_frame(self, scene_index: int):
-        """View end frame in full-size image viewer"""
+        """View end frame in lower preview panel"""
         if not self.current_project or scene_index >= len(self.current_project.scenes):
             return
 
@@ -2714,13 +2780,27 @@ class WorkspaceWidget(QWidget):
             dialog_manager.show_warning("No Image", "No end frame image available to view.")
             return
 
-        # Open image viewer dialog
-        from gui.video.image_viewer_dialog import ImageViewerDialog
-        dialog = ImageViewerDialog(scene.end_frame, f"End Frame - Scene {scene_index + 1}", self)
-        dialog.exec_()
+        # Display image in lower preview panel
+        from PySide6.QtGui import QPixmap
+
+        # Hide video player, show image label
+        self.video_player_container.hide()
+        self.output_image_label.show()
+        self.media_player.stop()
+
+        pixmap = QPixmap(str(scene.end_frame))
+        if not pixmap.isNull():
+            # Scale to fit the image view
+            scaled = pixmap.scaled(
+                self.output_image_label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.output_image_label.setPixmap(scaled)
+            self._log_to_console(f"Displaying end frame: {scene.end_frame.name}", "INFO")
 
     def _view_video_first_frame(self, scene_index: int):
-        """View first frame of generated video in full-size image viewer"""
+        """View first frame of generated video in lower preview panel"""
         if not self.current_project or scene_index >= len(self.current_project.scenes):
             return
 
@@ -2742,10 +2822,24 @@ class WorkspaceWidget(QWidget):
             dialog_manager.show_warning("Extraction Failed", "Could not extract first frame from video.")
             return
 
-        # Open image viewer dialog
-        from gui.video.image_viewer_dialog import ImageViewerDialog
-        dialog = ImageViewerDialog(scene.first_frame, f"Video First Frame - Scene {scene_index + 1}", self)
-        dialog.exec_()
+        # Display image in lower preview panel
+        from PySide6.QtGui import QPixmap
+
+        # Hide video player, show image label
+        self.video_player_container.hide()
+        self.output_image_label.show()
+        self.media_player.stop()
+
+        pixmap = QPixmap(str(scene.first_frame))
+        if not pixmap.isNull():
+            # Scale to fit the image view
+            scaled = pixmap.scaled(
+                self.output_image_label.size(),
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            self.output_image_label.setPixmap(scaled)
+            self._log_to_console(f"Displaying video first frame: {scene.first_frame.name}", "INFO")
 
     def _load_video_first_frame_in_panel(self, scene_index: int):
         """Load video's first frame in the lower image panel"""
@@ -2892,6 +2986,56 @@ class WorkspaceWidget(QWidget):
             # Note: Not clearing end_frame_images so user can re-select if desired
             self.save_project()
             self.populate_scene_table()
+
+    def _load_end_frame_image(self, scene_index: int):
+        """Load an image from disk for end frame"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        from PySide6.QtWidgets import QFileDialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select End Frame Image",
+            str(Path.home()),
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+        )
+
+        if file_path:
+            scene.end_frame = Path(file_path)
+            scene.end_frame_auto_linked = False  # Clear auto-link when manually loading
+            self.save_project()
+            self.populate_scene_table()
+            self._log_to_console(f"Loaded end frame from: {file_path}", "INFO")
+
+    def _use_last_generated_for_end_frame(self, scene_index: int):
+        """Use the last generated image from history as end frame"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        # Get the last generated image from history
+        from core.utils import scan_disk_history
+        history_paths = scan_disk_history(project_only=False)
+
+        if not history_paths:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning(
+                "No History",
+                "No generated images found in history."
+            )
+            return
+
+        # Use the most recent image (first in list, since it's sorted by time)
+        last_image_path = history_paths[0]
+        scene.end_frame = last_image_path
+        scene.end_frame_auto_linked = False  # Clear auto-link when using last generated
+        self.save_project()
+        self.populate_scene_table()
+        self._log_to_console(f"Using last generated image for end frame: {last_image_path.name}", "INFO")
 
     def _auto_link_end_frame(self, scene_index: int):
         """Auto-link end frame to next scene's start frame"""

@@ -804,24 +804,6 @@ class VideoProjectTab(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
-        # Development notice
-        from PySide6.QtWidgets import QLabel
-        from PySide6.QtGui import QFont
-        notice = QLabel("⚠️ Video features are in active development - Some features may be incomplete")
-        notice.setStyleSheet("""
-            QLabel {
-                background-color: #fff3cd;
-                color: #856404;
-                padding: 5px;
-                border: 1px solid #ffeeba;
-                border-radius: 3px;
-            }
-        """)
-        notice_font = QFont()
-        notice_font.setPointSize(9)
-        notice.setFont(notice_font)
-        layout.addWidget(notice)
-        
         # Create tab widget for sub-tabs
         self.tab_widget = QTabWidget()
 

@@ -614,11 +614,15 @@ The Video Project feature provides comprehensive tools for creating AI-powered v
    - **Frame Rate Control**: 24, 30, or 60 fps
    - **Audio Integration**: Sync with audio tracks
 
-2. **Google Veo AI Video** (Planned):
-   - **True AI Video**: Generate motion video from text
-   - **Model Selection**: Veo Pro, Veo Dev, Veo Flash
-   - **Duration Control**: 5-10 second clips per scene
-   - **Advanced Features**: Camera movements, visual styles
+2. **Google Veo 3.1 AI Video** (NEW! - Version 0.23.0):
+   - **Continuous Video Generation**: Automatically grab end frame and use as start frame for next scene
+   - **Seamless Scene Transitions**: Maintain visual continuity across multi-scene videos
+   - **Optional End Frame Control**: Set custom end frames for precise scene endings
+   - **Start/End Frame Support**: Google released start/end frame control on October 15, 2025
+   - **True AI Video**: Generate motion video from text prompts
+   - **Model Selection**: Veo 3.1 models with frame-to-frame continuity
+   - **Duration Control**: 4, 6, or 8 second clips per scene (auto-snapped)
+   - **Advanced Features**: Camera movements, visual styles, physics-accurate motion
 
 **Version Control and History**:
 - **Event Sourcing Architecture**: Complete history of all changes

@@ -89,6 +89,8 @@ class FrameButton(QPushButton):
     clear_requested = Signal()  # Emitted when user wants to clear frame
     view_requested = Signal()  # Emitted when user wants to view full image
     auto_link_requested = Signal()  # Emitted when user wants to use auto-link
+    load_image_requested = Signal()  # Emitted when user wants to load an image from disk
+    use_last_generated_requested = Signal()  # Emitted when user wants to use last generated image
 
     def __init__(self, frame_type: str = "start", parent=None):
         """
@@ -237,7 +239,17 @@ class FrameButton(QPushButton):
             generate_action.triggered.connect(self.generate_requested.emit)
             menu.addAction(generate_action)
 
-            select_action = QAction("Select Existing Image...", self)
+            menu.addSeparator()
+
+            load_image_action = QAction("Load Image...", self)
+            load_image_action.triggered.connect(self.load_image_requested.emit)
+            menu.addAction(load_image_action)
+
+            use_last_action = QAction("Use Last Generated", self)
+            use_last_action.triggered.connect(self.use_last_generated_requested.emit)
+            menu.addAction(use_last_action)
+
+            select_action = QAction("Select from Scene Images", self)
             select_action.triggered.connect(self.select_requested.emit)
             menu.addAction(select_action)
 
