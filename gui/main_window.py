@@ -5902,10 +5902,9 @@ For more detailed information, please refer to the full documentation.
                         if hasattr(workspace, 'current_project') and workspace.current_project:
                             # Auto-save the project
                             workspace.save_project()
-                            print(f"Auto-saved video project: {workspace.current_project.name}")
                 except Exception as e:
-                    print(f"Error auto-saving video project: {e}")
-            
+                    logger.error(f"Error auto-saving video project: {e}")
+
             # Save window geometry
             geo = {
                 "x": self.x(),
@@ -5914,14 +5913,14 @@ For more detailed information, please refer to the full documentation.
                 "h": self.height(),
             }
             self.config.set("window_geometry", geo)
-            
+
             # Save all UI state
             self._save_ui_state()
-            
+
             # Save config
             self.config.save()
         except Exception as e:
-            print(f"Error saving UI state: {e}")
+            logger.error(f"Error saving UI state: {e}")
         
         # Clean up thread if running
         self._cleanup_thread()
@@ -6747,11 +6746,11 @@ For more detailed information, please refer to the full documentation.
     def _save_ui_state(self):
         """Save all UI widget states to config."""
         ui_state = {}
-        
+
         try:
             # Current tab index
             ui_state['current_tab'] = self.tabs.currentIndex()
-            
+
             # Generate tab settings
             ui_state['prompt'] = self.prompt_edit.toPlainText()
             ui_state['model'] = self.model_combo.currentData() or self.model_combo.currentText()
@@ -6825,24 +6824,24 @@ For more detailed information, please refer to the full documentation.
                 ui_state['history_sort_order'] = 0 if sort_order == Qt.AscendingOrder else 1
             
             # Output console height is auto-managed; do not persist
-            
+
             # Save to config
             self.config.set('ui_state', ui_state)
-            
+
         except Exception as e:
-            print(f"Error saving UI state: {e}")
+            logger.error(f"Error saving UI state: {e}")
     
     def _restore_ui_state(self):
         """Restore all UI widget states from config."""
         ui_state = self.config.get('ui_state', {})
         if not ui_state:
             return
-        
+
         try:
             # Restore prompt
             if 'prompt' in ui_state:
                 self.prompt_edit.setPlainText(ui_state['prompt'])
-            
+
             # Restore model selection
             if 'model_index' in ui_state and ui_state['model_index'] >= 0:
                 if ui_state['model_index'] < self.model_combo.count():
@@ -6903,18 +6902,18 @@ For more detailed information, please refer to the full documentation.
             
             # Restore aspect ratio
             if 'aspect_ratio' in ui_state and hasattr(self, 'aspect_selector') and self.aspect_selector:
-                # The aspect selector might have a method to set the ratio
                 try:
                     self.aspect_selector.set_ratio(ui_state['aspect_ratio'])
-                except:
-                    pass
-            
+                except Exception as e:
+                    logger.debug(f"Error restoring aspect ratio: {e}")
+
             # Restore resolution
             if 'resolution' in ui_state and hasattr(self, 'resolution_selector') and self.resolution_selector:
                 try:
-                    self.resolution_selector.set_resolution(ui_state['resolution'])
-                except:
-                    pass
+                    # Use skip_mode_change=True to avoid unchecking aspect ratio during restoration
+                    self.resolution_selector.set_resolution(ui_state['resolution'], skip_mode_change=True)
+                except Exception as e:
+                    logger.debug(f"Error restoring resolution: {e}")
             elif 'resolution_combo_index' in ui_state and hasattr(self, 'resolution_combo'):
                 if ui_state['resolution_combo_index'] < self.resolution_combo.count():
                     self.resolution_combo.setCurrentIndex(ui_state['resolution_combo_index'])
@@ -6922,10 +6921,9 @@ For more detailed information, please refer to the full documentation.
             # Restore quality settings
             if 'quality_settings' in ui_state and hasattr(self, 'quality_selector') and self.quality_selector:
                 try:
-                    # Now QualitySelector has set_settings method
                     self.quality_selector.set_settings(ui_state['quality_settings'])
                 except Exception as e:
-                    print(f"Error restoring quality settings: {e}")
+                    logger.debug(f"Error restoring quality settings: {e}")
             
             # Restore batch number
             if 'batch_num' in ui_state and hasattr(self, 'batch_selector') and self.batch_selector:
@@ -6951,10 +6949,9 @@ For more detailed information, please refer to the full documentation.
                         pass
                 if 'advanced_settings' in ui_state:
                     try:
-                        # Now AdvancedSettingsPanel has set_settings method
                         self.advanced_panel.set_settings(ui_state['advanced_settings'])
                     except Exception as e:
-                        print(f"Error restoring advanced settings: {e}")
+                        logger.debug(f"Error restoring advanced settings: {e}")
             elif hasattr(self, 'advanced_group'):
                 if 'advanced_visible' in ui_state:
                     self.advanced_group.setVisible(ui_state['advanced_visible'])
@@ -7038,10 +7035,10 @@ For more detailed information, please refer to the full documentation.
                 if image_path.exists():
                     # Use QTimer to load image after UI is fully initialized
                     QTimer.singleShot(100, lambda: self._load_image_file(image_path))
-            
+
         except Exception as e:
-            print(f"Error restoring UI state: {e}")
-    
+            logger.error(f"Error restoring UI state: {e}")
+
     def _add_to_history_table(self, history_entry):
         """Add a single new entry to the history table without refreshing everything."""
         if not hasattr(self, 'history_table'):

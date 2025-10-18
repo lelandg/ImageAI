@@ -36,6 +36,8 @@ class AspectRatioSelector(QWidget):
         self.custom_button = None
         self.custom_input = None
         self._using_custom = False
+        self.button_group = QButtonGroup(self)  # Add button group for exclusive selection
+        self.button_group.setExclusive(True)  # Only one button can be checked at a time
         self._init_ui()
     
     def _init_ui(self):
@@ -51,10 +53,12 @@ class AspectRatioSelector(QWidget):
         for ratio, info in self.ASPECT_RATIOS.items():
             button = self._create_ratio_button(ratio, info)
             self.buttons[ratio] = button
+            self.button_group.addButton(button)  # Add to button group
             buttons_layout.addWidget(button)
-        
+
         # Add custom button
         self.custom_button = self._create_custom_button()
+        self.button_group.addButton(self.custom_button)  # Add to button group
         buttons_layout.addWidget(self.custom_button)
         
         buttons_layout.addStretch()
@@ -300,7 +304,7 @@ class AspectRatioSelector(QWidget):
     def set_ratio(self, ratio: str):
         """Set the current aspect ratio."""
         self.current_ratio = ratio
-        
+
         # Check if it's a preset ratio
         if ratio in self.buttons:
             for r, button in self.buttons.items():
@@ -908,11 +912,37 @@ class ResolutionSelector(QWidget):
         else:
             return self.combo.currentData() or "1024x1024"
     
-    def set_resolution(self, resolution: str):
-        """Set resolution."""
+    def set_resolution(self, resolution: str, skip_mode_change: bool = False):
+        """Set resolution.
+
+        Args:
+            resolution: Resolution string like "2048x1152" or "auto"
+            skip_mode_change: If True, don't switch to resolution mode (used during restoration)
+        """
         if resolution == "auto":
             self.set_mode_aspect_ratio()
         else:
+            # Parse width and height from resolution string
+            if 'x' in resolution:
+                try:
+                    width, height = map(int, resolution.split('x'))
+                    # Block signals to prevent triggering change events during restoration
+                    self.width_spin.blockSignals(True)
+                    self.height_spin.blockSignals(True)
+
+                    # Update the spinboxes
+                    self.width_spin.setValue(width)
+                    self.height_spin.setValue(height)
+                    self._custom_width = width
+                    self._custom_height = height
+
+                    # Unblock signals
+                    self.width_spin.blockSignals(False)
+                    self.height_spin.blockSignals(False)
+                except (ValueError, AttributeError):
+                    pass  # Invalid resolution format
+
+            # Update combo box
             found = False
             for i in range(self.combo.count()):
                 if self.combo.itemData(i) == resolution:
@@ -924,7 +954,13 @@ class ResolutionSelector(QWidget):
                 custom_label = f"Custom ({resolution})"
                 self.combo.addItem(custom_label, userData=resolution)
                 self.combo.setCurrentIndex(self.combo.count() - 1)
-            self.set_mode_resolution()
+
+            # Only switch to resolution mode if not during restoration
+            if not skip_mode_change:
+                self.set_mode_resolution()
+
+            # Update info text to reflect new resolution
+            self._update_info_text()
     
     def is_using_aspect_ratio(self) -> bool:
         """Check if using aspect ratio mode."""
