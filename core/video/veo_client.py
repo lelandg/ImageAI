@@ -49,6 +49,7 @@ class VeoGenerationConfig:
     seed: Optional[int] = None
     image: Optional[Path] = None  # Start frame for image-to-video generation
     last_frame: Optional[Path] = None  # End frame for Veo 3.1 frame-to-frame interpolation
+    reference_images: Optional[List[Path]] = None  # Up to 3 reference images for style/character/environment consistency
 
     def __post_init__(self):
         """Validate configuration after initialization"""
@@ -59,6 +60,13 @@ class VeoGenerationConfig:
                     f"Veo 3 duration must be 4, 6, or 8 seconds, got {self.duration}. "
                     f"Use snap_duration_to_veo() to convert float durations."
                 )
+
+        # Validate reference images (max 3)
+        if self.reference_images and len(self.reference_images) > 3:
+            raise ValueError(
+                f"Veo 3 supports maximum 3 reference images, got {len(self.reference_images)}. "
+                f"Please reduce to 3 or fewer reference images."
+            )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API calls (excludes image, handled separately)"""
@@ -79,8 +87,8 @@ class VeoGenerationConfig:
         if self.seed is not None:
             config["seed"] = self.seed
 
-        # Note: image is handled separately in generate_video_async
-        # as it requires special loading/preparation
+        # Note: image, last_frame, and reference_images are handled separately
+        # in generate_video_async as they require special loading/preparation
 
         return config
 
@@ -268,6 +276,29 @@ class VeoClient:
                 except Exception as e:
                     self.logger.warning(f"Failed to load end frame: {e}, proceeding without it")
 
+            # Load reference images if provided for Veo 3 style/character/environment consistency (max 3)
+            reference_image_list = []
+            if config.reference_images:
+                for idx, ref_path in enumerate(config.reference_images[:3]):  # Max 3
+                    if ref_path and ref_path.exists():
+                        try:
+                            # Load image bytes
+                            with open(ref_path, 'rb') as f:
+                                ref_bytes = f.read()
+
+                            # Create Image object for Veo API
+                            ref_image = {
+                                'imageBytes': ref_bytes,
+                                'mimeType': 'image/png'
+                            }
+                            reference_image_list.append(ref_image)
+                            self.logger.info(f"Loaded reference image {idx+1}: {ref_path} ({len(ref_bytes)} bytes)")
+                        except Exception as e:
+                            self.logger.warning(f"Failed to load reference image {idx+1} ({ref_path}): {e}, skipping")
+
+                if reference_image_list:
+                    self.logger.info(f"Using {len(reference_image_list)} reference image(s) for visual consistency")
+
             # Create GenerateVideosConfig for additional parameters
             # Note: Resolution is determined automatically by the model based on aspect_ratio
             # Veo 3 supports duration_seconds parameter (4, 6, or 8 seconds)
@@ -290,6 +321,11 @@ class VeoClient:
                 video_config_params["last_frame"] = last_frame_image
                 self.logger.info("Added last_frame to GenerateVideosConfig for frame-to-frame interpolation")
 
+            # Add reference images for Veo 3 visual consistency (max 3)
+            if reference_image_list:
+                video_config_params["reference_images"] = reference_image_list
+                self.logger.info(f"Added {len(reference_image_list)} reference image(s) to GenerateVideosConfig for visual consistency")
+
             video_config = types.GenerateVideosConfig(**video_config_params)
 
             # Start generation (returns operation ID for polling)
@@ -308,6 +344,10 @@ class VeoClient:
                 self.logger.info("  - Start frame provided")
             else:
                 self.logger.info("Mode: Text-to-Video")
+
+            # Log reference images if provided
+            if reference_image_list:
+                self.logger.info(f"Visual Consistency: {len(reference_image_list)} reference image(s) for style/character/environment guidance")
 
             self.logger.info(f"Full Prompt:\n{config.prompt}")
 

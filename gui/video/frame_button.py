@@ -86,6 +86,7 @@ class FrameButton(QPushButton):
     frame_clicked = Signal()  # Emitted when button is clicked
     generate_requested = Signal()  # Emitted when user requests generation
     select_requested = Signal()  # Emitted when user wants to select from variants
+    select_from_scene_requested = Signal()  # Emitted when user wants to select from scene images
     clear_requested = Signal()  # Emitted when user wants to clear frame
     view_requested = Signal()  # Emitted when user wants to view full image
     auto_link_requested = Signal()  # Emitted when user wants to use auto-link
@@ -216,6 +217,10 @@ class FrameButton(QPushButton):
             select_action.triggered.connect(self.select_requested.emit)
             menu.addAction(select_action)
 
+            select_from_scene_action = QAction("Select from Scene Images", self)
+            select_from_scene_action.triggered.connect(self.select_from_scene_requested.emit)
+            menu.addAction(select_from_scene_action)
+
             menu.addSeparator()
 
             regenerate_action = QAction("Regenerate", self)
@@ -249,9 +254,9 @@ class FrameButton(QPushButton):
             use_last_action.triggered.connect(self.use_last_generated_requested.emit)
             menu.addAction(use_last_action)
 
-            select_action = QAction("Select from Scene Images", self)
-            select_action.triggered.connect(self.select_requested.emit)
-            menu.addAction(select_action)
+            select_from_scene_action = QAction("Select from Scene Images", self)
+            select_from_scene_action.triggered.connect(self.select_from_scene_requested.emit)
+            menu.addAction(select_from_scene_action)
 
             # End frame specific: option to use next start frame
             if self.frame_type == "end":

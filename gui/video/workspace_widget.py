@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QListWidget, QListWidgetItem, QInputDialog
 )
 from PySide6.QtCore import Qt, Signal, Slot, QEvent, QPoint, QTimer, QUrl
-from PySide6.QtGui import QPixmap, QImage, QTextOption, QColor
+from PySide6.QtGui import QPixmap, QImage, QTextOption, QColor, QCursor
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
@@ -34,6 +34,7 @@ from gui.video.frame_button import FrameButton
 from gui.video.video_button import VideoButton
 from gui.video.end_prompt_dialog import EndPromptDialog
 from gui.video.prompt_field_widget import PromptFieldWidget
+from gui.video.reference_images_widget import ReferenceImagesWidget
 from core.video.end_prompt_generator import EndPromptGenerator, EndPromptContext
 from core.llm_models import get_provider_models, get_all_provider_ids, get_provider_display_name
 
@@ -449,44 +450,86 @@ class WorkspaceWidget(QWidget):
         # Default to muted
         self.audio_output.setMuted(True)
 
-        # Video controls (vertical layout on right side)
+        # Video controls container (right side with wider controls)
         video_controls = QWidget()
-        video_controls.setMaximumWidth(120)
+        video_controls.setMinimumWidth(300)
+        video_controls.setMaximumWidth(350)
         video_controls_layout = QVBoxLayout(video_controls)
         video_controls_layout.setContentsMargins(5, 5, 5, 5)
-        video_controls_layout.setSpacing(5)
+        video_controls_layout.setSpacing(8)
+
+        # Playback controls row
+        playback_controls = QHBoxLayout()
 
         self.play_pause_btn = QPushButton("▶ Play")
         self.play_pause_btn.clicked.connect(self._toggle_play_pause)
-        video_controls_layout.addWidget(self.play_pause_btn)
+        playback_controls.addWidget(self.play_pause_btn)
 
         self.mute_btn = QPushButton("🔇 Unmute")
         self.mute_btn.setCheckable(True)
         self.mute_btn.setChecked(True)  # Muted by default
         self.mute_btn.clicked.connect(self._toggle_mute)
-        video_controls_layout.addWidget(self.mute_btn)
+        playback_controls.addWidget(self.mute_btn)
 
-        # Position slider (vertical)
-        position_container = QWidget()
-        position_layout = QVBoxLayout(position_container)
-        position_layout.setContentsMargins(0, 0, 0, 0)
-        position_label = QLabel("Position")
-        position_label.setAlignment(Qt.AlignCenter)
-        position_label.setStyleSheet("font-size: 8pt;")
-        position_layout.addWidget(position_label)
+        video_controls_layout.addLayout(playback_controls)
 
-        self.video_position_slider = QSlider(Qt.Vertical)
+        # Time display with precise control
+        time_container = QWidget()
+        time_layout = QHBoxLayout(time_container)
+        time_layout.setContentsMargins(0, 0, 0, 0)
+        time_layout.setSpacing(5)
+
+        time_label = QLabel("Time:")
+        time_layout.addWidget(time_label)
+
+        # Precise time textbox (format: MM:SS.mmm)
+        self.video_time_textbox = QLineEdit()
+        self.video_time_textbox.setPlaceholderText("00:00.000")
+        self.video_time_textbox.setMaximumWidth(90)
+        self.video_time_textbox.setToolTip("Enter time as MM:SS.mmm or SS.mmm to jump to position\nPress Enter to apply")
+        self.video_time_textbox.returnPressed.connect(self._on_time_textbox_changed)
+        time_layout.addWidget(self.video_time_textbox)
+
+        # Duration label
+        self.video_time_label = QLabel("/ 00:00.000")
+        time_layout.addWidget(self.video_time_label)
+        time_layout.addStretch()
+
+        video_controls_layout.addWidget(time_container)
+
+        # Horizontal timeline with markers
+        timeline_label = QLabel("Timeline")
+        timeline_label.setStyleSheet("font-size: 9pt; font-weight: bold;")
+        video_controls_layout.addWidget(timeline_label)
+
+        # Create custom slider with tick marks
+        timeline_container = QWidget()
+        timeline_layout = QVBoxLayout(timeline_container)
+        timeline_layout.setContentsMargins(0, 0, 0, 0)
+        timeline_layout.setSpacing(2)
+
+        self.video_position_slider = QSlider(Qt.Horizontal)
         self.video_position_slider.setRange(0, 0)
+        self.video_position_slider.setTickPosition(QSlider.TicksBelow)
+        self.video_position_slider.setTickInterval(1000)  # Tick every 1000ms (1 second)
         self.video_position_slider.sliderMoved.connect(self._set_position)
-        self.video_position_slider.setInvertedAppearance(True)  # Top is start
-        position_layout.addWidget(self.video_position_slider)
+        self.video_position_slider.setMinimumHeight(30)
+        self.video_position_slider.setToolTip("Drag to seek video position\nHover shows precise time")
+        # Enable mouse tracking for tooltip
+        self.video_position_slider.setMouseTracking(True)
+        # Install event filter to show precise time tooltip
+        self.video_position_slider.installEventFilter(self)
 
-        video_controls_layout.addWidget(position_container)
+        timeline_layout.addWidget(self.video_position_slider)
 
-        self.video_time_label = QLabel("00:00\n/\n00:00")
-        self.video_time_label.setAlignment(Qt.AlignCenter)
-        self.video_time_label.setStyleSheet("font-size: 8pt;")
-        video_controls_layout.addWidget(self.video_time_label)
+        video_controls_layout.addWidget(timeline_container)
+
+        # Extract frame button
+        self.extract_frame_btn = QPushButton("📸 Extract Frame at Playhead")
+        self.extract_frame_btn.setToolTip("Extract the current frame from the video and save it to the project")
+        self.extract_frame_btn.clicked.connect(self._extract_frame_at_playhead)
+        self.extract_frame_btn.setEnabled(False)  # Disabled until video is loaded
+        video_controls_layout.addWidget(self.extract_frame_btn)
 
         video_controls_layout.addStretch()
 
@@ -1049,9 +1092,9 @@ class WorkspaceWidget(QWidget):
         
         # Scene table (10 columns - optimized for Veo 3.1)
         self.scene_table = QTableWidget()
-        self.scene_table.setColumnCount(10)
+        self.scene_table.setColumnCount(11)
         self.scene_table.setHorizontalHeaderLabels([
-            "#", "Start Frame", "End Frame", "🎬", "Time", "⤵️",
+            "#", "Start Frame", "End Frame", "Ref Images", "🎬", "Time", "⤵️",
             "Source", "Start Prompt", "End Prompt (Optional)", "Video Prompt"
         ])
         # Set size policy to expand vertically to show more rows
@@ -1069,13 +1112,14 @@ class WorkspaceWidget(QWidget):
         self.scene_table.horizontalHeaderItem(0).setToolTip("Scene number")
         self.scene_table.horizontalHeaderItem(1).setToolTip("Start Frame\nFirst frame of video (hover for preview, click to view, right-click for options)")
         self.scene_table.horizontalHeaderItem(2).setToolTip("End Frame\nLast frame of video (hover for preview, click to view, right-click for options)\nLeave empty for Veo 3 single-frame video")
-        self.scene_table.horizontalHeaderItem(3).setToolTip("Generate Video\nClick to view first frame when video exists, double-click to regenerate")
-        # Column 4 (Time): No tooltip
-        self.scene_table.horizontalHeaderItem(5).setToolTip("Wrap\nToggle prompt text wrapping for this row")
-        self.scene_table.horizontalHeaderItem(6).setToolTip("Source\nOriginal lyrics or text")
-        self.scene_table.horizontalHeaderItem(7).setToolTip("Start Prompt\nAI-enhanced prompt for start frame generation (✨ LLM + ↶↷ undo/redo)")
-        self.scene_table.horizontalHeaderItem(8).setToolTip("End Prompt\nOptional: describe the ending frame for Veo 3.1 transition (✨ LLM + ↶↷ undo/redo)")
-        self.scene_table.horizontalHeaderItem(9).setToolTip("Video Prompt\nAI-enhanced prompt with camera movement for video generation (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(3).setToolTip("Reference Images (Veo 3)\nUp to 3 images for visual continuity (style/character/environment)\nAuto-links previous scene's last frame when enabled")
+        self.scene_table.horizontalHeaderItem(4).setToolTip("Generate Video\nClick to view first frame when video exists, double-click to regenerate")
+        # Column 5 (Time): No tooltip
+        self.scene_table.horizontalHeaderItem(6).setToolTip("Wrap\nToggle prompt text wrapping for this row")
+        self.scene_table.horizontalHeaderItem(7).setToolTip("Source\nOriginal lyrics or text")
+        self.scene_table.horizontalHeaderItem(8).setToolTip("Start Prompt\nAI-enhanced prompt for start frame generation (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(9).setToolTip("End Prompt\nOptional: describe the ending frame for Veo 3.1 transition (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(10).setToolTip("Video Prompt\nAI-enhanced prompt with camera movement for video generation (✨ LLM + ↶↷ undo/redo)")
         # Configure columns - all resizable by user
         header = self.scene_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)  # All columns user-resizable
@@ -1083,17 +1127,21 @@ class WorkspaceWidget(QWidget):
         # Set fixed row height to match PromptFieldWidget button height
         self.scene_table.verticalHeader().setDefaultSectionSize(30)  # Match LLM button height
         self.scene_table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
-        # Set initial widths for 10-column optimized layout
+        # Set initial widths for 11-column optimized layout
         header.resizeSection(0, 35)   # Scene # - minimized
         header.resizeSection(1, 70)   # Start Frame - FrameButton widget
         header.resizeSection(2, 70)   # End Frame - FrameButton widget
-        header.resizeSection(3, 40)   # Video button
-        header.resizeSection(4, 45)   # Time - narrow
-        header.resizeSection(5, 40)   # Wrap button - minimized
-        header.resizeSection(6, 120)  # Source - compact
-        header.resizeSection(7, 360)  # Start Prompt - wide (text + ✨ + ↶↷)
-        header.resizeSection(8, 360)  # End Prompt - wide (text + ✨ + ↶↷)
-        header.resizeSection(9, 360)  # Video Prompt - wide (text + ✨ + ↶↷)
+        header.resizeSection(3, 160)  # Ref Images - ReferenceImagesWidget (3 buttons)
+        header.resizeSection(4, 40)   # Video button (🎬)
+        header.resizeSection(5, 45)   # Time - narrow
+        header.resizeSection(6, 40)   # Wrap button (⤵️) - minimized
+        header.resizeSection(7, 120)  # Source - compact
+        header.resizeSection(8, 360)  # Start Prompt - wide (text + ✨ + ↶↷)
+        header.resizeSection(9, 360)  # End Prompt - wide (text + ✨ + ↶↷)
+        header.resizeSection(10, 360) # Video Prompt - wide (text + ✨ + ↶↷)
+        # Enforce minimum width for Ref Images column (col 3) - must fit 3 buttons
+        # 3 buttons × 50px (min) + 2 spacings × 2px + margins 4px = 158px minimum
+        header.sectionResized.connect(self._on_column_resized)
         # Enable double-click to auto-resize and Ctrl+double-click for all columns
         header.sectionDoubleClicked.connect(self._on_header_double_clicked)
 
@@ -2020,6 +2068,7 @@ class WorkspaceWidget(QWidget):
             start_frame_btn.generate_requested.connect(lambda idx=i: self.generate_single_scene(idx))
             start_frame_btn.view_requested.connect(lambda idx=i: self._view_start_frame(idx))
             start_frame_btn.select_requested.connect(lambda idx=i: self._select_start_frame_variant(idx))
+            start_frame_btn.select_from_scene_requested.connect(lambda idx=i: self._select_start_frame_from_scenes(idx))
             start_frame_btn.clear_requested.connect(lambda idx=i: self._clear_start_frame(idx))
             start_frame_btn.load_image_requested.connect(lambda idx=i: self._load_start_frame_image(idx))
             start_frame_btn.use_last_generated_requested.connect(lambda idx=i: self._use_last_generated_for_start_frame(idx))
@@ -2037,6 +2086,7 @@ class WorkspaceWidget(QWidget):
             end_frame_btn.generate_requested.connect(lambda idx=i: self._generate_end_frame(idx))
             end_frame_btn.view_requested.connect(lambda idx=i: self._view_end_frame(idx))
             end_frame_btn.select_requested.connect(lambda idx=i: self._select_end_frame_variant(idx))
+            end_frame_btn.select_from_scene_requested.connect(lambda idx=i: self._select_end_frame_from_scenes(idx))
             end_frame_btn.clear_requested.connect(lambda idx=i: self._clear_end_frame(idx))
             end_frame_btn.auto_link_requested.connect(lambda idx=i: self._auto_link_end_frame(idx))
             end_frame_btn.load_image_requested.connect(lambda idx=i: self._load_end_frame_image(idx))
@@ -2044,7 +2094,22 @@ class WorkspaceWidget(QWidget):
 
             self.scene_table.setCellWidget(i, 2, end_frame_btn)
 
-            # Column 3: Video button (VideoButton widget with preview)
+            # Column 3: Reference Images (ReferenceImagesWidget with up to 3 slots)
+            ref_images_widget = ReferenceImagesWidget(max_references=3, parent=self)
+            # Load existing reference images from scene
+            for ref_idx, ref_image in enumerate(scene.reference_images[:3]):  # Max 3
+                if ref_image and ref_image.path:
+                    ref_images_widget.set_reference_image(ref_idx, ref_image.path, ref_image.auto_linked)
+
+            # Connect all reference image signals
+            ref_images_widget.reference_changed.connect(lambda slot_idx, path, scene_idx=i: self._on_reference_image_changed(scene_idx, slot_idx, path))
+            ref_images_widget.select_from_scene_requested.connect(lambda slot_idx, scene_idx=i: self._select_reference_from_scenes(scene_idx, slot_idx))
+            ref_images_widget.view_requested.connect(lambda slot_idx, scene_idx=i: self._view_reference_image(scene_idx, slot_idx))
+            ref_images_widget.load_requested.connect(lambda slot_idx, scene_idx=i: self._load_reference_image(scene_idx, slot_idx))
+
+            self.scene_table.setCellWidget(i, 3, ref_images_widget)
+
+            # Column 4: Video button (VideoButton widget with preview)
             video_btn = VideoButton(parent=self)
             has_video_prompt = bool(hasattr(scene, 'video_prompt') and scene.video_prompt and len(scene.video_prompt) > 0)
             video_path = scene.video_clip if scene.video_clip else None
@@ -2064,14 +2129,14 @@ class WorkspaceWidget(QWidget):
             video_btn.clear_requested.connect(lambda idx=i: self._clear_video(idx))
             video_btn.play_requested.connect(lambda idx=i: self._play_video_in_panel(idx))
 
-            self.scene_table.setCellWidget(i, 3, video_btn)
+            self.scene_table.setCellWidget(i, 4, video_btn)
 
-            # Column 4: Time (narrowed, no 's' suffix, no tooltip)
+            # Column 5: Time (narrowed, no 's' suffix, no tooltip)
             time_item = QTableWidgetItem(f"{scene.duration_sec:.1f}")
             time_item.setTextAlignment(Qt.AlignCenter)
-            self.scene_table.setItem(i, 4, time_item)
+            self.scene_table.setItem(i, 5, time_item)
 
-            # Column 5: Wrap button (⤵️)
+            # Column 6: Wrap button (⤵️)
             wrap_btn = QPushButton("⤵️")
             wrap_btn.setToolTip("Toggle text wrapping for this row")
             wrap_btn.setFixedHeight(30)  # Match LLM button height
@@ -2105,14 +2170,14 @@ class WorkspaceWidget(QWidget):
 
             # Connect to toggle handler
             wrap_btn.clicked.connect(lambda checked, idx=i: self._toggle_row_wrap(idx, checked))
-            self.scene_table.setCellWidget(i, 5, wrap_btn)
+            self.scene_table.setCellWidget(i, 6, wrap_btn)
 
-            # Column 6: Source text
+            # Column 7: Source text
             source_item = QTableWidgetItem(scene.source[:50] if scene.source else "")
             source_item.setToolTip(scene.source if scene.source else "")
-            self.scene_table.setItem(i, 6, source_item)
+            self.scene_table.setItem(i, 7, source_item)
 
-            # Column 7: Start Prompt (PromptFieldWidget with LLM + undo/redo)
+            # Column 8: Start Prompt (PromptFieldWidget with LLM + undo/redo)
             start_prompt_widget = PromptFieldWidget(
                 placeholder="Click ✨ to generate start frame prompt",
                 parent=self
@@ -2129,9 +2194,9 @@ class WorkspaceWidget(QWidget):
                 lambda idx=i: self._show_start_prompt_llm_dialog(idx)
             )
 
-            self.scene_table.setCellWidget(i, 7, start_prompt_widget)
+            self.scene_table.setCellWidget(i, 8, start_prompt_widget)
 
-            # Column 8: End Prompt (PromptFieldWidget with LLM + undo/redo)
+            # Column 9: End Prompt (PromptFieldWidget with LLM + undo/redo)
             end_prompt_widget = PromptFieldWidget(
                 placeholder="Optional: click ✨ for end frame prompt",
                 parent=self
@@ -2148,9 +2213,9 @@ class WorkspaceWidget(QWidget):
                 lambda idx=i: self._show_end_prompt_llm_dialog(idx)
             )
 
-            self.scene_table.setCellWidget(i, 8, end_prompt_widget)
+            self.scene_table.setCellWidget(i, 9, end_prompt_widget)
 
-            # Column 9: Video Prompt (PromptFieldWidget with LLM + undo/redo)
+            # Column 10: Video Prompt (PromptFieldWidget with LLM + undo/redo)
             video_prompt_widget = PromptFieldWidget(
                 placeholder="Click ✨ to generate video motion prompt",
                 parent=self
@@ -2167,7 +2232,7 @@ class WorkspaceWidget(QWidget):
                 lambda idx=i: self._show_video_prompt_llm_dialog(idx)
             )
 
-            self.scene_table.setCellWidget(i, 9, video_prompt_widget)
+            self.scene_table.setCellWidget(i, 10, video_prompt_widget)
 
             # Apply initial wrap state
             if is_wrapped:
@@ -2335,6 +2400,18 @@ class WorkspaceWidget(QWidget):
 
         return super().eventFilter(obj, event)
 
+    def _on_column_resized(self, logical_index: int, old_size: int, new_size: int):
+        """Enforce minimum width for Ref Images column (column 3)"""
+        REF_IMAGES_COL = 3
+        MIN_REF_IMAGES_WIDTH = 158  # 3 buttons × 50px (min) + 2 × 2px spacing + 4px margins
+
+        if logical_index == REF_IMAGES_COL and new_size < MIN_REF_IMAGES_WIDTH:
+            # Prevent resizing below minimum - block the signal to avoid recursion
+            header = self.scene_table.horizontalHeader()
+            header.blockSignals(True)
+            header.resizeSection(REF_IMAGES_COL, MIN_REF_IMAGES_WIDTH)
+            header.blockSignals(False)
+
     def _on_header_double_clicked(self, logical_index: int):
         """Handle header double-click to auto-resize columns"""
         from PySide6.QtWidgets import QApplication
@@ -2479,6 +2556,9 @@ class WorkspaceWidget(QWidget):
         self.video_position_slider.setRange(0, duration)
         self._update_time_label(self.media_player.position(), duration)
 
+        # Enable extract frame button when video is loaded
+        self.extract_frame_btn.setEnabled(duration > 0)
+
     def _update_play_button(self, state):
         """Update play/pause button text based on playback state"""
         if state == QMediaPlayer.PlayingState:
@@ -2487,16 +2567,173 @@ class WorkspaceWidget(QWidget):
             self.play_pause_btn.setText("▶ Play")
 
     def _update_time_label(self, position, duration):
-        """Update time label with current position and duration"""
-        def format_time(ms):
-            seconds = ms // 1000
-            minutes = seconds // 60
-            seconds = seconds % 60
-            return f"{minutes:02d}:{seconds:02d}"
+        """Update time label and textbox with current position and duration (with milliseconds)"""
+        def format_time_ms(ms):
+            """Format time as MM:SS.mmm"""
+            total_seconds = ms / 1000.0
+            minutes = int(total_seconds // 60)
+            seconds = int(total_seconds % 60)
+            milliseconds = int((total_seconds % 1) * 1000)
+            return f"{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
 
-        pos_str = format_time(position)
-        dur_str = format_time(duration)
-        self.video_time_label.setText(f"{pos_str}\n/\n{dur_str}")
+        pos_str = format_time_ms(position)
+        dur_str = format_time_ms(duration)
+
+        # Update duration label
+        self.video_time_label.setText(f"/ {dur_str}")
+
+        # Update time textbox (only if not currently being edited)
+        if not self.video_time_textbox.hasFocus():
+            self.video_time_textbox.setText(pos_str)
+
+    def _on_time_textbox_changed(self):
+        """Handle time textbox change - parse and seek to specified time"""
+        try:
+            time_str = self.video_time_textbox.text().strip()
+            if not time_str:
+                return
+
+            # Parse time formats: MM:SS.mmm, SS.mmm, or just seconds
+            parts = time_str.replace(',', '.').split(':')
+
+            if len(parts) == 1:
+                # Just seconds (with optional milliseconds)
+                total_seconds = float(parts[0])
+            elif len(parts) == 2:
+                # MM:SS.mmm format
+                minutes = int(parts[0])
+                seconds = float(parts[1])
+                total_seconds = minutes * 60 + seconds
+            else:
+                self.logger.warning(f"Invalid time format: {time_str}")
+                return
+
+            # Convert to milliseconds
+            position_ms = int(total_seconds * 1000)
+
+            # Clamp to valid range
+            duration = self.media_player.duration()
+            position_ms = max(0, min(position_ms, duration))
+
+            # Seek to position
+            self.media_player.setPosition(position_ms)
+            self.logger.info(f"Seeking to {position_ms}ms ({total_seconds:.3f}s)")
+
+        except ValueError as e:
+            self.logger.warning(f"Failed to parse time '{time_str}': {e}")
+
+    def eventFilter(self, obj, event):
+        """Event filter for slider tooltip with precise time"""
+        # Check if video_position_slider exists and if this event is for it
+        if hasattr(self, 'video_position_slider') and obj == self.video_position_slider and event.type() == QEvent.ToolTip:
+            # Get slider value at mouse position
+            slider = obj
+            mouse_pos = slider.mapFromGlobal(QCursor.pos())
+            slider_width = slider.width()
+            slider_min = slider.minimum()
+            slider_max = slider.maximum()
+
+            # Calculate value at mouse position
+            if slider_max > slider_min:
+                value_at_pos = slider_min + (slider_max - slider_min) * (mouse_pos.x() / slider_width)
+                value_at_pos = max(slider_min, min(slider_max, value_at_pos))
+
+                # Format time
+                total_seconds = value_at_pos / 1000.0
+                minutes = int(total_seconds // 60)
+                seconds = int(total_seconds % 60)
+                milliseconds = int((total_seconds % 1) * 1000)
+                time_str = f"{minutes:02d}:{seconds:02d}.{milliseconds:03d}"
+
+                # Show tooltip
+                slider.setToolTip(f"Time: {time_str}")
+
+        return super().eventFilter(obj, event)
+
+    def _extract_frame_at_playhead(self):
+        """Extract the current frame from video at playhead position"""
+        try:
+            if not self.media_player or not self.media_player.source():
+                self.logger.warning("No video loaded")
+                return
+
+            # Get current position
+            position_ms = self.media_player.position()
+            total_seconds = position_ms / 1000.0
+
+            # Format timestamp for filename
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # Create extracted frames directory in project
+            if not self.current_project:
+                self.logger.warning("No project loaded")
+                return
+
+            project_dir = Path(self.current_project.file_path).parent if self.current_project.file_path else Path.cwd()
+            extracted_dir = project_dir / "extracted_frames"
+            extracted_dir.mkdir(exist_ok=True)
+
+            # Generate filename
+            frame_filename = f"frame_{timestamp}_{total_seconds:.3f}s.png"
+            frame_path = extracted_dir / frame_filename
+
+            # Use ffmpeg to extract frame at precise position
+            video_path = Path(self.media_player.source().toLocalFile())
+
+            from core.video.ffmpeg_renderer import FFmpegRenderer
+            renderer = FFmpegRenderer()
+
+            # Extract frame using ffmpeg
+            import subprocess
+            cmd = [
+                "ffmpeg",
+                "-ss", str(total_seconds),  # Seek to position
+                "-i", str(video_path),
+                "-frames:v", "1",  # Extract 1 frame
+                "-q:v", "2",  # High quality
+                "-y",  # Overwrite
+                str(frame_path)
+            ]
+
+            self.logger.info(f"Extracting frame at {total_seconds:.3f}s: {frame_path}")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+            if result.returncode == 0 and frame_path.exists():
+                self.logger.info(f"✅ Frame extracted successfully: {frame_path}")
+
+                # Add to project's extracted frames list
+                if not hasattr(self.current_project, 'extracted_frames'):
+                    self.current_project.extracted_frames = []
+
+                self.current_project.extracted_frames.append({
+                    'path': str(frame_path),
+                    'timestamp_sec': total_seconds,
+                    'video_source': str(video_path),
+                    'extracted_at': timestamp
+                })
+
+                # Auto-save project
+                self.save_project()
+
+                # Show success message
+                self._log_to_console(f"✅ Frame extracted: {frame_path.name}", "SUCCESS")
+                QMessageBox.information(
+                    self,
+                    "Frame Extracted",
+                    f"Frame extracted successfully:\n{frame_path.name}\n\nTime: {total_seconds:.3f}s"
+                )
+            else:
+                error_msg = result.stderr if result.stderr else "Unknown error"
+                self.logger.error(f"Failed to extract frame: {error_msg}")
+                self._log_to_console(f"❌ Failed to extract frame: {error_msg}", "ERROR")
+
+        except subprocess.TimeoutExpired:
+            self.logger.error("Frame extraction timed out")
+            self._log_to_console("❌ Frame extraction timed out", "ERROR")
+        except Exception as e:
+            self.logger.error(f"Failed to extract frame: {e}")
+            self._log_to_console(f"❌ Failed to extract frame: {e}", "ERROR")
 
     def _show_last_frame(self, scene, row):
         """Display the scene's last frame in the viewer"""
@@ -2734,6 +2971,43 @@ class WorkspaceWidget(QWidget):
         self.save_project()
         self.populate_scene_table()
         self._log_to_console(f"Using last generated image: {last_image_path.name}", "INFO")
+
+    def _select_start_frame_from_scenes(self, scene_index: int):
+        """Select start frame from any scene's images"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        # Check if any scenes have images
+        has_any_images = any(hasattr(s, 'images') and s.images for s in self.current_project.scenes)
+        if not has_any_images:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Images", "No scenes have generated images yet. Generate images first.")
+            return
+
+        # Show scene image selector dialog
+        from gui.video.scene_image_selector_dialog import SceneImageSelectorDialog
+        dialog = SceneImageSelectorDialog(
+            self.current_project.scenes,
+            scene_index,
+            f"Select Start Frame for Scene {scene_index + 1}",
+            self
+        )
+
+        if dialog.exec_():
+            selected_path = dialog.get_selected_image()
+            selected_scene_idx = dialog.get_selected_scene_index()
+            if selected_path:
+                scene.approved_image = selected_path
+                self.save_project()
+                self.populate_scene_table()
+                if selected_scene_idx is not None:
+                    self._log_to_console(
+                        f"Scene {scene_index + 1} start frame set from Scene {selected_scene_idx + 1}: {selected_path.name}",
+                        "INFO"
+                    )
 
     def _show_end_prompt_llm_dialog(self, scene_index: int):
         """Show LLM dialog for generating end prompt"""
@@ -3096,6 +3370,44 @@ class WorkspaceWidget(QWidget):
         self.populate_scene_table()
         self._log_to_console(f"Using last generated image for end frame: {last_image_path.name}", "INFO")
 
+    def _select_end_frame_from_scenes(self, scene_index: int):
+        """Select end frame from any scene's images"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        # Check if any scenes have images
+        has_any_images = any(hasattr(s, 'images') and s.images for s in self.current_project.scenes)
+        if not has_any_images:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Images", "No scenes have generated images yet. Generate images first.")
+            return
+
+        # Show scene image selector dialog
+        from gui.video.scene_image_selector_dialog import SceneImageSelectorDialog
+        dialog = SceneImageSelectorDialog(
+            self.current_project.scenes,
+            scene_index,
+            f"Select End Frame for Scene {scene_index + 1}",
+            self
+        )
+
+        if dialog.exec_():
+            selected_path = dialog.get_selected_image()
+            selected_scene_idx = dialog.get_selected_scene_index()
+            if selected_path:
+                scene.end_frame = selected_path
+                scene.end_frame_auto_linked = False  # Clear auto-link when manually selecting
+                self.save_project()
+                self.populate_scene_table()
+                if selected_scene_idx is not None:
+                    self._log_to_console(
+                        f"Scene {scene_index + 1} end frame set from Scene {selected_scene_idx + 1}: {selected_path.name}",
+                        "INFO"
+                    )
+
     def _auto_link_end_frame(self, scene_index: int):
         """Auto-link end frame to next scene's start frame"""
         if not self.current_project or scene_index >= len(self.current_project.scenes):
@@ -3193,6 +3505,78 @@ class WorkspaceWidget(QWidget):
         except Exception as e:
             self.logger.error(f"Error extracting first frame: {e}")
 
+    def _extract_video_last_frame(self, scene_index: int):
+        """Extract last frame from video clip using OpenCV"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        if not scene.video_clip or not scene.video_clip.exists():
+            self.logger.warning(f"Cannot extract last frame: video clip not found for scene {scene_index + 1}")
+            return
+
+        try:
+            import cv2
+
+            # Create last_frames directory in project directory
+            last_frames_dir = self.current_project.project_dir / "last_frames"
+            last_frames_dir.mkdir(exist_ok=True)
+
+            # Generate output path
+            output_path = last_frames_dir / f"scene_{scene_index + 1:03d}_last_frame.png"
+
+            self.logger.info(f"Extracting last frame from {scene.video_clip.name}...")
+
+            # Open video file
+            cap = cv2.VideoCapture(str(scene.video_clip))
+            if not cap.isOpened():
+                self.logger.error(f"Failed to open video: {scene.video_clip}")
+                return
+
+            # Get total frame count
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if total_frames <= 0:
+                self.logger.error("Failed to get frame count from video")
+                cap.release()
+                return
+
+            # Seek to last frame
+            cap.set(cv2.CAP_PROP_POS_FRAMES, total_frames - 1)
+
+            # Read the last frame
+            ret, frame = cap.read()
+            cap.release()
+
+            if not ret:
+                self.logger.error("Failed to read last frame from video")
+                return
+
+            # Save the frame
+            cv2.imwrite(str(output_path), frame)
+
+            if output_path.exists():
+                scene.last_frame = output_path
+                self.save_project()
+                self.populate_scene_table()  # Refresh to show the new last frame
+                self._log_to_console(f"Scene {scene_index + 1} last frame extracted: {output_path.name}", "INFO")
+                self.logger.info(f"Last frame extracted to {output_path}")
+            else:
+                self.logger.error("Failed to save last frame")
+
+        except ImportError:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_error(
+                "OpenCV Required",
+                "OpenCV (cv2) is required to extract video frames.\nPlease install opencv-python:\n\npip install opencv-python"
+            )
+        except Exception as e:
+            self.logger.error(f"Error extracting last frame: {e}")
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_error("Extraction Failed", f"Failed to extract last frame:\n{e}")
+
     def _extract_all_first_frames(self):
         """Extract first frames for all scenes with videos but no first frame"""
         if not self.current_project:
@@ -3233,6 +3617,109 @@ class WorkspaceWidget(QWidget):
         scene = self.current_project.scenes[scene_index]
         scene.prompt = text.strip()
         self.save_project()
+
+    def _on_reference_image_changed(self, scene_index: int, slot_idx: int, path):
+        """Handle reference image change"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        from core.video.project import ReferenceImage
+        scene = self.current_project.scenes[scene_index]
+
+        # Ensure reference_images list exists and has enough slots
+        while len(scene.reference_images) <= slot_idx:
+            scene.reference_images.append(None)
+
+        if path:
+            # Update or add reference image
+            ref_image = ReferenceImage(
+                path=path,
+                label=f"ref{slot_idx+1}",
+                auto_linked=False
+            )
+            scene.reference_images[slot_idx] = ref_image
+        else:
+            # Clear reference image
+            if slot_idx < len(scene.reference_images):
+                scene.reference_images[slot_idx] = None
+
+        # Clean up None entries at the end of the list
+        while scene.reference_images and scene.reference_images[-1] is None:
+            scene.reference_images.pop()
+
+        self.save_project()
+        self.logger.info(f"Reference image {slot_idx+1} for scene {scene_index} updated")
+
+    def _select_reference_from_scenes(self, scene_index: int, slot_idx: int):
+        """Select reference image from any scene's images"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        # Check if any scenes have images
+        has_any_images = any(hasattr(s, 'images') and s.images for s in self.current_project.scenes)
+        if not has_any_images:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Images", "No scenes have generated images yet. Generate images first.")
+            return
+
+        # Show scene image selector dialog
+        from gui.video.scene_image_selector_dialog import SceneImageSelectorDialog
+        dialog = SceneImageSelectorDialog(
+            self.current_project.scenes,
+            scene_index,
+            f"Select Reference Image {slot_idx + 1} for Scene {scene_index + 1}",
+            self
+        )
+
+        if dialog.exec_():
+            selected_path = dialog.get_selected_image()
+            selected_scene_idx = dialog.get_selected_scene_index()
+            if selected_path:
+                # Get the ref_images_widget for this scene
+                ref_images_widget = self.scene_table.cellWidget(scene_index, 3)
+                if ref_images_widget:
+                    ref_images_widget.set_reference_image(slot_idx, selected_path, False)
+                if selected_scene_idx is not None:
+                    self._log_to_console(
+                        f"Scene {scene_index + 1} reference {slot_idx + 1} set from Scene {selected_scene_idx + 1}: {selected_path.name}",
+                        "INFO"
+                    )
+
+    def _view_reference_image(self, scene_index: int, slot_idx: int):
+        """View reference image in full viewer"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+        if slot_idx < len(scene.reference_images) and scene.reference_images[slot_idx]:
+            ref_image = scene.reference_images[slot_idx]
+            if ref_image.path and ref_image.path.exists():
+                # Use existing image viewer
+                from gui.common.image_viewer import ImageViewer
+                viewer = ImageViewer(ref_image.path, self)
+                viewer.exec_()
+
+    def _load_reference_image(self, scene_index: int, slot_idx: int):
+        """Load reference image from disk"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        from PySide6.QtWidgets import QFileDialog
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            f"Select Reference Image {slot_idx + 1} for Scene {scene_index + 1}",
+            "",
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+        )
+
+        if file_path:
+            # Get the ref_images_widget for this scene
+            ref_images_widget = self.scene_table.cellWidget(scene_index, 3)
+            if ref_images_widget:
+                from pathlib import Path
+                ref_images_widget.set_reference_image(slot_idx, Path(file_path), False)
+                self._log_to_console(f"Scene {scene_index + 1} reference {slot_idx + 1} loaded: {Path(file_path).name}", "INFO")
 
     def _show_start_prompt_llm_dialog(self, scene_index: int):
         """Show LLM dialog for generating start prompt"""

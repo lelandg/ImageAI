@@ -145,6 +145,37 @@ class PromptHistory:
 
 
 @dataclass
+class ReferenceImage:
+    """A reference image for style/character/environment consistency in video generation"""
+    path: Path
+    label: Optional[str] = None  # Optional label like "character", "environment", "lighting"
+    description: Optional[str] = None  # Optional description of what this reference provides
+    auto_linked: bool = False  # True if automatically linked from previous scene's last frame
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization"""
+        return {
+            "path": str(self.path),
+            "label": self.label,
+            "description": self.description,
+            "auto_linked": self.auto_linked,
+            "metadata": self.metadata
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "ReferenceImage":
+        """Create from dictionary"""
+        return cls(
+            path=Path(data["path"]),
+            label=data.get("label"),
+            description=data.get("description"),
+            auto_linked=data.get("auto_linked", False),
+            metadata=data.get("metadata", {})
+        )
+
+
+@dataclass
 class ImageVariant:
     """A single generated image variant for a scene"""
     path: Path
@@ -206,6 +237,10 @@ class Scene:
     end_frame_images: List[ImageVariant] = field(default_factory=list)  # Generated end frame variants
     end_frame: Optional[Path] = None  # Selected end frame for Veo 3.1
     end_frame_auto_linked: bool = False  # True if using next scene's start frame as end frame
+
+    # Veo 3 Reference Images (up to 3 for style/character/environment consistency)
+    reference_images: List[ReferenceImage] = field(default_factory=list)  # Scene-specific references (max 3)
+    use_global_references: bool = True  # If True, use project global references; if False, use scene-specific
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
@@ -230,7 +265,10 @@ class Scene:
             "end_prompt": self.end_prompt,
             "end_frame_images": [img.to_dict() for img in self.end_frame_images],
             "end_frame": str(self.end_frame) if self.end_frame else None,
-            "end_frame_auto_linked": self.end_frame_auto_linked
+            "end_frame_auto_linked": self.end_frame_auto_linked,
+            # Veo 3 reference images
+            "reference_images": [ref.to_dict() for ref in self.reference_images],
+            "use_global_references": self.use_global_references
         }
     
     @classmethod
@@ -257,7 +295,10 @@ class Scene:
             end_prompt=data.get("end_prompt", ""),
             end_frame_images=[ImageVariant.from_dict(img) for img in data.get("end_frame_images", [])],
             end_frame=Path(data["end_frame"]) if data.get("end_frame") else None,
-            end_frame_auto_linked=data.get("end_frame_auto_linked", False)
+            end_frame_auto_linked=data.get("end_frame_auto_linked", False),
+            # Veo 3 reference images
+            reference_images=[ReferenceImage.from_dict(ref) for ref in data.get("reference_images", [])],
+            use_global_references=data.get("use_global_references", True)
         )
     
     def add_prompt_to_history(self, prompt: str):
@@ -276,6 +317,42 @@ class Scene:
         # Need at least start frame (approved_image or first image in images list)
         has_start_frame = self.approved_image is not None or (self.images and len(self.images) > 0)
         return has_start_frame
+
+    def add_reference_image(self, ref_image: ReferenceImage, max_refs: int = 3) -> bool:
+        """
+        Add a reference image to the scene (max 3).
+
+        Args:
+            ref_image: ReferenceImage to add
+            max_refs: Maximum number of reference images (default 3 for Veo 3)
+
+        Returns:
+            True if added successfully, False if at max capacity
+        """
+        if len(self.reference_images) >= max_refs:
+            return False
+        self.reference_images.append(ref_image)
+        self.use_global_references = False  # Using scene-specific references now
+        return True
+
+    def get_effective_reference_images(self, global_refs: Optional[List[ReferenceImage]] = None) -> List[ReferenceImage]:
+        """
+        Get the effective reference images for this scene.
+
+        Args:
+            global_refs: Global reference images from project (if available)
+
+        Returns:
+            List of reference images (scene-specific or global, max 3)
+        """
+        if self.use_global_references and global_refs:
+            return global_refs[:3]  # Max 3
+        return self.reference_images[:3]  # Max 3
+
+    def clear_reference_images(self):
+        """Clear all scene-specific reference images"""
+        self.reference_images.clear()
+        self.use_global_references = True
 
 
 @dataclass
@@ -340,7 +417,13 @@ class VideoProject:
     
     # Scenes
     scenes: List[Scene] = field(default_factory=list)
-    
+
+    # Veo 3 Reference Images (up to 3 global references for entire project)
+    global_reference_images: List[ReferenceImage] = field(default_factory=list)  # Max 3 global references
+
+    # Extracted frames from videos (for reuse as start/end/reference frames)
+    extracted_frames: List[Dict[str, Any]] = field(default_factory=list)  # Each dict has: path, timestamp_sec, video_source, extracted_at
+
     # Project paths
     project_dir: Optional[Path] = None
     export_path: Optional[Path] = None
@@ -407,6 +490,8 @@ class VideoProject:
                 "generated_files": {k: str(v) for k, v in self.karaoke_generated_files.items()}
             } if self.karaoke_config else None,
             "scenes": [scene.to_dict() for scene in self.scenes],
+            "global_reference_images": [ref.to_dict() for ref in self.global_reference_images],
+            "extracted_frames": self.extracted_frames,
             "export": {
                 "path": str(self.export_path) if self.export_path else None
             },
@@ -496,11 +581,19 @@ class VideoProject:
         
         # Load scenes
         project.scenes = [Scene.from_dict(scene) for scene in data.get("scenes", [])]
-        
+
+        # Load global reference images
+        project.global_reference_images = [
+            ReferenceImage.from_dict(ref) for ref in data.get("global_reference_images", [])
+        ]
+
+        # Load extracted frames
+        project.extracted_frames = data.get("extracted_frames", [])
+
         # Load export path
         if "export" in data and data["export"].get("path"):
             project.export_path = Path(data["export"]["path"])
-        
+
         project.total_cost = data.get("total_cost", 0.0)
         
         return project

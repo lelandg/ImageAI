@@ -1,6 +1,7 @@
 """
 Enhanced storyboard generation with provider-specific scene splitting approaches.
 Implements OpenAI and Gemini's distinct methods for lyric-to-scene conversion.
+Includes support for Veo 3 reference images (up to 3) for visual continuity.
 """
 
 import json
@@ -10,7 +11,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 from pathlib import Path
 
-from core.video.project import Scene
+from core.video.project import Scene, ReferenceImage
 from core.video.prompt_engine import UnifiedLLMProvider, PromptStyle
 
 
@@ -131,6 +132,7 @@ Now, generate the complete JSON output."""
     def __init__(self, llm_provider: Optional[UnifiedLLMProvider] = None):
         self.logger = logging.getLogger(__name__)
         self.llm_provider = llm_provider or UnifiedLLMProvider()
+        self.enable_auto_link_references = True  # Auto-link previous scene's last frame as reference
     
     def get_approach(self, provider: str) -> StoryboardApproach:
         """Determine the best approach for a provider"""
@@ -470,11 +472,11 @@ Format as JSON with 'scenes' array containing objects with 'lyrics', 'descriptio
     def _fallback_scene_split(self, lyrics: str, duration: int) -> List[Scene]:
         """Simple fallback scene splitting when LLM fails"""
         lines = [l.strip() for l in lyrics.split('\n') if l.strip()]
-        
+
         # Group into sections
         sections = []
         current_section = []
-        
+
         for line in lines:
             if line.startswith('[') and line.endswith(']'):
                 # Section marker
@@ -483,14 +485,14 @@ Format as JSON with 'scenes' array containing objects with 'lyrics', 'descriptio
                     current_section = []
             else:
                 current_section.append(line)
-        
+
         if current_section:
             sections.append('\n'.join(current_section))
-        
+
         # Create scenes from sections
         scenes = []
         scene_duration = duration / max(len(sections), 1)
-        
+
         for i, section in enumerate(sections):
             scene = Scene(
                 source=section,
@@ -499,5 +501,45 @@ Format as JSON with 'scenes' array containing objects with 'lyrics', 'descriptio
                 metadata={'approach': 'fallback'}
             )
             scenes.append(scene)
-        
+
+        return scenes
+
+    def apply_reference_image_auto_linking(self, scenes: List[Scene]) -> List[Scene]:
+        """
+        Auto-link reference images for visual continuity.
+        Uses previous scene's last_frame as first reference image for next scene.
+
+        Args:
+            scenes: List of scenes to process
+
+        Returns:
+            List of scenes with reference images auto-linked
+        """
+        if not self.enable_auto_link_references or len(scenes) < 2:
+            return scenes
+
+        for i in range(1, len(scenes)):
+            prev_scene = scenes[i - 1]
+            current_scene = scenes[i]
+
+            # If previous scene has a last_frame, use it as reference for current scene
+            if prev_scene.last_frame and prev_scene.last_frame.exists():
+                # Create auto-linked reference image
+                ref_image = ReferenceImage(
+                    path=prev_scene.last_frame,
+                    label="continuity",
+                    description=f"Last frame from Scene {i} for visual continuity",
+                    auto_linked=True,
+                    metadata={
+                        'source_scene_id': prev_scene.id,
+                        'source_scene_order': prev_scene.order
+                    }
+                )
+
+                # Add as first reference (if scene accepts it)
+                if current_scene.add_reference_image(ref_image):
+                    self.logger.info(
+                        f"Auto-linked Scene {i-1} last frame as reference for Scene {i}"
+                    )
+
         return scenes
