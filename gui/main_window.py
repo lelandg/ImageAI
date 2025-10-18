@@ -4564,21 +4564,19 @@ For more detailed information, please refer to the full documentation.
                 # Don't clear here, might be needed for the else block too
 
             if width and height:
-                # If using Google provider and resolution > 1024, calculate scaled dimensions
+                # For Google provider, don't add dimensions (they get rendered as literal text)
+                # For other providers, add dimensions to instruction
                 if self.current_provider.lower() == 'google':
-                    max_dim = max(width, height)
-                    if max_dim > 1024:
-                        scale_factor = 1024 / max_dim
-                        scaled_width = int(width * scale_factor)
-                        scaled_height = int(height * scale_factor)
-                        resolution_text = f" (Image will be {scaled_width}x{scaled_height}, scale to fit.)"
-                    else:
-                        resolution_text = f" (Image will be {width}x{height}, scale to fit.)"
+                    # Google uses image_config parameter, dimensions in text get rendered
+                    resolution_text = ""
                 else:
                     resolution_text = f" (Image will be {width}x{height}, scale to fit.)"
 
             # Build instruction and prepend to prompt for generation only
-            instruction = f"{', '.join(instruction_parts)}.{resolution_text}"
+            if resolution_text:
+                instruction = f"{', '.join(instruction_parts)}.{resolution_text}"
+            else:
+                instruction = f"{', '.join(instruction_parts)}."
             # Create modified prompt for generation (original_prompt already stored)
             prompt = f"{instruction} {prompt}"
 
@@ -4596,26 +4594,17 @@ For more detailed information, please refer to the full documentation.
                 width, height = self._pending_resolution
                 self._pending_resolution = None  # Clear it after use
 
-            # For Google provider with 1:1 aspect ratio, don't insert dimensions
-            # For other aspect ratios or providers, insert dimensions
+            # For Google provider, NEVER insert dimensions into prompt (they get rendered as literal text)
+            # Google uses image_config parameter instead
+            # For other providers, insert dimensions into prompt
             if width and height:
-                is_square = (width == height)
-                if self.current_provider.lower() == 'google' and is_square:
-                    # Don't insert dimensions for square images with Google
+                if self.current_provider.lower() == 'google':
+                    # Don't insert dimensions for Google - it uses image_config parameter
+                    # Dimensions in text get rendered as literal text in the image
                     pass
                 elif width != 1024 or height != 1024:
-                    # If using Google provider and resolution > 1024, calculate scaled dimensions
-                    if self.current_provider.lower() == 'google':
-                        max_dim = max(width, height)
-                        if max_dim > 1024:
-                            scale_factor = 1024 / max_dim
-                            scaled_width = int(width * scale_factor)
-                            scaled_height = int(height * scale_factor)
-                            resolution_text = f"(Image will be {scaled_width}x{scaled_height}, scale to fit.)"
-                        else:
-                            resolution_text = f"(Image will be {width}x{height}, scale to fit.)"
-                    else:
-                        resolution_text = f"(Image will be {width}x{height}, scale to fit.)"
+                    # For non-Google providers, add dimensions to prompt
+                    resolution_text = f"(Image will be {width}x{height}, scale to fit.)"
                     prompt = f"{resolution_text} {prompt}"
                     self._append_to_console(f"Auto-inserted: \"{resolution_text}\"", "#9966ff")
 
@@ -7004,44 +6993,38 @@ For more detailed information, please refer to the full documentation.
                     self.history_table.sortItems(ui_state['history_sort_column'], sort_order)
             
             # Output console height is auto-managed; nothing to restore
-            
-            # Check if there's a last video project to restore
-            # If so, switch to Video tab to trigger creation and auto-load
+
+            # Always restore the last tab the user was on
+            if 'current_tab' in ui_state:
+                if ui_state['current_tab'] < self.tabs.count():
+                    self.logger.info(f"Restoring last active tab: {ui_state['current_tab']}")
+                    self.tabs.setCurrentIndex(ui_state['current_tab'])
+
+            # Only auto-load video project if user was on the Video tab when they closed the app
             from PySide6.QtCore import QSettings
             video_settings = QSettings("ImageAI", "VideoProjects")
             last_video_project = video_settings.value("last_project")
+            video_tab_index = self.tabs.indexOf(self.tab_video)
+            current_tab_is_video = self.tabs.currentIndex() == video_tab_index
 
             self.logger.info("=== STARTUP VIDEO PROJECT CHECK ===")
             self.logger.info(f"Last video project from QSettings: {last_video_project}")
+            self.logger.info(f"Current tab is Video tab: {current_tab_is_video}")
 
-            if last_video_project:
+            if last_video_project and current_tab_is_video:
                 project_path = Path(last_video_project)
                 self.logger.info(f"Project path exists: {project_path.exists()}")
 
                 if project_path.exists():
-                    # Switch to Video tab to trigger creation and auto-load
-                    video_tab_index = self.tabs.indexOf(self.tab_video)
-                    self.logger.info(f"Video tab index: {video_tab_index}")
-                    self.logger.info(f"Video tab loaded: {self._video_tab_loaded}")
-                    self.logger.info(f"Current tab index before switch: {self.tabs.currentIndex()}")
-
-                    if video_tab_index >= 0:
-                        self.logger.info(f"Switching to Video tab (index {video_tab_index})")
-                        self.tabs.setCurrentIndex(video_tab_index)
-                        self.logger.info(f"Current tab index after switch: {self.tabs.currentIndex()}")
-                    else:
-                        self.logger.warning("Video tab index not found!")
+                    # Video tab is already active, project will auto-load via tab change handler
+                    self.logger.info(f"Video tab active, project will auto-load: {last_video_project}")
                 else:
                     self.logger.info("Video project path does not exist, skipping")
             else:
-                self.logger.info("No last video project found")
-
-            # Otherwise restore current tab (do this last so all content is ready)
-            if not (last_video_project and Path(last_video_project).exists()):
-                if 'current_tab' in ui_state:
-                    if ui_state['current_tab'] < self.tabs.count():
-                        self.logger.info(f"Restoring UI state tab: {ui_state['current_tab']}")
-                        self.tabs.setCurrentIndex(ui_state['current_tab'])
+                if not last_video_project:
+                    self.logger.info("No last video project found")
+                if not current_tab_is_video:
+                    self.logger.info("User was not on Video tab, skipping video project auto-load")
 
             # Restore last IMAGE project if saved
             if 'last_project' in ui_state:
