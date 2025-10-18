@@ -47,7 +47,8 @@ class VeoGenerationConfig:
     include_audio: bool = True  # Veo 3 can generate audio
     person_generation: bool = False  # May be restricted by region
     seed: Optional[int] = None
-    image: Optional[Path] = None  # Seed image for image-to-video generation
+    image: Optional[Path] = None  # Start frame for image-to-video generation
+    last_frame: Optional[Path] = None  # End frame for Veo 3.1 frame-to-frame interpolation
 
     def __post_init__(self):
         """Validate configuration after initialization"""
@@ -231,7 +232,7 @@ class VeoClient:
             if not self.client:
                 raise ValueError("No client configured. API key required for video generation.")
 
-            # Load seed image if provided
+            # Load start frame (seed image) if provided
             seed_image = None
             if config.image and config.image.exists():
                 try:
@@ -245,9 +246,27 @@ class VeoClient:
                         'imageBytes': image_bytes,
                         'mimeType': 'image/png'
                     }
-                    self.logger.info(f"Loaded seed image: {config.image} ({len(image_bytes)} bytes)")
+                    self.logger.info(f"Loaded start frame (seed image): {config.image} ({len(image_bytes)} bytes)")
                 except Exception as e:
-                    self.logger.warning(f"Failed to load seed image: {e}, proceeding without it")
+                    self.logger.warning(f"Failed to load start frame: {e}, proceeding without it")
+
+            # Load end frame (last_frame) if provided for Veo 3.1 interpolation
+            last_frame_image = None
+            if config.last_frame and config.last_frame.exists():
+                try:
+                    # Load image bytes
+                    with open(config.last_frame, 'rb') as f:
+                        last_frame_bytes = f.read()
+
+                    # Create Image object for Veo API
+                    last_frame_image = {
+                        'imageBytes': last_frame_bytes,
+                        'mimeType': 'image/png'
+                    }
+                    self.logger.info(f"Loaded end frame (last_frame): {config.last_frame} ({len(last_frame_bytes)} bytes)")
+                    self.logger.info("Using Veo 3.1 frame-to-frame interpolation mode")
+                except Exception as e:
+                    self.logger.warning(f"Failed to load end frame: {e}, proceeding without it")
 
             # Create GenerateVideosConfig for additional parameters
             # Note: Resolution is determined automatically by the model based on aspect_ratio
@@ -266,26 +285,43 @@ class VeoClient:
             if config.seed is not None:
                 video_config_params["seed"] = config.seed
 
+            # Add last_frame for Veo 3.1 interpolation (must be used with image/start frame)
+            if last_frame_image:
+                video_config_params["last_frame"] = last_frame_image
+                self.logger.info("Added last_frame to GenerateVideosConfig for frame-to-frame interpolation")
+
             video_config = types.GenerateVideosConfig(**video_config_params)
 
             # Start generation (returns operation ID for polling)
             self.logger.info(f"Starting Veo generation with {config.model.value}")
             self.logger.info(f"Config: {config.aspect_ratio}, duration={config.duration}s")
             self.logger.info(f"Note: Resolution determined automatically by model (typically 720p)")
-            self.logger.info(f"Prompt: {config.prompt[:100]}...")
+
+            # Log generation mode
+            if seed_image and last_frame_image:
+                self.logger.info("Mode: Frame-to-Frame Interpolation (Veo 3.1)")
+                self.logger.info("  - Start frame provided")
+                self.logger.info("  - End frame provided")
+                self.logger.info("  - Veo will generate smooth transition between frames")
+            elif seed_image:
+                self.logger.info("Mode: Image-to-Video")
+                self.logger.info("  - Start frame provided")
+            else:
+                self.logger.info("Mode: Text-to-Video")
+
+            self.logger.info(f"Full Prompt:\n{config.prompt}")
 
             if seed_image:
-                self.logger.info("Using seed image for image-to-video generation")
                 response = self.client.models.generate_videos(
                     model=config.model.value,
-                    prompt=config.prompt,  # Use original prompt, not enhanced
+                    prompt=config.prompt,
                     config=video_config,
                     image=seed_image
                 )
             else:
                 response = self.client.models.generate_videos(
                     model=config.model.value,
-                    prompt=config.prompt,  # Use original prompt, not enhanced
+                    prompt=config.prompt,
                     config=video_config
                 )
             
@@ -561,11 +597,12 @@ class VeoClient:
                 "-safe", "0",
                 "-i", str(concat_file),
                 "-c", "copy",
+                "-fflags", "+genpts",  # Regenerate presentation timestamps for smooth playback
             ]
-            
+
             if remove_audio:
                 cmd.extend(["-an"])  # Remove audio stream
-            
+
             cmd.extend(["-y", str(output_path)])
             
             subprocess.run(cmd, capture_output=True, check=True)

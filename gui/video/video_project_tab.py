@@ -347,10 +347,64 @@ class VideoGenerationThread(QThread):
                 scene_images = []
                 image_paths = []
 
-                # Prepend style to prompt for first scene only (others use continuity)
+                # Check continuity mode and apply style/transition if needed
                 prompt_with_style = scene.prompt
                 scene_actual_index = self.project.scenes.index(scene)
-                if scene_actual_index == 0 and prompt_style:
+
+                # Get continuity mode from kwargs
+                continuity_mode_str = self.kwargs.get('continuity_mode', 'none')
+                from core.video.style_analyzer import ContinuityMode
+                continuity_mode = ContinuityMode(continuity_mode_str)
+
+                # Apply continuity for scenes 2+ if mode is set
+                if scene_actual_index > 0 and continuity_mode != ContinuityMode.NONE:
+                    from core.video.style_analyzer import StyleAnalyzer, get_previous_scene_info
+
+                    # Get previous frame path
+                    previous_frame_path, _ = get_previous_scene_info(self.project, scene_actual_index)
+
+                    if previous_frame_path and previous_frame_path.exists():
+                        logger.info(f"Scene {scene_actual_index}: Applying continuity mode '{continuity_mode.value}'")
+                        logger.info(f"  Previous frame: {previous_frame_path}")
+                        self.progress_update.emit(progress, f"Analyzing previous frame for continuity...")
+
+                        # Get API key for style analysis
+                        llm_api_key = None
+                        if provider == 'google':
+                            llm_api_key = config.get_api_key('google')
+                        elif provider == 'openai':
+                            llm_api_key = config.get_api_key('openai')
+
+                        if llm_api_key:
+                            analyzer = StyleAnalyzer(
+                                api_key=llm_api_key,
+                                llm_provider=provider,
+                                llm_model=model
+                            )
+
+                            try:
+                                if continuity_mode == ContinuityMode.STYLE_ONLY:
+                                    style_info = analyzer.analyze_for_style(previous_frame_path)
+                                    if style_info:
+                                        prompt_with_style = f"{style_info} {scene.prompt}"
+                                        logger.info(f"  Style info: {style_info[:100]}...")
+                                elif continuity_mode == ContinuityMode.TRANSITION:
+                                    transition_prompt = analyzer.analyze_for_transition(
+                                        previous_frame_path,
+                                        scene.prompt
+                                    )
+                                    if transition_prompt:
+                                        prompt_with_style = transition_prompt
+                                        logger.info(f"  Transition prompt: {transition_prompt[:100]}...")
+                            except Exception as e:
+                                logger.warning(f"Continuity analysis failed: {e}, using original prompt")
+                        else:
+                            logger.warning(f"No API key for {provider}, skipping continuity analysis")
+                    else:
+                        logger.warning(f"Continuity mode set but no previous frame available for scene {scene_actual_index}")
+
+                # For scene 0, prepend style if provided
+                elif scene_actual_index == 0 and prompt_style:
                     prompt_with_style = f"{prompt_style} style: {scene.prompt}"
                     logger.info(f"Scene {scene_actual_index}: Prepending style '{prompt_style}' to prompt")
 
@@ -476,17 +530,36 @@ class VideoGenerationThread(QThread):
             # Get generation parameters
             # Check for 'start_frame' (new parameter name) or fall back to 'seed_image' (old name)
             seed_image_path = self.kwargs.get('start_frame') or self.kwargs.get('seed_image')
+            end_frame_path = None  # For Veo 3.1 interpolation
+
             # Use video_prompt if available, otherwise fall back to regular prompt
-            prompt = scene.video_prompt if scene.video_prompt else scene.prompt
+            # Check kwargs first (passed from UI), then scene object
+            prompt = self.kwargs.get('video_prompt') or scene.video_prompt or scene.prompt
             aspect_ratio = self.kwargs.get('aspect_ratio', '16:9')
 
             # Log which prompt is being used
             import logging
             logger = logging.getLogger(__name__)
             if scene.video_prompt:
-                logger.info(f"Using video_prompt for scene {scene_index}: {prompt[:100]}...")
+                logger.info(f"Using video_prompt for scene {scene_index}:\n{prompt}")
             else:
-                logger.info(f"Using regular prompt for scene {scene_index} (no video_prompt): {prompt[:100]}...")
+                logger.info(f"Using regular prompt for scene {scene_index} (no video_prompt):\n{prompt}")
+
+            # Check if we should use previous scene's last frame as start frame (sequential chaining)
+            use_prev_last_frame = self.kwargs.get('use_prev_last_frame', False)
+            if use_prev_last_frame and scene_index > 0:
+                prev_scene = self.project.scenes[scene_index - 1]
+                if prev_scene.last_frame and prev_scene.last_frame.exists():
+                    seed_image_path = prev_scene.last_frame
+                    logger.info(f"🔗 Sequential Chaining: Using previous scene's last frame as start frame")
+                    logger.info(f"   Previous scene last frame: {prev_scene.last_frame}")
+                    self.progress_update.emit(12, "Using previous clip's last frame for smooth transition...")
+                else:
+                    logger.warning(f"Previous scene has no last frame available, using selected/generated image")
+                    if not seed_image_path and scene.approved_image:
+                        seed_image_path = scene.approved_image
+                    elif not seed_image_path and scene.images:
+                        seed_image_path = scene.images[0].path
 
             self.progress_update.emit(10, f"Generating video clip for scene {scene_index + 1}...")
 
@@ -580,18 +653,22 @@ class VideoGenerationThread(QThread):
                 logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s for Veo 3 compatibility")
                 self.progress_update.emit(12, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3 requires 4/6/8s)")
 
-            # Configure generation with prompt and optional seed image
+            # Configure generation with prompt and optional start/end frames
             config = VeoGenerationConfig(
                 model=VeoModel.VEO_3_GENERATE,
                 prompt=prompt,
                 duration=veo_duration,
                 aspect_ratio=aspect_ratio,
-                image=Path(seed_image_path) if seed_image_path and Path(seed_image_path).exists() else None
+                image=Path(seed_image_path) if seed_image_path and Path(seed_image_path).exists() else None,
+                last_frame=Path(end_frame_path) if end_frame_path and Path(end_frame_path).exists() else None
             )
 
-            if config.image:
-                logger.info(f"Using seed image for image-to-video generation: {config.image}")
-                self.progress_update.emit(20, "Submitting to Veo with seed image...")
+            if config.image and config.last_frame:
+                logger.info(f"Using frame-to-frame interpolation: start={config.image}, end={config.last_frame}")
+                self.progress_update.emit(20, "Submitting to Veo with start and end frames...")
+            elif config.image:
+                logger.info(f"Using image-to-video generation: start frame={config.image}")
+                self.progress_update.emit(20, "Submitting to Veo with start frame...")
             else:
                 self.progress_update.emit(20, "Submitting to Veo...")
 

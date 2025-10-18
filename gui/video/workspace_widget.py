@@ -772,6 +772,23 @@ class WorkspaceWidget(QWidget):
         self.seed_spin.setToolTip("Generation seed for reproducibility (-1 for random)")
         style_layout.addWidget(self.seed_spin)
 
+        # Visual continuity mode for start frame generation
+        style_layout.addWidget(QLabel("Continuity:"))
+        self.continuity_mode_combo = QComboBox()
+        from core.video.style_analyzer import ContinuityMode
+        self.continuity_mode_combo.addItem("None", ContinuityMode.NONE.value)
+        self.continuity_mode_combo.addItem("Style Only", ContinuityMode.STYLE_ONLY.value)
+        self.continuity_mode_combo.addItem("Transition", ContinuityMode.TRANSITION.value)
+        self.continuity_mode_combo.setCurrentIndex(0)
+        self.continuity_mode_combo.setToolTip(
+            "Visual continuity for start frame generation:\n"
+            "- None: Fresh scene without previous frame\n"
+            "- Style Only: Match lighting/colors from previous frame\n"
+            "- Transition: Smooth visual continuation from previous frame"
+        )
+        self.continuity_mode_combo.currentIndexChanged.connect(lambda: self._auto_save_settings())
+        style_layout.addWidget(self.continuity_mode_combo)
+
         style_layout.addStretch()
         layout.addLayout(style_layout)
         
@@ -1053,7 +1070,7 @@ class WorkspaceWidget(QWidget):
         self.scene_table.horizontalHeaderItem(1).setToolTip("Start Frame\nFirst frame of video (hover for preview, click to view, right-click for options)")
         self.scene_table.horizontalHeaderItem(2).setToolTip("End Frame\nLast frame of video (hover for preview, click to view, right-click for options)\nLeave empty for Veo 3 single-frame video")
         self.scene_table.horizontalHeaderItem(3).setToolTip("Generate Video\nClick to view first frame when video exists, double-click to regenerate")
-        self.scene_table.horizontalHeaderItem(4).setToolTip("Time\nScene duration in seconds")
+        # Column 4 (Time): No tooltip
         self.scene_table.horizontalHeaderItem(5).setToolTip("Wrap\nToggle prompt text wrapping for this row")
         self.scene_table.horizontalHeaderItem(6).setToolTip("Source\nOriginal lyrics or text")
         self.scene_table.horizontalHeaderItem(7).setToolTip("Start Prompt\nAI-enhanced prompt for start frame generation (✨ LLM + ↶↷ undo/redo)")
@@ -1142,7 +1159,17 @@ class WorkspaceWidget(QWidget):
         self.captions_check = QCheckBox("Captions")
         self.captions_check.setToolTip("Include lyrics/text as captions in the video")
         export_layout.addWidget(self.captions_check)
-        
+
+        # Veo 3.1 sequential chaining option
+        self.use_prev_last_frame_check = QCheckBox("Smooth Transitions")
+        self.use_prev_last_frame_check.setToolTip(
+            "Use previous clip's last frame as next clip's start frame\n"
+            "Creates smooth visual continuity between video clips\n"
+            "(Veo 3.1 only - uses frame-to-frame interpolation)"
+        )
+        self.use_prev_last_frame_check.setChecked(False)
+        export_layout.addWidget(self.use_prev_last_frame_check)
+
         export_layout.addStretch()
         layout.addLayout(export_layout)
         
@@ -1984,7 +2011,8 @@ class WorkspaceWidget(QWidget):
 
             # Column 1: Start Frame (FrameButton widget)
             start_frame_btn = FrameButton(frame_type="start", parent=self)
-            start_frame_path = scene.approved_image  # Only use explicitly approved image, not fallback to variants
+            # Use approved image if set, otherwise fall back to first generated image
+            start_frame_path = scene.approved_image or (scene.images[0].path if scene.images else None)
             if start_frame_path:
                 start_frame_btn.set_frame(start_frame_path, auto_linked=False)
 
@@ -2038,9 +2066,8 @@ class WorkspaceWidget(QWidget):
 
             self.scene_table.setCellWidget(i, 3, video_btn)
 
-            # Column 4: Time (narrowed, no 's' suffix)
+            # Column 4: Time (narrowed, no 's' suffix, no tooltip)
             time_item = QTableWidgetItem(f"{scene.duration_sec:.1f}")
-            time_item.setToolTip(f"Duration: {scene.duration_sec:.1f} seconds")
             time_item.setTextAlignment(Qt.AlignCenter)
             self.scene_table.setItem(i, 4, time_item)
 
@@ -2381,7 +2408,12 @@ class WorkspaceWidget(QWidget):
         self.output_image_label.show()
         self.media_player.stop()
 
-        img_path = scene.images[0]
+        # Prefer approved_image, fallback to first image in list
+        if scene.approved_image:
+            img_path = scene.approved_image
+        else:
+            img_path = scene.images[0]
+
         # Handle both Path objects and ImageVariant objects
         if hasattr(img_path, 'path'):
             img_path = img_path.path
@@ -2929,12 +2961,39 @@ class WorkspaceWidget(QWidget):
                 except Exception as e:
                     self.logger.error(f"Failed to delete video file: {e}")
 
+            # Delete first frame file if it exists
+            if scene.first_frame and scene.first_frame.exists():
+                try:
+                    scene.first_frame.unlink()
+                    self.logger.info(f"Deleted first frame file: {scene.first_frame}")
+                except Exception as e:
+                    self.logger.error(f"Failed to delete first frame file: {e}")
+
             # Clear video clip and first frame references
             scene.video_clip = None
             scene.first_frame = None
+
+            # Stop media player and clear source completely
+            self.media_player.stop()
+            self.media_player.setSource(QUrl())  # Clear the source
+
+            # Reset click tracking to prevent stale references
+            if self.last_clicked_row == scene_index:
+                self.last_clicked_row = -1  # Reset to invalid row
+                self.showing_video = False
+
+            # Always update the preview panel
+            # Show the image if available, otherwise clear the panel
+            if scene.images and len(scene.images) > 0:
+                self._show_image(scene, scene_index)
+            else:
+                self.output_image_label.clear()
+                self.output_image_label.show()
+                self.video_player_container.hide()
+
             self.save_project()
             self.populate_scene_table()
-            self._log_to_console(f"🗑️ Scene {scene_index + 1}: Video cleared")
+            self._log_to_console(f"🗑️ Scene {scene_index + 1}: Video and first frame cleared")
 
     def _select_end_frame_variant(self, scene_index: int):
         """Select end frame from generated variants"""
@@ -3192,17 +3251,59 @@ class WorkspaceWidget(QWidget):
         llm_provider = self.llm_provider_combo.currentText().lower()
         llm_model = self.llm_model_combo.currentText()
 
+        # Get API key from config
+        api_key = None
+        if llm_provider == "openai":
+            api_key = self.config.get_api_key('openai')
+        elif llm_provider in ["google", "gemini"]:
+            api_key = self.config.get_api_key('google')
+        elif llm_provider in ["anthropic", "claude"]:
+            api_key = self.config.get_api_key('anthropic')
+
+        if not api_key:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning(
+                "API Key Missing",
+                f"Please configure your {llm_provider} API key in Settings."
+            )
+            return
+
+        # Get continuity mode from settings
+        from core.video.style_analyzer import ContinuityMode
+        continuity_mode_str = self.continuity_mode_combo.currentData()
+        continuity_mode = ContinuityMode(continuity_mode_str)
+
+        self.logger.info(f"Using continuity mode: {continuity_mode.value}")
+
+        # Get previous frame path for continuity (only if scene has no image yet)
+        previous_frame_path = None
+        has_start_image = (scene.approved_image and scene.approved_image.exists()) or (scene.images and len(scene.images) > 0)
+
+        if scene_index > 0 and continuity_mode != ContinuityMode.NONE and not has_start_image:
+            from core.video.style_analyzer import get_previous_scene_info
+            previous_frame_path, _ = get_previous_scene_info(self.current_project, scene_index)
+            if previous_frame_path:
+                self.logger.info(f"Previous frame available for continuity: {previous_frame_path}")
+            else:
+                self.logger.warning(f"Continuity mode '{continuity_mode.value}' selected but no previous frame available")
+        elif has_start_image and continuity_mode != ContinuityMode.NONE:
+            self.logger.info(f"Scene {scene_index} already has an image - skipping continuity for prompt generation")
+
         # Create generator (can reuse EndPromptGenerator)
         from gui.video.start_prompt_dialog import StartPromptDialog
         generator = EndPromptGenerator(llm_provider=None)  # Will use litellm directly
 
-        # Show dialog
+        # Show dialog with continuity support
         dialog = StartPromptDialog(
             generator,
             scene.source,
             scene.prompt,
             llm_provider,
             llm_model,
+            api_key,
+            continuity_mode,
+            previous_frame_path,
             self
         )
 
@@ -3396,7 +3497,9 @@ class WorkspaceWidget(QWidget):
             'ken_burns': self.ken_burns_check.isChecked(),
             'transitions': self.transitions_check.isChecked(),
             'captions': self.captions_check.isChecked(),
-            'use_last_frame_for_next': self.use_last_frame_checkbox.isChecked(),  # For continuous video
+            'use_prev_last_frame': self.use_prev_last_frame_check.isChecked(),  # For Veo 3.1 smooth transitions
+            'use_last_frame_for_next': False,  # Deprecated - replaced by use_prev_last_frame
+            'continuity_mode': self.continuity_mode_combo.currentData(),  # Visual continuity for images
             'auth_mode': auth_mode,  # Include auth mode for Google Cloud support
             'google_api_key': google_key,
             'openai_api_key': openai_key,
@@ -4087,6 +4190,7 @@ class WorkspaceWidget(QWidget):
         self.current_project.resolution = self.resolution_combo.currentText()
         self.current_project.seed = self.seed_spin.value() if self.seed_spin.value() >= 0 else None
         self.current_project.negative_prompt = self.negative_prompt.text()
+        self.current_project.continuity_mode = self.continuity_mode_combo.currentData()
 
         # Save prompt template/style
         self.current_project.prompt_style = self._get_current_style()
@@ -4280,9 +4384,16 @@ class WorkspaceWidget(QWidget):
                 index = self.resolution_combo.findText(self.current_project.resolution)
                 if index >= 0:
                     self.resolution_combo.setCurrentIndex(index)
-            
+
             if hasattr(self.current_project, 'seed') and self.current_project.seed is not None:
                 self.seed_spin.setValue(self.current_project.seed)
+
+            if hasattr(self.current_project, 'continuity_mode') and self.current_project.continuity_mode:
+                # Find index by matching the data value
+                for i in range(self.continuity_mode_combo.count()):
+                    if self.continuity_mode_combo.itemData(i) == self.current_project.continuity_mode:
+                        self.continuity_mode_combo.setCurrentIndex(i)
+                        break
             
             if hasattr(self.current_project, 'negative_prompt') and self.current_project.negative_prompt:
                 self.negative_prompt.setText(self.current_project.negative_prompt)
@@ -4290,10 +4401,10 @@ class WorkspaceWidget(QWidget):
             # Prompt style is now loaded earlier (before signal reconnection)
 
             # Load generation settings (variants always 1)
-            
+
             if hasattr(self.current_project, 'ken_burns'):
                 self.ken_burns_check.setChecked(self.current_project.ken_burns)
-            
+
             if hasattr(self.current_project, 'transitions'):
                 self.transitions_check.setChecked(self.current_project.transitions)
             

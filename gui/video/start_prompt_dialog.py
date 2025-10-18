@@ -3,9 +3,11 @@ Dialog for generating start frame prompts using LLM.
 
 This dialog shows the source text (lyric, narration, or scene description),
 and allows the user to generate, edit, and regenerate start frame descriptions.
+Supports visual continuity by analyzing previous frame for style or transitions.
 """
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtWidgets import (
@@ -16,6 +18,7 @@ from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QFont
 
 from core.video.end_prompt_generator import EndPromptGenerator
+from core.video.style_analyzer import StyleAnalyzer, ContinuityMode
 
 
 class StartPromptGenerationThread(QThread):
@@ -24,6 +27,7 @@ class StartPromptGenerationThread(QThread):
     # Signals
     generation_complete = Signal(str)  # Emits generated prompt
     generation_failed = Signal(str)  # Emits error message
+    progress_update = Signal(str)  # Emits progress messages
 
     def __init__(
         self,
@@ -32,6 +36,9 @@ class StartPromptGenerationThread(QThread):
         current_prompt: str,
         provider: str,
         model: str,
+        api_key: str,
+        continuity_mode: ContinuityMode = ContinuityMode.NONE,
+        previous_frame_path: Optional[Path] = None,
         parent=None
     ):
         super().__init__(parent)
@@ -40,11 +47,87 @@ class StartPromptGenerationThread(QThread):
         self.current_prompt = current_prompt
         self.provider = provider
         self.model = model
+        self.api_key = api_key
+        self.continuity_mode = continuity_mode
+        self.previous_frame_path = previous_frame_path
+        self.logger = logging.getLogger(__name__)
 
     def run(self):
         """Run generation in background"""
         try:
-            # Use LiteLLM directly through the generator's provider
+            # Step 1: Analyze previous frame if continuity mode is enabled
+            style_info = None
+            if self.continuity_mode != ContinuityMode.NONE and self.previous_frame_path:
+                self.progress_update.emit("Analyzing previous frame for continuity...")
+                self.logger.info(f"Analyzing previous frame: {self.previous_frame_path}")
+
+                try:
+                    analyzer = StyleAnalyzer(
+                        api_key=self.api_key,
+                        llm_provider=self.provider,
+                        llm_model=self.model
+                    )
+
+                    if self.continuity_mode == ContinuityMode.STYLE_ONLY:
+                        self.logger.info("Using STYLE_ONLY mode - extracting visual style")
+                        style_info = analyzer.analyze_for_style(self.previous_frame_path)
+                    elif self.continuity_mode == ContinuityMode.TRANSITION:
+                        self.logger.info("Using TRANSITION mode - creating smooth continuation")
+                        style_info = analyzer.analyze_for_transition(
+                            self.previous_frame_path,
+                            self.source
+                        )
+
+                    if style_info:
+                        self.logger.info(f"Style analysis result: {style_info[:100]}...")
+                        self.progress_update.emit("Previous frame analyzed - generating prompt...")
+                    else:
+                        self.logger.warning("Style analysis returned no result")
+                        self.progress_update.emit("Style analysis failed - using source text only...")
+
+                except Exception as e:
+                    self.logger.error(f"Style analysis failed: {e}")
+                    self.progress_update.emit(f"Style analysis error: {str(e)} - continuing without it...")
+                    style_info = None
+
+            # Step 2: Generate prompt with or without style info
+            self.progress_update.emit("Generating image prompt...")
+
+            if style_info and self.continuity_mode == ContinuityMode.TRANSITION:
+                # For transition mode, the style_info already contains the full prompt
+                self.logger.info("Using transition analysis result directly as prompt")
+                prompt = style_info
+            else:
+                # Generate prompt with optional style guidance
+                prompt = self._generate_prompt_with_style(style_info)
+
+            if prompt:
+                self.generation_complete.emit(prompt)
+            else:
+                self.generation_failed.emit("LLM returned empty response")
+
+        except Exception as e:
+            self.logger.error(f"Start prompt generation failed: {e}")
+            self.generation_failed.emit(str(e))
+
+    def _generate_prompt_with_style(self, style_info: Optional[str]) -> str:
+        """Generate image prompt, optionally incorporating style information."""
+
+        # Build system prompt
+        if style_info:
+            system_prompt = """You are an AI image prompt specialist. Create a detailed, vivid description for generating a single image frame.
+
+The user provides a text line (lyric, narration, or scene description) AND visual style guidance from a previous frame.
+Your task is to create a prompt that:
+- Incorporates the scene content from the source text
+- Maintains the visual style from the style guidance
+- Creates visual continuity with the previous frame
+- Is 1-2 sentences describing what should be visible in the frame
+- Focuses on composition, lighting, color palette, and atmosphere
+- Is specific and concrete (avoid vague or abstract language)
+
+Format: 1-2 sentences describing the visual scene with the specified style."""
+        else:
             system_prompt = """You are an AI image prompt specialist. Create a detailed, vivid description for generating a single image frame.
 
 The user provides a text line (lyric, narration, or scene description). Generate a comprehensive prompt that:
@@ -55,7 +138,18 @@ The user provides a text line (lyric, narration, or scene description). Generate
 
 Format: 1-2 sentences describing the visual scene."""
 
-            current_info = f'"{self.current_prompt}"' if self.current_prompt else "None - generate new"
+        # Build user prompt
+        current_info = f'"{self.current_prompt}"' if self.current_prompt else "None - generate new"
+
+        if style_info:
+            user_prompt = f"""Create an image prompt from this text, maintaining the visual style:
+
+Source Text: "{self.source}"
+Style Guidance: {style_info}
+Current prompt: {current_info}
+
+Generate a detailed visual description that incorporates BOTH the source content AND the style guidance."""
+        else:
             user_prompt = f"""Create an image prompt from this text:
 
 Source: "{self.source}"
@@ -63,27 +157,27 @@ Current prompt: {current_info}
 
 Generate a detailed visual description suitable for AI image generation."""
 
-            # Use the generator's LLM provider to make the call
-            import litellm
+        # Use LiteLLM to make the call
+        import litellm
+        litellm.drop_params = True
 
-            response = litellm.completion(
-                model=f"{self.provider}/{self.model}",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7
-            )
+        self.logger.info(f"Calling LLM with provider={self.provider}, model={self.model}")
+        self.logger.info(f"User prompt: {user_prompt}")
 
-            prompt = response.choices[0].message.content.strip()
+        response = litellm.completion(
+            model=f"{self.provider}/{self.model}",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.7,
+            api_key=self.api_key
+        )
 
-            if prompt:
-                self.generation_complete.emit(prompt)
-            else:
-                self.generation_failed.emit("LLM returned empty response")
+        prompt = response.choices[0].message.content.strip()
+        self.logger.info(f"Generated prompt: {prompt}")
 
-        except Exception as e:
-            self.generation_failed.emit(str(e))
+        return prompt
 
 
 class StartPromptDialog(QDialog):
@@ -92,6 +186,7 @@ class StartPromptDialog(QDialog):
 
     Shows source text, current prompt (if any), generates enhanced prompt,
     and allows edit/regenerate/use actions.
+    Supports visual continuity from previous frame.
     """
 
     def __init__(
@@ -101,6 +196,9 @@ class StartPromptDialog(QDialog):
         current_prompt: str,
         provider: str,
         model: str,
+        api_key: str,
+        continuity_mode: ContinuityMode = ContinuityMode.NONE,
+        previous_frame_path: Optional[Path] = None,
         parent=None
     ):
         super().__init__(parent)
@@ -110,6 +208,9 @@ class StartPromptDialog(QDialog):
         self.current_prompt = current_prompt
         self.provider = provider
         self.model = model
+        self.api_key = api_key
+        self.continuity_mode = continuity_mode
+        self.previous_frame_path = previous_frame_path
         self.generation_thread: Optional[StartPromptGenerationThread] = None
         self.generated_prompt: Optional[str] = None
 
@@ -138,6 +239,12 @@ class StartPromptDialog(QDialog):
 
         source_group.setLayout(source_layout)
         layout.addWidget(source_group)
+
+        # Show continuity info if enabled
+        if self.continuity_mode != ContinuityMode.NONE:
+            continuity_info = QLabel(f"ℹ️ Continuity mode: {self._get_mode_display_name(self.continuity_mode)}")
+            continuity_info.setStyleSheet("QLabel { color: #0066cc; font-style: italic; padding: 5px; }")
+            layout.addWidget(continuity_info)
 
         # Current prompt section (if exists)
         if self.current_prompt:
@@ -196,6 +303,12 @@ class StartPromptDialog(QDialog):
         self.regenerate_btn.setEnabled(False)
         self.progress_bar.show()
 
+        # Log generation parameters
+        self.logger.info(f"Generating start prompt with {self.provider}/{self.model}")
+        self.logger.info(f"Continuity mode: {self.continuity_mode.value}")
+        if self.previous_frame_path:
+            self.logger.info(f"Previous frame: {self.previous_frame_path}")
+
         # Create and start generation thread
         self.generation_thread = StartPromptGenerationThread(
             self.generator,
@@ -203,13 +316,29 @@ class StartPromptDialog(QDialog):
             self.current_prompt,
             self.provider,
             self.model,
+            self.api_key,
+            self.continuity_mode,
+            self.previous_frame_path,
             self
         )
         self.generation_thread.generation_complete.connect(self._on_generation_complete)
         self.generation_thread.generation_failed.connect(self._on_generation_failed)
+        self.generation_thread.progress_update.connect(self._on_progress_update)
         self.generation_thread.start()
 
-        self.logger.info(f"Generating start prompt with {self.provider}/{self.model}")
+    def _on_progress_update(self, message: str):
+        """Handle progress updates from generation thread."""
+        self.logger.info(f"Progress: {message}")
+        # Could update a status label here if we add one
+
+    def _get_mode_display_name(self, mode: ContinuityMode) -> str:
+        """Get display name for continuity mode."""
+        names = {
+            ContinuityMode.NONE: "None",
+            ContinuityMode.STYLE_ONLY: "Style Only",
+            ContinuityMode.TRANSITION: "Transition"
+        }
+        return names.get(mode, "Unknown")
 
     def _on_generation_complete(self, prompt: str):
         """Handle successful generation"""
@@ -217,12 +346,19 @@ class StartPromptDialog(QDialog):
         self.generated_prompt_edit.setPlainText(prompt)
         self.progress_bar.hide()
         self.regenerate_btn.setEnabled(True)
-        self.logger.info(f"Start prompt generated: {prompt[:100]}...")
+        # Change button text back to "Regenerate" after first generation
+        self.regenerate_btn.setText("🔄 Regenerate")
+        self.logger.info(f"Start prompt generated:\n{prompt}")
 
     def _on_generation_failed(self, error: str):
         """Handle generation failure"""
         self.progress_bar.hide()
         self.regenerate_btn.setEnabled(True)
+        # Keep button as "Generate" if it was the first attempt, or change to "Regenerate"
+        if self.generated_prompt is None:
+            self.regenerate_btn.setText("🎨 Generate")
+        else:
+            self.regenerate_btn.setText("🔄 Regenerate")
         self.generated_prompt_edit.setPlainText(f"Generation failed: {error}\n\nPlease try again or edit manually.")
         self.logger.error(f"Start prompt generation failed: {error}")
 

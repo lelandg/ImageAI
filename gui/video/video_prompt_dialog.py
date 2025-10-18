@@ -208,7 +208,7 @@ class VideoPromptDialog(QDialog):
         self.generated_prompt_edit.setPlainText(prompt)
         self.progress_bar.hide()
         self.regenerate_btn.setEnabled(True)
-        self.logger.info(f"Video prompt generated: {prompt[:100]}...")
+        self.logger.info(f"Video prompt generated:\n{prompt}")
 
     def _on_generation_failed(self, error: str):
         """Handle generation failure"""

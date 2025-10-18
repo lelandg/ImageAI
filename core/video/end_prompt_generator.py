@@ -117,7 +117,7 @@ Describe a natural ending frame for this scene."""
             # Extract response text
             response_text = response.choices[0].message.content.strip()
 
-            self.logger.info(f"Generated end prompt: {response_text[:100]}...")
+            self.logger.info(f"Generated end prompt:\n{response_text}")
             return response_text
 
         except Exception as e:
