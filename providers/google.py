@@ -230,9 +230,11 @@ class GoogleProvider(ImageProvider):
         images: List[bytes] = []
         
         # Build generation config for Gemini models
-        # IMPORTANT: Google Gemini only generates square (1:1) images
-        # Aspect ratio parameters and prompt hints do NOT change the output dimensions
-        config = {}
+        # Updated: Google Gemini now supports aspect_ratio via image_config parameter
+        # Must use types.GenerateContentConfig for the new SDK
+        from google.genai import types
+
+        config_params = {}
 
         # Get dimensions for resolution quality hints and cropping
         width = kwargs.get('width')
@@ -300,9 +302,9 @@ class GoogleProvider(ImageProvider):
                 kwargs['_needs_upscale'] = True if max_dim > 1024 else False
                 kwargs['_needs_downscale'] = True if max_dim < 1024 else False
 
-        # For Gemini, add dimensions in parentheses for non-square aspect ratios
-        # per CLAUDE.md: "for all gemini image ratios besides 1:1, send ratio. E.g. LLM prompt like 'brief prompt description (1024x768)'"
         # Calculate aspect ratio from dimensions if not provided
+        # Note: We no longer add dimensions to the prompt text as it gets rendered as literal text
+        # Instead, we rely solely on the image_config parameter below
         if width and height and not aspect_ratio:
             # Calculate the actual aspect ratio for logging
             ratio = width / height
@@ -324,18 +326,8 @@ class GoogleProvider(ImageProvider):
                 # For non-standard ratios, create a descriptive string
                 aspect_ratio = f"{width}:{height}"
 
-        if aspect_ratio and aspect_ratio != "1:1" and width and height:
-            # Use dimension format as specified in CLAUDE.md
-            prompt_with_dims = f"{prompt} ({width}x{height})"
-            logger.info(f"Sending to Gemini with aspect ratio {aspect_ratio}: dimensions ({width}x{height})")
-            logger.info(f"Full prompt: {prompt_with_dims}")
-            prompt = prompt_with_dims
-        elif width and height:
-            # For square images (1:1)
-            logger.info(f"Sending to Gemini with square aspect (1:1): {width}x{height} - no dimensions added to prompt")
-        elif aspect_ratio and aspect_ratio != "1:1":
-            # If we have aspect ratio but no dimensions, calculate default dimensions for common ratios
-            # This ensures we always send dimensions for non-square images
+        # Calculate default dimensions if we have aspect ratio but no dimensions
+        if aspect_ratio and not (width and height):
             if aspect_ratio == '16:9':
                 width, height = 1024, 576
             elif aspect_ratio == '9:16':
@@ -346,38 +338,98 @@ class GoogleProvider(ImageProvider):
                 width, height = 768, 1024
             elif aspect_ratio == '21:9':
                 width, height = 1024, 439
+            elif aspect_ratio == '1:1':
+                width, height = 1024, 1024
             else:
                 # Default fallback
                 width, height = 1024, 1024
 
-            # Use dimension format as specified in CLAUDE.md
-            prompt_with_dims = f"{prompt} ({width}x{height})"
-            logger.info(f"Sending to Gemini with aspect ratio {aspect_ratio}: dimensions ({width}x{height})")
-            logger.info(f"Full prompt: {prompt_with_dims}")
-            prompt = prompt_with_dims
+        # Log what we're sending (but don't add dimensions to prompt)
+        if aspect_ratio:
+            logger.info(f"Sending to Gemini with aspect ratio {aspect_ratio} via image_config (target: {width}x{height})")
         else:
-            logger.info(f"Sending to Gemini with default resolution (no dimensions specified)")
+            logger.info(f"Sending to Gemini with default resolution (no aspect ratio specified)")
 
         if resolution_hint and aspect_ratio == "1:1":
             # For square images, we can still add quality hints
             prompt = f"{prompt}. {resolution_hint}."
-        
-        # Note: These generation_config parameters may not be supported by all Gemini models
-        # Most are placeholders for potential future support
-        
+
+        # Build config using new SDK types
+        # Safety settings - convert string to proper SafetySetting list
+        if kwargs.get('safety_filter'):
+            safety_filter = kwargs['safety_filter']
+
+            # Map UI strings to HarmBlockThreshold enums
+            threshold_map = {
+                'Block most': types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                'Block some': types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                'Block few': types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                'Block fewest': types.HarmBlockThreshold.BLOCK_NONE,
+                # Also support lowercase with underscores from settings
+                'block_most': types.HarmBlockThreshold.BLOCK_LOW_AND_ABOVE,
+                'block_some': types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE,
+                'block_few': types.HarmBlockThreshold.BLOCK_ONLY_HIGH,
+                'block_fewest': types.HarmBlockThreshold.BLOCK_NONE,
+            }
+
+            # If it's a string (from UI), convert to SafetySetting list
+            if isinstance(safety_filter, str):
+                threshold = threshold_map.get(safety_filter, types.HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE)
+
+                # Apply to all harm categories
+                config_params['safety_settings'] = [
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
+                        threshold=threshold
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_HARASSMENT,
+                        threshold=threshold
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
+                        threshold=threshold
+                    ),
+                    types.SafetySetting(
+                        category=types.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
+                        threshold=threshold
+                    ),
+                ]
+            else:
+                # Assume it's already a list of SafetySettings
+                config_params['safety_settings'] = safety_filter
+
+        # Seed for reproducibility
+        # Only pass positive seeds - Gemini may reject negative values
+        seed = kwargs.get('seed')
+        if seed is not None and seed >= 0:
+            config_params['seed'] = seed
+        elif seed is not None and seed < 0:
+            logger.debug(f"Ignoring negative seed value: {seed}")
+
         # Number of images - may work with some models
         num_images = kwargs.get('num_images', 1)
         if num_images > 1:
-            # Try to request multiple images (may not be supported)
-            config['candidate_count'] = num_images
-        
-        # Safety settings (these generally work)
-        if kwargs.get('safety_filter'):
-            config['safety_settings'] = kwargs['safety_filter']
-        
-        # Seed for reproducibility (if supported)
-        if kwargs.get('seed') is not None:
-            config['seed'] = kwargs['seed']
+            config_params['candidate_count'] = num_images
+
+        # Create the proper config object using types
+        # This is required for aspect_ratio to work with the new SDK
+        if aspect_ratio:
+            logger.info(f"Using Gemini aspect ratio: {aspect_ratio} (target dimensions: {width}x{height})")
+            logger.info(f"Setting image_config with aspect_ratio={aspect_ratio}")
+
+            config = types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+                image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
+                **config_params
+            )
+        else:
+            # No aspect ratio specified, use basic config
+            logger.info(f"No aspect ratio specified, using default")
+            config = types.GenerateContentConfig(
+                response_modalities=["IMAGE"],
+                **config_params
+            ) if config_params else None
 
         # Handle reference image if provided
         reference_image = kwargs.get('reference_image')
@@ -493,12 +545,12 @@ class GoogleProvider(ImageProvider):
                 logger.info(f"Generation config: {config}")
             logger.info("=" * 60)
 
-            # Try to use generation_config parameter if supported
+            # Call API with proper config parameter for new SDK
             if config:
                 response = self.client.models.generate_content(
                     model=model,
                     contents=contents,
-                    generation_config=config
+                    config=config
                 )
             else:
                 response = self.client.models.generate_content(
@@ -634,12 +686,33 @@ class GoogleProvider(ImageProvider):
 
                                     images.append(image_bytes)
         except Exception as e:
-            # Fallback to basic generation if advanced config fails
+            # Log the error that triggered fallback
+            logger.error(f"Primary generation failed with error: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+
+            # Check if it's a specific API error
+            if hasattr(e, 'message'):
+                logger.error(f"Error message: {e.message}")
+            if hasattr(e, 'code'):
+                logger.error(f"Error code: {e.code}")
+            if hasattr(e, 'details'):
+                logger.error(f"Error details: {e.details}")
+
+            logger.warning(f"Attempting fallback with config included...")
+
+            # Fallback: try again with config (maybe first attempt had transient issue)
             try:
-                response = self.client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                )
+                if config:
+                    response = self.client.models.generate_content(
+                        model=model,
+                        contents=contents,
+                        config=config
+                    )
+                else:
+                    response = self.client.models.generate_content(
+                        model=model,
+                        contents=contents,
+                    )
                 
                 if response and response.candidates:
                     logger.info(f"DEBUG (fallback): Response has {len(response.candidates)} candidates")
@@ -858,7 +931,8 @@ class GoogleProvider(ImageProvider):
     def get_models(self) -> Dict[str, str]:
         """Get available Google models."""
         return {
-            "gemini-2.5-flash-image-preview": "Gemini 2.5 Flash (Image Preview)",
+            "gemini-2.5-flash-image": "Gemini 2.5 Flash Image (Production)",
+            "gemini-2.5-flash-image-preview": "Gemini 2.5 Flash Image (Preview - Deprecated)",
             "gemini-2.5-flash": "Gemini 2.5 Flash",
             "gemini-2.5-pro": "Gemini 2.5 Pro",
             "gemini-1.5-flash": "Gemini 1.5 Flash",
@@ -875,10 +949,15 @@ class GoogleProvider(ImageProvider):
             - description: Optional brief description
         """
         return {
-            "gemini-2.5-flash-image-preview": {
+            "gemini-2.5-flash-image": {
                 "name": "Gemini 2.5 Flash Image",
                 "nickname": "Nano Banana",
-                "description": "Advanced image generation and editing"
+                "description": "Production image generation with aspect ratio support"
+            },
+            "gemini-2.5-flash-image-preview": {
+                "name": "Gemini 2.5 Flash Image Preview",
+                "nickname": "Nano Banana (Old)",
+                "description": "Deprecated - Use production version instead"
             },
             "gemini-2.5-flash": {
                 "name": "Gemini 2.5 Flash",
@@ -900,7 +979,7 @@ class GoogleProvider(ImageProvider):
     
     def get_default_model(self) -> str:
         """Get default Google model."""
-        return "gemini-2.5-flash-image-preview"
+        return "gemini-2.5-flash-image"
     
     def get_api_key_url(self) -> str:
         """Get Google API key URL."""

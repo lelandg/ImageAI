@@ -183,7 +183,12 @@ When the code map needs updating:
 - **Use LiteLLM when possible**: It handles parameter compatibility automatically
 - **Dynamic parameter selection**: Use `max_completion_tokens` for newer OpenAI models, `max_tokens` for older ones
 - .venv is for Powershell. Do not use in this wsl shell.
-- for all gemini image ratios besides 1:1, send ratio. E.g. LLM prompt like "brief prompt description (1024x768)
-- For gemini, if either resolution is greater than 1024, scale proportionally so max is 1024, then send that (1024x{n}) resolution to gemini. Then when it comes back, auto-crop and scale proportionally with users selected method
-- Always log what resolution, if any, is sent
-- to send upscale resolution to google always scale numbers proportioanally so largest is 1024
+
+### Google Gemini Image Generation Notes
+- **IMPORTANT**: Use `gemini-2.5-flash-image` (production), NOT `gemini-2.5-flash-image-preview` (deprecated, has broken aspect ratio support)
+- **Aspect Ratio**: Set via `image_config={'aspect_ratio': '4:3'}` in generation_config, NOT in prompt text
+- **DO NOT add dimensions to prompt text**: Text like "(1024x768)" gets rendered as literal text in the generated image
+- **Supported aspect ratios**: 1:1, 3:2, 2:3, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9
+- **Scaling**: For target resolutions > 1024px, scale proportionally so max is 1024, then upscale result
+- **Reference images**: When reference image aspect doesn't match target, create transparent canvas with correct aspect ratio and center the reference image
+- Always log what aspect_ratio is sent via image_config
