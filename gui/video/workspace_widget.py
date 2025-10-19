@@ -312,18 +312,18 @@ class WorkspaceWidget(QWidget):
         workspace_layout = QVBoxLayout(workspace_widget)
         workspace_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Horizontal layout for wizard button + splitter
+        # Horizontal layout for button + splitter
         h_container = QWidget()
         h_container_layout = QHBoxLayout(h_container)
         h_container_layout.setContentsMargins(0, 0, 0, 0)
-        h_container_layout.setSpacing(0)
+        h_container_layout.setSpacing(2)
 
-        # Wizard toggle button (fixed on left side, outside splitter)
+        # Wizard toggle button (fixed position, left of splitter)
         self.wizard_toggle_btn_top = QPushButton("◀ Hide")
         self.wizard_toggle_btn_top.setCheckable(True)
         self.wizard_toggle_btn_top.setChecked(True)
         self.wizard_toggle_btn_top.setMaximumWidth(60)
-        self.wizard_toggle_btn_top.setMaximumHeight(30)
+        self.wizard_toggle_btn_top.setMaximumHeight(25)
         self.wizard_toggle_btn_top.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
         self.wizard_toggle_btn_top.setStyleSheet("QPushButton { font-size: 8pt; padding: 2px; }")
         self.wizard_toggle_btn_top.clicked.connect(self._toggle_wizard)
@@ -336,6 +336,7 @@ class WorkspaceWidget(QWidget):
         self.wizard_container = QWidget()
         self.wizard_layout = QVBoxLayout(self.wizard_container)
         self.wizard_layout.setContentsMargins(5, 5, 5, 5)
+        self.wizard_layout.setSpacing(2)
 
         # Content container (collapsible)
         self.wizard_content = QWidget()
@@ -390,8 +391,8 @@ class WorkspaceWidget(QWidget):
         self.h_splitter.setStretchFactor(1, 1)  # Left panel stretches equally
         self.h_splitter.setStretchFactor(2, 1)  # Right panel stretches equally
 
-        # Set minimum width constraint for wizard container
-        self.wizard_container.setMinimumWidth(50)  # Minimum when visible
+        # Set minimum width constraint for wizard container (match screenshot)
+        self.wizard_container.setMinimumWidth(300)  # Minimum when visible
         # Remove any maximum width constraint to allow manual resizing
         self.wizard_container.setMaximumWidth(16777215)  # Qt's QWIDGETSIZE_MAX
 
@@ -4462,16 +4463,19 @@ class WorkspaceWidget(QWidget):
     def _toggle_wizard(self, checked):
         """Toggle wizard visibility and collapse/expand width"""
         if checked:
-            # Show the wizard content
+            # Show the wizard container
             self.wizard_container.setVisible(True)
             self.wizard_toggle_btn_top.setText("◀ Hide")
+
+            # Restore minimum width constraint
+            self.wizard_container.setMinimumWidth(300)
 
             # Restore to original width (or 300 if not set)
             sizes = self.h_splitter.sizes()
             sizes[0] = self.wizard_original_width
             self.h_splitter.setSizes(sizes)
         else:
-            # Hide the wizard content
+            # Hide the wizard container completely
             self.wizard_container.setVisible(False)
             self.wizard_toggle_btn_top.setText("▶ Show")
 
@@ -4480,9 +4484,9 @@ class WorkspaceWidget(QWidget):
             if current_width > 50:  # Only save if not already collapsed
                 self.wizard_original_width = current_width
 
-            # Collapse to minimal width (just 1px for hidden)
+            # Collapse to zero (container is hidden)
             sizes = self.h_splitter.sizes()
-            sizes[0] = 1  # Set to 1px (minimum visible size)
+            sizes[0] = 0
             self.h_splitter.setSizes(sizes)
 
     def _on_splitter_moved(self, pos, index):
@@ -4491,7 +4495,7 @@ class WorkspaceWidget(QWidget):
         if index != 0:
             return
 
-        # Only check when wizard is visible
+        # Only check when wizard container is visible
         if not self.wizard_container.isVisible():
             return
 
