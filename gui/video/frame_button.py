@@ -111,7 +111,8 @@ class FrameButton(QPushButton):
         # Configure button appearance - match LLM button height
         self.setFixedHeight(30)  # Match PromptFieldWidget button height
         self.setMinimumWidth(50)
-        self.setMaximumWidth(70)
+        # Allow button to scale naturally with content and DPI settings
+        # Maximum width removed to support high-DPI displays
         self.setStyleSheet("""
             QPushButton {
                 font-size: 18px;
@@ -194,6 +195,10 @@ class FrameButton(QPushButton):
         if self.preview_popup:
             self.preview_popup.hide()
 
+    def hide_preview(self):
+        """Public method to hide preview from external callers"""
+        self._hide_preview()
+
     def _on_clicked(self):
         """Handle button click"""
         if self.frame_path and self.frame_path.exists():
@@ -205,6 +210,9 @@ class FrameButton(QPushButton):
 
     def contextMenuEvent(self, event):
         """Show context menu on right-click"""
+        # Hide preview when context menu opens
+        self._hide_preview()
+
         menu = QMenu(self)
 
         if self.frame_path and self.frame_path.exists():
@@ -220,6 +228,10 @@ class FrameButton(QPushButton):
             select_from_scene_action = QAction("Select from Scene Images", self)
             select_from_scene_action.triggered.connect(self.select_from_scene_requested.emit)
             menu.addAction(select_from_scene_action)
+
+            load_image_action = QAction("Load Image...", self)
+            load_image_action.triggered.connect(self.load_image_requested.emit)
+            menu.addAction(load_image_action)
 
             menu.addSeparator()
 

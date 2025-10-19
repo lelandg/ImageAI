@@ -4,12 +4,15 @@ Handles project state, scenes, and metadata management.
 """
 
 import json
+import logging
 import uuid
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 # Import MIDI and karaoke modules if available
 try:
@@ -166,8 +169,14 @@ class ReferenceImage:
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ReferenceImage":
         """Create from dictionary"""
+        path = Path(data["path"])
+
+        # Validate that the path exists
+        if not path.exists():
+            logger.warning(f"Reference image not found: {path}")
+
         return cls(
-            path=Path(data["path"]),
+            path=path,
             label=data.get("label"),
             description=data.get("description"),
             auto_linked=data.get("auto_linked", False),
@@ -368,7 +377,7 @@ class VideoProject:
     llm_provider: Optional[str] = None  # For prompt generation
     llm_model: Optional[str] = None
     image_provider: str = "gemini"
-    image_model: str = "gemini-2.5-flash-image-preview"
+    image_model: str = "gemini-2.5-flash-image"
     video_provider: str = "slideshow"  # 'veo' or 'slideshow'
     video_model: Optional[str] = None  # For Veo: 'veo-3.0-generate-001', etc.
     
@@ -390,6 +399,12 @@ class VideoProject:
     captions: bool = False  # Enable captions
     video_muted: bool = True  # Video playback muted by default
     auto_link_enabled: bool = False  # Veo 3.1: Auto-link end frames to next scene's start
+
+    # Continuity settings
+    continuity_mode: str = "none"  # Continuity mode: "none", "style_only", "transition"
+    enable_continuity: bool = False  # Enable visual continuity
+    enable_enhanced_storyboard: bool = False  # Enable enhanced storyboard generation
+    use_last_frame_for_continuous: bool = False  # Use last frame for continuous generation
     
     # Input configuration
     input_text: str = ""
@@ -473,7 +488,11 @@ class VideoProject:
                 "transitions": self.transitions,
                 "captions": self.captions,
                 "video_muted": self.video_muted,
-                "auto_link_enabled": self.auto_link_enabled
+                "auto_link_enabled": self.auto_link_enabled,
+                "continuity_mode": self.continuity_mode,
+                "enable_continuity": self.enable_continuity,
+                "enable_enhanced_storyboard": self.enable_enhanced_storyboard,
+                "use_last_frame_for_continuous": self.use_last_frame_for_continuous
             },
             "audio": {
                 "tracks": [track.to_dict() for track in self.audio_tracks]
@@ -517,7 +536,8 @@ class VideoProject:
                 project.llm_model = providers["llm"].get("model")
             if "images" in providers:
                 project.image_provider = providers["images"].get("provider", "gemini")
-                project.image_model = providers["images"].get("model", "gemini-2.5-flash-image-preview")
+                # Use production model by default, fallback to preview for backwards compat
+                project.image_model = providers["images"].get("model", "gemini-2.5-flash-image")
             if "video" in providers:
                 project.video_provider = providers["video"].get("provider", "slideshow")
                 project.video_model = providers["video"].get("model")
@@ -536,6 +556,11 @@ class VideoProject:
             project.captions = gen.get("captions", False)
             project.video_muted = gen.get("video_muted", True)
             project.auto_link_enabled = gen.get("auto_link_enabled", False)
+            # Load continuity settings
+            project.continuity_mode = gen.get("continuity_mode", "none")
+            project.enable_continuity = gen.get("enable_continuity", False)
+            project.enable_enhanced_storyboard = gen.get("enable_enhanced_storyboard", False)
+            project.use_last_frame_for_continuous = gen.get("use_last_frame_for_continuous", False)
         else:
             # Fallback for older projects
             project.variants = 3
@@ -544,6 +569,10 @@ class VideoProject:
             project.captions = False
             project.video_muted = True
             project.auto_link_enabled = False
+            project.continuity_mode = "none"
+            project.enable_continuity = False
+            project.enable_enhanced_storyboard = False
+            project.use_last_frame_for_continuous = False
         
         # Load input configuration
         if "input" in data:
