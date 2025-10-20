@@ -1608,9 +1608,10 @@ class WorkspaceWidget(QWidget):
         # Apply LLM sync if enabled and we have timing data
         if use_llm_sync and midi_timing:
             self.logger.info(f"Starting LLM sync with {llm_provider}/{llm_model}...")
+            self._log_to_console(f"🎵 Starting LLM sync with {llm_provider}/{llm_model}...", "INFO")
             import time
             start_time = time.time()
-            
+
             # Get config for API keys
             config = self.get_provider_config()
             sync_assistant = LLMSyncAssistant(provider=llm_provider.lower(), model=llm_model, config=config)

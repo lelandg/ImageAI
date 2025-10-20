@@ -270,24 +270,32 @@ class LLMSyncAssistant:
                     elif isinstance(item, dict) and 'text' in item:
                         # Legacy format handling
                         # Convert times - could be in ms or seconds
+                        start_time = None
+                        end_time = None
+
                         if 'startMs' in item and 'endMs' in item:
                             # Camel case milliseconds format
-                            start_time = float(item['startMs']) / 1000.0
-                            end_time = float(item['endMs']) / 1000.0
+                            if item['startMs'] is not None and item['endMs'] is not None:
+                                start_time = float(item['startMs']) / 1000.0
+                                end_time = float(item['endMs']) / 1000.0
                         elif 'start_ms' in item and 'end_ms' in item:
                             # Snake case milliseconds format
-                            start_time = float(item['start_ms']) / 1000.0
-                            end_time = float(item['end_ms']) / 1000.0
+                            if item['start_ms'] is not None and item['end_ms'] is not None:
+                                start_time = float(item['start_ms']) / 1000.0
+                                end_time = float(item['end_ms']) / 1000.0
                         elif 'start' in item and 'end' in item:
                             # Simple seconds format (GPT-5 often uses this)
-                            start_time = float(item['start'])
-                            end_time = float(item['end'])
+                            if item['start'] is not None and item['end'] is not None:
+                                start_time = float(item['start'])
+                                end_time = float(item['end'])
                         elif 'start_time' in item and 'end_time' in item:
                             # Verbose seconds format
-                            start_time = float(item['start_time'])
-                            end_time = float(item['end_time'])
-                        else:
-                            self.logger.warning(f"Item {i} missing timing fields: {item}")
+                            if item['start_time'] is not None and item['end_time'] is not None:
+                                start_time = float(item['start_time'])
+                                end_time = float(item['end_time'])
+
+                        if start_time is None or end_time is None:
+                            self.logger.warning(f"Item {i} has null or missing timing fields, skipping: {item}")
                             continue
                         
                         timed_lyric = TimedLyric(
