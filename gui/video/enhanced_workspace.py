@@ -223,30 +223,82 @@ class ImageVariantSelector(QWidget):
         """Delete current variant"""
         if not self.current_variants or len(self.current_variants.variants) <= 1:
             return
-        
+
+        variant = self.current_variants.variants[self.current_index]
+        variant_path = Path(variant.filename)
+
+        # Check if this is a protected frame (auto-linked last frame from video)
+        is_protected = False
+        protected_reason = ""
+
+        # Check if this file is a last_frame from any scene in the current project
+        if hasattr(self, 'project') and self.project:
+            for scene in self.project.scenes:
+                if scene.last_frame and variant_path == scene.last_frame:
+                    is_protected = True
+                    protected_reason = "This is an auto-extracted last frame from a video clip and cannot be deleted manually. Delete the video clip to remove this frame."
+                    break
+
+                # Check if it's an auto-linked reference image
+                if not is_protected:
+                    for ref_img in scene.reference_images:
+                        if ref_img.auto_linked and variant_path == ref_img.path:
+                            is_protected = True
+                            protected_reason = "This is an auto-linked reference image and cannot be deleted manually."
+                            break
+
+        if is_protected:
+            QMessageBox.warning(
+                self, "Cannot Delete",
+                protected_reason,
+                QMessageBox.Ok
+            )
+            return
+
         reply = QMessageBox.question(
             self, "Delete Variant",
-            "Are you sure you want to delete this image variant?",
+            "Are you sure you want to delete this image variant? It will be moved to the recycle bin.",
             QMessageBox.Yes | QMessageBox.No
         )
-        
+
         if reply == QMessageBox.Yes:
-            # Delete file
-            variant = self.current_variants.variants[self.current_index]
-            if Path(variant.filename).exists():
-                Path(variant.filename).unlink()
-            
+            # Delete file using recycle bin
+            from core.recycle_bin import send_to_recycle_bin, RecycleBinError
+            import logging
+            logger = logging.getLogger(__name__)
+
+            if variant_path.exists():
+                try:
+                    send_to_recycle_bin(variant_path)
+                    logger.info(f"Moved image to recycle bin: {variant_path}")
+                except RecycleBinError as e:
+                    logger.error(f"Failed to move image to recycle bin: {e}")
+                    QMessageBox.warning(
+                        self, "Delete Failed",
+                        f"Failed to move image to recycle bin: {e}",
+                        QMessageBox.Ok
+                    )
+                    return
+                except Exception as e:
+                    logger.error(f"Failed to delete image: {e}")
+                    QMessageBox.warning(
+                        self, "Delete Failed",
+                        f"Failed to delete image: {e}",
+                        QMessageBox.Ok
+                    )
+                    return
+
             # Remove from list
             self.current_variants.variants.pop(self.current_index)
-            
+
             # Adjust index
             if self.current_index >= len(self.current_variants.variants):
                 self.current_index = len(self.current_variants.variants) - 1
-            
+
             # Select new current if it was selected
             if variant.is_selected and self.current_variants.variants:
                 self.current_variants.select_variant(self.current_index)
-            
+
             self.update_ui()
             self.update_thumbnails()
     

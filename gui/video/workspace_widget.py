@@ -3222,31 +3222,47 @@ class WorkspaceWidget(QWidget):
         scene = self.current_project.scenes[scene_index]
 
         from gui.common.dialog_manager import get_dialog_manager
+        from core.recycle_bin import send_to_recycle_bin, RecycleBinError
         dialog_manager = get_dialog_manager(self)
 
         if dialog_manager.show_question(
             "Clear Video",
-            f"Clear the video clip for Scene {scene_index + 1}? This will remove the generated video file."
+            f"Clear the video clip for Scene {scene_index + 1}? This will move the video and extracted frames to the recycle bin."
         ):
-            # Delete video file if it exists
+            # Delete video file if it exists (use recycle bin)
             if scene.video_clip and scene.video_clip.exists():
                 try:
-                    scene.video_clip.unlink()
-                    self.logger.info(f"Deleted video file: {scene.video_clip}")
+                    send_to_recycle_bin(scene.video_clip)
+                    self.logger.info(f"Moved video file to recycle bin: {scene.video_clip}")
+                except RecycleBinError as e:
+                    self.logger.error(f"Failed to move video file to recycle bin: {e}")
                 except Exception as e:
                     self.logger.error(f"Failed to delete video file: {e}")
 
-            # Delete first frame file if it exists
+            # Delete first frame file if it exists (use recycle bin)
             if scene.first_frame and scene.first_frame.exists():
                 try:
-                    scene.first_frame.unlink()
-                    self.logger.info(f"Deleted first frame file: {scene.first_frame}")
+                    send_to_recycle_bin(scene.first_frame)
+                    self.logger.info(f"Moved first frame to recycle bin: {scene.first_frame}")
+                except RecycleBinError as e:
+                    self.logger.error(f"Failed to move first frame to recycle bin: {e}")
                 except Exception as e:
                     self.logger.error(f"Failed to delete first frame file: {e}")
 
-            # Clear video clip and first frame references
+            # Delete last frame file if it exists (use recycle bin)
+            if scene.last_frame and scene.last_frame.exists():
+                try:
+                    send_to_recycle_bin(scene.last_frame)
+                    self.logger.info(f"Moved last frame to recycle bin: {scene.last_frame}")
+                except RecycleBinError as e:
+                    self.logger.error(f"Failed to move last frame to recycle bin: {e}")
+                except Exception as e:
+                    self.logger.error(f"Failed to delete last frame file: {e}")
+
+            # Clear video clip and frame references
             scene.video_clip = None
             scene.first_frame = None
+            scene.last_frame = None
 
             # Stop media player and clear source completely
             self.media_player.stop()
