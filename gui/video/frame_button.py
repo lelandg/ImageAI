@@ -239,12 +239,6 @@ class FrameButton(QPushButton):
             regenerate_action.triggered.connect(self.generate_requested.emit)
             menu.addAction(regenerate_action)
 
-            # End frame specific: option to use next start frame
-            if self.frame_type == "end":
-                auto_link_action = QAction("Use Next Start Frame", self)
-                auto_link_action.triggered.connect(self.auto_link_requested.emit)
-                menu.addAction(auto_link_action)
-
             menu.addSeparator()
 
             clear_action = QAction("Clear", self)
@@ -269,13 +263,6 @@ class FrameButton(QPushButton):
             select_from_scene_action = QAction("Select from Scene Images", self)
             select_from_scene_action.triggered.connect(self.select_from_scene_requested.emit)
             menu.addAction(select_from_scene_action)
-
-            # End frame specific: option to use next start frame
-            if self.frame_type == "end":
-                menu.addSeparator()
-                auto_link_action = QAction("Use Next Start Frame", self)
-                auto_link_action.triggered.connect(self.auto_link_requested.emit)
-                menu.addAction(auto_link_action)
 
         menu.exec_(event.globalPos())
 

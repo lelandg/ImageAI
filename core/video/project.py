@@ -24,6 +24,19 @@ except ImportError:
     KaraokeConfig = None
     MIDI_SUPPORT = False
 
+# Import reference manager types
+try:
+    from .reference_manager import ReferenceImageType
+    REFERENCE_MANAGER_AVAILABLE = True
+except ImportError:
+    # Fallback if reference_manager not available
+    class ReferenceImageType(Enum):
+        CHARACTER = "character"
+        OBJECT = "object"
+        ENVIRONMENT = "environment"
+        STYLE = "style"
+    REFERENCE_MANAGER_AVAILABLE = False
+
 
 class VideoProvider(Enum):
     """Available video generation providers"""
@@ -151,18 +164,45 @@ class PromptHistory:
 class ReferenceImage:
     """A reference image for style/character/environment consistency in video generation"""
     path: Path
-    label: Optional[str] = None  # Optional label like "character", "environment", "lighting"
+    ref_type: ReferenceImageType = ReferenceImageType.CHARACTER  # Type of reference
+    name: Optional[str] = None  # User-friendly name like "Sarah", "Vintage Car"
     description: Optional[str] = None  # Optional description of what this reference provides
+    is_global: bool = False  # True if this should be used globally across all scenes
     auto_linked: bool = False  # True if automatically linked from previous scene's last frame
+    label: Optional[str] = None  # Deprecated: kept for backward compatibility
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        """Handle backward compatibility for legacy projects"""
+        # Migrate legacy label to ref_type if needed
+        if self.label and not hasattr(self, '_migrated'):
+            self._migrated = True
+            label_lower = self.label.lower()
+
+            # Try to parse type from label
+            if 'character' in label_lower or 'person' in label_lower:
+                self.ref_type = ReferenceImageType.CHARACTER
+            elif 'object' in label_lower or 'prop' in label_lower:
+                self.ref_type = ReferenceImageType.OBJECT
+            elif 'environment' in label_lower or 'scene' in label_lower:
+                self.ref_type = ReferenceImageType.ENVIRONMENT
+            elif 'style' in label_lower:
+                self.ref_type = ReferenceImageType.STYLE
+
+            # If label looks like a name (no type keywords), use it as name
+            if not any(kw in label_lower for kw in ['character', 'object', 'environment', 'style']):
+                self.name = self.label
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
         return {
             "path": str(self.path),
-            "label": self.label,
+            "ref_type": self.ref_type.value,
+            "name": self.name,
             "description": self.description,
+            "is_global": self.is_global,
             "auto_linked": self.auto_linked,
+            "label": self.label,  # Keep for backward compat
             "metadata": self.metadata
         }
 
@@ -175,11 +215,35 @@ class ReferenceImage:
         if not path.exists():
             logger.warning(f"Reference image not found: {path}")
 
+        # Parse ref_type (with backward compat for label)
+        ref_type = ReferenceImageType.CHARACTER  # Default
+        if "ref_type" in data:
+            try:
+                ref_type = ReferenceImageType(data["ref_type"])
+            except ValueError:
+                logger.warning(f"Invalid ref_type: {data['ref_type']}, using CHARACTER")
+        elif "label" in data:
+            # Legacy: try to parse from label
+            label = data["label"]
+            if label:
+                label_lower = label.lower()
+                if 'character' in label_lower:
+                    ref_type = ReferenceImageType.CHARACTER
+                elif 'object' in label_lower:
+                    ref_type = ReferenceImageType.OBJECT
+                elif 'environment' in label_lower:
+                    ref_type = ReferenceImageType.ENVIRONMENT
+                elif 'style' in label_lower:
+                    ref_type = ReferenceImageType.STYLE
+
         return cls(
             path=path,
-            label=data.get("label"),
+            ref_type=ref_type,
+            name=data.get("name"),
             description=data.get("description"),
+            is_global=data.get("is_global", False),
             auto_linked=data.get("auto_linked", False),
+            label=data.get("label"),  # Keep for backward compat
             metadata=data.get("metadata", {})
         )
 
@@ -759,3 +823,146 @@ class VideoProject:
             next_action = wizard.get_next_action()
             return f"{next_action['step_title']}: {next_action['action']}"
         return None
+
+    # Reference Image Management Methods
+
+    def add_global_reference(self, ref_image: ReferenceImage) -> bool:
+        """
+        Add a global reference image.
+
+        Note: While unlimited references can be stored, only up to 3 will be used
+        per video generation (Veo 3 API limit). A selection dialog appears when
+        more than 3 global references of the same type exist.
+
+        Args:
+            ref_image: ReferenceImage to add
+
+        Returns:
+            True if added successfully
+        """
+        self.global_reference_images.append(ref_image)
+        return True
+
+    def remove_global_reference(self, ref_path: Path) -> bool:
+        """
+        Remove a global reference image by path.
+
+        Args:
+            ref_path: Path to reference image
+
+        Returns:
+            True if removed, False if not found
+        """
+        for i, ref in enumerate(self.global_reference_images):
+            if ref.path == ref_path:
+                self.global_reference_images.pop(i)
+                return True
+        return False
+
+    def get_references_by_type(
+        self,
+        ref_type: ReferenceImageType,
+        include_global: bool = True
+    ) -> List[ReferenceImage]:
+        """
+        Get all references of a specific type.
+
+        Args:
+            ref_type: Type of reference to filter by
+            include_global: Include global references (default True)
+
+        Returns:
+            List of matching references
+        """
+        refs = []
+
+        if include_global:
+            refs.extend([
+                ref for ref in self.global_reference_images
+                if ref.ref_type == ref_type
+            ])
+
+        # Could also include scene-specific refs if needed
+        # for scene in self.scenes:
+        #     refs.extend([
+        #         ref for ref in scene.reference_images
+        #         if ref.ref_type == ref_type
+        #     ])
+
+        return refs
+
+    def get_references_by_name(self, name: str) -> List[ReferenceImage]:
+        """
+        Get references by name (case-insensitive partial match).
+
+        Args:
+            name: Name to search for
+
+        Returns:
+            List of matching references
+        """
+        name_lower = name.lower()
+        refs = []
+
+        for ref in self.global_reference_images:
+            if ref.name and name_lower in ref.name.lower():
+                refs.append(ref)
+
+        return refs
+
+    def get_effective_references_for_scene(
+        self,
+        scene: Scene,
+        max_refs: int = 3,
+        selected_refs: Optional[List[ReferenceImage]] = None
+    ) -> List[ReferenceImage]:
+        """
+        Get the effective reference images for a scene.
+
+        Args:
+            scene: Scene to get references for
+            max_refs: Maximum references to return (default 3)
+            selected_refs: Pre-selected references (from user selection dialog)
+
+        Returns:
+            List of references (scene-specific, selected, or global)
+        """
+        # If user selected specific refs, use those (up to max)
+        if selected_refs is not None:
+            return selected_refs[:max_refs]
+
+        # If scene has specific references, use those
+        if not scene.use_global_references and scene.reference_images:
+            return scene.reference_images[:max_refs]
+
+        # Otherwise use global references
+        # Note: All items in global_reference_images are considered available
+        # The is_global flag is for future use (e.g., temporary non-global refs in the list)
+        return self.global_reference_images[:max_refs]
+
+    def get_all_available_references(self, scene: Scene) -> List[ReferenceImage]:
+        """
+        Get ALL available references for a scene (for selection dialog).
+
+        Args:
+            scene: Scene to get references for
+
+        Returns:
+            List of all available references
+        """
+        if not scene.use_global_references and scene.reference_images:
+            return scene.reference_images
+        # Return all global references - anything in global_reference_images is available
+        # The is_global flag is for future use, but doesn't filter here
+        return self.global_reference_images
+
+    def has_character_references(self) -> bool:
+        """Check if project has any character references"""
+        return any(
+            ref.ref_type == ReferenceImageType.CHARACTER
+            for ref in self.global_reference_images
+        )
+
+    def clear_global_references(self):
+        """Clear all global reference images"""
+        self.global_reference_images.clear()

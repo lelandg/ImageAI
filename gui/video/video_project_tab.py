@@ -24,6 +24,7 @@ from core.video.config import VideoConfig
 # Import the workspace and history widgets
 from .workspace_widget import WorkspaceWidget
 from .history_tab import HistoryTab
+from .reference_selector_dialog import ReferenceSelectorDialog
 
 
 class VideoGenerationThread(QThread):
@@ -50,6 +51,8 @@ class VideoGenerationThread(QThread):
                 self._enhance_for_video()
             elif self.operation == "generate_images":
                 self._generate_images()
+            elif self.operation == "generate_end_frame":
+                self._generate_end_frame_images()
             elif self.operation == "generate_video_clip":
                 self._generate_video_clip()
             elif self.operation == "render_video":
@@ -506,11 +509,193 @@ class VideoGenerationThread(QThread):
         except Exception as e:
             self.generation_complete.emit(False, f"Image generation failed: {e}")
 
+    def _generate_end_frame_images(self):
+        """Generate end frame image from end_prompt"""
+        try:
+            from core.config import ConfigManager
+            from providers import get_provider
+            from pathlib import Path
+            from datetime import datetime
+            import logging
+
+            logger = logging.getLogger(__name__)
+
+            # Get generation parameters
+            provider = self.kwargs.get('provider', 'google')
+            model = self.kwargs.get('model', '')
+            variants = self.kwargs.get('variants', 3)
+            auth_mode = self.kwargs.get('auth_mode', 'api-key')
+
+            # Get the end prompt from prompt_override
+            end_prompt = self.kwargs.get('prompt_override')
+            if not end_prompt:
+                self.generation_complete.emit(False, "No end prompt provided")
+                return
+
+            # Get API key using ConfigManager (same as image tab)
+            config = ConfigManager()
+            api_key = config.get_api_key(provider) if auth_mode == "api-key" else None
+
+            logger.info(f"End frame generation - Provider: {provider}, Model: {model}, API key present: {api_key is not None}")
+
+            # Create provider config (same as image tab)
+            provider_config = {
+                "api_key": api_key,
+                "auth_mode": auth_mode,
+            }
+
+            # Get provider instance (disable cache to ensure fresh instance with API key)
+            provider_instance = get_provider(provider, provider_config, use_cache=False)
+
+            # Get scene indices (should be single scene for end frame generation)
+            scene_indices = self.kwargs.get('scene_indices', None)
+            if not scene_indices or len(scene_indices) == 0:
+                self.generation_complete.emit(False, "No scene specified for end frame generation")
+                return
+
+            scene_index = scene_indices[0]
+            if scene_index >= len(self.project.scenes):
+                self.generation_complete.emit(False, f"Invalid scene index: {scene_index}")
+                return
+
+            scene = self.project.scenes[scene_index]
+
+            # Get additional generation params
+            aspect_ratio = self.kwargs.get('aspect_ratio', '16:9')
+            resolution = self.kwargs.get('resolution', '1920x1080')
+
+            # Parse resolution string to width/height
+            width = height = None
+            if resolution and 'x' in resolution:
+                parts = resolution.split('x')
+                width, height = int(parts[0]), int(parts[1])
+            elif resolution:
+                # Handle "720p", "1080p" format
+                if '720' in resolution:
+                    if aspect_ratio == '16:9':
+                        width, height = 1280, 720
+                    elif aspect_ratio == '9:16':
+                        width, height = 720, 1280
+                    elif aspect_ratio == '1:1':
+                        width, height = 720, 720
+                elif '1080' in resolution:
+                    if aspect_ratio == '16:9':
+                        width, height = 1920, 1080
+                    elif aspect_ratio == '9:16':
+                        width, height = 1080, 1920
+                    elif aspect_ratio == '1:1':
+                        width, height = 1080, 1080
+
+            # For Gemini provider: scale to max 1024 and track target for post-processing
+            gemini_scaled_width = width
+            gemini_scaled_height = height
+            needs_upscale = False
+
+            if provider == 'google' and width and height:
+                max_dim = max(width, height)
+                if max_dim > 1024:
+                    # Scale proportionally so max dimension is 1024
+                    scale_factor = 1024 / max_dim
+                    gemini_scaled_width = int(width * scale_factor)
+                    gemini_scaled_height = int(height * scale_factor)
+                    needs_upscale = True
+                    logger.info(f"Scaling down for Gemini: {width}x{height} -> {gemini_scaled_width}x{gemini_scaled_height}")
+
+            self.progress_update.emit(0, f"Generating end frame for scene {scene_index + 1}")
+
+            # Generate end frame variants
+            scene_images = []
+            image_paths = []
+
+            for v in range(variants):
+                if self.cancelled:
+                    break
+
+                logger.info(f"Generating end frame variant {v+1}/{variants}")
+                progress = int((v / variants) * 100)
+                self.progress_update.emit(progress, f"Generating end frame variant {v+1}/{variants}")
+
+                # Prepare generation kwargs
+                gen_kwargs = {
+                    'aspect_ratio': aspect_ratio,
+                    'num_images': 1
+                }
+
+                # For Gemini: use scaled dimensions
+                if provider == 'google':
+                    if gemini_scaled_width and gemini_scaled_height:
+                        gen_kwargs['width'] = gemini_scaled_width
+                        gen_kwargs['height'] = gemini_scaled_height
+                else:
+                    # For other providers, use original dimensions
+                    if width and height:
+                        gen_kwargs['width'] = width
+                        gen_kwargs['height'] = height
+
+                try:
+                    # Generate single image using provider
+                    texts, images = provider_instance.generate(
+                        prompt=end_prompt,
+                        model=model,
+                        **gen_kwargs
+                    )
+
+                    if images:
+                        scene_images.extend(images)
+
+                        # Save image to project directory
+                        images_dir = self.project.project_dir / "images"
+                        images_dir.mkdir(parents=True, exist_ok=True)
+
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        img_filename = f"scene_{scene_index}_end_frame_{timestamp}_v{v}.png"
+                        img_path = images_dir / img_filename
+                        img_path.write_bytes(images[0])
+                        image_paths.append(img_path)
+
+                except Exception as e:
+                    logger.error(f"Failed to generate end frame variant {v+1}: {e}")
+
+            if not image_paths:
+                self.generation_complete.emit(False, "Failed to generate any end frame variants")
+                return
+
+            # Store images in scene as ImageVariant objects for end_frame_images
+            from core.video.project import ImageVariant
+            scene.end_frame_images = [
+                ImageVariant(
+                    path=img_path,
+                    provider=provider,
+                    model=model,
+                    cost=0.0
+                )
+                for img_path in image_paths
+            ]
+
+            # Auto-select the first variant as the end_frame
+            scene.end_frame = image_paths[0]
+
+            result_data = {
+                "scene_id": scene.id,
+                "end_frame": image_paths[0],
+                "variants": image_paths,
+                "status": "completed"
+            }
+
+            self.progress_update.emit(100, f"✓ Generated {len(image_paths)} end frame variant(s)")
+            self.scene_complete.emit(scene.id, result_data)
+            self.generation_complete.emit(True, f"End frame generated successfully")
+
+        except Exception as e:
+            logger.error(f"End frame generation failed: {e}")
+            self.generation_complete.emit(False, f"End frame generation failed: {e}")
+
     def _generate_video_clip(self):
         """Generate video clip for a single scene using Veo"""
         try:
             from core.video.veo_client import VeoClient, VeoGenerationConfig, VeoModel
             from core.video.midi_processor import snap_duration_to_veo
+            from core.video.reference_manager import ReferenceManager
             from pathlib import Path
             import cv2
 
@@ -545,31 +730,95 @@ class VideoGenerationThread(QThread):
             else:
                 logger.info(f"Using regular prompt for scene {scene_index} (no video_prompt):\n{prompt}")
 
-            # Check if we should use previous scene's last frame as start frame (sequential chaining)
-            use_prev_last_frame = self.kwargs.get('use_prev_last_frame', False)
-            if use_prev_last_frame and scene_index > 0:
+            # === NEW: REFERENCES-FIRST APPROACH ===
+            # Initialize reference manager
+            ref_manager = ReferenceManager(self.project.project_dir)
+
+            # Get effective reference images for this scene (global or scene-specific)
+            selected_refs = self.kwargs.get('selected_refs')  # User-selected refs from dialog
+            scene_refs = self.project.get_effective_references_for_scene(scene, max_refs=3, selected_refs=selected_refs)
+            reference_image_paths = [ref.path for ref in scene_refs if ref.path.exists()]
+
+            if reference_image_paths:
+                logger.info(f"📸 Using {len(reference_image_paths)} reference image(s) for character/style consistency:")
+                for i, ref_path in enumerate(reference_image_paths, 1):
+                    ref_obj = scene_refs[i-1]
+                    ref_name = ref_obj.name or ref_path.stem
+                    ref_type = ref_obj.ref_type.value if hasattr(ref_obj.ref_type, 'value') else ref_obj.ref_type
+                    logger.info(f"  {i}. {ref_name} ({ref_type}): {ref_path}")
+                self.progress_update.emit(8, f"Using {len(reference_image_paths)} reference(s) for consistency...")
+            else:
+                logger.info("📸 No reference images configured for this scene")
+
+            # Smart continuity detection for last-frame usage
+            use_last_frame_continuity = False
+            continuity_reason = "First scene or no previous scene"
+
+            if scene_index > 0:
                 prev_scene = self.project.scenes[scene_index - 1]
-                if prev_scene.last_frame and prev_scene.last_frame.exists():
-                    seed_image_path = prev_scene.last_frame
-                    logger.info(f"🔗 Sequential Chaining: Using previous scene's last frame as start frame")
-                    logger.info(f"   Previous scene last frame: {prev_scene.last_frame}")
-                    self.progress_update.emit(12, "Using previous clip's last frame for smooth transition...")
+
+                # Check if user explicitly requested last-frame continuity
+                use_prev_last_frame = self.kwargs.get('use_prev_last_frame', False)
+
+                if use_prev_last_frame:
+                    # User explicitly wants continuity - check if it makes sense
+                    should_use, reason = ref_manager.should_use_last_frame_continuity(
+                        prev_scene, scene, check_prompts=True
+                    )
+
+                    if should_use:
+                        use_last_frame_continuity = True
+                        continuity_reason = reason
+                        if prev_scene.last_frame and prev_scene.last_frame.exists():
+                            seed_image_path = prev_scene.last_frame
+                            logger.info(f"✅ Last-Frame Continuity: {reason}")
+                            logger.info(f"   Using previous scene's last frame: {prev_scene.last_frame}")
+                            self.progress_update.emit(10, f"✓ Using last-frame continuity: {reason}")
+                        else:
+                            logger.warning(f"⚠️ Last-frame continuity recommended but previous scene has no last frame")
+                            logger.warning(f"   Falling back to scene's approved image or generated images")
+                            use_last_frame_continuity = False
+                            continuity_reason = "Previous scene missing last frame"
+                    else:
+                        logger.info(f"❌ Last-Frame Continuity NOT recommended: {reason}")
+                        logger.info(f"   Will use reference images only (references-first approach)")
+                        self.progress_update.emit(10, f"✗ Skipping last-frame: {reason}")
+                        continuity_reason = reason
+                        # Clear seed_image_path to force text-to-video with references only
+                        if not self.kwargs.get('start_frame'):  # Don't override explicit start frame
+                            seed_image_path = None
+
+            # Fallback: If no seed image and no continuity, use scene's approved image ONLY if explicitly set
+            # DO NOT fall back to scene.images[0] - if user cleared start frame, respect that (for reference images mode)
+            if not seed_image_path:
+                if scene.approved_image and scene.approved_image.exists():
+                    seed_image_path = scene.approved_image
+                    logger.info(f"Using scene's approved image as start frame: {scene.approved_image}")
                 else:
-                    logger.warning(f"Previous scene has no last frame available, using selected/generated image")
-                    if not seed_image_path and scene.approved_image:
-                        seed_image_path = scene.approved_image
-                    elif not seed_image_path and scene.images:
-                        seed_image_path = scene.images[0].path
+                    logger.info(f"No start frame set - will use text-to-video or reference images mode")
 
-            self.progress_update.emit(10, f"Generating video clip for scene {scene_index + 1}...")
+            self.progress_update.emit(12, f"Preparing video generation...")
 
-            # Initialize Veo client
+            # Initialize Veo client with gcloud auth if available, otherwise API key
+            auth_mode = self.kwargs.get('google_auth_mode', 'api-key')
             google_api_key = self.kwargs.get('google_api_key')
-            if not google_api_key:
-                self.generation_complete.emit(False, "Google API key required for Veo video generation")
-                return
+            google_project_id = self.kwargs.get('google_project_id')
 
-            veo_client = VeoClient(api_key=google_api_key)
+            if auth_mode == 'gcloud':
+                # Use gcloud authentication (Application Default Credentials)
+                logger.info(f"🔐 Initializing Veo client with gcloud authentication (project: {google_project_id})")
+                try:
+                    veo_client = VeoClient(auth_mode='gcloud', project_id=google_project_id)
+                except Exception as e:
+                    self.generation_complete.emit(False, f"Google Cloud authentication failed: {e}")
+                    return
+            elif google_api_key:
+                # Use API key authentication
+                logger.info(f"🔐 Initializing Veo client with API key")
+                veo_client = VeoClient(api_key=google_api_key, auth_mode='api-key')
+            else:
+                self.generation_complete.emit(False, "Google API key or gcloud authentication required for Veo video generation")
+                return
 
             # If using seed image, check aspect ratio match and apply transparent canvas fix if needed
             processed_seed_path = None
@@ -647,30 +896,114 @@ class VideoGenerationThread(QThread):
                     logger.warning(f"Failed to process reference image: {e}")
                     # Fall back to original seed image
 
-            # Snap duration to Veo-compatible value (4, 6, or 8 seconds)
-            veo_duration = snap_duration_to_veo(scene.duration_sec)
-            if veo_duration != scene.duration_sec:
-                logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s for Veo 3 compatibility")
-                self.progress_update.emit(12, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3 requires 4/6/8s)")
+            # === NEW: Configure generation with REFERENCES-FIRST approach ===
+            # CRITICAL: Veo 3.1 has TWO SEPARATE modes that CANNOT be combined:
+            # 1. "Ingredients to Video" (reference images) - text prompt only, REQUIRES 8 seconds
+            # 2. "Image-to-Video" (start frame) - animates a single image, supports 4/6/8 seconds
+            # Choose one mode based on what's provided
+            selected_model = VeoModel.VEO_3_GENERATE
+            use_start_frame = None
+            use_reference_images = None
 
-            # Configure generation with prompt and optional start/end frames
+            if reference_image_paths and len(reference_image_paths) > 0:
+                # MODE 1: "Ingredients to Video" with reference images
+                # Do NOT include start frame - reference images mode uses text prompt only
+                # IMPORTANT: Reference mode ONLY supports 8 seconds
+                selected_model = VeoModel.VEO_3_1_GENERATE
+                use_reference_images = reference_image_paths
+                use_start_frame = None  # Explicitly exclude start frame
+                veo_duration = 8  # Force 8 seconds for reference_to_video mode
+                if veo_duration != scene.duration_sec:
+                    logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s (Veo 3.1 reference mode requires 8s)")
+                    self.progress_update.emit(14, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3.1 references require 8s)")
+                logger.info(f"🔄 Auto-switching to Veo 3.1 'Ingredients to Video' mode ({len(reference_image_paths)} reference(s))")
+                logger.info(f"   Reference images will guide character/style - NO start frame used")
+                self.progress_update.emit(12, f"Using Veo 3.1 'Ingredients to Video' with {len(reference_image_paths)} ref(s)...")
+            else:
+                # MODE 2: "Image-to-Video" with start frame (if available)
+                # Do NOT include reference images - image-to-video mode animates a single image
+                # Supports 4, 6, or 8 seconds
+                use_reference_images = None
+                use_start_frame = Path(seed_image_path) if seed_image_path and Path(seed_image_path).exists() else None
+
+                # Snap duration to Veo-compatible value (4, 6, or 8 seconds) for image-to-video mode
+                veo_duration = snap_duration_to_veo(scene.duration_sec)
+                if veo_duration != scene.duration_sec:
+                    logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s for Veo 3 compatibility")
+                    self.progress_update.emit(14, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3 requires 4/6/8s)")
+
+                if use_start_frame:
+                    logger.info(f"🔄 Using Veo 3.0 'Image-to-Video' mode with start frame")
+                    self.progress_update.emit(12, f"Using Image-to-Video mode...")
+                else:
+                    logger.info(f"🔄 Using Veo 3.0 'Text-to-Video' mode (no references, no start frame)")
+                    self.progress_update.emit(12, f"Using Text-to-Video mode...")
+
             config = VeoGenerationConfig(
-                model=VeoModel.VEO_3_GENERATE,
+                model=selected_model,
                 prompt=prompt,
                 duration=veo_duration,
                 aspect_ratio=aspect_ratio,
-                image=Path(seed_image_path) if seed_image_path and Path(seed_image_path).exists() else None,
-                last_frame=Path(end_frame_path) if end_frame_path and Path(end_frame_path).exists() else None
+                reference_images=use_reference_images,  # Mode 1: Character/style consistency
+                image=use_start_frame,  # Mode 2: Motion from specific frame
+                last_frame=Path(end_frame_path) if end_frame_path and Path(end_frame_path).exists() else None  # Optional: End frame interpolation
             )
 
+            # Log generation mode for user clarity
+            generation_mode = []
+            if config.reference_images:
+                generation_mode.append(f"{len(config.reference_images)} reference(s)")
             if config.image and config.last_frame:
-                logger.info(f"Using frame-to-frame interpolation: start={config.image}, end={config.last_frame}")
-                self.progress_update.emit(20, "Submitting to Veo with start and end frames...")
+                generation_mode.append("frame-to-frame interpolation")
             elif config.image:
-                logger.info(f"Using image-to-video generation: start frame={config.image}")
-                self.progress_update.emit(20, "Submitting to Veo with start frame...")
+                generation_mode.append("image-to-video")
             else:
-                self.progress_update.emit(20, "Submitting to Veo...")
+                generation_mode.append("text-to-video")
+
+            mode_str = " + ".join(generation_mode) if generation_mode else "text-to-video"
+
+            if config.reference_images and config.image:
+                logger.info(f"🎬 Hybrid Generation: {len(config.reference_images)} reference(s) + image-to-video")
+                logger.info(f"   References for character consistency, image for motion continuity")
+                self.progress_update.emit(18, f"Hybrid mode: {len(config.reference_images)} ref(s) + motion continuity")
+            elif config.reference_images:
+                logger.info(f"🎬 References-Only Generation: {len(config.reference_images)} reference(s)")
+                logger.info(f"   Using references for character/style consistency")
+                self.progress_update.emit(18, f"References-only: {len(config.reference_images)} image(s)")
+            elif config.image and config.last_frame:
+                logger.info(f"🎬 Frame-to-Frame Interpolation: start={config.image}, end={config.last_frame}")
+                self.progress_update.emit(18, "Frame-to-frame interpolation mode")
+            elif config.image:
+                logger.info(f"🎬 Image-to-Video Generation: start frame={config.image}")
+                self.progress_update.emit(18, "Image-to-video mode (no references)")
+            else:
+                logger.info(f"🎬 Text-to-Video Generation (no references or seed image)")
+                self.progress_update.emit(18, "Text-to-video mode")
+
+            # Log complete generation request details for debugging
+            logger.info("=" * 80)
+            logger.info("VIDEO GENERATION REQUEST DETAILS")
+            logger.info("=" * 80)
+            logger.info(f"Scene Index: {scene_index}")
+            logger.info(f"Model: {config.model.value}")
+            logger.info(f"Duration: {config.duration}s")
+            logger.info(f"Aspect Ratio: {config.aspect_ratio}")
+            logger.info(f"Generation Mode: {mode_str}")
+            logger.info(f"Reference Images: {len(config.reference_images) if config.reference_images else 0}")
+            if config.reference_images:
+                for i, ref_path in enumerate(config.reference_images, 1):
+                    logger.info(f"  Ref {i}: {ref_path}")
+            logger.info(f"Start Frame (image): {config.image if config.image else 'None'}")
+            logger.info(f"End Frame (last_frame): {config.last_frame if config.last_frame else 'None'}")
+            if use_last_frame_continuity:
+                logger.info(f"Last-Frame Continuity: YES - {continuity_reason}")
+            else:
+                logger.info(f"Last-Frame Continuity: NO - {continuity_reason}")
+            logger.info(f"Prompt ({len(prompt)} chars):\n{prompt}")
+            logger.info("=" * 80)
+
+            # Also emit to status console for user visibility
+            self.progress_update.emit(20, f"📋 Generation details logged - Model: {config.model.value}, Duration: {config.duration}s, Aspect: {config.aspect_ratio}")
 
             # Generate video (with or without seed image)
             result = veo_client.generate_video(config)
@@ -700,17 +1033,17 @@ class VideoGenerationThread(QThread):
 
             self.progress_update.emit(80, "Extracting last frame...")
 
-            # Extract last frame
+            # Extract last frame (for reference/debugging, not assigned to scene)
             last_frame_path = self._extract_last_frame(video_path, scene_index)
 
-            # Extract first frame
+            # Extract first frame (for reference/debugging, not assigned to scene)
             self.progress_update.emit(85, "Extracting first frame...")
             first_frame_path = self._extract_first_frame(video_path, scene_index)
 
-            # Update scene with video clip and frames (using project path)
+            # Update scene with video clip only (don't assign extracted frames)
             scene.video_clip = video_path
-            scene.first_frame = first_frame_path
-            scene.last_frame = last_frame_path
+            # Note: first_frame and last_frame are extracted to disk but NOT assigned to scene
+            # This prevents them from appearing in the UI buttons
 
             self.progress_update.emit(100, f"Video clip generated for scene {scene_index + 1}")
 
@@ -906,7 +1239,17 @@ class VideoProjectTab(QWidget):
         self.history_widget = HistoryTab()
         self.history_widget.restore_requested.connect(self.on_restore_requested)
         self.tab_widget.addTab(self.history_widget, "History")
-        
+
+        # Create reference library tab
+        from gui.video.reference_library_widget import ReferenceLibraryWidget
+        self.reference_library_widget = ReferenceLibraryWidget(self, None)
+        self.reference_library_widget.references_changed.connect(self.on_references_changed)
+        self.tab_widget.addTab(self.reference_library_widget, "📸 References")
+
+        # Update reference library when project changes
+        if self.current_project:
+            self.reference_library_widget.set_project(self.current_project)
+
         # Add tabs to layout
         layout.addWidget(self.tab_widget)
     
@@ -936,6 +1279,9 @@ class VideoProjectTab(QWidget):
         # Update history tab with new project
         if project and hasattr(project, 'id'):
             self.history_widget.set_project(project.id)
+        # Update reference library with new project
+        if hasattr(self, 'reference_library_widget'):
+            self.reference_library_widget.set_project(project)
     
     def on_generation_requested(self, operation: str, kwargs: Dict[str, Any]):
         """Handle generation request from workspace"""
@@ -1069,13 +1415,24 @@ class VideoProjectTab(QWidget):
                             from pathlib import Path
                             scene.video_clip = Path(result['video_clip'])
 
-                            # Auto-load video after generation to show first frame
-                            if scene.first_frame and scene.first_frame.exists():
-                                self.workspace_widget._load_video_first_frame_in_panel(i)
-                                # Reset the video button toggle state so first click plays video
-                                video_btn = self.workspace_widget.scene_table.cellWidget(i, 3)
-                                if video_btn and hasattr(video_btn, 'reset_toggle_state'):
-                                    video_btn.reset_toggle_state()
+                            # Log generation details to status console
+                            if self.generation_thread:
+                                kwargs = self.generation_thread.kwargs
+                                self.workspace_widget._log_to_console("=" * 60, "INFO")
+                                self.workspace_widget._log_to_console("VIDEO GENERATION COMPLETED - REQUEST DETAILS:", "SUCCESS")
+                                self.workspace_widget._log_to_console(f"Scene: {i+1}", "INFO")
+                                if scene.video_prompt:
+                                    self.workspace_widget._log_to_console(f"Video Prompt: {scene.video_prompt[:100]}..." if len(scene.video_prompt) > 100 else f"Video Prompt: {scene.video_prompt}", "INFO")
+                                elif scene.prompt:
+                                    self.workspace_widget._log_to_console(f"Prompt: {scene.prompt[:100]}..." if len(scene.prompt) > 100 else f"Prompt: {scene.prompt}", "INFO")
+                                self.workspace_widget._log_to_console(f"Aspect Ratio: {kwargs.get('aspect_ratio', 'N/A')}", "INFO")
+                                self.workspace_widget._log_to_console(f"Duration: {scene.duration_sec}s", "INFO")
+                                self.workspace_widget._log_to_console(f"Output: {scene.video_clip.name}", "INFO")
+                                self.workspace_widget._log_to_console("=" * 60, "INFO")
+
+                            # Auto-play video after generation
+                            self.workspace_widget._show_video(scene, i)
+                            self.workspace_widget._log_to_console(f"✓ Video clip generated for scene {i+1}, now playing", "SUCCESS")
 
                         if 'last_frame' in result:
                             from pathlib import Path
@@ -1123,6 +1480,14 @@ class VideoProjectTab(QWidget):
         self.workspace_widget.status_label.setText(message)
         # Log to status console
         self.workspace_widget._log_to_console(message, "SUCCESS" if success else "ERROR")
+
+        # Clean up thread properly to avoid QThread destruction errors
+        if self.generation_thread:
+            # Wait for thread to finish (should already be done, but be safe)
+            self.generation_thread.wait(1000)  # Wait up to 1 second
+            # Schedule thread for deletion
+            self.generation_thread.deleteLater()
+            self.generation_thread = None
 
         if success:
             # Update UI state
@@ -1175,3 +1540,81 @@ class VideoProjectTab(QWidget):
                 dialog_manager.show_generation_error(operation, message)
             else:
                 dialog_manager.show_error("Generation Failed", message)
+
+    def on_references_changed(self):
+        """Handle reference library changes"""
+        # Refresh workspace if it needs to update
+        if hasattr(self.workspace_widget, 'refresh_references'):
+            self.workspace_widget.refresh_references()
+        self.logger.info("Reference library updated")
+
+    def generate_reference_image_sync(self, prompt: str, output_dir: Path, filename_prefix: str) -> Optional[Path]:
+        """
+        Generate a reference image synchronously for the reference generation wizard.
+
+        Args:
+            prompt: Image generation prompt
+            output_dir: Output directory
+            filename_prefix: Filename prefix
+
+        Returns:
+            Path to generated image or None
+        """
+        try:
+            from pathlib import Path
+            import time
+
+            self.logger.info(f"Generating reference image: {filename_prefix}")
+
+            # Get image provider from workspace
+            if not hasattr(self.workspace_widget, 'image_provider'):
+                self.logger.error("No image provider available")
+                return None
+
+            image_provider = self.workspace_widget.image_provider
+            if not image_provider:
+                self.logger.error("Image provider not initialized")
+                return None
+
+            # Create output directory
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+            # Generate filename
+            timestamp = int(time.time())
+            filename = f"{filename_prefix}_{timestamp}.png"
+            output_path = output_dir / filename
+
+            # Get project settings
+            project = self.current_project
+            aspect_ratio = "1:1"  # Square for references
+            if project and hasattr(project, 'style'):
+                aspect_ratio = project.style.get('aspect_ratio', '1:1')
+                # Override to 1:1 for references
+                aspect_ratio = "1:1"
+
+            # Generate image
+            self.logger.info(f"Calling image provider with prompt: {prompt[:80]}...")
+            result = image_provider.generate_image(
+                prompt=prompt,
+                output_path=output_path,
+                aspect_ratio=aspect_ratio,
+                model="gemini-2.5-flash-image",  # Use production model
+                quality="high"
+            )
+
+            if result and result.get('success') and result.get('image_path'):
+                image_path = Path(result['image_path'])
+                if image_path.exists():
+                    self.logger.info(f"✓ Generated reference image: {image_path}")
+                    return image_path
+                else:
+                    self.logger.error(f"Generated image path doesn't exist: {image_path}")
+                    return None
+            else:
+                error_msg = result.get('error', 'Unknown error') if result else 'No result'
+                self.logger.error(f"Image generation failed: {error_msg}")
+                return None
+
+        except Exception as e:
+            self.logger.error(f"Reference image generation failed: {e}", exc_info=True)
+            return None

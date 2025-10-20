@@ -6,7 +6,7 @@ in video_project_tab.py, now separated for tab organization.
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 
 from PySide6.QtWidgets import (
@@ -279,6 +279,9 @@ class WorkspaceWidget(QWidget):
         self.last_clicked_row = None
         self.showing_video = False  # True if showing video, False if showing image
 
+        # Track currently playing scene for sequential playback
+        self.current_playing_scene = None
+
         self.logger.info("Calling init_ui()...")
         self.init_ui()
         self.logger.info("init_ui() complete")
@@ -532,6 +535,21 @@ class WorkspaceWidget(QWidget):
         self.extract_frame_btn.setEnabled(False)  # Disabled until video is loaded
         video_controls_layout.addWidget(self.extract_frame_btn)
 
+        # Playback options
+        playback_options_layout = QHBoxLayout()
+
+        self.loop_video_checkbox = QCheckBox("Loop Video")
+        self.loop_video_checkbox.setChecked(True)  # Default enabled
+        self.loop_video_checkbox.setToolTip("Loop the current video continuously")
+        playback_options_layout.addWidget(self.loop_video_checkbox)
+
+        self.sequential_playback_checkbox = QCheckBox("Play Sequential")
+        self.sequential_playback_checkbox.setToolTip("Play available scenes in order, starting with current scene\n(Respects loop setting, but loops through all scenes)")
+        playback_options_layout.addWidget(self.sequential_playback_checkbox)
+
+        playback_options_layout.addStretch()
+        video_controls_layout.addLayout(playback_options_layout)
+
         video_controls_layout.addStretch()
 
         video_player_layout.addWidget(video_controls)
@@ -544,6 +562,7 @@ class WorkspaceWidget(QWidget):
         self.media_player.positionChanged.connect(self._update_position)
         self.media_player.durationChanged.connect(self._update_duration)
         self.media_player.playbackStateChanged.connect(self._update_play_button)
+        self.media_player.mediaStatusChanged.connect(self._on_media_status_changed)
 
         image_console_splitter.addWidget(media_viewer_container)
 
@@ -1067,21 +1086,17 @@ class WorkspaceWidget(QWidget):
         self.generate_images_btn.setEnabled(False)
         controls_layout.addWidget(self.generate_images_btn)
 
-        # Use last frame checkbox
-        self.use_last_frame_checkbox = QCheckBox("Use last frame for continuous video")
-        self.use_last_frame_checkbox.setToolTip("When enabled, uses the last frame of the previous clip as the seed image for the next clip")
-        self.use_last_frame_checkbox.setChecked(False)
-        controls_layout.addWidget(self.use_last_frame_checkbox)
+        # Character Reference Generation button
+        self.char_ref_btn = QPushButton("🎨 Character Refs")
+        self.char_ref_btn.setToolTip("Generate character reference images for consistency across scenes")
+        self.char_ref_btn.clicked.connect(self.open_character_reference_wizard)
+        controls_layout.addWidget(self.char_ref_btn)
 
-        # Veo 3.1 Auto-link checkbox
-        self.auto_link_checkbox = QCheckBox("Auto-link end frames (Veo 3.1)")
-        self.auto_link_checkbox.setToolTip(
-            "When enabled, automatically uses next scene's start frame as current scene's end frame.\n"
-            "Creates seamless transitions between scenes when generating videos with Veo 3.1."
-        )
-        self.auto_link_checkbox.setChecked(False)
-        self.auto_link_checkbox.stateChanged.connect(self._on_auto_link_changed)
-        controls_layout.addWidget(self.auto_link_checkbox)
+        # Visual Reference Library button
+        self.ref_library_btn = QPushButton("📸 Ref Library")
+        self.ref_library_btn.setToolTip("Open visual reference library to manage global references")
+        self.ref_library_btn.clicked.connect(self.open_reference_library)
+        controls_layout.addWidget(self.ref_library_btn)
 
         controls_layout.addStretch()
 
@@ -2060,8 +2075,9 @@ class WorkspaceWidget(QWidget):
 
             # Column 1: Start Frame (FrameButton widget)
             start_frame_btn = FrameButton(frame_type="start", parent=self)
-            # Use approved image if set, otherwise fall back to first generated image
-            start_frame_path = scene.approved_image or (scene.images[0].path if scene.images else None)
+            # ONLY use approved_image - DO NOT fall back to scene.images[0]
+            # If user cleared the start frame, respect that choice (for reference images mode)
+            start_frame_path = scene.approved_image if scene.approved_image and scene.approved_image.exists() else None
             if start_frame_path:
                 start_frame_btn.set_frame(start_frame_path, auto_linked=False)
 
@@ -2089,7 +2105,7 @@ class WorkspaceWidget(QWidget):
             end_frame_btn.select_requested.connect(lambda idx=i: self._select_end_frame_variant(idx))
             end_frame_btn.select_from_scene_requested.connect(lambda idx=i: self._select_end_frame_from_scenes(idx))
             end_frame_btn.clear_requested.connect(lambda idx=i: self._clear_end_frame(idx))
-            end_frame_btn.auto_link_requested.connect(lambda idx=i: self._auto_link_end_frame(idx))
+            # auto_link_requested removed - auto-linking disabled
             end_frame_btn.load_image_requested.connect(lambda idx=i: self._load_end_frame_image(idx))
             end_frame_btn.use_last_generated_requested.connect(lambda idx=i: self._use_last_generated_for_end_frame(idx))
 
@@ -2516,6 +2532,9 @@ class WorkspaceWidget(QWidget):
         video_path = scene.video_clip
 
         try:
+            # Track current playing scene for sequential playback
+            self.current_playing_scene = row
+
             # Hide image label, show video player
             self.output_image_label.hide()
             self.video_player_container.show()
@@ -2566,6 +2585,54 @@ class WorkspaceWidget(QWidget):
             self.play_pause_btn.setText("⏸ Pause")
         else:
             self.play_pause_btn.setText("▶ Play")
+
+    def _on_media_status_changed(self, status):
+        """Handle media status changes for loop and sequential playback"""
+        from PySide6.QtMultimedia import QMediaPlayer
+
+        # Check if video has finished playing
+        if status == QMediaPlayer.EndOfMedia:
+            # Check if loop is enabled
+            if self.loop_video_checkbox.isChecked():
+                if self.sequential_playback_checkbox.isChecked():
+                    # Sequential mode: play next scene (or loop back to first)
+                    self._play_next_scene()
+                else:
+                    # Loop current video
+                    self.media_player.setPosition(0)
+                    self.media_player.play()
+                    self._log_to_console("🔁 Looping video")
+
+    def _play_next_scene(self):
+        """Play the next available scene with video"""
+        if not self.current_project or not self.current_project.scenes:
+            return
+
+        # Find current scene index
+        current_index = self.current_playing_scene if self.current_playing_scene is not None else 0
+
+        # Find next scene with video
+        next_index = None
+        for i in range(current_index + 1, len(self.current_project.scenes)):
+            scene = self.current_project.scenes[i]
+            if scene.video_clip and scene.video_clip.exists():
+                next_index = i
+                break
+
+        # If no next scene found, loop back to beginning
+        if next_index is None:
+            for i in range(0, current_index + 1):
+                scene = self.current_project.scenes[i]
+                if scene.video_clip and scene.video_clip.exists():
+                    next_index = i
+                    break
+
+        # Play next scene if found
+        if next_index is not None:
+            self.current_playing_scene = next_index
+            scene = self.current_project.scenes[next_index]
+            self._show_video(scene, next_index)
+            self._log_to_console(f"▶ Playing scene {next_index + 1} sequentially")
 
     def _update_time_label(self, position, duration):
         """Update time label and textbox with current position and duration (with milliseconds)"""
@@ -2805,18 +2872,12 @@ class WorkspaceWidget(QWidget):
             dialog_manager.show_warning("No Video Prompt", "Please enhance the prompts for video first (Enhance for Video button).")
             return
 
-        # Determine start frame (required for Veo 3/3.1)
+        # Determine start frame (OPTIONAL - only used if no reference images)
+        # With reference images (Veo 3.1 "Ingredients to Video"), start frame is NOT used
         start_frame = None
         if scene.approved_image and scene.approved_image.exists():
             start_frame = scene.approved_image
-        elif scene.images and len(scene.images) > 0:
-            start_frame = scene.images[0].path if hasattr(scene.images[0], 'path') else scene.images[0]
-
-        if not start_frame:
-            from gui.common.dialog_manager import get_dialog_manager
-            dialog_manager = get_dialog_manager(self)
-            dialog_manager.show_warning("No Start Frame", "Please generate an image for this scene first.")
-            return
+        # Do NOT fall back to scene.images[0] - if user cleared start frame, respect that choice
 
         # Check for end frame (determines Veo 3 vs 3.1)
         end_frame = scene.end_frame if scene.end_frame and scene.end_frame.exists() else None
@@ -2825,12 +2886,51 @@ class WorkspaceWidget(QWidget):
         # Log what we're about to generate
         if use_veo_31:
             self.logger.info(f"Generating video with Veo 3.1 (start + end frames) for scene {scene_index + 1}")
-            self.logger.info(f"  Start frame: {start_frame}")
+            self.logger.info(f"  Start frame: {start_frame if start_frame else 'None (will use reference images or text-to-video)'}")
             self.logger.info(f"  End frame: {end_frame}")
-            self.logger.info(f"  Auto-linked: {scene.end_frame_auto_linked}")
         else:
-            self.logger.info(f"Generating video with Veo 3 (single frame) for scene {scene_index + 1}")
-            self.logger.info(f"  Start frame: {start_frame}")
+            self.logger.info(f"Generating video for scene {scene_index + 1}")
+            self.logger.info(f"  Start frame: {start_frame if start_frame else 'None (will use reference images or text-to-video)'}")
+
+        # Check if we need to show reference selector dialog
+        selected_refs = None
+        available_refs = self.current_project.get_all_available_references(scene)
+
+        self.logger.info(f"📸 Reference check: Found {len(available_refs)} available references")
+        for ref in available_refs:
+            ref_type = ref.ref_type.value if hasattr(ref.ref_type, 'value') else str(ref.ref_type)
+            self.logger.info(f"   - {ref.name or ref.path.stem}: {ref_type}")
+
+        # Check if there are 2+ references of the same type (requires user selection)
+        from collections import Counter
+        ref_types = [ref.ref_type for ref in available_refs]
+        type_counts = Counter(ref_types)
+        has_duplicate_types = any(count >= 2 for count in type_counts.values())
+
+        self.logger.info(f"📸 Type analysis: {dict(type_counts)}, has_duplicate_types={has_duplicate_types}")
+
+        # Also show selector if we have more than 3 total refs (max limit)
+        needs_selection = has_duplicate_types or len(available_refs) > 3
+
+        if needs_selection and len(available_refs) >= 2:
+            if has_duplicate_types:
+                duplicate_types = [str(t.value if hasattr(t, 'value') else t) for t, count in type_counts.items() if count >= 2]
+                self.logger.info(f"📸 Found {len(available_refs)} references with duplicates of type(s): {', '.join(duplicate_types)}")
+            else:
+                self.logger.info(f"📸 Found {len(available_refs)} references (exceeds max 3), showing selector")
+
+            from gui.video.reference_selector_dialog import ReferenceSelectorDialog
+            from PySide6.QtWidgets import QDialog
+
+            dialog = ReferenceSelectorDialog(available_refs, max_selection=3, parent=self)
+            if dialog.exec() == QDialog.Accepted:
+                selected_refs = dialog.selected_references
+                self.logger.info(f"📸 User selected {len(selected_refs)} references for video generation")
+            else:
+                self.logger.info("📸 Reference selection cancelled, aborting video generation")
+                return  # User cancelled
+        elif len(available_refs) > 0:
+            self.logger.info(f"📸 Using all {len(available_refs)} available references (no duplicates, no selection needed)")
 
         # Emit generation request for video clip
         params = self.gather_generation_params()
@@ -2841,6 +2941,13 @@ class WorkspaceWidget(QWidget):
         params['video_prompt'] = scene.video_prompt  # Use video-specific prompt
         params['duration'] = scene.duration_sec  # Scene duration
         params['generate_video'] = True  # Flag to indicate video generation
+        params['selected_refs'] = selected_refs  # User-selected references (if any)
+
+        # IMPORTANT: For single scene generation, never use previous scene's last frame
+        # The start_frame is explicitly set above from the scene's approved_image/images
+        # The use_prev_last_frame setting should only apply during batch/export operations
+        params['use_prev_last_frame'] = False
+
         self.generation_requested.emit("generate_video_clip", params)
 
     # Veo 3.1 Frame Interaction Methods
@@ -2923,7 +3030,13 @@ class WorkspaceWidget(QWidget):
         ):
             scene.approved_image = None
             self.save_project()
-            self.populate_scene_table()
+
+            # Update the button directly to show + emoji immediately
+            start_frame_btn = self.scene_table.cellWidget(scene_index, 1)
+            if start_frame_btn and hasattr(start_frame_btn, 'set_frame'):
+                start_frame_btn.set_frame(None, auto_linked=False)
+
+            self._log_to_console(f"✓ Scene {scene_index + 1}: Start frame cleared")
 
     def _load_start_frame_image(self, scene_index: int):
         """Load an image from disk for start frame"""
@@ -3335,7 +3448,13 @@ class WorkspaceWidget(QWidget):
             scene.end_prompt = ""
             # Note: Not clearing end_frame_images so user can re-select if desired
             self.save_project()
-            self.populate_scene_table()
+
+            # Update the button directly to show + emoji immediately
+            end_frame_btn = self.scene_table.cellWidget(scene_index, 2)
+            if end_frame_btn and hasattr(end_frame_btn, 'set_frame'):
+                end_frame_btn.set_frame(None, auto_linked=False)
+
+            self._log_to_console(f"✓ Scene {scene_index + 1}: End frame cleared")
 
     def _load_end_frame_image(self, scene_index: int):
         """Load an image from disk for end frame"""
@@ -3426,48 +3545,16 @@ class WorkspaceWidget(QWidget):
                     )
 
     def _auto_link_end_frame(self, scene_index: int):
-        """Auto-link end frame to next scene's start frame"""
-        if not self.current_project or scene_index >= len(self.current_project.scenes):
-            return
-
-        scene = self.current_project.scenes[scene_index]
-
-        # Check if there's a next scene
-        if scene_index + 1 >= len(self.current_project.scenes):
-            from gui.common.dialog_manager import get_dialog_manager
-            dialog_manager = get_dialog_manager(self)
-            dialog_manager.show_warning("No Next Scene", "Cannot auto-link: this is the last scene.")
-            return
-
-        next_scene = self.current_project.scenes[scene_index + 1]
-        next_start_frame = next_scene.approved_image or (next_scene.images[0].path if next_scene.images else None)
-
-        if not next_start_frame or not next_start_frame.exists():
-            from gui.common.dialog_manager import get_dialog_manager
-            dialog_manager = get_dialog_manager(self)
-            dialog_manager.show_warning(
-                "No Next Start Frame",
-                "The next scene doesn't have a start frame yet. Generate it first."
-            )
-            return
-
-        # Set auto-link
-        scene.end_frame = next_start_frame
-        scene.end_frame_auto_linked = True
-
-        # Also set end_prompt to match next scene's start if available
-        if next_scene.prompt:
-            scene.end_prompt = f"transitioning toward: {next_scene.prompt}"
-
-        self.save_project()
-        self.populate_scene_table()
-
+        """DISABLED: Auto-linking removed - use manual frame selection only"""
+        # Auto-linking feature has been removed due to complexity and confusion
+        # Users should manually select end frames using "Select from Scene Images" instead
         from gui.common.dialog_manager import get_dialog_manager
         dialog_manager = get_dialog_manager(self)
         dialog_manager.show_info(
-            "Auto-Linked",
-            f"End frame auto-linked to Scene {scene_index + 2}'s start frame.\n"
-            "This will create a seamless transition when generating video."
+            "Feature Disabled",
+            "Auto-linking has been disabled. Please manually select an end frame using:\n"
+            "• Right-click → 'Select from Scene Images'\n"
+            "• Or generate a new end frame"
         )
 
     def _extract_video_first_frame(self, scene_index: int):
@@ -3712,10 +3799,20 @@ class WorkspaceWidget(QWidget):
         if slot_idx < len(scene.reference_images) and scene.reference_images[slot_idx]:
             ref_image = scene.reference_images[slot_idx]
             if ref_image.path and ref_image.path.exists():
-                # Use existing image viewer
-                from gui.common.image_viewer import ImageViewer
-                viewer = ImageViewer(ref_image.path, self)
-                viewer.exec_()
+                # Open image in system default viewer
+                import subprocess
+                import platform
+
+                try:
+                    if platform.system() == 'Windows':
+                        subprocess.run(['start', str(ref_image.path)], shell=True, check=False)
+                    elif platform.system() == 'Darwin':  # macOS
+                        subprocess.run(['open', str(ref_image.path)], check=False)
+                    else:  # Linux
+                        subprocess.run(['xdg-open', str(ref_image.path)], check=False)
+                except Exception as e:
+                    self.logger.error(f"Failed to open image: {e}")
+                    QMessageBox.warning(self, "Open Image Failed", f"Could not open image: {e}")
 
     def _load_reference_image(self, scene_index: int, slot_idx: int):
         """Load reference image from disk"""
@@ -3912,44 +4009,61 @@ class WorkspaceWidget(QWidget):
             # The text will still be elided, but the taller row provides visual feedback
             pass
 
-    def _on_auto_link_changed(self, state):
-        """Handle auto-link checkbox state change"""
+    def open_character_reference_wizard(self):
+        """Open the character reference generation wizard"""
+        from gui.video.reference_generation_dialog import ReferenceGenerationDialog
+
         if not self.current_project:
+            QMessageBox.warning(self, "No Project", "Please create or open a project first")
             return
 
-        enabled = state == Qt.Checked
-        self.current_project.auto_link_enabled = enabled
-        self.save_project()
+        # Get parent video_project_tab for image generator
+        parent_tab = self.parent()
+        while parent_tab and not hasattr(parent_tab, 'generate_reference_image_sync'):
+            parent_tab = parent_tab.parent()
 
-        # Log the change
-        self.logger.info(f"Auto-link end frames: {'enabled' if enabled else 'disabled'}")
-
-        # Optionally, apply auto-linking immediately if enabled
-        if enabled:
-            self._apply_auto_linking_to_all_scenes()
-
-    def _apply_auto_linking_to_all_scenes(self):
-        """Apply auto-linking to all eligible scenes"""
-        if not self.current_project or not self.current_project.scenes:
+        if not parent_tab:
+            QMessageBox.warning(
+                self,
+                "Image Generator Not Available",
+                "Could not find parent tab with image generation capability"
+            )
             return
 
-        linked_count = 0
-        for i, scene in enumerate(self.current_project.scenes[:-1]):  # Skip last scene
-            # Check if next scene has a start frame
-            next_scene = self.current_project.scenes[i + 1]
-            next_start_frame = next_scene.approved_image or (next_scene.images[0].path if next_scene.images else None)
+        # Create image generator wrapper
+        def image_generator(prompt: str, output_dir: Path, filename_prefix: str):
+            return parent_tab.generate_reference_image_sync(prompt, output_dir, filename_prefix)
 
-            if next_start_frame and next_start_frame.exists():
-                scene.end_frame = next_start_frame
-                scene.end_frame_auto_linked = True
-                if next_scene.prompt:
-                    scene.end_prompt = f"transitioning toward: {next_scene.prompt}"
-                linked_count += 1
+        # Open dialog
+        dialog = ReferenceGenerationDialog(self, self.current_project, image_generator)
+        dialog.references_generated.connect(self._on_references_generated)
+        dialog.exec()
 
-        if linked_count > 0:
-            self.save_project()
-            self.populate_scene_table()
-            self.logger.info(f"Auto-linked {linked_count} scenes")
+    def open_reference_library(self):
+        """Open the reference library management tab"""
+        # Get parent video_project_tab to switch to references tab
+        parent_tab = self.parent()
+        while parent_tab and not hasattr(parent_tab, 'tab_widget'):
+            parent_tab = parent_tab.parent()
+
+        if parent_tab and hasattr(parent_tab, 'tab_widget'):
+            # Find the References tab and switch to it
+            for i in range(parent_tab.tab_widget.count()):
+                if "References" in parent_tab.tab_widget.tabText(i):
+                    parent_tab.tab_widget.setCurrentIndex(i)
+                    return
+
+        QMessageBox.information(
+            self,
+            "Reference Library",
+            "Reference library tab not found. Check the main tab bar for '📸 References'."
+        )
+
+    def _on_references_generated(self, paths: List[Path]):
+        """Handle references generated from wizard"""
+        self.logger.info(f"References generated: {len(paths)} images")
+        # Refresh UI if needed
+        self.populate_scene_table()
 
     def enhance_all_prompts(self):
         """Request prompt enhancement"""
@@ -3981,9 +4095,10 @@ class WorkspaceWidget(QWidget):
 
         # Get auth mode from config (for Google Cloud authentication support)
         auth_mode = self.config.get('auth_mode', 'api-key')
+        google_project_id = self.config.get('google_project_id', None)
 
         self.logger.debug(f"Gathering generation params - API keys: google={google_key is not None}, openai={openai_key is not None}, anthropic={anthropic_key is not None}, stability={stability_key is not None}")
-        self.logger.debug(f"Auth mode: {auth_mode}")
+        self.logger.debug(f"Auth mode: {auth_mode}, Google project: {google_project_id}")
 
         return {
             'provider': self.img_provider_combo.currentText().lower(),
@@ -4005,6 +4120,8 @@ class WorkspaceWidget(QWidget):
             'use_last_frame_for_next': False,  # Deprecated - replaced by use_prev_last_frame
             'continuity_mode': self.continuity_mode_combo.currentData(),  # Visual continuity for images
             'auth_mode': auth_mode,  # Include auth mode for Google Cloud support
+            'google_auth_mode': auth_mode,  # Alias for video generation
+            'google_project_id': google_project_id,  # Google Cloud project ID
             'google_api_key': google_key,
             'openai_api_key': openai_key,
             'anthropic_api_key': anthropic_key,
@@ -4713,10 +4830,8 @@ class WorkspaceWidget(QWidget):
         # Save continuity settings
         self.current_project.enable_continuity = self.enable_continuity_checkbox.isChecked()
         self.current_project.enable_enhanced_storyboard = self.enable_enhanced_storyboard.isChecked()
-        self.current_project.use_last_frame_for_continuous = self.use_last_frame_checkbox.isChecked()
-
-        # Save Veo 3.1 settings
-        self.current_project.auto_link_enabled = self.auto_link_checkbox.isChecked()
+        # Note: Smart continuity detection now happens automatically during video generation
+        # No need for use_last_frame_for_continuous or auto_link_enabled checkboxes
 
         # IMPORTANT: Save audio and MIDI file information
         # These are already set when browsing, but we need to ensure they're preserved
@@ -4932,12 +5047,8 @@ class WorkspaceWidget(QWidget):
             if hasattr(self.current_project, 'enable_enhanced_storyboard'):
                 self.enable_enhanced_storyboard.setChecked(self.current_project.enable_enhanced_storyboard)
 
-            if hasattr(self.current_project, 'use_last_frame_for_continuous'):
-                self.use_last_frame_checkbox.setChecked(self.current_project.use_last_frame_for_continuous)
-
-            # Load Veo 3.1 auto-link setting
-            if hasattr(self.current_project, 'auto_link_enabled'):
-                self.auto_link_checkbox.setChecked(self.current_project.auto_link_enabled)
+            # Note: Smart continuity detection now happens automatically
+            # No UI controls needed for use_last_frame_for_continuous or auto_link_enabled
 
             # Load target duration
             if self.current_project.target_duration:

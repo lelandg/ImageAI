@@ -11,7 +11,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 from dataclasses import dataclass
 from enum import Enum
 import hashlib
@@ -27,10 +27,23 @@ except ImportError:
     genai = None
     types = None
 
+# Check if Google Cloud is available
+try:
+    import importlib.util
+    GCLOUD_AVAILABLE = importlib.util.find_spec("google.cloud.aiplatform") is not None
+except ImportError:
+    GCLOUD_AVAILABLE = False
+
+# These will be populated on first use for gcloud auth
+aiplatform = None
+google_auth_default = None
+DefaultCredentialsError = Exception
+
 
 class VeoModel(Enum):
     """Available Veo models"""
     VEO_3_GENERATE = "veo-3.0-generate-001"
+    VEO_3_1_GENERATE = "veo-3.1-generate-preview"  # Supports reference images
     VEO_3_FAST = "veo-3.0-fast-generate-001"
     VEO_2_GENERATE = "veo-2.0-generate-001"
 
@@ -54,19 +67,25 @@ class VeoGenerationConfig:
     def __post_init__(self):
         """Validate configuration after initialization"""
         # Validate duration for Veo 3 models (must be 4, 6, or 8 seconds)
-        if self.model in [VeoModel.VEO_3_GENERATE, VeoModel.VEO_3_FAST]:
+        if self.model in [VeoModel.VEO_3_GENERATE, VeoModel.VEO_3_1_GENERATE, VeoModel.VEO_3_FAST]:
             if self.duration not in [4, 6, 8]:
                 raise ValueError(
                     f"Veo 3 duration must be 4, 6, or 8 seconds, got {self.duration}. "
                     f"Use snap_duration_to_veo() to convert float durations."
                 )
 
-        # Validate reference images (max 3)
-        if self.reference_images and len(self.reference_images) > 3:
-            raise ValueError(
-                f"Veo 3 supports maximum 3 reference images, got {len(self.reference_images)}. "
-                f"Please reduce to 3 or fewer reference images."
-            )
+        # Validate reference images (only supported by Veo 3.1 and Veo 2.0)
+        if self.reference_images and len(self.reference_images) > 0:
+            if self.model not in [VeoModel.VEO_3_1_GENERATE, VeoModel.VEO_2_GENERATE]:
+                raise ValueError(
+                    f"Reference images are only supported by Veo 3.1 (veo-3.1-generate-preview) and Veo 2.0, "
+                    f"but model is {self.model.value}. Please use Veo 3.1 for reference image support."
+                )
+            if len(self.reference_images) > 3:
+                raise ValueError(
+                    f"Veo 3.1 supports maximum 3 reference images, got {len(self.reference_images)}. "
+                    f"Please reduce to 3 or fewer reference images."
+                )
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for API calls (excludes image, handled separately)"""
@@ -120,6 +139,15 @@ class VeoClient:
             "resolutions": ["720p", "1080p"],
             "aspect_ratios": ["16:9", "9:16", "1:1"],
             "supports_audio": True,
+            "supports_reference_images": False,  # Veo 3.0 does NOT support reference images
+            "generation_time": (60, 360)  # 1-6 minutes
+        },
+        VeoModel.VEO_3_1_GENERATE: {
+            "max_duration": 8,
+            "resolutions": ["720p", "1080p"],
+            "aspect_ratios": ["16:9", "9:16", "1:1"],
+            "supports_audio": True,
+            "supports_reference_images": True,  # Veo 3.1 DOES support reference images (up to 3)
             "generation_time": (60, 360)  # 1-6 minutes
         },
         VeoModel.VEO_3_FAST: {
@@ -127,6 +155,7 @@ class VeoClient:
             "resolutions": ["720p"],
             "aspect_ratios": ["16:9", "9:16"],
             "supports_audio": False,
+            "supports_reference_images": False,
             "generation_time": (11, 60)  # 11-60 seconds
         },
         VeoModel.VEO_2_GENERATE: {
@@ -134,33 +163,99 @@ class VeoClient:
             "resolutions": ["720p"],
             "aspect_ratios": ["16:9"],
             "supports_audio": False,
+            "supports_reference_images": True,  # Veo 2.0 supports reference images
             "generation_time": (60, 180)  # 1-3 minutes
         }
     }
     
-    def __init__(self, api_key: Optional[str] = None, region: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, region: Optional[str] = None, auth_mode: str = "api-key", project_id: Optional[str] = None):
         """
         Initialize Veo client.
 
         Args:
-            api_key: Google API key
+            api_key: Google API key (for api-key auth mode)
             region: User's region for restriction checking
+            auth_mode: Authentication mode - "api-key" or "gcloud"
+            project_id: Google Cloud project ID (for gcloud auth mode)
         """
         if not GENAI_AVAILABLE:
             raise ImportError("google-generativeai not installed. Run: pip install google-generativeai")
 
         self.api_key = api_key
+        self.auth_mode = auth_mode
+        self.project_id = project_id
         self.region = region or self._detect_region()
         self.logger = logging.getLogger(__name__)
         self.client = None
 
-        if api_key:
+        # Initialize client based on auth mode
+        if auth_mode == "gcloud":
+            self._init_gcloud_client()
+        elif api_key:
             # Use the new google.genai Client API instead of configure
             self.client = genai.Client(api_key=api_key)
 
         # Check regional restrictions
         self.person_generation_allowed = self._check_person_generation()
-    
+
+    def _init_gcloud_client(self):
+        """Initialize client with Google Cloud authentication (Application Default Credentials)."""
+        global aiplatform, google_auth_default, DefaultCredentialsError
+
+        if not GCLOUD_AVAILABLE:
+            raise ImportError(
+                "Google Cloud AI Platform not installed. "
+                "Run: pip install google-cloud-aiplatform"
+            )
+
+        # Lazy import Google Cloud on first use
+        if aiplatform is None:
+            self.logger.info("Loading Google Cloud AI Platform for gcloud auth...")
+            from google.cloud import aiplatform
+            from google.auth import default as google_auth_default
+            from google.auth.exceptions import DefaultCredentialsError
+
+        try:
+            # Get Application Default Credentials
+            credentials, project = google_auth_default()
+            if not project:
+                project = self.project_id
+            if not project:
+                raise ValueError(
+                    "No Google Cloud project found. "
+                    "Set a project with: gcloud config set project YOUR_PROJECT_ID"
+                )
+
+            self.project_id = project
+            # Initialize aiplatform
+            aiplatform.init(project=project, location="us-central1")
+
+            # Create genai client that will use Vertex AI (vertexai=True + ADC)
+            # IMPORTANT: Must pass vertexai=True to use Vertex AI endpoint instead of Gemini API
+            self.client = genai.Client(
+                vertexai=True,
+                project=project,
+                location="us-central1"
+            )
+            self.logger.info(f"✓ Using gcloud authentication with Vertex AI project: {project}")
+
+        except DefaultCredentialsError as e:
+            raise RuntimeError(
+                f"Google Cloud authentication failed.\n\n"
+                f"Please complete the setup:\n"
+                f"1. Install Google Cloud CLI from:\n"
+                f"   https://cloud.google.com/sdk/docs/install\n"
+                f"2. Run in terminal/PowerShell:\n"
+                f"   gcloud auth application-default login\n"
+                f"3. Set your project:\n"
+                f"   gcloud config set project YOUR_PROJECT_ID\n"
+                f"4. Enable required APIs at:\n"
+                f"   https://console.cloud.google.com/apis/library\n"
+                f"   - Vertex AI API\n"
+                f"   - Cloud Resource Manager API\n\n"
+                f"Error details: {e}"
+            )
+
     def _detect_region(self) -> str:
         """Detect user's region from IP"""
         try:
@@ -282,17 +377,23 @@ class VeoClient:
                 for idx, ref_path in enumerate(config.reference_images[:3]):  # Max 3
                     if ref_path and ref_path.exists():
                         try:
-                            # Load image bytes
+                            # Load image bytes manually (same approach as start frame)
                             with open(ref_path, 'rb') as f:
-                                ref_bytes = f.read()
+                                ref_image_bytes = f.read()
 
-                            # Create Image object for Veo API
-                            ref_image = {
-                                'imageBytes': ref_bytes,
+                            # Create reference image dict with bytes and MIME type
+                            ref_image_dict = {
+                                'imageBytes': ref_image_bytes,
                                 'mimeType': 'image/png'
                             }
+
+                            # Create VideoGenerationReferenceImage with the image dict
+                            ref_image = types.VideoGenerationReferenceImage(
+                                image=ref_image_dict,
+                                reference_type="asset"  # "asset" for character/object consistency
+                            )
                             reference_image_list.append(ref_image)
-                            self.logger.info(f"Loaded reference image {idx+1}: {ref_path} ({len(ref_bytes)} bytes)")
+                            self.logger.info(f"Loaded reference image {idx+1}: {ref_path} ({len(ref_image_bytes)} bytes)")
                         except Exception as e:
                             self.logger.warning(f"Failed to load reference image {idx+1} ({ref_path}): {e}, skipping")
 
@@ -375,19 +476,33 @@ class VeoClient:
             # Documentation states 1-6 minutes typical, using 8 minutes for buffer
             constraints = self.MODEL_CONSTRAINTS[config.model]
             max_wait = 480  # 8 minutes
-            
-            video_url = await self._poll_for_completion(response, max_wait)
-            
-            if video_url:
-                result.video_url = video_url
-                result.success = True
-                
-                # Download video to local storage
-                result.video_path = await self._download_video(video_url)
-                
-                # Note about retention
-                result.metadata["retention_warning"] = "Video URLs expire after 2 days. Local copy saved."
-                result.metadata["expires_at"] = (datetime.now() + timedelta(days=2)).isoformat()
+
+            video_result = await self._poll_for_completion(response, max_wait)
+
+            if video_result:
+                # Handle both URL (str) and raw bytes (bytes) responses
+                if isinstance(video_result, bytes):
+                    # Raw video bytes returned directly
+                    self.logger.info(f"Received raw video bytes, saving to local storage...")
+                    result.video_path = await self._save_video_bytes(video_result)
+                    result.success = True
+                    result.metadata["source"] = "raw_bytes"
+                elif isinstance(video_result, str):
+                    # URL returned, download it
+                    result.video_url = video_result
+                    result.success = True
+
+                    # Download video to local storage
+                    result.video_path = await self._download_video(video_result)
+
+                    # Note about retention
+                    result.metadata["retention_warning"] = "Video URLs expire after 2 days. Local copy saved."
+                    result.metadata["expires_at"] = (datetime.now() + timedelta(days=2)).isoformat()
+                    result.metadata["source"] = "url_download"
+                else:
+                    self.logger.error(f"Unexpected video result type: {type(video_result)}")
+                    result.success = False
+                    result.error = f"Unexpected result type: {type(video_result)}"
             else:
                 result.success = False
                 result.error = "Generation timed out or failed"
@@ -420,7 +535,7 @@ class VeoClient:
         finally:
             loop.close()
     
-    async def _poll_for_completion(self, operation: Any, max_wait: int) -> Optional[str]:
+    async def _poll_for_completion(self, operation: Any, max_wait: int) -> Optional[Union[str, bytes]]:
         """
         Poll for video generation completion using official Google API pattern.
 
@@ -453,32 +568,66 @@ class VeoClient:
                     elapsed_total = time.time() - start_time
                     self.logger.info(f"✅ Operation completed after {elapsed_total:.1f} seconds ({poll_count} polls)")
 
+                    # Check for errors first
+                    if hasattr(operation, 'error') and operation.error:
+                        self.logger.error(f"❌ Operation failed with error: {operation.error}")
+                        return None
+
                     # Extract video from response (official structure from docs)
                     try:
                         if hasattr(operation, 'response') and hasattr(operation.response, 'generated_videos'):
                             generated_videos = operation.response.generated_videos
                             if generated_videos and len(generated_videos) > 0:
                                 video = generated_videos[0].video
-                                if hasattr(video, 'uri'):
-                                    video_url = video.uri
-                                    self.logger.info(f"Retrieved video URL: {video_url[:80]}...")
 
-                                    # Parse and log video metadata if available (VEO3_FIXES enhancement)
+                                # Try URI first (cloud storage URL)
+                                if hasattr(video, 'uri') and video.uri:
+                                    video_url = video.uri
+                                    self.logger.info(f"Retrieved video URL: {video_url[:80] if len(video_url) > 80 else video_url}")
+
+                                    # Parse and log video metadata if available
                                     if hasattr(video, 'metadata'):
                                         metadata = video.metadata
                                         self.logger.info(f"Video metadata: {metadata}")
 
                                     return video_url
+
+                                # If no URI, check for video_bytes (raw video data)
+                                elif hasattr(video, 'video_bytes') and video.video_bytes:
+                                    video_bytes = video.video_bytes
+                                    self.logger.info(f"Retrieved video as raw bytes ({len(video_bytes)} bytes)")
+
+                                    # Parse and log video metadata if available
+                                    if hasattr(video, 'metadata'):
+                                        metadata = video.metadata
+                                        self.logger.info(f"Video metadata: {metadata}")
+
+                                    # Return the raw bytes - caller will need to save them
+                                    return video_bytes
+
                                 else:
-                                    self.logger.error(f"Video object has no 'uri' attribute. Attributes: {dir(video)}")
+                                    # Neither URI nor bytes available
+                                    self.logger.error(f"Video object has neither 'uri' nor 'video_bytes'.")
+                                    self.logger.error(f"  - has 'uri' attr: {hasattr(video, 'uri')}, value: {getattr(video, 'uri', '<no attr>')}")
+                                    self.logger.error(f"  - has 'video_bytes' attr: {hasattr(video, 'video_bytes')}, value length: {len(getattr(video, 'video_bytes', b'')) if hasattr(video, 'video_bytes') else 0}")
+                                    self.logger.error(f"  - video type: {type(video)}")
                                     return None
                             else:
                                 self.logger.error("No generated_videos in response")
                                 return None
                         else:
+                            # Log detailed diagnostic information
                             self.logger.error(f"Unexpected response structure. Operation attributes: {dir(operation)}")
                             if hasattr(operation, 'response'):
                                 self.logger.error(f"Response attributes: {dir(operation.response)}")
+                                # Try to log the actual response value
+                                try:
+                                    self.logger.error(f"Response value: {operation.response}")
+                                    self.logger.error(f"Response type: {type(operation.response)}")
+                                except Exception as log_err:
+                                    self.logger.error(f"Could not log response value: {log_err}")
+                            if hasattr(operation, 'metadata'):
+                                self.logger.error(f"Operation metadata: {operation.metadata}")
                             return None
                     except Exception as e:
                         self.logger.error(f"Error extracting video URL from completed operation: {e}", exc_info=True)
@@ -568,7 +717,52 @@ class VeoClient:
         except Exception as e:
             self.logger.error(f"Failed to download video: {e}", exc_info=True)
             return None
-    
+
+    async def _save_video_bytes(self, video_bytes: bytes) -> Optional[Path]:
+        """
+        Save raw video bytes to local storage.
+
+        Args:
+            video_bytes: Raw video data as bytes
+
+        Returns:
+            Local path to saved video
+        """
+        try:
+            # Create cache directory
+            cache_dir = Path.home() / ".imageai" / "cache" / "veo_videos"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            # Generate filename from hash of video bytes
+            video_hash = hashlib.sha256(video_bytes).hexdigest()[:16]
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"veo_{timestamp}_{video_hash}.mp4"
+            video_path = cache_dir / filename
+
+            # Save bytes to file
+            self.logger.info(f"Saving video bytes to {video_path}...")
+            with open(video_path, 'wb') as f:
+                f.write(video_bytes)
+
+            # Validate saved file
+            if not video_path.exists():
+                self.logger.error(f"Video file was not created at {video_path}")
+                return None
+
+            actual_size = video_path.stat().st_size
+            expected_size = len(video_bytes)
+
+            if actual_size != expected_size:
+                self.logger.error(f"File size mismatch: expected {expected_size} bytes, file is {actual_size} bytes")
+                return None
+
+            self.logger.info(f"Video saved successfully to {video_path} ({actual_size / (1024*1024):.2f} MB)")
+            return video_path
+
+        except Exception as e:
+            self.logger.error(f"Failed to save video bytes: {e}", exc_info=True)
+            return None
+
     def generate_batch(self,
                       configs: List[VeoGenerationConfig],
                       max_concurrent: int = 3) -> List[VeoGenerationResult]:

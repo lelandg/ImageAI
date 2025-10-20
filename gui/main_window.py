@@ -148,6 +148,7 @@ from core import (
     detect_image_extension, find_cached_demo, default_model_for_provider
 )
 from core.constants import DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT
+from core.video.reference_manager import ReferenceImageType
 from providers import get_provider, preload_provider, list_providers
 from gui.dialogs import ExamplesDialog
 from gui.shortcut_hint_widget import create_shortcut_hint
@@ -1001,6 +1002,37 @@ class MainWindow(QMainWindow):
         self.ref_position_combo.currentTextChanged.connect(self._on_ref_position_changed)
         position_layout.addWidget(self.ref_position_combo)
         ref_options_layout.addLayout(position_layout)
+
+        # Type dropdown
+        type_layout = QHBoxLayout()
+        type_label = QLabel("Type:")
+        type_label.setMinimumWidth(60)
+        type_layout.addWidget(type_label)
+
+        self.ref_type_combo = QComboBox()
+        self.ref_type_combo.addItems([
+            "CHARACTER",
+            "OBJECT",
+            "ENVIRONMENT",
+            "STYLE"
+        ])
+        self.ref_type_combo.setToolTip("Specify how this reference should be used")
+        self.ref_type_combo.currentTextChanged.connect(self._on_ref_type_changed)
+        type_layout.addWidget(self.ref_type_combo)
+        ref_options_layout.addLayout(type_layout)
+
+        # How to use (freeform text)
+        usage_layout = QHBoxLayout()
+        usage_label = QLabel("How to use:")
+        usage_label.setMinimumWidth(60)
+        usage_layout.addWidget(usage_label)
+
+        self.ref_usage_edit = QLineEdit()
+        self.ref_usage_edit.setPlaceholderText("e.g., 'Match the character's outfit and hairstyle'")
+        self.ref_usage_edit.setToolTip("Freeform text describing how to use this reference")
+        self.ref_usage_edit.textChanged.connect(self._on_ref_usage_changed)
+        usage_layout.addWidget(self.ref_usage_edit)
+        ref_options_layout.addLayout(usage_layout)
 
         # Tips label
         tips_label = QLabel("Tips: Gemini understands natural language\ninstructions about your reference image.")
@@ -6598,6 +6630,18 @@ For more detailed information, please refer to the full documentation.
         if self.reference_image_path:
             self._save_reference_image_to_config()
 
+    def _on_ref_type_changed(self, ref_type):
+        """Handle reference image type change."""
+        self._update_ref_instruction_preview()
+        if self.reference_image_path:
+            self._save_reference_image_to_config()
+
+    def _on_ref_usage_changed(self, usage_text):
+        """Handle reference image usage text change."""
+        self._update_ref_instruction_preview()
+        if self.reference_image_path:
+            self._save_reference_image_to_config()
+
     def _update_ref_instruction_preview(self):
         """Update the preview of what will be inserted into the prompt."""
         if not hasattr(self, 'ref_instruction_label'):
@@ -6677,7 +6721,9 @@ For more detailed information, please refer to the full documentation.
             'path': str(self.reference_image_path) if self.reference_image_path else None,
             'enabled': self.ref_image_enabled.isChecked(),
             'style': self.ref_style_combo.currentText() if hasattr(self, 'ref_style_combo') else "Natural blend",
-            'position': self.ref_position_combo.currentText() if hasattr(self, 'ref_position_combo') else "Auto"
+            'position': self.ref_position_combo.currentText() if hasattr(self, 'ref_position_combo') else "Auto",
+            'type': self.ref_type_combo.currentText() if hasattr(self, 'ref_type_combo') else "CHARACTER",
+            'usage': self.ref_usage_edit.text() if hasattr(self, 'ref_usage_edit') else ""
         }
         self.config.set('reference_images', ref_images)
         self.config.save()
@@ -6735,6 +6781,10 @@ For more detailed information, please refer to the full documentation.
                             self.ref_style_combo.setCurrentText(ref_image_data['style'])
                         if 'position' in ref_image_data:
                             self.ref_position_combo.setCurrentText(ref_image_data['position'])
+                        if 'type' in ref_image_data:
+                            self.ref_type_combo.setCurrentText(ref_image_data['type'])
+                        if 'usage' in ref_image_data:
+                            self.ref_usage_edit.setText(ref_image_data['usage'])
                         self._update_ref_instruction_preview()
 
                         # Update button state after loading reference

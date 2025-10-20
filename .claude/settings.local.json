@@ -31,7 +31,9 @@
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --no-decorate -20)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/video/workspace_widget.py)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/video/video_project_tab.py)",
-      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI status --short)"
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI status --short)",
+      "Read(//tmp/**)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff core/video/veo_client.py)"
     ],
     "deny": [],
     "ask": []
