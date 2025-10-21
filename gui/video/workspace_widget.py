@@ -1074,7 +1074,7 @@ class WorkspaceWidget(QWidget):
         self.enhance_prompts_btn.setEnabled(False)
         controls_layout.addWidget(self.enhance_prompts_btn)
 
-        self.enhance_video_prompts_btn = QPushButton("Generate for Video")
+        self.enhance_video_prompts_btn = QPushButton("Generate Video Prompts")
         self.enhance_video_prompts_btn.setToolTip("Add camera movement and motion to image prompts for video generation")
         self.enhance_video_prompts_btn.clicked.connect(self.enhance_for_video)
         self.enhance_video_prompts_btn.setEnabled(False)
@@ -4009,21 +4009,30 @@ class WorkspaceWidget(QWidget):
 
     def _apply_row_wrap(self, row_index: int, wrapped: bool):
         """Apply wrap state to all text fields in a row"""
-        # Adjust row height based on wrap state
+        # Adjust row height and PromptFieldWidget heights based on wrap state
         # When wrapped, make row taller to show more of the prompt text
         if wrapped:
-            # Make row 3x taller when wrapped
-            self.scene_table.setRowHeight(row_index, 90)
+            # Make row much taller when wrapped to show full prompts
+            self.scene_table.setRowHeight(row_index, 200)
+
+            # Update PromptFieldWidget heights for columns 8, 9, 10 (Start, End, Video prompts)
+            for col in [8, 9, 10]:
+                widget = self.scene_table.cellWidget(row_index, col)
+                if widget and hasattr(widget, 'text_edit'):
+                    # Allow text edit to expand to show full content
+                    widget.text_edit.setMinimumHeight(180)
+                    widget.text_edit.setMaximumHeight(180)
         else:
             # Return to default height
             self.scene_table.setRowHeight(row_index, 30)
 
-        # Enable word wrap for text items in Source column (column 6)
-        source_item = self.scene_table.item(row_index, 6)
-        if source_item:
-            # QTableWidget doesn't support per-cell word wrap, but we can adjust the row height
-            # The text will still be elided, but the taller row provides visual feedback
-            pass
+            # Reset PromptFieldWidget heights for columns 8, 9, 10
+            for col in [8, 9, 10]:
+                widget = self.scene_table.cellWidget(row_index, col)
+                if widget and hasattr(widget, 'text_edit'):
+                    # Return to compact single-line height
+                    widget.text_edit.setMinimumHeight(30)
+                    widget.text_edit.setMaximumHeight(200)  # Still allow some growth
 
     def open_character_reference_wizard(self):
         """Open the character reference generation wizard"""

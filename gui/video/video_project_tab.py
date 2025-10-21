@@ -208,6 +208,15 @@ class VideoGenerationThread(QThread):
             base_texts = [scene.prompt if scene.prompt else scene.source
                          for scene in self.project.scenes]
 
+            # Collect source lyrics for context (helps LLM understand what each scene visualizes)
+            source_lyrics = [scene.source for scene in self.project.scenes]
+
+            # Collect lyric timings for frame-accurate transitions within batched scenes
+            lyric_timings = [scene.metadata.get('lyric_timings') for scene in self.project.scenes]
+
+            # Collect scene durations
+            scene_durations = [scene.duration_sec for scene in self.project.scenes]
+
             self.progress_update.emit(10, f"🎬 BATCH processing {total_scenes} scenes for video in 1 API call...")
 
             # Use batch_enhance_for_video for efficiency (ONE API call for all scenes)
@@ -218,7 +227,10 @@ class VideoGenerationThread(QThread):
                     model=llm_model,
                     style=style,
                     temperature=0.7,
-                    console_callback=None  # Progress updates handled by parent
+                    console_callback=None,  # Progress updates handled by parent
+                    source_lyrics=source_lyrics,  # Provide lyric context
+                    lyric_timings=lyric_timings,  # Provide frame-accurate timing info
+                    scene_durations=scene_durations  # Provide total scene durations
                 )
 
                 # Apply video prompts to scenes

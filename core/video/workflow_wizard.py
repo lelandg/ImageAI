@@ -172,7 +172,7 @@ class WorkflowWizard:
             is_optional=False,
             is_blocking=True,
             help_text=(
-                "Click 'Generate for Videos' to create visuals for your scenes.\n\n"
+                "Click 'Generate Video Prompts' to create visuals for your scenes.\n\n"
                 "**Generation Options:**\n"
                 "- **Images (Gemini/DALL-E):** Fast, cheaper - combine with Ken Burns effect\n"
                 "- **Video Clips (Veo 3):** Native motion, higher quality, more expensive\n\n"
@@ -382,7 +382,7 @@ class WorkflowWizard:
             WorkflowStep.AUDIO_FILE: "Upload Audio File (or Skip)",
             WorkflowStep.GENERATE_STORYBOARD: "Generate Storyboard",
             WorkflowStep.ENHANCE_PROMPTS: "Enhance with AI (or Skip)",
-            WorkflowStep.GENERATE_MEDIA: "Generate for Videos",
+            WorkflowStep.GENERATE_MEDIA: "Generate Video Prompts",
             WorkflowStep.REVIEW_APPROVE: "Review Scenes",
             WorkflowStep.EXPORT_VIDEO: "Export Final Video"
         }

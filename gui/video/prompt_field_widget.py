@@ -12,8 +12,9 @@ This module provides a reusable widget for prompt editing with:
 import logging
 from typing import Optional, Callable
 
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLineEdit, QPushButton
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QTextEdit, QPushButton
 from PySide6.QtCore import Signal
+from PySide6.QtGui import QTextOption
 
 from core.video.project import PromptHistory
 
@@ -52,10 +53,15 @@ class PromptFieldWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
-        # Text edit field
-        self.text_edit = QLineEdit()
+        # Text edit field (multiline)
+        self.text_edit = QTextEdit()
         self.text_edit.setPlaceholderText(placeholder)
+        self.text_edit.setWordWrapMode(QTextOption.WrapAtWordBoundaryOrAnywhere)
+        self.text_edit.setAcceptRichText(False)
         self.text_edit.textChanged.connect(self._on_text_changed)
+        # Set minimum height to show at least 1-2 lines
+        self.text_edit.setMinimumHeight(30)
+        self.text_edit.setMaximumHeight(200)  # Limit height to avoid excessive growth
         layout.addWidget(self.text_edit, stretch=1)  # Take most space
 
         # LLM button
@@ -84,10 +90,13 @@ class PromptFieldWidget(QWidget):
         self.redo_button.setEnabled(False)
         layout.addWidget(self.redo_button)
 
-    def _on_text_changed(self, text: str):
+    def _on_text_changed(self):
         """Handle text change"""
         # Only add to history if it's a significant change (not every keystroke)
         # We'll add to history when LLM generates or when user explicitly commits
+        text = self.text_edit.toPlainText()
+        # Update tooltip with full text
+        self.text_edit.setToolTip(text if text else "")
         self.text_changed.emit(text)
         self._update_button_states()
 
@@ -100,24 +109,27 @@ class PromptFieldWidget(QWidget):
             add_to_history: If True, add current text to history before changing
         """
         if add_to_history:
-            current = self.text_edit.text()
+            current = self.text_edit.toPlainText()
             if current and current != text:
                 self.history.add(current)
 
         # Temporarily block signals to avoid recursive updates
         self.text_edit.blockSignals(True)
-        self.text_edit.setText(text)
+        self.text_edit.setPlainText(text)
         self.text_edit.blockSignals(False)
+
+        # Update tooltip with full text
+        self.text_edit.setToolTip(text if text else "")
 
         self._update_button_states()
 
     def get_text(self) -> str:
         """Get current text"""
-        return self.text_edit.text()
+        return self.text_edit.toPlainText()
 
     def commit_to_history(self):
         """Commit current text to history"""
-        text = self.text_edit.text()
+        text = self.text_edit.toPlainText()
         if text:
             self.history.add(text)
             self._update_button_states()
@@ -125,7 +137,7 @@ class PromptFieldWidget(QWidget):
     def _on_undo(self):
         """Handle undo button click"""
         # First, save current state if not already in history
-        current = self.text_edit.text()
+        current = self.text_edit.toPlainText()
         if current and (not self.history.history or self.history.get_current() != current):
             self.history.add(current)
 

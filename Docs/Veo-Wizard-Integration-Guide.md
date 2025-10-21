@@ -74,28 +74,28 @@ if next_action['choices']:
 ### GUI Widget Structure Recommendation
 
 ```
-┌────────────────────────────────────────────────────────┐
+┌───────────────────────────────────────────────────────┐
 │ Video Project: "American Reckoning"                   │
 │ Progress: ████████████░░░░░░░░  75% Complete          │
-├────────────────────────────────────────────────────────┤
-│                                                        │
-│ ✓ 1. Input Text/Lyrics                 [Edit]       │
-│ ✓ 2. MIDI File (optional)              [Change]     │
-│ ✓ 3. Audio Track (optional)            [Change]     │
-│ ✓ 4. Generate Storyboard                             │
-│ ✓ 5. Enhance Prompts (optional)                      │
-│ ● 6. Generate Images/Videos             [Current]   │
-│ ○ 7. Review & Approve                                │
-│ ○ 8. Export Final Video                             │
-│                                                        │
-├────────────────────────────────────────────────────────┤
+├───────────────────────────────────────────────────────┤
+│                                                       │
+│ ✓ 1. Input Text/Lyrics                   [Edit]       │
+│ ✓ 2. MIDI File (optional)                [Change]     │
+│ ✓ 3. Audio Track (optional)              [Change]     │
+│ ✓ 4. Generate Storyboard                              │
+│ ✓ 5. Enhance Prompts (optional)                       │
+│ ● 6. Generate Images/Videos             [Current]     │
+│ ○ 7. Review & Approve                                 │
+│ ○ 8. Export Final Video                               │
+│                                                       │
+├───────────────────────────────────────────────────────┤
 │ Current Step: Generate Images/Videos                  │
-│                                                        │
-│ Click 'Generate for Videos' to create visuals.        │
-│                                                        │
+│                                                       │
+│ Click 'Generate Video Prompts' to create visuals.     │
+│                                                       │
 │ [?] Help: Shows generation options explanation        │
-│                                                        │
-│ ┌──────────────────────────────────────────────┐     │
+│                                                       │
+│ ┌───────────────────────────────────────────────┐     │
 │ │ Choose Generation Method:                     │     │
 │ │                                               │     │
 │ │ ○ Images (Gemini) + Ken Burns Effect          │     │
@@ -105,10 +105,10 @@ if next_action['choices']:
 │ │   Native motion, MIDI-synced durations        │     │
 │ │   (~$0.60/scene for 6s clip)                  │     │
 │ │                                               │     │
-│ └──────────────────────────────────────────────┘     │
-│                                                        │
-│ [Generate for Videos]  [Skip for Now]                │
-└────────────────────────────────────────────────────────┘
+│ └───────────────────────────────────────────────┘     │
+│                                                       │
+│ [Generate for Videos]  [Skip for Now]                 │
+└───────────────────────────────────────────────────────┘
 ```
 
 ### Code for GUI Display

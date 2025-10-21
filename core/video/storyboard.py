@@ -521,7 +521,7 @@ class StoryboardGenerator:
             scenes: List of scenes to merge
 
         Returns:
-            Single merged Scene object
+            Single merged Scene object with timing information for each lyric line
         """
         if len(scenes) == 1:
             return scenes[0]
@@ -535,6 +535,20 @@ class StoryboardGenerator:
         # Sum durations
         total_duration = sum(scene.duration_sec for scene in scenes)
 
+        # Calculate timing information for each lyric line within the merged scene
+        lyric_timings = []
+        cumulative_time = 0.0
+        for scene in scenes:
+            start_time = cumulative_time
+            end_time = cumulative_time + scene.duration_sec
+            lyric_timings.append({
+                'text': scene.source,
+                'start_sec': round(start_time, 1),
+                'end_sec': round(end_time, 1),
+                'duration_sec': round(scene.duration_sec, 1)
+            })
+            cumulative_time = end_time
+
         # Use the order of the first scene
         merged_scene = Scene(
             source=combined_source,
@@ -547,6 +561,7 @@ class StoryboardGenerator:
         merged_scene.metadata = scenes[0].metadata.copy()
         merged_scene.metadata['batched_count'] = len(scenes)
         merged_scene.metadata['original_scene_ids'] = [s.order for s in scenes]
+        merged_scene.metadata['lyric_timings'] = lyric_timings  # Store timing for each lyric line
 
         return merged_scene
 

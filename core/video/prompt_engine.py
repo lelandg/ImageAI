@@ -578,7 +578,10 @@ Return one enhanced visual description per line, numbered:
                                 model: str,
                                 style: PromptStyle = PromptStyle.CINEMATIC,
                                 temperature: float = 0.7,
-                                console_callback=None) -> List[str]:
+                                console_callback=None,
+                                source_lyrics: Optional[List[str]] = None,
+                                lyric_timings: Optional[List[Optional[List[Dict]]]] = None,
+                                scene_durations: Optional[List[float]] = None) -> List[str]:
         """
         Batch enhance multiple prompts for video generation in ONE API call.
         Adds camera movements, motion, and temporal progression with scene continuity.
@@ -590,6 +593,9 @@ Return one enhanced visual description per line, numbered:
             style: Style of enhancement
             temperature: Creativity parameter
             console_callback: Optional callback for logging
+            source_lyrics: Optional list of source lyrics for each scene (provides context)
+            lyric_timings: Optional list of timing dicts for each lyric line within batched scenes
+            scene_durations: Optional list of total scene durations in seconds
 
         Returns:
             List of video-enhanced prompts with camera movements and continuity
@@ -621,21 +627,45 @@ CRITICAL FORMATTING:
 - Each prompt: keep core description + add 2-3 motion elements
 - Make camera work subtle and cinematic"""
 
-        # Create batch prompt with context about scene flow
+        # Create batch prompt with context about scene flow and lyrics
         batch_prompt = f"""Transform these {len(texts)} image descriptions into video prompts with camera movement for continuous single-shot videos.
 
-Image descriptions:
-
 """
-        for i, text in enumerate(texts, 1):
-            batch_prompt += f"{i}. {text}\n"
+
+        # Add lyric context with frame-accurate timing if available
+        if source_lyrics and lyric_timings and scene_durations:
+            batch_prompt += "FRAME-ACCURATE TIMING (Veo 3 generates at 24 FPS):\n\n"
+            for i, (lyrics, text, timings, duration) in enumerate(zip(source_lyrics, texts, lyric_timings, scene_durations), 1):
+                batch_prompt += f"{i}. SCENE DURATION: {duration:.1f}s\n"
+                batch_prompt += f"   IMAGE DESCRIPTION: {text}\n"
+
+                if timings:
+                    # Scene has batched lyrics with timing info
+                    batch_prompt += f"   LYRIC TIMELINE (describe visual evolution matching these timestamps):\n"
+                    for timing in timings:
+                        batch_prompt += f"     • {timing['start_sec']:.1f}s-{timing['end_sec']:.1f}s ({timing['duration_sec']:.1f}s): \"{timing['text']}\"\n"
+                else:
+                    # Single lyric line, no timing breakdown
+                    batch_prompt += f"   LYRICS: {lyrics}\n"
+
+                batch_prompt += "\n"
+        elif source_lyrics:
+            batch_prompt += "LYRICS CONTEXT (what this scene visualizes):\n\n"
+            for i, (lyrics, text) in enumerate(zip(source_lyrics, texts), 1):
+                batch_prompt += f"{i}. LYRICS: {lyrics}\n   IMAGE DESCRIPTION: {text}\n\n"
+        else:
+            batch_prompt += "Image descriptions:\n\n"
+            for i, text in enumerate(texts, 1):
+                batch_prompt += f"{i}. {text}\n"
 
         batch_prompt += f"""
-
 Return {len(texts)} numbered video prompts with:
 - Camera movements appropriate to each scene (single continuous shot)
 - Natural subject/environmental motion within the same scene
-- NO transitions, NO cuts, NO scene changes
+- INCORPORATE the lyric content/meaning into the visual storytelling
+- For batched scenes: Use explicit time markers (e.g., "0-3s: ..., 3-5s: ..., 5-8s: ...") to describe visual evolution that matches the lyric timeline
+- Describe smooth transitions between lyric moments at their exact timestamps
+- NO cuts, NO scene changes - describe ONE continuous camera movement with evolving action
 - Each prompt describes ONE continuous unified shot only
 
 Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
@@ -672,10 +702,25 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
                 console_callback(f"🎬 Batch enhancing {len(texts)} prompts for video in ONE API call...", "INFO")
 
             self.logger.info(f"Batch enhancing {len(texts)} prompts for video with {provider}/{model}")
+
+            # Log the full request
+            self.logger.info("=== VIDEO PROMPT ENHANCEMENT REQUEST ===")
+            self.logger.info(f"System prompt (FULL, {len(system_prompt)} chars):")
+            self.logger.info(system_prompt)
+            self.logger.info(f"User prompt (FULL, {len(batch_prompt)} chars):")
+            self.logger.info(batch_prompt)
+            self.logger.info("=== END VIDEO PROMPT REQUEST ===")
+
             response = self.litellm.completion(**kwargs)
 
             # Parse the response
             enhanced_text = response.choices[0].message.content.strip()
+
+            # Log the full response
+            self.logger.info("=== VIDEO PROMPT ENHANCEMENT RESPONSE ===")
+            self.logger.info(f"Response (FULL, {len(enhanced_text)} chars):")
+            self.logger.info(enhanced_text)
+            self.logger.info("=== END VIDEO PROMPT RESPONSE ===")
 
             # Use the batch parser
             results = self._parse_batch_response(enhanced_text, len(texts))
