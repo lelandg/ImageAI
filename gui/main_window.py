@@ -1965,9 +1965,10 @@ class MainWindow(QMainWindow):
             self.btn_help_forward.setEnabled(False)
             
             return  # Exit early if WebEngine works
-            
-        except ImportError:
-            print("QWebEngineView not available, falling back to QTextBrowser")
+
+        except Exception as e:
+            # Catch all exceptions, not just ImportError, to ensure fallback always works
+            print(f"QWebEngineView initialization failed ({type(e).__name__}: {e}), falling back to QTextBrowser")
             
         # Fallback to QTextBrowser implementation
         from PySide6.QtCore import QUrl
