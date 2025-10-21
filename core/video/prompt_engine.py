@@ -615,10 +615,12 @@ For each scene, add:
 Style: {style.value}
 
 CRITICAL REQUIREMENTS:
-- Each scene MUST be a SINGLE CONTINUOUS SHOT with NO CUTS or scene changes
-- NEVER use words like "transition," "cut to," "next shot," or "scene change"
-- Describe smooth camera movement within ONE unified scene only
-- Keep all action within the same continuous space and time
+- Each scene MUST be a SINGLE CONTINUOUS SHOT with NO HARD CUTS between scenes
+- NEVER use editing terminology like "cut to," "next shot," "smash cut," or "jump cut"
+- DO describe smooth visual evolution, gradual transformations, and temporal progression
+- DO use natural transition phrases like "transitions to," "evolves into," "gradually reveals," "morphs from," "shifts focus to"
+- Keep camera movement continuous (pans, tilts, zooms, tracking) within one unified shot
+- The scene can smoothly evolve over time - it doesn't have to be static
 
 CRITICAL FORMATTING:
 - Return EXACTLY {len(texts)} enhanced video prompts
@@ -664,9 +666,22 @@ Return {len(texts)} numbered video prompts with:
 - Natural subject/environmental motion within the same scene
 - INCORPORATE the lyric content/meaning into the visual storytelling
 - For batched scenes: Use explicit time markers (e.g., "0-3s: ..., 3-5s: ..., 5-8s: ...") to describe visual evolution that matches the lyric timeline
-- Describe smooth transitions between lyric moments at their exact timestamps
-- NO cuts, NO scene changes - describe ONE continuous camera movement with evolving action
-- Each prompt describes ONE continuous unified shot only
+- Describe smooth visual transitions between lyric moments at their exact timestamps using phrases like:
+  * "transitions to," "evolves into," "gradually reveals," "shifts to"
+  * "morphs from X to Y," "transforms into," "the scene shifts focus to"
+  * "During seconds 0-3..., then at 3s transitions to..., by 5s evolves into..."
+- NO hard cuts or abrupt scene changes - describe ONE continuous camera movement with smoothly evolving visuals
+- Each prompt describes ONE continuous unified shot with smooth internal visual progression
+
+GOOD EXAMPLES:
+  ✓ "...the camera slowly pans right, transitioning focus from the forest to the ocean shore"
+  ✓ "...as the sun sets (0-3s), the scene gradually reveals stars appearing (3-5s), evolving into a full night sky (5-8s)"
+  ✓ "...the character walks forward as the background morphs from city to countryside"
+
+BAD EXAMPLES:
+  ✗ "Cut to a new location" (hard cut)
+  ✗ "Next shot shows..." (editing terminology)
+  ✗ "Scene changes to..." (discontinuous)
 
 Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
 
@@ -1153,10 +1168,12 @@ class PromptEngine:
 Style: {style.value}
 
 CRITICAL REQUIREMENTS:
-- The video MUST be a SINGLE CONTINUOUS SHOT with NO CUTS or scene changes
-- NEVER use words like "transition," "cut to," "next shot," or "scene change"
-- Describe smooth camera movement within ONE unified scene only
-- Keep all action within the same continuous space and time
+- The video MUST be a SINGLE CONTINUOUS SHOT with NO HARD CUTS between scenes
+- NEVER use editing terminology like "cut to," "next shot," "smash cut," or "jump cut"
+- DO describe smooth visual evolution, gradual transformations, and temporal progression
+- DO use natural transition phrases like "transitions to," "evolves into," "gradually reveals," "morphs from"
+- Keep camera movement continuous (pans, tilts, zooms, tracking) within one unified shot
+- The scene can smoothly evolve over time - it doesn't have to be static
 
 FORMATTING:
 - Return ONLY the enhanced video prompt, no preamble
@@ -1172,11 +1189,13 @@ FORMATTING:
 Current scene description: {text}
 
 Transform this into a single continuous shot video prompt that:
-1. Adds appropriate camera movement (no cuts, one continuous shot)
+1. Adds appropriate camera movement (no hard cuts, one continuous shot)
 2. Includes natural motion and action within the same scene
-3. Creates smooth temporal flow within one unified space
+3. Creates smooth temporal flow and visual evolution within one unified space
+4. Uses transition phrases to describe how the scene smoothly evolves over time
 
-CRITICAL: This must be ONE CONTINUOUS SHOT with NO scene changes, NO cuts, NO transitions.
+CRITICAL: This must be ONE CONTINUOUS SHOT with NO hard cuts or scene changes.
+Describe smooth visual transitions and evolution (e.g., "transitions to," "evolves into," "gradually reveals").
 
 Return only the enhanced video prompt."""
         else:
@@ -1185,9 +1204,11 @@ Return only the enhanced video prompt."""
 Transform this into a dynamic video prompt by adding:
 1. Appropriate camera movement (pan, tilt, zoom, etc.) within ONE continuous shot
 2. Subject or environmental motion within the same scene
-3. Temporal progression within the same unified space
+3. Temporal progression and visual evolution within the same unified space
+4. Transition phrases to describe smooth visual development over time
 
-CRITICAL: This must be ONE CONTINUOUS SHOT with NO scene changes, NO cuts, NO transitions.
+CRITICAL: This must be ONE CONTINUOUS SHOT with NO hard cuts or scene changes.
+Describe smooth visual transitions and evolution (e.g., "transitions to," "evolves into," "gradually reveals").
 
 Return only the enhanced video prompt."""
 

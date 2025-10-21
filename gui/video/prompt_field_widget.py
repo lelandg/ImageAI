@@ -13,7 +13,7 @@ import logging
 from typing import Optional, Callable
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QTextEdit, QPushButton
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QTextOption
 
 from core.video.project import PromptHistory
@@ -68,27 +68,30 @@ class PromptFieldWidget(QWidget):
         self.llm_button = QPushButton("✨")
         self.llm_button.setToolTip("Generate with LLM")
         self.llm_button.setMaximumWidth(30)
+        self.llm_button.setFixedHeight(30)  # Match text_edit minimum height
         self.llm_button.setStyleSheet("QPushButton { padding: 2px; margin: 0px; font-size: 16px; }")
         self.llm_button.clicked.connect(self.llm_requested.emit)
-        layout.addWidget(self.llm_button)
+        layout.addWidget(self.llm_button, alignment=Qt.AlignTop)  # Top-align in layout
 
         # Undo button
         self.undo_button = QPushButton("↶")
         self.undo_button.setToolTip("Undo")
         self.undo_button.setMaximumWidth(30)
+        self.undo_button.setFixedHeight(30)  # Match text_edit minimum height
         self.undo_button.setStyleSheet("QPushButton { padding: 2px; margin: 0px; font-size: 16px; }")
         self.undo_button.clicked.connect(self._on_undo)
         self.undo_button.setEnabled(False)
-        layout.addWidget(self.undo_button)
+        layout.addWidget(self.undo_button, alignment=Qt.AlignTop)  # Top-align in layout
 
         # Redo button
         self.redo_button = QPushButton("↷")
         self.redo_button.setToolTip("Redo")
         self.redo_button.setMaximumWidth(30)
+        self.redo_button.setFixedHeight(30)  # Match text_edit minimum height
         self.redo_button.setStyleSheet("QPushButton { padding: 2px; margin: 0px; font-size: 16px; }")
         self.redo_button.clicked.connect(self._on_redo)
         self.redo_button.setEnabled(False)
-        layout.addWidget(self.redo_button)
+        layout.addWidget(self.redo_button, alignment=Qt.AlignTop)  # Top-align in layout
 
     def _on_text_changed(self):
         """Handle text change"""

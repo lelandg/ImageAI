@@ -125,7 +125,9 @@ class ReferenceGenerationDialog(QDialog):
         layout.addWidget(instructions)
 
         # Splitter for input and preview
+        from gui.common.splitter_style import apply_splitter_style
         splitter = QSplitter(Qt.Vertical)
+        apply_splitter_style(splitter)
         layout.addWidget(splitter, stretch=1)
 
         # === INPUT SECTION ===

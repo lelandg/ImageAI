@@ -308,9 +308,18 @@ class WorkspaceWidget(QWidget):
         layout.addWidget(self.create_project_header())
 
         # Main vertical splitter - top for workspace, bottom for image/console
+        from gui.common.splitter_style import apply_splitter_style
         main_splitter = QSplitter(Qt.Vertical)
+        apply_splitter_style(main_splitter)
 
-        # Top section - existing workspace
+        # Top section - existing workspace (wrapped in scroll area for larger image/video panel)
+        from PySide6.QtWidgets import QScrollArea
+        workspace_scroll = QScrollArea()
+        workspace_scroll.setWidgetResizable(True)
+        workspace_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        workspace_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        workspace_scroll.setFrameShape(QScrollArea.NoFrame)
+
         workspace_widget = QWidget()
         workspace_layout = QVBoxLayout(workspace_widget)
         workspace_layout.setContentsMargins(0, 0, 0, 0)
@@ -334,6 +343,7 @@ class WorkspaceWidget(QWidget):
 
         # Horizontal splitter for workspace
         self.h_splitter = QSplitter(Qt.Horizontal)
+        apply_splitter_style(self.h_splitter)
 
         # Wizard container (far left panel in splitter)
         self.wizard_container = QWidget()
@@ -410,7 +420,9 @@ class WorkspaceWidget(QWidget):
         # Status bar
         workspace_layout.addWidget(self.create_status_bar())
 
-        main_splitter.addWidget(workspace_widget)
+        # Set workspace widget in scroll area
+        workspace_scroll.setWidget(workspace_widget)
+        main_splitter.addWidget(workspace_scroll)
 
         # Bottom section - Image view and status console
         bottom_widget = QWidget()
@@ -419,6 +431,7 @@ class WorkspaceWidget(QWidget):
 
         # Image view and status console in vertical splitter
         image_console_splitter = QSplitter(Qt.Vertical)
+        apply_splitter_style(image_console_splitter)
 
         # Media viewer container (holds both image and video player)
         media_viewer_container = QWidget()
@@ -614,6 +627,18 @@ class WorkspaceWidget(QWidget):
         main_splitter.setStretchFactor(1, 1)
 
         layout.addWidget(main_splitter)
+
+        # Store splitter references for save/restore
+        self.main_splitter = main_splitter
+        self.image_console_splitter = image_console_splitter
+
+        # Connect splitter signals to save positions
+        main_splitter.splitterMoved.connect(self._save_splitter_positions)
+        self.h_splitter.splitterMoved.connect(self._save_splitter_positions)
+        image_console_splitter.splitterMoved.connect(self._save_splitter_positions)
+
+        # Restore splitter positions from saved settings (deferred until widget is shown)
+        QTimer.singleShot(200, self._restore_splitter_positions)
     
     def create_project_header(self) -> QWidget:
         """Create project header with name and controls"""
@@ -1106,12 +1131,12 @@ class WorkspaceWidget(QWidget):
         
         layout.addLayout(controls_layout)
         
-        # Scene table (10 columns - optimized for Veo 3.1)
+        # Scene table (11 columns - optimized for Veo 3.1)
         self.scene_table = QTableWidget()
         self.scene_table.setColumnCount(11)
         self.scene_table.setHorizontalHeaderLabels([
             "#", "Start Frame", "End Frame", "Ref Images", "🎬", "Time", "⤵️",
-            "Source", "Start Prompt", "End Prompt (Optional)", "Video Prompt"
+            "Source", "Video Prompt", "Start Prompt", "End Prompt (Optional)"
         ])
         # Set size policy to expand vertically to show more rows
         self.scene_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -1124,7 +1149,7 @@ class WorkspaceWidget(QWidget):
         # Disable word wrap by default - individual rows can be toggled
         self.scene_table.setWordWrap(False)
         self.scene_table.setTextElideMode(Qt.ElideRight)
-        # Set tooltips for headers (10 columns: 0-9)
+        # Set tooltips for headers (11 columns: 0-10)
         self.scene_table.horizontalHeaderItem(0).setToolTip("Scene number")
         self.scene_table.horizontalHeaderItem(1).setToolTip("Start Frame\nFirst frame of video (hover for preview, click to view, right-click for options)")
         self.scene_table.horizontalHeaderItem(2).setToolTip("End Frame\nLast frame of video (hover for preview, click to view, right-click for options)\nLeave empty for Veo 3 single-frame video")
@@ -1132,10 +1157,10 @@ class WorkspaceWidget(QWidget):
         self.scene_table.horizontalHeaderItem(4).setToolTip("Generate Video\nClick to view first frame when video exists, double-click to regenerate")
         # Column 5 (Time): No tooltip
         self.scene_table.horizontalHeaderItem(6).setToolTip("Wrap\nToggle prompt text wrapping for this row")
-        self.scene_table.horizontalHeaderItem(7).setToolTip("Source\nOriginal lyrics or text")
-        self.scene_table.horizontalHeaderItem(8).setToolTip("Start Prompt\nAI-enhanced prompt for start frame generation (✨ LLM + ↶↷ undo/redo)")
-        self.scene_table.horizontalHeaderItem(9).setToolTip("End Prompt\nOptional: describe the ending frame for Veo 3.1 transition (✨ LLM + ↶↷ undo/redo)")
-        self.scene_table.horizontalHeaderItem(10).setToolTip("Video Prompt\nAI-enhanced prompt with camera movement for video generation (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(7).setToolTip("Source\nOriginal lyrics or text (hover for full text)")
+        self.scene_table.horizontalHeaderItem(8).setToolTip("Video Prompt\nAI-enhanced prompt with camera movement for video generation (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(9).setToolTip("Start Prompt\nAI-enhanced prompt for start frame generation (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(10).setToolTip("End Prompt\nOptional: describe the ending frame for Veo 3.1 transition (✨ LLM + ↶↷ undo/redo)")
         # Configure columns - all resizable by user
         header = self.scene_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)  # All columns user-resizable
@@ -1152,9 +1177,9 @@ class WorkspaceWidget(QWidget):
         header.resizeSection(5, 45)   # Time - narrow
         header.resizeSection(6, 40)   # Wrap button (⤵️) - minimized
         header.resizeSection(7, 120)  # Source - compact
-        header.resizeSection(8, 360)  # Start Prompt - wide (text + ✨ + ↶↷)
-        header.resizeSection(9, 360)  # End Prompt - wide (text + ✨ + ↶↷)
-        header.resizeSection(10, 360) # Video Prompt - wide (text + ✨ + ↶↷)
+        header.resizeSection(8, 360)  # Video Prompt - wide (text + ✨ + ↶↷) - MOVED
+        header.resizeSection(9, 360)  # Start Prompt - wide (text + ✨ + ↶↷) - MOVED
+        header.resizeSection(10, 360) # End Prompt - wide (text + ✨ + ↶↷) - MOVED
         # Enforce minimum width for Ref Images column (col 3) - must fit 3 buttons
         # 3 buttons × 50px (min) + 2 spacings × 2px + margins 4px = 158px minimum
         header.sectionResized.connect(self._on_column_resized)
@@ -1672,19 +1697,51 @@ class WorkspaceWidget(QWidget):
                     if scene.source.strip().startswith('[') and scene.source.strip().endswith(']'):
                         self.logger.debug(f"Scene {i}: Skipping section marker '{scene.source}'")
                         continue
-                    
-                    if lyric_index < len(timed_lyrics):
-                        timed_lyric = timed_lyrics[lyric_index]
-                        old_duration = scene.duration_sec
-                        scene.duration_sec = timed_lyric.end_time - timed_lyric.start_time
-                        scene.metadata['llm_start_time'] = timed_lyric.start_time
-                        scene.metadata['llm_end_time'] = timed_lyric.end_time
-                        if timed_lyric.section_type:
-                            scene.metadata['section'] = timed_lyric.section_type
-                        
-                        lyric_index += 1
-                        updated_count += 1
-                
+
+                    # Check if this scene was batched (contains multiple lyrics)
+                    batched_count = scene.metadata.get('batched_count', 1)
+
+                    if batched_count > 1:
+                        # Batched scene - need to sum durations from multiple LLM timings
+                        if lyric_index + batched_count <= len(timed_lyrics):
+                            # Get all timings for this batched scene
+                            batch_timings = timed_lyrics[lyric_index:lyric_index + batched_count]
+
+                            # Calculate total duration from first start to last end
+                            first_timing = batch_timings[0]
+                            last_timing = batch_timings[-1]
+                            total_duration = last_timing.end_time - first_timing.start_time
+
+                            scene.duration_sec = total_duration
+                            scene.metadata['llm_start_time'] = first_timing.start_time
+                            scene.metadata['llm_end_time'] = last_timing.end_time
+
+                            # Update the lyric_timings metadata with LLM-precise timings
+                            if 'lyric_timings' in scene.metadata:
+                                for j, (lyric_timing, timed_lyric) in enumerate(zip(scene.metadata['lyric_timings'], batch_timings)):
+                                    lyric_timing['start_sec'] = timed_lyric.start_time
+                                    lyric_timing['end_sec'] = timed_lyric.end_time
+                                    lyric_timing['duration_sec'] = timed_lyric.end_time - timed_lyric.start_time
+
+                            if first_timing.section_type:
+                                scene.metadata['section'] = first_timing.section_type
+
+                            lyric_index += batched_count
+                            updated_count += 1
+                            self.logger.debug(f"Scene {i}: Batched {batched_count} lyrics, duration={total_duration:.1f}s")
+                    else:
+                        # Single lyric scene
+                        if lyric_index < len(timed_lyrics):
+                            timed_lyric = timed_lyrics[lyric_index]
+                            scene.duration_sec = timed_lyric.end_time - timed_lyric.start_time
+                            scene.metadata['llm_start_time'] = timed_lyric.start_time
+                            scene.metadata['llm_end_time'] = timed_lyric.end_time
+                            if timed_lyric.section_type:
+                                scene.metadata['section'] = timed_lyric.section_type
+
+                            lyric_index += 1
+                            updated_count += 1
+
                 self.logger.info(f"Applied LLM sync to {updated_count} scenes (matched {lyric_index}/{len(timed_lyrics)} lyrics)")
             else:
                 self.logger.warning("No timed lyrics returned from LLM sync")
@@ -1898,20 +1955,51 @@ class WorkspaceWidget(QWidget):
                 
                 # Update scene timings
                 if timed_lyrics:
-                    self.logger.info(f"Applying enhanced timing to {len(timed_lyrics)} scenes")
+                    self.logger.info(f"Applying enhanced timing to scenes...")
                     lyric_index = 0
-                    for scene in scenes:
+                    for i, scene in enumerate(scenes):
                         if scene.source.strip().startswith('[') and scene.source.strip().endswith(']'):
                             continue
-                        
-                        if lyric_index < len(timed_lyrics):
-                            timed_lyric = timed_lyrics[lyric_index]
-                            scene.duration_sec = timed_lyric.end_time - timed_lyric.start_time
-                            scene.metadata['llm_start_time'] = timed_lyric.start_time
-                            scene.metadata['llm_end_time'] = timed_lyric.end_time
-                            if timed_lyric.section_type:
-                                scene.metadata['section'] = timed_lyric.section_type
-                            lyric_index += 1
+
+                        # Check if this scene was batched (contains multiple lyrics)
+                        batched_count = scene.metadata.get('batched_count', 1)
+
+                        if batched_count > 1:
+                            # Batched scene - need to sum durations from multiple LLM timings
+                            if lyric_index + batched_count <= len(timed_lyrics):
+                                # Get all timings for this batched scene
+                                batch_timings = timed_lyrics[lyric_index:lyric_index + batched_count]
+
+                                # Calculate total duration from first start to last end
+                                first_timing = batch_timings[0]
+                                last_timing = batch_timings[-1]
+                                total_duration = last_timing.end_time - first_timing.start_time
+
+                                scene.duration_sec = total_duration
+                                scene.metadata['llm_start_time'] = first_timing.start_time
+                                scene.metadata['llm_end_time'] = last_timing.end_time
+
+                                # Update the lyric_timings metadata with LLM-precise timings
+                                if 'lyric_timings' in scene.metadata:
+                                    for j, (lyric_timing, timed_lyric) in enumerate(zip(scene.metadata['lyric_timings'], batch_timings)):
+                                        lyric_timing['start_sec'] = timed_lyric.start_time
+                                        lyric_timing['end_sec'] = timed_lyric.end_time
+                                        lyric_timing['duration_sec'] = timed_lyric.end_time - timed_lyric.start_time
+
+                                if first_timing.section_type:
+                                    scene.metadata['section'] = first_timing.section_type
+
+                                lyric_index += batched_count
+                        else:
+                            # Single lyric scene
+                            if lyric_index < len(timed_lyrics):
+                                timed_lyric = timed_lyrics[lyric_index]
+                                scene.duration_sec = timed_lyric.end_time - timed_lyric.start_time
+                                scene.metadata['llm_start_time'] = timed_lyric.start_time
+                                scene.metadata['llm_end_time'] = timed_lyric.end_time
+                                if timed_lyric.section_type:
+                                    scene.metadata['section'] = timed_lyric.section_type
+                                lyric_index += 1
             
             # Store aspect ratio in scenes for continuity
             for scene in scenes:
@@ -2075,6 +2163,29 @@ class WorkspaceWidget(QWidget):
         except Exception as e:
             self.logger.error(f"Failed to enhance prompts: {e}")
     
+    def _create_top_aligned_widget(self, widget):
+        """Wrap widget in container aligned to top of cell"""
+        from PySide6.QtWidgets import QVBoxLayout
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(widget)
+        layout.addStretch()  # Push widget to top
+        return container
+
+    def _get_cell_widget(self, row: int, col: int):
+        """Get the actual widget from a cell (unwraps container if needed)"""
+        container = self.scene_table.cellWidget(row, col)
+        if not container:
+            return None
+        # If it's a container with a layout, get the first widget
+        layout = container.layout()
+        if layout and layout.count() > 0:
+            return layout.itemAt(0).widget()
+        # Otherwise return the container itself (shouldn't happen)
+        return container
+
     def populate_scene_table(self):
         """Populate scene table with project scenes (10-column Veo 3.1 layout)"""
         if not self.current_project:
@@ -2084,10 +2195,11 @@ class WorkspaceWidget(QWidget):
 
         total_duration = 0
         for i, scene in enumerate(self.current_project.scenes):
-            # Column 0: Scene # (unchanged)
-            scene_num_item = QTableWidgetItem(str(i + 1))
-            scene_num_item.setTextAlignment(Qt.AlignCenter)
-            self.scene_table.setItem(i, 0, scene_num_item)
+            # Column 0: Scene # (use label widget for proper top alignment)
+            scene_num_label = QLabel(str(i + 1))
+            scene_num_label.setAlignment(Qt.AlignTop | Qt.AlignCenter)
+            scene_num_label.setStyleSheet("padding: 2px;")
+            self.scene_table.setCellWidget(i, 0, self._create_top_aligned_widget(scene_num_label))
 
             # Column 1: Start Frame (FrameButton widget)
             start_frame_btn = FrameButton(frame_type="start", parent=self)
@@ -2106,7 +2218,7 @@ class WorkspaceWidget(QWidget):
             start_frame_btn.load_image_requested.connect(lambda idx=i: self._load_start_frame_image(idx))
             start_frame_btn.use_last_generated_requested.connect(lambda idx=i: self._use_last_generated_for_start_frame(idx))
 
-            self.scene_table.setCellWidget(i, 1, start_frame_btn)
+            self.scene_table.setCellWidget(i, 1, self._create_top_aligned_widget(start_frame_btn))
 
             # Column 2: End Frame (FrameButton widget)
             end_frame_btn = FrameButton(frame_type="end", parent=self)
@@ -2125,7 +2237,7 @@ class WorkspaceWidget(QWidget):
             end_frame_btn.load_image_requested.connect(lambda idx=i: self._load_end_frame_image(idx))
             end_frame_btn.use_last_generated_requested.connect(lambda idx=i: self._use_last_generated_for_end_frame(idx))
 
-            self.scene_table.setCellWidget(i, 2, end_frame_btn)
+            self.scene_table.setCellWidget(i, 2, self._create_top_aligned_widget(end_frame_btn))
 
             # Column 3: Reference Images (ReferenceImagesWidget with up to 3 slots)
             ref_images_widget = ReferenceImagesWidget(max_references=3, parent=self)
@@ -2140,7 +2252,7 @@ class WorkspaceWidget(QWidget):
             ref_images_widget.view_requested.connect(lambda slot_idx, scene_idx=i: self._view_reference_image(scene_idx, slot_idx))
             ref_images_widget.load_requested.connect(lambda slot_idx, scene_idx=i: self._load_reference_image(scene_idx, slot_idx))
 
-            self.scene_table.setCellWidget(i, 3, ref_images_widget)
+            self.scene_table.setCellWidget(i, 3, self._create_top_aligned_widget(ref_images_widget))
 
             # Column 4: Video button (VideoButton widget with preview)
             video_btn = VideoButton(parent=self)
@@ -2162,12 +2274,13 @@ class WorkspaceWidget(QWidget):
             video_btn.clear_requested.connect(lambda idx=i: self._clear_video(idx))
             video_btn.play_requested.connect(lambda idx=i: self._play_video_in_panel(idx))
 
-            self.scene_table.setCellWidget(i, 4, video_btn)
+            self.scene_table.setCellWidget(i, 4, self._create_top_aligned_widget(video_btn))
 
-            # Column 5: Time (narrowed, no 's' suffix, no tooltip)
-            time_item = QTableWidgetItem(f"{scene.duration_sec:.1f}")
-            time_item.setTextAlignment(Qt.AlignCenter)
-            self.scene_table.setItem(i, 5, time_item)
+            # Column 5: Time (use label widget for proper top alignment)
+            time_label = QLabel(f"{scene.duration_sec:.1f}")
+            time_label.setAlignment(Qt.AlignTop | Qt.AlignCenter)
+            time_label.setStyleSheet("padding: 2px;")
+            self.scene_table.setCellWidget(i, 5, self._create_top_aligned_widget(time_label))
 
             # Column 6: Wrap button (⤵️)
             wrap_btn = QPushButton("⤵️")
@@ -2203,52 +2316,18 @@ class WorkspaceWidget(QWidget):
 
             # Connect to toggle handler
             wrap_btn.clicked.connect(lambda checked, idx=i: self._toggle_row_wrap(idx, checked))
-            self.scene_table.setCellWidget(i, 6, wrap_btn)
+            self.scene_table.setCellWidget(i, 6, self._create_top_aligned_widget(wrap_btn))
 
-            # Column 7: Source text
-            source_item = QTableWidgetItem(scene.source[:50] if scene.source else "")
-            source_item.setToolTip(scene.source if scene.source else "")
-            self.scene_table.setItem(i, 7, source_item)
+            # Column 7: Source text (use label widget for proper top alignment)
+            source_label = QLabel(scene.source[:50] if scene.source else "")
+            source_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
+            source_label.setWordWrap(True)  # Allow wrapping for long text
+            source_label.setStyleSheet("padding: 2px;")
+            # Set tooltip with full source text
+            source_label.setToolTip(scene.source if scene.source else "")
+            self.scene_table.setCellWidget(i, 7, self._create_top_aligned_widget(source_label))
 
-            # Column 8: Start Prompt (PromptFieldWidget with LLM + undo/redo)
-            start_prompt_widget = PromptFieldWidget(
-                placeholder="Click ✨ to generate start frame prompt",
-                parent=self
-            )
-            start_prompt_widget.set_text(scene.prompt)
-
-            # Connect text changes to auto-save
-            start_prompt_widget.text_changed.connect(
-                lambda text, idx=i: self._on_start_prompt_changed(idx, text)
-            )
-
-            # Connect LLM button to dialog
-            start_prompt_widget.llm_requested.connect(
-                lambda idx=i: self._show_start_prompt_llm_dialog(idx)
-            )
-
-            self.scene_table.setCellWidget(i, 8, start_prompt_widget)
-
-            # Column 9: End Prompt (PromptFieldWidget with LLM + undo/redo)
-            end_prompt_widget = PromptFieldWidget(
-                placeholder="Optional: click ✨ for end frame prompt",
-                parent=self
-            )
-            end_prompt_widget.set_text(scene.end_prompt)
-
-            # Connect text changes to auto-save
-            end_prompt_widget.text_changed.connect(
-                lambda text, idx=i: self._on_end_prompt_changed(idx, text)
-            )
-
-            # Connect LLM button to dialog
-            end_prompt_widget.llm_requested.connect(
-                lambda idx=i: self._show_end_prompt_llm_dialog(idx)
-            )
-
-            self.scene_table.setCellWidget(i, 9, end_prompt_widget)
-
-            # Column 10: Video Prompt (PromptFieldWidget with LLM + undo/redo)
+            # Column 8: Video Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
             video_prompt_widget = PromptFieldWidget(
                 placeholder="Click ✨ to generate video motion prompt",
                 parent=self
@@ -2265,7 +2344,45 @@ class WorkspaceWidget(QWidget):
                 lambda idx=i: self._show_video_prompt_llm_dialog(idx)
             )
 
-            self.scene_table.setCellWidget(i, 10, video_prompt_widget)
+            self.scene_table.setCellWidget(i, 8, self._create_top_aligned_widget(video_prompt_widget))
+
+            # Column 9: Start Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
+            start_prompt_widget = PromptFieldWidget(
+                placeholder="Click ✨ to generate start frame prompt",
+                parent=self
+            )
+            start_prompt_widget.set_text(scene.prompt)
+
+            # Connect text changes to auto-save
+            start_prompt_widget.text_changed.connect(
+                lambda text, idx=i: self._on_start_prompt_changed(idx, text)
+            )
+
+            # Connect LLM button to dialog
+            start_prompt_widget.llm_requested.connect(
+                lambda idx=i: self._show_start_prompt_llm_dialog(idx)
+            )
+
+            self.scene_table.setCellWidget(i, 9, self._create_top_aligned_widget(start_prompt_widget))
+
+            # Column 10: End Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
+            end_prompt_widget = PromptFieldWidget(
+                placeholder="Optional: click ✨ for end frame prompt",
+                parent=self
+            )
+            end_prompt_widget.set_text(scene.end_prompt)
+
+            # Connect text changes to auto-save
+            end_prompt_widget.text_changed.connect(
+                lambda text, idx=i: self._on_end_prompt_changed(idx, text)
+            )
+
+            # Connect LLM button to dialog
+            end_prompt_widget.llm_requested.connect(
+                lambda idx=i: self._show_end_prompt_llm_dialog(idx)
+            )
+
+            self.scene_table.setCellWidget(i, 10, self._create_top_aligned_widget(end_prompt_widget))
 
             # Apply initial wrap state
             if is_wrapped:
@@ -2452,11 +2569,11 @@ class WorkspaceWidget(QWidget):
 
         modifiers = QApplication.keyboardModifiers()
 
-        # Define default widths for prompt columns
+        # Define default widths for prompt columns (updated for new column order)
         default_widths = {
-            7: 360,  # Start Prompt
-            8: 360,  # End Prompt
-            9: 360,  # Video Prompt
+            8: 360,  # Video Prompt (moved from 10)
+            9: 360,  # Start Prompt (moved from 8)
+            10: 360,  # End Prompt (moved from 9)
         }
 
         if modifiers & Qt.ControlModifier:
@@ -3048,7 +3165,7 @@ class WorkspaceWidget(QWidget):
             self.save_project()
 
             # Update the button directly to show + emoji immediately
-            start_frame_btn = self.scene_table.cellWidget(scene_index, 1)
+            start_frame_btn = self._get_cell_widget(scene_index, 1)
             if start_frame_btn and hasattr(start_frame_btn, 'set_frame'):
                 start_frame_btn.set_frame(None, auto_linked=False)
 
@@ -3466,7 +3583,7 @@ class WorkspaceWidget(QWidget):
             self.save_project()
 
             # Update the button directly to show + emoji immediately
-            end_frame_btn = self.scene_table.cellWidget(scene_index, 2)
+            end_frame_btn = self._get_cell_widget(scene_index, 2)
             if end_frame_btn and hasattr(end_frame_btn, 'set_frame'):
                 end_frame_btn.set_frame(None, auto_linked=False)
 
@@ -3797,7 +3914,7 @@ class WorkspaceWidget(QWidget):
             selected_scene_idx = dialog.get_selected_scene_index()
             if selected_path:
                 # Get the ref_images_widget for this scene
-                ref_images_widget = self.scene_table.cellWidget(scene_index, 3)
+                ref_images_widget = self._get_cell_widget(scene_index, 3)
                 if ref_images_widget:
                     ref_images_widget.set_reference_image(slot_idx, selected_path, False)
                 if selected_scene_idx is not None:
@@ -3845,7 +3962,7 @@ class WorkspaceWidget(QWidget):
 
         if file_path:
             # Get the ref_images_widget for this scene
-            ref_images_widget = self.scene_table.cellWidget(scene_index, 3)
+            ref_images_widget = self._get_cell_widget(scene_index, 3)
             if ref_images_widget:
                 from pathlib import Path
                 ref_images_widget.set_reference_image(slot_idx, Path(file_path), False)
@@ -3928,7 +4045,7 @@ class WorkspaceWidget(QWidget):
             generated_prompt = dialog.get_prompt()
             if generated_prompt:
                 # Get widget and update it (with history)
-                start_prompt_widget = self.scene_table.cellWidget(scene_index, 3)
+                start_prompt_widget = self._get_cell_widget(scene_index, 8)
                 if isinstance(start_prompt_widget, PromptFieldWidget):
                     start_prompt_widget.set_text(generated_prompt, add_to_history=True)
 
@@ -3945,7 +4062,7 @@ class WorkspaceWidget(QWidget):
         self.save_project()
 
         # Update video button enabled state
-        video_btn = self.scene_table.cellWidget(scene_index, 6)
+        video_btn = self._get_cell_widget(scene_index, 4)
         if video_btn:
             video_btn.setEnabled(bool(text.strip()))
 
@@ -3984,7 +4101,7 @@ class WorkspaceWidget(QWidget):
             generated_prompt = dialog.get_prompt()
             if generated_prompt:
                 # Get widget and update it (with history)
-                video_prompt_widget = self.scene_table.cellWidget(scene_index, 8)
+                video_prompt_widget = self._get_cell_widget(scene_index, 10)
                 if isinstance(video_prompt_widget, PromptFieldWidget):
                     video_prompt_widget.set_text(generated_prompt, add_to_history=True)
 
@@ -3992,7 +4109,7 @@ class WorkspaceWidget(QWidget):
                 self.save_project()
 
                 # Enable video button
-                video_btn = self.scene_table.cellWidget(scene_index, 6)
+                video_btn = self._get_cell_widget(scene_index, 4)
                 if video_btn:
                     video_btn.setEnabled(True)
 
@@ -4017,22 +4134,32 @@ class WorkspaceWidget(QWidget):
 
             # Update PromptFieldWidget heights for columns 8, 9, 10 (Start, End, Video prompts)
             for col in [8, 9, 10]:
-                widget = self.scene_table.cellWidget(row_index, col)
-                if widget and hasattr(widget, 'text_edit'):
-                    # Allow text edit to expand to show full content
-                    widget.text_edit.setMinimumHeight(180)
-                    widget.text_edit.setMaximumHeight(180)
+                container = self.scene_table.cellWidget(row_index, col)
+                if container:
+                    # Find the PromptFieldWidget inside the container
+                    layout = container.layout()
+                    if layout and layout.count() > 0:
+                        widget = layout.itemAt(0).widget()
+                        if widget and hasattr(widget, 'text_edit'):
+                            # Allow text edit to expand to show full content
+                            widget.text_edit.setMinimumHeight(180)
+                            widget.text_edit.setMaximumHeight(180)
         else:
             # Return to default height
             self.scene_table.setRowHeight(row_index, 30)
 
             # Reset PromptFieldWidget heights for columns 8, 9, 10
             for col in [8, 9, 10]:
-                widget = self.scene_table.cellWidget(row_index, col)
-                if widget and hasattr(widget, 'text_edit'):
-                    # Return to compact single-line height
-                    widget.text_edit.setMinimumHeight(30)
-                    widget.text_edit.setMaximumHeight(200)  # Still allow some growth
+                container = self.scene_table.cellWidget(row_index, col)
+                if container:
+                    # Find the PromptFieldWidget inside the container
+                    layout = container.layout()
+                    if layout and layout.count() > 0:
+                        widget = layout.itemAt(0).widget()
+                        if widget and hasattr(widget, 'text_edit'):
+                            # Return to compact single-line height
+                            widget.text_edit.setMinimumHeight(30)
+                            widget.text_edit.setMaximumHeight(200)  # Still allow some growth
 
     def open_character_reference_wizard(self):
         """Open the character reference generation wizard"""
@@ -4579,22 +4706,53 @@ class WorkspaceWidget(QWidget):
             # Update scene timings (skip section markers)
             if timed_lyrics:
                 lyric_index = 0
-                for scene in self.current_project.scenes:
+                for i, scene in enumerate(self.current_project.scenes):
                     # Skip section markers
                     if scene.source.strip().startswith('[') and scene.source.strip().endswith(']'):
                         scene.duration_sec = 0.0  # Section markers get no time
                         continue
-                    
-                    if lyric_index < len(timed_lyrics):
-                        timed_lyric = timed_lyrics[lyric_index]
-                        scene.duration_sec = timed_lyric.end_time - timed_lyric.start_time
-                        scene.metadata['start_time'] = timed_lyric.start_time
-                        scene.metadata['end_time'] = timed_lyric.end_time
-                        if timed_lyric.section_type:
-                            scene.metadata['section'] = timed_lyric.section_type
-                        lyric_index += 1
-                
-                self.logger.info(f"Recalculated timing for {len(timed_lyrics)} scenes using {'LLM' if use_llm else 'MIDI'} sync")
+
+                    # Check if this scene was batched (contains multiple lyrics)
+                    batched_count = scene.metadata.get('batched_count', 1)
+
+                    if batched_count > 1:
+                        # Batched scene - need to sum durations from multiple LLM timings
+                        if lyric_index + batched_count <= len(timed_lyrics):
+                            # Get all timings for this batched scene
+                            batch_timings = timed_lyrics[lyric_index:lyric_index + batched_count]
+
+                            # Calculate total duration from first start to last end
+                            first_timing = batch_timings[0]
+                            last_timing = batch_timings[-1]
+                            total_duration = last_timing.end_time - first_timing.start_time
+
+                            scene.duration_sec = total_duration
+                            scene.metadata['start_time'] = first_timing.start_time
+                            scene.metadata['end_time'] = last_timing.end_time
+
+                            # Update the lyric_timings metadata with LLM-precise timings
+                            if 'lyric_timings' in scene.metadata:
+                                for j, (lyric_timing, timed_lyric) in enumerate(zip(scene.metadata['lyric_timings'], batch_timings)):
+                                    lyric_timing['start_sec'] = timed_lyric.start_time
+                                    lyric_timing['end_sec'] = timed_lyric.end_time
+                                    lyric_timing['duration_sec'] = timed_lyric.end_time - timed_lyric.start_time
+
+                            if first_timing.section_type:
+                                scene.metadata['section'] = first_timing.section_type
+
+                            lyric_index += batched_count
+                    else:
+                        # Single lyric scene
+                        if lyric_index < len(timed_lyrics):
+                            timed_lyric = timed_lyrics[lyric_index]
+                            scene.duration_sec = timed_lyric.end_time - timed_lyric.start_time
+                            scene.metadata['start_time'] = timed_lyric.start_time
+                            scene.metadata['end_time'] = timed_lyric.end_time
+                            if timed_lyric.section_type:
+                                scene.metadata['section'] = timed_lyric.section_type
+                            lyric_index += 1
+
+                self.logger.info(f"Recalculated timing for {lyric_index} lyrics across {len([s for s in self.current_project.scenes if not (s.source.strip().startswith('[') and s.source.strip().endswith(']'))])} scenes using {'LLM' if use_llm else 'MIDI'} sync")
         else:
             # Simple even distribution
             avg_duration = total_duration / len(self.current_project.scenes)
@@ -4646,6 +4804,10 @@ class WorkspaceWidget(QWidget):
             sizes = self.h_splitter.sizes()
             sizes[0] = 0
             self.h_splitter.setSizes(sizes)
+
+        # Save wizard visibility state
+        self.config.set('video_tab_wizard_hidden', not checked)
+        self.config.save()
 
     def _on_splitter_moved(self, pos, index):
         """Enforce max width constraint for wizard panel (50% of window)"""
@@ -5179,3 +5341,61 @@ class WorkspaceWidget(QWidget):
             self.logger.info(f"Style combo: '{self.prompt_style_input.currentText()}' (index {self.prompt_style_input.currentIndex()})")
             self.logger.info(f"Custom input: visible={self.custom_style_input.isVisible()}, text='{self.custom_style_input.text()}'")
             self.logger.info(f"Final style value: '{self._get_current_style()}'")
+    def _save_splitter_positions(self):
+        """Save current splitter positions to config"""
+        try:
+            # Save main splitter (vertical: workspace and image/console)
+            main_sizes = self.main_splitter.sizes()
+            self.config.set('video_tab_main_splitter', main_sizes)
+
+            # Save horizontal splitter (wizard, left panel, right panel)
+            h_sizes = self.h_splitter.sizes()
+            self.config.set('video_tab_h_splitter', h_sizes)
+
+            # Save image/console splitter (vertical: image and console)
+            image_console_sizes = self.image_console_splitter.sizes()
+            self.config.set('video_tab_image_console_splitter', image_console_sizes)
+
+            self.config.save()
+        except Exception as e:
+            self.logger.error(f"Failed to save splitter positions: {e}")
+
+    def _restore_splitter_positions(self):
+        """Restore splitter positions from config"""
+        try:
+            # Restore main splitter
+            main_sizes = self.config.get('video_tab_main_splitter')
+            if main_sizes and len(main_sizes) == 2:
+                self.main_splitter.setSizes(main_sizes)
+
+            # Restore horizontal splitter
+            h_sizes = self.config.get('video_tab_h_splitter')
+            if h_sizes and len(h_sizes) == 3:
+                self.h_splitter.setSizes(h_sizes)
+
+            # Restore image/console splitter
+            image_console_sizes = self.config.get('video_tab_image_console_splitter')
+            if image_console_sizes and len(image_console_sizes) == 2:
+                self.image_console_splitter.setSizes(image_console_sizes)
+
+            # Restore workflow guide visibility
+            wizard_hidden = self.config.get('video_tab_wizard_hidden', False)
+            if wizard_hidden and self.wizard_toggle_btn_top.isChecked():
+                # Button is checked (visible), but should be hidden
+                self.wizard_toggle_btn_top.setChecked(False)
+                self._toggle_wizard(False)
+            elif not wizard_hidden and not self.wizard_toggle_btn_top.isChecked():
+                # Button is unchecked (hidden), but should be visible
+                self.wizard_toggle_btn_top.setChecked(True)
+                self._toggle_wizard(True)
+
+        except Exception as e:
+            self.logger.error(f"Failed to restore splitter positions: {e}")
+
+    def closeEvent(self, event):
+        """Save state when widget is closed"""
+        self._save_splitter_positions()
+        # Save workflow guide visibility state
+        self.config.set('video_tab_wizard_hidden', not self.wizard_toggle_btn_top.isChecked())
+        self.config.save()
+        super().closeEvent(event)

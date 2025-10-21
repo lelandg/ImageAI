@@ -589,19 +589,9 @@ class MainWindow(QMainWindow):
         v.addLayout(provider_model_layout)
         
         # Create vertical splitter for prompt and image
+        from gui.common.splitter_style import apply_splitter_style
         splitter = QSplitter(Qt.Vertical)
-        splitter.setHandleWidth(8)  # Make handle thicker and more visible
-        splitter.setStyleSheet("""
-            QSplitter::handle {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #e0e0e0, stop:0.5 #888888, stop:1 #e0e0e0);
-                border: 1px solid #cccccc;
-            }
-            QSplitter::handle:hover {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #a0a0ff, stop:0.5 #6060ff, stop:1 #a0a0ff);
-            }
-        """)
+        apply_splitter_style(splitter)
         
         # Top section: Prompt input (resizable via splitter)
         prompt_container = QWidget()

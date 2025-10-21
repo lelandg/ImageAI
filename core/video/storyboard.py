@@ -465,8 +465,9 @@ class StoryboardGenerator:
             scene_duration = scene.duration_sec
             scene_section = scene.metadata.get('section')
 
-            # Check if this would exceed our target significantly (allow up to 130% = 10.4s for 8s target)
-            would_exceed = current_duration + scene_duration > self.target_scene_duration * 1.3
+            # Check if this would exceed our target (STRICT: never exceed target_scene_duration)
+            # For Veo 3.1, this ensures scenes are always <= 8.0 seconds
+            would_exceed = current_duration + scene_duration > self.target_scene_duration
 
             # Check if section changed (don't cross section boundaries like Verse → Chorus)
             section_changed = (current_section is not None and
