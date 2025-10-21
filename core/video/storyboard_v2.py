@@ -133,7 +133,188 @@ Now, generate the complete JSON output."""
         self.logger = logging.getLogger(__name__)
         self.llm_provider = llm_provider or UnifiedLLMProvider()
         self.enable_auto_link_references = True  # Auto-link previous scene's last frame as reference
-    
+
+    def _batch_scenes_for_veo(self, scenes: List[Scene], max_duration: float = 8.0) -> List[Dict[str, Any]]:
+        """
+        Batch consecutive scenes into groups that fit within max_duration for Veo 3.1.
+
+        Args:
+            scenes: List of Scene objects with duration_sec
+            max_duration: Maximum duration per batch (default 8.0 for Veo 3.1)
+
+        Returns:
+            List of batch dictionaries with structure:
+            {
+                'batch_id': int,
+                'scene_ids': List[int],
+                'total_duration': float,
+                'scenes': List[{scene_id, lyrics, duration}]
+            }
+        """
+        batches = []
+        current_batch = []
+        current_duration = 0.0
+        batch_id = 0
+
+        for i, scene in enumerate(scenes):
+            scene_duration = scene.duration_sec
+
+            # If adding this scene would exceed max_duration, finalize current batch
+            if current_batch and current_duration + scene_duration > max_duration:
+                batches.append({
+                    'batch_id': batch_id,
+                    'scene_ids': [s['scene_id'] for s in current_batch],
+                    'total_duration': current_duration,
+                    'scenes': current_batch
+                })
+                batch_id += 1
+                current_batch = []
+                current_duration = 0.0
+
+            # Add scene to current batch
+            current_batch.append({
+                'scene_id': i,
+                'lyrics': scene.source,
+                'duration': scene_duration
+            })
+            current_duration += scene_duration
+
+        # Add final batch
+        if current_batch:
+            batches.append({
+                'batch_id': batch_id,
+                'scene_ids': [s['scene_id'] for s in current_batch],
+                'total_duration': current_duration,
+                'scenes': current_batch
+            })
+
+        self.logger.info(f"Batched {len(scenes)} scenes into {len(batches)} Veo batches (max {max_duration}s each)")
+        return batches
+
+    def _generate_veo_batches(self,
+                             scenes: List[Scene],
+                             lyrics: str,
+                             title: str,
+                             style: str,
+                             provider: str,
+                             model: str) -> Optional[List[Dict]]:
+        """
+        Generate batched video prompts for Veo 3.1 using LLM with frame-accurate timing.
+
+        Args:
+            scenes: List of Scene objects with individual duration_sec values
+            lyrics: Full lyrics text
+            title: Song title
+            style: Visual style guide
+            provider: LLM provider
+            model: LLM model
+
+        Returns:
+            List of batch dictionaries with video_prompt for each batch
+        """
+        # First, batch the scenes
+        batches = self._batch_scenes_for_veo(scenes)
+
+        # Create prompt for LLM to generate combined prompts WITH TIMING
+        prompt = f"""You are an expert music video director creating prompts for Google's Veo 3.1 AI video generator.
+
+Veo 3.1 generates 8-second video clips at 24 FPS. You need to create cohesive video prompts for batched lyric segments that RESPECT THE SPECIFIC TIMING of each lyric line.
+
+Song: {title}
+Visual Style: {style}
+Full Lyrics:
+{lyrics}
+
+CRITICAL: Each lyric line below has a specific duration. Your video prompt MUST describe how the scene evolves frame-accurately to match these timings.
+
+For each batch, create a SINGLE unified video prompt that:
+1. Specifies what happens during EACH lyric's time window (e.g., "0-3s: [...], 3-5s: [...], 5-8s: [...]")
+2. Describes smooth transitions at the exact timestamps where lyrics change
+3. Uses temporal markers (e.g., "During the first 3 seconds...", "At the 3-second mark, transitioning to...")
+4. Maintains visual continuity with smooth camera movements and lighting changes
+
+Batches with EXACT TIMING:
+"""
+
+        for batch in batches:
+            prompt += f"\nBatch {batch['batch_id']} (Total: {batch['total_duration']:.1f}s):\n"
+            cumulative_time = 0.0
+            for scene in batch['scenes']:
+                end_time = cumulative_time + scene['duration']
+                prompt += f"  - {cumulative_time:.1f}s-{end_time:.1f}s ({scene['duration']:.1f}s): \"{scene['lyrics']}\"\n"
+                cumulative_time = end_time
+
+        prompt += """
+Output Format (MUST be valid JSON):
+{
+  "combined_prompts": [
+    {
+      "batch_id": 0,
+      "scene_ids": [0, 1],
+      "duration": 5.0,
+      "video_prompt": "A time-aware prompt with explicit temporal markers (e.g., '0-3s: wide shot of character..., 3-5s: camera pushes in as character...')",
+      "reasoning": "How the timing enhances the narrative flow"
+    }
+  ]
+}
+
+CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-5s:") matching the lyric timings above. This ensures the visual narrative syncs with the lyrics frame-accurately."""
+
+        try:
+            # Call LLM
+            if not self.llm_provider.is_available():
+                self.logger.error("LLM provider not available for Veo batch generation")
+                return None
+
+            import litellm
+
+            # Prepare the model string
+            if provider == 'gemini':
+                model_id = f"gemini/{model}"
+            elif provider == 'openai':
+                model_id = model
+            elif provider == 'claude':
+                model_id = model
+            else:
+                model_id = model
+
+            self.logger.info(f"Generating Veo batched prompts with {provider}/{model}...")
+            self.logger.info(f"Prompt sent to LLM:\n{'-'*80}\n{prompt}\n{'-'*80}")
+
+            response = litellm.completion(
+                model=model_id,
+                messages=[
+                    {"role": "system", "content": "You are a music video director. Respond only with valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=3000
+            )
+
+            # Extract response text
+            response_text = response.choices[0].message.content
+            self.logger.info(f"LLM Response:\n{'-'*80}\n{response_text}\n{'-'*80}")
+
+            # Parse JSON response
+            result = self._parse_json_response(response_text)
+
+            if not result or 'combined_prompts' not in result:
+                self.logger.error("Failed to parse Veo batch response")
+                return None
+
+            self.logger.info(f"Generated {len(result['combined_prompts'])} Veo batched prompts")
+
+            # Log the generated prompts for verification (FULL, not truncated)
+            for i, batch_prompt in enumerate(result['combined_prompts']):
+                self.logger.info(f"Batch {i} (FULL prompt, {len(batch_prompt.get('video_prompt', ''))} chars):")
+                self.logger.info(batch_prompt.get('video_prompt', ''))
+
+            return result['combined_prompts']
+
+        except Exception as e:
+            self.logger.error(f"Failed to generate Veo batches: {e}")
+            return None
+
     def get_approach(self, provider: str) -> StoryboardApproach:
         """Determine the best approach for a provider"""
         approach_map = {
@@ -153,27 +334,41 @@ Now, generate the complete JSON output."""
                           provider: str = "gemini",
                           model: str = "gemini-2.5-pro",
                           style: str = "cinematic, high quality",
-                          negatives: str = "low quality, blurry") -> Tuple[Optional[StyleGuide], List[Scene]]:
+                          negatives: str = "low quality, blurry",
+                          render_method: Optional[str] = None) -> Tuple[Optional[StyleGuide], List[Scene], Optional[List[Dict]]]:
         """
         Generate storyboard using provider-specific approach.
-        
+
+        Args:
+            render_method: If set to "veo_3.1" or similar, also generates batched prompts for 8s clips
+
         Returns:
-            Tuple of (StyleGuide, List[Scene])
+            Tuple of (StyleGuide, List[Scene], Optional[List[VeoBatch]])
+            VeoBatch structure: {batch_id, scene_ids, duration, video_prompt}
         """
         approach = self.get_approach(provider)
-        
+
         if approach == StoryboardApproach.STRUCTURED_JSON:
-            return self._generate_structured_json(
+            style_guide, scenes = self._generate_structured_json(
                 lyrics, title, duration, provider, model, style, negatives
             )
         elif approach == StoryboardApproach.DIRECTORS_TREATMENT:
-            return self._generate_directors_treatment(
+            style_guide, scenes = self._generate_directors_treatment(
                 lyrics, title, duration, provider, model, style, negatives
             )
         else:
-            return self._generate_hybrid(
+            style_guide, scenes = self._generate_hybrid(
                 lyrics, title, duration, provider, model, style, negatives
             )
+
+        # Generate batched prompts if render_method requires it
+        veo_batches = None
+        if render_method and "veo" in render_method.lower() and "3.1" in render_method:
+            veo_batches = self._generate_veo_batches(
+                scenes, lyrics, title, style, provider, model
+            )
+
+        return style_guide, scenes, veo_batches
     
     def _generate_structured_json(self,
                                  lyrics: str,

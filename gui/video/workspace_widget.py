@@ -1591,9 +1591,10 @@ class WorkspaceWidget(QWidget):
         use_llm_sync = llm_provider != "None" and llm_model
         
         self.logger.info(f"LLM sync: {use_llm_sync} (provider={llm_provider}, model={llm_model})")
-        
+
         # Generate scenes with MIDI sync if available
         self.logger.info("Generating initial scenes...")
+        self._log_to_console("📝 Generating storyboard scenes...", "INFO")
         scenes = generator.generate_scenes(
             text,
             target_duration=target_duration,
@@ -1796,26 +1797,39 @@ class WorkspaceWidget(QWidget):
             llm = UnifiedLLMProvider(config)
             
             generator = EnhancedStoryboardGenerator(llm)
-            
+
+            # Get video render method for batching
+            video_provider = self.video_provider_combo.currentText()
+            veo_model = self.veo_model_combo.currentText() if hasattr(self, 'veo_model_combo') else None
+            render_method = None
+            if video_provider == "Gemini Veo" and veo_model:
+                render_method = veo_model  # e.g., "veo-3.1-generate-001"
+
             # Generate storyboard with provider-specific approach
             self.logger.info(f"Generating enhanced storyboard using {llm_provider} approach")
-            style_guide, scenes = generator.generate_storyboard(
+            if render_method:
+                self.logger.info(f"Render method: {render_method} - will generate batched prompts for Veo 3.1")
+
+            style_guide, scenes, veo_batches = generator.generate_storyboard(
                 lyrics=text,
                 title=project_name,
                 duration=target_duration,
                 provider=llm_provider,
                 model=llm_model,
                 style=prompt_style,
-                negatives=self.negative_prompt.text() or "low quality, blurry"
+                negatives=self.negative_prompt.text() or "low quality, blurry",
+                render_method=render_method
             )
-            
+
             if not scenes:
                 self.logger.warning("No scenes generated")
                 dialog_manager = get_dialog_manager(self)
                 dialog_manager.show_warning("Generation Failed", "Failed to generate scenes from lyrics")
                 return
-            
+
             self.logger.info(f"Generated {len(scenes)} scenes with enhanced approach")
+            if veo_batches:
+                self.logger.info(f"Generated {len(veo_batches)} Veo batched prompts for 8-second clips")
             
             # Initialize continuity manager
             continuity_mgr = ImageContinuityManager()
@@ -1906,6 +1920,7 @@ class WorkspaceWidget(QWidget):
             
             # Update project
             self.current_project.scenes = scenes
+            self.current_project.veo_batches = veo_batches  # Store batched prompts for Veo 3.1
             self.current_project.input_text = text
             self.current_project.sync_mode = sync_mode
             self.current_project.snap_strength = snap_strength

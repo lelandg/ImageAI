@@ -497,6 +497,9 @@ class VideoProject:
     # Scenes
     scenes: List[Scene] = field(default_factory=list)
 
+    # Veo 3.1 batched prompts (for 8-second clip generation)
+    veo_batches: Optional[List[Dict[str, Any]]] = None  # List of {batch_id, scene_ids, duration, video_prompt}
+
     # Veo 3 Reference Images (up to 3 global references for entire project)
     global_reference_images: List[ReferenceImage] = field(default_factory=list)  # Max 3 global references
 
@@ -573,6 +576,7 @@ class VideoProject:
                 "generated_files": {k: str(v) for k, v in self.karaoke_generated_files.items()}
             } if self.karaoke_config else None,
             "scenes": [scene.to_dict() for scene in self.scenes],
+            "veo_batches": self.veo_batches,
             "global_reference_images": [ref.to_dict() for ref in self.global_reference_images],
             "extracted_frames": self.extracted_frames,
             "export": {
@@ -674,6 +678,9 @@ class VideoProject:
         
         # Load scenes
         project.scenes = [Scene.from_dict(scene) for scene in data.get("scenes", [])]
+
+        # Load veo batches
+        project.veo_batches = data.get("veo_batches")
 
         # Load global reference images
         project.global_reference_images = [
@@ -779,6 +786,27 @@ class VideoProject:
     def get_total_duration(self) -> float:
         """Calculate total video duration in seconds"""
         return sum(scene.duration_sec for scene in self.scenes)
+
+    def get_veo_batch_for_scene(self, scene_index: int) -> Optional[Dict[str, Any]]:
+        """
+        Get the Veo batched prompt for a scene if available.
+
+        Args:
+            scene_index: Index of the scene
+
+        Returns:
+            Dictionary with batch info {batch_id, scene_ids, duration, video_prompt}
+            or None if no batched prompt available
+        """
+        if not self.veo_batches:
+            return None
+
+        # Find which batch contains this scene
+        for batch in self.veo_batches:
+            if scene_index in batch.get('scene_ids', []):
+                return batch
+
+        return None
     
     def add_audio_track(self, audio_file: Path, track_type: str = 'music') -> AudioTrack:
         """Add an audio track to the project"""

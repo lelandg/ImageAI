@@ -321,8 +321,9 @@ Lyrics:
             # Call the LLM
             self.logger.info("Calling LLM for lyric synchronization")
             self.logger.info("=== LLM REQUEST ===")
-            self.logger.info(f"System prompt: {system_prompt[:200]}...")
-            self.logger.info(f"User message ({len(user_message)} chars):")
+            self.logger.info(f"System prompt (FULL, {len(system_prompt)} chars):")
+            self.logger.info(system_prompt)
+            self.logger.info(f"User message (FULL, {len(user_message)} chars):")
             self.logger.info(user_message)
             self.logger.info("=== END LLM REQUEST ===")
             

@@ -207,9 +207,11 @@ class ImageAnalysisWorker(QObject):
                 if self._stopped:
                     return
 
-                # Log response
-                logger.info(f"LLM Response - Description: {description[:200]}...")
-                console.info(f"LLM Response - Description: {description[:200]}...")
+                # Log response (FULL)
+                logger.info(f"LLM Response - Description (FULL, {len(description)} chars):")
+                logger.info(description)
+                console.info(f"LLM Response - Description (FULL, {len(description)} chars):")
+                console.info(description)
                 self.log_message.emit("Description generated successfully", "INFO")
 
                 self.finished.emit(description)
@@ -301,8 +303,10 @@ class ImageAnalysisWorker(QObject):
                 return
 
             # Log response
-            logger.info(f"LLM Response - Description: {description[:200]}...")
-            console.info(f"LLM Response - Description: {description[:200]}...")
+            logger.info(f"LLM Response - Description (FULL, {len(description)} chars):")
+            logger.info(description)
+            console.info(f"LLM Response - Description (FULL, {len(description)} chars):")
+            console.info(description)
             self.log_message.emit("Description generated successfully", "INFO")
 
             self.finished.emit(description)

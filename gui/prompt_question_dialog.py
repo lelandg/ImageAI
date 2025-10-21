@@ -151,9 +151,11 @@ class QuestionWorker(QObject):
             if not answer:
                 answer = "I apologize, but I didn't receive a proper response. Please try again."
 
-            # Log response
-            logger.info(f"LLM Response - Answer: {answer[:200]}...")
-            console.info(f"LLM Response - Answer: {answer[:200]}...")
+            # Log response (FULL)
+            logger.info(f"LLM Response - Answer (FULL, {len(answer)} chars):")
+            logger.info(answer)
+            console.info(f"LLM Response - Answer (FULL, {len(answer)} chars):")
+            console.info(answer)
             self.log_message.emit("Response received successfully", "SUCCESS")
 
             # Display answer in status console

@@ -421,20 +421,135 @@ class TimingEngine:
 
 class StoryboardGenerator:
     """Generate storyboard from parsed input"""
-    
-    def __init__(self, parser: Optional[LyricParser] = None, 
-                 timing: Optional[TimingEngine] = None):
+
+    def __init__(self, parser: Optional[LyricParser] = None,
+                 timing: Optional[TimingEngine] = None,
+                 target_scene_duration: float = 8.0):
         """
         Initialize storyboard generator.
-        
+
         Args:
             parser: LyricParser instance
             timing: TimingEngine instance
+            target_scene_duration: Target duration per scene in seconds (default 8.0 for Veo 3.1)
         """
         self.parser = parser or LyricParser()
         self.timing = timing or TimingEngine()
         self.logger = logging.getLogger(__name__)
-    
+        self.target_scene_duration = target_scene_duration
+
+    def _batch_scenes_for_optimal_duration(self, scenes: List[Scene]) -> List[Scene]:
+        """
+        Batch consecutive scenes to aim for target_scene_duration per scene.
+
+        This combines short lyric lines into longer scenes suitable for video generation.
+        Respects section boundaries and aims for scenes close to target_scene_duration.
+
+        Args:
+            scenes: List of Scene objects (typically one per lyric line)
+
+        Returns:
+            List of batched Scene objects with combined lyrics and durations
+        """
+        if not scenes:
+            return scenes
+
+        batched_scenes = []
+        current_batch = []
+        current_duration = 0.0
+        current_section = None
+
+        self.logger.info(f"Batching {len(scenes)} scenes to aim for ~{self.target_scene_duration}s per scene")
+
+        for i, scene in enumerate(scenes):
+            scene_duration = scene.duration_sec
+            scene_section = scene.metadata.get('section')
+
+            # Check if this would exceed our target significantly (allow up to 130% = 10.4s for 8s target)
+            would_exceed = current_duration + scene_duration > self.target_scene_duration * 1.3
+
+            # Check if section changed (don't cross section boundaries like Verse → Chorus)
+            section_changed = (current_section is not None and
+                             scene_section is not None and
+                             scene_section != current_section)
+
+            # Decide whether to add to current batch or finalize it
+            should_finalize = current_batch and (would_exceed or section_changed)
+
+            if should_finalize:
+                # Finalize current batch
+                batched_scene = self._merge_scenes(current_batch)
+                batched_scenes.append(batched_scene)
+                self.logger.debug(f"Batched {len(current_batch)} scenes → {current_duration:.1f}s "
+                                f"(reason: {'exceed' if would_exceed else 'section change'})")
+
+                # Start new batch
+                current_batch = [scene]
+                current_duration = scene_duration
+                current_section = scene_section
+            else:
+                # Add to current batch
+                current_batch.append(scene)
+                current_duration += scene_duration
+                # Update section if this scene has one
+                if scene_section:
+                    current_section = scene_section
+
+            # If this is the last scene, finalize the batch
+            if i == len(scenes) - 1 and current_batch:
+                batched_scene = self._merge_scenes(current_batch)
+                batched_scenes.append(batched_scene)
+                self.logger.debug(f"Final batch: {len(current_batch)} scenes → {current_duration:.1f}s")
+
+        self.logger.info(f"Batched {len(scenes)} scenes into {len(batched_scenes)} combined scenes")
+
+        # Log statistics
+        if batched_scenes:
+            avg_duration = sum(s.duration_sec for s in batched_scenes) / len(batched_scenes)
+            min_duration = min(s.duration_sec for s in batched_scenes)
+            max_duration = max(s.duration_sec for s in batched_scenes)
+            self.logger.info(f"Scene durations - Avg: {avg_duration:.1f}s, Min: {min_duration:.1f}s, "
+                           f"Max: {max_duration:.1f}s (target: {self.target_scene_duration:.1f}s)")
+
+        return batched_scenes
+
+    def _merge_scenes(self, scenes: List[Scene]) -> Scene:
+        """
+        Merge multiple scenes into one.
+
+        Args:
+            scenes: List of scenes to merge
+
+        Returns:
+            Single merged Scene object
+        """
+        if len(scenes) == 1:
+            return scenes[0]
+
+        # Combine source text with newlines
+        combined_source = '\n'.join(scene.source for scene in scenes)
+
+        # Combine prompts (if different from source)
+        combined_prompt = '\n'.join(scene.prompt for scene in scenes)
+
+        # Sum durations
+        total_duration = sum(scene.duration_sec for scene in scenes)
+
+        # Use the order of the first scene
+        merged_scene = Scene(
+            source=combined_source,
+            prompt=combined_prompt,
+            duration_sec=total_duration,
+            order=scenes[0].order
+        )
+
+        # Merge metadata
+        merged_scene.metadata = scenes[0].metadata.copy()
+        merged_scene.metadata['batched_count'] = len(scenes)
+        merged_scene.metadata['original_scene_ids'] = [s.order for s in scenes]
+
+        return merged_scene
+
     def generate_scenes(self,
                        text: str,
                        target_duration: Optional[str] = None,
@@ -514,10 +629,14 @@ class StoryboardGenerator:
             scenes = self.sync_scenes_to_midi(
                 scenes, midi_timing_data, sync_mode, snap_strength
             )
-        
+
         self.logger.info(f"Generated {len(scenes)} content scenes (skipped {skipped_markers} section markers), "
                         f"total duration: {sum(s.duration_sec for s in scenes):.1f} seconds")
-        
+
+        # Batch scenes to aim for optimal video generation duration
+        # This combines short lyric lines into ~8-second scenes suitable for Veo 3.1
+        scenes = self._batch_scenes_for_optimal_duration(scenes)
+
         return scenes
     
     def sync_scenes_to_midi(self, scenes: List[Scene],

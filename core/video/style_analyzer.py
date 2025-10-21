@@ -89,7 +89,8 @@ Example good output: "3D cartoon style with bold cel-shading and clean black out
         try:
             result = self._analyze_image(image_path, prompt)
             if result:
-                logger.info(f"Style analysis result: {result[:100]}...")
+                logger.info(f"Style analysis result (FULL, {len(result)} chars):")
+                logger.info(result)
             return result
         except Exception as e:
             logger.error(f"Style analysis failed: {e}")
@@ -132,7 +133,8 @@ Focus on CONTINUITY - the viewer should feel this is one continuous video."""
         try:
             result = self._analyze_image(image_path, prompt)
             if result:
-                logger.info(f"Transition analysis result: {result[:100]}...")
+                logger.info(f"Transition analysis result (FULL, {len(result)} chars):")
+                logger.info(result)
             return result
         except Exception as e:
             logger.error(f"Transition analysis failed: {e}")

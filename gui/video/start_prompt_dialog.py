@@ -79,7 +79,8 @@ class StartPromptGenerationThread(QThread):
                         )
 
                     if style_info:
-                        self.logger.info(f"Style analysis result: {style_info[:100]}...")
+                        self.logger.info(f"Style analysis result (FULL, {len(style_info)} chars):")
+                        self.logger.info(style_info)
                         self.progress_update.emit("Previous frame analyzed - generating prompt...")
                     else:
                         self.logger.warning("Style analysis returned no result")

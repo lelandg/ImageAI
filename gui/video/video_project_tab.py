@@ -390,7 +390,8 @@ class VideoGenerationThread(QThread):
                                     style_info = analyzer.analyze_for_style(previous_frame_path)
                                     if style_info:
                                         prompt_with_style = f"{style_info} {scene.prompt}"
-                                        logger.info(f"  Style info: {style_info[:100]}...")
+                                        logger.info(f"  Style info (FULL, {len(style_info)} chars):")
+                                        logger.info(f"  {style_info}")
                                 elif continuity_mode == ContinuityMode.TRANSITION:
                                     transition_prompt = analyzer.analyze_for_transition(
                                         previous_frame_path,
@@ -398,7 +399,8 @@ class VideoGenerationThread(QThread):
                                     )
                                     if transition_prompt:
                                         prompt_with_style = transition_prompt
-                                        logger.info(f"  Transition prompt: {transition_prompt[:100]}...")
+                                        logger.info(f"  Transition prompt (FULL, {len(transition_prompt)} chars):")
+                                        logger.info(f"  {transition_prompt}")
                             except Exception as e:
                                 logger.warning(f"Continuity analysis failed: {e}, using original prompt")
                         else:
