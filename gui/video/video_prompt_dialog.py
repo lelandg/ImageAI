@@ -32,6 +32,7 @@ class VideoPromptGenerationThread(QThread):
         duration: float,
         provider: str,
         model: str,
+        enable_camera_movements: bool = True,
         parent=None
     ):
         super().__init__(parent)
@@ -40,12 +41,14 @@ class VideoPromptGenerationThread(QThread):
         self.duration = duration
         self.provider = provider
         self.model = model
+        self.enable_camera_movements = enable_camera_movements
 
     def run(self):
         """Run generation in background"""
         try:
             # Use LiteLLM directly through the generator's provider
-            system_prompt = """You are a video motion specialist. Given a static image description, generate a video prompt that describes camera movement and action.
+            if self.enable_camera_movements:
+                system_prompt = """You are a video motion specialist. Given a static image description, generate a video prompt that describes camera movement and action.
 
 The video prompt should:
 - Start with the static scene description
@@ -53,15 +56,40 @@ The video prompt should:
 - Add subtle motion or changes over time
 - Be optimized for Google Veo video generation
 - Be 2-3 sentences maximum
+- NEVER include quoted text or lyrics (they will render as text in the video)
 
 Format: [Static scene], [camera movement], [motion/changes]"""
 
-            user_prompt = f"""Create a video motion prompt:
+                user_prompt = f"""Create a video motion prompt:
 
-Start frame: "{self.start_prompt}"
+Start frame description: {self.start_prompt}
 Duration: {self.duration} seconds
 
-Generate a prompt describing camera movement and scene evolution for Veo video generation."""
+Generate a prompt describing camera movement and scene evolution for Veo video generation.
+
+IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
+            else:
+                system_prompt = """You are a video motion specialist. Given a static image description, generate a video prompt that describes subject motion and temporal progression.
+
+The video prompt should:
+- Start with the static scene description
+- Focus on subject/character actions and environmental motion
+- Keep camera mostly static (minimal camera movement only when essential)
+- Add subtle motion or changes over time
+- Be optimized for Google Veo video generation
+- Be 2-3 sentences maximum
+- NEVER include quoted text or lyrics (they will render as text in the video)
+
+Format: [Static scene], [subject motion], [temporal progression]"""
+
+                user_prompt = f"""Create a video motion prompt:
+
+Start frame description: {self.start_prompt}
+Duration: {self.duration} seconds
+
+Generate a prompt describing subject motion and scene evolution for Veo video generation (minimal camera movement).
+
+IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
 
             # Use the generator's LLM provider to make the call
             import litellm
@@ -194,6 +222,7 @@ class VideoPromptDialog(QDialog):
             self.duration,
             self.provider,
             self.model,
+            self.enable_camera_movements,
             self
         )
         self.generation_thread.generation_complete.connect(self._on_generation_complete)

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QWidget, QFrame, QCheckBox, QGroupBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QPixmap
 
 from core.video.project import ReferenceImage
@@ -119,11 +119,14 @@ class ReferenceSelectorDialog(QDialog):
         self.max_selection = max_selection
         self.reference_cards: List[ReferenceCheckCard] = []
         self.selected_references: List[ReferenceImage] = []
+        self.settings = QSettings("ImageAI", "ReferenceSelectorDialog")
 
         self.setWindowTitle("Select Reference Images")
         self.setMinimumSize(700, 600)
 
         self.setup_ui()
+        self.restore_window_geometry()
+        self.restore_selected_references()
 
     def setup_ui(self):
         """Setup dialog UI"""
@@ -265,4 +268,53 @@ class ReferenceSelectorDialog(QDialog):
         """Handle accept"""
         self.selected_references = self.get_selected_references()
         logger.info(f"User selected {len(self.selected_references)} references for video generation")
+        self.save_window_geometry()
+        self.save_selected_references()
         super().accept()
+
+    def reject(self):
+        """Handle reject"""
+        self.save_window_geometry()
+        super().reject()
+
+    def restore_window_geometry(self):
+        """Restore window size and position from settings"""
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+            logger.debug("Restored window geometry from settings")
+
+    def save_window_geometry(self):
+        """Save window size and position to settings"""
+        self.settings.setValue("geometry", self.saveGeometry())
+        logger.debug("Saved window geometry to settings")
+
+    def restore_selected_references(self):
+        """Restore previously selected references from settings"""
+        saved_paths = self.settings.value("selected_paths", [])
+        if not saved_paths:
+            return
+
+        # Convert saved paths to Path objects
+        saved_path_set = {Path(p) for p in saved_paths if p}
+
+        # Check each card and restore selection state
+        restored_count = 0
+        for card in self.reference_cards:
+            if card.reference.path in saved_path_set:
+                card.checkbox.setChecked(True)
+                restored_count += 1
+            else:
+                card.checkbox.setChecked(False)
+
+        if restored_count > 0:
+            logger.info(f"Restored selection for {restored_count} reference(s) from settings")
+        else:
+            # If no selections were restored, default to selecting first N
+            self.select_first_n()
+
+    def save_selected_references(self):
+        """Save selected references to settings for next time"""
+        selected_paths = [str(card.reference.path) for card in self.reference_cards if card.is_checked()]
+        self.settings.setValue("selected_paths", selected_paths)
+        logger.debug(f"Saved {len(selected_paths)} selected reference path(s) to settings")

@@ -464,6 +464,10 @@ class VideoProject:
     video_muted: bool = True  # Video playback muted by default
     auto_link_enabled: bool = False  # Veo 3.1: Auto-link end frames to next scene's start
 
+    # Video prompt generation settings
+    enable_camera_movements: bool = True  # Add camera movements to video prompts
+    enable_prompt_flow: bool = True  # Make prompts flow into each other with section breaks
+
     # Continuity settings
     continuity_mode: str = "none"  # Continuity mode: "none", "style_only", "transition"
     enable_continuity: bool = False  # Enable visual continuity
@@ -556,6 +560,8 @@ class VideoProject:
                 "captions": self.captions,
                 "video_muted": self.video_muted,
                 "auto_link_enabled": self.auto_link_enabled,
+                "enable_camera_movements": self.enable_camera_movements,
+                "enable_prompt_flow": self.enable_prompt_flow,
                 "continuity_mode": self.continuity_mode,
                 "enable_continuity": self.enable_continuity,
                 "enable_enhanced_storyboard": self.enable_enhanced_storyboard,
@@ -624,6 +630,9 @@ class VideoProject:
             project.captions = gen.get("captions", False)
             project.video_muted = gen.get("video_muted", True)
             project.auto_link_enabled = gen.get("auto_link_enabled", False)
+            # Load video prompt generation settings
+            project.enable_camera_movements = gen.get("enable_camera_movements", True)
+            project.enable_prompt_flow = gen.get("enable_prompt_flow", True)
             # Load continuity settings
             project.continuity_mode = gen.get("continuity_mode", "none")
             project.enable_continuity = gen.get("enable_continuity", False)
@@ -637,6 +646,8 @@ class VideoProject:
             project.captions = False
             project.video_muted = True
             project.auto_link_enabled = False
+            project.enable_camera_movements = True
+            project.enable_prompt_flow = True
             project.continuity_mode = "none"
             project.enable_continuity = False
             project.enable_enhanced_storyboard = False

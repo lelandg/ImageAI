@@ -219,6 +219,10 @@ class VideoGenerationThread(QThread):
 
             self.progress_update.emit(10, f"🎬 BATCH processing {total_scenes} scenes for video in 1 API call...")
 
+            # Get video prompt generation options
+            enable_camera_movements = self.kwargs.get('enable_camera_movements', True)
+            enable_prompt_flow = self.kwargs.get('enable_prompt_flow', True)
+
             # Use batch_enhance_for_video for efficiency (ONE API call for all scenes)
             try:
                 video_prompts = llm.batch_enhance_for_video(
@@ -230,7 +234,9 @@ class VideoGenerationThread(QThread):
                     console_callback=None,  # Progress updates handled by parent
                     source_lyrics=source_lyrics,  # Provide lyric context
                     lyric_timings=lyric_timings,  # Provide frame-accurate timing info
-                    scene_durations=scene_durations  # Provide total scene durations
+                    scene_durations=scene_durations,  # Provide total scene durations
+                    enable_camera_movements=enable_camera_movements,  # Camera movements option
+                    enable_prompt_flow=enable_prompt_flow  # Prompt flow/continuity option
                 )
 
                 # Apply video prompts to scenes
@@ -910,49 +916,60 @@ class VideoGenerationThread(QThread):
                     logger.warning(f"Failed to process reference image: {e}")
                     # Fall back to original seed image
 
-            # === NEW: Configure generation with REFERENCES-FIRST approach ===
-            # CRITICAL: Veo API limitation - these modes are MUTUALLY EXCLUSIVE:
-            # 1. "Ingredients to Video" (reference images) - text prompt only, REQUIRES 8 seconds
-            # 2. "Image-to-Video" (start frame) - animates a single image, supports 4/6/8 seconds
-            # API error if both are set: "Image and reference images cannot be both set."
-            # Choose one mode based on what's provided, preferring references for consistency
+            # === NEW: Configure generation - NO HYBRID MODE ===
+            # CRITICAL: If start or end frame is provided, DO NOT use reference images
+            # This eliminates hybrid mode and simplifies the logic
             selected_model = VeoModel.VEO_3_GENERATE
             use_start_frame = None
             use_reference_images = None
 
-            if reference_image_paths and len(reference_image_paths) > 0:
-                # MODE 1: "Ingredients to Video" with reference images
-                # Do NOT include start frame - API rejects both simultaneously
-                # IMPORTANT: Reference mode ONLY supports 8 seconds
-                selected_model = VeoModel.VEO_3_1_GENERATE
-                use_reference_images = reference_image_paths
-                use_start_frame = None  # Explicitly exclude start frame (API limitation)
-                veo_duration = 8  # Force 8 seconds for reference_to_video mode
-                if veo_duration != scene.duration_sec:
-                    logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s (Veo 3.1 reference mode requires 8s)")
-                    self.progress_update.emit(14, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3.1 references require 8s)")
-                logger.info(f"🔄 Auto-switching to Veo 3.1 'Ingredients to Video' mode ({len(reference_image_paths)} reference(s))")
-                logger.info(f"   Reference images will guide character/style - NO start frame used (API limitation)")
-                self.progress_update.emit(12, f"Using Veo 3.1 'Ingredients to Video' with {len(reference_image_paths)} ref(s)...")
-            else:
-                # MODE 2: "Image-to-Video" with start frame (if available)
-                # Do NOT include reference images - API rejects both simultaneously
-                # Supports 4, 6, or 8 seconds
+            # Check if we have start or end frame
+            has_start_or_end_frame = (seed_image_path and Path(seed_image_path).exists()) or (end_frame_path and Path(end_frame_path).exists())
+
+            if has_start_or_end_frame:
+                # MODE 1: "Image-to-Video" with start/end frame
+                # Do NOT use reference images when frames are provided (no hybrid mode)
                 use_reference_images = None
                 use_start_frame = Path(seed_image_path) if seed_image_path and Path(seed_image_path).exists() else None
 
-                # Snap duration to Veo-compatible value (4, 6, or 8 seconds) for image-to-video mode
+                # Snap duration to Veo-compatible value (4, 6, or 8 seconds)
                 veo_duration = snap_duration_to_veo(scene.duration_sec)
                 if veo_duration != scene.duration_sec:
                     logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s for Veo 3 compatibility")
                     self.progress_update.emit(14, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3 requires 4/6/8s)")
 
                 if use_start_frame:
-                    logger.info(f"🔄 Using Veo 3.0 'Image-to-Video' mode with start frame")
-                    self.progress_update.emit(12, f"Using Image-to-Video mode...")
+                    logger.info(f"🔄 Using 'Image-to-Video' mode with start frame (reference images DISABLED)")
+                    self.progress_update.emit(12, f"Using Image-to-Video mode (no references)...")
                 else:
-                    logger.info(f"🔄 Using Veo 3.0 'Text-to-Video' mode (no references, no start frame)")
-                    self.progress_update.emit(12, f"Using Text-to-Video mode...")
+                    logger.info(f"🔄 Using 'Image-to-Video' mode with end frame only")
+                    self.progress_update.emit(12, f"Using Image-to-Video mode with end frame...")
+            elif reference_image_paths and len(reference_image_paths) > 0:
+                # MODE 2: "Ingredients to Video" with reference images (ONLY when no frames)
+                # IMPORTANT: Reference mode ONLY supports 8 seconds
+                selected_model = VeoModel.VEO_3_1_GENERATE
+                use_reference_images = reference_image_paths
+                use_start_frame = None  # No start frame in reference mode
+                veo_duration = 8  # Force 8 seconds for reference_to_video mode
+                if veo_duration != scene.duration_sec:
+                    logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s (Veo 3.1 reference mode requires 8s)")
+                    self.progress_update.emit(14, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3.1 references require 8s)")
+                logger.info(f"🔄 Using Veo 3.1 'Ingredients to Video' mode ({len(reference_image_paths)} reference(s))")
+                logger.info(f"   Reference images will guide character/style (no start/end frames)")
+                self.progress_update.emit(12, f"Using Veo 3.1 'Ingredients to Video' with {len(reference_image_paths)} ref(s)...")
+            else:
+                # MODE 3: "Text-to-Video" (no references, no frames)
+                use_reference_images = None
+                use_start_frame = None
+
+                # Snap duration to Veo-compatible value (4, 6, or 8 seconds)
+                veo_duration = snap_duration_to_veo(scene.duration_sec)
+                if veo_duration != scene.duration_sec:
+                    logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s for Veo 3 compatibility")
+                    self.progress_update.emit(14, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3 requires 4/6/8s)")
+
+                logger.info(f"🔄 Using 'Text-to-Video' mode (no references, no frames)")
+                self.progress_update.emit(12, f"Using Text-to-Video mode...")
 
             config = VeoGenerationConfig(
                 model=selected_model,
@@ -977,22 +994,19 @@ class VideoGenerationThread(QThread):
 
             mode_str = " + ".join(generation_mode) if generation_mode else "text-to-video"
 
-            if config.reference_images and config.image:
-                logger.info(f"🎬 Hybrid Generation: {len(config.reference_images)} reference(s) + image-to-video")
-                logger.info(f"   References for character consistency, image for motion continuity")
-                self.progress_update.emit(18, f"Hybrid mode: {len(config.reference_images)} ref(s) + motion continuity")
-            elif config.reference_images:
+            # Log the selected mode (no more hybrid mode)
+            if config.reference_images:
                 logger.info(f"🎬 References-Only Generation: {len(config.reference_images)} reference(s)")
-                logger.info(f"   Using references for character/style consistency")
+                logger.info(f"   Using references for character/style consistency (no frames)")
                 self.progress_update.emit(18, f"References-only: {len(config.reference_images)} image(s)")
             elif config.image and config.last_frame:
                 logger.info(f"🎬 Frame-to-Frame Interpolation: start={config.image}, end={config.last_frame}")
                 self.progress_update.emit(18, "Frame-to-frame interpolation mode")
             elif config.image:
-                logger.info(f"🎬 Image-to-Video Generation: start frame={config.image}")
+                logger.info(f"🎬 Image-to-Video Generation: start frame={config.image} (no references)")
                 self.progress_update.emit(18, "Image-to-video mode (no references)")
             else:
-                logger.info(f"🎬 Text-to-Video Generation (no references or seed image)")
+                logger.info(f"🎬 Text-to-Video Generation (no references, no frames)")
                 self.progress_update.emit(18, "Text-to-video mode")
 
             # Log complete generation request details for debugging

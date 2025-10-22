@@ -8,6 +8,7 @@ in video_project_tab.py, now separated for tab organization.
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 import logging
+import textwrap
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
@@ -261,7 +262,8 @@ class WorkspaceWidget(QWidget):
 
         # Suppress FFmpeg console output (set before creating media player)
         import os
-        os.environ['QT_LOGGING_RULES'] = 'qt.multimedia.ffmpeg=false'
+        # Suppress all FFmpeg info/debug messages and AAC decoder warnings
+        os.environ['QT_LOGGING_RULES'] = 'qt.multimedia.ffmpeg.info=false;qt.multimedia.ffmpeg.warning=false'
 
         self.config = config
         self.providers = providers
@@ -907,9 +909,32 @@ class WorkspaceWidget(QWidget):
         )
         self.enable_enhanced_storyboard.stateChanged.connect(lambda: self._auto_save_settings())
         continuity_layout.addWidget(self.enable_enhanced_storyboard)
-        
+
         continuity_layout.addStretch()
         layout.addLayout(continuity_layout)
+
+        # Video prompt generation options
+        video_prompt_layout = QHBoxLayout()
+        self.enable_camera_movements_check = QCheckBox("Enable Camera Movements")
+        self.enable_camera_movements_check.setToolTip(
+            "Add camera movements (pan, tilt, zoom, dolly) to video prompts\n"
+            "Disable for static or minimal-movement scenes"
+        )
+        self.enable_camera_movements_check.setChecked(True)  # Enabled by default
+        self.enable_camera_movements_check.stateChanged.connect(lambda: self._auto_save_settings())
+        video_prompt_layout.addWidget(self.enable_camera_movements_check)
+
+        self.enable_prompt_flow_check = QCheckBox("Enable Prompt Flow")
+        self.enable_prompt_flow_check.setToolTip(
+            "Make video prompts flow continuously into each other (text-only continuity)\n"
+            "Flow breaks between chorus/verses for natural section transitions"
+        )
+        self.enable_prompt_flow_check.setChecked(True)  # Enabled by default
+        self.enable_prompt_flow_check.stateChanged.connect(lambda: self._auto_save_settings())
+        video_prompt_layout.addWidget(self.enable_prompt_flow_check)
+
+        video_prompt_layout.addStretch()
+        layout.addLayout(video_prompt_layout)
         
         group.setLayout(layout)
         
@@ -1198,6 +1223,14 @@ class WorkspaceWidget(QWidget):
 
         # Connect cell click to show image in image view
         self.scene_table.cellClicked.connect(self._on_cell_clicked)
+
+        # Connect scrollbar signals to save positions
+        h_scrollbar = self.scene_table.horizontalScrollBar()
+        v_scrollbar = self.scene_table.verticalScrollBar()
+        if h_scrollbar:
+            h_scrollbar.valueChanged.connect(self._save_scrollbar_positions)
+        if v_scrollbar:
+            v_scrollbar.valueChanged.connect(self._save_scrollbar_positions)
 
         layout.addWidget(self.scene_table)
         
@@ -2459,12 +2492,17 @@ class WorkspaceWidget(QWidget):
             self.scene_table.setCellWidget(i, 6, self._create_top_aligned_widget(wrap_btn))
 
             # Column 7: Source text (use label widget for proper top alignment)
-            source_label = QLabel(scene.source[:50] if scene.source else "")
+            # Show full text without truncation
+            source_label = QLabel(scene.source if scene.source else "")
             source_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
             source_label.setWordWrap(True)  # Allow wrapping for long text
             source_label.setStyleSheet("padding: 2px;")
-            # Set tooltip with full source text
-            source_label.setToolTip(scene.source if scene.source else "")
+            # Set tooltip with full source text, wrapped at 80 characters
+            if scene.source:
+                wrapped_tooltip = '\n'.join(textwrap.wrap(scene.source, width=80))
+                source_label.setToolTip(wrapped_tooltip)
+            else:
+                source_label.setToolTip("")
             self.scene_table.setCellWidget(i, 7, self._create_top_aligned_widget(source_label))
 
             # Column 8: Video Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
@@ -2546,6 +2584,10 @@ class WorkspaceWidget(QWidget):
 
         # Refresh wizard after populating scenes
         self._refresh_wizard()
+
+        # Restore column widths and scrollbar positions (deferred to ensure table is fully rendered)
+        QTimer.singleShot(50, self._restore_column_widths)
+        QTimer.singleShot(100, self._restore_scrollbar_positions)
 
     def enhance_single_prompt(self, scene_index: int):
         """Enhance a single scene's prompt with AI"""
@@ -2700,7 +2742,7 @@ class WorkspaceWidget(QWidget):
         return super().eventFilter(obj, event)
 
     def _on_column_resized(self, logical_index: int, old_size: int, new_size: int):
-        """Enforce minimum width for Ref Images column (column 3)"""
+        """Enforce minimum width for Ref Images column (column 3) and save column widths"""
         REF_IMAGES_COL = 3
         MIN_REF_IMAGES_WIDTH = 158  # 3 buttons × 50px (min) + 2 × 2px spacing + 4px margins
 
@@ -2710,6 +2752,9 @@ class WorkspaceWidget(QWidget):
             header.blockSignals(True)
             header.resizeSection(REF_IMAGES_COL, MIN_REF_IMAGES_WIDTH)
             header.blockSignals(False)
+
+        # Save column widths whenever any column is resized
+        self._save_column_widths()
 
     def _on_header_double_clicked(self, logical_index: int):
         """Handle header double-click to auto-resize columns"""
@@ -3180,54 +3225,65 @@ class WorkspaceWidget(QWidget):
         end_frame = scene.end_frame if scene.end_frame and scene.end_frame.exists() else None
         use_veo_31 = end_frame is not None
 
+        # IMPORTANT: No hybrid mode - if start or end frame is provided, don't use reference images
+        use_reference_images = not (start_frame or end_frame)
+
         # Log what we're about to generate
         if use_veo_31:
             self.logger.info(f"Generating video with Veo 3.1 (start + end frames) for scene {scene_index + 1}")
-            self.logger.info(f"  Start frame: {start_frame if start_frame else 'None (will use reference images or text-to-video)'}")
+            self.logger.info(f"  Start frame: {start_frame if start_frame else 'None'}")
             self.logger.info(f"  End frame: {end_frame}")
+            self.logger.info(f"  Reference images: DISABLED (frames provided)")
         else:
             self.logger.info(f"Generating video for scene {scene_index + 1}")
-            self.logger.info(f"  Start frame: {start_frame if start_frame else 'None (will use reference images or text-to-video)'}")
+            self.logger.info(f"  Start frame: {start_frame if start_frame else 'None'}")
+            if use_reference_images:
+                self.logger.info(f"  Reference images: Will be used if available")
+            else:
+                self.logger.info(f"  Reference images: DISABLED (start frame provided)")
 
-        # Check if we need to show reference selector dialog
+        # Check if we need to show reference selector dialog (only if no frames provided)
         selected_refs = None
-        available_refs = self.current_project.get_all_available_references(scene)
+        if use_reference_images:
+            available_refs = self.current_project.get_all_available_references(scene)
 
-        self.logger.info(f"📸 Reference check: Found {len(available_refs)} available references")
-        for ref in available_refs:
-            ref_type = ref.ref_type.value if hasattr(ref.ref_type, 'value') else str(ref.ref_type)
-            self.logger.info(f"   - {ref.name or ref.path.stem}: {ref_type}")
+            self.logger.info(f"📸 Reference check: Found {len(available_refs)} available references")
+            for ref in available_refs:
+                ref_type = ref.ref_type.value if hasattr(ref.ref_type, 'value') else str(ref.ref_type)
+                self.logger.info(f"   - {ref.name or ref.path.stem}: {ref_type}")
 
-        # Check if there are 2+ references of the same type (requires user selection)
-        from collections import Counter
-        ref_types = [ref.ref_type for ref in available_refs]
-        type_counts = Counter(ref_types)
-        has_duplicate_types = any(count >= 2 for count in type_counts.values())
+            # Check if there are 2+ references of the same type (requires user selection)
+            from collections import Counter
+            ref_types = [ref.ref_type for ref in available_refs]
+            type_counts = Counter(ref_types)
+            has_duplicate_types = any(count >= 2 for count in type_counts.values())
 
-        self.logger.info(f"📸 Type analysis: {dict(type_counts)}, has_duplicate_types={has_duplicate_types}")
+            self.logger.info(f"📸 Type analysis: {dict(type_counts)}, has_duplicate_types={has_duplicate_types}")
 
-        # Also show selector if we have more than 3 total refs (max limit)
-        needs_selection = has_duplicate_types or len(available_refs) > 3
+            # Also show selector if we have more than 3 total refs (max limit)
+            needs_selection = has_duplicate_types or len(available_refs) > 3
 
-        if needs_selection and len(available_refs) >= 2:
-            if has_duplicate_types:
-                duplicate_types = [str(t.value if hasattr(t, 'value') else t) for t, count in type_counts.items() if count >= 2]
-                self.logger.info(f"📸 Found {len(available_refs)} references with duplicates of type(s): {', '.join(duplicate_types)}")
-            else:
-                self.logger.info(f"📸 Found {len(available_refs)} references (exceeds max 3), showing selector")
+            if needs_selection and len(available_refs) >= 2:
+                if has_duplicate_types:
+                    duplicate_types = [str(t.value if hasattr(t, 'value') else t) for t, count in type_counts.items() if count >= 2]
+                    self.logger.info(f"📸 Found {len(available_refs)} references with duplicates of type(s): {', '.join(duplicate_types)}")
+                else:
+                    self.logger.info(f"📸 Found {len(available_refs)} references (exceeds max 3), showing selector")
 
-            from gui.video.reference_selector_dialog import ReferenceSelectorDialog
-            from PySide6.QtWidgets import QDialog
+                from gui.video.reference_selector_dialog import ReferenceSelectorDialog
+                from PySide6.QtWidgets import QDialog
 
-            dialog = ReferenceSelectorDialog(available_refs, max_selection=3, parent=self)
-            if dialog.exec() == QDialog.Accepted:
-                selected_refs = dialog.selected_references
-                self.logger.info(f"📸 User selected {len(selected_refs)} references for video generation")
-            else:
-                self.logger.info("📸 Reference selection cancelled, aborting video generation")
-                return  # User cancelled
-        elif len(available_refs) > 0:
-            self.logger.info(f"📸 Using all {len(available_refs)} available references (no duplicates, no selection needed)")
+                dialog = ReferenceSelectorDialog(available_refs, max_selection=3, parent=self)
+                if dialog.exec() == QDialog.Accepted:
+                    selected_refs = dialog.selected_references
+                    self.logger.info(f"📸 User selected {len(selected_refs)} references for video generation")
+                else:
+                    self.logger.info("📸 Reference selection cancelled, aborting video generation")
+                    return  # User cancelled
+            elif len(available_refs) > 0:
+                self.logger.info(f"📸 Using all {len(available_refs)} available references (no duplicates, no selection needed)")
+        else:
+            self.logger.info(f"📸 Reference images SKIPPED (start or end frame provided - no hybrid mode)")
 
         # Emit generation request for video clip
         params = self.gather_generation_params()
@@ -4318,6 +4374,9 @@ class WorkspaceWidget(QWidget):
         from gui.video.video_prompt_dialog import VideoPromptDialog
         generator = EndPromptGenerator(llm_provider=None)  # Reuse for simplicity
 
+        # Get camera movement setting
+        enable_camera_movements = self.enable_camera_movements_check.isChecked()
+
         # Show dialog
         dialog = VideoPromptDialog(
             generator,
@@ -4325,6 +4384,7 @@ class WorkspaceWidget(QWidget):
             scene.duration_sec,
             llm_provider,
             llm_model,
+            enable_camera_movements,
             self
         )
 
@@ -4502,6 +4562,8 @@ class WorkspaceWidget(QWidget):
             'use_prev_last_frame': self.use_prev_last_frame_check.isChecked(),  # For Veo 3.1 smooth transitions
             'use_last_frame_for_next': False,  # Deprecated - replaced by use_prev_last_frame
             'continuity_mode': self.continuity_mode_combo.currentData(),  # Visual continuity for images
+            'enable_camera_movements': self.enable_camera_movements_check.isChecked(),  # Camera movements in video prompts
+            'enable_prompt_flow': self.enable_prompt_flow_check.isChecked(),  # Prompt flow/continuity
             'auth_mode': auth_mode,  # Include auth mode for Google Cloud support
             'google_auth_mode': auth_mode,  # Alias for video generation
             'google_project_id': google_project_id,  # Google Cloud project ID
@@ -5296,6 +5358,10 @@ class WorkspaceWidget(QWidget):
         self.current_project.transitions = self.transitions_check.isChecked()
         self.current_project.captions = self.captions_check.isChecked()
 
+        # Save video prompt generation settings
+        self.current_project.enable_camera_movements = self.enable_camera_movements_check.isChecked()
+        self.current_project.enable_prompt_flow = self.enable_prompt_flow_check.isChecked()
+
         # Save video player settings
         self.current_project.video_muted = self.audio_output.isMuted()
 
@@ -5505,6 +5571,17 @@ class WorkspaceWidget(QWidget):
             if hasattr(self.current_project, 'captions'):
                 self.captions_check.setChecked(self.current_project.captions)
 
+            # Load video prompt generation settings
+            if hasattr(self.current_project, 'enable_camera_movements'):
+                self.enable_camera_movements_check.setChecked(self.current_project.enable_camera_movements)
+            else:
+                self.enable_camera_movements_check.setChecked(True)  # Default to enabled
+
+            if hasattr(self.current_project, 'enable_prompt_flow'):
+                self.enable_prompt_flow_check.setChecked(self.current_project.enable_prompt_flow)
+            else:
+                self.enable_prompt_flow_check.setChecked(True)  # Default to enabled
+
             # Load video player settings
             if hasattr(self.current_project, 'video_muted'):
                 is_muted = self.current_project.video_muted
@@ -5645,6 +5722,32 @@ class WorkspaceWidget(QWidget):
         except Exception as e:
             self.logger.error(f"Failed to save splitter positions: {e}")
 
+    def _save_column_widths(self):
+        """Save current column widths to config"""
+        try:
+            if hasattr(self, 'scene_table'):
+                header = self.scene_table.horizontalHeader()
+                widths = [header.sectionSize(i) for i in range(self.scene_table.columnCount())]
+                self.config.set('video_tab_column_widths', widths)
+                self.config.save()
+        except Exception as e:
+            self.logger.error(f"Failed to save column widths: {e}")
+
+    def _save_scrollbar_positions(self):
+        """Save current scrollbar positions to config"""
+        try:
+            if hasattr(self, 'scene_table'):
+                h_scrollbar = self.scene_table.horizontalScrollBar()
+                v_scrollbar = self.scene_table.verticalScrollBar()
+                positions = {
+                    'horizontal': h_scrollbar.value() if h_scrollbar else 0,
+                    'vertical': v_scrollbar.value() if v_scrollbar else 0
+                }
+                self.config.set('video_tab_scrollbar_positions', positions)
+                self.config.save()
+        except Exception as e:
+            self.logger.error(f"Failed to save scrollbar positions: {e}")
+
     def _restore_splitter_positions(self):
         """Restore splitter positions from config"""
         try:
@@ -5677,9 +5780,38 @@ class WorkspaceWidget(QWidget):
         except Exception as e:
             self.logger.error(f"Failed to restore splitter positions: {e}")
 
+    def _restore_column_widths(self):
+        """Restore column widths from config"""
+        try:
+            if hasattr(self, 'scene_table'):
+                widths = self.config.get('video_tab_column_widths')
+                if widths and len(widths) == self.scene_table.columnCount():
+                    header = self.scene_table.horizontalHeader()
+                    for i, width in enumerate(widths):
+                        header.resizeSection(i, width)
+        except Exception as e:
+            self.logger.error(f"Failed to restore column widths: {e}")
+
+    def _restore_scrollbar_positions(self):
+        """Restore scrollbar positions from config"""
+        try:
+            if hasattr(self, 'scene_table'):
+                positions = self.config.get('video_tab_scrollbar_positions')
+                if positions:
+                    h_scrollbar = self.scene_table.horizontalScrollBar()
+                    v_scrollbar = self.scene_table.verticalScrollBar()
+                    if h_scrollbar and 'horizontal' in positions:
+                        h_scrollbar.setValue(positions['horizontal'])
+                    if v_scrollbar and 'vertical' in positions:
+                        v_scrollbar.setValue(positions['vertical'])
+        except Exception as e:
+            self.logger.error(f"Failed to restore scrollbar positions: {e}")
+
     def closeEvent(self, event):
         """Save state when widget is closed"""
         self._save_splitter_positions()
+        self._save_column_widths()
+        self._save_scrollbar_positions()
         # Save workflow guide visibility state
         self.config.set('video_tab_wizard_hidden', not self.wizard_toggle_btn_top.isChecked())
         self.config.save()

@@ -265,15 +265,15 @@ class UnifiedLLMProvider:
         
         # Adjust user prompt based on whether it's a lyric
         if is_lyric:
-            user_prompt = f"""Create a detailed visual scene description for this lyric line: "{text}"
+            user_prompt = f"""Create a detailed visual scene description that represents the themes and emotions from this text: {text}
 
-Describe what we should see in the image that represents this lyric visually. Include specific details about:
+Describe what we should see in the image. Include specific details about:
 - The main subject or action
 - The setting and environment
 - Lighting and mood
 - Visual style and composition
 
-IMPORTANT: Do NOT include the lyric text itself in your response. Only provide the visual description.
+IMPORTANT: Do NOT include any quoted text in your response. Only provide pure visual descriptions without any text overlays.
 
 Be highly descriptive and detailed. Aim for 75-150 words."""
         else:
@@ -501,11 +501,11 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
         else:
             # Create a batch prompt for other providers
             if likely_lyrics:
-                batch_prompt = """Create detailed visual scene descriptions for each lyric line below.
-For each line, describe what we should see in the image that represents the lyric visually.
+                batch_prompt = """Create detailed visual scene descriptions that represent the themes and emotions from each text below.
+For each text, describe what we should see in the image.
 Include specific details about the main subject, setting, lighting, and visual style.
 
-IMPORTANT: Do NOT include the lyric text itself in your responses. Only provide pure visual descriptions.
+IMPORTANT: Do NOT include any quoted text or lyrics in your responses. Only provide pure visual descriptions without any text overlays.
 
 Return one enhanced visual description per line, numbered:
 
@@ -581,7 +581,9 @@ Return one enhanced visual description per line, numbered:
                                 console_callback=None,
                                 source_lyrics: Optional[List[str]] = None,
                                 lyric_timings: Optional[List[Optional[List[Dict]]]] = None,
-                                scene_durations: Optional[List[float]] = None) -> List[str]:
+                                scene_durations: Optional[List[float]] = None,
+                                enable_camera_movements: bool = True,
+                                enable_prompt_flow: bool = True) -> List[str]:
         """
         Batch enhance multiple prompts for video generation in ONE API call.
         Adds camera movements, motion, and temporal progression with scene continuity.
@@ -596,6 +598,8 @@ Return one enhanced visual description per line, numbered:
             source_lyrics: Optional list of source lyrics for each scene (provides context)
             lyric_timings: Optional list of timing dicts for each lyric line within batched scenes
             scene_durations: Optional list of total scene durations in seconds
+            enable_camera_movements: If True, add camera movements; if False, focus on static shots
+            enable_prompt_flow: If True, make prompts flow into each other with section breaks
 
         Returns:
             List of video-enhanced prompts with camera movements and continuity
@@ -605,18 +609,48 @@ Return one enhanced visual description per line, numbered:
             return [f"{text}. Camera movement: gentle pan and subtle motion." for text in texts]
 
         # Build system prompt for video enhancement
-        system_prompt = f"""You are a video prompt engineer. Transform image descriptions into dynamic video prompts for continuous single-shot video generation.
-
+        camera_guidance = ""
+        if enable_camera_movements:
+            camera_guidance = """
 For each scene, add:
 1. **Camera Movements**: Pans (left/right), tilts (up/down), zooms, dolly moves, tracking shots
 2. **Subject Motion**: Character actions, environmental movement (wind, water, clouds)
-3. **Temporal Progression**: Light changes, emotional progression, scene development
+3. **Temporal Progression**: Light changes, emotional progression, scene development"""
+        else:
+            camera_guidance = """
+For each scene, focus on:
+1. **Subject Motion**: Character actions, environmental movement (wind, water, clouds)
+2. **Temporal Progression**: Light changes, emotional progression, scene development
+3. **Static/Minimal Camera**: Keep camera mostly static, use subtle movements only when essential"""
+
+        flow_guidance = ""
+        if enable_prompt_flow:
+            flow_guidance = """
+PROMPT FLOW & CONTINUITY:
+- Make scenes flow into each other with smooth visual and narrative continuity
+- Each scene should reference or build upon the previous scene's ending
+- IMPORTANT: Break flow between song sections (verse/chorus/bridge boundaries)
+- Detect section changes from lyrics context and start fresh visual themes at section boundaries
+- Within a section, maintain visual coherence and progressive storytelling
+- Use phrases like "continuing from," "building on," "evolving the previous scene"
+"""
+        else:
+            flow_guidance = """
+SCENE INDEPENDENCE:
+- Each scene is independent with its own visual theme
+- No need to reference previous or next scenes
+- Focus on making each scene compelling on its own
+"""
+
+        system_prompt = f"""You are a video prompt engineer. Transform image descriptions into dynamic video prompts for continuous single-shot video generation.
+{camera_guidance}
 
 Style: {style.value}
-
+{flow_guidance}
 CRITICAL REQUIREMENTS:
 - Each scene MUST be a SINGLE CONTINUOUS SHOT with NO HARD CUTS between scenes
 - NEVER use editing terminology like "cut to," "next shot," "smash cut," or "jump cut"
+- NEVER include quoted text or lyrics in prompts (they will render as text in the video)
 - DO describe smooth visual evolution, gradual transformations, and temporal progression
 - DO use natural transition phrases like "transitions to," "evolves into," "gradually reveals," "morphs from," "shifts focus to"
 - Keep camera movement continuous (pans, tilts, zooms, tracking) within one unified shot
@@ -632,14 +666,17 @@ CRITICAL FORMATTING:
 - Number them 1-{len(texts)}
 - NO headers, NO markdown, NO preamble
 - Each prompt: keep core description + add 2-3 motion elements
-- Make camera work subtle and cinematic"""
+- Make camera work subtle and cinematic
+- NO quoted text or lyrics in any prompt"""
 
         # Create batch prompt with context about scene flow and lyrics
-        batch_prompt = f"""Transform these {len(texts)} image descriptions into video prompts with camera movement for continuous single-shot videos.
+        motion_description = "camera movement and motion" if enable_camera_movements else "motion and temporal progression"
+        batch_prompt = f"""Transform these {len(texts)} image descriptions into video prompts with {motion_description} for continuous single-shot videos.
 
 """
 
-        # Add lyric context with frame-accurate timing if available
+        # Add context with frame-accurate timing if available
+        # IMPORTANT: We provide timing structure but NOT the actual lyric text to avoid text rendering in videos
         if source_lyrics and lyric_timings and scene_durations:
             batch_prompt += "FRAME-ACCURATE TIMING (Veo 3 generates at 24 FPS):\n\n"
             for i, (lyrics, text, timings, duration) in enumerate(zip(source_lyrics, texts, lyric_timings, scene_durations), 1):
@@ -650,70 +687,56 @@ CRITICAL FORMATTING:
 
                 if is_instrumental:
                     # Provide context from adjacent scenes for instrumental sections
-                    batch_prompt += f"   TYPE: INSTRUMENTAL SECTION (no lyrics)\n"
+                    batch_prompt += f"   TYPE: INSTRUMENTAL SECTION\n"
                     batch_prompt += f"   INSTRUCTIONS: Create a cinematic visual that:\n"
-                    batch_prompt += f"     • Maintains visual continuity with surrounding lyric scenes\n"
+                    batch_prompt += f"     • Maintains visual continuity with surrounding scenes\n"
                     batch_prompt += f"     • Uses establishing shots, ambient details, or scene transitions\n"
                     batch_prompt += f"     • Provides breathing room and visual variety\n"
                     batch_prompt += f"     • Examples: camera pans across setting, environmental details, character reactions, atmospheric moments\n"
-
-                    # Add context from previous/next scenes if available
-                    if i > 1:
-                        prev_lyric = source_lyrics[i-2]
-                        batch_prompt += f"   PREVIOUS SCENE: {prev_lyric[:60]}...\n"
-                    if i < len(source_lyrics):
-                        next_lyric = source_lyrics[i] if i < len(source_lyrics) else ""
-                        if next_lyric and next_lyric != "[Instrumental]":
-                            batch_prompt += f"   NEXT SCENE: {next_lyric[:60]}...\n"
                 else:
                     batch_prompt += f"   IMAGE DESCRIPTION: {text}\n"
 
                 if timings and not is_instrumental:
-                    # Scene has batched lyrics with timing info
-                    batch_prompt += f"   LYRIC TIMELINE (describe visual evolution matching these timestamps):\n"
+                    # Scene has batched lyrics with timing info - provide timing structure only
+                    batch_prompt += f"   TIMING STRUCTURE (describe visual evolution at these timestamps):\n"
                     for timing in timings:
-                        batch_prompt += f"     • {timing['start_sec']:.1f}s-{timing['end_sec']:.1f}s ({timing['duration_sec']:.1f}s): \"{timing['text']}\"\n"
-                elif not is_instrumental:
-                    # Single lyric line, no timing breakdown
-                    batch_prompt += f"   LYRICS: {lyrics}\n"
+                        # Provide timing but NOT the lyric text itself
+                        batch_prompt += f"     • {timing['start_sec']:.1f}s-{timing['end_sec']:.1f}s ({timing['duration_sec']:.1f}s duration)\n"
 
                 batch_prompt += "\n"
         elif source_lyrics:
-            batch_prompt += "LYRICS CONTEXT (what this scene visualizes):\n\n"
+            batch_prompt += "SCENE CONTEXT:\n\n"
             for i, (lyrics, text) in enumerate(zip(source_lyrics, texts), 1):
                 is_instrumental = (lyrics == "[Instrumental]" or text == "[Instrumental]")
 
                 if is_instrumental:
                     batch_prompt += f"{i}. TYPE: INSTRUMENTAL SECTION\n"
-                    batch_prompt += f"   Create a cinematic visual for a music break (no lyrics).\n"
+                    batch_prompt += f"   Create a cinematic visual for a music break.\n"
                     batch_prompt += f"   Use establishing shots, ambient details, or atmospheric moments.\n"
-                    if i > 1:
-                        batch_prompt += f"   Context from previous: {source_lyrics[i-2][:60]}...\n"
-                    if i < len(source_lyrics):
-                        next_lyric = source_lyrics[i] if i < len(source_lyrics) else ""
-                        if next_lyric and next_lyric != "[Instrumental]":
-                            batch_prompt += f"   Leading into: {next_lyric[:60]}...\n"
                 else:
-                    batch_prompt += f"{i}. LYRICS: {lyrics}\n   IMAGE DESCRIPTION: {text}\n"
+                    batch_prompt += f"{i}. IMAGE DESCRIPTION: {text}\n"
                 batch_prompt += "\n"
         else:
             batch_prompt += "Image descriptions:\n\n"
             for i, text in enumerate(texts, 1):
                 batch_prompt += f"{i}. {text}\n"
 
+        camera_instruction = "- Camera movements appropriate to each scene (single continuous shot)\n" if enable_camera_movements else "- Minimal camera movement (mostly static shots with subtle movements only when necessary)\n"
+
         batch_prompt += f"""
 Return {len(texts)} numbered video prompts with:
-- Camera movements appropriate to each scene (single continuous shot)
-- Natural subject/environmental motion within the same scene
-- INCORPORATE the lyric content/meaning into the visual storytelling
-- For INSTRUMENTAL SECTIONS (no lyrics): Create atmospheric, establishing, or transitional visuals that maintain continuity
-- For batched scenes: Use explicit time markers (e.g., "0-3s: ..., 3-5s: ..., 5-8s: ...") to describe visual evolution that matches the lyric timeline
-- Describe smooth visual transitions between lyric moments at their exact timestamps using phrases like:
+{camera_instruction}- Natural subject/environmental motion within the same scene
+- Visualize the themes and emotions from the content
+- For INSTRUMENTAL SECTIONS: Create atmospheric, establishing, or transitional visuals that maintain continuity
+- For batched scenes: Use explicit time markers (e.g., "0-3s: ..., 3-5s: ..., 5-8s: ...") to describe visual evolution at the provided timestamps
+- Describe smooth visual transitions at timestamps using phrases like:
   * "transitions to," "evolves into," "gradually reveals," "shifts to"
   * "morphs from X to Y," "transforms into," "the scene shifts focus to"
   * "During seconds 0-3..., then at 3s transitions to..., by 5s evolves into..."
 - NO hard cuts or abrupt scene changes - describe ONE continuous camera movement with smoothly evolving visuals
 - Each prompt describes ONE continuous unified shot with smooth internal visual progression
+
+CRITICAL: Do NOT include any quoted text or lyrics in the prompts. Only provide pure visual descriptions. Text in quotes will be rendered as actual text in the video.
 
 GOOD EXAMPLES:
   ✓ "...the camera slowly pans right, transitioning focus from the forest to the ocean shore"
@@ -725,6 +748,7 @@ BAD EXAMPLES:
   ✗ "Cut to a new location" (hard cut)
   ✗ "Next shot shows..." (editing terminology)
   ✗ "Scene changes to..." (discontinuous)
+  ✗ Any quoted text or lyrics in the prompt
 
 Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
 
@@ -1213,6 +1237,7 @@ Style: {style.value}
 CRITICAL REQUIREMENTS:
 - The video MUST be a SINGLE CONTINUOUS SHOT with NO HARD CUTS between scenes
 - NEVER use editing terminology like "cut to," "next shot," "smash cut," or "jump cut"
+- NEVER include quoted text or lyrics in the prompt (they will render as text in the video)
 - DO describe smooth visual evolution, gradual transformations, and temporal progression
 - DO use natural transition phrases like "transitions to," "evolves into," "gradually reveals," "morphs from"
 - Keep camera movement continuous (pans, tilts, zooms, tracking) within one unified shot
@@ -1223,7 +1248,8 @@ FORMATTING:
 - Keep the core scene description intact
 - Add 2-3 motion elements maximum
 - Make camera work subtle and cinematic
-- DO NOT use markdown formatting"""
+- DO NOT use markdown formatting
+- DO NOT include any quoted text"""
 
         # Build user prompt
         if previous_scene_context:
@@ -1237,8 +1263,10 @@ Transform this into a single continuous shot video prompt that:
 3. Creates smooth temporal flow and visual evolution within one unified space
 4. Uses transition phrases to describe how the scene smoothly evolves over time
 
-CRITICAL: This must be ONE CONTINUOUS SHOT with NO hard cuts or scene changes.
-Describe smooth visual transitions and evolution (e.g., "transitions to," "evolves into," "gradually reveals").
+CRITICAL:
+- This must be ONE CONTINUOUS SHOT with NO hard cuts or scene changes
+- Do NOT include any quoted text or lyrics in the prompt
+- Describe smooth visual transitions and evolution (e.g., "transitions to," "evolves into," "gradually reveals")
 
 Return only the enhanced video prompt."""
         else:
@@ -1250,8 +1278,10 @@ Transform this into a dynamic video prompt by adding:
 3. Temporal progression and visual evolution within the same unified space
 4. Transition phrases to describe smooth visual development over time
 
-CRITICAL: This must be ONE CONTINUOUS SHOT with NO hard cuts or scene changes.
-Describe smooth visual transitions and evolution (e.g., "transitions to," "evolves into," "gradually reveals").
+CRITICAL:
+- This must be ONE CONTINUOUS SHOT with NO hard cuts or scene changes
+- Do NOT include any quoted text or lyrics in the prompt
+- Describe smooth visual transitions and evolution (e.g., "transitions to," "evolves into," "gradually reveals")
 
 Return only the enhanced video prompt."""
 
