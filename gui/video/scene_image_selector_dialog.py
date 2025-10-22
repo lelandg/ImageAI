@@ -57,13 +57,14 @@ class SceneImageSelectorDialog(QDialog):
         # Button group for radio buttons (to make them mutually exclusive across all scenes)
         self.button_group = QButtonGroup(self)
 
-        # Create a group box for each scene that has images or last frame
+        # Create a group box for each scene that has images, first frame, or last frame
         # NO FILE CHECKS - just check if the path is set
         scenes_with_images = []
         for scene_idx, scene in enumerate(self.scenes):
             has_images = hasattr(scene, 'images') and scene.images
+            has_first_frame = hasattr(scene, 'first_frame') and scene.first_frame is not None
             has_last_frame = hasattr(scene, 'last_frame') and scene.last_frame is not None
-            if has_images or has_last_frame:
+            if has_images or has_first_frame or has_last_frame:
                 scenes_with_images.append((scene_idx, scene))
 
         if not scenes_with_images:
@@ -116,7 +117,7 @@ class SceneImageSelectorDialog(QDialog):
         grid_layout = QGridLayout()
         grid_layout.setSpacing(10)
 
-        # Collect all images from this scene (variants + last frame)
+        # Collect all images from this scene (variants + first frame + last frame)
         from core.video.project import ImageVariant
         all_images = []
 
@@ -127,7 +128,14 @@ class SceneImageSelectorDialog(QDialog):
             else:
                 all_images.append(("variant", Path(variant)))
 
-        # Add last frame if set (assume it exists - extracted frames are already on disk)
+        # Add first frame if set (extracted from video)
+        if hasattr(scene, 'first_frame') and scene.first_frame:
+            # Check if first_frame is already in the variant list
+            first_frame_in_variants = any(img_path == scene.first_frame for _, img_path in all_images)
+            if not first_frame_in_variants:
+                all_images.append(("first_frame", scene.first_frame))
+
+        # Add last frame if set (extracted from video)
         if hasattr(scene, 'last_frame') and scene.last_frame:
             # Check if last_frame is already in the variant list
             last_frame_in_variants = any(img_path == scene.last_frame for _, img_path in all_images)
@@ -187,11 +195,14 @@ class SceneImageSelectorDialog(QDialog):
                 card_layout.addWidget(image_label)
 
             # Image type label
-            if img_type == "last_frame":
+            if img_type == "first_frame":
+                type_label = QLabel("First Frame")
+                type_label.setStyleSheet("font-size: 10px; color: #00cc66; font-weight: bold;")
+            elif img_type == "last_frame":
                 type_label = QLabel("Last Frame")
                 type_label.setStyleSheet("font-size: 10px; color: #0066cc; font-weight: bold;")
             else:
-                # Count variant number (excluding last frames)
+                # Count variant number (excluding extracted frames)
                 variant_num = sum(1 for j in range(img_idx + 1) if all_images[j][0] == "variant")
                 type_label = QLabel(f"Variant {variant_num}")
                 type_label.setStyleSheet("font-size: 10px; color: #666;")

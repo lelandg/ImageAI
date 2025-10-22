@@ -622,6 +622,11 @@ CRITICAL REQUIREMENTS:
 - Keep camera movement continuous (pans, tilts, zooms, tracking) within one unified shot
 - The scene can smoothly evolve over time - it doesn't have to be static
 
+DURATION CONSTRAINT:
+- IMPORTANT: Each scene MUST be 8.0 seconds or less
+- If the provided scene duration exceeds 8.0 seconds, you MUST fit the visual content within 8.0 seconds maximum
+- Compress or adjust the timing to stay within the 8-second limit
+
 CRITICAL FORMATTING:
 - Return EXACTLY {len(texts)} enhanced video prompts
 - Number them 1-{len(texts)}
@@ -638,15 +643,37 @@ CRITICAL FORMATTING:
         if source_lyrics and lyric_timings and scene_durations:
             batch_prompt += "FRAME-ACCURATE TIMING (Veo 3 generates at 24 FPS):\n\n"
             for i, (lyrics, text, timings, duration) in enumerate(zip(source_lyrics, texts, lyric_timings, scene_durations), 1):
-                batch_prompt += f"{i}. SCENE DURATION: {duration:.1f}s\n"
-                batch_prompt += f"   IMAGE DESCRIPTION: {text}\n"
+                # Check if this is an instrumental scene
+                is_instrumental = (lyrics == "[Instrumental]" or text == "[Instrumental]")
 
-                if timings:
+                batch_prompt += f"{i}. SCENE DURATION: {duration:.1f}s\n"
+
+                if is_instrumental:
+                    # Provide context from adjacent scenes for instrumental sections
+                    batch_prompt += f"   TYPE: INSTRUMENTAL SECTION (no lyrics)\n"
+                    batch_prompt += f"   INSTRUCTIONS: Create a cinematic visual that:\n"
+                    batch_prompt += f"     • Maintains visual continuity with surrounding lyric scenes\n"
+                    batch_prompt += f"     • Uses establishing shots, ambient details, or scene transitions\n"
+                    batch_prompt += f"     • Provides breathing room and visual variety\n"
+                    batch_prompt += f"     • Examples: camera pans across setting, environmental details, character reactions, atmospheric moments\n"
+
+                    # Add context from previous/next scenes if available
+                    if i > 1:
+                        prev_lyric = source_lyrics[i-2]
+                        batch_prompt += f"   PREVIOUS SCENE: {prev_lyric[:60]}...\n"
+                    if i < len(source_lyrics):
+                        next_lyric = source_lyrics[i] if i < len(source_lyrics) else ""
+                        if next_lyric and next_lyric != "[Instrumental]":
+                            batch_prompt += f"   NEXT SCENE: {next_lyric[:60]}...\n"
+                else:
+                    batch_prompt += f"   IMAGE DESCRIPTION: {text}\n"
+
+                if timings and not is_instrumental:
                     # Scene has batched lyrics with timing info
                     batch_prompt += f"   LYRIC TIMELINE (describe visual evolution matching these timestamps):\n"
                     for timing in timings:
                         batch_prompt += f"     • {timing['start_sec']:.1f}s-{timing['end_sec']:.1f}s ({timing['duration_sec']:.1f}s): \"{timing['text']}\"\n"
-                else:
+                elif not is_instrumental:
                     # Single lyric line, no timing breakdown
                     batch_prompt += f"   LYRICS: {lyrics}\n"
 
@@ -654,7 +681,21 @@ CRITICAL FORMATTING:
         elif source_lyrics:
             batch_prompt += "LYRICS CONTEXT (what this scene visualizes):\n\n"
             for i, (lyrics, text) in enumerate(zip(source_lyrics, texts), 1):
-                batch_prompt += f"{i}. LYRICS: {lyrics}\n   IMAGE DESCRIPTION: {text}\n\n"
+                is_instrumental = (lyrics == "[Instrumental]" or text == "[Instrumental]")
+
+                if is_instrumental:
+                    batch_prompt += f"{i}. TYPE: INSTRUMENTAL SECTION\n"
+                    batch_prompt += f"   Create a cinematic visual for a music break (no lyrics).\n"
+                    batch_prompt += f"   Use establishing shots, ambient details, or atmospheric moments.\n"
+                    if i > 1:
+                        batch_prompt += f"   Context from previous: {source_lyrics[i-2][:60]}...\n"
+                    if i < len(source_lyrics):
+                        next_lyric = source_lyrics[i] if i < len(source_lyrics) else ""
+                        if next_lyric and next_lyric != "[Instrumental]":
+                            batch_prompt += f"   Leading into: {next_lyric[:60]}...\n"
+                else:
+                    batch_prompt += f"{i}. LYRICS: {lyrics}\n   IMAGE DESCRIPTION: {text}\n"
+                batch_prompt += "\n"
         else:
             batch_prompt += "Image descriptions:\n\n"
             for i, text in enumerate(texts, 1):
@@ -665,6 +706,7 @@ Return {len(texts)} numbered video prompts with:
 - Camera movements appropriate to each scene (single continuous shot)
 - Natural subject/environmental motion within the same scene
 - INCORPORATE the lyric content/meaning into the visual storytelling
+- For INSTRUMENTAL SECTIONS (no lyrics): Create atmospheric, establishing, or transitional visuals that maintain continuity
 - For batched scenes: Use explicit time markers (e.g., "0-3s: ..., 3-5s: ..., 5-8s: ...") to describe visual evolution that matches the lyric timeline
 - Describe smooth visual transitions between lyric moments at their exact timestamps using phrases like:
   * "transitions to," "evolves into," "gradually reveals," "shifts to"
@@ -677,6 +719,7 @@ GOOD EXAMPLES:
   ✓ "...the camera slowly pans right, transitioning focus from the forest to the ocean shore"
   ✓ "...as the sun sets (0-3s), the scene gradually reveals stars appearing (3-5s), evolving into a full night sky (5-8s)"
   ✓ "...the character walks forward as the background morphs from city to countryside"
+  ✓ "INSTRUMENTAL: Wide establishing shot, camera slowly dollying forward through the misty forest, revealing shafts of morning light filtering through the trees, gentle wind rustling leaves"
 
 BAD EXAMPLES:
   ✗ "Cut to a new location" (hard cut)

@@ -504,13 +504,20 @@ class StoryboardGenerator:
 
         self.logger.info(f"Batched {len(scenes)} scenes into {len(batched_scenes)} combined scenes")
 
-        # Log statistics
+        # Log statistics and validate max duration
         if batched_scenes:
             avg_duration = sum(s.duration_sec for s in batched_scenes) / len(batched_scenes)
             min_duration = min(s.duration_sec for s in batched_scenes)
             max_duration = max(s.duration_sec for s in batched_scenes)
             self.logger.info(f"Scene durations - Avg: {avg_duration:.1f}s, Min: {min_duration:.1f}s, "
                            f"Max: {max_duration:.1f}s (target: {self.target_scene_duration:.1f}s)")
+
+            # Validate that no scene exceeds the target (should never happen after split)
+            over_limit = [s for s in batched_scenes if s.duration_sec > self.target_scene_duration]
+            if over_limit:
+                self.logger.error(f"⚠️ WARNING: {len(over_limit)} batched scenes exceed {self.target_scene_duration}s limit!")
+                for scene in over_limit:
+                    self.logger.error(f"  - '{scene.source[:50]}...': {scene.duration_sec:.1f}s")
 
         return batched_scenes
 
@@ -649,6 +656,11 @@ class StoryboardGenerator:
         self.logger.info(f"Generated {len(scenes)} content scenes (skipped {skipped_markers} section markers), "
                         f"total duration: {sum(s.duration_sec for s in scenes):.1f} seconds")
 
+        # CRITICAL: Split any scenes that exceed max duration BEFORE batching
+        # This ensures no single scene is > 8 seconds (required for Veo 3/3.1)
+        scenes = self.split_long_scenes(scenes, max_duration=self.target_scene_duration)
+        self.logger.info(f"After splitting long scenes: {len(scenes)} scenes")
+
         # Batch scenes to aim for optimal video generation duration
         # This combines short lyric lines into ~8-second scenes suitable for Veo 3.1
         scenes = self._batch_scenes_for_optimal_duration(scenes)
@@ -723,20 +735,21 @@ class StoryboardGenerator:
             self.logger.error(f"Failed to sync to MIDI: {e}")
             return scenes
     
-    def split_long_scenes(self, scenes: List[Scene], 
+    def split_long_scenes(self, scenes: List[Scene],
                          max_duration: float = 8.0) -> List[Scene]:
         """
         Split scenes that are too long for video generation.
-        
+
         Args:
             scenes: List of scenes
             max_duration: Maximum duration per scene (e.g., 8s for Veo)
-            
+
         Returns:
             List of scenes with long ones split
         """
         result = []
-        
+        split_count = 0
+
         for scene in scenes:
             if scene.duration_sec <= max_duration:
                 result.append(scene)
@@ -744,7 +757,10 @@ class StoryboardGenerator:
                 # Split into multiple scenes
                 num_splits = int(scene.duration_sec / max_duration) + 1
                 split_duration = scene.duration_sec / num_splits
-                
+
+                self.logger.info(f"Splitting scene '{scene.source[:50]}...' ({scene.duration_sec:.1f}s) into {num_splits} parts of {split_duration:.1f}s each")
+                split_count += 1
+
                 for i in range(num_splits):
                     new_scene = Scene(
                         source=scene.source,
@@ -755,11 +771,14 @@ class StoryboardGenerator:
                     new_scene.metadata = scene.metadata.copy()
                     new_scene.metadata["split_part"] = i + 1
                     new_scene.metadata["split_total"] = num_splits
-                    
+
                     result.append(new_scene)
-        
+
         # Re-number order
         for i, scene in enumerate(result):
             scene.order = i
-        
+
+        if split_count > 0:
+            self.logger.info(f"Split {split_count} scenes that exceeded {max_duration}s")
+
         return result

@@ -29,12 +29,13 @@ class ReferenceGenerationWorker(QThread):
     reference_generated = Signal(int, str)  # index (1-3), file_path
     generation_complete = Signal(bool, str)  # success, message
 
-    def __init__(self, description: str, style: str, output_dir: Path, image_generator):
+    def __init__(self, description: str, style: str, output_dir: Path, image_generator, reference_image: Optional[Path] = None):
         super().__init__()
         self.description = description
         self.style = style
         self.output_dir = output_dir
         self.image_generator = image_generator
+        self.reference_image = reference_image
         self.generated_paths = []
 
     def run(self):
@@ -57,7 +58,12 @@ class ReferenceGenerationWorker(QThread):
                 try:
                     # Generate image
                     logger.info(f"Generating reference {i}/3: {prompt[:80]}...")
-                    image_path = self.image_generator(prompt, self.output_dir, f"char_ref_{angle}")
+
+                    # Pass reference image if provided
+                    if self.reference_image:
+                        image_path = self.image_generator(prompt, self.output_dir, f"char_ref_{angle}", self.reference_image)
+                    else:
+                        image_path = self.image_generator(prompt, self.output_dir, f"char_ref_{angle}")
 
                     if image_path and image_path.exists():
                         # Validate
@@ -184,6 +190,40 @@ class ReferenceGenerationDialog(QDialog):
 
         input_layout.addWidget(style_group)
 
+        # Reference image (optional - for generating views from existing image)
+        ref_image_group = QGroupBox("Reference Image (Optional)")
+        ref_image_layout = QVBoxLayout(ref_image_group)
+
+        ref_help_label = QLabel(
+            "Upload an optional reference image to guide the 3-view generation.\n"
+            "The system will use this image as a reference to create front, side, and full-body views."
+        )
+        ref_help_label.setWordWrap(True)
+        ref_help_label.setStyleSheet("color: #666; font-style: italic; font-size: 11px;")
+        ref_image_layout.addWidget(ref_help_label)
+
+        ref_controls_layout = QHBoxLayout()
+        self.ref_image_upload_btn = QPushButton("📁 Upload Reference Image")
+        self.ref_image_upload_btn.clicked.connect(self.upload_reference_image)
+        ref_controls_layout.addWidget(self.ref_image_upload_btn)
+
+        self.ref_image_label = QLabel("No reference image")
+        self.ref_image_label.setStyleSheet("color: #999; font-style: italic;")
+        ref_controls_layout.addWidget(self.ref_image_label, 1)
+
+        self.ref_image_clear_btn = QPushButton("✕")
+        self.ref_image_clear_btn.setToolTip("Clear reference image")
+        self.ref_image_clear_btn.setMaximumWidth(30)
+        self.ref_image_clear_btn.setVisible(False)
+        self.ref_image_clear_btn.clicked.connect(self.clear_reference_image)
+        ref_controls_layout.addWidget(self.ref_image_clear_btn)
+
+        ref_image_layout.addLayout(ref_controls_layout)
+        input_layout.addWidget(ref_image_group)
+
+        # Store reference image path
+        self.reference_image_path = None
+
         # Import from library button
         self.import_library_btn = QPushButton("📚 Import from Reference Library")
         self.import_library_btn.setStyleSheet("padding: 8px;")
@@ -297,6 +337,43 @@ class ReferenceGenerationDialog(QDialog):
         button_layout.addWidget(cancel_btn)
 
         layout.addLayout(button_layout)
+
+    def upload_reference_image(self):
+        """Upload a reference image to guide 3-view generation"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Reference Image",
+            str(Path.home()),
+            "Images (*.png *.jpg *.jpeg)"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            source_path = Path(file_path)
+
+            # Store reference image path
+            self.reference_image_path = source_path
+
+            # Update label
+            self.ref_image_label.setText(source_path.name)
+            self.ref_image_label.setStyleSheet("color: #00cc66; font-weight: bold;")
+            self.ref_image_clear_btn.setVisible(True)
+
+            logger.info(f"Loaded reference image: {source_path.name}")
+
+        except Exception as e:
+            logger.error(f"Failed to load reference image: {e}")
+            QMessageBox.warning(self, "Load Error", f"Failed to load reference image:\n{str(e)}")
+
+    def clear_reference_image(self):
+        """Clear the loaded reference image"""
+        self.reference_image_path = None
+        self.ref_image_label.setText("No reference image")
+        self.ref_image_label.setStyleSheet("color: #999; font-style: italic;")
+        self.ref_image_clear_btn.setVisible(False)
+        logger.info("Cleared reference image")
 
     def import_from_library(self):
         """Import existing references from the project library"""
@@ -486,7 +563,7 @@ class ReferenceGenerationDialog(QDialog):
             status_label.setStyleSheet("color: blue; font-style: italic;")
 
         # Start worker
-        self.worker = ReferenceGenerationWorker(description, style, output_dir, self.image_generator)
+        self.worker = ReferenceGenerationWorker(description, style, output_dir, self.image_generator, self.reference_image_path)
         self.worker.progress.connect(self.on_progress)
         self.worker.reference_generated.connect(self.on_reference_generated)
         self.worker.generation_complete.connect(self.on_generation_complete)

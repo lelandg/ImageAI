@@ -956,16 +956,17 @@ class MainWindow(QMainWindow):
 
         self.ref_style_combo = QComboBox()
         self.ref_style_combo.addItems([
+            "Seamless merge",
             "Natural blend",
             "In center",
             "Blurred edges",
             "In circle",
             "In frame",
-            "Seamless merge",
             "As background",
             "As overlay",
             "Split screen"
         ])
+        self.ref_style_combo.setCurrentText("Seamless merge")  # Set as default
         self.ref_style_combo.currentTextChanged.connect(self._on_ref_style_changed)
         style_layout.addWidget(self.ref_style_combo)
         ref_options_layout.addLayout(style_layout)

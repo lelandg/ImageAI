@@ -1128,7 +1128,13 @@ class WorkspaceWidget(QWidget):
         self.total_duration_label = QLabel("Total: 0:00")
         self.total_duration_label.setToolTip("Total video duration based on all scenes")
         controls_layout.addWidget(self.total_duration_label)
-        
+
+        # Warning label for invalid scene durations
+        self.duration_warning_label = QLabel()
+        self.duration_warning_label.setStyleSheet("color: #cc0000; font-weight: bold; padding: 4px;")
+        self.duration_warning_label.setVisible(False)
+        controls_layout.addWidget(self.duration_warning_label)
+
         layout.addLayout(controls_layout)
         
         # Scene table (11 columns - optimized for Veo 3.1)
@@ -1683,10 +1689,62 @@ class WorkspaceWidget(QWidget):
                 total_duration=total_duration,
                 sections=sections
             )
-            
+
             elapsed = time.time() - start_time
             self.logger.info(f"LLM sync completed in {elapsed:.1f} seconds, got {len(timed_lyrics) if timed_lyrics else 0} timed lyrics")
-            
+
+            # Fill instrumental gaps between lyrics
+            if timed_lyrics:
+                self.logger.info("Detecting and filling instrumental gaps...")
+                timed_lyrics_with_gaps = sync_assistant.fill_instrumental_gaps(
+                    timed_lyrics=timed_lyrics,
+                    total_duration=total_duration,
+                    min_gap_duration=1.0  # Only create scenes for gaps >= 1 second
+                )
+                self.logger.info(f"After gap filling: {len(timed_lyrics_with_gaps)} total sections (lyrics + instrumental)")
+
+                # Create new Scene objects for instrumental sections and insert them into scenes list
+                from core.video.project import Scene
+                new_scenes = []
+                lyric_index = 0
+
+                for timed_item in timed_lyrics_with_gaps:
+                    if timed_item.text == "[Instrumental]":
+                        # Create a new scene for instrumental section
+                        instrumental_scene = Scene(
+                            source="[Instrumental]",
+                            prompt="",  # Will be filled by video prompt generation
+                            duration_sec=timed_item.end_time - timed_item.start_time,
+                            metadata={
+                                'llm_start_time': timed_item.start_time,
+                                'llm_end_time': timed_item.end_time,
+                                'section': timed_item.section_type or 'instrumental',
+                                'is_instrumental': True
+                            }
+                        )
+                        new_scenes.append(instrumental_scene)
+                        self.logger.info(
+                            f"Created instrumental scene: {timed_item.start_time:.1f}-{timed_item.end_time:.1f}s "
+                            f"({timed_item.end_time - timed_item.start_time:.1f}s)"
+                        )
+                    else:
+                        # This is a lyric - find the corresponding original scene
+                        # Skip section markers in original scenes
+                        while lyric_index < len(scenes) and scenes[lyric_index].source.strip().startswith('[') and scenes[lyric_index].source.strip().endswith(']'):
+                            new_scenes.append(scenes[lyric_index])  # Keep section markers
+                            lyric_index += 1
+
+                        if lyric_index < len(scenes):
+                            new_scenes.append(scenes[lyric_index])
+                            lyric_index += 1
+
+                # Replace scenes with new list that includes instrumental sections
+                scenes = new_scenes
+                self.logger.info(f"Updated scenes list: {len(scenes)} total scenes (including instrumental)")
+
+                # Now timed_lyrics should refer to the filled list for timing application
+                timed_lyrics = timed_lyrics_with_gaps
+
             # Update scene timings based on LLM sync (skip section markers)
             if timed_lyrics:
                 self.logger.info("Applying LLM timing to scenes...")
@@ -1952,7 +2010,48 @@ class WorkspaceWidget(QWidget):
                     total_duration=total_duration,
                     sections=sections
                 )
-                
+
+                # Fill instrumental gaps
+                if timed_lyrics:
+                    self.logger.info("Detecting and filling instrumental gaps in enhanced storyboard...")
+                    timed_lyrics_with_gaps = sync_assistant.fill_instrumental_gaps(
+                        timed_lyrics=timed_lyrics,
+                        total_duration=total_duration,
+                        min_gap_duration=1.0
+                    )
+                    self.logger.info(f"After gap filling: {len(timed_lyrics_with_gaps)} total sections")
+
+                    # Create new Scene objects for instrumental sections
+                    from core.video.project import Scene
+                    new_scenes = []
+                    lyric_index = 0
+
+                    for timed_item in timed_lyrics_with_gaps:
+                        if timed_item.text == "[Instrumental]":
+                            instrumental_scene = Scene(
+                                source="[Instrumental]",
+                                prompt="",
+                                duration_sec=timed_item.end_time - timed_item.start_time,
+                                metadata={
+                                    'llm_start_time': timed_item.start_time,
+                                    'llm_end_time': timed_item.end_time,
+                                    'section': timed_item.section_type or 'instrumental',
+                                    'is_instrumental': True
+                                }
+                            )
+                            new_scenes.append(instrumental_scene)
+                        else:
+                            while lyric_index < len(scenes) and scenes[lyric_index].source.strip().startswith('[') and scenes[lyric_index].source.strip().endswith(']'):
+                                new_scenes.append(scenes[lyric_index])
+                                lyric_index += 1
+                            if lyric_index < len(scenes):
+                                new_scenes.append(scenes[lyric_index])
+                                lyric_index += 1
+
+                    scenes = new_scenes
+                    timed_lyrics = timed_lyrics_with_gaps
+                    self.logger.info(f"Updated scenes list: {len(scenes)} total scenes (including instrumental)")
+
                 # Update scene timings
                 if timed_lyrics:
                     self.logger.info(f"Applying enhanced timing to scenes...")
@@ -2273,13 +2372,21 @@ class WorkspaceWidget(QWidget):
             video_btn.regenerate_requested.connect(lambda idx=i: self.generate_video_clip(idx))
             video_btn.clear_requested.connect(lambda idx=i: self._clear_video(idx))
             video_btn.play_requested.connect(lambda idx=i: self._play_video_in_panel(idx))
+            video_btn.select_existing_requested.connect(lambda idx=i: self._select_existing_video(idx))
 
             self.scene_table.setCellWidget(i, 4, self._create_top_aligned_widget(video_btn))
 
             # Column 5: Time (use label widget for proper top alignment)
             time_label = QLabel(f"{scene.duration_sec:.1f}")
             time_label.setAlignment(Qt.AlignTop | Qt.AlignCenter)
-            time_label.setStyleSheet("padding: 2px;")
+
+            # Validate duration: must be <= 8.0 seconds
+            if scene.duration_sec > 8.0:
+                time_label.setStyleSheet("padding: 2px; background-color: #ffcccc; color: #cc0000; font-weight: bold;")
+                time_label.setToolTip(f"⚠️ WARNING: Scene duration ({scene.duration_sec:.1f}s) exceeds maximum of 8.0s")
+            else:
+                time_label.setStyleSheet("padding: 2px;")
+
             self.scene_table.setCellWidget(i, 5, self._create_top_aligned_widget(time_label))
 
             # Column 6: Wrap button (⤵️)
@@ -2394,6 +2501,15 @@ class WorkspaceWidget(QWidget):
         minutes = int(total_duration // 60)
         seconds = int(total_duration % 60)
         self.total_duration_label.setText(f"Total: {minutes}:{seconds:02d}")
+
+        # Check for invalid scene durations (> 8.0 seconds)
+        invalid_scenes = [i+1 for i, scene in enumerate(self.current_project.scenes) if scene.duration_sec > 8.0]
+        if invalid_scenes:
+            self.duration_warning_label.setText(f"⚠️ {len(invalid_scenes)} scene(s) exceed 8.0s limit (#{', #'.join(map(str, invalid_scenes))})")
+            self.duration_warning_label.setToolTip("Video generation is blocked until all scenes are 8.0 seconds or less. Please manually adjust the Time column.")
+            self.duration_warning_label.setVisible(True)
+        else:
+            self.duration_warning_label.setVisible(False)
 
         # Refresh wizard after populating scenes
         self._refresh_wizard()
@@ -2734,7 +2850,7 @@ class WorkspaceWidget(QWidget):
                     # Loop current video
                     self.media_player.setPosition(0)
                     self.media_player.play()
-                    self._log_to_console("🔁 Looping video")
+                    # Don't log loop message to avoid console spam
 
     def _play_next_scene(self):
         """Play the next available scene with video"""
@@ -2958,6 +3074,7 @@ class WorkspaceWidget(QWidget):
     def _log_to_console(self, message: str, level: str = "INFO"):
         """Log a message to the status console"""
         from datetime import datetime
+        from PySide6.QtWidgets import QApplication
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         # Color coding based on level
@@ -2971,6 +3088,9 @@ class WorkspaceWidget(QWidget):
 
         html = f'<span style="color: {color};">[{timestamp}] {message}</span>'
         self.status_console.append(html)
+
+        # Force immediate GUI update so messages appear in real-time
+        QApplication.processEvents()
 
     def generate_single_scene(self, scene_index: int):
         """Generate image for a single scene"""
@@ -2997,6 +3117,17 @@ class WorkspaceWidget(QWidget):
             return
 
         scene = self.current_project.scenes[scene_index]
+
+        # Validate scene duration (must be <= 8.0 seconds)
+        if scene.duration_sec > 8.0:
+            from gui.common.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning(
+                "Invalid Scene Duration",
+                f"Scene #{scene_index + 1} duration ({scene.duration_sec:.1f}s) exceeds the maximum of 8.0 seconds.\n\n"
+                f"Please manually adjust the duration in the Time column before generating video."
+            )
+            return
 
         # Ensure scene has a video prompt
         if not hasattr(scene, 'video_prompt') or not scene.video_prompt:
@@ -3226,8 +3357,13 @@ class WorkspaceWidget(QWidget):
 
         scene = self.current_project.scenes[scene_index]
 
-        # Check if any scenes have images
-        has_any_images = any(hasattr(s, 'images') and s.images for s in self.current_project.scenes)
+        # Check if any scenes have images (variants, first frame, or last frame)
+        has_any_images = any(
+            (hasattr(s, 'images') and s.images) or
+            (hasattr(s, 'first_frame') and s.first_frame) or
+            (hasattr(s, 'last_frame') and s.last_frame)
+            for s in self.current_project.scenes
+        )
         if not has_any_images:
             from gui.common.dialog_manager import get_dialog_manager
             dialog_manager = get_dialog_manager(self)
@@ -3532,6 +3668,58 @@ class WorkspaceWidget(QWidget):
             self.populate_scene_table()
             self._log_to_console(f"🗑️ Scene {scene_index + 1}: Video and first frame cleared")
 
+    def _select_existing_video(self, scene_index: int):
+        """Open dialog to select an existing video clip from the project to assign to this scene"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        # Import the dialog
+        from gui.video.select_existing_video_dialog import SelectExistingVideoDialog
+
+        # Show the dialog
+        dialog = SelectExistingVideoDialog(
+            project=self.current_project,
+            current_scene_id=scene.id,
+            parent=self
+        )
+
+        if dialog.exec() == QDialog.Accepted:
+            # Get the selected video path
+            selected_video_path = dialog.get_selected_video_path()
+
+            if selected_video_path and selected_video_path.exists():
+                # Assign the video to this scene
+                scene.video_clip = selected_video_path
+
+                # Try to extract first and last frames from the video
+                try:
+                    from core.video.veo_client import extract_first_last_frames
+                    project_dir = self.project_manager.get_project_dir(self.current_project.project_id)
+
+                    first_frame_path, last_frame_path = extract_first_last_frames(
+                        video_path=selected_video_path,
+                        output_dir=project_dir,
+                        scene_id=scene.id
+                    )
+
+                    scene.first_frame = first_frame_path
+                    scene.last_frame = last_frame_path
+
+                    self.logger.info(f"Assigned existing video to Scene {scene_index + 1}: {selected_video_path}")
+                    self.logger.info(f"Extracted frames: {first_frame_path}, {last_frame_path}")
+
+                except Exception as e:
+                    # If frame extraction fails, still assign the video but log the error
+                    self.logger.error(f"Failed to extract frames from video: {e}")
+                    self.logger.warning("Video assigned but frames not extracted")
+
+                # Save and refresh
+                self.save_project()
+                self.populate_scene_table()
+                self._log_to_console(f"📁 Scene {scene_index + 1}: Assigned existing video clip")
+
     def _select_end_frame_variant(self, scene_index: int):
         """Select end frame from generated variants"""
         if not self.current_project or scene_index >= len(self.current_project.scenes):
@@ -3646,8 +3834,13 @@ class WorkspaceWidget(QWidget):
 
         scene = self.current_project.scenes[scene_index]
 
-        # Check if any scenes have images
-        has_any_images = any(hasattr(s, 'images') and s.images for s in self.current_project.scenes)
+        # Check if any scenes have images (variants, first frame, or last frame)
+        has_any_images = any(
+            (hasattr(s, 'images') and s.images) or
+            (hasattr(s, 'first_frame') and s.first_frame) or
+            (hasattr(s, 'last_frame') and s.last_frame)
+            for s in self.current_project.scenes
+        )
         if not has_any_images:
             from gui.common.dialog_manager import get_dialog_manager
             dialog_manager = get_dialog_manager(self)
@@ -3756,12 +3949,12 @@ class WorkspaceWidget(QWidget):
         try:
             import cv2
 
-            # Create last_frames directory in project directory
-            last_frames_dir = self.current_project.project_dir / "last_frames"
-            last_frames_dir.mkdir(exist_ok=True)
+            # Create frames directory in project directory (backward compatible)
+            frames_dir = self.current_project.project_dir / "frames"
+            frames_dir.mkdir(exist_ok=True)
 
-            # Generate output path
-            output_path = last_frames_dir / f"scene_{scene_index + 1:03d}_last_frame.png"
+            # Generate output path (use 0-based index to match video generation system)
+            output_path = frames_dir / f"scene_{scene_index}_last_frame.png"
 
             self.logger.info(f"Extracting last frame from {scene.video_clip.name}...")
 
@@ -3892,8 +4085,13 @@ class WorkspaceWidget(QWidget):
         if not self.current_project or scene_index >= len(self.current_project.scenes):
             return
 
-        # Check if any scenes have images
-        has_any_images = any(hasattr(s, 'images') and s.images for s in self.current_project.scenes)
+        # Check if any scenes have images (variants, first frame, or last frame)
+        has_any_images = any(
+            (hasattr(s, 'images') and s.images) or
+            (hasattr(s, 'first_frame') and s.first_frame) or
+            (hasattr(s, 'last_frame') and s.last_frame)
+            for s in self.current_project.scenes
+        )
         if not has_any_images:
             from gui.common.dialog_manager import get_dialog_manager
             dialog_manager = get_dialog_manager(self)
@@ -4699,10 +4897,50 @@ class WorkspaceWidget(QWidget):
         
         if use_llm or sections:
             # Use LLM sync assistant
-            sync_assistant = LLMSyncAssistant(provider=llm_provider if use_llm else None, 
+            sync_assistant = LLMSyncAssistant(provider=llm_provider if use_llm else None,
                                             model=llm_model if use_llm else None)
             timed_lyrics = sync_assistant.estimate_lyric_timing(lyrics_lines, total_duration, sections)
-            
+
+            # Fill instrumental gaps
+            if timed_lyrics:
+                self.logger.info("Detecting and filling instrumental gaps during recalculation...")
+                timed_lyrics_with_gaps = sync_assistant.fill_instrumental_gaps(
+                    timed_lyrics=timed_lyrics,
+                    total_duration=total_duration,
+                    min_gap_duration=1.0
+                )
+
+                # Create/update scenes to include instrumental sections
+                from core.video.project import Scene
+                new_scenes = []
+                lyric_index = 0
+
+                for timed_item in timed_lyrics_with_gaps:
+                    if timed_item.text == "[Instrumental]":
+                        instrumental_scene = Scene(
+                            source="[Instrumental]",
+                            prompt="",
+                            duration_sec=timed_item.end_time - timed_item.start_time,
+                            metadata={
+                                'start_time': timed_item.start_time,
+                                'end_time': timed_item.end_time,
+                                'section': timed_item.section_type or 'instrumental',
+                                'is_instrumental': True
+                            }
+                        )
+                        new_scenes.append(instrumental_scene)
+                    else:
+                        while lyric_index < len(self.current_project.scenes) and self.current_project.scenes[lyric_index].source.strip().startswith('[') and self.current_project.scenes[lyric_index].source.strip().endswith(']'):
+                            new_scenes.append(self.current_project.scenes[lyric_index])
+                            lyric_index += 1
+                        if lyric_index < len(self.current_project.scenes):
+                            new_scenes.append(self.current_project.scenes[lyric_index])
+                            lyric_index += 1
+
+                self.current_project.scenes = new_scenes
+                timed_lyrics = timed_lyrics_with_gaps
+                self.logger.info(f"Updated scenes during recalc: {len(self.current_project.scenes)} total scenes")
+
             # Update scene timings (skip section markers)
             if timed_lyrics:
                 lyric_index = 0

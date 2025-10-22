@@ -1034,7 +1034,7 @@ class LLMSyncAssistant:
         # Section markers get minimal time
         if self._is_section_marker(line):
             return base_duration * 0.3
-        
+
         # Adjust based on line length (more words = more time)
         word_count = len(line.split())
         if word_count < 5:
@@ -1043,3 +1043,109 @@ class LLMSyncAssistant:
             return base_duration * 1.3
         else:
             return base_duration
+
+    def fill_instrumental_gaps(self,
+                              timed_lyrics: List[TimedLyric],
+                              total_duration: float,
+                              min_gap_duration: float = 1.0) -> List[TimedLyric]:
+        """
+        Detect silent/instrumental gaps between lyrics and create TimedLyric entries for them.
+
+        This enables the storyboard generation to create scenes for instrumental sections,
+        which can then be filled with appropriate visual content by the video prompt generator.
+
+        Args:
+            timed_lyrics: List of timed lyrics (from LLM sync or estimation)
+            total_duration: Total duration of the audio/video
+            min_gap_duration: Minimum gap duration to fill (in seconds).
+                            Gaps shorter than this are ignored.
+
+        Returns:
+            Combined list of timed lyrics and instrumental sections, sorted by start_time
+
+        Example:
+            >>> # Lyrics at 0-5s, 10-15s, 20-25s (total 30s)
+            >>> lyrics = [
+            ...     TimedLyric("verse 1", 0, 5),
+            ...     TimedLyric("verse 2", 10, 15),
+            ...     TimedLyric("chorus", 20, 25)
+            ... ]
+            >>> filled = assistant.fill_instrumental_gaps(lyrics, 30.0, min_gap_duration=2.0)
+            >>> # Returns 5 items:
+            >>> # 0-5s: "verse 1"
+            >>> # 5-10s: "[Instrumental]" (5s gap)
+            >>> # 10-15s: "verse 2"
+            >>> # 15-20s: "[Instrumental]" (5s gap)
+            >>> # 20-25s: "chorus"
+            >>> # 25-30s: "[Instrumental]" (5s gap at end)
+        """
+        if not timed_lyrics:
+            self.logger.warning("No timed lyrics to process for gap detection")
+            return []
+
+        result = []
+
+        # Sort by start time to ensure correct order
+        sorted_lyrics = sorted(timed_lyrics, key=lambda x: x.start_time)
+
+        # Check for gap at the beginning (intro)
+        first_lyric = sorted_lyrics[0]
+        if first_lyric.start_time >= min_gap_duration:
+            intro_gap = TimedLyric(
+                text="[Instrumental]",
+                start_time=0.0,
+                end_time=first_lyric.start_time,
+                section_type="intro"
+            )
+            result.append(intro_gap)
+            self.logger.info(f"Added intro gap: 0.0-{first_lyric.start_time:.1f}s ({first_lyric.start_time:.1f}s)")
+
+        # Process each lyric and check for gaps
+        for i, lyric in enumerate(sorted_lyrics):
+            # Add the current lyric
+            result.append(lyric)
+
+            # Check for gap between this lyric and the next
+            if i < len(sorted_lyrics) - 1:
+                next_lyric = sorted_lyrics[i + 1]
+                gap_duration = next_lyric.start_time - lyric.end_time
+
+                if gap_duration >= min_gap_duration:
+                    # Create instrumental gap
+                    gap = TimedLyric(
+                        text="[Instrumental]",
+                        start_time=lyric.end_time,
+                        end_time=next_lyric.start_time,
+                        section_type="instrumental"
+                    )
+                    result.append(gap)
+                    self.logger.info(
+                        f"Added instrumental gap: {lyric.end_time:.1f}-{next_lyric.start_time:.1f}s "
+                        f"({gap_duration:.1f}s)"
+                    )
+
+        # Check for gap at the end (outro)
+        last_lyric = sorted_lyrics[-1]
+        if last_lyric.end_time + min_gap_duration <= total_duration:
+            outro_gap = TimedLyric(
+                text="[Instrumental]",
+                start_time=last_lyric.end_time,
+                end_time=total_duration,
+                section_type="outro"
+            )
+            result.append(outro_gap)
+            gap_duration = total_duration - last_lyric.end_time
+            self.logger.info(f"Added outro gap: {last_lyric.end_time:.1f}-{total_duration:.1f}s ({gap_duration:.1f}s)")
+
+        # Sort result by start time
+        result.sort(key=lambda x: x.start_time)
+
+        # Log summary
+        instrumental_count = sum(1 for item in result if item.text == "[Instrumental]")
+        lyric_count = len(result) - instrumental_count
+        self.logger.info(
+            f"Gap filling complete: {lyric_count} lyrics + {instrumental_count} instrumental sections "
+            f"= {len(result)} total scenes"
+        )
+
+        return result

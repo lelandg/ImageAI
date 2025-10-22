@@ -230,14 +230,17 @@ class ReferenceSelectorDialog(QDialog):
             )
             self.count_label.setStyleSheet("color: orange; font-weight: bold; font-size: 12px;")
             self.ok_btn.setEnabled(False)
+            self.ok_btn.setText("Use Selected References")
         elif selected_count == 0:
-            self.count_label.setText("⚠ No references selected")
-            self.count_label.setStyleSheet("color: red; font-weight: bold; font-size: 12px;")
-            self.ok_btn.setEnabled(False)
+            self.count_label.setText("ℹ No references selected - will use text-to-video mode")
+            self.count_label.setStyleSheet("color: #2196F3; font-weight: bold; font-size: 12px;")
+            self.ok_btn.setEnabled(True)  # Allow generation with no references
+            self.ok_btn.setText("Continue (Text-to-Video)")
         else:
             self.count_label.setText(f"✓ {selected_count} / {self.max_selection} references selected")
             self.count_label.setStyleSheet("color: green; font-weight: bold; font-size: 12px;")
             self.ok_btn.setEnabled(True)
+            self.ok_btn.setText("Use Selected References")
 
     def select_all(self):
         """Select all references"""

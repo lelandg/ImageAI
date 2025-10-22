@@ -911,31 +911,32 @@ class VideoGenerationThread(QThread):
                     # Fall back to original seed image
 
             # === NEW: Configure generation with REFERENCES-FIRST approach ===
-            # CRITICAL: Veo 3.1 has TWO SEPARATE modes that CANNOT be combined:
+            # CRITICAL: Veo API limitation - these modes are MUTUALLY EXCLUSIVE:
             # 1. "Ingredients to Video" (reference images) - text prompt only, REQUIRES 8 seconds
             # 2. "Image-to-Video" (start frame) - animates a single image, supports 4/6/8 seconds
-            # Choose one mode based on what's provided
+            # API error if both are set: "Image and reference images cannot be both set."
+            # Choose one mode based on what's provided, preferring references for consistency
             selected_model = VeoModel.VEO_3_GENERATE
             use_start_frame = None
             use_reference_images = None
 
             if reference_image_paths and len(reference_image_paths) > 0:
                 # MODE 1: "Ingredients to Video" with reference images
-                # Do NOT include start frame - reference images mode uses text prompt only
+                # Do NOT include start frame - API rejects both simultaneously
                 # IMPORTANT: Reference mode ONLY supports 8 seconds
                 selected_model = VeoModel.VEO_3_1_GENERATE
                 use_reference_images = reference_image_paths
-                use_start_frame = None  # Explicitly exclude start frame
+                use_start_frame = None  # Explicitly exclude start frame (API limitation)
                 veo_duration = 8  # Force 8 seconds for reference_to_video mode
                 if veo_duration != scene.duration_sec:
                     logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s (Veo 3.1 reference mode requires 8s)")
                     self.progress_update.emit(14, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3.1 references require 8s)")
                 logger.info(f"🔄 Auto-switching to Veo 3.1 'Ingredients to Video' mode ({len(reference_image_paths)} reference(s))")
-                logger.info(f"   Reference images will guide character/style - NO start frame used")
+                logger.info(f"   Reference images will guide character/style - NO start frame used (API limitation)")
                 self.progress_update.emit(12, f"Using Veo 3.1 'Ingredients to Video' with {len(reference_image_paths)} ref(s)...")
             else:
                 # MODE 2: "Image-to-Video" with start frame (if available)
-                # Do NOT include reference images - image-to-video mode animates a single image
+                # Do NOT include reference images - API rejects both simultaneously
                 # Supports 4, 6, or 8 seconds
                 use_reference_images = None
                 use_start_frame = Path(seed_image_path) if seed_image_path and Path(seed_image_path).exists() else None
@@ -1047,17 +1048,17 @@ class VideoGenerationThread(QThread):
 
             self.progress_update.emit(80, "Extracting last frame...")
 
-            # Extract last frame (for reference/debugging, not assigned to scene)
+            # Extract last frame and assign to scene
             last_frame_path = self._extract_last_frame(video_path, scene_index)
 
-            # Extract first frame (for reference/debugging, not assigned to scene)
+            # Extract first frame and assign to scene
             self.progress_update.emit(85, "Extracting first frame...")
             first_frame_path = self._extract_first_frame(video_path, scene_index)
 
-            # Update scene with video clip only (don't assign extracted frames)
+            # Update scene with video clip AND extracted frames
             scene.video_clip = video_path
-            # Note: first_frame and last_frame are extracted to disk but NOT assigned to scene
-            # This prevents them from appearing in the UI buttons
+            scene.first_frame = first_frame_path
+            scene.last_frame = last_frame_path
 
             self.progress_update.emit(100, f"Video clip generated for scene {scene_index + 1}")
 
@@ -1095,10 +1096,11 @@ class VideoGenerationThread(QThread):
         if not ret:
             raise Exception("Failed to read last frame from video")
 
-        # Save the frame
+        # Save the frame to frames directory (backward compatible with existing projects)
         frames_dir = self.project.project_dir / "frames"
         frames_dir.mkdir(parents=True, exist_ok=True)
 
+        # Use 0-based index for backward compatibility with existing projects
         frame_path = frames_dir / f"scene_{scene_index}_last_frame.png"
         cv2.imwrite(str(frame_path), frame)
 
@@ -1562,7 +1564,7 @@ class VideoProjectTab(QWidget):
             self.workspace_widget.refresh_references()
         self.logger.info("Reference library updated")
 
-    def generate_reference_image_sync(self, prompt: str, output_dir: Path, filename_prefix: str) -> Optional[Path]:
+    def generate_reference_image_sync(self, prompt: str, output_dir: Path, filename_prefix: str, reference_image: Optional[Path] = None) -> Optional[Path]:
         """
         Generate a reference image synchronously for the reference generation wizard.
 
@@ -1570,6 +1572,7 @@ class VideoProjectTab(QWidget):
             prompt: Image generation prompt
             output_dir: Output directory
             filename_prefix: Filename prefix
+            reference_image: Optional reference image to guide generation
 
         Returns:
             Path to generated image or None
@@ -1608,13 +1611,24 @@ class VideoProjectTab(QWidget):
 
             # Generate image
             self.logger.info(f"Calling image provider with prompt: {prompt[:80]}...")
-            result = image_provider.generate_image(
-                prompt=prompt,
-                output_path=output_path,
-                aspect_ratio=aspect_ratio,
-                model="gemini-2.5-flash-image",  # Use production model
-                quality="high"
-            )
+
+            # Prepare kwargs
+            gen_kwargs = {
+                "prompt": prompt,
+                "output_path": output_path,
+                "aspect_ratio": aspect_ratio,
+                "model": "gemini-2.5-flash-image",  # Use production model
+                "quality": "high"
+            }
+
+            # Add reference image if provided
+            if reference_image and reference_image.exists():
+                from PIL import Image
+                ref_img = Image.open(reference_image)
+                gen_kwargs["reference_image"] = ref_img
+                self.logger.info(f"Using reference image: {reference_image.name}")
+
+            result = image_provider.generate_image(**gen_kwargs)
 
             if result and result.get('success') and result.get('image_path'):
                 image_path = Path(result['image_path'])

@@ -36,6 +36,7 @@ class VideoButton(QPushButton):
     regenerate_requested = Signal()  # Emitted when user requests regeneration
     clear_requested = Signal()  # Emitted when user wants to clear video
     play_requested = Signal()  # Emitted when user wants to play video
+    select_existing_requested = Signal()  # Emitted when user wants to select existing video clip
 
     def __init__(self, parent=None):
         """
@@ -180,7 +181,7 @@ class VideoButton(QPushButton):
         menu = QMenu(self)
 
         if self.has_video():
-            # Video exists: show play/regenerate/clear options
+            # Video exists: show play/regenerate/select existing/clear options
             play_action = QAction("▶ Play Video", self)
             play_action.triggered.connect(self.play_requested.emit)
             menu.addAction(play_action)
@@ -191,16 +192,26 @@ class VideoButton(QPushButton):
             regenerate_action.triggered.connect(self.regenerate_requested.emit)
             menu.addAction(regenerate_action)
 
+            select_existing_action = QAction("📁 Select Existing Video...", self)
+            select_existing_action.triggered.connect(self.select_existing_requested.emit)
+            menu.addAction(select_existing_action)
+
             menu.addSeparator()
 
             clear_action = QAction("🗑️ Clear Video", self)
             clear_action.triggered.connect(self.clear_requested.emit)
             menu.addAction(clear_action)
         else:
-            # No video: show generate option
+            # No video: show generate and select existing options
             generate_action = QAction("🎬 Generate Video", self)
             generate_action.triggered.connect(self.regenerate_requested.emit)
             menu.addAction(generate_action)
+
+            menu.addSeparator()
+
+            select_existing_action = QAction("📁 Select Existing Video...", self)
+            select_existing_action.triggered.connect(self.select_existing_requested.emit)
+            menu.addAction(select_existing_action)
 
         menu.exec_(event.globalPos())
 
