@@ -656,14 +656,9 @@ class StoryboardGenerator:
         self.logger.info(f"Generated {len(scenes)} content scenes (skipped {skipped_markers} section markers), "
                         f"total duration: {sum(s.duration_sec for s in scenes):.1f} seconds")
 
-        # CRITICAL: Split any scenes that exceed max duration BEFORE batching
-        # This ensures no single scene is > 8 seconds (required for Veo 3/3.1)
-        scenes = self.split_long_scenes(scenes, max_duration=self.target_scene_duration)
-        self.logger.info(f"After splitting long scenes: {len(scenes)} scenes")
-
-        # Batch scenes to aim for optimal video generation duration
-        # This combines short lyric lines into ~8-second scenes suitable for Veo 3.1
-        scenes = self._batch_scenes_for_optimal_duration(scenes)
+        # NOTE: Splitting and batching are deferred to workspace_widget.py
+        # This is because instrumental scenes are inserted AFTER scene generation,
+        # and splitting/batching must happen AFTER instrumentals to maintain timing alignment
 
         return scenes
     

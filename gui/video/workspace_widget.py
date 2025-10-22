@@ -1808,10 +1808,24 @@ class WorkspaceWidget(QWidget):
                 self.logger.info("LLM sync disabled")
             if not midi_timing:
                 self.logger.info("No MIDI timing available for LLM sync")
-        
+
+        # CRITICAL: Split then batch scenes AFTER instrumental insertion and timing
+        # Split must happen BEFORE batching to ensure no scene exceeds 8 seconds
+        # This must happen AFTER instrumentals to preserve 1:1 lyric-to-scene mapping
+        from core.video.storyboard import StoryboardGenerator
+        storyboard_gen = StoryboardGenerator(target_scene_duration=8.0)
+
+        self.logger.info(f"Splitting long scenes (>{storyboard_gen.target_scene_duration}s)...")
+        scenes = storyboard_gen.split_long_scenes(scenes, max_duration=storyboard_gen.target_scene_duration)
+        self.logger.info(f"After splitting: {len(scenes)} scenes")
+
+        self.logger.info(f"Batching {len(scenes)} scenes to aim for {storyboard_gen.target_scene_duration}-second optimal duration...")
+        scenes = storyboard_gen._batch_scenes_for_optimal_duration(scenes)
+        self.logger.info(f"After batching: {len(scenes)} scenes")
+
         # Update project with ALL current settings
         self.update_project_from_ui()  # This now saves all settings including LLM
-        
+
         # Update specific storyboard-related fields
         self.current_project.scenes = scenes
         self.current_project.input_text = text
@@ -2100,11 +2114,25 @@ class WorkspaceWidget(QWidget):
                                     scene.metadata['section'] = timed_lyric.section_type
                                 lyric_index += 1
             
+            # CRITICAL: Split then batch scenes AFTER instrumental insertion and timing
+            # Split must happen BEFORE batching to ensure no scene exceeds 8 seconds
+            # This must happen AFTER instrumentals to preserve 1:1 lyric-to-scene mapping
+            from core.video.storyboard import StoryboardGenerator
+            storyboard_gen = StoryboardGenerator(target_scene_duration=8.0)
+
+            self.logger.info(f"Splitting long scenes (>{storyboard_gen.target_scene_duration}s)...")
+            scenes = storyboard_gen.split_long_scenes(scenes, max_duration=storyboard_gen.target_scene_duration)
+            self.logger.info(f"After splitting: {len(scenes)} scenes")
+
+            self.logger.info(f"Batching {len(scenes)} scenes to aim for {storyboard_gen.target_scene_duration}-second optimal duration...")
+            scenes = storyboard_gen._batch_scenes_for_optimal_duration(scenes)
+            self.logger.info(f"After batching: {len(scenes)} scenes")
+
             # Store aspect ratio in scenes for continuity
             for scene in scenes:
                 scene.metadata['aspect_ratio'] = aspect_ratio
                 scene.metadata['continuity_enabled'] = True
-            
+
             # Update project
             self.current_project.scenes = scenes
             self.current_project.veo_batches = veo_batches  # Store batched prompts for Veo 3.1
@@ -5008,7 +5036,21 @@ class WorkspaceWidget(QWidget):
                 current_time += scene.duration_sec
             
             self.logger.info(f"Recalculated timing for {len(self.current_project.scenes)} scenes with even distribution")
-        
+
+        # CRITICAL: Split then batch scenes AFTER instrumental insertion and timing recalculation
+        # Split must happen BEFORE batching to ensure no scene exceeds 8 seconds
+        # This must happen AFTER instrumentals to preserve 1:1 lyric-to-scene mapping
+        from core.video.storyboard import StoryboardGenerator
+        storyboard_gen = StoryboardGenerator(target_scene_duration=8.0)
+
+        self.logger.info(f"Splitting long scenes (>{storyboard_gen.target_scene_duration}s)...")
+        self.current_project.scenes = storyboard_gen.split_long_scenes(self.current_project.scenes, max_duration=storyboard_gen.target_scene_duration)
+        self.logger.info(f"After splitting: {len(self.current_project.scenes)} scenes")
+
+        self.logger.info(f"Batching {len(self.current_project.scenes)} scenes to aim for {storyboard_gen.target_scene_duration}-second optimal duration...")
+        self.current_project.scenes = storyboard_gen._batch_scenes_for_optimal_duration(self.current_project.scenes)
+        self.logger.info(f"After batching: {len(self.current_project.scenes)} scenes")
+
         # Auto-save the fixed timing
         self.save_project()
 
