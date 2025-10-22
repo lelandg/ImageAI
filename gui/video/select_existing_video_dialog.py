@@ -9,6 +9,11 @@ the storyboard.
 from pathlib import Path
 from typing import Optional, List, Tuple
 import logging
+import os
+
+# Suppress FFmpeg/codec console warnings (aac, h264, etc.)
+os.environ.setdefault('QTAV_FFMPEG_LOG', '0')
+os.environ.setdefault('QT_LOGGING_RULES', '*.debug=false;qt.multimedia.ffmpeg.warning=false')
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,

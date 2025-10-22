@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 import logging
 import textwrap
+import os
+
+# Suppress FFmpeg/codec console warnings (aac, h264, etc.)
+os.environ.setdefault('QTAV_FFMPEG_LOG', '0')
+os.environ.setdefault('QT_LOGGING_RULES', '*.debug=false;qt.multimedia.ffmpeg.warning=false')
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox,
@@ -743,7 +748,30 @@ class WorkspaceWidget(QWidget):
         self.input_text.setPlaceholderText("Paste lyrics or text here...")
         self.input_text.setMaximumHeight(150)
         layout.addWidget(self.input_text)
-        
+
+        # Scene marker controls
+        marker_layout = QHBoxLayout()
+        marker_layout.addWidget(QLabel("Scene Markers:"))
+
+        self.new_scene_btn = QPushButton("Insert Scene Marker")
+        self.new_scene_btn.setToolTip("Insert '=== NEW SCENE: <environment> ===' at cursor position")
+        self.new_scene_btn.clicked.connect(self._insert_scene_marker)
+        marker_layout.addWidget(self.new_scene_btn)
+
+        self.scene_env_input = QLineEdit()
+        self.scene_env_input.setPlaceholderText("Environment (e.g., bedroom, forest...)")
+        self.scene_env_input.setMaximumWidth(250)
+        self.scene_env_input.setToolTip("Environment description for the new scene")
+        marker_layout.addWidget(self.scene_env_input)
+
+        self.delete_scene_btn = QPushButton("Delete Marker at Cursor")
+        self.delete_scene_btn.setToolTip("Delete scene marker line at cursor position")
+        self.delete_scene_btn.clicked.connect(self._delete_scene_marker)
+        marker_layout.addWidget(self.delete_scene_btn)
+
+        marker_layout.addStretch()
+        layout.addLayout(marker_layout)
+
         # Timing controls
         timing_layout = QHBoxLayout()
         timing_layout.addWidget(QLabel("Target Length:"))
@@ -1164,10 +1192,10 @@ class WorkspaceWidget(QWidget):
         
         # Scene table (11 columns - optimized for Veo 3.1)
         self.scene_table = QTableWidget()
-        self.scene_table.setColumnCount(11)
+        self.scene_table.setColumnCount(12)
         self.scene_table.setHorizontalHeaderLabels([
             "#", "Start Frame", "End Frame", "Ref Images", "🎬", "Time", "⤵️",
-            "Source", "Video Prompt", "Start Prompt", "End Prompt (Optional)"
+            "Source", "Environment", "Video Prompt", "Start Prompt", "End Prompt (Optional)"
         ])
         # Set size policy to expand vertically to show more rows
         self.scene_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -1180,7 +1208,7 @@ class WorkspaceWidget(QWidget):
         # Disable word wrap by default - individual rows can be toggled
         self.scene_table.setWordWrap(False)
         self.scene_table.setTextElideMode(Qt.ElideRight)
-        # Set tooltips for headers (11 columns: 0-10)
+        # Set tooltips for headers (12 columns: 0-11)
         self.scene_table.horizontalHeaderItem(0).setToolTip("Scene number")
         self.scene_table.horizontalHeaderItem(1).setToolTip("Start Frame\nFirst frame of video (hover for preview, click to view, right-click for options)")
         self.scene_table.horizontalHeaderItem(2).setToolTip("End Frame\nLast frame of video (hover for preview, click to view, right-click for options)\nLeave empty for Veo 3 single-frame video")
@@ -1189,9 +1217,10 @@ class WorkspaceWidget(QWidget):
         # Column 5 (Time): No tooltip
         self.scene_table.horizontalHeaderItem(6).setToolTip("Wrap\nToggle prompt text wrapping for this row")
         self.scene_table.horizontalHeaderItem(7).setToolTip("Source\nOriginal lyrics or text (hover for full text)")
-        self.scene_table.horizontalHeaderItem(8).setToolTip("Video Prompt\nAI-enhanced prompt with camera movement for video generation (✨ LLM + ↶↷ undo/redo)")
-        self.scene_table.horizontalHeaderItem(9).setToolTip("Start Prompt\nAI-enhanced prompt for start frame generation (✨ LLM + ↶↷ undo/redo)")
-        self.scene_table.horizontalHeaderItem(10).setToolTip("End Prompt\nOptional: describe the ending frame for Veo 3.1 transition (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(8).setToolTip("Environment\nLocation/setting for this scene (e.g., 'bedroom', 'abstract', 'forest')\nPassed to LLM for consistent environment across scenes")
+        self.scene_table.horizontalHeaderItem(9).setToolTip("Video Prompt\nAI-enhanced prompt with camera movement for video generation (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(10).setToolTip("Start Prompt\nAI-enhanced prompt for start frame generation (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(11).setToolTip("End Prompt\nOptional: describe the ending frame for Veo 3.1 transition (✨ LLM + ↶↷ undo/redo)")
         # Configure columns - all resizable by user
         header = self.scene_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)  # All columns user-resizable
@@ -1199,7 +1228,7 @@ class WorkspaceWidget(QWidget):
         # Set fixed row height to match PromptFieldWidget button height
         self.scene_table.verticalHeader().setDefaultSectionSize(30)  # Match LLM button height
         self.scene_table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
-        # Set initial widths for 11-column optimized layout
+        # Set initial widths for 12-column layout (with Environment column)
         header.resizeSection(0, 35)   # Scene # - minimized
         header.resizeSection(1, 70)   # Start Frame - FrameButton widget
         header.resizeSection(2, 70)   # End Frame - FrameButton widget
@@ -1208,9 +1237,10 @@ class WorkspaceWidget(QWidget):
         header.resizeSection(5, 45)   # Time - narrow
         header.resizeSection(6, 40)   # Wrap button (⤵️) - minimized
         header.resizeSection(7, 120)  # Source - compact
-        header.resizeSection(8, 360)  # Video Prompt - wide (text + ✨ + ↶↷) - MOVED
-        header.resizeSection(9, 360)  # Start Prompt - wide (text + ✨ + ↶↷) - MOVED
-        header.resizeSection(10, 360) # End Prompt - wide (text + ✨ + ↶↷) - MOVED
+        header.resizeSection(8, 120)  # Environment - compact (editable text field)
+        header.resizeSection(9, 360)  # Video Prompt - wide (text + ✨ + ↶↷)
+        header.resizeSection(10, 360) # Start Prompt - wide (text + ✨ + ↶↷)
+        header.resizeSection(11, 360) # End Prompt - wide (text + ✨ + ↶↷)
         # Enforce minimum width for Ref Images column (col 3) - must fit 3 buttons
         # 3 buttons × 50px (min) + 2 spacings × 2px + margins 4px = 158px minimum
         header.sectionResized.connect(self._on_column_resized)
@@ -1585,7 +1615,39 @@ class WorkspaceWidget(QWidget):
                 # so this is mainly for logging and potential future UI updates
         except Exception as e:
             self.logger.error(f"Error updating recent projects: {e}")
-    
+
+    def _insert_scene_marker(self):
+        """Insert scene marker at cursor position"""
+        environment = self.scene_env_input.text().strip() or "untitled"
+        marker_text = f"=== NEW SCENE: {environment} ==="
+
+        cursor = self.input_text.textCursor()
+        cursor.insertText(f"\n{marker_text}\n")
+
+        # Clear the environment input
+        self.scene_env_input.clear()
+
+        self.logger.info(f"Inserted scene marker: {marker_text}")
+
+    def _delete_scene_marker(self):
+        """Delete scene marker line at cursor position"""
+        cursor = self.input_text.textCursor()
+        cursor.select(cursor.LineUnderCursor)
+        line_text = cursor.selectedText().strip()
+
+        # Check if this line is a scene marker
+        import re
+        if re.match(r'^===\s*NEW SCENE:.*===$', line_text, re.IGNORECASE):
+            cursor.removeSelectedText()
+            cursor.deletePreviousChar()  # Remove the newline
+            self.logger.info(f"Deleted scene marker: {line_text}")
+        else:
+            from gui.utils.dialog_manager import get_dialog_manager
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_error("Not a Scene Marker",
+                                     "Cursor is not on a scene marker line.\n\n"
+                                     "Scene markers have the format: === NEW SCENE: <environment> ===")
+
     def generate_storyboard(self):
         """Generate storyboard from input text"""
         self.logger.info("=== Starting storyboard generation ===")
@@ -1860,6 +1922,27 @@ class WorkspaceWidget(QWidget):
         self.logger.info(f"Batching {len(scenes)} scenes to aim for {storyboard_gen.target_scene_duration}-second optimal duration...")
         scenes = storyboard_gen._batch_scenes_for_optimal_duration(scenes)
         self.logger.info(f"After batching: {len(scenes)} scenes")
+
+        # Apply prompt style to initial prompts (before LLM enhancement)
+        # Note: LLM enhancement will also apply style, but this ensures style is set even without LLM
+        prompt_style = self._get_current_style()
+        if prompt_style and prompt_style.lower() != 'none':
+            self.logger.info(f"🎨 Pre-applying prompt style '{prompt_style}' to initial {len(scenes)} scene prompts...")
+            prompt_count = 0
+
+            for i, scene in enumerate(scenes):
+                # Apply to regular prompt field (always present after storyboard generation)
+                if hasattr(scene, 'prompt') and scene.prompt:
+                    # Skip section markers like [Verse 1], [Chorus], [Instrumental]
+                    if not (scene.prompt.strip().startswith('[') and scene.prompt.strip().endswith(']')):
+                        if not scene.prompt.lower().startswith(prompt_style.lower()):
+                            scene.prompt = f"{prompt_style} style: {scene.prompt}"
+                            prompt_count += 1
+                            self.logger.debug(f"Scene {i}: Applied style to prompt")
+
+            self.logger.info(f"✓ Style '{prompt_style}' pre-applied to {prompt_count} initial prompts (will be preserved during LLM enhancement)")
+        else:
+            self.logger.debug("No prompt style to apply (style is 'None' or empty)")
 
         # Update project with ALL current settings
         self.update_project_from_ui()  # This now saves all settings including LLM
@@ -2306,6 +2389,12 @@ class WorkspaceWidget(QWidget):
                                 provider=provider,
                                 aspect_ratio=aspect_ratio
                             )
+
+                        # Prepend prompt style if not already present
+                        if prompt_style and prompt_style.lower() != 'none':
+                            if not enhanced.lower().startswith(prompt_style.lower()):
+                                enhanced = f"{prompt_style} style: {enhanced}"
+
                         scene.prompt = enhanced
                         enhanced_count += 1
 
@@ -2505,7 +2594,18 @@ class WorkspaceWidget(QWidget):
                 source_label.setToolTip("")
             self.scene_table.setCellWidget(i, 7, self._create_top_aligned_widget(source_label))
 
-            # Column 8: Video Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
+            # Column 8: Environment (editable text field)
+            environment_edit = QLineEdit()
+            environment_edit.setPlaceholderText("e.g., bedroom, abstract, forest...")
+            environment_edit.setText(scene.environment if hasattr(scene, 'environment') and scene.environment else "")
+            environment_edit.setStyleSheet("padding: 4px;")
+            # Connect to auto-save
+            environment_edit.textChanged.connect(
+                lambda text, idx=i: self._on_environment_changed(idx, text)
+            )
+            self.scene_table.setCellWidget(i, 11, self._create_top_aligned_widget(environment_edit))
+
+            # Column 9: Video Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
             video_prompt_widget = PromptFieldWidget(
                 placeholder="Click ✨ to generate video motion prompt",
                 parent=self
@@ -2522,9 +2622,9 @@ class WorkspaceWidget(QWidget):
                 lambda idx=i: self._show_video_prompt_llm_dialog(idx)
             )
 
-            self.scene_table.setCellWidget(i, 8, self._create_top_aligned_widget(video_prompt_widget))
+            self.scene_table.setCellWidget(i, 9, self._create_top_aligned_widget(video_prompt_widget))
 
-            # Column 9: Start Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
+            # Column 10: Start Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
             start_prompt_widget = PromptFieldWidget(
                 placeholder="Click ✨ to generate start frame prompt",
                 parent=self
@@ -2541,9 +2641,9 @@ class WorkspaceWidget(QWidget):
                 lambda idx=i: self._show_start_prompt_llm_dialog(idx)
             )
 
-            self.scene_table.setCellWidget(i, 9, self._create_top_aligned_widget(start_prompt_widget))
+            self.scene_table.setCellWidget(i, 10, self._create_top_aligned_widget(start_prompt_widget))
 
-            # Column 10: End Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
+            # Column 11: End Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
             end_prompt_widget = PromptFieldWidget(
                 placeholder="Optional: click ✨ for end frame prompt",
                 parent=self
@@ -2560,7 +2660,7 @@ class WorkspaceWidget(QWidget):
                 lambda idx=i: self._show_end_prompt_llm_dialog(idx)
             )
 
-            self.scene_table.setCellWidget(i, 10, self._create_top_aligned_widget(end_prompt_widget))
+            self.scene_table.setCellWidget(i, 11, self._create_top_aligned_widget(end_prompt_widget))
 
             # Apply initial wrap state
             if is_wrapped:
@@ -4158,6 +4258,17 @@ class WorkspaceWidget(QWidget):
         scene.prompt = text.strip()
         self.save_project()
 
+    def _on_environment_changed(self, scene_index: int, text: str):
+        """Handle environment text change"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+        scene.environment = text.strip()
+        self.save_project()
+
+        self.logger.info(f"Scene {scene_index}: Environment set to '{text.strip()}'")
+
     def _on_reference_image_changed(self, scene_index: int, slot_idx: int, path):
         """Handle reference image change"""
         if not self.current_project or scene_index >= len(self.current_project.scenes):
@@ -4412,6 +4523,12 @@ class WorkspaceWidget(QWidget):
         if dialog.exec_():
             generated_prompt = dialog.get_prompt()
             if generated_prompt:
+                # Prepend prompt style if not already present
+                prompt_style = self._get_current_style()
+                if prompt_style and prompt_style.lower() != 'none':
+                    if not generated_prompt.lower().startswith(prompt_style.lower()):
+                        generated_prompt = f"{prompt_style} style: {generated_prompt}"
+
                 # Get widget and update it (with history)
                 video_prompt_widget = self._get_cell_widget(scene_index, 10)
                 if isinstance(video_prompt_widget, PromptFieldWidget):
@@ -4445,7 +4562,7 @@ class WorkspaceWidget(QWidget):
             self.scene_table.setRowHeight(row_index, 200)
 
             # Update PromptFieldWidget heights for columns 8, 9, 10 (Start, End, Video prompts)
-            for col in [8, 9, 10]:
+            for col in [9, 10, 11]:  # Video, Start, End prompts
                 container = self.scene_table.cellWidget(row_index, col)
                 if container:
                     # Find the PromptFieldWidget inside the container
@@ -4461,7 +4578,7 @@ class WorkspaceWidget(QWidget):
             self.scene_table.setRowHeight(row_index, 30)
 
             # Reset PromptFieldWidget heights for columns 8, 9, 10
-            for col in [8, 9, 10]:
+            for col in [9, 10, 11]:  # Video, Start, End prompts
                 container = self.scene_table.cellWidget(row_index, col)
                 if container:
                     # Find the PromptFieldWidget inside the container

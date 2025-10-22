@@ -314,7 +314,11 @@ class Scene:
     # Veo 3 Reference Images (up to 3 for style/character/environment consistency)
     reference_images: List[ReferenceImage] = field(default_factory=list)  # Scene-specific references (max 3)
     use_global_references: bool = True  # If True, use project global references; if False, use scene-specific
-    
+
+    # Scene grouping and environment guidance
+    environment: Optional[str] = ""  # User-specified environment like "bedroom", "abstract", "forest"
+    scene_group_id: Optional[str] = None  # Links scenes that share the same environment
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization"""
         return {
@@ -341,7 +345,10 @@ class Scene:
             "end_frame_auto_linked": self.end_frame_auto_linked,
             # Veo 3 reference images
             "reference_images": [ref.to_dict() for ref in self.reference_images],
-            "use_global_references": self.use_global_references
+            "use_global_references": self.use_global_references,
+            # Scene grouping and environment
+            "environment": self.environment,
+            "scene_group_id": self.scene_group_id
         }
     
     @classmethod
@@ -371,7 +378,10 @@ class Scene:
             end_frame_auto_linked=data.get("end_frame_auto_linked", False),
             # Veo 3 reference images
             reference_images=[ReferenceImage.from_dict(ref) for ref in data.get("reference_images", [])],
-            use_global_references=data.get("use_global_references", True)
+            use_global_references=data.get("use_global_references", True),
+            # Scene grouping and environment
+            environment=data.get("environment", ""),
+            scene_group_id=data.get("scene_group_id")
         )
     
     def add_prompt_to_history(self, prompt: str):

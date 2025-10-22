@@ -244,6 +244,12 @@ class VideoGenerationThread(QThread):
                     for i, (scene, video_prompt) in enumerate(zip(self.project.scenes, video_prompts)):
                         progress = int(((i + 1) / total_scenes) * 90) + 10  # 10-100%
                         scene_preview = scene.source[:40] + "..." if len(scene.source) > 40 else scene.source
+
+                        # Prepend prompt style if not already present
+                        if prompt_style and prompt_style.lower() != 'none':
+                            if not video_prompt.lower().startswith(prompt_style.lower()):
+                                video_prompt = f"{prompt_style} style: {video_prompt}"
+
                         scene.video_prompt = video_prompt
                         self.progress_update.emit(progress, f"Scene {i+1}/{total_scenes}: '{scene_preview}' - ✓")
 

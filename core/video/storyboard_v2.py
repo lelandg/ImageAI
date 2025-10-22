@@ -13,6 +13,68 @@ from pathlib import Path
 
 from core.video.project import Scene, ReferenceImage
 from core.video.prompt_engine import UnifiedLLMProvider, PromptStyle
+import re
+import uuid
+
+
+def parse_scene_markers(lyrics: str) -> Tuple[str, List[Dict[str, str]]]:
+    """
+    Parse scene markers from lyrics text.
+
+    Syntax: === NEW SCENE: <environment> ===
+    Example: === NEW SCENE: bedroom ===
+
+    Returns:
+        Tuple of (cleaned_lyrics, list of scene_markers)
+        where scene_markers contains {'line_index': int, 'environment': str, 'group_id': str}
+    """
+    lines = lyrics.split('\n')
+    scene_markers = []
+    cleaned_lines = []
+    current_environment = None
+    current_group_id = None
+
+    # Pattern: === NEW SCENE: <environment> ===
+    scene_marker_pattern = re.compile(r'^===\s*NEW SCENE:\s*(.+?)\s*===$', re.IGNORECASE)
+
+    for i, line in enumerate(lines):
+        marker_match = scene_marker_pattern.match(line.strip())
+
+        if marker_match:
+            # Found a scene marker
+            environment = marker_match.group(1).strip()
+            current_environment = environment
+            current_group_id = f"group-{uuid.uuid4().hex[:8]}"
+
+            # Add marker info for this line index
+            scene_markers.append({
+                'line_index': len(cleaned_lines),  # Next line will start new scene
+                'environment': environment,
+                'group_id': current_group_id
+            })
+
+            # Don't include the marker line in cleaned lyrics
+            continue
+        else:
+            # Regular lyric line - add environment info if we're in a marked scene
+            if current_environment:
+                cleaned_lines.append(line)
+                # Store environment for this line
+                scene_markers.append({
+                    'line_index': len(cleaned_lines) - 1,
+                    'environment': current_environment,
+                    'group_id': current_group_id,
+                    'is_marker': False
+                })
+            else:
+                cleaned_lines.append(line)
+
+    cleaned_lyrics = '\n'.join(cleaned_lines)
+
+    # Filter to only keep actual scene break markers
+    scene_break_markers = [m for m in scene_markers if m.get('is_marker', True)]
+
+    return cleaned_lyrics, scene_break_markers
 
 
 class StoryboardApproach(Enum):
@@ -60,6 +122,7 @@ Inputs:
 - TARGET_DURATION_SEC: {duration}
 - GLOBAL_STYLE: {style}
 - NEGATIVES: {negatives}
+- TEMPO: {tempo} BPM{tempo_guidance}
 
 Schema (must match exactly):
 {{
@@ -95,8 +158,9 @@ Rules:
 2. Assign duration_sec so total ≈ TARGET_DURATION_SEC. If missing, assume ~8s per scene.
 3. Keep continuity tight: repeat characters/locations/props across scenes when the lyrics suggest.
 4. Veo prompt must be single-paragraph, filmic, concrete, and avoid brand names unless explicitly in lyrics.
-5. Image prompts should be still-friendly (clean composition, texture details).
-6. Use NEGATIVES to avoid undesirable elements."""
+5. MATCH VIDEO ENERGY TO TEMPO: Use the tempo to guide camera movement, action intensity, and visual rhythm. Fast tempos (>140 BPM) need quick cuts, dynamic camera moves, energetic action. Slow tempos (<80 BPM) need smooth moves, longer holds, contemplative pacing. Medium tempos use balanced energy.
+6. Image prompts should be still-friendly (clean composition, texture details).
+7. Use NEGATIVES to avoid undesirable elements."""
 
     # Gemini's director's treatment prompt
     GEMINI_TREATMENT_PROMPT = """You are an expert music video director and cinematic prompt writer for Google's Veo 3 text-to-video model. Your task is to transform the provided song lyrics into a complete, scene-by-scene shot list that forms a continuous and coherent music video.
@@ -335,31 +399,59 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                           model: str = "gemini-2.5-pro",
                           style: str = "cinematic, high quality",
                           negatives: str = "low quality, blurry",
-                          render_method: Optional[str] = None) -> Tuple[Optional[StyleGuide], List[Scene], Optional[List[Dict]]]:
+                          render_method: Optional[str] = None,
+                          tempo: Optional[float] = None) -> Tuple[Optional[StyleGuide], List[Scene], Optional[List[Dict]]]:
         """
         Generate storyboard using provider-specific approach.
 
         Args:
             render_method: If set to "veo_3.1" or similar, also generates batched prompts for 8s clips
+            tempo: Song tempo in BPM (beats per minute) for matching video energy to music
 
         Returns:
             Tuple of (StyleGuide, List[Scene], Optional[List[VeoBatch]])
             VeoBatch structure: {batch_id, scene_ids, duration, video_prompt}
         """
+        # Parse scene markers from lyrics (=== NEW SCENE: <environment> ===)
+        cleaned_lyrics, scene_markers = parse_scene_markers(lyrics)
+
+        # Store scene markers for later application to scenes
+        self._scene_markers = scene_markers
+
+        # Use cleaned lyrics (without marker lines) for generation
+        lyrics_for_llm = cleaned_lyrics
+
+        # Format tempo guidance for LLM
+        if tempo:
+            if tempo >= 140:
+                tempo_guidance = " (Fast/Energetic - use quick cuts, dynamic camera moves, energetic action)"
+            elif tempo >= 100:
+                tempo_guidance = " (Medium - balanced pacing and energy)"
+            elif tempo >= 80:
+                tempo_guidance = " (Moderate - smooth movements, contemplative pacing)"
+            else:
+                tempo_guidance = " (Slow/Ballad - long holds, minimal cuts, emotional depth)"
+        else:
+            tempo = 120  # Default if not provided
+            tempo_guidance = " (Default - adjust based on lyrical content)"
+
         approach = self.get_approach(provider)
 
         if approach == StoryboardApproach.STRUCTURED_JSON:
             style_guide, scenes = self._generate_structured_json(
-                lyrics, title, duration, provider, model, style, negatives
+                lyrics_for_llm, title, duration, provider, model, style, negatives, tempo, tempo_guidance
             )
         elif approach == StoryboardApproach.DIRECTORS_TREATMENT:
             style_guide, scenes = self._generate_directors_treatment(
-                lyrics, title, duration, provider, model, style, negatives
+                lyrics_for_llm, title, duration, provider, model, style, negatives, tempo, tempo_guidance
             )
         else:
             style_guide, scenes = self._generate_hybrid(
-                lyrics, title, duration, provider, model, style, negatives
+                lyrics_for_llm, title, duration, provider, model, style, negatives, tempo, tempo_guidance
             )
+
+        # Apply environment and scene_group_id from markers to generated scenes
+        scenes = self._apply_scene_markers(scenes, scene_markers)
 
         # Generate batched prompts if render_method requires it
         veo_batches = None
@@ -377,15 +469,19 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                                  provider: str,
                                  model: str,
                                  style: str,
-                                 negatives: str) -> Tuple[Optional[StyleGuide], List[Scene]]:
+                                 negatives: str,
+                                 tempo: float = 120,
+                                 tempo_guidance: str = "") -> Tuple[Optional[StyleGuide], List[Scene]]:
         """Generate using OpenAI's structured JSON approach"""
-        
+
         prompt = self.OPENAI_SCENE_PROMPT.format(
             title=title,
             lyrics=lyrics,
             duration=duration,
             style=style,
-            negatives=negatives
+            negatives=negatives,
+            tempo=tempo,
+            tempo_guidance=tempo_guidance
         )
         
         try:
@@ -459,7 +555,9 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                                      provider: str,
                                      model: str,
                                      style: str,
-                                     negatives: str) -> Tuple[Optional[StyleGuide], List[Scene]]:
+                                     negatives: str,
+                                     tempo: float = 120,
+                                     tempo_guidance: str = "") -> Tuple[Optional[StyleGuide], List[Scene]]:
         """Generate using Gemini's director's treatment approach"""
         
         prompt = self.GEMINI_TREATMENT_PROMPT.format(
@@ -542,7 +640,9 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                         provider: str,
                         model: str,
                         style: str,
-                        negatives: str) -> Tuple[Optional[StyleGuide], List[Scene]]:
+                        negatives: str,
+                        tempo: float = 120,
+                        tempo_guidance: str = "") -> Tuple[Optional[StyleGuide], List[Scene]]:
         """Generate using a simplified hybrid approach for local models"""
         
         # Simplified prompt for local models
@@ -696,6 +796,52 @@ Format as JSON with 'scenes' array containing objects with 'lyrics', 'descriptio
                 metadata={'approach': 'fallback'}
             )
             scenes.append(scene)
+
+        return scenes
+
+    def _apply_scene_markers(self, scenes: List[Scene], scene_markers: List[Dict[str, str]]) -> List[Scene]:
+        """
+        Apply environment and scene_group_id from parsed scene markers to generated scenes.
+
+        This matches scene markers (by line content) to generated scenes and assigns
+        environment descriptions and group IDs for continuity tracking.
+
+        Args:
+            scenes: Generated scenes from LLM
+            scene_markers: Parsed scene markers with environment and group_id
+
+        Returns:
+            Scenes with environment and scene_group_id fields populated
+        """
+        if not scene_markers:
+            return scenes
+
+        # Build a map of environment by line index or content matching
+        # Since LLM may rearrange/combine lines, we need fuzzy matching
+        environment_map = {}
+        for marker in scene_markers:
+            environment_map[marker['line_index']] = {
+                'environment': marker['environment'],
+                'group_id': marker['group_id']
+            }
+
+        # Apply to scenes (simple approach: sequential matching)
+        # More sophisticated: match by scene.source content
+        current_environment = None
+        current_group_id = None
+
+        for i, scene in enumerate(scenes):
+            # Check if this scene index has a marker
+            if i in environment_map:
+                current_environment = environment_map[i]['environment']
+                current_group_id = environment_map[i]['group_id']
+
+            # Apply current environment to this scene
+            if current_environment:
+                scene.environment = current_environment
+                scene.scene_group_id = current_group_id
+
+                self.logger.info(f"Scene {i}: Applied environment '{current_environment}' (group: {current_group_id})")
 
         return scenes
 
