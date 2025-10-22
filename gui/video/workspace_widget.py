@@ -2707,7 +2707,28 @@ class WorkspaceWidget(QWidget):
             return super().eventFilter(obj, event)
 
         if obj == viewport:
-            if event.type() == QEvent.MouseMove:
+            if event.type() == QEvent.Wheel:
+                # Custom wheel scrolling: scroll by content line (row height), not by viewport row count
+                # Get vertical scrollbar
+                v_scrollbar = self.scene_table.verticalScrollBar()
+                if v_scrollbar:
+                    # Get row height
+                    row_height = self.scene_table.verticalHeader().defaultSectionSize()
+
+                    # Get wheel delta (120 units per notch on most mice)
+                    delta = event.angleDelta().y()
+
+                    # Scroll by one row height per wheel notch
+                    scroll_amount = -(delta // 120) * row_height
+
+                    # Apply scroll
+                    new_value = v_scrollbar.value() + scroll_amount
+                    v_scrollbar.setValue(new_value)
+
+                    # Accept event to prevent default scrolling
+                    return True
+
+            elif event.type() == QEvent.MouseMove:
                 # Get the item under the cursor
                 pos = event.pos()
                 item = self.scene_table.itemAt(pos)

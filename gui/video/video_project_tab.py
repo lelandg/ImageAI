@@ -491,6 +491,11 @@ class VideoGenerationThread(QThread):
                         for img_path in image_paths
                     ]
 
+                    # If generating for a single scene (from start frame button), automatically set approved_image
+                    if scene_indices is not None and len(scene_indices) == 1 and image_paths:
+                        scene.approved_image = image_paths[0]
+                        logger.info(f"Auto-selected first image as start frame: {image_paths[0].name}")
+
                     # Create thumbnails
                     thumbnails = []
                     for img_data in scene_images[:4]:
@@ -742,6 +747,13 @@ class VideoGenerationThread(QThread):
             prompt = self.kwargs.get('video_prompt') or scene.video_prompt or scene.prompt
             aspect_ratio = self.kwargs.get('aspect_ratio', '16:9')
 
+            # Prepend prompt_style to the prompt for consistent artistic style
+            prompt_style = self.kwargs.get('prompt_style', 'Cinematic')
+            if prompt_style and prompt_style.lower() != 'none':
+                # Check if prompt already starts with style guidance
+                if not prompt.lower().startswith(prompt_style.lower()):
+                    prompt = f"{prompt_style} style: {prompt}"
+
             # Log which prompt is being used
             import logging
             logger = logging.getLogger(__name__)
@@ -749,6 +761,10 @@ class VideoGenerationThread(QThread):
                 logger.info(f"Using video_prompt for scene {scene_index}:\n{prompt}")
             else:
                 logger.info(f"Using regular prompt for scene {scene_index} (no video_prompt):\n{prompt}")
+
+            # Log the style being applied
+            if prompt_style and prompt_style.lower() != 'none':
+                logger.info(f"🎨 Applied style: '{prompt_style}'")
 
             # === NEW: REFERENCES-FIRST APPROACH ===
             # Initialize reference manager
@@ -1399,7 +1415,9 @@ class VideoProjectTab(QWidget):
                         # Don't overwrite it here, just use the paths for UI display
                         if 'images' in result:
                             image_paths = result.get('images', [])
-                            # Display the first image in the image view
+                            # DO NOT auto-display the image in the lower panel
+                            # User should click the start frame button to view it
+                            # Just add to history for tracking
                             if scene.images and len(scene.images) > 0:
                                 from pathlib import Path
                                 from PySide6.QtGui import QPixmap
@@ -1412,18 +1430,9 @@ class VideoProjectTab(QWidget):
                                     img_path = first_img.path
                                 else:
                                     img_path = Path(first_img)
-                                if img_path.exists():
-                                    pixmap = QPixmap(str(img_path))
-                                    if not pixmap.isNull():
-                                        # Scale to fit the image view
-                                        scaled = pixmap.scaled(
-                                            self.workspace_widget.output_image_label.size(),
-                                            Qt.KeepAspectRatio,
-                                            Qt.SmoothTransformation
-                                        )
-                                        self.workspace_widget.output_image_label.setPixmap(scaled)
 
-                                    # Add to history with tab tracking
+                                # Add to history with tab tracking
+                                if img_path.exists():
                                     sidecar = read_image_sidecar(img_path)
                                     if sidecar:
                                         history_entry = {
