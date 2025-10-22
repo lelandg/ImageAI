@@ -1751,8 +1751,13 @@ class WorkspaceWidget(QWidget):
                 lyric_index = 0
                 updated_count = 0
                 for i, scene in enumerate(scenes):
-                    # Skip section markers
-                    if scene.source.strip().startswith('[') and scene.source.strip().endswith(']'):
+                    # Skip section markers like [Verse 1], [Chorus], but NOT [Instrumental]
+                    # [Instrumental] is a real scene that needs timing from timed_lyrics
+                    is_section_marker = (scene.source.strip().startswith('[') and
+                                       scene.source.strip().endswith(']') and
+                                       scene.source.strip() != '[Instrumental]')
+
+                    if is_section_marker:
                         self.logger.debug(f"Scene {i}: Skipping section marker '{scene.source}'")
                         continue
 
