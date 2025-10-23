@@ -143,9 +143,14 @@ class GoogleProvider(ImageProvider):
             self.project_id = project
             # Initialize aiplatform
             aiplatform.init(project=project, location="us-central1")
-            
-            # Create genai client that will use ADC
-            self.client = genai.Client()
+
+            # Create genai client in Vertex AI mode
+            # Must specify vertexai=True to use ADC and Google Cloud project
+            self.client = genai.Client(
+                vertexai=True,
+                project=project,
+                location="us-central1"
+            )
             return True
             
         except DefaultCredentialsError as e:
