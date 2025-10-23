@@ -458,12 +458,19 @@ class StoryboardGenerator:
         current_batch = []
         current_duration = 0.0
         current_section = None
+        current_environment = None  # Track environment to respect NEW SCENE markers
 
         self.logger.info(f"Batching {len(scenes)} scenes to aim for ~{self.target_scene_duration}s per scene")
 
         for i, scene in enumerate(scenes):
             scene_duration = scene.duration_sec
             scene_section = scene.metadata.get('section')
+            scene_environment = getattr(scene, 'environment', None)
+
+            # Log environment tracking
+            if scene_environment:
+                self.logger.debug(f"Scene {i}: environment='{scene_environment}', "
+                                f"current_env='{current_environment}', source='{scene.source[:30]}...'")
 
             # Check if this would exceed our target (STRICT: never exceed target_scene_duration)
             # For Veo 3.1, this ensures scenes are always <= 8.0 seconds
@@ -474,20 +481,34 @@ class StoryboardGenerator:
                              scene_section is not None and
                              scene_section != current_section)
 
+            # Check if environment changed (don't cross NEW SCENE boundaries)
+            # Only finalize if BOTH scenes have environments set (ignore None → None transitions)
+            environment_changed = (current_environment is not None and
+                                 scene_environment is not None and
+                                 scene_environment != current_environment)
+
+            if environment_changed:
+                self.logger.info(f"Environment change detected at scene {i}: "
+                               f"'{current_environment}' → '{scene_environment}', forcing batch finalization")
+
             # Decide whether to add to current batch or finalize it
-            should_finalize = current_batch and (would_exceed or section_changed)
+            # Finalize if: duration would exceed OR section changed OR environment changed
+            should_finalize = current_batch and (would_exceed or section_changed or environment_changed)
 
             if should_finalize:
                 # Finalize current batch
                 batched_scene = self._merge_scenes(current_batch)
                 batched_scenes.append(batched_scene)
-                self.logger.debug(f"Batched {len(current_batch)} scenes → {current_duration:.1f}s "
-                                f"(reason: {'exceed' if would_exceed else 'section change'})")
+
+                # Determine the reason for finalization (for logging)
+                reason = 'exceed' if would_exceed else ('environment change' if environment_changed else 'section change')
+                self.logger.debug(f"Batched {len(current_batch)} scenes → {current_duration:.1f}s (reason: {reason})")
 
                 # Start new batch
                 current_batch = [scene]
                 current_duration = scene_duration
                 current_section = scene_section
+                current_environment = scene_environment
             else:
                 # Add to current batch
                 current_batch.append(scene)
@@ -495,6 +516,9 @@ class StoryboardGenerator:
                 # Update section if this scene has one
                 if scene_section:
                     current_section = scene_section
+                # Update environment if this scene has one
+                if scene_environment:
+                    current_environment = scene_environment
 
             # If this is the last scene, finalize the batch
             if i == len(scenes) - 1 and current_batch:
@@ -503,6 +527,11 @@ class StoryboardGenerator:
                 self.logger.debug(f"Final batch: {len(current_batch)} scenes → {current_duration:.1f}s")
 
         self.logger.info(f"Batched {len(scenes)} scenes into {len(batched_scenes)} combined scenes")
+
+        # DEBUG: Check environment preservation after batching
+        for i, scene in enumerate(batched_scenes[:5]):
+            env = getattr(scene, 'environment', None)
+            self.logger.info(f"After batching - Scene {i}: environment='{env}', source='{scene.source[:40]}...'")
 
         # Log statistics and validate max duration
         if batched_scenes:
@@ -544,17 +573,27 @@ class StoryboardGenerator:
         total_duration = sum(scene.duration_sec for scene in scenes)
 
         # Calculate timing information for each lyric line within the merged scene
+        # IMPORTANT: Store both relative times (for scene-internal timing) AND absolute times (from LLM/MIDI)
         lyric_timings = []
         cumulative_time = 0.0
         for scene in scenes:
             start_time = cumulative_time
             end_time = cumulative_time + scene.duration_sec
-            lyric_timings.append({
+
+            timing_info = {
                 'text': scene.source,
-                'start_sec': round(start_time, 1),
-                'end_sec': round(end_time, 1),
+                'start_sec': round(start_time, 1),      # Relative time within merged scene
+                'end_sec': round(end_time, 1),          # Relative time within merged scene
                 'duration_sec': round(scene.duration_sec, 1)
-            })
+            }
+
+            # Preserve absolute timing from LLM/MIDI sync (if available)
+            if 'llm_start_time' in scene.metadata:
+                timing_info['llm_start_time'] = scene.metadata['llm_start_time']
+            if 'llm_end_time' in scene.metadata:
+                timing_info['llm_end_time'] = scene.metadata['llm_end_time']
+
+            lyric_timings.append(timing_info)
             cumulative_time = end_time
 
         # Use the order of the first scene
@@ -570,6 +609,32 @@ class StoryboardGenerator:
         merged_scene.metadata['batched_count'] = len(scenes)
         merged_scene.metadata['original_scene_ids'] = [s.order for s in scenes]
         merged_scene.metadata['lyric_timings'] = lyric_timings  # Store timing for each lyric line
+
+        # CRITICAL: Preserve precise timing from LLM/MIDI sync
+        # Use llm_start_time from FIRST scene and llm_end_time from LAST scene
+        first_scene = scenes[0]
+        last_scene = scenes[-1]
+
+        if 'llm_start_time' in first_scene.metadata:
+            merged_scene.metadata['llm_start_time'] = first_scene.metadata['llm_start_time']
+
+        if 'llm_end_time' in last_scene.metadata:
+            merged_scene.metadata['llm_end_time'] = last_scene.metadata['llm_end_time']
+
+        # Log timing for debugging
+        if 'llm_start_time' in merged_scene.metadata and 'llm_end_time' in merged_scene.metadata:
+            llm_duration = merged_scene.metadata['llm_end_time'] - merged_scene.metadata['llm_start_time']
+            self.logger.debug(f"Merged scene timing: {merged_scene.metadata['llm_start_time']:.2f}s - "
+                            f"{merged_scene.metadata['llm_end_time']:.2f}s (LLM duration: {llm_duration:.2f}s, "
+                            f"Sum duration: {total_duration:.2f}s, diff: {abs(llm_duration - total_duration):.3f}s)")
+
+            # Use the more precise LLM timing if available
+            # The sum of durations might have accumulated rounding errors
+            merged_scene.duration_sec = llm_duration
+
+        # Copy environment from first scene (if set)
+        if hasattr(scenes[0], 'environment') and scenes[0].environment:
+            merged_scene.environment = scenes[0].environment
 
         return merged_scene
 
@@ -624,26 +689,41 @@ class StoryboardGenerator:
         scenes = []
         scene_index = 0
         skipped_markers = 0
+        current_environment = None  # Track current environment from NEW SCENE markers
+
         for i, (line, duration) in enumerate(zip(parsed_lines, durations)):
+            # Check for NEW SCENE markers: === NEW SCENE: <environment> ===
+            new_scene_match = re.match(r'^===\s*NEW SCENE:\s*(.+?)\s*===$', line.text.strip(), re.IGNORECASE)
+            if new_scene_match:
+                current_environment = new_scene_match.group(1).strip()
+                self.logger.info(f"Found scene marker - Environment set to: '{current_environment}'")
+                skipped_markers += 1
+                continue
+
             # Skip section markers like [Verse 1], [Chorus], etc.
             if line.text.strip().startswith('[') and line.text.strip().endswith(']'):
                 self.logger.info(f"Skipping section marker: {line.text}")
                 skipped_markers += 1
                 continue
-            
+
             scene = Scene(
                 source=line.text,
                 prompt=line.text,  # Initial prompt is the source text
                 duration_sec=duration,
                 order=scene_index
             )
-            
+
             # Add metadata
             if line.timestamp is not None:
                 scene.metadata["timestamp"] = line.timestamp
             if line.section:
                 scene.metadata["section"] = line.section
-            
+
+            # Set environment from current NEW SCENE marker (if any)
+            if current_environment:
+                scene.environment = current_environment
+                self.logger.info(f"Scene {scene_index}: Applied environment '{current_environment}' to '{scene.source[:40]}...'")
+
             scenes.append(scene)
             scene_index += 1
         
@@ -689,7 +769,8 @@ class StoryboardGenerator:
                     'source': scene.source,
                     'prompt': scene.prompt,
                     'order': scene.order,
-                    'metadata': scene.metadata
+                    'metadata': scene.metadata,
+                    'environment': getattr(scene, 'environment', '')  # Preserve environment
                 }
                 for scene in scenes
             ]
@@ -709,7 +790,10 @@ class StoryboardGenerator:
                     order=scene_dict['order']
                 )
                 scene.metadata = scene_dict.get('metadata', {})
-                
+
+                # Restore environment attribute
+                scene.environment = scene_dict.get('environment', '')
+
                 # Add MIDI sync metadata
                 if 'start_time' in scene_dict:
                     scene.metadata['midi_start'] = scene_dict['start_time']
@@ -717,7 +801,7 @@ class StoryboardGenerator:
                     scene.metadata['midi_end'] = scene_dict['end_time']
                 if 'beat_markers' in scene_dict:
                     scene.metadata['beat_markers'] = scene_dict['beat_markers']
-                
+
                 synced_scenes.append(scene)
             
             self.logger.info(f"Synchronized {len(synced_scenes)} scenes to MIDI {sync_mode}")
@@ -766,6 +850,10 @@ class StoryboardGenerator:
                     new_scene.metadata = scene.metadata.copy()
                     new_scene.metadata["split_part"] = i + 1
                     new_scene.metadata["split_total"] = num_splits
+
+                    # Copy environment from original scene (if set)
+                    if hasattr(scene, 'environment') and scene.environment:
+                        new_scene.environment = scene.environment
 
                     result.append(new_scene)
 

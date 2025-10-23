@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QFont
 
-from core.video.end_prompt_generator import EndPromptGenerator
+from core.video.video_prompt_generator import VideoPromptGenerator, VideoPromptContext
 
 
 class VideoPromptGenerationThread(QThread):
@@ -27,12 +27,14 @@ class VideoPromptGenerationThread(QThread):
 
     def __init__(
         self,
-        generator: EndPromptGenerator,
+        generator: VideoPromptGenerator,
         start_prompt: str,
         duration: float,
         provider: str,
         model: str,
         enable_camera_movements: bool = True,
+        enable_prompt_flow: bool = False,
+        previous_video_prompt: Optional[str] = None,
         parent=None
     ):
         super().__init__(parent)
@@ -42,68 +44,28 @@ class VideoPromptGenerationThread(QThread):
         self.provider = provider
         self.model = model
         self.enable_camera_movements = enable_camera_movements
+        self.enable_prompt_flow = enable_prompt_flow
+        self.previous_video_prompt = previous_video_prompt
 
     def run(self):
         """Run generation in background"""
         try:
-            # Use LiteLLM directly through the generator's provider
-            if self.enable_camera_movements:
-                system_prompt = """You are a video motion specialist. Given a static image description, generate a video prompt that describes camera movement and action.
-
-The video prompt should:
-- Start with the static scene description
-- Add camera movement (pan, zoom, dolly, tilt, etc.)
-- Add subtle motion or changes over time
-- Be optimized for Google Veo video generation
-- Be 2-3 sentences maximum
-- NEVER include quoted text or lyrics (they will render as text in the video)
-
-Format: [Static scene], [camera movement], [motion/changes]"""
-
-                user_prompt = f"""Create a video motion prompt:
-
-Start frame description: {self.start_prompt}
-Duration: {self.duration} seconds
-
-Generate a prompt describing camera movement and scene evolution for Veo video generation.
-
-IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
-            else:
-                system_prompt = """You are a video motion specialist. Given a static image description, generate a video prompt that describes subject motion and temporal progression.
-
-The video prompt should:
-- Start with the static scene description
-- Focus on subject/character actions and environmental motion
-- Keep camera mostly static (minimal camera movement only when essential)
-- Add subtle motion or changes over time
-- Be optimized for Google Veo video generation
-- Be 2-3 sentences maximum
-- NEVER include quoted text or lyrics (they will render as text in the video)
-
-Format: [Static scene], [subject motion], [temporal progression]"""
-
-                user_prompt = f"""Create a video motion prompt:
-
-Start frame description: {self.start_prompt}
-Duration: {self.duration} seconds
-
-Generate a prompt describing subject motion and scene evolution for Veo video generation (minimal camera movement).
-
-IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
-
-            # Use the generator's LLM provider to make the call
-            import litellm
-
-            response = litellm.completion(
-                model=f"{self.provider}/{self.model}",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.7
+            # Create context for generation
+            context = VideoPromptContext(
+                start_prompt=self.start_prompt,
+                duration=self.duration,
+                enable_camera_movements=self.enable_camera_movements,
+                enable_prompt_flow=self.enable_prompt_flow,
+                previous_video_prompt=self.previous_video_prompt
             )
 
-            prompt = response.choices[0].message.content.strip()
+            # Use the generator to create the video prompt
+            prompt = self.generator.generate_video_prompt(
+                context=context,
+                provider=self.provider,
+                model=self.model,
+                temperature=0.7
+            )
 
             if prompt:
                 self.generation_complete.emit(prompt)
@@ -124,11 +86,14 @@ class VideoPromptDialog(QDialog):
 
     def __init__(
         self,
-        generator: EndPromptGenerator,
+        generator: VideoPromptGenerator,
         start_prompt: str,
         duration: float,
         provider: str,
         model: str,
+        enable_camera_movements: bool = True,
+        enable_prompt_flow: bool = False,
+        previous_video_prompt: Optional[str] = None,
         parent=None
     ):
         super().__init__(parent)
@@ -138,6 +103,9 @@ class VideoPromptDialog(QDialog):
         self.duration = duration
         self.provider = provider
         self.model = model
+        self.enable_camera_movements = enable_camera_movements
+        self.enable_prompt_flow = enable_prompt_flow
+        self.previous_video_prompt = previous_video_prompt
         self.generation_thread: Optional[VideoPromptGenerationThread] = None
         self.generated_prompt: Optional[str] = None
 
@@ -223,6 +191,8 @@ class VideoPromptDialog(QDialog):
             self.provider,
             self.model,
             self.enable_camera_movements,
+            self.enable_prompt_flow,
+            self.previous_video_prompt,
             self
         )
         self.generation_thread.generation_complete.connect(self._on_generation_complete)

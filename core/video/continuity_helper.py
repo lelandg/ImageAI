@@ -34,13 +34,15 @@ class ContinuityHelper:
                 prompt += f" The image should be in {aspect_ratio} format."
         
         # For subsequent scenes, add continuity hints
-        if scene_index > 0 and project_id in self.previous_prompts:
-            if provider.lower() == 'openai':
-                # DALL-E 3 approach: emphasize consistency
-                prompt = f"Continuing from the previous scene, {prompt}"
-            elif provider.lower() == 'gemini':
-                # Gemini approach: reference previous
-                prompt = f"Next in the sequence, {prompt}"
+        # DISABLED: We don't want "Continuing from previous" or "Next in the sequence" in prompts
+        # The environment field and reference images now handle continuity
+        # if scene_index > 0 and project_id in self.previous_prompts:
+        #     if provider.lower() == 'openai':
+        #         # DALL-E 3 approach: emphasize consistency
+        #         prompt = f"Continuing from the previous scene, {prompt}"
+        #     elif provider.lower() == 'gemini':
+        #         # Gemini approach: reference previous
+        #         prompt = f"Next in the sequence, {prompt}"
         
         # Store for next scene
         if project_id not in self.previous_prompts:

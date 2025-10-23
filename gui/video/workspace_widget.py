@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QListWidget, QListWidgetItem, QInputDialog
 )
 from PySide6.QtCore import Qt, Signal, Slot, QEvent, QPoint, QTimer, QUrl
-from PySide6.QtGui import QPixmap, QImage, QTextOption, QColor, QCursor
+from PySide6.QtGui import QPixmap, QImage, QTextOption, QColor, QCursor, QKeySequence
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
@@ -297,7 +297,25 @@ class WorkspaceWidget(QWidget):
         self.logger.info("Scheduling auto_load_last_project in 100ms...")
         QTimer.singleShot(100, self.auto_load_last_project)
         self.logger.info("=== WorkspaceWidget.__init__ COMPLETE ===")
-    
+
+    def changeEvent(self, event):
+        """Handle widget state changes"""
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.WindowDeactivate or event.type() == QEvent.FocusOut:
+            # Hide image preview when window loses focus
+            if hasattr(self, 'image_preview') and self.image_preview.isVisible():
+                self.image_preview.hide()
+        super().changeEvent(event)
+
+    def eventFilter(self, obj, event):
+        """Filter events for context menu detection"""
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.ContextMenu:
+            # Hide image preview when context menu is opened
+            if hasattr(self, 'image_preview') and self.image_preview.isVisible():
+                self.image_preview.hide()
+        return super().eventFilter(obj, event)
+
     def init_ui(self):
         """Initialize the workspace UI"""
         self.logger.info("Creating workspace layout...")
@@ -663,27 +681,28 @@ class WorkspaceWidget(QWidget):
         # Make buttons compact
         button_style = "QPushButton { padding: 2px 8px; }"
 
-        self.new_btn = QPushButton("New")
+        self.new_btn = QPushButton("&New")  # Alt+N
         self.new_btn.setStyleSheet(button_style)
         self.new_btn.clicked.connect(self.new_project)
         layout.addWidget(self.new_btn)
 
-        self.open_btn = QPushButton("Open")
+        self.open_btn = QPushButton("&Open")  # Alt+O
         self.open_btn.setStyleSheet(button_style)
         self.open_btn.clicked.connect(self.open_project)
         layout.addWidget(self.open_btn)
 
-        self.browse_btn = QPushButton("Browse")
+        self.browse_btn = QPushButton("&Browse")  # Alt+B
         self.browse_btn.setStyleSheet(button_style)
         self.browse_btn.clicked.connect(self.browse_projects)
         layout.addWidget(self.browse_btn)
 
-        self.save_btn = QPushButton("Save")
+        self.save_btn = QPushButton("&Save")  # Alt+S (or Ctrl+S via QKeySequence.Save)
         self.save_btn.setStyleSheet(button_style)
+        self.save_btn.setShortcut(QKeySequence.Save)  # Ctrl+S
         self.save_btn.clicked.connect(self.save_project)
         layout.addWidget(self.save_btn)
 
-        self.save_as_btn = QPushButton("Save As")
+        self.save_as_btn = QPushButton("Save &As")  # Alt+A
         self.save_as_btn.setStyleSheet(button_style)
         self.save_as_btn.clicked.connect(self.save_project_as)
         layout.addWidget(self.save_as_btn)
@@ -735,8 +754,8 @@ class WorkspaceWidget(QWidget):
         self.format_combo.setToolTip("Select the format of your input text:\n- Auto-detect: Automatically detect format\n- Timestamped: Text with [MM:SS] timestamps\n- Structured: JSON or structured data\n- Plain text: Unformatted lyrics or text")
         format_layout.addWidget(self.format_combo)
 
-        self.load_file_btn = QPushButton("Load File")
-        self.load_file_btn.setToolTip("Load lyrics or text from a file")
+        self.load_file_btn = QPushButton("&Load File")  # Alt+L
+        self.load_file_btn.setToolTip("Load lyrics or text from a file (Alt+L)")
         self.load_file_btn.clicked.connect(self.load_input_file)
         format_layout.addWidget(self.load_file_btn)
         
@@ -753,8 +772,8 @@ class WorkspaceWidget(QWidget):
         marker_layout = QHBoxLayout()
         marker_layout.addWidget(QLabel("Scene Markers:"))
 
-        self.new_scene_btn = QPushButton("Insert Scene Marker")
-        self.new_scene_btn.setToolTip("Insert '=== NEW SCENE: <environment> ===' at cursor position")
+        self.new_scene_btn = QPushButton("&Insert Scene Marker")  # Alt+I
+        self.new_scene_btn.setToolTip("Insert '=== NEW SCENE: <environment> ===' at cursor position (Alt+I)")
         self.new_scene_btn.clicked.connect(self._insert_scene_marker)
         marker_layout.addWidget(self.new_scene_btn)
 
@@ -764,8 +783,8 @@ class WorkspaceWidget(QWidget):
         self.scene_env_input.setToolTip("Environment description for the new scene")
         marker_layout.addWidget(self.scene_env_input)
 
-        self.delete_scene_btn = QPushButton("Delete Marker at Cursor")
-        self.delete_scene_btn.setToolTip("Delete scene marker line at cursor position")
+        self.delete_scene_btn = QPushButton("&Delete Marker at Cursor")  # Alt+D
+        self.delete_scene_btn.setToolTip("Delete scene marker line at cursor position (Alt+D)")
         self.delete_scene_btn.clicked.connect(self._delete_scene_marker)
         marker_layout.addWidget(self.delete_scene_btn)
 
@@ -789,13 +808,60 @@ class WorkspaceWidget(QWidget):
         self.pacing_combo.setToolTip("Scene transition pacing:\n- Fast: Quick cuts, energetic\n- Medium: Balanced pacing\n- Slow: Longer scenes, contemplative")
         timing_layout.addWidget(self.pacing_combo)
 
-        self.generate_storyboard_btn = QPushButton("Generate Storyboard")
-        self.generate_storyboard_btn.setToolTip("Generate scene breakdown from input text")
+        self.generate_storyboard_btn = QPushButton("&Generate Storyboard")  # Alt+G
+        self.generate_storyboard_btn.setToolTip("Generate scene breakdown from input text (Alt+G)")
         self.generate_storyboard_btn.clicked.connect(self.generate_storyboard)
         timing_layout.addWidget(self.generate_storyboard_btn)
-        
+
         timing_layout.addStretch()
         layout.addLayout(timing_layout)
+
+        # Storyboard generation options
+        options_layout = QHBoxLayout()
+        options_layout.addWidget(QLabel("Auto-generate:"))
+
+        self.auto_gen_video_prompts_check = QCheckBox("Video Prompts")
+        self.auto_gen_video_prompts_check.setChecked(True)  # Enabled by default
+        self.auto_gen_video_prompts_check.setToolTip("Automatically generate video motion prompts after creating storyboard")
+        options_layout.addWidget(self.auto_gen_video_prompts_check)
+
+        self.auto_gen_start_prompts_check = QCheckBox("Start Frame Prompts")
+        self.auto_gen_start_prompts_check.setChecked(False)  # Disabled by default
+        self.auto_gen_start_prompts_check.setToolTip("Automatically enhance start frame prompts with LLM after creating storyboard")
+        options_layout.addWidget(self.auto_gen_start_prompts_check)
+
+        self.auto_gen_end_prompts_check = QCheckBox("End Frame Prompts")
+        self.auto_gen_end_prompts_check.setChecked(False)  # Disabled by default
+        self.auto_gen_end_prompts_check.setToolTip("Automatically generate end frame prompts with LLM after creating storyboard")
+        options_layout.addWidget(self.auto_gen_end_prompts_check)
+
+        options_layout.addStretch()
+        layout.addLayout(options_layout)
+
+        # Reference image auto-linking options
+        ref_options_layout = QHBoxLayout()
+        ref_options_layout.addWidget(QLabel("Auto-link refs:"))
+
+        self.auto_link_prev_frame_check = QCheckBox("Previous frame to next scene")
+        self.auto_link_prev_frame_check.setChecked(True)  # Enabled by default
+        self.auto_link_prev_frame_check.setToolTip("Automatically add the last frame of each scene as a reference image to the next scene for visual continuity")
+        ref_options_layout.addWidget(self.auto_link_prev_frame_check)
+
+        self.auto_link_as_start_frame_check = QCheckBox("As start frame reference")
+        self.auto_link_as_start_frame_check.setChecked(False)  # Disabled by default
+        self.auto_link_as_start_frame_check.setToolTip("When enabled, use the previous scene's last frame as the start frame reference instead of a general reference (mutually exclusive with 'Previous frame to next scene')")
+        ref_options_layout.addWidget(self.auto_link_as_start_frame_check)
+
+        # Make checkboxes mutually exclusive
+        self.auto_link_prev_frame_check.toggled.connect(lambda checked: self.auto_link_as_start_frame_check.setEnabled(not checked) if checked else None)
+        self.auto_link_as_start_frame_check.toggled.connect(lambda checked: self.auto_link_prev_frame_check.setEnabled(not checked) if checked else None)
+
+        # Connect to auto-save
+        self.auto_link_prev_frame_check.toggled.connect(lambda: self._auto_save_settings())
+        self.auto_link_as_start_frame_check.toggled.connect(lambda: self._auto_save_settings())
+
+        ref_options_layout.addStretch()
+        layout.addLayout(ref_options_layout)
         
         group.setLayout(layout)
         return group
@@ -1035,6 +1101,7 @@ class WorkspaceWidget(QWidget):
         self.sync_mode_combo = QComboBox()
         self.sync_mode_combo.addItems(["None", "Beat", "Measure", "Section"])
         self.sync_mode_combo.setEnabled(False)
+        self.sync_mode_combo.setToolTip("Audio sync mode (requires MIDI analysis):\n• None: No sync, manual timing\n• Beat: Sync to individual beats\n• Measure: Sync to musical measures (bars)\n• Section: Sync to song sections (verse, chorus, etc.)")
         sync_layout.addWidget(self.sync_mode_combo)
         
         sync_layout.addWidget(QLabel("Snap:"))
@@ -1043,6 +1110,7 @@ class WorkspaceWidget(QWidget):
         self.snap_strength_slider.setValue(80)
         self.snap_strength_slider.setMaximumWidth(100)
         self.snap_strength_slider.setEnabled(False)
+        self.snap_strength_slider.setToolTip("Snap strength (0-100%):\nControls how strongly scene boundaries snap to audio beats/sections\n0% = No snapping\n100% = Always snap to nearest beat/section")
         sync_layout.addWidget(self.snap_strength_slider)
         
         self.snap_label = QLabel("80%")
@@ -1099,6 +1167,7 @@ class WorkspaceWidget(QWidget):
         karaoke_style_layout.addWidget(QLabel("Style:"))
         self.karaoke_style_combo = QComboBox()
         self.karaoke_style_combo.addItems(["Bouncing Ball", "Highlight", "Fade In"])
+        self.karaoke_style_combo.setToolTip("Karaoke animation style:\n• Bouncing Ball: Classic bouncing indicator\n• Highlight: Highlight current word\n• Fade In: Words fade in as sung")
         karaoke_style_layout.addWidget(self.karaoke_style_combo)
         
         karaoke_style_layout.addWidget(QLabel("Position:"))
@@ -1146,20 +1215,27 @@ class WorkspaceWidget(QWidget):
         # Controls
         controls_layout = QHBoxLayout()
         
-        self.enhance_prompts_btn = QPushButton("Enhance All Prompts")
-        self.enhance_prompts_btn.setToolTip("Use AI to enhance all scene prompts for better image generation")
+        self.enhance_prompts_btn = QPushButton("&Enhance All Prompts")  # Alt+E
+        self.enhance_prompts_btn.setToolTip("Use AI to enhance all scene prompts for better image generation (Alt+E)")
         self.enhance_prompts_btn.clicked.connect(self.enhance_all_prompts)
         self.enhance_prompts_btn.setEnabled(False)
         controls_layout.addWidget(self.enhance_prompts_btn)
 
-        self.enhance_video_prompts_btn = QPushButton("Generate Video Prompts")
-        self.enhance_video_prompts_btn.setToolTip("Add camera movement and motion to image prompts for video generation")
+        self.enhance_video_prompts_btn = QPushButton("Generate &Video Prompts")  # Alt+V
+        self.enhance_video_prompts_btn.setToolTip("Add camera movement and motion to image prompts for video generation (Alt+V)")
         self.enhance_video_prompts_btn.clicked.connect(self.enhance_for_video)
         self.enhance_video_prompts_btn.setEnabled(False)
         controls_layout.addWidget(self.enhance_video_prompts_btn)
 
-        self.generate_images_btn = QPushButton("Generate Images")
-        self.generate_images_btn.setToolTip("Generate images for all scenes with prompts")
+        self.generate_start_end_prompts_btn = QPushButton("Generate Start/End &Frames")  # Alt+F
+        self.generate_start_end_prompts_btn.setToolTip("Generate start and end frame prompts for smooth transitions (Alt+F)")
+        self.generate_start_end_prompts_btn.clicked.connect(self.generate_start_end_prompts)
+        self.generate_start_end_prompts_btn.setEnabled(False)
+        controls_layout.addWidget(self.generate_start_end_prompts_btn)
+
+        self.generate_images_btn = QPushButton("Generate &Images")  # Alt+I (conflicts with Insert, will use Ctrl+Shift+I)
+        self.generate_images_btn.setToolTip("Generate images for all scenes with prompts (Ctrl+Shift+I)")
+        self.generate_images_btn.setShortcut("Ctrl+Shift+I")
         self.generate_images_btn.clicked.connect(self.generate_images)
         self.generate_images_btn.setEnabled(False)
         controls_layout.addWidget(self.generate_images_btn)
@@ -1208,6 +1284,8 @@ class WorkspaceWidget(QWidget):
         # Disable word wrap by default - individual rows can be toggled
         self.scene_table.setWordWrap(False)
         self.scene_table.setTextElideMode(Qt.ElideRight)
+        # Install event filter to detect context menus
+        self.scene_table.installEventFilter(self)
         # Set tooltips for headers (12 columns: 0-11)
         self.scene_table.horizontalHeaderItem(0).setToolTip("Scene number")
         self.scene_table.horizontalHeaderItem(1).setToolTip("Start Frame\nFirst frame of video (hover for preview, click to view, right-click for options)")
@@ -1334,14 +1412,14 @@ class WorkspaceWidget(QWidget):
         # Export buttons
         button_layout = QHBoxLayout()
 
-        self.preview_btn = QPushButton("Preview")
-        self.preview_btn.setToolTip("Generate a quick preview of the video")
+        self.preview_btn = QPushButton("&Preview")  # Alt+P
+        self.preview_btn.setToolTip("Generate a quick preview of the video (Alt+P)")
         self.preview_btn.clicked.connect(self.preview_video)
         self.preview_btn.setEnabled(False)
         button_layout.addWidget(self.preview_btn)
 
-        self.render_btn = QPushButton("Render Video")
-        self.render_btn.setToolTip("Render the final video with all settings applied")
+        self.render_btn = QPushButton("&Render Video")  # Alt+R
+        self.render_btn.setToolTip("Render the final video with all settings applied (Alt+R)")
         self.render_btn.clicked.connect(self.render_video)
         self.render_btn.setEnabled(False)
         button_layout.addWidget(self.render_btn)
@@ -1412,11 +1490,19 @@ class WorkspaceWidget(QWidget):
                 # Suppress error dialogs during auto-load on startup
                 self.load_project_from_path(last_project, show_error_dialog=False)
                 self.logger.info(f"=== AUTO-LOAD COMPLETE - Style after load: {self._get_current_style()} ===")
+                # Restore UI state after loading project
+                self._restore_splitter_positions()
+                self._restore_column_widths()
+                self._restore_scrollbar_positions()
             except Exception as e:
                 self.logger.warning(f"Could not auto-load last project: {e}")
                 # User will start with a clean slate instead
         else:
             self.logger.info("No last project to auto-load")
+            # Restore UI state even without a project
+            self._restore_splitter_positions()
+            self._restore_column_widths()
+            self._restore_scrollbar_positions()
     
     def browse_projects(self):
         """Browse and open projects using the project browser"""
@@ -1731,7 +1817,12 @@ class WorkspaceWidget(QWidget):
             snap_strength=snap_strength
         )
         self.logger.info(f"Generated {len(scenes)} scenes before LLM sync")
-        
+
+        # DEBUG: Check environments immediately after generation
+        for i in range(min(5, len(scenes))):
+            env = getattr(scenes[i], 'environment', None)
+            self.logger.info(f"BEFORE LLM SYNC - Scene {i}: environment='{env}', source='{scenes[i].source[:40]}...'")
+
         # Apply LLM sync if enabled and we have timing data
         if use_llm_sync and midi_timing:
             self.logger.info(f"Starting LLM sync with {llm_provider}/{llm_model}...")
@@ -1837,6 +1928,11 @@ class WorkspaceWidget(QWidget):
                 scenes = new_scenes
                 self.logger.info(f"Updated scenes list: {len(scenes)} total scenes (including instrumental)")
 
+                # DEBUG: Check environments after instrumental insertion
+                for i in range(min(5, len(scenes))):
+                    env = getattr(scenes[i], 'environment', None)
+                    self.logger.info(f"AFTER INSTRUMENTAL INSERT - Scene {i}: environment='{env}', source='{scenes[i].source[:40]}...'")
+
                 # Now timed_lyrics should refer to the filled list for timing application
                 timed_lyrics = timed_lyrics_with_gaps
 
@@ -1915,6 +2011,11 @@ class WorkspaceWidget(QWidget):
         from core.video.storyboard import StoryboardGenerator
         storyboard_gen = StoryboardGenerator(target_scene_duration=8.0)
 
+        # DEBUG: Check environments before splitting
+        for i in range(min(5, len(scenes))):
+            env = getattr(scenes[i], 'environment', None)
+            self.logger.info(f"BEFORE SPLIT - Scene {i}: environment='{env}', source='{scenes[i].source[:40]}...'")
+
         self.logger.info(f"Splitting long scenes (>{storyboard_gen.target_scene_duration}s)...")
         scenes = storyboard_gen.split_long_scenes(scenes, max_duration=storyboard_gen.target_scene_duration)
         self.logger.info(f"After splitting: {len(scenes)} scenes")
@@ -1955,11 +2056,23 @@ class WorkspaceWidget(QWidget):
         
         # Log scenes being added
         self.logger.info(f"Generated {len(scenes)} scenes for project")
-        
-        # Automatically enhance prompts if LLM is enabled
+
+        # Automatically enhance/generate prompts based on checkboxes
         if llm_provider != "None" and llm_model:
-            self.logger.info(f"Auto-enhancing prompts with {llm_provider}/{llm_model}...")
-            self._enhance_scene_prompts(scenes, llm_provider, llm_model)
+            # Auto-generate video prompts if checkbox is enabled
+            if self.auto_gen_video_prompts_check.isChecked():
+                self.logger.info(f"Auto-generating video prompts with {llm_provider}/{llm_model}...")
+                self._generate_video_prompts_for_all_scenes(scenes, llm_provider, llm_model)
+
+            # Auto-enhance start frame prompts if checkbox is enabled
+            if self.auto_gen_start_prompts_check.isChecked():
+                self.logger.info(f"Auto-enhancing start frame prompts with {llm_provider}/{llm_model}...")
+                self._enhance_scene_prompts(scenes, llm_provider, llm_model)
+
+            # Auto-generate end frame prompts if checkbox is enabled
+            if self.auto_gen_end_prompts_check.isChecked():
+                self.logger.info(f"Auto-generating end frame prompts with {llm_provider}/{llm_model}...")
+                self._generate_end_prompts_for_all_scenes(scenes, llm_provider, llm_model)
         
         # Update karaoke settings if enabled
         if self.karaoke_group.isChecked():
@@ -2416,7 +2529,162 @@ class WorkspaceWidget(QWidget):
             
         except Exception as e:
             self.logger.error(f"Failed to enhance prompts: {e}")
-    
+
+    def _generate_video_prompts_for_all_scenes(self, scenes: list, provider: str, model: str):
+        """Generate video prompts for all scenes using LLM batch method."""
+        try:
+            from core.video.video_prompt_generator import VideoPromptGenerator, VideoPromptContext
+
+            # Get settings
+            enable_camera_movements = self.enable_camera_movements_check.isChecked()
+            enable_prompt_flow = self.enable_prompt_flow_check.isChecked()
+
+            # Get configuration
+            config = self.get_provider_config()
+
+            # Create generator
+            generator = VideoPromptGenerator(llm_provider=provider.lower(), llm_model=model, config=config)
+
+            # Get prompt style
+            prompt_style = self._get_current_style()
+
+            # Build contexts for all scenes with prompts
+            contexts = []
+            scene_indices = []
+            previous_video_prompt = None
+
+            for i, scene in enumerate(scenes):
+                if not scene.prompt:
+                    self.logger.debug(f"Scene {i}: No start prompt, skipping video prompt generation")
+                    continue
+
+                # Create context for generation
+                # Include lyric_timings for batched scenes
+                lyric_timings = scene.metadata.get('lyric_timings') if hasattr(scene, 'metadata') else None
+
+                context = VideoPromptContext(
+                    start_prompt=scene.prompt,
+                    duration=scene.duration_sec,
+                    style=prompt_style if prompt_style else "cinematic",
+                    enable_camera_movements=enable_camera_movements,
+                    enable_prompt_flow=enable_prompt_flow,
+                    previous_video_prompt=previous_video_prompt if enable_prompt_flow else None,
+                    lyric_timings=lyric_timings
+                )
+                contexts.append(context)
+                scene_indices.append(i)
+
+                # For flow, we need to generate sequentially (can't truly batch)
+                # This is a limitation when flow is enabled
+                if enable_prompt_flow:
+                    video_prompt = generator.generate_video_prompt(
+                        context=context,
+                        provider=provider.lower(),
+                        model=model
+                    )
+                    if video_prompt:
+                        scene.video_prompt = video_prompt  # FIXED: Actually assign to scene
+                        previous_video_prompt = video_prompt
+
+            # Generate video prompts (batch if flow is disabled, otherwise already done above)
+            if not enable_prompt_flow and contexts:
+                self._log_to_console(f"Generating {len(contexts)} video prompts in batch...", "INFO")
+                video_prompts = generator.batch_generate_video_prompts(
+                    contexts=contexts,
+                    provider=provider.lower(),
+                    model=model
+                )
+
+                # Apply generated prompts to scenes
+                for i, (scene_idx, video_prompt) in enumerate(zip(scene_indices, video_prompts)):
+                    if video_prompt:
+                        scenes[scene_idx].video_prompt = video_prompt
+
+                generated_count = sum(1 for p in video_prompts if p)
+            else:
+                # Flow mode - prompts already set above
+                generated_count = sum(1 for scene in scenes if hasattr(scene, 'video_prompt') and scene.video_prompt)
+
+            if generated_count > 0:
+                self.logger.info(f"✅ Generated video prompts for {generated_count}/{len(scenes)} scenes")
+                self._log_to_console(f"✅ Generated video prompts for {generated_count}/{len(scenes)} scenes", "SUCCESS")
+            else:
+                self.logger.warning("⚠️ No video prompts generated")
+                self._log_to_console("⚠️ No video prompts generated", "WARNING")
+
+        except Exception as e:
+            self.logger.error(f"Failed to generate video prompts: {e}")
+            self._log_to_console(f"❌ Failed to generate video prompts: {str(e)}", "ERROR")
+
+    def _generate_end_prompts_for_all_scenes(self, scenes: list, provider: str, model: str):
+        """Generate end frame prompts for all scenes using LLM batch method."""
+        try:
+            from core.video.end_prompt_generator import EndPromptGenerator, EndPromptContext
+
+            # Get configuration
+            config = self.get_provider_config()
+
+            # Create generator
+            generator = EndPromptGenerator(llm_provider=provider.lower())
+
+            # Get prompt style
+            prompt_style = self._get_current_style()
+
+            # Build contexts for all scenes with prompts
+            contexts = []
+            scene_indices = []
+
+            for i, scene in enumerate(scenes):
+                if not scene.prompt:
+                    self.logger.debug(f"Scene {i}: No start prompt, skipping end prompt generation")
+                    continue
+
+                # Get next scene's start prompt for smooth transitions
+                next_start_prompt = None
+                if i + 1 < len(scenes):
+                    next_start_prompt = scenes[i + 1].prompt
+
+                # Create context for generation
+                context = EndPromptContext(
+                    start_prompt=scene.prompt,
+                    next_start_prompt=next_start_prompt,
+                    duration=scene.duration_sec,
+                    style=prompt_style if prompt_style else "cinematic"
+                )
+                contexts.append(context)
+                scene_indices.append(i)
+
+            if contexts:
+                self._log_to_console(f"Generating {len(contexts)} end frame prompts in batch...", "INFO")
+
+                # Generate end prompts in batch
+                end_prompts = generator.batch_generate_end_prompts(
+                    contexts=contexts,
+                    provider=provider.lower(),
+                    model=model
+                )
+
+                # Apply generated prompts to scenes
+                for i, (scene_idx, end_prompt) in enumerate(zip(scene_indices, end_prompts)):
+                    if end_prompt:
+                        scenes[scene_idx].end_prompt = end_prompt
+
+                generated_count = sum(1 for p in end_prompts if p)
+
+                if generated_count > 0:
+                    self.logger.info(f"✅ Generated end prompts for {generated_count}/{len(scenes)} scenes")
+                    self._log_to_console(f"✅ Generated end prompts for {generated_count}/{len(scenes)} scenes", "SUCCESS")
+                else:
+                    self.logger.warning("⚠️ No end prompts generated")
+                    self._log_to_console("⚠️ No end prompts generated", "WARNING")
+            else:
+                self.logger.warning("⚠️ No scenes with start prompts to generate end prompts")
+                self._log_to_console("⚠️ No scenes with start prompts to generate end prompts", "WARNING")
+
+        except Exception as e:
+            self.logger.error(f"Failed to generate end prompts: {e}")
+            self._log_to_console(f"❌ Failed to generate end prompts: {str(e)}", "ERROR")
+
     def _create_top_aligned_widget(self, widget):
         """Wrap widget in container aligned to top of cell"""
         from PySide6.QtWidgets import QVBoxLayout
@@ -2532,13 +2800,13 @@ class WorkspaceWidget(QWidget):
             self.scene_table.setCellWidget(i, 4, self._create_top_aligned_widget(video_btn))
 
             # Column 5: Time (use label widget for proper top alignment)
-            time_label = QLabel(f"{scene.duration_sec:.1f}")
+            time_label = QLabel(f"{scene.duration_sec:.3f}")
             time_label.setAlignment(Qt.AlignTop | Qt.AlignCenter)
 
             # Validate duration: must be <= 8.0 seconds
             if scene.duration_sec > 8.0:
                 time_label.setStyleSheet("padding: 2px; background-color: #ffcccc; color: #cc0000; font-weight: bold;")
-                time_label.setToolTip(f"⚠️ WARNING: Scene duration ({scene.duration_sec:.1f}s) exceeds maximum of 8.0s")
+                time_label.setToolTip(f"⚠️ WARNING: Scene duration ({scene.duration_sec:.3f}s) exceeds maximum of 8.0s")
             else:
                 time_label.setStyleSheet("padding: 2px;")
 
@@ -2603,7 +2871,7 @@ class WorkspaceWidget(QWidget):
             environment_edit.textChanged.connect(
                 lambda text, idx=i: self._on_environment_changed(idx, text)
             )
-            self.scene_table.setCellWidget(i, 11, self._create_top_aligned_widget(environment_edit))
+            self.scene_table.setCellWidget(i, 8, self._create_top_aligned_widget(environment_edit))
 
             # Column 9: Video Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
             video_prompt_widget = PromptFieldWidget(
@@ -4654,6 +4922,48 @@ class WorkspaceWidget(QWidget):
         """Request video prompt enhancement"""
         self.generation_requested.emit("enhance_for_video", self.gather_generation_params())
 
+    def generate_start_end_prompts(self):
+        """Generate start and end frame prompts using LLM (respects checkbox settings)"""
+        if not self.current_project or not self.current_project.scenes:
+            return
+
+        llm_provider = self.llm_provider_combo.currentText()
+        llm_model = self.llm_model_combo.currentText()
+
+        if llm_provider == "None" or not llm_model:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "LLM Required", "Please select an LLM provider and model to generate start/end frame prompts.")
+            return
+
+        # Check if at least one option is selected
+        generate_start = self.auto_gen_start_prompts_check.isChecked()
+        generate_end = self.auto_gen_end_prompts_check.isChecked()
+
+        if not generate_start and not generate_end:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "No Options Selected",
+                "Please check at least one option:\n"
+                "- Start Frame Prompts\n"
+                "- End Frame Prompts\n\n"
+                "These checkboxes are in the Input section under 'Auto-generate'.")
+            return
+
+        scenes = self.current_project.scenes
+
+        # Generate start prompts if checkbox is enabled
+        if generate_start:
+            self._log_to_console("Generating start frame prompts...", "INFO")
+            self._enhance_scene_prompts(scenes, llm_provider, llm_model)
+
+        # Generate end prompts if checkbox is enabled
+        if generate_end:
+            self._log_to_console("Generating end frame prompts...", "INFO")
+            self._generate_end_prompts_for_all_scenes(scenes, llm_provider, llm_model)
+
+        # Refresh table to show new prompts
+        self.populate_scene_table()
+        self.save_project()
+
     def generate_images(self):
         """Request image generation"""
         self.generation_requested.emit("generate_images", self.gather_generation_params())
@@ -5431,10 +5741,12 @@ class WorkspaceWidget(QWidget):
         self.save_as_btn.setEnabled(has_project)
         self.generate_storyboard_btn.setEnabled(True)
         self.enhance_prompts_btn.setEnabled(has_scenes)
-        # Enable video enhancement when scenes have prompts (image prompts are used as base)
+        # Enable video enhancement and start/end frame generation when scenes have prompts (image prompts are used as base)
         has_prompts = has_scenes and any(s.prompt for s in self.current_project.scenes)
         self.enhance_video_prompts_btn.setEnabled(has_prompts)
-        self.generate_images_btn.setEnabled(has_scenes)
+        self.generate_start_end_prompts_btn.setEnabled(has_prompts)
+        # Enable generate images only when at least one scene has a prompt
+        self.generate_images_btn.setEnabled(has_prompts)
         self.preview_btn.setEnabled(has_images)
         # Enable render button if there are either images OR video clips
         self.render_btn.setEnabled(has_images or has_video_clips)

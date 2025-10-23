@@ -632,7 +632,7 @@ PROMPT FLOW & CONTINUITY:
 - IMPORTANT: Break flow between song sections (verse/chorus/bridge boundaries)
 - Detect section changes from lyrics context and start fresh visual themes at section boundaries
 - Within a section, maintain visual coherence and progressive storytelling
-- Use phrases like "continuing from," "building on," "evolving the previous scene"
+- Use natural transitions without explicit phrases like "continuing from" or "building on"
 """
         else:
             flow_guidance = """
