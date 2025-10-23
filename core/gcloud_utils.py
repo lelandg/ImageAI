@@ -148,7 +148,7 @@ def check_gcloud_auth_status() -> Tuple[bool, str]:
             [gcloud_cmd, "auth", "application-default", "print-access-token"],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=5,  # Reduced from 10s to 5s - runs in background thread now, so shorter timeout is safer
             shell=(platform.system() == "Windows")  # Use shell on Windows for .cmd files
         )
         

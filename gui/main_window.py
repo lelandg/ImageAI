@@ -141,6 +141,32 @@ try:
 except ImportError:
     raise ImportError("PySide6 is required for GUI mode")
 
+
+class GCloudStatusChecker(QThread):
+    """Background thread for checking gcloud auth status without blocking the main GUI thread."""
+
+    # Signals to communicate results back to main thread
+    status_checked = Signal(bool, str)  # (is_authenticated, status_message)
+    project_id_fetched = Signal(str)    # project_id
+
+    def run(self):
+        """Run in background thread - subprocess calls are safe here."""
+        try:
+            from core.gcloud_utils import check_gcloud_auth_status, get_gcloud_project_id
+
+            # These blocking subprocess calls are OK in background thread
+            is_auth, status_msg = check_gcloud_auth_status()
+            self.status_checked.emit(is_auth, status_msg)
+
+            if is_auth:
+                project_id = get_gcloud_project_id()
+                if project_id:
+                    self.project_id_fetched.emit(project_id)
+        except Exception as e:
+            # Emit error status
+            self.status_checked.emit(False, f"Error: {str(e)}")
+
+
 from core import (
     ConfigManager, APP_NAME, VERSION, DEFAULT_MODEL, sanitize_filename,
     scan_disk_history, images_output_dir, sidecar_path, write_image_sidecar,
@@ -3885,11 +3911,10 @@ For more detailed information, please refer to the full documentation.
         auth_mode_internal = "gcloud" if auth_mode == "Google Cloud Account" else "api-key"
         self.config.set("auth_mode", auth_mode_internal)
         self._update_auth_visibility()
-        
-        # Only check status if switching to Google Cloud Account and no cached auth
-        if auth_mode == "Google Cloud Account":
-            if not self.config.get("gcloud_auth_validated", False):
-                self._check_gcloud_status()
+
+        # DON'T auto-check on mode change - this was causing main thread to freeze
+        # User must click "Check Status" button explicitly to check gcloud auth
+        # The check now runs in a background thread (GCloudStatusChecker)
     
     # Midjourney settings are now handled in the dedicated Midjourney tab
 
@@ -3932,50 +3957,46 @@ For more detailed information, please refer to the full documentation.
             )
 
     def _check_gcloud_status(self):
-        """Check Google Cloud CLI status and credentials."""
-        try:
-            # Import the functions from gcloud_utils
-            from core.gcloud_utils import check_gcloud_auth_status, get_gcloud_project_id
-            
-            # Use the exact same functions as the original
-            is_auth, status_msg = check_gcloud_auth_status()
-            
-            if is_auth:
-                # Get project ID
-                project_id = get_gcloud_project_id()
-                if project_id:
-                    self.project_id_edit.setText(project_id)
-                    self.gcloud_status_label.setText("✓ Authenticated")
-                    self.gcloud_status_label.setStyleSheet("color: green;")
-                else:
-                    self.project_id_edit.setText("")
-                    self.gcloud_status_label.setText("✓ Authenticated (no project)")
-                    self.gcloud_status_label.setStyleSheet("color: orange;")
-                
-                # Save the auth validation status
-                self.config.set("gcloud_auth_validated", True)
-                if project_id:
-                    self.config.set("gcloud_project_id", project_id)
-                self.config.save()
-            else:
-                self.project_id_edit.setText("")
-                # Show the status message from check_gcloud_auth_status
-                if len(status_msg) > 50:
-                    # Truncate long messages for the status label
-                    self.gcloud_status_label.setText("✗ Not authenticated")
-                else:
-                    self.gcloud_status_label.setText(f"✗ {status_msg}")
-                self.gcloud_status_label.setStyleSheet("color: red;")
-                
-                # Clear cached auth validation
-                self.config.set("gcloud_auth_validated", False)
-                self.config.set("gcloud_project_id", "")
-                self.config.save()
-                
-        except Exception as e:
+        """Check Google Cloud CLI status asynchronously using background thread."""
+        # Show "checking" status immediately (non-blocking)
+        self.gcloud_status_label.setText("⟳ Checking...")
+        self.gcloud_status_label.setStyleSheet("color: blue;")
+        self.btn_check_status.setEnabled(False)  # Prevent multiple simultaneous checks
+
+        # Start background thread (non-blocking)
+        self.gcloud_checker = GCloudStatusChecker()
+        self.gcloud_checker.status_checked.connect(self._on_gcloud_status_checked)
+        self.gcloud_checker.project_id_fetched.connect(self._on_project_id_fetched)
+        self.gcloud_checker.finished.connect(lambda: self.btn_check_status.setEnabled(True))
+        self.gcloud_checker.start()
+
+    def _on_gcloud_status_checked(self, is_auth: bool, status_msg: str):
+        """Handle gcloud status check results (runs on main thread via signal)."""
+        if is_auth:
+            self.gcloud_status_label.setText("✓ Authenticated")
+            self.gcloud_status_label.setStyleSheet("color: green;")
+            self.config.set("gcloud_auth_validated", True)
+        else:
             self.project_id_edit.setText("")
-            self.gcloud_status_label.setText(f"✗ Error: {str(e)[:50]}")
+            # Show the status message from check_gcloud_auth_status
+            if len(status_msg) > 50:
+                # Truncate long messages for the status label
+                self.gcloud_status_label.setText("✗ Not authenticated")
+            else:
+                self.gcloud_status_label.setText(f"✗ {status_msg}")
             self.gcloud_status_label.setStyleSheet("color: red;")
+
+            # Clear cached auth validation
+            self.config.set("gcloud_auth_validated", False)
+            self.config.set("gcloud_project_id", "")
+
+        self.config.save()
+
+    def _on_project_id_fetched(self, project_id: str):
+        """Handle project ID fetch (runs on main thread via signal)."""
+        self.project_id_edit.setText(project_id)
+        self.config.set("gcloud_project_id", project_id)
+        self.config.save()
     
     def _authenticate_gcloud(self):
         """Run gcloud auth application-default login."""
