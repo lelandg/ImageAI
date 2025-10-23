@@ -2553,9 +2553,19 @@ class WorkspaceWidget(QWidget):
             scene_indices = []
             previous_video_prompt = None
 
+            # Get tempo from MIDI if available
+            tempo_bpm = None
+            if self.current_project and hasattr(self.current_project, 'midi_timing_data') and self.current_project.midi_timing_data:
+                if hasattr(self.current_project.midi_timing_data, 'tempo_bpm'):
+                    tempo_bpm = self.current_project.midi_timing_data.tempo_bpm
+                    self.logger.info(f"Using tempo from MIDI: {tempo_bpm:.1f} BPM")
+
             for i, scene in enumerate(scenes):
-                if not scene.prompt:
-                    self.logger.debug(f"Scene {i}: No start prompt, skipping video prompt generation")
+                # Use scene.prompt if available, otherwise fall back to scene.source
+                start_prompt = scene.prompt if scene.prompt else scene.source
+
+                if not start_prompt:
+                    self.logger.debug(f"Scene {i}: No prompt or source, skipping video prompt generation")
                     continue
 
                 # Create context for generation
@@ -2563,13 +2573,14 @@ class WorkspaceWidget(QWidget):
                 lyric_timings = scene.metadata.get('lyric_timings') if hasattr(scene, 'metadata') else None
 
                 context = VideoPromptContext(
-                    start_prompt=scene.prompt,
+                    start_prompt=start_prompt,
                     duration=scene.duration_sec,
                     style=prompt_style if prompt_style else "cinematic",
                     enable_camera_movements=enable_camera_movements,
                     enable_prompt_flow=enable_prompt_flow,
                     previous_video_prompt=previous_video_prompt if enable_prompt_flow else None,
-                    lyric_timings=lyric_timings
+                    lyric_timings=lyric_timings,
+                    tempo_bpm=tempo_bpm
                 )
                 contexts.append(context)
                 scene_indices.append(i)

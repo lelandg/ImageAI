@@ -20,6 +20,7 @@ class VideoPromptContext:
     enable_prompt_flow: bool = True
     previous_video_prompt: Optional[str] = None
     lyric_timings: Optional[list] = None  # For batched scenes: [{'text': '...', 'start_sec': 0.0, 'end_sec': 2.5, 'duration_sec': 2.5}, ...]
+    tempo_bpm: Optional[float] = None  # Song tempo in BPM for energy/pacing hints
 
 
 class VideoPromptGenerator:
@@ -32,6 +33,7 @@ The video prompt should:
 - Start with the static scene description
 - Add camera movement (pan, zoom, dolly, tilt, etc.)
 - Add subtle motion or changes over time
+- Match the energy/pacing to the song's tempo (if provided)
 - Be optimized for Google Veo video generation
 - Be 2-3 sentences maximum
 - NEVER include quoted text or lyrics (they will render as text in the video)
@@ -46,6 +48,7 @@ The video prompt should:
 - Focus on subject/character actions and environmental motion
 - Keep camera mostly static (minimal camera movement only when essential)
 - Add subtle motion or changes over time
+- Match the energy/pacing to the song's tempo (if provided)
 - Be optimized for Google Veo video generation
 - Be 2-3 sentences maximum
 - NEVER include quoted text or lyrics (they will render as text in the video)
@@ -60,6 +63,7 @@ The video prompt should:
 - Maintain visual and temporal continuity
 - Add camera movement (pan, zoom, dolly, tilt, etc.)
 - Add subtle motion or changes over time
+- Match the energy/pacing to the song's tempo (if provided)
 - Be optimized for Google Veo video generation
 - Be 2-3 sentences maximum
 - NEVER include quoted text or lyrics (they will render as text in the video)
@@ -119,6 +123,9 @@ Format: [Static scene continuing from previous], [camera movement], [motion/chan
         else:
             system_prompt = self.SYSTEM_PROMPT_NO_CAMERA
 
+        # Detect instrumental sections
+        is_instrumental = context.start_prompt.strip().lower() in ['[instrumental]', 'instrumental', '[instrumental section]']
+
         # Build user prompt based on context
         timing_info = ""
         if context.lyric_timings and len(context.lyric_timings) > 1:
@@ -127,13 +134,39 @@ Format: [Static scene continuing from previous], [camera movement], [motion/chan
                 timing_info += f"  {timing['start_sec']:.3f}-{timing['end_sec']:.3f}s: {timing['text']}\n"
             timing_info += "\nDescribe how the visuals evolve through these timing segments."
 
-        if context.enable_prompt_flow and context.previous_video_prompt:
+        # Add tempo guidance if available
+        tempo_guidance = ""
+        if context.tempo_bpm:
+            if context.tempo_bpm >= 140:
+                tempo_guidance = f"\nTempo: {context.tempo_bpm:.0f} BPM (Fast/Energetic - use quick camera movements, dynamic action, energetic pacing)"
+            elif context.tempo_bpm >= 100:
+                tempo_guidance = f"\nTempo: {context.tempo_bpm:.0f} BPM (Medium - balanced pacing and energy)"
+            elif context.tempo_bpm >= 80:
+                tempo_guidance = f"\nTempo: {context.tempo_bpm:.0f} BPM (Moderate - smooth movements, contemplative pacing)"
+            else:
+                tempo_guidance = f"\nTempo: {context.tempo_bpm:.0f} BPM (Slow/Ballad - gentle movements, emotional depth)"
+
+        if is_instrumental:
+            # Special prompt for instrumental sections
+            motion_desc = "camera movement and scene evolution" if context.enable_camera_movements else "subject motion and temporal progression"
+            user_prompt = f"""Create a video motion prompt for an INSTRUMENTAL section (music break with no lyrics):
+
+Duration: {context.duration} seconds{tempo_guidance}
+
+Generate a prompt with {motion_desc} that:
+• Maintains visual continuity with surrounding scenes
+• Uses establishing shots, ambient details, or atmospheric moments
+• Provides visual breathing room and variety
+• Examples: camera pans across setting, environmental details, character reactions, scenic transitions
+
+IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
+        elif context.enable_prompt_flow and context.previous_video_prompt:
             user_prompt = f"""Create a video motion prompt:
 
 Previous scene's video prompt: {context.previous_video_prompt}
 
 Current start frame description: {context.start_prompt}
-Duration: {context.duration} seconds{timing_info}
+Duration: {context.duration} seconds{tempo_guidance}{timing_info}
 
 Generate a prompt describing camera movement and scene evolution that flows naturally from the previous scene.
 
@@ -142,7 +175,7 @@ IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual e
             user_prompt = f"""Create a video motion prompt:
 
 Start frame description: {context.start_prompt}
-Duration: {context.duration} seconds{timing_info}
+Duration: {context.duration} seconds{tempo_guidance}{timing_info}
 
 Generate a prompt describing camera movement and scene evolution for Veo video generation.
 
@@ -151,7 +184,7 @@ IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual e
             user_prompt = f"""Create a video motion prompt:
 
 Start frame description: {context.start_prompt}
-Duration: {context.duration} seconds{timing_info}
+Duration: {context.duration} seconds{tempo_guidance}{timing_info}
 
 Generate a prompt describing subject motion and scene evolution for Veo video generation (minimal camera movement).
 
@@ -210,7 +243,7 @@ IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual e
         temperature: float = 0.7
     ) -> list[Optional[str]]:
         """
-        Generate multiple video prompts in batch.
+        Generate multiple video prompts in ONE API call (true batching).
 
         Args:
             contexts: List of context objects
@@ -221,11 +254,137 @@ IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual e
         Returns:
             List of generated prompts (same length as contexts)
         """
-        results = []
+        if not contexts:
+            return []
 
-        for i, context in enumerate(contexts):
-            self.logger.info(f"Generating video prompt {i+1}/{len(contexts)}")
-            prompt = self.generate_video_prompt(context, provider, model, temperature)
-            results.append(prompt)
+        # Use provided or instance defaults
+        provider = provider or self.llm_provider
+        model = model or self.llm_model
 
-        return results
+        if not provider or not model:
+            self.logger.error("LLM provider and model must be specified")
+            return [self._fallback_prompt(ctx) for ctx in contexts]
+
+        # Check if any context requires prompt flow - if so, must generate sequentially
+        has_flow = any(ctx.enable_prompt_flow and ctx.previous_video_prompt for ctx in contexts)
+        if has_flow:
+            self.logger.info("Prompt flow enabled - generating sequentially")
+            results = []
+            for i, context in enumerate(contexts):
+                self.logger.info(f"Generating video prompt {i+1}/{len(contexts)} (sequential for flow)")
+                prompt = self.generate_video_prompt(context, provider, model, temperature)
+                results.append(prompt)
+            return results
+
+        # TRUE BATCHING: Single API call for all prompts
+        self.logger.info(f"🚀 TRUE BATCH: Generating {len(contexts)} video prompts in ONE API call")
+
+        # Select system prompt based on first context (assume all similar settings)
+        first_ctx = contexts[0]
+        if first_ctx.enable_camera_movements:
+            system_prompt = self.SYSTEM_PROMPT_WITH_CAMERA
+            motion_type = "camera movement and scene evolution"
+        else:
+            system_prompt = self.SYSTEM_PROMPT_NO_CAMERA
+            motion_type = "subject motion and scene evolution"
+
+        # Build batch user prompt
+        batch_prompt = f"""Generate video motion prompts for {len(contexts)} scenes.
+
+For each scene, add {motion_type} to the static image description.
+Return EXACTLY {len(contexts)} numbered prompts (1., 2., 3., etc.) with NO headers or preamble.
+
+Scenes:\n\n"""
+
+        for i, ctx in enumerate(contexts, 1):
+            # Detect instrumental sections
+            is_instrumental = ctx.start_prompt.strip().lower() in ['[instrumental]', 'instrumental', '[instrumental section]']
+
+            # Add tempo guidance if available
+            tempo_hint = ""
+            if ctx.tempo_bpm:
+                if ctx.tempo_bpm >= 140:
+                    tempo_hint = f" [{ctx.tempo_bpm:.0f} BPM - Fast/Energetic]"
+                elif ctx.tempo_bpm >= 100:
+                    tempo_hint = f" [{ctx.tempo_bpm:.0f} BPM - Medium]"
+                elif ctx.tempo_bpm >= 80:
+                    tempo_hint = f" [{ctx.tempo_bpm:.0f} BPM - Moderate]"
+                else:
+                    tempo_hint = f" [{ctx.tempo_bpm:.0f} BPM - Slow/Ballad]"
+
+            if is_instrumental:
+                # Special handling for instrumental sections
+                batch_prompt += f"{i}. TYPE: INSTRUMENTAL SECTION\n"
+                batch_prompt += f"   Duration: {ctx.duration}s{tempo_hint}\n"
+                batch_prompt += f"   INSTRUCTIONS: Create a video prompt with {motion_type} that:\n"
+                batch_prompt += f"     • Maintains visual continuity with surrounding scenes\n"
+                batch_prompt += f"     • Uses establishing shots, ambient details, or atmospheric moments\n"
+                batch_prompt += f"     • Provides visual breathing room and variety\n"
+                batch_prompt += f"     • Examples: camera pans across setting, environmental details, character reactions\n"
+            else:
+                # Regular scene
+                batch_prompt += f"{i}. Start frame: {ctx.start_prompt}\n"
+                batch_prompt += f"   Duration: {ctx.duration}s{tempo_hint}\n"
+
+                # Add timing breakdown for batched scenes
+                if ctx.lyric_timings and len(ctx.lyric_timings) > 1:
+                    batch_prompt += f"   Timing: "
+                    batch_prompt += ", ".join([f"{t['start_sec']:.1f}-{t['end_sec']:.1f}s" for t in ctx.lyric_timings])
+                    batch_prompt += "\n"
+
+            batch_prompt += "\n"
+
+        batch_prompt += f"""Return {len(contexts)} numbered video prompts.
+Each prompt should be 2-3 sentences describing the motion and camera work.
+NEVER include quoted text or lyrics in prompts."""
+
+        try:
+            import litellm
+
+            model_id = f"{provider}/{model}" if provider else model
+
+            self.logger.info(f"Batch generating {len(contexts)} video prompts with {provider}/{model}")
+
+            response = litellm.completion(
+                model=model_id,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": batch_prompt}
+                ],
+                temperature=temperature,
+                max_tokens=200 * len(contexts)  # ~200 tokens per video prompt
+            )
+
+            # Parse numbered response
+            response_text = response.choices[0].message.content.strip()
+
+            # Split by numbered markers (1., 2., etc.)
+            import re
+            parts = re.split(r'\n(?=\d+\.)', response_text)
+            results = []
+
+            for part in parts:
+                # Remove number prefix and clean up
+                cleaned = re.sub(r'^\d+\.\s*', '', part).strip()
+                if cleaned:
+                    results.append(cleaned)
+
+            # Ensure we have the right number of results
+            while len(results) < len(contexts):
+                missing_idx = len(results)
+                self.logger.warning(f"Missing video result {missing_idx + 1}, using fallback")
+                results.append(self._fallback_prompt(contexts[missing_idx]))
+
+            self.logger.info(f"✅ Batch generated {len(results)} video prompts in ONE API call")
+            return results[:len(contexts)]
+
+        except Exception as e:
+            self.logger.error(f"Batch video generation failed: {e}")
+            # Fallback to individual generation
+            self.logger.info("Falling back to individual generation")
+            results = []
+            for i, context in enumerate(contexts):
+                self.logger.info(f"Generating video prompt {i+1}/{len(contexts)} (fallback)")
+                prompt = self.generate_video_prompt(context, provider, model, temperature)
+                results.append(prompt)
+            return results
