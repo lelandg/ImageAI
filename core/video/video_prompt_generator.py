@@ -170,7 +170,9 @@ Duration: {context.duration} seconds{tempo_guidance}{timing_info}
 
 Generate a prompt describing camera movement and scene evolution that flows naturally from the previous scene.
 
-IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
+IMPORTANT:
+- If timing breakdown is provided, use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ...") to describe visual evolution
+- Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
         elif context.enable_camera_movements:
             user_prompt = f"""Create a video motion prompt:
 
@@ -179,7 +181,9 @@ Duration: {context.duration} seconds{tempo_guidance}{timing_info}
 
 Generate a prompt describing camera movement and scene evolution for Veo video generation.
 
-IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
+IMPORTANT:
+- If timing breakdown is provided, use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ...") to describe visual evolution
+- Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
         else:
             user_prompt = f"""Create a video motion prompt:
 
@@ -188,7 +192,9 @@ Duration: {context.duration} seconds{tempo_guidance}{timing_info}
 
 Generate a prompt describing subject motion and scene evolution for Veo video generation (minimal camera movement).
 
-IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
+IMPORTANT:
+- If timing breakdown is provided, use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ...") to describe visual evolution
+- Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
 
         try:
             # Call LLM provider using LiteLLM
@@ -326,17 +332,26 @@ Scenes:\n\n"""
                 batch_prompt += f"{i}. Start frame: {ctx.start_prompt}\n"
                 batch_prompt += f"   Duration: {ctx.duration}s{tempo_hint}\n"
 
-                # Add timing breakdown for batched scenes
+                # Add timing breakdown for batched scenes WITH lyric context
                 if ctx.lyric_timings and len(ctx.lyric_timings) > 1:
-                    batch_prompt += f"   Timing: "
-                    batch_prompt += ", ".join([f"{t['start_sec']:.1f}-{t['end_sec']:.1f}s" for t in ctx.lyric_timings])
-                    batch_prompt += "\n"
+                    batch_prompt += f"   Timing breakdown:\n"
+                    for t in ctx.lyric_timings:
+                        # Include lyric text so LLM knows what's happening at each timestamp
+                        lyric_text = t.get('text', '')
+                        batch_prompt += f"     • {t['start_sec']:.1f}-{t['end_sec']:.1f}s: \"{lyric_text}\"\n"
 
             batch_prompt += "\n"
 
         batch_prompt += f"""Return {len(contexts)} numbered video prompts.
-Each prompt should be 2-3 sentences describing the motion and camera work.
-NEVER include quoted text or lyrics in prompts."""
+
+For scenes with timing breakdowns: Use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ..., 5-8s: ...") to describe visual evolution at those exact timestamps.
+For single-shot scenes: Describe 2-3 sentences of motion and camera work.
+
+IMPORTANT:
+- Include time markers when timing breakdown is provided
+- Describe smooth transitions between time segments
+- ONE continuous shot per scene (no cuts)
+- NEVER include quoted text or lyrics in prompts"""
 
         try:
             import litellm

@@ -697,11 +697,13 @@ CRITICAL FORMATTING:
                     batch_prompt += f"   IMAGE DESCRIPTION: {text}\n"
 
                 if timings and not is_instrumental:
-                    # Scene has batched lyrics with timing info - provide timing structure only
+                    # Scene has batched lyrics with timing info - provide timing structure WITH context
                     batch_prompt += f"   TIMING STRUCTURE (describe visual evolution at these timestamps):\n"
                     for timing in timings:
-                        # Provide timing but NOT the lyric text itself
-                        batch_prompt += f"     • {timing['start_sec']:.1f}s-{timing['end_sec']:.1f}s ({timing['duration_sec']:.1f}s duration)\n"
+                        # Include lyric text for context so LLM knows what's happening at each timestamp
+                        # The LLM won't render text - it uses this to understand the emotional/thematic content
+                        lyric_text = timing.get('text', '')
+                        batch_prompt += f"     • {timing['start_sec']:.1f}s-{timing['end_sec']:.1f}s: \"{lyric_text}\" ({timing['duration_sec']:.1f}s)\n"
 
                 batch_prompt += "\n"
         elif source_lyrics:

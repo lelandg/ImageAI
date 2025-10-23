@@ -192,15 +192,84 @@ class ReferenceCard(QFrame):
         menu.exec_(event.globalPos())
 
 
+class ExtractedFrameCard(QFrame):
+    """Compact card widget for extracted video frames (first/last frames)"""
+
+    add_as_reference_clicked = Signal(Path, str)  # Path, frame_type ("start" or "end")
+
+    def __init__(self, frame_path: Path, frame_type: str, scene_source: str, parent=None):
+        super().__init__(parent)
+        self.frame_path = frame_path
+        self.frame_type = frame_type  # "start" or "end"
+        self.scene_source = scene_source
+
+        self.setFrameShape(QFrame.Box)
+        self.setLineWidth(1)
+        self.setFixedSize(160, 200)  # Compact fixed size
+
+        self.setup_ui()
+
+    def setup_ui(self):
+        """Setup compact card UI"""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(2)
+        layout.setContentsMargins(3, 3, 3, 3)
+
+        # Image preview (most of the space)
+        image_label = QLabel()
+        image_label.setAlignment(Qt.AlignCenter)
+        image_label.setFixedSize(154, 154)
+        image_label.setStyleSheet("background: #f5f5f5; border: 1px solid #ddd;")
+
+        if self.frame_path.exists():
+            pixmap = QPixmap(str(self.frame_path))
+            if not pixmap.isNull():
+                scaled_pixmap = pixmap.scaled(152, 152, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                image_label.setPixmap(scaled_pixmap)
+            else:
+                image_label.setText("Error")
+        else:
+            image_label.setText("Missing")
+
+        layout.addWidget(image_label)
+
+        # Compact footer with badge and button
+        footer_layout = QHBoxLayout()
+        footer_layout.setSpacing(2)
+        footer_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Frame type badge (tiny)
+        color = "#4CAF50" if self.frame_type == "start" else "#2196F3"
+        type_badge = QLabel(self.frame_type[0].upper())  # Just "S" or "E"
+        type_badge.setStyleSheet(
+            f"background: {color}; color: white; "
+            "padding: 1px 3px; border-radius: 2px; font-size: 8px; font-weight: bold;"
+        )
+        type_badge.setFixedWidth(12)
+        type_badge.setToolTip(f"{self.frame_type.title()} frame")
+        footer_layout.addWidget(type_badge)
+
+        # Add button (compact)
+        add_btn = QPushButton("+Ref")
+        add_btn.setStyleSheet("font-size: 8px; padding: 1px 3px;")
+        add_btn.setToolTip(f"Add as reference\n{self.scene_source[:40]}...")
+        add_btn.clicked.connect(lambda: self.add_as_reference_clicked.emit(self.frame_path, self.frame_type))
+        footer_layout.addWidget(add_btn)
+
+        layout.addLayout(footer_layout)
+
+
 class ReferenceLibraryWidget(QWidget):
     """Widget for managing global reference images"""
 
     references_changed = Signal()  # Emitted when references are added/removed
+    frame_selected = Signal(Path)  # Emitted when an extracted frame is selected to add as reference
 
     def __init__(self, parent=None, project: Optional[VideoProject] = None):
         super().__init__(parent)
         self.project = project
         self.reference_cards = []
+        self.extracted_frame_cards = []
 
         self.setup_ui()
         if self.project:
@@ -208,13 +277,30 @@ class ReferenceLibraryWidget(QWidget):
 
     def setup_ui(self):
         """Setup widget UI"""
+        from PySide6.QtWidgets import QTabWidget
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create tab widget for different library sections
+        self.tab_widget = QTabWidget()
+        layout.addWidget(self.tab_widget)
+
+        # Tab 1: Reference Images
+        self._setup_references_tab()
+
+        # Tab 2: Extracted Frames
+        self._setup_extracted_frames_tab()
+
+    def _setup_references_tab(self):
+        """Setup the reference images tab"""
+        ref_tab = QWidget()
+        layout = QVBoxLayout(ref_tab)
 
         # Header
         header_layout = QHBoxLayout()
 
-        title = QLabel("📸 Reference Library")
+        title = QLabel("📸 Reference Images")
         title.setStyleSheet("font-size: 14px; font-weight: bold;")
         header_layout.addWidget(title)
 
@@ -239,8 +325,7 @@ class ReferenceLibraryWidget(QWidget):
 
         # Help text
         help_text = QLabel(
-            "Reference images maintain character/object/environment consistency across all scenes. "
-            "Maximum 3 global references."
+            "Reference images maintain character/object/environment consistency across all scenes."
         )
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color: gray; font-size: 11px; font-style: italic; padding: 5px;")
@@ -269,6 +354,60 @@ class ReferenceLibraryWidget(QWidget):
         self.empty_label.setStyleSheet("color: gray; font-style: italic; padding: 40px;")
         layout.addWidget(self.empty_label)
 
+        self.tab_widget.addTab(ref_tab, "References")
+
+    def _setup_extracted_frames_tab(self):
+        """Setup the extracted frames tab with compact grid layout"""
+        from PySide6.QtWidgets import QGridLayout
+
+        frames_tab = QWidget()
+        layout = QVBoxLayout(frames_tab)
+
+        # Header
+        header_layout = QHBoxLayout()
+
+        title = QLabel("🎞️ Extracted Frames")
+        title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        header_layout.addWidget(title)
+
+        self.frames_count_label = QLabel("(0 frames)")
+        self.frames_count_label.setStyleSheet("color: gray; font-size: 12px;")
+        header_layout.addWidget(self.frames_count_label)
+
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
+
+        # Help text (compact)
+        help_text = QLabel("Extracted frames from generated videos. Hover over +Ref to see scene text.")
+        help_text.setWordWrap(True)
+        help_text.setStyleSheet("color: gray; font-size: 9px; font-style: italic; padding: 2px;")
+        layout.addWidget(help_text)
+
+        # Scroll area for frame cards in grid
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setMinimumHeight(300)
+
+        scroll_widget = QWidget()
+        self.frames_layout = QGridLayout(scroll_widget)
+        self.frames_layout.setAlignment(Qt.AlignLeft | Qt.AlignTop)
+        self.frames_layout.setSpacing(5)  # Compact spacing
+        self.frames_layout.setContentsMargins(5, 5, 5, 5)
+
+        scroll.setWidget(scroll_widget)
+        layout.addWidget(scroll, stretch=1)
+
+        # Empty state
+        self.frames_empty_label = QLabel(
+            "No extracted frames yet.\n\n"
+            "Generate videos in the workspace to extract start/end frames."
+        )
+        self.frames_empty_label.setAlignment(Qt.AlignCenter)
+        self.frames_empty_label.setStyleSheet("color: gray; font-style: italic; padding: 40px;")
+        layout.addWidget(self.frames_empty_label)
+
+        self.tab_widget.addTab(frames_tab, "Extracted Frames")
+
     def set_project(self, project: VideoProject):
         """Set the project"""
         self.project = project
@@ -276,16 +415,31 @@ class ReferenceLibraryWidget(QWidget):
 
     def refresh(self):
         """Refresh display from project"""
-        # Clear existing cards
+        # Clear existing reference cards
         for card in self.reference_cards:
             card.deleteLater()
         self.reference_cards.clear()
 
+        # Clear existing frame cards
+        for card in self.extracted_frame_cards:
+            card.deleteLater()
+        self.extracted_frame_cards.clear()
+
         if not self.project:
             self.empty_label.setVisible(True)
+            self.frames_empty_label.setVisible(True)
             self.count_label.setText("(No project)")
+            self.frames_count_label.setText("(No project)")
             return
 
+        # Refresh reference images tab
+        self._refresh_references()
+
+        # Refresh extracted frames tab
+        self._refresh_extracted_frames()
+
+    def _refresh_references(self):
+        """Refresh the reference images tab"""
         # Get references
         refs = self.project.global_reference_images
 
@@ -311,6 +465,44 @@ class ReferenceLibraryWidget(QWidget):
             card.edit_clicked.connect(self.on_edit_reference)
             self.cards_layout.addWidget(card)
             self.reference_cards.append(card)
+
+    def _refresh_extracted_frames(self):
+        """Refresh the extracted frames tab with grid layout"""
+        from core.video.project import Scene
+
+        frames = []
+
+        # Scan all scenes in the project for extracted frames
+        if self.project and hasattr(self.project, 'scenes'):
+            for scene in self.project.scenes:
+                # Add first frame (start frame) if exists
+                if scene.first_frame and scene.first_frame.exists():
+                    frames.append((scene.first_frame, "start", scene.source, scene))
+
+                # Add last frame (end frame) if exists
+                if scene.last_frame and scene.last_frame.exists():
+                    frames.append((scene.last_frame, "end", scene.source, scene))
+
+        # Update count
+        self.frames_count_label.setText(f"({len(frames)} frames)")
+
+        # Show/hide empty state
+        self.frames_empty_label.setVisible(len(frames) == 0)
+
+        # Create cards in grid layout (auto-wrapping)
+        # Calculate columns based on available width (160px per card + 5px spacing)
+        cols_per_row = 6  # Default, will auto-wrap anyway
+
+        for i, (frame_path, frame_type, scene_source, scene) in enumerate(frames):
+            card = ExtractedFrameCard(frame_path, frame_type, scene_source, self)
+            card.add_as_reference_clicked.connect(self.on_frame_selected)
+
+            row = i // cols_per_row
+            col = i % cols_per_row
+            self.frames_layout.addWidget(card, row, col)
+            self.extracted_frame_cards.append(card)
+
+        logger.info(f"Refreshed extracted frames tab: {len(frames)} frames found in grid layout")
 
     def on_generate_clicked(self):
         """Handle generate button clicked"""
@@ -530,3 +722,88 @@ class ReferenceLibraryWidget(QWidget):
         logger.info(f"References generated: {len(paths)} images")
         self.refresh()
         self.references_changed.emit()
+
+    def on_frame_selected(self, frame_path: Path, frame_type: str):
+        """Handle extracted frame selected to add as reference"""
+        from PySide6.QtWidgets import QDialog, QFormLayout, QDialogButtonBox
+
+        # Ask for reference details
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Add {frame_type.title()} Frame as Reference")
+        dialog.setModal(True)
+
+        dialog_layout = QVBoxLayout(dialog)
+
+        # Show frame preview
+        preview_label = QLabel()
+        preview_label.setAlignment(Qt.AlignCenter)
+        if frame_path.exists():
+            pixmap = QPixmap(str(frame_path))
+            if not pixmap.isNull():
+                scaled_pixmap = pixmap.scaled(300, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                preview_label.setPixmap(scaled_pixmap)
+        dialog_layout.addWidget(preview_label)
+
+        form_layout = QFormLayout()
+
+        # Type
+        type_combo = QComboBox()
+        type_combo.addItems(["CHARACTER", "OBJECT", "ENVIRONMENT", "STYLE"])
+        form_layout.addRow("Type:", type_combo)
+
+        # Name
+        name_edit = QLineEdit()
+        name_edit.setPlaceholderText(f"e.g., Character from scene...")
+        name_edit.setText(f"Extracted {frame_type} frame")
+        form_layout.addRow("Name:", name_edit)
+
+        # Description
+        desc_edit = QLineEdit()
+        desc_edit.setPlaceholderText("Optional description...")
+        desc_edit.setText(f"{frame_type.title()} frame from generated video")
+        form_layout.addRow("Description:", desc_edit)
+
+        dialog_layout.addLayout(form_layout)
+
+        # Buttons
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        dialog_layout.addWidget(button_box)
+
+        if dialog.exec() != QDialog.Accepted:
+            return
+
+        # Get values
+        ref_type_str = type_combo.currentText().lower()
+        ref_type = ReferenceImageType(ref_type_str)
+        name = name_edit.text().strip() or frame_path.stem
+        description = desc_edit.text().strip()
+
+        # Create reference
+        ref_image = ReferenceImage(
+            path=frame_path,
+            ref_type=ref_type,
+            name=name,
+            description=description or None,
+            is_global=True  # Default to global
+        )
+
+        # Add to project
+        if self.project.add_global_reference(ref_image):
+            self.project.save()
+            logger.info(f"Added extracted frame as reference: {frame_path.name}")
+            self.refresh()
+            self.references_changed.emit()
+            QMessageBox.information(
+                self,
+                "Frame Added",
+                f"Successfully added {frame_type} frame as a reference image!"
+            )
+        else:
+            QMessageBox.warning(
+                self,
+                "Failed to Add Reference",
+                "Could not add reference. Please check the error log."
+            )
+
