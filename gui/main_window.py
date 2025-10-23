@@ -3859,8 +3859,13 @@ For more detailed information, please refer to the full documentation.
         else:
             key = self.api_key_edit.text().strip()
 
-        # Validate we have a key for non-local providers
-        if self.current_provider.lower() not in ["local_sd", "midjourney"] and not key:
+        # Check if using Google Cloud auth mode
+        is_google = self.current_provider.lower() == "google"
+        auth_mode_text = self.auth_mode_combo.currentText() if is_google else "API Key"
+        is_gcloud_auth = auth_mode_text == "Google Cloud Account"
+
+        # Validate we have a key for non-local providers (unless using gcloud auth)
+        if self.current_provider.lower() not in ["local_sd", "midjourney"] and not key and not is_gcloud_auth:
             QMessageBox.warning(self, APP_NAME, f"Please enter an API key for {self.current_provider}.")
             return
 
@@ -3868,7 +3873,12 @@ For more detailed information, please refer to the full documentation.
 
         # Test connection for the current provider
         try:
-            provider_config = {"api_key": key}
+            # Include auth_mode in provider config
+            auth_mode_value = "gcloud" if is_gcloud_auth else "api-key"
+            provider_config = {
+                "api_key": key,
+                "auth_mode": auth_mode_value
+            }
 
             provider = get_provider(self.current_provider, provider_config)
             is_valid, message = provider.validate_auth()
@@ -4041,22 +4051,15 @@ For more detailed information, please refer to the full documentation.
     def _on_project_id_changed(self):
         """Handle project ID edit changes."""
         project_id = self.project_id_edit.text().strip()
-        
+
         # Save the project ID
         if project_id:
             self.config.set("gcloud_project_id", project_id)
         else:
-            # If empty, try to detect from gcloud config
-            try:
-                from core.gcloud_utils import get_gcloud_project_id
-                detected_id = get_gcloud_project_id()
-                if detected_id:
-                    self.project_id_edit.setText(detected_id)
-                    project_id = detected_id
-                    self.config.set("gcloud_project_id", project_id)
-            except:
-                pass
-        
+            # DON'T try to detect from gcloud here - it would block the main thread
+            # User can click "Check Status" button to detect it in background thread
+            self.config.set("gcloud_project_id", "")
+
         self.config.save()
         
         # Update status if we have a project ID
@@ -4391,7 +4394,14 @@ For more detailed information, please refer to the full documentation.
         # Store original prompt (before reference image modifications)
         original_prompt = prompt
 
-        if not self.current_api_key and self.current_provider.lower() not in ["local_sd", "midjourney"]:
+        # Check if using Google Cloud auth mode (no API key needed)
+        is_using_gcloud = False
+        if self.current_provider.lower() == "google":
+            auth_mode_text = self.auth_mode_combo.currentText()
+            is_using_gcloud = auth_mode_text == "Google Cloud Account"
+
+        # Validate API key (unless using gcloud auth or local/manual providers)
+        if not self.current_api_key and not is_using_gcloud and self.current_provider.lower() not in ["local_sd", "midjourney"]:
             self._append_to_console("ERROR: No API key configured", "#ff6666")  # Red
             QMessageBox.warning(self, APP_NAME, "Please set an API key in Settings.")
             return

@@ -161,23 +161,8 @@ class ConfigManager:
         """Set authentication validation status for a provider."""
         if provider == "google":
             self.config["gcloud_auth_validated"] = validated
-            # Also store the project ID if available
-            if validated:
-                from pathlib import Path
-                import subprocess
-                import platform
-                try:
-                    gcloud_cmd = "gcloud.cmd" if platform.system() == "Windows" else "gcloud"
-                    result = subprocess.run(
-                        [gcloud_cmd, "config", "get-value", "project"],
-                        capture_output=True,
-                        text=True,
-                        timeout=5
-                    )
-                    if result.returncode == 0 and result.stdout:
-                        self.config["gcloud_project_id"] = result.stdout.strip()
-                except Exception:
-                    pass
+            # DON'T fetch project ID here - it would block the main thread
+            # Project ID should be fetched in background thread and set separately via set_gcloud_project_id()
     
     def get_gcloud_project_id(self) -> Optional[str]:
         """Get the stored Google Cloud project ID."""

@@ -173,10 +173,11 @@ class GoogleProvider(ImageProvider):
             # Fast path: Read directly from gcloud config file
             from pathlib import Path
             import configparser
-            
+
             # Check gcloud config locations
             config_paths = [
                 Path.home() / ".config" / "gcloud" / "configurations" / "config_default",  # Linux/WSL
+                Path.home() / "snap" / "google-cloud-cli" / "common" / ".config" / "gcloud" / "configurations" / "config_default",  # Linux snap install
                 Path.home() / "AppData" / "Roaming" / "gcloud" / "configurations" / "config_default",  # Windows
             ]
             
