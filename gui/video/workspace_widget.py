@@ -336,22 +336,27 @@ class WorkspaceWidget(QWidget):
         # Main vertical splitter - top for workspace, bottom for image/console
         from gui.common.splitter_style import apply_splitter_style
         main_splitter = QSplitter(Qt.Vertical)
+        main_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         apply_splitter_style(main_splitter)
 
         # Top section - existing workspace (wrapped in scroll area for larger image/video panel)
         from PySide6.QtWidgets import QScrollArea
         workspace_scroll = QScrollArea()
         workspace_scroll.setWidgetResizable(True)
-        workspace_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        workspace_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)  # Never show horizontal scrollbar, expand to fit
         workspace_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         workspace_scroll.setFrameShape(QScrollArea.NoFrame)
+        workspace_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         workspace_widget = QWidget()
+        workspace_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         workspace_layout = QVBoxLayout(workspace_widget)
         workspace_layout.setContentsMargins(0, 0, 0, 0)
+        workspace_layout.setSpacing(0)
 
         # Horizontal layout for button + splitter
         h_container = QWidget()
+        h_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         h_container_layout = QHBoxLayout(h_container)
         h_container_layout.setContentsMargins(0, 0, 0, 0)
         h_container_layout.setSpacing(2)
@@ -369,6 +374,7 @@ class WorkspaceWidget(QWidget):
 
         # Horizontal splitter for workspace
         self.h_splitter = QSplitter(Qt.Horizontal)
+        self.h_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         apply_splitter_style(self.h_splitter)
 
         # Wizard container (far left panel in splitter)
@@ -397,23 +403,61 @@ class WorkspaceWidget(QWidget):
         # Store original width for restoring
         self.wizard_original_width = 300
 
-        # Left panel - Input and settings
+        # Left panel - Input and settings with vertical splitter
         self.logger.info("Creating left panel (input/settings/audio)...")
         left_panel = QWidget()
+        left_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Create vertical splitter for input panel vs settings/audio panels
+        left_splitter = QSplitter(Qt.Vertical)
+        left_splitter.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        apply_splitter_style(left_splitter)
+
+        # Top: Input panel
         self.logger.info("  - Creating input panel...")
-        left_layout.addWidget(self.create_input_panel())
+        input_panel_widget = self.create_input_panel()
+        left_splitter.addWidget(input_panel_widget)
+
+        # Bottom: Input options + Settings and audio panels with scroll area
+        settings_scroll = QScrollArea()
+        settings_scroll.setWidgetResizable(True)
+        settings_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        settings_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        settings_scroll.setFrameShape(QScrollArea.NoFrame)
+        settings_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+        settings_container = QWidget()
+        settings_layout = QVBoxLayout(settings_container)
+        settings_layout.setContentsMargins(0, 0, 0, 0)
+        self.logger.info("  - Creating input options panel...")
+        settings_layout.addWidget(self.create_input_options_panel())
         self.logger.info("  - Creating settings panel...")
-        left_layout.addWidget(self.create_settings_panel())
+        settings_layout.addWidget(self.create_settings_panel())
         self.logger.info("  - Creating audio panel...")
-        left_layout.addWidget(self.create_audio_panel())
-        left_layout.addStretch()
+        settings_layout.addWidget(self.create_audio_panel())
+        settings_layout.addStretch()
+
+        settings_scroll.setWidget(settings_container)
+        left_splitter.addWidget(settings_scroll)
+
+        # Set initial splitter sizes (input panel gets 30%, settings get 70%)
+        left_splitter.setSizes([200, 400])
+        left_splitter.setStretchFactor(0, 1)  # Input panel stretches
+        left_splitter.setStretchFactor(1, 1)  # Settings panel stretches
+        # Allow the splitter to be moved all the way down by setting minimum to 0
+        left_splitter.setCollapsible(1, False)  # Don't allow complete collapse
+
+        left_layout.addWidget(left_splitter, 1)  # Add stretch factor 1
         self.h_splitter.addWidget(left_panel)
 
         # Right panel - Storyboard and export
         self.logger.info("Creating right panel (storyboard/export)...")
         right_panel = QWidget()
+        right_panel.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
         self.logger.info("  - Creating storyboard panel...")
         # Add storyboard with stretch factor so it expands to fill available space
         right_layout.addWidget(self.create_storyboard_panel(), stretch=3)
@@ -452,8 +496,28 @@ class WorkspaceWidget(QWidget):
 
         # Bottom section - Image view and status console
         bottom_widget = QWidget()
+        bottom_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         bottom_layout = QVBoxLayout(bottom_widget)
         bottom_layout.setContentsMargins(0, 0, 0, 0)
+
+        # Status and cost info above the preview area
+        status_cost_widget = QWidget()
+        status_cost_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        status_cost_layout = QHBoxLayout(status_cost_widget)
+        status_cost_layout.setContentsMargins(5, 2, 5, 2)
+        status_cost_layout.setSpacing(10)
+
+        self.status_label = QLabel("Ready")
+        status_cost_layout.addWidget(self.status_label)
+
+        status_cost_layout.addStretch()
+
+        # Updated cost label format: Generated and Total cost
+        self.cost_label = QLabel("Generated: $0.00 | Total: $0.00")
+        self.cost_label.setToolTip("Generated: Cost of newly created images/clips\nTotal: Cumulative cost of all clips and images")
+        status_cost_layout.addWidget(self.cost_label)
+
+        bottom_layout.addWidget(status_cost_widget)
 
         # Image view and status console in vertical splitter
         image_console_splitter = QSplitter(Qt.Vertical)
@@ -611,13 +675,7 @@ class WorkspaceWidget(QWidget):
         console_layout.setContentsMargins(0, 0, 0, 0)
         console_layout.setSpacing(0)
 
-        # Console header
-        console_header = QLabel("Status Console")
-        console_header.setStyleSheet("color: #666; font-size: 9pt; padding: 0px; margin: 0px;")
-        console_header.setMaximumHeight(16)
-        console_layout.addWidget(console_header)
-
-        # Status console - styled like a terminal
+        # Status console - styled like a terminal (no header label)
         self.status_console = QTextEdit()
         self.status_console.setReadOnly(True)
         self.status_console.setMinimumHeight(50)
@@ -652,7 +710,7 @@ class WorkspaceWidget(QWidget):
         main_splitter.setStretchFactor(0, 2)
         main_splitter.setStretchFactor(1, 1)
 
-        layout.addWidget(main_splitter)
+        layout.addWidget(main_splitter, 1)  # Add stretch factor 1 to make splitter expand
 
         # Store splitter references for save/restore
         self.main_splitter = main_splitter
@@ -665,6 +723,9 @@ class WorkspaceWidget(QWidget):
 
         # Restore splitter positions from saved settings (deferred until widget is shown)
         QTimer.singleShot(200, self._restore_splitter_positions)
+
+        # Write "Ready." to status console in green on startup
+        QTimer.singleShot(100, lambda: self._log_to_console("Ready.", "SUCCESS"))
     
     def create_project_header(self) -> QWidget:
         """Create project header with name and controls"""
@@ -746,7 +807,7 @@ class WorkspaceWidget(QWidget):
         """Create input panel for lyrics/text"""
         group = QGroupBox("Input")
         layout = QVBoxLayout()
-        
+
         # Format selector
         format_layout = QHBoxLayout()
         format_layout.addWidget(QLabel("Format:"))
@@ -759,15 +820,49 @@ class WorkspaceWidget(QWidget):
         self.load_file_btn.setToolTip("Load lyrics or text from a file (Alt+L)")
         self.load_file_btn.clicked.connect(self.load_input_file)
         format_layout.addWidget(self.load_file_btn)
-        
+
         format_layout.addStretch()
         layout.addLayout(format_layout)
-        
-        # Text input
+
+        # Text input (no max height - grows with splitter)
         self.input_text = QTextEdit()
         self.input_text.setPlaceholderText("Paste lyrics or text here...")
-        self.input_text.setMaximumHeight(150)
         layout.addWidget(self.input_text)
+
+        group.setLayout(layout)
+        return group
+
+    def create_input_options_panel(self) -> QWidget:
+        """Create input options panel (below splitter)"""
+        container_widget = QWidget()
+        container_layout = QVBoxLayout(container_widget)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
+        # Toggle button for Input Options
+        self.input_options_toggle = QPushButton("▼ Input Options")
+        self.input_options_toggle.setCheckable(True)
+        self.input_options_toggle.setChecked(True)  # Expanded by default
+        self.input_options_toggle.clicked.connect(self._toggle_input_options)
+        self.input_options_toggle.setStyleSheet("""
+            QPushButton {
+                text-align: left;
+                padding: 5px;
+                border: none;
+                background: transparent;
+            }
+            QPushButton:hover {
+                background: rgba(0, 0, 0, 0.05);
+            }
+        """)
+        container_layout.addWidget(self.input_options_toggle)
+
+        # Container for input options (initially visible)
+        self.input_options_container = QWidget()
+        self.input_options_container.setVisible(True)
+        input_options_layout = QVBoxLayout(self.input_options_container)
+        input_options_layout.setSpacing(5)
+        input_options_layout.setContentsMargins(10, 0, 0, 0)  # Indent for hierarchy
 
         # Scene marker controls
         marker_layout = QHBoxLayout()
@@ -790,7 +885,7 @@ class WorkspaceWidget(QWidget):
         marker_layout.addWidget(self.delete_scene_btn)
 
         marker_layout.addStretch()
-        layout.addLayout(marker_layout)
+        input_options_layout.addLayout(marker_layout)
 
         # Timing controls
         timing_layout = QHBoxLayout()
@@ -815,7 +910,7 @@ class WorkspaceWidget(QWidget):
         timing_layout.addWidget(self.generate_storyboard_btn)
 
         timing_layout.addStretch()
-        layout.addLayout(timing_layout)
+        input_options_layout.addLayout(timing_layout)
 
         # Storyboard generation options
         options_layout = QHBoxLayout()
@@ -837,7 +932,7 @@ class WorkspaceWidget(QWidget):
         options_layout.addWidget(self.auto_gen_end_prompts_check)
 
         options_layout.addStretch()
-        layout.addLayout(options_layout)
+        input_options_layout.addLayout(options_layout)
 
         # Reference image auto-linking options
         ref_options_layout = QHBoxLayout()
@@ -862,15 +957,44 @@ class WorkspaceWidget(QWidget):
         self.auto_link_as_start_frame_check.toggled.connect(lambda: self._auto_save_settings())
 
         ref_options_layout.addStretch()
-        layout.addLayout(ref_options_layout)
-        
-        group.setLayout(layout)
-        return group
+        input_options_layout.addLayout(ref_options_layout)
+
+        # Close the input options container
+        container_layout.addWidget(self.input_options_container)
+
+        return container_widget
     
     def create_settings_panel(self) -> QWidget:
         """Create settings panel for providers and style"""
-        group = QGroupBox("Generation Settings")
-        layout = QVBoxLayout()
+        container_widget = QWidget()
+        container_layout = QVBoxLayout(container_widget)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
+        # Toggle button for Generation Settings
+        self.settings_toggle = QPushButton("▼ Generation Settings")
+        self.settings_toggle.setCheckable(True)
+        self.settings_toggle.setChecked(True)  # Expanded by default
+        self.settings_toggle.clicked.connect(self._toggle_settings)
+        self.settings_toggle.setStyleSheet("""
+            QPushButton {
+                text-align: left;
+                padding: 5px;
+                border: none;
+                background: transparent;
+            }
+            QPushButton:hover {
+                background: rgba(0, 0, 0, 0.05);
+            }
+        """)
+        container_layout.addWidget(self.settings_toggle)
+
+        # Container for settings (initially visible)
+        self.settings_container = QWidget()
+        self.settings_container.setVisible(True)
+        layout = QVBoxLayout(self.settings_container)
+        layout.setSpacing(5)
+        layout.setContentsMargins(10, 0, 0, 0)  # Indent for hierarchy
 
         # Image provider
         img_layout = QHBoxLayout()
@@ -1030,14 +1154,12 @@ class WorkspaceWidget(QWidget):
 
         video_prompt_layout.addStretch()
         layout.addLayout(video_prompt_layout)
-        
-        group.setLayout(layout)
-        
+
         # Initialize the model combos with default selections
         # NOTE: Commented out - this was being called before project loading
         # and was interfering with restoring saved values
         # self.on_img_provider_changed(self.img_provider_combo.currentText())
-        
+
         # Instead, populate the image model combo with default Gemini models
         # since Gemini is the first item in the provider combo
         self.img_model_combo.addItems([
@@ -1047,14 +1169,43 @@ class WorkspaceWidget(QWidget):
             "gemini-1.5-flash",
             "gemini-1.5-pro"
         ])
-        
-        return group
+
+        # Close the settings container
+        container_layout.addWidget(self.settings_container)
+
+        return container_widget
     
     def create_audio_panel(self) -> QWidget:
         """Create audio and MIDI settings panel"""
-        group = QGroupBox("Audio & MIDI")
-        layout = QVBoxLayout()
+        container_widget = QWidget()
+        container_layout = QVBoxLayout(container_widget)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
+        # Toggle button for Music
+        self.music_toggle = QPushButton("▼ Music")
+        self.music_toggle.setCheckable(True)
+        self.music_toggle.setChecked(True)  # Expanded by default
+        self.music_toggle.clicked.connect(self._toggle_music)
+        self.music_toggle.setStyleSheet("""
+            QPushButton {
+                text-align: left;
+                padding: 5px;
+                border: none;
+                background: transparent;
+            }
+            QPushButton:hover {
+                background: rgba(0, 0, 0, 0.05);
+            }
+        """)
+        container_layout.addWidget(self.music_toggle)
+
+        # Container for music settings (initially visible)
+        self.music_container = QWidget()
+        self.music_container.setVisible(True)
+        layout = QVBoxLayout(self.music_container)
         layout.setSpacing(5)
+        layout.setContentsMargins(10, 0, 0, 0)  # Indent for hierarchy
         
         # Audio file selection
         audio_layout = QHBoxLayout()
@@ -1204,9 +1355,11 @@ class WorkspaceWidget(QWidget):
         
         self.karaoke_group.setLayout(karaoke_layout)
         layout.addWidget(self.karaoke_group)
-        
-        group.setLayout(layout)
-        return group
+
+        # Close the music container
+        container_layout.addWidget(self.music_container)
+
+        return container_widget
     
     def create_storyboard_panel(self) -> QWidget:
         """Create storyboard panel with scene table"""
@@ -1276,6 +1429,8 @@ class WorkspaceWidget(QWidget):
         ])
         # Set size policy to expand vertically to show more rows
         self.scene_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        # Set minimum height to show 3 rows (3 * 30px row height + 30px header = 120px)
+        self.scene_table.setMinimumHeight(120)
         # Make table non-selectable
         self.scene_table.setSelectionMode(QTableWidget.NoSelection)
         self.scene_table.setFocusPolicy(Qt.NoFocus)
@@ -1436,19 +1591,11 @@ class WorkspaceWidget(QWidget):
         widget = QWidget()
         layout = QHBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.status_label = QLabel("Ready")
-        layout.addWidget(self.status_label)
-        
+
         self.progress_bar = QProgressBar()
         self.progress_bar.setVisible(False)
         layout.addWidget(self.progress_bar)
-        
-        layout.addStretch()
-        
-        self.cost_label = QLabel("Cost: $0.00")
-        layout.addWidget(self.cost_label)
-        
+
         widget.setLayout(layout)
         return widget
     
@@ -5161,6 +5308,33 @@ class WorkspaceWidget(QWidget):
         """Handle Veo model selection change"""
         self._auto_save_settings()
 
+    def _toggle_input_options(self, checked=None):
+        """Toggle the input options panel visibility."""
+        if checked is None:
+            is_visible = self.input_options_container.isVisible()
+        else:
+            is_visible = checked
+        self.input_options_container.setVisible(is_visible)
+        self.input_options_toggle.setText("▼ Input Options" if is_visible else "▶ Input Options")
+
+    def _toggle_settings(self, checked=None):
+        """Toggle the generation settings panel visibility."""
+        if checked is None:
+            is_visible = self.settings_container.isVisible()
+        else:
+            is_visible = checked
+        self.settings_container.setVisible(is_visible)
+        self.settings_toggle.setText("▼ Generation Settings" if is_visible else "▶ Generation Settings")
+
+    def _toggle_music(self, checked=None):
+        """Toggle the music panel visibility."""
+        if checked is None:
+            is_visible = self.music_container.isVisible()
+        else:
+            is_visible = checked
+        self.music_container.setVisible(is_visible)
+        self.music_toggle.setText("▼ Music" if is_visible else "▶ Music")
+
     def _auto_save_settings(self):
         """Auto-save settings to project if we have one"""
         # Skip auto-save during initial loading
@@ -5765,7 +5939,34 @@ class WorkspaceWidget(QWidget):
         self.preview_btn.setEnabled(has_images)
         # Enable render button if there are either images OR video clips
         self.render_btn.setEnabled(has_images or has_video_clips)
-    
+
+        # Update cost calculation
+        self._update_cost_label()
+
+    def _update_cost_label(self):
+        """Update the cost label based on generated content"""
+        if not self.current_project:
+            self.cost_label.setText("Generated: $0.00 | Total: $0.00")
+            return
+
+        # Veo 3 pricing: $0.02 per second
+        # Average scene is ~8 seconds, so ~$0.16 per video clip
+        VEO_COST_PER_SECOND = 0.02
+        VEO_COST_PER_VIDEO = 0.16  # Assuming 8-second average
+
+        # Count scenes with video clips (generated content)
+        scenes_with_video = sum(1 for s in self.current_project.scenes if s.video_clip)
+
+        # Calculate generated cost (actual clips made)
+        generated_cost = scenes_with_video * VEO_COST_PER_VIDEO
+
+        # Calculate total cost (all scenes * cost per clip)
+        total_scenes = len(self.current_project.scenes)
+        total_cost = total_scenes * VEO_COST_PER_VIDEO
+
+        # Update label
+        self.cost_label.setText(f"Generated: ${generated_cost:.2f} | Total: ${total_cost:.2f}")
+
     def update_project_from_ui(self):
         """Update project from UI values"""
         if not self.current_project:
