@@ -26,6 +26,12 @@ def launch_gui():
         if "QWindowsWindow::setGeometry" in msg:
             return  # Window geometry warnings during resize
 
+        # Suppress FFmpeg/codec warnings during video playback
+        if "[aac @" in msg and "Could not update timestamps" in msg:
+            return  # Benign AAC codec timestamp warnings
+        if "[h264 @" in msg or "[hevc @" in msg or "[vp9 @" in msg:
+            return  # Benign video codec warnings
+
         # Log other Qt messages normally
         import logging
         logger = logging.getLogger("qt")

@@ -43,6 +43,7 @@ from gui.video.prompt_field_widget import PromptFieldWidget
 from gui.video.reference_images_widget import ReferenceImagesWidget
 from core.video.end_prompt_generator import EndPromptGenerator, EndPromptContext
 from core.llm_models import get_provider_models, get_all_provider_ids, get_provider_display_name
+from gui.utils.stderr_suppressor import SuppressStderr
 
 
 class ImageHoverPreview(QLabel):
@@ -3267,7 +3268,8 @@ class WorkspaceWidget(QWidget):
             self.video_player_container.show()
 
             # Load and play the video
-            self.media_player.setSource(QUrl.fromLocalFile(str(video_path)))
+            with SuppressStderr():
+                self.media_player.setSource(QUrl.fromLocalFile(str(video_path)))
             self.media_player.play()
 
             self._log_to_console(f"🎬 Scene {row + 1}: Playing video ({video_path.name})")
@@ -4076,7 +4078,8 @@ class WorkspaceWidget(QWidget):
             self.media_player.stop()
 
             # Load the video and restart from beginning
-            self.media_player.setSource(QUrl.fromLocalFile(str(scene.video_clip)))
+            with SuppressStderr():
+                self.media_player.setSource(QUrl.fromLocalFile(str(scene.video_clip)))
             self.media_player.setPosition(0)  # Ensure playback starts at beginning
             self.media_player.play()
 
@@ -4137,7 +4140,8 @@ class WorkspaceWidget(QWidget):
 
             # Stop media player and clear source completely
             self.media_player.stop()
-            self.media_player.setSource(QUrl())  # Clear the source
+            with SuppressStderr():
+                self.media_player.setSource(QUrl())  # Clear the source
 
             # Reset click tracking to prevent stale references
             if self.last_clicked_row == scene_index:

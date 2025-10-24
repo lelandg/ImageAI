@@ -26,6 +26,7 @@ from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
 
 from core.video.project import VideoProject, Scene
+from gui.utils.stderr_suppressor import SuppressStderr
 
 
 class SelectExistingVideoDialog(QDialog):
@@ -225,7 +226,8 @@ class SelectExistingVideoDialog(QDialog):
         self.media_player.stop()
 
         # Load the video
-        self.media_player.setSource(QUrl.fromLocalFile(str(scene.video_clip)))
+        with SuppressStderr():
+            self.media_player.setSource(QUrl.fromLocalFile(str(scene.video_clip)))
 
         # Enable controls
         self.play_btn.setEnabled(True)
@@ -256,7 +258,8 @@ class SelectExistingVideoDialog(QDialog):
     def _clear_preview(self):
         """Clear the video preview"""
         self.media_player.stop()
-        self.media_player.setSource(QUrl())
+        with SuppressStderr():
+            self.media_player.setSource(QUrl())
         self.play_btn.setEnabled(False)
         self.stop_btn.setEnabled(False)
         self.context_info.clear()

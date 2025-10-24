@@ -30,21 +30,22 @@ class VideoPromptGenerator:
     SYSTEM_PROMPT_WITH_CAMERA = """You are a video motion specialist. Given a static image description, generate a video prompt that describes camera movement and action.
 
 The video prompt should:
-- Start with the static scene description
+- Describe the scene visually without referencing continuity (ref images handle character/environment consistency)
 - Add camera movement (pan, zoom, dolly, tilt, etc.)
 - Add subtle motion or changes over time
 - Match the energy/pacing to the song's tempo (if provided)
 - Be optimized for Google Veo video generation
 - Be 2-3 sentences maximum
 - NEVER include quoted text or lyrics (they will render as text in the video)
+- AVOID phrases like "same character", "same room", "previous scene" (visual continuity is automatic)
 
-Format: [Static scene], [camera movement], [motion/changes]"""
+Format: [Scene description], [camera movement], [motion/changes]"""
 
     # System prompt for LLM without camera movements
     SYSTEM_PROMPT_NO_CAMERA = """You are a video motion specialist. Given a static image description, generate a video prompt that describes subject motion and temporal progression.
 
 The video prompt should:
-- Start with the static scene description
+- Describe the scene visually without referencing continuity (ref images handle character/environment consistency)
 - Focus on subject/character actions and environmental motion
 - Keep camera mostly static (minimal camera movement only when essential)
 - Add subtle motion or changes over time
@@ -52,23 +53,25 @@ The video prompt should:
 - Be optimized for Google Veo video generation
 - Be 2-3 sentences maximum
 - NEVER include quoted text or lyrics (they will render as text in the video)
+- AVOID phrases like "same character", "same room", "previous scene" (visual continuity is automatic)
 
-Format: [Static scene], [subject motion], [temporal progression]"""
+Format: [Scene description], [subject motion], [temporal progression]"""
 
     # System prompt for prompt flow (text continuity between scenes)
     SYSTEM_PROMPT_WITH_FLOW = """You are a video motion specialist. Given a static image description and the previous scene's video prompt, generate a video prompt that flows naturally from the previous scene.
 
 The video prompt should:
-- Continue the motion/energy from the previous scene
-- Maintain visual and temporal continuity
+- Continue the motion/energy from the previous scene smoothly
+- Maintain visual and temporal continuity through motion progression
 - Add camera movement (pan, zoom, dolly, tilt, etc.)
 - Add subtle motion or changes over time
 - Match the energy/pacing to the song's tempo (if provided)
 - Be optimized for Google Veo video generation
 - Be 2-3 sentences maximum
 - NEVER include quoted text or lyrics (they will render as text in the video)
+- AVOID redundant phrases like "same character", "same room" (visual continuity is handled by reference images)
 
-Format: [Static scene continuing from previous], [camera movement], [motion/changes]"""
+Format: [Scene description with flowing motion], [camera movement], [motion/changes]"""
 
     def __init__(self, llm_provider=None, llm_model=None, config=None):
         """

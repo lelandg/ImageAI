@@ -16,6 +16,8 @@ from dataclasses import dataclass
 from enum import Enum
 import hashlib
 import requests
+from io import BytesIO
+from PIL import Image
 
 # Check if google.genai is available
 try:
@@ -380,6 +382,85 @@ class VeoClient:
                             # Load image bytes manually (same approach as start frame)
                             with open(ref_path, 'rb') as f:
                                 ref_image_bytes = f.read()
+
+                            # Load image with PIL to check and fix aspect ratio if needed
+                            img = Image.open(BytesIO(ref_image_bytes))
+                            ref_width, ref_height = img.size
+                            ref_aspect = ref_width / ref_height
+
+                            # Parse target aspect ratio (e.g., "16:9" -> 16/9 = 1.777...)
+                            if ':' in config.aspect_ratio:
+                                ar_parts = config.aspect_ratio.split(':')
+                                expected_aspect = int(ar_parts[0]) / int(ar_parts[1])
+                            else:
+                                # Fallback to 16:9 if invalid format
+                                self.logger.warning(f"Invalid aspect ratio format: {config.aspect_ratio}, using 16:9")
+                                expected_aspect = 16/9
+
+                            # Check if aspect ratios match (within tolerance)
+                            if abs(ref_aspect - expected_aspect) > 0.1:
+                                self.logger.warning(f"⚠️ ASPECT RATIO MISMATCH: Reference image {idx+1} is {ref_width}x{ref_height} "
+                                                  f"(aspect {ref_aspect:.2f}) but requesting {config.aspect_ratio} "
+                                                  f"(aspect {expected_aspect:.2f}). Applying canvas centering fix...")
+
+                                # Create a transparent canvas with the target aspect ratio
+                                # Calculate canvas dimensions based on reference image max dimension
+                                max_ref_dim = max(ref_width, ref_height)
+
+                                # Calculate canvas dimensions maintaining target aspect ratio
+                                if expected_aspect >= 1.0:  # Landscape or square
+                                    canvas_width = max_ref_dim
+                                    canvas_height = int(max_ref_dim / expected_aspect)
+                                else:  # Portrait
+                                    canvas_height = max_ref_dim
+                                    canvas_width = int(max_ref_dim * expected_aspect)
+
+                                # Make sure canvas is large enough to contain the reference image
+                                if canvas_width < ref_width:
+                                    canvas_width = ref_width
+                                    canvas_height = int(ref_width / expected_aspect)
+                                if canvas_height < ref_height:
+                                    canvas_height = ref_height
+                                    canvas_width = int(ref_height * expected_aspect)
+
+                                self.logger.info(f"Creating transparent canvas: {canvas_width}x{canvas_height} (aspect {expected_aspect:.2f})")
+                                self.logger.info(f"Reference image will be centered: {ref_width}x{ref_height}")
+
+                                # Create transparent canvas
+                                canvas = Image.new('RGBA', (canvas_width, canvas_height), (0, 0, 0, 0))
+
+                                # Calculate position to center the reference image
+                                x_offset = (canvas_width - ref_width) // 2
+                                y_offset = (canvas_height - ref_height) // 2
+
+                                # Convert reference image to RGBA if needed
+                                if img.mode != 'RGBA':
+                                    img_rgba = img.convert('RGBA')
+                                else:
+                                    img_rgba = img
+
+                                # Paste the reference image centered on the canvas
+                                canvas.paste(img_rgba, (x_offset, y_offset), img_rgba)
+
+                                # Save the composed canvas for debugging
+                                timestamp = int(time.time())
+                                debug_filename = f"DEBUG_VEO_REF_CANVAS_{idx+1}_{timestamp}.png"
+                                # Get output directory from config
+                                from core.config import ConfigManager
+                                config_mgr = ConfigManager()
+                                output_dir = Path(config_mgr.get('output_dir', Path.home() / 'AppData' / 'Roaming' / 'ImageAI' / 'generated'))
+                                debug_path = output_dir / debug_filename
+                                canvas.save(debug_path, 'PNG')
+                                self.logger.info(f"Saved composed canvas for debugging: {debug_path}")
+
+                                # Convert canvas to bytes
+                                img = canvas
+                                self.logger.info(f"Using composed canvas ({canvas_width}x{canvas_height}) instead of original reference image")
+
+                            # Convert image to bytes
+                            output_buffer = BytesIO()
+                            img.save(output_buffer, format='PNG')
+                            ref_image_bytes = output_buffer.getvalue()
 
                             # Create reference image dict with bytes and MIME type
                             ref_image_dict = {

@@ -13,6 +13,8 @@ import warnings
 # Set environment variables before any imports
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow info messages
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable oneDNN custom operations message
+os.environ['FFREPORT'] = 'level=32'  # Suppress FFmpeg warnings (only show errors)
+os.environ['QT_LOGGING_RULES'] = '*.debug=false;qt.qpa.*=false'  # Suppress Qt debug messages
 
 # Suppress warnings before any imports that might trigger them
 warnings.filterwarnings('ignore', category=FutureWarning)
