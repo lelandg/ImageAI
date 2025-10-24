@@ -68,11 +68,18 @@ class VeoGenerationConfig:
 
     def __post_init__(self):
         """Validate configuration after initialization"""
-        # Validate duration for Veo 3 models (must be 4, 6, or 8 seconds)
-        if self.model in [VeoModel.VEO_3_GENERATE, VeoModel.VEO_3_1_GENERATE, VeoModel.VEO_3_FAST]:
+        # Validate duration for Veo 3 models (ALL Veo 3 models now ONLY support 8 seconds)
+        if self.model in [VeoModel.VEO_3_GENERATE, VeoModel.VEO_3_1_GENERATE]:
+            if self.duration != 8:
+                raise ValueError(
+                    f"Veo 3.0 and 3.1 now ONLY support 8-second clips, got {self.duration}. "
+                    f"All scenes must be batched to exactly 8 seconds."
+                )
+        elif self.model == VeoModel.VEO_3_FAST:
+            # Veo 3 Fast still supports multiple durations
             if self.duration not in [4, 6, 8]:
                 raise ValueError(
-                    f"Veo 3 duration must be 4, 6, or 8 seconds, got {self.duration}. "
+                    f"Veo 3 Fast duration must be 4, 6, or 8 seconds, got {self.duration}. "
                     f"Use snap_duration_to_veo() to convert float durations."
                 )
 
@@ -138,6 +145,7 @@ class VeoClient:
     MODEL_CONSTRAINTS = {
         VeoModel.VEO_3_GENERATE: {
             "max_duration": 8,
+            "fixed_duration": 8,  # Veo 3.0 now ONLY supports 8-second clips
             "resolutions": ["720p", "1080p"],
             "aspect_ratios": ["16:9", "9:16", "1:1"],
             "supports_audio": True,
@@ -146,6 +154,7 @@ class VeoClient:
         },
         VeoModel.VEO_3_1_GENERATE: {
             "max_duration": 8,
+            "fixed_duration": 8,  # Veo 3.1 ONLY supports 8-second clips
             "resolutions": ["720p", "1080p"],
             "aspect_ratios": ["16:9", "9:16", "1:1"],
             "supports_audio": True,

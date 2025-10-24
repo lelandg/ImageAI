@@ -27,51 +27,58 @@ class VideoPromptGenerator:
     """Generate video motion prompts using LLM for Veo video generation"""
 
     # System prompt for LLM with camera movements
-    SYSTEM_PROMPT_WITH_CAMERA = """You are a video motion specialist. Given a static image description, generate a video prompt that describes camera movement and action.
+    SYSTEM_PROMPT_WITH_CAMERA = """You are a video motion specialist for Google Veo 3, which generates exactly 8-second clips.
 
 The video prompt should:
-- Describe the scene visually without referencing continuity (ref images handle character/environment consistency)
+- Include EXPLICIT TIME MARKERS for all scenes, especially short ones (e.g., "0-2s:", "2-2.5s:", "2.5-8s:")
+- For ultra-brief moments (<0.5s): use "flash", "flicker", "blink", "glimpse"
+- For brief moments (0.5-1s): use "quick", "brief", "momentary"
 - Add camera movement (pan, zoom, dolly, tilt, etc.)
 - Add subtle motion or changes over time
 - Match the energy/pacing to the song's tempo (if provided)
-- Be optimized for Google Veo video generation
-- Be 2-3 sentences maximum
+- Be optimized for Google Veo 3 8-second generation
 - NEVER include quoted text or lyrics (they will render as text in the video)
 - AVOID phrases like "same character", "same room", "previous scene" (visual continuity is automatic)
 
-Format: [Scene description], [camera movement], [motion/changes]"""
+Format for single scene: [Duration/timing], [Scene description], [camera movement], [motion/changes]
+Format for batched scenes: Use time segments like "0-2s: action1, 2-4s: action2, 4-8s: action3" """
 
     # System prompt for LLM without camera movements
-    SYSTEM_PROMPT_NO_CAMERA = """You are a video motion specialist. Given a static image description, generate a video prompt that describes subject motion and temporal progression.
+    SYSTEM_PROMPT_NO_CAMERA = """You are a video motion specialist for Google Veo 3, which generates exactly 8-second clips.
 
 The video prompt should:
-- Describe the scene visually without referencing continuity (ref images handle character/environment consistency)
+- Include EXPLICIT TIME MARKERS for all scenes, especially short ones (e.g., "0-2s:", "2-2.5s:", "2.5-8s:")
+- For ultra-brief moments (<0.5s): use "flash", "flicker", "blink", "glimpse"
+- For brief moments (0.5-1s): use "quick", "brief", "momentary"
 - Focus on subject/character actions and environmental motion
 - Keep camera mostly static (minimal camera movement only when essential)
 - Add subtle motion or changes over time
 - Match the energy/pacing to the song's tempo (if provided)
-- Be optimized for Google Veo video generation
-- Be 2-3 sentences maximum
+- Be optimized for Google Veo 3 8-second generation
 - NEVER include quoted text or lyrics (they will render as text in the video)
 - AVOID phrases like "same character", "same room", "previous scene" (visual continuity is automatic)
 
-Format: [Scene description], [subject motion], [temporal progression]"""
+Format for single scene: [Duration/timing], [Scene description], [subject motion], [temporal progression]
+Format for batched scenes: Use time segments like "0-2s: action1, 2-4s: action2, 4-8s: action3" """
 
     # System prompt for prompt flow (text continuity between scenes)
-    SYSTEM_PROMPT_WITH_FLOW = """You are a video motion specialist. Given a static image description and the previous scene's video prompt, generate a video prompt that flows naturally from the previous scene.
+    SYSTEM_PROMPT_WITH_FLOW = """You are a video motion specialist for Google Veo 3, which generates exactly 8-second clips.
 
 The video prompt should:
+- Include EXPLICIT TIME MARKERS for all scenes, especially short ones (e.g., "0-2s:", "2-2.5s:", "2.5-8s:")
+- For ultra-brief moments (<0.5s): use "flash", "flicker", "blink", "glimpse"
+- For brief moments (0.5-1s): use "quick", "brief", "momentary"
 - Continue the motion/energy from the previous scene smoothly
 - Maintain visual and temporal continuity through motion progression
 - Add camera movement (pan, zoom, dolly, tilt, etc.)
 - Add subtle motion or changes over time
 - Match the energy/pacing to the song's tempo (if provided)
-- Be optimized for Google Veo video generation
-- Be 2-3 sentences maximum
+- Be optimized for Google Veo 3 8-second generation
 - NEVER include quoted text or lyrics (they will render as text in the video)
 - AVOID redundant phrases like "same character", "same room" (visual continuity is handled by reference images)
 
-Format: [Scene description with flowing motion], [camera movement], [motion/changes]"""
+Format for single scene: [Duration/timing], [Scene description with flowing motion], [camera movement], [motion/changes]
+Format for batched scenes: Use time segments like "0-2s: action1, 2-2.5s: brief moment, 2.5-8s: action3" """
 
     def __init__(self, llm_provider=None, llm_model=None, config=None):
         """
@@ -129,12 +136,28 @@ Format: [Scene description with flowing motion], [camera movement], [motion/chan
         # Detect instrumental sections
         is_instrumental = context.start_prompt.strip().lower() in ['[instrumental]', 'instrumental', '[instrumental section]']
 
-        # Build user prompt based on context
+        # Build user prompt based on context - ALWAYS include duration info
+        # Format duration string based on length
+        if context.duration < 1.0:
+            duration_str = f"{context.duration:.1f} seconds (ultra-brief moment)"
+        elif context.duration < 2.0:
+            duration_str = f"{context.duration:.1f} seconds (quick moment)"
+        else:
+            duration_str = f"{context.duration:.1f} seconds"
+
         timing_info = ""
         if context.lyric_timings and len(context.lyric_timings) > 1:
-            timing_info = "\n\nTiming breakdown for this scene:\n"
+            timing_info = "\n\nTiming breakdown for this scene (within 8-second Veo clip):\n"
             for timing in context.lyric_timings:
-                timing_info += f"  {timing['start_sec']:.3f}-{timing['end_sec']:.3f}s: {timing['text']}\n"
+                # Add descriptors for very short segments
+                duration_sec = timing['end_sec'] - timing['start_sec']
+                if duration_sec < 0.5:
+                    duration_desc = " [ultra-brief flash]"
+                elif duration_sec < 1.0:
+                    duration_desc = " [brief moment]"
+                else:
+                    duration_desc = ""
+                timing_info += f"  {timing['start_sec']:.1f}-{timing['end_sec']:.1f}s: {timing['text']}{duration_desc}\n"
             timing_info += "\nDescribe how the visuals evolve through these timing segments."
 
         # Add tempo guidance if available
@@ -154,13 +177,15 @@ Format: [Scene description with flowing motion], [camera movement], [motion/chan
             motion_desc = "camera movement and scene evolution" if context.enable_camera_movements else "subject motion and temporal progression"
             user_prompt = f"""Create a video motion prompt for an INSTRUMENTAL section (music break with no lyrics):
 
-Duration: {context.duration} seconds{tempo_guidance}
+Duration: {duration_str}{tempo_guidance}
+Note: This will be part of an 8-second Veo generation
 
 Generate a prompt with {motion_desc} that:
 • Maintains visual continuity with surrounding scenes
 • Uses establishing shots, ambient details, or atmospheric moments
 • Provides visual breathing room and variety
 • Examples: camera pans across setting, environmental details, character reactions, scenic transitions
+• For short durations (<1s), describe as brief flashes or quick moments
 
 IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
         elif context.enable_prompt_flow and context.previous_video_prompt:
@@ -169,34 +194,40 @@ IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual e
 Previous scene's video prompt: {context.previous_video_prompt}
 
 Current start frame description: {context.start_prompt}
-Duration: {context.duration} seconds{tempo_guidance}{timing_info}
+Duration: {duration_str}{tempo_guidance}{timing_info}
+Note: This will be part of an 8-second Veo generation
 
 Generate a prompt describing camera movement and scene evolution that flows naturally from the previous scene.
 
 IMPORTANT:
 - If timing breakdown is provided, use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ...") to describe visual evolution
+- For ultra-brief moments (<0.5s), use terms like "flash", "blink", "flicker"
 - Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
         elif context.enable_camera_movements:
             user_prompt = f"""Create a video motion prompt:
 
 Start frame description: {context.start_prompt}
-Duration: {context.duration} seconds{tempo_guidance}{timing_info}
+Duration: {duration_str}{tempo_guidance}{timing_info}
+Note: This will be part of an 8-second Veo generation
 
 Generate a prompt describing camera movement and scene evolution for Veo video generation.
 
 IMPORTANT:
 - If timing breakdown is provided, use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ...") to describe visual evolution
+- For ultra-brief moments (<0.5s), use terms like "flash", "blink", "flicker"
 - Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
         else:
             user_prompt = f"""Create a video motion prompt:
 
 Start frame description: {context.start_prompt}
-Duration: {context.duration} seconds{tempo_guidance}{timing_info}
+Duration: {duration_str}{tempo_guidance}{timing_info}
+Note: This will be part of an 8-second Veo generation
 
 Generate a prompt describing subject motion and scene evolution for Veo video generation (minimal camera movement).
 
 IMPORTANT:
 - If timing breakdown is provided, use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ...") to describe visual evolution
+- For ultra-brief moments (<0.5s), use terms like "flash", "blink", "flicker"
 - Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
 
         try:
@@ -321,10 +352,21 @@ Scenes:\n\n"""
                 else:
                     tempo_hint = f" [{ctx.tempo_bpm:.0f} BPM - Slow/Ballad]"
 
+            # Format duration with descriptors for very short scenes
+            if ctx.duration < 0.5:
+                duration_desc = f"{ctx.duration:.1f}s (ultra-brief flash)"
+            elif ctx.duration < 1.0:
+                duration_desc = f"{ctx.duration:.1f}s (brief moment)"
+            elif ctx.duration < 2.0:
+                duration_desc = f"{ctx.duration:.1f}s (quick moment)"
+            else:
+                duration_desc = f"{ctx.duration:.1f}s"
+
             if is_instrumental:
                 # Special handling for instrumental sections
                 batch_prompt += f"{i}. TYPE: INSTRUMENTAL SECTION\n"
-                batch_prompt += f"   Duration: {ctx.duration}s{tempo_hint}\n"
+                batch_prompt += f"   Duration: {duration_desc}{tempo_hint}\n"
+                batch_prompt += f"   Part of 8-second Veo generation\n"
                 batch_prompt += f"   INSTRUCTIONS: Create a video prompt with {motion_type} that:\n"
                 batch_prompt += f"     • Maintains visual continuity with surrounding scenes\n"
                 batch_prompt += f"     • Uses establishing shots, ambient details, or atmospheric moments\n"
@@ -333,15 +375,23 @@ Scenes:\n\n"""
             else:
                 # Regular scene
                 batch_prompt += f"{i}. Start frame: {ctx.start_prompt}\n"
-                batch_prompt += f"   Duration: {ctx.duration}s{tempo_hint}\n"
+                batch_prompt += f"   Duration: {duration_desc}{tempo_hint}\n"
+                batch_prompt += f"   Part of 8-second Veo generation\n"
 
                 # Add timing breakdown for batched scenes WITH lyric context
                 if ctx.lyric_timings and len(ctx.lyric_timings) > 1:
-                    batch_prompt += f"   Timing breakdown:\n"
+                    batch_prompt += f"   Timing breakdown (within 8-second clip):\n"
                     for t in ctx.lyric_timings:
                         # Include lyric text so LLM knows what's happening at each timestamp
                         lyric_text = t.get('text', '')
-                        batch_prompt += f"     • {t['start_sec']:.1f}-{t['end_sec']:.1f}s: \"{lyric_text}\"\n"
+                        segment_duration = t['end_sec'] - t['start_sec']
+                        if segment_duration < 0.5:
+                            seg_desc = " [ultra-brief]"
+                        elif segment_duration < 1.0:
+                            seg_desc = " [brief]"
+                        else:
+                            seg_desc = ""
+                        batch_prompt += f"     • {t['start_sec']:.1f}-{t['end_sec']:.1f}s: \"{lyric_text}\"{seg_desc}\n"
 
             batch_prompt += "\n"
 

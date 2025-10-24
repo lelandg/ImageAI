@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the implementation of scene batching for Veo 3.1 video generation. Veo 3.1 generates 8-second video clips, so we batch consecutive scenes that total ≤8 seconds and generate cohesive video prompts for each batch.
+This document describes the implementation of scene batching for Veo 3.1 video generation. **Veo 3.1 ALWAYS generates exactly 8-second video clips** (unlike Veo 3.0 which supports 4s, 6s, or 8s). Therefore, we MUST batch consecutive scenes to total exactly 8 seconds and generate cohesive video prompts for each batch.
 
 ## Implementation Details
 
