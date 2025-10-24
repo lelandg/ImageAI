@@ -1102,6 +1102,7 @@ class VideoGenerationThread(QThread):
             result_data = {
                 "scene_id": scene.id,
                 "video_clip": str(video_path),
+                "first_frame": str(first_frame_path),
                 "last_frame": str(last_frame_path),
                 "status": "completed"
             }
@@ -1485,7 +1486,9 @@ class VideoProjectTab(QWidget):
 
                             # If "use last frame for continuous video" is checked,
                             # set last frame as image for NEXT scene (not current scene)
-                            use_last_frame_for_next = self.generation_thread.kwargs.get('use_last_frame_for_next', False)
+                            use_last_frame_for_next = False
+                            if self.generation_thread:
+                                use_last_frame_for_next = self.generation_thread.kwargs.get('use_last_frame_for_next', False)
                             if use_last_frame_for_next and i < len(self.current_project.scenes) - 1:
                                 next_scene = self.current_project.scenes[i + 1]
                                 # Add last frame as an image for the next scene
@@ -1501,6 +1504,10 @@ class VideoProjectTab(QWidget):
                                     next_scene.images = [last_frame_variant]
                                 else:
                                     next_scene.images.insert(0, last_frame_variant)
+
+                        if 'first_frame' in result:
+                            from pathlib import Path
+                            scene.first_frame = Path(result['first_frame'])
 
                         # Update the preview column (column 4) - always show image icon if image exists
                         if scene.images:
