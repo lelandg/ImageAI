@@ -438,12 +438,172 @@ class StoryboardGenerator:
         self.logger = logging.getLogger(__name__)
         self.target_scene_duration = target_scene_duration
 
+    def _split_instrumental_vocal_pair(self, instrumental_scene: Scene, vocal_scene: Scene,
+                                       max_duration: float = 8.0) -> List[Scene]:
+        """
+        Split an instrumental + vocal pair into multiple scenes of max_duration.
+
+        For example, if instrumental is 9s and vocal is 7s (16s total), split into:
+        - Scene 1: 8s (part of instrumental)
+        - Scene 2: 8s (rest of instrumental + part of vocal)
+
+        IMPORTANT: Properly calculates llm_start_time/llm_end_time for each split
+        and adds timing hints (lyric_timings) to show when vocals appear.
+
+        Args:
+            instrumental_scene: The [Instrumental] scene
+            vocal_scene: The following vocal scene
+            max_duration: Maximum duration per scene
+
+        Returns:
+            List of split scenes with proper timing metadata
+        """
+        # Get absolute timing from LLM (if available)
+        inst_start = instrumental_scene.metadata.get('llm_start_time', 0.0)
+        vocal_end = vocal_scene.metadata.get('llm_end_time',
+                                            inst_start + instrumental_scene.duration_sec + vocal_scene.duration_sec)
+
+        total_duration = instrumental_scene.duration_sec + vocal_scene.duration_sec
+        num_splits = int(total_duration / max_duration) + 1
+        split_duration = max_duration  # Use exactly max_duration for all but potentially the last
+
+        self.logger.info(f"Splitting instrumental ({instrumental_scene.duration_sec:.1f}s) + "
+                        f"vocal ({vocal_scene.duration_sec:.1f}s) = {total_duration:.1f}s "
+                        f"into {num_splits} scenes of ~{split_duration:.1f}s each")
+        self.logger.info(f"  Absolute timing: {inst_start:.1f}s → {vocal_end:.1f}s")
+
+        result = []
+        remaining_instrumental = instrumental_scene.duration_sec
+        remaining_vocal = vocal_scene.duration_sec
+        current_time = inst_start  # Track absolute time position
+
+        for i in range(num_splits):
+            scene_duration = min(split_duration, remaining_instrumental + remaining_vocal)
+            scene_start = current_time
+            scene_end = current_time + scene_duration
+
+            # Determine how much of instrumental and vocal to include in this split
+            if remaining_instrumental >= split_duration:
+                # This split contains only instrumental
+                new_scene = Scene(
+                    source="[Instrumental]",  # Pure instrumental, no lyrics
+                    prompt=instrumental_scene.prompt,
+                    duration_sec=scene_duration,
+                    order=instrumental_scene.order + i * 0.1
+                )
+                new_scene.metadata = instrumental_scene.metadata.copy()
+                new_scene.metadata['is_instrumental'] = True
+                new_scene.metadata["split_part"] = i + 1
+                new_scene.metadata["split_total"] = num_splits
+                new_scene.metadata["split_type"] = "instrumental_only"
+                new_scene.metadata["llm_start_time"] = scene_start
+                new_scene.metadata["llm_end_time"] = scene_end
+
+                if hasattr(instrumental_scene, 'environment'):
+                    new_scene.environment = instrumental_scene.environment
+
+                remaining_instrumental -= scene_duration
+
+            elif remaining_instrumental > 0:
+                # This split contains both instrumental and vocal
+                vocal_start_in_scene = remaining_instrumental  # When vocals start within this scene
+                vocal_duration_in_scene = min(scene_duration - remaining_instrumental, remaining_vocal)
+
+                new_scene = Scene(
+                    source=f"[Instrumental]\n{vocal_scene.source}",  # Show both parts
+                    prompt=vocal_scene.prompt,  # Use vocal prompt for the combined scene
+                    duration_sec=scene_duration,
+                    order=instrumental_scene.order + i * 0.1
+                )
+                # Combine metadata
+                new_scene.metadata = vocal_scene.metadata.copy()
+                new_scene.metadata["split_part"] = i + 1
+                new_scene.metadata["split_total"] = num_splits
+                new_scene.metadata["split_type"] = "instrumental_and_vocal"
+                new_scene.metadata["instrumental_duration"] = remaining_instrumental
+                new_scene.metadata["vocal_duration"] = vocal_duration_in_scene
+                new_scene.metadata["llm_start_time"] = scene_start
+                new_scene.metadata["llm_end_time"] = scene_end
+
+                # Add timing hints showing when each part appears
+                new_scene.metadata["lyric_timings"] = [
+                    {
+                        "text": "[Instrumental]",
+                        "start_sec": 0.0,
+                        "end_sec": round(vocal_start_in_scene, 1),
+                        "duration_sec": round(remaining_instrumental, 1),
+                        "llm_start_time": scene_start,
+                        "llm_end_time": scene_start + remaining_instrumental
+                    },
+                    {
+                        "text": vocal_scene.source,
+                        "start_sec": round(vocal_start_in_scene, 1),
+                        "end_sec": round(vocal_start_in_scene + vocal_duration_in_scene, 1),
+                        "duration_sec": round(vocal_duration_in_scene, 1),
+                        "llm_start_time": scene_start + remaining_instrumental,
+                        "llm_end_time": scene_start + remaining_instrumental + vocal_duration_in_scene
+                    }
+                ]
+
+                if hasattr(vocal_scene, 'environment'):
+                    new_scene.environment = vocal_scene.environment
+
+                consumed_vocal = vocal_duration_in_scene
+                remaining_vocal -= consumed_vocal
+                remaining_instrumental = 0
+
+            else:
+                # This split contains only remaining vocal (continuation from previous scene)
+                new_scene = Scene(
+                    source=f"{vocal_scene.source} (continued)",  # Indicate this is a continuation
+                    prompt=vocal_scene.prompt,
+                    duration_sec=scene_duration,
+                    order=instrumental_scene.order + i * 0.1
+                )
+                new_scene.metadata = vocal_scene.metadata.copy()
+                new_scene.metadata["split_part"] = i + 1
+                new_scene.metadata["split_total"] = num_splits
+                new_scene.metadata["split_type"] = "vocal_continuation"
+                new_scene.metadata["llm_start_time"] = scene_start
+                new_scene.metadata["llm_end_time"] = scene_end
+
+                # Add timing hint for continuation
+                new_scene.metadata["lyric_timings"] = [
+                    {
+                        "text": vocal_scene.source,
+                        "start_sec": 0.0,
+                        "end_sec": round(scene_duration, 1),
+                        "duration_sec": round(scene_duration, 1),
+                        "llm_start_time": scene_start,
+                        "llm_end_time": scene_end,
+                        "note": f"Continuation from previous scene (part {i} of {num_splits})"
+                    }
+                ]
+
+                if hasattr(vocal_scene, 'environment'):
+                    new_scene.environment = vocal_scene.environment
+
+                remaining_vocal -= scene_duration
+
+            result.append(new_scene)
+            current_time = scene_end  # Advance timeline
+
+            self.logger.debug(f"  Split {i+1}/{num_splits}: {scene_duration:.1f}s ({scene_start:.1f}s → {scene_end:.1f}s) - {new_scene.metadata.get('split_type')}")
+
+        return result
+
     def _batch_scenes_for_optimal_duration(self, scenes: List[Scene]) -> List[Scene]:
         """
         Batch consecutive scenes to aim for target_scene_duration per scene.
 
         This combines short lyric lines into longer scenes suitable for video generation.
         Respects section boundaries and aims for scenes close to target_scene_duration.
+
+        SPECIAL HANDLING FOR INSTRUMENTALS:
+        - [Instrumental] scenes are always combined with the immediately following vocal scene
+        - If instrumental + vocal <= 8s, they're batched together
+        - If instrumental + vocal > 8s, they're split into 8s chunks BEFORE batching
+        - This ensures instrumental time is properly included in clip duration calculations
 
         Args:
             scenes: List of Scene objects (typically one per lyric line)
@@ -462,15 +622,118 @@ class StoryboardGenerator:
 
         self.logger.info(f"Batching {len(scenes)} scenes to aim for ~{self.target_scene_duration}s per scene")
 
-        for i, scene in enumerate(scenes):
+        i = 0
+        while i < len(scenes):
+            scene = scenes[i]
             scene_duration = scene.duration_sec
             scene_section = scene.metadata.get('section')
             scene_environment = getattr(scene, 'environment', None)
+            is_instrumental = scene.metadata.get('is_instrumental', False) or scene.source.strip() == '[Instrumental]'
 
             # Log environment tracking
             if scene_environment:
                 self.logger.debug(f"Scene {i}: environment='{scene_environment}', "
                                 f"current_env='{current_environment}', source='{scene.source[:30]}...'")
+
+            # SPECIAL CASE: If this is an [Instrumental], peek ahead and combine with next vocal
+            if is_instrumental:
+                # Check if there's a next scene and if it's a vocal
+                has_next = i + 1 < len(scenes)
+                if has_next:
+                    next_scene = scenes[i + 1]
+                    next_is_instrumental = next_scene.metadata.get('is_instrumental', False) or next_scene.source.strip() == '[Instrumental]'
+                else:
+                    next_is_instrumental = True  # No next scene, treat as standalone
+
+                # Only combine with non-instrumental vocals
+                if not next_is_instrumental and has_next:
+                    combined_duration = scene_duration + next_scene.duration_sec
+                    self.logger.info(f"Found instrumental ({scene_duration:.1f}s) + vocal ({next_scene.duration_sec:.1f}s) = {combined_duration:.1f}s")
+
+                    # Check if we need to finalize current batch before adding instrumental + vocal
+                    if current_batch and current_duration + combined_duration > self.target_scene_duration:
+                        # Finalize current batch first
+                        batched_scene = self._merge_scenes(current_batch)
+                        batched_scenes.append(batched_scene)
+                        self.logger.debug(f"Finalized batch before instrumental+vocal: {len(current_batch)} scenes → {current_duration:.1f}s")
+                        current_batch = []
+                        current_duration = 0.0
+
+                    # Now handle instrumental + vocal pair
+                    if combined_duration <= self.target_scene_duration:
+                        # Combined duration fits in one clip - batch them together
+                        current_batch.extend([scene, next_scene])
+                        current_duration += combined_duration
+                        current_section = next_scene.metadata.get('section')
+                        current_environment = getattr(next_scene, 'environment', scene_environment)
+                        self.logger.info(f"✓ Batching instrumental + vocal together ({combined_duration:.1f}s <= {self.target_scene_duration}s)")
+                        i += 2  # Skip both scenes
+                        continue
+                    else:
+                        # Combined duration exceeds limit - split the pair into max_duration chunks
+                        self.logger.info(f"⚠️ Instrumental + vocal ({combined_duration:.1f}s) exceeds {self.target_scene_duration}s - splitting pair...")
+                        split_scenes = self._split_instrumental_vocal_pair(scene, next_scene, self.target_scene_duration)
+
+                        # Add the split scenes to results (they're already properly sized)
+                        for split_scene in split_scenes:
+                            if current_batch and current_duration + split_scene.duration_sec > self.target_scene_duration:
+                                # Finalize current batch
+                                batched_scene = self._merge_scenes(current_batch)
+                                batched_scenes.append(batched_scene)
+                                self.logger.debug(f"Finalized batch: {len(current_batch)} scenes → {current_duration:.1f}s")
+                                current_batch = []
+                                current_duration = 0.0
+
+                            # Each split scene is already at or near max_duration, so add directly
+                            batched_scenes.append(split_scene)
+                            self.logger.debug(f"Added split scene: {split_scene.duration_sec:.1f}s")
+
+                        i += 2  # Skip both original scenes
+                        continue
+                else:
+                    # Standalone instrumental (no following vocal or followed by another instrumental)
+                    if scene_duration > self.target_scene_duration:
+                        # Split standalone instrumental into max_duration chunks
+                        self.logger.info(f"Standalone instrumental ({scene_duration:.1f}s) exceeds {self.target_scene_duration}s - splitting...")
+                        num_inst_splits = int(scene_duration / self.target_scene_duration) + 1
+
+                        for inst_i in range(num_inst_splits):
+                            inst_duration = min(self.target_scene_duration, scene_duration - (inst_i * self.target_scene_duration))
+                            inst_start = scene.metadata.get('llm_start_time', 0) + (inst_i * self.target_scene_duration)
+                            inst_end = inst_start + inst_duration
+
+                            inst_scene = Scene(
+                                source="[Instrumental]",
+                                prompt=scene.prompt,
+                                duration_sec=inst_duration,
+                                order=scene.order + inst_i * 0.1
+                            )
+                            inst_scene.metadata = scene.metadata.copy()
+                            inst_scene.metadata['is_instrumental'] = True
+                            inst_scene.metadata["split_part"] = inst_i + 1
+                            inst_scene.metadata["split_total"] = num_inst_splits
+                            inst_scene.metadata["split_type"] = "instrumental_only"
+                            inst_scene.metadata["llm_start_time"] = inst_start
+                            inst_scene.metadata["llm_end_time"] = inst_end
+
+                            if hasattr(scene, 'environment'):
+                                inst_scene.environment = scene.environment
+
+                            # Finalize current batch if needed
+                            if current_batch and current_duration + inst_duration > self.target_scene_duration:
+                                batched_scene = self._merge_scenes(current_batch)
+                                batched_scenes.append(batched_scene)
+                                self.logger.debug(f"Finalized batch: {len(current_batch)} scenes → {current_duration:.1f}s")
+                                current_batch = []
+                                current_duration = 0.0
+
+                            # Add split instrumental directly (it's already at max duration)
+                            batched_scenes.append(inst_scene)
+                            self.logger.debug(f"Added standalone instrumental split {inst_i+1}/{num_inst_splits}: {inst_duration:.1f}s")
+
+                        i += 1  # Skip this instrumental
+                        continue
+                    # else: Instrumental fits in 8s, fall through to normal processing
 
             # Check if this would exceed our target (STRICT: never exceed target_scene_duration)
             # For Veo 3.1, this ensures scenes are always <= 8.0 seconds
@@ -520,11 +783,13 @@ class StoryboardGenerator:
                 if scene_environment:
                     current_environment = scene_environment
 
-            # If this is the last scene, finalize the batch
-            if i == len(scenes) - 1 and current_batch:
-                batched_scene = self._merge_scenes(current_batch)
-                batched_scenes.append(batched_scene)
-                self.logger.debug(f"Final batch: {len(current_batch)} scenes → {current_duration:.1f}s")
+            i += 1
+
+        # Finalize any remaining batch
+        if current_batch:
+            batched_scene = self._merge_scenes(current_batch)
+            batched_scenes.append(batched_scene)
+            self.logger.debug(f"Final batch: {len(current_batch)} scenes → {current_duration:.1f}s")
 
         self.logger.info(f"Batched {len(scenes)} scenes into {len(batched_scenes)} combined scenes")
 
@@ -819,6 +1084,9 @@ class StoryboardGenerator:
         """
         Split scenes that are too long for video generation.
 
+        NOTE: [Instrumental] scenes are NOT split here - they're handled during batching
+        where they're combined with following vocal scenes and split as a pair if needed.
+
         Args:
             scenes: List of scenes
             max_duration: Maximum duration per scene (e.g., 8s for Veo)
@@ -830,7 +1098,14 @@ class StoryboardGenerator:
         split_count = 0
 
         for scene in scenes:
-            if scene.duration_sec <= max_duration:
+            # Check if this is an instrumental scene
+            is_instrumental = scene.metadata.get('is_instrumental', False) or scene.source.strip() == '[Instrumental]'
+
+            if is_instrumental:
+                # Don't split instrumental scenes here - they'll be handled during batching
+                self.logger.info(f"Skipping split for [Instrumental] scene ({scene.duration_sec:.1f}s) - will be handled with next vocal")
+                result.append(scene)
+            elif scene.duration_sec <= max_duration:
                 result.append(scene)
             else:
                 # Split into multiple scenes
@@ -862,6 +1137,6 @@ class StoryboardGenerator:
             scene.order = i
 
         if split_count > 0:
-            self.logger.info(f"Split {split_count} scenes that exceeded {max_duration}s")
+            self.logger.info(f"Split {split_count} non-instrumental scenes that exceeded {max_duration}s")
 
         return result
