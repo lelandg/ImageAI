@@ -5,6 +5,43 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2025-10-24
+
+- Update ReadMe to include new features.
+
+## [0.23.1] - 2025-10-24
+
+### Added
+- **Enhanced Video Tab Documentation**: Comprehensive documentation for video project features in README
+  - Complete overview of video project capabilities
+  - Detailed explanation of video rendering options (FFmpeg slideshow and Google Veo AI)
+  - MIDI synchronization and karaoke feature documentation
+  - Audio and timing control documentation
+
+### Fixed
+- **Veo Duration Enforcement**: Enforce 8-second duration limits for Veo 3.0/3.1 models
+  - Automatic duration snapping to provider specifications
+  - Improved prompt validation for duration constraints
+- **FFmpeg Codec Warnings**: Suppress unnecessary FFmpeg and codec warnings in GUI and video playback
+  - Cleaner console output during video generation and playback
+  - Improved logging visibility for actual errors
+- **Instrumental Scene Processing**: Improved batching and splitting of instrumental scenes
+  - Better handling of music-only sections in video projects
+  - Enhanced scene detection for complex audio structures
+
+### Changed
+- **Workspace UI Layout**: Refactored workspace UI with collapsible panels
+  - More intuitive panel organization
+  - Better space utilization in video project interface
+  - Improved accessibility of advanced features
+- **Google AI Integration**: Initialize genai client with Vertex AI mode support
+  - Enhanced support for enterprise Google Cloud deployments
+
+### Technical
+- Updated LLM integration for video prompt enhancement
+- Improved error handling for video generation operations
+- Enhanced MIDI synchronization accuracy
+
 ## [0.23.0] - 2025-01-16
 
 ### Added

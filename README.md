@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.23.0**
+**Version 0.24.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **LelandGreen.com on Discord - The Intersection of Art and AI [Discord](https://discord.gg/a64xRg9w)**
@@ -614,15 +614,16 @@ The Video Project feature provides comprehensive tools for creating AI-powered v
    - **Frame Rate Control**: 24, 30, or 60 fps
    - **Audio Integration**: Sync with audio tracks
 
-2. **Google Veo 3.1 AI Video** (NEW! - Version 0.23.0):
+2. **Google Veo 3.1 AI Video** (NEW! - Version 0.23.1):
    - **Continuous Video Generation**: Automatically grab end frame and use as start frame for next scene
    - **Seamless Scene Transitions**: Maintain visual continuity across multi-scene videos
    - **Optional End Frame Control**: Set custom end frames for precise scene endings
    - **Start/End Frame Support**: Google released start/end frame control on October 15, 2025
    - **True AI Video**: Generate motion video from text prompts
-   - **Model Selection**: Veo 3.1 models with frame-to-frame continuity
-   - **Duration Control**: 4, 6, or 8 second clips per scene (auto-snapped)
+   - **Model Selection**: Veo 3.0 and Veo 3.1 models with frame-to-frame continuity
+   - **Duration Control**: 4, 6, or 8 second clips per scene (auto-snapped to provider limits)
    - **Advanced Features**: Camera movements, visual styles, physics-accurate motion
+   - **Duration Enforcement**: Automatic snapping to 8-second duration for Veo 3.0/3.1 compliance
 
 **Version Control and History**:
 - **Event Sourcing Architecture**: Complete history of all changes
@@ -673,6 +674,60 @@ The Video Project feature provides comprehensive tools for creating AI-powered v
   - GPU acceleration toggle
   - Memory usage limits
   - Cache management
+
+**Video Project Workflow Examples**:
+
+1. **Simple Lyrics-to-Video Workflow**:
+   - Open Video tab → Create New Project
+   - Paste song lyrics or structured text
+   - Click "Split Text" to auto-detect scenes
+   - Select LLM provider and enhance all prompts
+   - Generate images for each scene
+   - Choose FFmpeg slideshow for simple rendering
+   - Render with Ken Burns effects
+
+2. **Music-Synced Video Workflow** (Advanced):
+   - Create project with song lyrics
+   - Load audio file (MP3/WAV/M4A)
+   - Load MIDI file for perfect timing
+   - Set sync mode to "Beat" or "Measure"
+   - Auto-detect musical structure
+   - Generate scenes synced to beats
+   - Render final video with audio integration
+   - Export karaoke overlays (LRC/SRT/ASS) if needed
+
+3. **AI Motion Video Workflow** (Google Veo 3.1):
+   - Create project with scene descriptions
+   - Select Veo 3.1 model (requires Google Gemini 2.0 API)
+   - Generate initial frame for first scene
+   - Let system auto-grab end frame for next scene's start
+   - Optionally set custom end frames for precise transitions
+   - Generate motion videos for each scene
+   - Automatic 8-second duration enforcement
+   - Combine videos with crossfades
+
+4. **Commercial/Professional Workflow**:
+   - Create project from detailed storyboard
+   - Use GPT-5 for ultra-realistic prompts
+   - Generate multiple variants per scene for selection
+   - Apply consistent style across scenes (cinematic/photorealistic)
+   - Render to 4K with 60fps for professional output
+   - Add metadata and titles
+   - Export as commercial-ready MP4
+
+**Video Tab Troubleshooting**:
+
+| Issue | Solution |
+|-------|----------|
+| "Scene detection failed" | Ensure text has clear line breaks or timestamps |
+| "MIDI sync not working" | Verify MIDI file format (SMF 0 or 1) and load audio first |
+| "Veo model not available" | Ensure Google API key is set and Gemini 2.0 API is enabled |
+| "Duration mismatch" | System auto-snaps to 4, 6, or 8 seconds; manual adjustment limited |
+| "Video rendering slow" | Reduce resolution or disable Ken Burns effects |
+| "Memory errors during generation" | Reduce batch size or number of concurrent scene generations |
+| "Audio sync issues" | Adjust "snap strength" slider (0-100%) for timing flexibility |
+| "Karaoke export blank" | Ensure MIDI file contains lyric events and is properly formatted |
+| "Generated images don't match style" | Use consistent LLM provider and set strong style descriptors in prompts |
 
 #### Settings Tab
 - **Provider Selection**: Switch between Google, OpenAI, Stability AI, and Local SD
