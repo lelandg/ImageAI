@@ -26,59 +26,128 @@ class VideoPromptContext:
 class VideoPromptGenerator:
     """Generate video motion prompts using LLM for Veo video generation"""
 
-    # System prompt for LLM with camera movements
+    # System prompt for LLM with camera movements (Claude-optimized with absolute requirements)
     SYSTEM_PROMPT_WITH_CAMERA = """You are a video motion specialist for Google Veo 3, which generates exactly 8-second clips.
 
-The video prompt should:
-- Include EXPLICIT TIME MARKERS for all scenes, especially short ones (e.g., "0-2s:", "2-2.5s:", "2.5-8s:")
-- For ultra-brief moments (<0.5s): use "flash", "flicker", "blink", "glimpse"
-- For brief moments (0.5-1s): use "quick", "brief", "momentary"
-- Add camera movement (pan, zoom, dolly, tilt, etc.)
-- Add subtle motion or changes over time
-- Match the energy/pacing to the song's tempo (if provided)
-- Be optimized for Google Veo 3 8-second generation
-- NEVER include quoted text or lyrics (they will render as text in the video)
-- AVOID phrases like "same character", "same room", "previous scene" (visual continuity is automatic)
+<timing_marker_rules>
+MANDATORY for ALL scenes regardless of duration:
+- Short scenes (0.5-2s): "0-1.5s: [complete action description]"
+- Medium scenes (2-5s): "0-2.5s: [action1], 2.5-5s: [action2]"
+- Long scenes (5-8s): "0-2s: [action1], 2-4s: [action2], 4-8s: [action3]"
 
-Format for single scene: [Duration/timing], [Scene description], [camera movement], [motion/changes]
-Format for batched scenes: Use time segments like "0-2s: action1, 2-4s: action2, 4-8s: action3" """
+REQUIRED: Begin each time segment with explicit markers "X-Ys:" even for brief scenes.
+Ultra-brief moments (<0.5s): "flash", "flicker", "blink", "glimpse"
+Brief moments (0.5-1s): "quick", "brief", "momentary"
 
-    # System prompt for LLM without camera movements
+Example for 1.5s scene: "0-1.5s: Close-up with quick energetic movement, camera tracks smoothly"
+</timing_marker_rules>
+
+<bpm_transformation>
+When tempo BPM is provided in XML tags, TRANSFORM to natural descriptors. DO NOT output numeric BPM.
+
+Slow (40-70 BPM): slow, contemplative, languid, meditative, gentle, flowing, graceful, calm, serene
+Moderate (70-100 BPM): moderate, steady, measured, balanced, natural, rhythmic, grounded, thoughtful
+Upbeat (100-130 BPM): upbeat, energetic, lively, driving, spirited, rhythmic, dynamic, vibrant, enthusiastic
+Fast (130-160 BPM): fast, intense, rapid, vigorous, sharp, quick, powerful, high-energy, electric
+Very Fast (160+ BPM): very fast, frenetic, breakneck, blazing, rapid-fire, explosive, chaotic, overwhelming
+
+Integrate these descriptors naturally into movement, camera work, and energy descriptions.
+</bpm_transformation>
+
+<prohibited_elements>
+NEVER include in output:
+- Numeric BPM values ("120 BPM", "140 BPM", etc.)
+- Quoted lyrics or text (will render as literal text in video)
+- Meta-references ("same character", "previous scene")
+- Prompts without timing markers
+</prohibited_elements>
+
+<output_format>
+Format: "X-Ys: [scene with tempo-appropriate descriptors], [camera], [motion]"
+Add camera movement (pan, zoom, dolly, tilt, etc.) and subtle motion over time.
+</output_format>"""
+
+    # System prompt for LLM without camera movements (Claude-optimized)
     SYSTEM_PROMPT_NO_CAMERA = """You are a video motion specialist for Google Veo 3, which generates exactly 8-second clips.
 
-The video prompt should:
-- Include EXPLICIT TIME MARKERS for all scenes, especially short ones (e.g., "0-2s:", "2-2.5s:", "2.5-8s:")
-- For ultra-brief moments (<0.5s): use "flash", "flicker", "blink", "glimpse"
-- For brief moments (0.5-1s): use "quick", "brief", "momentary"
-- Focus on subject/character actions and environmental motion
-- Keep camera mostly static (minimal camera movement only when essential)
-- Add subtle motion or changes over time
-- Match the energy/pacing to the song's tempo (if provided)
-- Be optimized for Google Veo 3 8-second generation
-- NEVER include quoted text or lyrics (they will render as text in the video)
-- AVOID phrases like "same character", "same room", "previous scene" (visual continuity is automatic)
+<timing_marker_rules>
+MANDATORY for ALL scenes regardless of duration:
+- Short scenes (0.5-2s): "0-1.5s: [complete action description]"
+- Medium scenes (2-5s): "0-2.5s: [action1], 2.5-5s: [action2]"
+- Long scenes (5-8s): "0-2s: [action1], 2-4s: [action2], 4-8s: [action3]"
 
-Format for single scene: [Duration/timing], [Scene description], [subject motion], [temporal progression]
-Format for batched scenes: Use time segments like "0-2s: action1, 2-4s: action2, 4-8s: action3" """
+REQUIRED: Begin each time segment with explicit markers "X-Ys:" even for brief scenes.
+Ultra-brief moments (<0.5s): "flash", "flicker", "blink", "glimpse"
+Brief moments (0.5-1s): "quick", "brief", "momentary"
 
-    # System prompt for prompt flow (text continuity between scenes)
+Example for 1.5s scene: "0-1.5s: Character blinks slowly with quick head turn"
+</timing_marker_rules>
+
+<bpm_transformation>
+When tempo BPM is provided in XML tags, TRANSFORM to natural descriptors. DO NOT output numeric BPM.
+
+Slow (40-70 BPM): slow, contemplative, languid, meditative, gentle, flowing, graceful, calm, serene
+Moderate (70-100 BPM): moderate, steady, measured, balanced, natural, rhythmic, grounded, thoughtful
+Upbeat (100-130 BPM): upbeat, energetic, lively, driving, spirited, rhythmic, dynamic, vibrant, enthusiastic
+Fast (130-160 BPM): fast, intense, rapid, vigorous, sharp, quick, powerful, high-energy, electric
+Very Fast (160+ BPM): very fast, frenetic, breakneck, blazing, rapid-fire, explosive, chaotic, overwhelming
+
+Integrate these descriptors naturally into subject motion and energy descriptions.
+</bpm_transformation>
+
+<prohibited_elements>
+NEVER include in output:
+- Numeric BPM values ("120 BPM", "140 BPM", etc.)
+- Quoted lyrics or text (will render as literal text in video)
+- Meta-references ("same character", "previous scene")
+- Prompts without timing markers
+</prohibited_elements>
+
+<output_format>
+Format: "X-Ys: [scene with tempo-appropriate descriptors], [subject motion], [temporal progression]"
+Focus on subject/character actions and environmental motion. Keep camera mostly static.
+</output_format>"""
+
+    # System prompt for prompt flow (Claude-optimized)
     SYSTEM_PROMPT_WITH_FLOW = """You are a video motion specialist for Google Veo 3, which generates exactly 8-second clips.
 
-The video prompt should:
-- Include EXPLICIT TIME MARKERS for all scenes, especially short ones (e.g., "0-2s:", "2-2.5s:", "2.5-8s:")
-- For ultra-brief moments (<0.5s): use "flash", "flicker", "blink", "glimpse"
-- For brief moments (0.5-1s): use "quick", "brief", "momentary"
-- Continue the motion/energy from the previous scene smoothly
-- Maintain visual and temporal continuity through motion progression
-- Add camera movement (pan, zoom, dolly, tilt, etc.)
-- Add subtle motion or changes over time
-- Match the energy/pacing to the song's tempo (if provided)
-- Be optimized for Google Veo 3 8-second generation
-- NEVER include quoted text or lyrics (they will render as text in the video)
-- AVOID redundant phrases like "same character", "same room" (visual continuity is handled by reference images)
+<timing_marker_rules>
+MANDATORY for ALL scenes regardless of duration:
+- Short scenes (0.5-2s): "0-1.5s: [complete action description]"
+- Medium scenes (2-5s): "0-2.5s: [action1], 2.5-5s: [action2]"
+- Long scenes (5-8s): "0-2s: [action1], 2-4s: [action2], 4-8s: [action3]"
 
-Format for single scene: [Duration/timing], [Scene description with flowing motion], [camera movement], [motion/changes]
-Format for batched scenes: Use time segments like "0-2s: action1, 2-2.5s: brief moment, 2.5-8s: action3" """
+REQUIRED: Begin each time segment with explicit markers "X-Ys:" even for brief scenes.
+Ultra-brief moments (<0.5s): "flash", "flicker", "blink", "glimpse"
+Brief moments (0.5-1s): "quick", "brief", "momentary"
+
+Continue motion/energy from previous scene smoothly. Maintain visual continuity through motion progression.
+</timing_marker_rules>
+
+<bpm_transformation>
+When tempo BPM is provided in XML tags, TRANSFORM to natural descriptors. DO NOT output numeric BPM.
+
+Slow (40-70 BPM): slow, contemplative, languid, meditative, gentle, flowing, graceful, calm, serene
+Moderate (70-100 BPM): moderate, steady, measured, balanced, natural, rhythmic, grounded, thoughtful
+Upbeat (100-130 BPM): upbeat, energetic, lively, driving, spirited, rhythmic, dynamic, vibrant, enthusiastic
+Fast (130-160 BPM): fast, intense, rapid, vigorous, sharp, quick, powerful, high-energy, electric
+Very Fast (160+ BPM): very fast, frenetic, breakneck, blazing, rapid-fire, explosive, chaotic, overwhelming
+
+Integrate these descriptors naturally into movement, camera work, and energy descriptions.
+</bpm_transformation>
+
+<prohibited_elements>
+NEVER include in output:
+- Numeric BPM values ("120 BPM", "140 BPM", etc.)
+- Quoted lyrics or text (will render as literal text in video)
+- Redundant meta-references ("same character", "same room" - visual continuity is handled by reference images)
+- Prompts without timing markers
+</prohibited_elements>
+
+<output_format>
+Format: "X-Ys: [scene with flowing motion and tempo-appropriate descriptors], [camera], [motion]"
+Add camera movement (pan, zoom, dolly, tilt, etc.) and subtle motion over time.
+</output_format>"""
 
     def __init__(self, llm_provider=None, llm_model=None, config=None):
         """
@@ -160,17 +229,10 @@ Format for batched scenes: Use time segments like "0-2s: action1, 2-2.5s: brief 
                 timing_info += f"  {timing['start_sec']:.1f}-{timing['end_sec']:.1f}s: {timing['text']}{duration_desc}\n"
             timing_info += "\nDescribe how the visuals evolve through these timing segments."
 
-        # Add tempo guidance if available
+        # Add tempo guidance using XML tags (prevents literal "BPM" from appearing in output)
         tempo_guidance = ""
         if context.tempo_bpm:
-            if context.tempo_bpm >= 140:
-                tempo_guidance = f"\nTempo: {context.tempo_bpm:.0f} BPM (Fast/Energetic - use quick camera movements, dynamic action, energetic pacing)"
-            elif context.tempo_bpm >= 100:
-                tempo_guidance = f"\nTempo: {context.tempo_bpm:.0f} BPM (Medium - balanced pacing and energy)"
-            elif context.tempo_bpm >= 80:
-                tempo_guidance = f"\nTempo: {context.tempo_bpm:.0f} BPM (Moderate - smooth movements, contemplative pacing)"
-            else:
-                tempo_guidance = f"\nTempo: {context.tempo_bpm:.0f} BPM (Slow/Ballad - gentle movements, emotional depth)"
+            tempo_guidance = f"\n<tempo_bpm>{context.tempo_bpm:.0f}</tempo_bpm>"
 
         if is_instrumental:
             # Special prompt for instrumental sections
@@ -340,17 +402,10 @@ Scenes:\n\n"""
             # Detect instrumental sections
             is_instrumental = ctx.start_prompt.strip().lower() in ['[instrumental]', 'instrumental', '[instrumental section]']
 
-            # Add tempo guidance if available
+            # Add tempo guidance using XML tags (prevents literal "BPM" in output)
             tempo_hint = ""
             if ctx.tempo_bpm:
-                if ctx.tempo_bpm >= 140:
-                    tempo_hint = f" [{ctx.tempo_bpm:.0f} BPM - Fast/Energetic]"
-                elif ctx.tempo_bpm >= 100:
-                    tempo_hint = f" [{ctx.tempo_bpm:.0f} BPM - Medium]"
-                elif ctx.tempo_bpm >= 80:
-                    tempo_hint = f" [{ctx.tempo_bpm:.0f} BPM - Moderate]"
-                else:
-                    tempo_hint = f" [{ctx.tempo_bpm:.0f} BPM - Slow/Ballad]"
+                tempo_hint = f" [<tempo_bpm>{ctx.tempo_bpm:.0f}</tempo_bpm>]"
 
             # Format duration with descriptors for very short scenes
             if ctx.duration < 0.5:
@@ -397,14 +452,17 @@ Scenes:\n\n"""
 
         batch_prompt += f"""Return {len(contexts)} numbered video prompts.
 
-For scenes with timing breakdowns: Use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ..., 5-8s: ...") to describe visual evolution at those exact timestamps.
-For single-shot scenes: Describe 2-3 sentences of motion and camera work.
+MANDATORY for ALL prompts: Use explicit time markers "X-Ys:" regardless of scene duration.
+- Short scenes (0.5-2s): "0-1.5s: [complete action]"
+- Medium scenes (2-5s): "0-2.5s: [action1], 2.5-5s: [action2]"
+- Long scenes (5-8s): "0-2s: [action1], 2-4s: [action2], 4-8s: [action3]"
 
-IMPORTANT:
-- Include time markers when timing breakdown is provided
+CRITICAL REQUIREMENTS:
+- ALL prompts MUST begin with timing markers "X-Ys:"
+- Transform <tempo_bpm> values to natural descriptors (NEVER output "BPM" text)
 - Describe smooth transitions between time segments
 - ONE continuous shot per scene (no cuts)
-- NEVER include quoted text or lyrics in prompts"""
+- NEVER include quoted text or lyrics"""
 
         try:
             import litellm
