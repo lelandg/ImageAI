@@ -249,7 +249,9 @@ Generate a prompt with {motion_desc} that:
 • Examples: camera pans across setting, environmental details, character reactions, scenic transitions
 • For short durations (<1s), describe as brief flashes or quick moments
 
-IMPORTANT: Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
+IMPORTANT:
+- Do NOT include any quoted text or lyrics. Only describe pure visual elements.
+- PRESERVE all style descriptors from surrounding scenes (e.g., "hi-res cartoon", "photorealistic", "cinematic", etc.)"""
         elif context.enable_prompt_flow and context.previous_video_prompt:
             user_prompt = f"""Create a video motion prompt:
 
@@ -264,7 +266,8 @@ Generate a prompt describing camera movement and scene evolution that flows natu
 IMPORTANT:
 - If timing breakdown is provided, use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ...") to describe visual evolution
 - For ultra-brief moments (<0.5s), use terms like "flash", "blink", "flicker"
-- Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
+- Do NOT include any quoted text or lyrics. Only describe pure visual elements.
+- PRESERVE all style descriptors from the start frame description (e.g., "hi-res cartoon", "photorealistic", "cinematic", etc.)"""
         elif context.enable_camera_movements:
             user_prompt = f"""Create a video motion prompt:
 
@@ -277,7 +280,8 @@ Generate a prompt describing camera movement and scene evolution for Veo video g
 IMPORTANT:
 - If timing breakdown is provided, use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ...") to describe visual evolution
 - For ultra-brief moments (<0.5s), use terms like "flash", "blink", "flicker"
-- Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
+- Do NOT include any quoted text or lyrics. Only describe pure visual elements.
+- PRESERVE all style descriptors from the start frame description (e.g., "hi-res cartoon", "photorealistic", "cinematic", etc.)"""
         else:
             user_prompt = f"""Create a video motion prompt:
 
@@ -290,7 +294,8 @@ Generate a prompt describing subject motion and scene evolution for Veo video ge
 IMPORTANT:
 - If timing breakdown is provided, use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ...") to describe visual evolution
 - For ultra-brief moments (<0.5s), use terms like "flash", "blink", "flicker"
-- Do NOT include any quoted text or lyrics. Only describe pure visual elements."""
+- Do NOT include any quoted text or lyrics. Only describe pure visual elements.
+- PRESERVE all style descriptors from the start frame description (e.g., "hi-res cartoon", "photorealistic", "cinematic", etc.)"""
 
         try:
             # Call LLM provider using LiteLLM
@@ -462,7 +467,8 @@ CRITICAL REQUIREMENTS:
 - Transform <tempo_bpm> values to natural descriptors (NEVER output "BPM" text)
 - Describe smooth transitions between time segments
 - ONE continuous shot per scene (no cuts)
-- NEVER include quoted text or lyrics"""
+- NEVER include quoted text or lyrics
+- PRESERVE all style descriptors from start frame descriptions (e.g., "hi-res cartoon", "photorealistic", "cinematic", etc.)"""
 
         try:
             import litellm

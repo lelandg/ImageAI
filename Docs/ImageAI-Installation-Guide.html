@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ImageAI Installation Guide</title>
+<style>
+:root{
+  --bg: #0b1020;
+  --fg: #e5e7eb;
+  --muted: #94a3b8;
+  --card: #0f172a;
+  --accent: #60a5fa;
+  --accent-2:#22d3ee;
+  --border:#1f2937;
+  --code:#e5e7eb;
+}
+:root.light{
+  --bg: #ffffff;
+  --fg: #0f172a;
+  --muted: #475569;
+  --card: #f8fafc;
+  --accent: #2563eb;
+  --accent-2:#0ea5e9;
+  --border:#e2e8f0;
+  --code:#111827;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  font:16px/1.6 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, Arial, sans-serif;
+  background:var(--bg);
+  color:var(--fg);
+}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+header{
+  position:sticky; top:0; z-index:50;
+  background:linear-gradient(180deg, rgba(0,0,0,0.08), transparent);
+  backdrop-filter: blur(4px);
+  border-bottom:1px solid var(--border);
+}
+.container{max-width:1000px;margin:0 auto;padding:16px}
+h1{font-size:28px;margin:8px 0 2px 0}
+h2{font-size:22px;margin-top:28px}
+h3{font-size:18px;margin-top:22px}
+.card{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:16px;
+  margin:16px 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+}
+.badge{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:6px 10px;border-radius:999px;border:1px solid var(--border);
+  background:rgba(2,132,199,0.12);
+  color:var(--fg);font-weight:600
+}
+kbd{border:1px solid var(--border);border-bottom-width:2px;border-radius:6px;padding:2px 6px;font-family:ui-monospace, SFMono-Regular, Menlo, monospace;color:var(--fg);background:var(--card)}
+code, pre{font-family:ui-monospace, SFMono-Regular, Menlo, monospace}
+pre{
+  background:var(--card); color:var(--code); padding:12px;border-radius:12px;border:1px solid var(--border);
+  overflow:auto;
+}
+.copy-btn{
+  float:right;border:1px solid var(--border);background:transparent;border-radius:8px;padding:6px 10px;cursor:pointer
+}
+.table-wrap{overflow:auto;border:1px solid var(--border);border-radius:12px}
+table{width:100%;border-collapse:collapse}
+th, td{padding:10px 12px;border-bottom:1px solid var(--border);vertical-align:top}
+thead th{background:var(--card);position:sticky;top:0}
+.small{font-size:13px;color:var(--muted)}
+#themeToggle{border:1px solid var(--border);background:var(--card);color:var(--fg);border-radius:10px;padding:8px 12px;cursor:pointer}
+#toc a{display:block;padding:6px 0}
+.alert{border-left:4px solid var(--accent);padding:12px 14px;background:rgba(37,99,235,0.10);border-radius:10px}
+</style>
+<script>
+// Default dark
+(function(){
+  const saved = localStorage.getItem('theme');
+  if(saved==='light'){ document.documentElement.classList.add('light'); }
+  else { document.documentElement.classList.remove('light'); } // dark default
+})();
+function toggleTheme(){
+  const root = document.documentElement;
+  const isLight = root.classList.toggle('light');
+  localStorage.setItem('theme', isLight ? 'light' : 'dark');
+}
+function copyToClipboard(id){
+  const el = document.getElementById(id);
+  navigator.clipboard.writeText(el.innerText || el.value || '').then(()=>{});
+}
+</script>
+</head>
+<body>
+<header>
+  <div class="container" style="display:flex;align-items:center;gap:12px;justify-content:space-between">
+    <div>
+      <span class="badge">🧭 ImageAI Installation Guide</span>
+      <div class="small">Cross‑platform. Non‑technical. Python&nbsp;3.12 recommended.</div>
+    </div>
+    <button id="themeToggle" onclick="toggleTheme()">Toggle theme</button>
+  </div>
+</header>
+
+<main class="container">
+  <h1>ImageAI Installation Guide (Cross‑Platform, Non‑Technical)</h1>
+
+  <section class="card" id="intro">
+    <p>This guide explains how to install and run <strong>ImageAI</strong> on Windows, macOS, or Linux without prior developer experience. It covers download options, Python&nbsp;3.12, virtual environments, running the app, and adding API keys.</p>
+  </section>
+
+  <section class="card" id="download">
+    <h2>1) Downloading ImageAI</h2>
+    <p>Choose one method.</p>
+    <h3>Option A — Download ZIP (Simplest)</h3>
+    <ol>
+      <li>Open <a href="https://github.com/lelandg/ImageAI" target="_blank" rel="noopener">https://github.com/lelandg/ImageAI</a>.</li>
+      <li>Click <strong>Code → Download ZIP</strong>.</li>
+      <li>Extract the ZIP. You will get a folder <code>ImageAI-main</code>.</li>
+    </ol>
+
+    <h3>Option B — Git CLI</h3>
+<pre id="git-cli">git clone https://github.com/lelandg/ImageAI.git
+cd ImageAI</pre>
+    <button class="copy-btn" onclick="copyToClipboard('git-cli')">Copy</button>
+
+    <h3>Option C — GitHub Desktop</h3>
+    <ol>
+      <li>Install <a href="https://desktop.github.com/" target="_blank" rel="noopener">GitHub Desktop</a>.</li>
+      <li>File → Clone Repository → URL → <code>https://github.com/lelandg/ImageAI.git</code>.</li>
+      <li>Choose a folder and Clone. Then open in Explorer/Finder.</li>
+    </ol>
+    <p>Other GUIs: Sourcetree, GitKraken, or VS Code Source Control.</p>
+  </section>
+
+  <section class="card" id="python">
+    <h2>2) Install Python&nbsp;3.12</h2>
+    <div class="alert"><strong>Recommendation:</strong> Use Python&nbsp;3.12. Avoid odd minor versions because key packages often lack prebuilt wheels and may break compatibility during interim cycles.</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>System</th><th>How to install</th></tr></thead>
+        <tbody>
+          <tr><td>Windows</td><td>Download from <a href="https://www.python.org/downloads/" target="_blank" rel="noopener">python.org</a>. Choose <em>Python&nbsp;3.12.x</em>. During setup check <strong>Add Python to PATH</strong>.</td></tr>
+          <tr><td>macOS</td><td>Use python.org or Homebrew: <code>brew install python@3.12</code></td></tr>
+          <tr><td>Linux (Ubuntu/Debian)</td><td><code>sudo apt update && sudo apt install python3.12 python3.12-venv -y</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Verify:</p>
+<pre id="py-ver">python --version</pre>
+    <button class="copy-btn" onclick="copyToClipboard('py-ver')">Copy</button>
+  </section>
+
+  <section class="card" id="venv">
+    <h2>3) Create a Virtual Environment</h2>
+    <ol>
+      <li>Open Terminal or PowerShell.</li>
+      <li>Change to the ImageAI folder you downloaded.</li>
+    </ol>
+<pre id="cd">cd path/to/ImageAI-main</pre>
+    <button class="copy-btn" onclick="copyToClipboard('cd')">Copy</button>
+    <p>Create and activate the environment:</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Step</th><th>Command</th></tr></thead>
+<tbody>
+<tr><td>Create</td><td><code>python -m venv .venv</code></td></tr>
+<tr><td>Activate (Windows PowerShell)</td><td><code>.\.venv\Scripts\Activate.ps1</code></td></tr>
+<tr><td>Activate (macOS/Linux)</td><td><code>source .venv/bin/activate</code></td></tr>
+</tbody>
+</table>
+</div>
+    <p>When active the prompt shows <code>(.venv)</code>.</p>
+  </section>
+
+  <section class="card" id="deps">
+    <h2>4) Install Dependencies</h2>
+<pre id="deps-commands">pip install --upgrade pip
+pip install -r requirements.txt</pre>
+    <button class="copy-btn" onclick="copyToClipboard('deps-commands')">Copy</button>
+    <p>If you see permission errors make sure the virtual environment is active.</p>
+  </section>
+
+  <section class="card" id="run">
+    <h2>5) Run ImageAI</h2>
+<pre id="run-cmd">python app.py</pre>
+    <button class="copy-btn" onclick="copyToClipboard('run-cmd')">Copy</button>
+    <p>If a module is missing reactivate <code>.venv</code> and reinstall requirements.</p>
+  </section>
+
+  <section class="card" id="auth">
+    <h2>6) Configure Authentication (API Keys)</h2>
+    <p>Use the providers that fit your goals. You can combine them.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Provider</th><th>Key / Auth</th><th>Best for</th><th>Advantages</th></tr></thead>
+        <tbody>
+          <tr><td>OpenAI</td><td>API key (<code>sk-...</code>)</td><td>Text-to-image, prompt enhancement</td><td>Simple, reliable, broad language support</td></tr>
+          <tr><td>Anthropic</td><td>API key (<code>sk-ant-...</code>)</td><td>Prompt enhancement, storytelling</td><td>Strong safety, creative narratives</td></tr>
+          <tr><td>Google Cloud (Veo/Gemini)</td><td><code>gcloud</code> login + project</td><td>Video, photorealism, multimodal</td><td>Fast generation, advanced context</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Store keys locally in your environment or app settings. Never share them publicly.</p>
+  </section>
+
+  <section class="card" id="next">
+    <h2>7) Next Steps</h2>
+    <ul>
+      <li>Open the app’s <strong>Help → Authentication</strong> section or the repo README for detailed provider setup.</li>
+      <li>Restart ImageAI after adding keys.</li>
+      <li>Create your first prompt.</li>
+    </ul>
+  </section>
+
+  <section class="card" id="troubleshoot">
+    <h2>Troubleshooting</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Issue</th><th>Cause</th><th>Fix</th></tr></thead>
+        <tbody>
+          <tr><td>“pip not found”</td><td>Python not on PATH</td><td>Reinstall Python 3.12 and check “Add to PATH”.</td></tr>
+          <tr><td>Activate permission denied</td><td>Windows execution policy</td><td>Admin PowerShell: <code>Set-ExecutionPolicy RemoteSigned -Scope CurrentUser</code></td></tr>
+          <tr><td>No module named ...</td><td>Venv inactive</td><td>Activate <code>.venv</code> and reinstall requirements.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="small">Finish by reviewing the <strong>Authentication</strong> section in the Help tab or the repository README.</div>
+</main>
+</body>
+</html>
