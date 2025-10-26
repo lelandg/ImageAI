@@ -41,6 +41,7 @@ from gui.video.video_button import VideoButton
 from gui.video.end_prompt_dialog import EndPromptDialog
 from gui.video.prompt_field_widget import PromptFieldWidget
 from gui.video.reference_images_widget import ReferenceImagesWidget
+from gui.video.ltx_controls_widget import LTXVideoControlsWidget
 from core.video.end_prompt_generator import EndPromptGenerator, EndPromptContext
 from core.llm_models import get_provider_models, get_all_provider_ids, get_provider_display_name
 from gui.utils.stderr_suppressor import SuppressStderr
@@ -1062,15 +1063,15 @@ class WorkspaceWidget(QWidget):
 
         style_layout.addWidget(QLabel("Aspect Ratio:"))
         self.aspect_combo = QComboBox()
-        self.aspect_combo.addItems(["16:9", "9:16", "1:1"])
-        self.aspect_combo.setToolTip("Video aspect ratio (Veo 3 compatible):\n- 16:9: Widescreen (landscape)\n- 9:16: Vertical (portrait)\n- 1:1: Square")
+        self.aspect_combo.addItems(["16:9", "9:16", "1:1", "21:9"])
+        self.aspect_combo.setToolTip("Video aspect ratio:\n- 16:9: Widescreen (landscape)\n- 9:16: Vertical (portrait)\n- 1:1: Square\n- 21:9: Ultrawide (LTX-Video)")
         style_layout.addWidget(self.aspect_combo)
 
         style_layout.addWidget(QLabel("Resolution:"))
         self.resolution_combo = QComboBox()
-        self.resolution_combo.addItems(["720p", "1080p"])
+        self.resolution_combo.addItems(["720p", "1080p", "4K"])
         self.resolution_combo.setCurrentIndex(1)
-        self.resolution_combo.setToolTip("Target resolution (Veo 3 compatible):\n- 720p: HD (1280x720)\n- 1080p: Full HD (1920x1080)")
+        self.resolution_combo.setToolTip("Target resolution:\n- 720p: HD (1280x720)\n- 1080p: Full HD (1920x1080)\n- 4K: Ultra HD (3840x2160, LTX-Video Ultra)")
         style_layout.addWidget(self.resolution_combo)
 
         style_layout.addWidget(QLabel("Seed:"))
@@ -1510,9 +1511,9 @@ class WorkspaceWidget(QWidget):
         provider_layout = QHBoxLayout()
         provider_layout.addWidget(QLabel("Render Method:"))
         self.video_provider_combo = QComboBox()
-        self.video_provider_combo.addItems(["FFmpeg Slideshow", "Gemini Veo"])
+        self.video_provider_combo.addItems(["FFmpeg Slideshow", "Gemini Veo", "LTX-Video"])
         self.video_provider_combo.setCurrentIndex(1)  # Default to Gemini Veo
-        self.video_provider_combo.setToolTip("Video rendering method:\n- FFmpeg Slideshow: Traditional slideshow with transitions\n- Gemini Veo: AI-powered video generation")
+        self.video_provider_combo.setToolTip("Video rendering method:\n- FFmpeg Slideshow: Traditional slideshow with transitions\n- Gemini Veo: AI-powered video generation\n- LTX-Video: Local GPU or cloud-based video generation (4K, 50fps)")
         self.video_provider_combo.currentTextChanged.connect(self.on_video_provider_changed)
         provider_layout.addWidget(self.video_provider_combo)
 
@@ -1534,7 +1535,12 @@ class WorkspaceWidget(QWidget):
         
         provider_layout.addStretch()
         layout.addLayout(provider_layout)
-        
+
+        # LTX-Video controls (conditionally shown when LTX-Video is selected)
+        self.ltx_controls = LTXVideoControlsWidget(self.config)
+        self.ltx_controls.setVisible(False)  # Hidden by default
+        layout.addWidget(self.ltx_controls)
+
         # Export settings
         export_layout = QHBoxLayout()
 
@@ -5302,7 +5308,9 @@ class WorkspaceWidget(QWidget):
     
     def on_video_provider_changed(self, provider: str):
         """Handle video provider change"""
+        # Show/hide provider-specific controls
         self.veo_model_combo.setVisible(provider == "Gemini Veo")
+        self.ltx_controls.setVisible(provider == "LTX-Video")
 
     def on_veo_model_changed(self, model: str):
         """Handle Veo model selection change"""

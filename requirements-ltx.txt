@@ -1,0 +1,26 @@
+# LTX-Video Local Deployment Requirements
+# Install these in addition to the main requirements.txt
+
+# PyTorch with CUDA support (adjust based on your CUDA version)
+# For CUDA 12.2+:
+torch>=2.0.0
+torchvision>=0.15.0
+torchaudio>=2.0.0
+
+# Hugging Face Libraries
+diffusers>=0.25.0
+transformers>=4.36.0
+accelerate>=0.25.0
+safetensors>=0.4.0
+huggingface-hub>=0.20.0
+
+# LoRA Training (Phase 3)
+peft>=0.7.0
+
+# Video Processing
+opencv-python>=4.8.0
+
+# Optional Cloud API Clients (Phase 4 - OPTIONAL)
+# Uncomment if you want cloud API fallback:
+# fal-client>=0.4.0
+# replicate>=0.21.0

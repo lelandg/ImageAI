@@ -200,6 +200,100 @@ class ConfigManager:
         images_dir.mkdir(parents=True, exist_ok=True)
         return images_dir
 
+    # LTX-Video Configuration
+
+    def get_ltx_deployment(self) -> str:
+        """Get LTX-Video deployment mode."""
+        return self.config.get("ltx_deployment", "local")
+
+    def set_ltx_deployment(self, mode: str) -> None:
+        """Set LTX-Video deployment mode (local, fal, replicate, comfyui)."""
+        self.config["ltx_deployment"] = mode
+
+    def get_ltx_model(self) -> str:
+        """Get LTX-Video model."""
+        return self.config.get("ltx_model", "ltx-video-2b")
+
+    def set_ltx_model(self, model: str) -> None:
+        """Set LTX-Video model."""
+        self.config["ltx_model"] = model
+
+    def get_ltx_resolution(self) -> str:
+        """Get LTX-Video resolution."""
+        return self.config.get("ltx_resolution", "1080p")
+
+    def set_ltx_resolution(self, resolution: str) -> None:
+        """Set LTX-Video resolution."""
+        self.config["ltx_resolution"] = resolution
+
+    def get_ltx_fps(self) -> int:
+        """Get LTX-Video FPS."""
+        return self.config.get("ltx_fps", 30)
+
+    def set_ltx_fps(self, fps: int) -> None:
+        """Set LTX-Video FPS."""
+        self.config["ltx_fps"] = fps
+
+    def get_ltx_duration(self) -> int:
+        """Get LTX-Video duration (seconds)."""
+        return self.config.get("ltx_duration", 5)
+
+    def set_ltx_duration(self, duration: int) -> None:
+        """Set LTX-Video duration (seconds)."""
+        self.config["ltx_duration"] = duration
+
+    def get_ltx_local_path(self) -> str:
+        """Get LTX-Video local installation path."""
+        default_path = str(Path.home() / ".cache" / "ltx-video")
+        return self.config.get("ltx_local_path", default_path)
+
+    def set_ltx_local_path(self, path: str) -> None:
+        """Set LTX-Video local installation path."""
+        self.config["ltx_local_path"] = path
+
+    def get_ltx_camera_motion(self) -> Optional[str]:
+        """Get LTX-Video camera motion setting."""
+        return self.config.get("ltx_camera_motion")
+
+    def set_ltx_camera_motion(self, motion: Optional[str]) -> None:
+        """Set LTX-Video camera motion."""
+        if motion:
+            self.config["ltx_camera_motion"] = motion
+        elif "ltx_camera_motion" in self.config:
+            del self.config["ltx_camera_motion"]
+
+    def get_ltx_guidance_scale(self) -> float:
+        """Get LTX-Video guidance scale."""
+        return self.config.get("ltx_guidance_scale", 7.5)
+
+    def set_ltx_guidance_scale(self, scale: float) -> None:
+        """Set LTX-Video guidance scale."""
+        self.config["ltx_guidance_scale"] = scale
+
+    def get_ltx_num_inference_steps(self) -> int:
+        """Get LTX-Video number of inference steps."""
+        return self.config.get("ltx_num_inference_steps", 50)
+
+    def set_ltx_num_inference_steps(self, steps: int) -> None:
+        """Set LTX-Video number of inference steps."""
+        self.config["ltx_num_inference_steps"] = steps
+
+    def get_fal_api_key(self) -> Optional[str]:
+        """Get Fal.ai API key for LTX-Video."""
+        return self.get_api_key("fal")
+
+    def set_fal_api_key(self, api_key: str) -> None:
+        """Set Fal.ai API key for LTX-Video."""
+        self.set_api_key("fal", api_key)
+
+    def get_replicate_api_key(self) -> Optional[str]:
+        """Get Replicate API key for LTX-Video."""
+        return self.get_api_key("replicate")
+
+    def set_replicate_api_key(self, api_key: str) -> None:
+        """Set Replicate API key for LTX-Video."""
+        self.set_api_key("replicate", api_key)
+
 
 def get_api_key_url(provider: str) -> str:
     """Get the API key documentation URL for a provider."""
