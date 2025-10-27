@@ -1,5 +1,10 @@
 {
+  "schema_version": "1.0",
   "name": "Comic: 3-Panel Grid",
+  "description": "Three-panel comic strip layout with vertical panels and bottom caption. Ideal for sequential storytelling and comic strips.",
+  "category": "comic",
+  "tags": ["comic strip", "sequential", "panels", "three panel"],
+  "author": "ImageAI",
   "page_size_px": [
     2550,
     3300

@@ -527,9 +527,30 @@ class GoogleProvider(ImageProvider):
                         # Save the composed canvas for debugging
                         import time
                         from pathlib import Path
+                        import platform
+                        import os
                         timestamp = int(time.time())
                         debug_filename = f"DEBUG_CANVAS_COMPOSED_{timestamp}.png"
-                        generated_dir = Path(self.config.get('output_dir', Path.home() / 'AppData' / 'Roaming' / 'ImageAI' / 'generated'))
+
+                        # Get platform-specific generated directory
+                        if 'output_dir' in self.config and self.config['output_dir']:
+                            generated_dir = Path(self.config['output_dir'])
+                        else:
+                            # Use platform-specific config directory
+                            system = platform.system()
+                            home = Path.home()
+                            if system == "Windows":
+                                base = Path(os.getenv("APPDATA", home / "AppData" / "Roaming"))
+                                config_dir = base / "ImageAI"
+                            elif system == "Darwin":  # macOS
+                                config_dir = home / "Library" / "Application Support" / "ImageAI"
+                            else:  # Linux/Unix
+                                base = Path(os.getenv("XDG_CONFIG_HOME", home / ".config"))
+                                config_dir = base / "ImageAI"
+                            generated_dir = config_dir / "generated"
+
+                        # Ensure directory exists
+                        generated_dir.mkdir(parents=True, exist_ok=True)
                         debug_path = generated_dir / debug_filename
                         canvas.save(debug_path, 'PNG')
                         logger.info(f"Saved composed canvas for debugging: {debug_path}")

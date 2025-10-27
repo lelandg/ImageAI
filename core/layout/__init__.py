@@ -8,6 +8,12 @@ Phase 2 enhancements:
 - Image processing with filters and effects
 - Template variable substitution
 - Smart layout algorithms
+
+Phase 3 enhancements:
+- Template discovery and management
+- Schema validation
+- Preview generation
+- Template categories and search
 """
 
 from .models import (
@@ -29,6 +35,15 @@ from .text_renderer import TextLayoutEngine, LayoutLine, LayoutParagraph
 from .image_processor import ImageProcessor
 from .template_engine import TemplateEngine
 from .layout_algorithms import LayoutAlgorithms, FitResult, PanelGrid
+
+# Phase 3 modules
+from .template_manager import (
+    TemplateManager,
+    TemplateMetadata,
+    TemplateValidator,
+    TemplatePreviewGenerator,
+    ValidationError,
+)
 
 __all__ = [
     # Data models
@@ -53,4 +68,10 @@ __all__ = [
     "LayoutAlgorithms",
     "FitResult",
     "PanelGrid",
+    # Phase 3 - Template management
+    "TemplateManager",
+    "TemplateMetadata",
+    "TemplateValidator",
+    "TemplatePreviewGenerator",
+    "ValidationError",
 ]
