@@ -3801,26 +3801,66 @@ For more detailed information, please refer to the full documentation.
 
     def _save_and_test(self):
         """Save all API keys and settings, then test the current provider."""
-        # Save all API keys
+        from core.security import secure_storage
+
+        # Save all API keys - IMPORTANT: Delete if empty to allow switching to gcloud
         google_key = self.google_key_edit.text().strip()
         if google_key:
             self.config.set_api_key("google", google_key)
             self.config.set("google_api_key", google_key)  # Backward compatibility
+        else:
+            # Clear Google API key from all locations
+            secure_storage.delete_key("google")
+            # Remove from config file
+            if "google_api_key" in self.config.config:
+                del self.config.config["google_api_key"]
+            # Remove from providers config
+            provider_config = self.config.get_provider_config("google")
+            if "api_key" in provider_config:
+                del provider_config["api_key"]
+                self.config.set_provider_config("google", provider_config)
 
         openai_key = self.openai_key_edit.text().strip()
         if openai_key:
             self.config.set_api_key("openai", openai_key)
             self.config.set("openai_api_key", openai_key)  # Backward compatibility
+        else:
+            # Clear OpenAI API key from all locations
+            secure_storage.delete_key("openai")
+            if "openai_api_key" in self.config.config:
+                del self.config.config["openai_api_key"]
+            provider_config = self.config.get_provider_config("openai")
+            if "api_key" in provider_config:
+                del provider_config["api_key"]
+                self.config.set_provider_config("openai", provider_config)
 
         stability_key = self.stability_key_edit.text().strip()
         if stability_key:
             self.config.set_api_key("stability", stability_key)
             self.config.set("stability_api_key", stability_key)  # Backward compatibility
+        else:
+            # Clear Stability API key from all locations
+            secure_storage.delete_key("stability")
+            if "stability_api_key" in self.config.config:
+                del self.config.config["stability_api_key"]
+            provider_config = self.config.get_provider_config("stability")
+            if "api_key" in provider_config:
+                del provider_config["api_key"]
+                self.config.set_provider_config("stability", provider_config)
 
         anthropic_key = self.anthropic_key_edit.text().strip()
         if anthropic_key:
             self.config.set_api_key("anthropic", anthropic_key)
             self.config.set("anthropic_api_key", anthropic_key)  # Backward compatibility
+        else:
+            # Clear Anthropic API key from all locations
+            secure_storage.delete_key("anthropic")
+            if "anthropic_api_key" in self.config.config:
+                del self.config.config["anthropic_api_key"]
+            provider_config = self.config.get_provider_config("anthropic")
+            if "api_key" in provider_config:
+                del provider_config["api_key"]
+                self.config.set_provider_config("anthropic", provider_config)
 
         # Save Midjourney settings
         self.config.set("midjourney_watch_enabled", self.chk_midjourney_watch.isChecked())

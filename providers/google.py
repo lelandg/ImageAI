@@ -225,9 +225,21 @@ class GoogleProvider(ImageProvider):
                 self._init_gcloud_client(raise_on_error=True)
             else:
                 raise ValueError("No API key configured for Google provider")
-        
+
         model = model or self.get_default_model()
-        
+
+        # Log authentication method being used
+        if self.auth_mode == "gcloud":
+            logger.info("=" * 60)
+            logger.info("GOOGLE AUTHENTICATION: Using Google Cloud (gcloud) credentials")
+            if self.project_id:
+                logger.info(f"Google Cloud Project ID: {self.project_id}")
+            logger.info("=" * 60)
+        else:
+            logger.info("=" * 60)
+            logger.info("GOOGLE AUTHENTICATION: Using API Key")
+            logger.info("=" * 60)
+
         # Only apply rate limiting for API key mode (Google Cloud has its own quotas)
         if self.auth_mode != "gcloud":
             rate_limiter.check_rate_limit('google', wait=True)

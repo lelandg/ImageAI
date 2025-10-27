@@ -23,6 +23,9 @@ from .models import (
     TextStyle, ImageStyle, Rect
 )
 from .font_manager import FontManager
+from .text_renderer import TextLayoutEngine
+from .image_processor import ImageProcessor
+from .template_engine import TemplateEngine
 
 logger = LogManager().get_logger("layout.engine")
 
@@ -30,26 +33,56 @@ logger = LogManager().get_logger("layout.engine")
 class LayoutEngine:
     """
     Main layout engine for rendering pages and documents.
+
+    Phase 2 enhancements:
+    - Advanced text rendering with hyphenation
+    - Image processing with filters and effects
+    - Template variable substitution
     """
 
-    def __init__(self, font_manager: FontManager):
+    def __init__(
+        self,
+        font_manager: FontManager,
+        use_advanced_text: bool = True,
+        hyphenation_language: str = "en_US"
+    ):
         """
         Initialize the layout engine.
 
         Args:
             font_manager: FontManager instance for font loading
+            use_advanced_text: Whether to use advanced text rendering (Phase 2)
+            hyphenation_language: Language for hyphenation (e.g., 'en_US')
         """
         self.font_manager = font_manager
+        self.use_advanced_text = use_advanced_text
 
-    def render_page_png(self, page: PageSpec, out_path: Path) -> None:
+        # Phase 2 components
+        self.text_engine = TextLayoutEngine(hyphenation_language) if use_advanced_text else None
+        self.image_processor = ImageProcessor()
+        self.template_engine = TemplateEngine()
+
+    def render_page_png(
+        self,
+        page: PageSpec,
+        out_path: Path,
+        page_variables: Optional[dict] = None,
+        process_template: bool = True
+    ) -> None:
         """
         Render a single page to a PNG file.
 
         Args:
             page: PageSpec describing the page layout
             out_path: Output path for the PNG file
+            page_variables: Optional variables for template substitution
+            process_template: Whether to process template variables (Phase 2)
         """
         logger.info(f"Rendering page to PNG: {out_path}")
+
+        # Process template variables if enabled
+        if process_template:
+            page = self.template_engine.process_page(page, page_variables)
 
         W, H = page.page_size_px
         bg = page.background or "#FFFFFF"
@@ -74,51 +107,80 @@ class LayoutEngine:
         logger.info(f"Page rendered successfully to {out_path}")
 
     def _render_image_block(self, img: Image.Image, draw: ImageDraw.ImageDraw, block: ImageBlock) -> None:
-        """Render an image block onto the page."""
+        """Render an image block onto the page using Phase 2 ImageProcessor."""
         if not block.image_path or not Path(block.image_path).exists():
             logger.warning(f"Image path not found for block {block.id}: {block.image_path}")
             return
 
-        src = Image.open(block.image_path).convert("RGB")
         x, y, w, h = block.rect
 
-        # Apply fit mode
-        if block.style.fit in ("contain", "fit_width", "fit_height"):
-            # Thumbnail preserves aspect ratio
-            src.thumbnail((w, h))
-            # Center the image
-            ox = x + (w - src.width) // 2
-            oy = y + (h - src.height) // 2
-            img.paste(src, (ox, oy))
+        # Use ImageProcessor for advanced image handling (Phase 2)
+        processed_img = self.image_processor.load_and_process(
+            block.image_path,
+            block.rect,
+            block.style
+        )
 
-        elif block.style.fit == "cover":
-            # Scale to cover rect (crop to fill)
-            ratio = max(w / src.width, h / src.height)
-            resized = src.resize((int(src.width * ratio), int(src.height * ratio)))
-            ox = x + (w - resized.width) // 2
-            oy = y + (h - resized.height) // 2
-            img.paste(resized, (ox, oy))
+        if processed_img is None:
+            logger.warning(f"Failed to process image for block {block.id}")
+            return
 
-        else:  # fill
-            resized = src.resize((w, h))
-            img.paste(resized, (x, y))
+        # Handle RGBA images properly
+        if processed_img.mode == 'RGBA':
+            # Paste with alpha compositing
+            img.paste(processed_img, (x, y), processed_img)
+        else:
+            # Simple paste for RGB
+            img.paste(processed_img, (x, y))
 
         # Draw border if needed
         if block.style.stroke_px > 0:
-            self._draw_rounded_rectangle(
+            color_tuple = self._hex_to_rgb(block.style.stroke_color)
+            self.image_processor.draw_border(
                 draw, block.rect,
                 block.style.border_radius_px,
                 block.style.stroke_px,
-                block.style.stroke_color
+                color_tuple
             )
 
     def _render_text_block(self, img: Image.Image, draw: ImageDraw.ImageDraw, block: TextBlock) -> None:
-        """Render a text block onto the page with auto-sizing."""
+        """Render a text block onto the page with auto-sizing and Phase 2 enhancements."""
         x, y, w, h = block.rect
         text = block.text or ""
 
         if not text:
             return
+
+        # Use advanced text rendering if available (Phase 2)
+        if self.use_advanced_text and self.text_engine:
+            self._render_text_advanced(draw, block)
+        else:
+            # Fallback to simple rendering (Phase 1)
+            self._render_text_simple(draw, block)
+
+    def _render_text_advanced(self, draw: ImageDraw.ImageDraw, block: TextBlock) -> None:
+        """Render text using Phase 2 TextLayoutEngine with hyphenation and justification."""
+        x, y, w, h = block.rect
+        text = block.text or ""
+
+        # Get optimal font size
+        size = block.style.size_px
+        font = self.font_manager.pil_font(block.style.family, size)
+
+        # Layout text with advanced features
+        paragraphs, total_height = self.text_engine.layout_text(
+            text, font, w, h, block.style, draw
+        )
+
+        # Draw the laid-out text
+        self.text_engine.draw_layout(paragraphs, draw, (x, y), font, block.style, w)
+
+        logger.debug(f"Advanced text rendering: {len(paragraphs)} paragraphs, {total_height}px height")
+
+    def _render_text_simple(self, draw: ImageDraw.ImageDraw, block: TextBlock) -> None:
+        """Simple text rendering (Phase 1 compatibility)."""
+        x, y, w, h = block.rect
+        text = block.text or ""
 
         # Binary search for optimal font size that fits the box
         size = block.style.size_px
