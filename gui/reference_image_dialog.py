@@ -69,7 +69,7 @@ class ImageAnalysisWorker(QObject):
     def __init__(self, image_path: str, llm_provider: str, llm_model: str, api_key: str,
                  analysis_prompt: str = None, temperature: float = 0.7,
                  max_tokens: int = 1000, reasoning_effort: str = "medium",
-                 verbosity: str = "medium"):
+                 verbosity: str = "medium", auth_mode: str = "api-key"):
         super().__init__()
         self.image_path = image_path
         self.llm_provider = llm_provider
@@ -80,6 +80,7 @@ class ImageAnalysisWorker(QObject):
         self.max_tokens = max_tokens
         self.reasoning_effort = reasoning_effort
         self.verbosity = verbosity
+        self.auth_mode = auth_mode
         self._stopped = False
 
     def stop(self):
@@ -87,15 +88,16 @@ class ImageAnalysisWorker(QObject):
         self._stopped = True
 
     def _analyze_with_google_gemini(self, image_data: bytes, mime_type: str,
-                                     temperature: float, max_tokens: int) -> str:
+                                     temperature: float, max_tokens: int, auth_mode: str = "api-key") -> str:
         """
-        Analyze image using Google Gemini's direct API (not Vertex AI).
+        Analyze image using Google Gemini API.
 
         Args:
             image_data: Raw image bytes
             mime_type: MIME type of the image
             temperature: Temperature parameter
             max_tokens: Maximum tokens to generate
+            auth_mode: Authentication mode ("api-key" or "gcloud")
 
         Returns:
             Generated description text
@@ -104,8 +106,39 @@ class ImageAnalysisWorker(QObject):
             import google.genai as genai
             from google.genai import types
 
-            # Create client with API key
-            client = genai.Client(api_key=self.api_key)
+            # Create client based on auth mode
+            if auth_mode == "gcloud":
+                # Use Google Cloud authentication (Vertex AI mode)
+                from google.auth import default as google_auth_default
+
+                # Get Application Default Credentials
+                credentials, project = google_auth_default()
+                if not project:
+                    # Try to get from gcloud config
+                    import subprocess
+                    result = subprocess.run(
+                        ["gcloud", "config", "get-value", "project"],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    project = result.stdout.strip()
+
+                if not project:
+                    raise ValueError(
+                        "No Google Cloud project found. "
+                        "Set a project with: gcloud config set project YOUR_PROJECT_ID"
+                    )
+
+                self.log_message.emit(f"Using Google Cloud project: {project}", "INFO")
+
+                # Create client in Vertex AI mode
+                client = genai.Client(
+                    vertexai=True,
+                    project=project,
+                    location="us-central1"
+                )
+            else:
+                # Use API key authentication
+                client = genai.Client(api_key=self.api_key)
 
             # Create the system prompt
             system_prompt = """You are an expert at analyzing images and creating detailed descriptions
@@ -217,10 +250,10 @@ class ImageAnalysisWorker(QObject):
             console.info(f"  Max tokens: {max_tokens}")
             self.log_message.emit(f"Max tokens: {max_tokens}", "INFO")
 
-            # For Google Gemini, use direct API to avoid Vertex AI
+            # For Google Gemini, use direct API or Vertex AI based on auth mode
             if provider_lower in ["google", "gemini"]:
                 description = self._analyze_with_google_gemini(
-                    image_data, mime_type, temperature, max_tokens
+                    image_data, mime_type, temperature, max_tokens, self.auth_mode
                 )
                 if self._stopped:
                     return
@@ -729,20 +762,34 @@ class ReferenceImageDialog(QDialog):
                                  "Please select an LLM provider and model.")
             return
 
-        # Get API key
-        api_key = None
-        if self.config:
-            if llm_provider.lower() == "openai":
-                api_key = self.config.get_api_key('openai')
-            elif llm_provider.lower() in ["google", "gemini"]:
-                api_key = self.config.get_api_key('google')
-            elif llm_provider.lower() in ["claude", "anthropic"]:
-                api_key = self.config.get_api_key('anthropic')
+        # Check authentication mode (for Google Cloud auth support)
+        auth_mode = "api-key"  # Default
+        if self.config and llm_provider.lower() in ["google", "gemini"]:
+            auth_mode = self.config.get("auth_mode", "api-key")
+            # Normalize auth mode values
+            if auth_mode in ["api_key", "API Key"]:
+                auth_mode = "api-key"
+            elif auth_mode == "Google Cloud Account":
+                auth_mode = "gcloud"
 
-        if not api_key:
-            QMessageBox.warning(self, "API Key Missing",
-                                 f"Please configure your {llm_provider} API key in Settings.")
-            return
+        # Get API key (only required for api-key mode)
+        api_key = None
+        if auth_mode == "api-key":
+            if self.config:
+                if llm_provider.lower() == "openai":
+                    api_key = self.config.get_api_key('openai')
+                elif llm_provider.lower() in ["google", "gemini"]:
+                    api_key = self.config.get_api_key('google')
+                elif llm_provider.lower() in ["claude", "anthropic"]:
+                    api_key = self.config.get_api_key('anthropic')
+
+            if not api_key:
+                QMessageBox.warning(self, "API Key Missing",
+                                     f"Please configure your {llm_provider} API key in Settings.")
+                return
+        else:
+            # Using Google Cloud auth - no API key needed
+            self.status_console.log("Using Google Cloud authentication", "INFO")
 
         # Get analysis prompt
         analysis_prompt = self.analysis_prompt.toPlainText().strip()
@@ -787,7 +834,8 @@ class ReferenceImageDialog(QDialog):
             temperature,
             max_tokens,
             reasoning,
-            verbosity
+            verbosity,
+            auth_mode
         )
 
         self.worker.moveToThread(self.thread)
