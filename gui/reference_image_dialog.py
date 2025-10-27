@@ -150,23 +150,18 @@ class ImageAnalysisWorker(QObject):
 
             self.log_message.emit("Sending request to Google Gemini...", "INFO")
 
-            # Create the content with image
-            content = types.Content(
-                parts=[
-                    types.Part(text=full_prompt),
-                    types.Part(
-                        inline_data=types.Blob(
-                            mime_type=mime_type,
-                            data=image_data
-                        )
-                    )
-                ]
-            )
+            # Convert image bytes to PIL Image for SDK compatibility
+            from PIL import Image
+            import io
+            img = Image.open(io.BytesIO(image_data))
+
+            # Create contents as list [image, text] - SDK handles role automatically
+            contents = [img, full_prompt]
 
             # Generate with vision model
             response = client.models.generate_content(
                 model=self.llm_model,  # e.g., 'gemini-2.5-pro'
-                contents=content,
+                contents=contents,
                 config=types.GenerateContentConfig(
                     temperature=temperature,
                     max_output_tokens=max_tokens
