@@ -200,6 +200,74 @@ class ConfigManager:
         images_dir.mkdir(parents=True, exist_ok=True)
         return images_dir
 
+    # Layout/Books Module Configuration
+
+    def get_layout_config(self) -> Dict[str, Any]:
+        """Get layout module configuration."""
+        return self.config.get("layout", {})
+
+    def set_layout_config(self, layout_config: Dict[str, Any]) -> None:
+        """Set layout module configuration."""
+        self.config["layout"] = layout_config
+
+    def get_templates_dir(self) -> Path:
+        """Get directory for layout templates."""
+        # Check if custom path is set in config
+        layout_config = self.get_layout_config()
+        custom_path = layout_config.get("templates_dir")
+
+        if custom_path:
+            path = Path(custom_path)
+            if path.exists() and path.is_dir():
+                return path
+
+        # Default to templates/layouts in project directory
+        # Find project root (look for main.py)
+        from pathlib import Path
+        current = Path(__file__).resolve()
+        for parent in [current.parent.parent, current.parent.parent.parent]:
+            if (parent / "main.py").exists():
+                return parent / "templates" / "layouts"
+
+        # Fallback to config directory
+        templates_dir = self.config_dir / "templates" / "layouts"
+        templates_dir.mkdir(parents=True, exist_ok=True)
+        return templates_dir
+
+    def get_fonts_dir(self) -> Optional[Path]:
+        """Get directory for custom fonts (optional)."""
+        layout_config = self.get_layout_config()
+        fonts_path = layout_config.get("fonts_dir")
+
+        if fonts_path:
+            path = Path(fonts_path)
+            if path.exists() and path.is_dir():
+                return path
+
+        return None
+
+    def get_layout_export_dpi(self) -> int:
+        """Get default DPI for layout exports."""
+        layout_config = self.get_layout_config()
+        return layout_config.get("export_dpi", 300)
+
+    def set_layout_export_dpi(self, dpi: int) -> None:
+        """Set default DPI for layout exports."""
+        layout_config = self.get_layout_config()
+        layout_config["export_dpi"] = dpi
+        self.set_layout_config(layout_config)
+
+    def get_layout_llm_provider(self) -> str:
+        """Get LLM provider for layout text generation."""
+        layout_config = self.get_layout_config()
+        return layout_config.get("llm_provider", "google")
+
+    def set_layout_llm_provider(self, provider: str) -> None:
+        """Set LLM provider for layout text generation."""
+        layout_config = self.get_layout_config()
+        layout_config["llm_provider"] = provider
+        self.set_layout_config(layout_config)
+
 
 def get_api_key_url(provider: str) -> str:
     """Get the API key documentation URL for a provider."""

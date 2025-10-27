@@ -1,0 +1,116 @@
+{
+  "name": "Magazine: 2 Columns + Pull Quote",
+  "page_size_px": [
+    2550,
+    3300
+  ],
+  "margin_px": 120,
+  "background": "#FFFFFF",
+  "variables": {
+    "column_gap": 48
+  },
+  "blocks": [
+    {
+      "type": "text",
+      "id": "title",
+      "rect": [
+        140,
+        140,
+        2270,
+        200
+      ],
+      "style": {
+        "family": [
+          "Helvetica",
+          "Arial",
+          "DejaVu Sans"
+        ],
+        "size_px": 96,
+        "align": "left",
+        "color": "#0F172A"
+      }
+    },
+    {
+      "type": "text",
+      "id": "subtitle",
+      "rect": [
+        140,
+        360,
+        2270,
+        120
+      ],
+      "style": {
+        "family": [
+          "Helvetica",
+          "Arial",
+          "DejaVu Sans"
+        ],
+        "size_px": 48,
+        "align": "left",
+        "color": "#334155"
+      }
+    },
+    {
+      "type": "text",
+      "id": "col1",
+      "rect": [
+        140,
+        520,
+        1060,
+        2300
+      ],
+      "style": {
+        "family": [
+          "Georgia",
+          "Times New Roman",
+          "DejaVu Serif"
+        ],
+        "size_px": 34,
+        "line_height": 1.35,
+        "align": "justify",
+        "color": "#111111"
+      }
+    },
+    {
+      "type": "text",
+      "id": "col2",
+      "rect": [
+        1350,
+        520,
+        1060,
+        2300
+      ],
+      "style": {
+        "family": [
+          "Georgia",
+          "Times New Roman",
+          "DejaVu Serif"
+        ],
+        "size_px": 34,
+        "line_height": 1.35,
+        "align": "justify",
+        "color": "#111111"
+      }
+    },
+    {
+      "type": "text",
+      "id": "pullquote",
+      "rect": [
+        900,
+        1200,
+        750,
+        500
+      ],
+      "style": {
+        "family": [
+          "Baskerville",
+          "Times New Roman",
+          "DejaVu Serif"
+        ],
+        "size_px": 50,
+        "align": "center",
+        "color": "#1F2937"
+      }
+    }
+  ]
+}

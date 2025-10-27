@@ -170,9 +170,34 @@ def get_error_report_info():
     }
 
 
+class LogManager:
+    """
+    Centralized log manager for getting named loggers.
+
+    Provides a consistent interface for obtaining loggers with proper naming conventions.
+    All loggers use the 'imageai' namespace.
+    """
+
+    def __init__(self):
+        """Initialize the log manager."""
+        self.base_logger = logging.getLogger("imageai")
+
+    def get_logger(self, name: str) -> logging.Logger:
+        """
+        Get a logger with the specified name under the 'imageai' namespace.
+
+        Args:
+            name: Logger name (e.g., 'layout.engine', 'layout.fonts', 'gui.main')
+
+        Returns:
+            Logger instance
+        """
+        return logging.getLogger(f"imageai.{name}")
+
+
 class ErrorLogger:
     """Context manager for logging exceptions with additional context"""
-    
+
     def __init__(self, operation_name, logger=None, reraise=True):
         """
         Args:
@@ -183,10 +208,10 @@ class ErrorLogger:
         self.operation_name = operation_name
         self.logger = logger or logging.getLogger()
         self.reraise = reraise
-    
+
     def __enter__(self):
         return self
-    
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type is not None:
             self.logger.error(

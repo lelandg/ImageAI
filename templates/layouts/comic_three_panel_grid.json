@@ -1,0 +1,76 @@
+{
+  "name": "Comic: 3-Panel Grid",
+  "page_size_px": [
+    2550,
+    3300
+  ],
+  "margin_px": 120,
+  "background": "#FFFFFF",
+  "variables": {
+    "gutter": 36
+  },
+  "blocks": [
+    {
+      "type": "image",
+      "id": "panel_1",
+      "rect": [
+        140,
+        140,
+        740,
+        2600
+      ],
+      "style": {
+        "fit": "cover",
+        "border_radius_px": 12
+      }
+    },
+    {
+      "type": "image",
+      "id": "panel_2",
+      "rect": [
+        905,
+        140,
+        740,
+        2600
+      ],
+      "style": {
+        "fit": "cover",
+        "border_radius_px": 12
+      }
+    },
+    {
+      "type": "image",
+      "id": "panel_3",
+      "rect": [
+        1670,
+        140,
+        740,
+        2600
+      ],
+      "style": {
+        "fit": "cover",
+        "border_radius_px": 12
+      }
+    },
+    {
+      "type": "text",
+      "id": "caption",
+      "rect": [
+        140,
+        2860,
+        2270,
+        300
+      ],
+      "style": {
+        "family": [
+          "Impact",
+          "Arial Black",
+          "DejaVu Sans"
+        ],
+        "size_px": 72,
+        "align": "center",
+        "color": "#111111"
+      }
+    }
+  ]
+}

@@ -1,0 +1,49 @@
+{
+  "name": "Children: Single Illustration + Bottom Text",
+  "page_size_px": [
+    2480,
+    3508
+  ],
+  "margin_px": 96,
+  "background": "#FFFFFF",
+  "variables": {
+    "accent": "#2C7BE5"
+  },
+  "blocks": [
+    {
+      "type": "image",
+      "id": "hero_image",
+      "rect": [
+        96,
+        96,
+        2288,
+        2200
+      ],
+      "style": {
+        "fit": "contain",
+        "border_radius_px": 24
+      }
+    },
+    {
+      "type": "text",
+      "id": "narration",
+      "rect": [
+        96,
+        2350,
+        2288,
+        1000
+      ],
+      "style": {
+        "family": [
+          "Georgia",
+          "Times New Roman",
+          "DejaVu Serif"
+        ],
+        "size_px": 58,
+        "line_height": 1.25,
+        "align": "left",
+        "color": "#111111"
+      }
+    }
+  ]
+}

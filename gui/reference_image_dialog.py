@@ -199,6 +199,24 @@ class ImageAnalysisWorker(QObject):
             elif provider_lower in ["claude", "anthropic"]:
                 api_config['anthropic_api_key'] = self.api_key
 
+            # Determine temperature and max_tokens based on model
+            is_gpt5 = "gpt-5" in self.llm_model.lower()
+            if is_gpt5:
+                temperature = 1.0
+                max_tokens = 1000
+            else:
+                temperature = self.temperature
+                max_tokens = self.max_tokens
+
+            # Log parameters
+            logger.info(f"  Temperature: {temperature}")
+            console.info(f"  Temperature: {temperature}")
+            self.log_message.emit(f"Temperature: {temperature}", "INFO")
+
+            logger.info(f"  Max tokens: {max_tokens}")
+            console.info(f"  Max tokens: {max_tokens}")
+            self.log_message.emit(f"Max tokens: {max_tokens}", "INFO")
+
             # For Google Gemini, use direct API to avoid Vertex AI
             if provider_lower in ["google", "gemini"]:
                 description = self._analyze_with_google_gemini(
@@ -221,7 +239,6 @@ class ImageAnalysisWorker(QObject):
             llm = UnifiedLLMProvider(api_config)
 
             # Log parameters based on model
-            is_gpt5 = "gpt-5" in self.llm_model.lower()
             if is_gpt5:
                 logger.info(f"  Reasoning effort: {self.reasoning_effort}")
                 console.info(f"  Reasoning effort: {self.reasoning_effort}")
@@ -231,20 +248,21 @@ class ImageAnalysisWorker(QObject):
                 console.info(f"  Verbosity: {self.verbosity}")
                 self.log_message.emit(f"Verbosity: {self.verbosity}", "INFO")
 
-                # GPT-5 has fixed parameters
-                temperature = 1.0
-                max_tokens = 1000
+                logger.info(f"  Temperature: {temperature}")
+                console.info(f"  Temperature: {temperature}")
+                self.log_message.emit(f"Temperature: {temperature}", "INFO")
+
+                logger.info(f"  Max tokens: {max_tokens}")
+                console.info(f"  Max tokens: {max_tokens}")
+                self.log_message.emit(f"Max tokens: {max_tokens}", "INFO")
             else:
-                logger.info(f"  Temperature: {self.temperature}")
-                console.info(f"  Temperature: {self.temperature}")
-                self.log_message.emit(f"Temperature: {self.temperature}", "INFO")
+                logger.info(f"  Temperature: {temperature}")
+                console.info(f"  Temperature: {temperature}")
+                self.log_message.emit(f"Temperature: {temperature}", "INFO")
 
-                logger.info(f"  Max tokens: {self.max_tokens}")
-                console.info(f"  Max tokens: {self.max_tokens}")
-                self.log_message.emit(f"Max tokens: {self.max_tokens}", "INFO")
-
-                temperature = self.temperature
-                max_tokens = self.max_tokens
+                logger.info(f"  Max tokens: {max_tokens}")
+                console.info(f"  Max tokens: {max_tokens}")
+                self.log_message.emit(f"Max tokens: {max_tokens}", "INFO")
 
             # Create the system prompt
             system_prompt = """You are an expert at analyzing images and creating detailed descriptions
