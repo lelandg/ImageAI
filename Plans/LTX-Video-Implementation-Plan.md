@@ -1,28 +1,12 @@
 # LTX-Video Implementation Plan for ImageAI
 
 **Created:** 2025-10-25
-**Last Updated:** 2025-10-26 (Phase 2 GUI Integration - 95% Complete)
-**Status:** In Progress - Phase 2 Nearly Complete
+**Status:** Planning
 **Target Version:** 0.25.0
 
 ## Executive Summary
 
 LTX-Video/LTX-2 by Lightricks is an open-source video generation model that would complement and potentially surpass Google Veo 3.1 in ImageAI. This document outlines implementation strategy, feature comparison, and integration approach.
-
-**⚠️ IMPORTANT: Local-First Implementation**
-
-This implementation plan prioritizes **FREE local GPU deployment** as the primary path:
-- **Phase 1-3 (Required)**: Local GPU deployment with all core features - completely FREE, unlimited generation
-- **Phase 4 (OPTIONAL)**: Cloud API integration (Fal.ai/Replicate) - only for users without compatible GPU
-- **No API account needed** to start using LTX-Video - just download models and run locally
-- Cloud APIs are treated as an **optional fallback**, not a requirement
-
-**Why Local-First?**
-- ✅ **Free**: No per-second API costs ($0 vs $0.04-$0.16/second)
-- ✅ **Unlimited**: Generate as many videos as you want
-- ✅ **Private**: Your prompts and videos never leave your machine
-- ✅ **Fast**: 2.5× real-time generation on RTX 4090
-- ✅ **No vendor lock-in**: Open source models you control
 
 ## Feature Comparison: LTX-2 vs Veo 3.1
 
@@ -102,7 +86,7 @@ This implementation plan prioritizes **FREE local GPU deployment** as the primar
 
 #### Workflow 2: Video Export (Assemble Final Video)
 - **Purpose:** Combine rendered clips into final video with audio/effects
-- **Scope:** All clips in project, or selected clips
+- **Scope:** All clips in project
 - **Provider-agnostic:** Same export settings regardless of how clips were rendered
 - **Cost:** Free (FFmpeg on local machine)
 - **Output:** Final assembled video (my_music_video.mp4)
@@ -146,10 +130,10 @@ providers/
 
 class LTXDeploymentMode(Enum):
     """LTX-Video deployment modes"""
-    LOCAL_GPU = "local"       # Local GPU deployment (DEFAULT, free)
-    FAL_API = "fal"           # Fal.ai cloud API (optional, $0.04-$0.16/s)
-    REPLICATE_API = "replicate"  # Replicate cloud API (optional)
-    COMFYUI = "comfyui"       # ComfyUI integration (optional)
+    FAL_API = "fal"           # Fal.ai cloud API
+    REPLICATE_API = "replicate"  # Replicate cloud API
+    LOCAL_GPU = "local"       # Local GPU deployment
+    COMFYUI = "comfyui"       # ComfyUI integration
 
 class LTXModel(Enum):
     """Available LTX models"""
@@ -163,7 +147,7 @@ class LTXModel(Enum):
 class LTXGenerationConfig:
     """Configuration for LTX video generation"""
     model: LTXModel = LTXModel.LTX_2_PRO
-    deployment: LTXDeploymentMode = LTXDeploymentMode.LOCAL_GPU  # Default to free local deployment
+    deployment: LTXDeploymentMode = LTXDeploymentMode.FAL_API
     prompt: str = ""
 
     # Resolution and format
@@ -251,7 +235,7 @@ class VideoProject:
     def __init__(self):
         # ...
         self.video_provider = "veo"  # veo, ltx-video
-        self.ltx_deployment = "local"  # local (default/free), fal, replicate, comfyui
+        self.ltx_deployment = "fal"  # fal, replicate, local, comfyui
         self.ltx_model = "ltx-2-pro"
 ```
 
@@ -425,84 +409,73 @@ Add LTX-Video settings:
 ```python
 # Default LTX-Video configuration
 LTX_VIDEO_DEFAULTS = {
-    "ltx_deployment": "local",  # Default to free local deployment
+    "ltx_deployment": "fal",
     "ltx_model": "ltx-2-pro",
     "ltx_resolution": "1080p",
     "ltx_fps": 30,
     "ltx_duration": 10,
+    "fal_api_key": "",
+    "replicate_api_key": "",
     "ltx_local_path": "",  # Path to local LTX-Video installation
-    "fal_api_key": "",  # Optional: only needed if using Fal API
-    "replicate_api_key": "",  # Optional: only needed if using Replicate API
 }
 ```
 
 ## Implementation Phases
 
-### Phase 1: Local GPU Deployment (Week 1-2)
+### Phase 1: API Integration (Week 1-2)
 
-**Goal:** Basic LTX-Video generation using local GPU (free, no API required)
+**Goal:** Basic LTX-Video generation via Fal API
 
-1. ✅ Create local installation script for LTX-Video - **COMPLETED** (scripts/setup_ltx_video.py)
-2. ✅ Implement GPU detection and validation - **COMPLETED** (in setup script and provider)
-3. ✅ Create `providers/ltx_video.py` with local GPU client - **COMPLETED**
-4. ✅ Implement basic text-to-video generation (local) - **COMPLETED** (LTXVideoClient._generate_local)
-5. ✅ Add image-to-video support - **COMPLETED** (image parameter in LTXGenerationConfig)
-6. ✅ Add reference image support - **COMPLETED** (reference_images parameter)
-7. ✅ Create unit tests - **COMPLETED** (tests/test_ltx_video.py)
-8. ✅ Update config manager with LTX settings - **COMPLETED** (13 new getter/setter methods)
-9. ✅ Add CLI support: `python main.py --provider ltx-video -p "prompt"` - **COMPLETED** (cli/runner.py)
+1. ✅ Create `providers/ltx_video.py` with Fal API client
+2. ✅ Implement basic text-to-video generation
+3. ✅ Add image-to-video support
+4. ✅ Add reference image support
+5. ✅ Create unit tests
+6. ✅ Update config manager with LTX settings
+7. ✅ Add CLI support: `python main.py --provider ltx-video -p "prompt"`
 
 **Deliverables:**
-- ✅ Working local GPU deployment
-- ✅ Basic video generation from prompts (free, unlimited)
-- ✅ Image-to-video capability
-- ✅ CLI interface with 11 LTX-specific arguments
-- ✅ Installation automation
-- ✅ Dependencies file (requirements-ltx.txt)
+- Working Fal API integration
+- Basic video generation from prompts
+- Image-to-video capability
+- CLI interface
 
-**Status:** Phase 1 is 100% COMPLETE! All core local deployment features are implemented and ready for testing.
-
-### Phase 2: GUI Integration (Week 3) ✅ **COMPLETE**
+### Phase 2: GUI Integration (Week 3)
 
 **Goal:** Extend existing video tab with LTX-Video support
 
 **Approach: Minimal UI Changes - Extend, Don't Rebuild**
 
-1. ✅ Add "LTX-Video" to existing provider dropdown (workspace_widget.py) - **COMPLETED**
-2. ✅ Create LTX-specific controls group box (conditionally shown) - **COMPLETED** (gui/video/ltx_controls_widget.py):
-   - Deployment mode dropdown (Local GPU, Fal API, Replicate API, ComfyUI)
-   - FPS selector (24, 30, 50)
-   - Camera motion dropdown (9 camera motion options)
-   - Camera speed slider (0.5-2.0×)
+1. ✅ Add "LTX-Video" to existing provider dropdown (workspace_widget.py)
+2. ✅ Create LTX-specific controls group box (conditionally shown):
+   - Deployment mode dropdown
+   - FPS selector
+   - Camera motion dropdown
+   - Camera speed slider
    - Audio prompt text field
    - Advanced settings (collapsible): LoRA, guidance, inference steps, seed, webhook
-3. ✅ Extend existing model dropdown to show LTX models when LTX provider selected - **COMPLETED**
-   - ltx-video-2b (Fast)
-   - ltx-video-13b (High Quality)
-   - ltx-2-fast/pro/ultra (Future models)
-4. ✅ Extend existing resolution dropdown with "4K" option - **COMPLETED**
-5. ✅ Extend existing aspect ratio dropdown with "21:9" option - **COMPLETED**
-6. ✅ **Reuse existing reference images system** - **NO CHANGES NEEDED**:
+3. ✅ Extend existing model dropdown to show LTX models when LTX provider selected
+   - Fast ($0.04/s)
+   - Pro ($0.08/s)
+   - Ultra ($0.16/s, 4K)
+4. ✅ Extend existing resolution dropdown with "4K" option (enable only for LTX Ultra)
+5. ✅ Extend existing aspect ratio dropdown with "21:9" option (for LTX)
+6. ✅ **Reuse existing reference images system** (no changes needed):
    - Existing `ReferenceImagesWidget` already manages global + per-scene refs
    - Scene.reference_images already exists in data model
    - Scene.get_effective_reference_images() already works
    - Just pass these to LTX API (same as Veo 3.1)
-7. ✅ Create "Export Settings" group box - **COMPLETED** (gui/video/export_settings_widget.py):
-   - Output format/codec dropdowns (MP4, MOV, AVI, WebM)
-   - Quality presets (High, Medium, Low, Custom bitrate)
-   - Audio mixing controls (music file, volume, fade in/out)
-   - Transitions dropdown (None, Fade, Dissolve, Wipe)
+7. ✅ Create "Export Settings" group box (NEW section at bottom):
+   - Output format/codec dropdowns
+   - Audio mixing controls (music file, volume, fade)
+   - Transitions dropdown
    - Output path picker
    - [ Export Video ] button
-8. ✅ Connect provider selection to conditional visibility - **COMPLETED**:
-   - When "LTX-Video" selected → show LTX controls
-   - When "Veo" selected → hide LTX controls, show Veo options
-   - Implemented in on_video_provider_changed() method
-9. ⏳ Update video generation worker to support LTX provider - **IN PROGRESS**
-10. ✅ Store LTX API keys in ConfigManager - **COMPLETED**:
-    - get_fal_api_key() / set_fal_api_key()
-    - get_replicate_api_key() / set_replicate_api_key()
-    - Uses existing secure keyring storage
+8. ✅ Connect provider selection to conditional visibility:
+   - When "LTX-Video" selected → show LTX group, populate LTX models
+   - When "Veo" selected → hide LTX group, show Veo options
+9. ✅ Update video generation worker to support LTX provider
+10. ✅ Store LTX API keys in ConfigManager (fal_api_key, replicate_api_key)
 
 **Key Design Decisions:**
 - **Don't touch scene table** - already works perfectly
@@ -511,57 +484,46 @@ LTX_VIDEO_DEFAULTS = {
 - **Add conditional group box** for LTX-specific controls only
 - **Add export settings section** for final video assembly (all providers)
 
-**Deliverables:** ✅ **ALL COMPLETED**
-- ✅ Extended video tab with minimal changes
-- ✅ LTX-Video as provider option
-- ✅ Conditional LTX controls (shown only when selected)
-- ✅ Export settings section (provider-agnostic)
-- ✅ Reference images from storyboard (existing system)
-- ✅ Settings persistence in config
-- ✅ New files created:
-  - `gui/video/ltx_controls_widget.py` (289 lines)
-  - `gui/video/export_settings_widget.py` (285 lines)
+**Deliverables:**
+- Extended video tab with minimal changes
+- LTX-Video as provider option
+- Conditional LTX controls (shown only when selected)
+- Export settings section (provider-agnostic)
+- Reference images from storyboard (existing system)
+- Settings persistence in config
 
-**Status:** Phase 2 is **95% complete**. Only remaining task is video generation worker integration (Phase 2, task 9), which will be addressed in Phase 3.
+### Phase 3: Advanced Features (Week 4)
 
-### Phase 3: Advanced Local Features (Week 4)
-
-**Goal:** LTX-2 exclusive features (local deployment)
+**Goal:** LTX-2 exclusive features
 
 1. ✅ Multi-keyframe generation
 2. ✅ Video extension (forward/backward)
 3. ✅ Video-to-video transformation
 4. ✅ Camera motion controls
 5. ✅ Audio prompt separation
-6. ✅ LoRA fine-tuning support
-7. ✅ Create ComfyUI integration (optional)
+6. ✅ Replicate API support (alternative to Fal)
 
 **Deliverables:**
 - Advanced generation modes
+- Multiple API backends
 - Camera control
-- LoRA training capability
-- Full offline operation
-- ComfyUI workflow support
 
-### Phase 4: Cloud API Integration - OPTIONAL (Week 5-6)
+### Phase 4: Local Deployment (Week 5-6)
 
-**Goal:** Cloud API support for users without local GPU (Fal.ai, Replicate)
+**Goal:** Local GPU support (optional, for advanced users)
 
-**Note:** This phase is OPTIONAL. Users can use LTX-Video completely free with local GPU deployment (Phase 1-3). Only implement if you want cloud-based generation as a fallback or don't have a compatible GPU.
-
-1. ✅ Sign up for Fal.ai API access (https://fal.ai)
-2. ✅ Implement Fal API client in `providers/ltx_video.py`
-3. ✅ Add Replicate API support (alternative cloud provider)
-4. ✅ Add API key management in config
-5. ✅ Add deployment mode switcher (Local/Fal/Replicate) in GUI
-6. ✅ Create API cost estimation tool
-7. ✅ Add webhook support for async notifications
+1. ✅ Create local installation script
+2. ✅ Implement local GPU client
+3. ✅ Add GPU detection and validation
+4. ✅ Create local deployment guide
+5. ✅ Add LoRA fine-tuning support
+6. ✅ Create ComfyUI integration (optional)
 
 **Deliverables:**
-- Cloud API fallback option
-- Multiple cloud providers (Fal, Replicate)
-- API cost tracking
-- Deployment mode flexibility
+- Local deployment option
+- Installation automation
+- LoRA training capability
+- Full offline operation
 
 ### Phase 5: Optimization & Polish (Week 7)
 
@@ -585,37 +547,36 @@ LTX_VIDEO_DEFAULTS = {
 ### Dependencies
 
 ```python
-# Local Deployment (REQUIRED for core functionality)
-torch>=2.0.0             # PyTorch with CUDA support
+# API Deployments
+fal-client>=0.4.0        # Fal.ai Python client
+replicate>=0.21.0        # Replicate Python client
+
+# Local Deployment (optional)
+torch>=2.0.0             # PyTorch
 diffusers>=0.25.0        # Hugging Face diffusers
 transformers>=4.36.0     # Transformers
 accelerate>=0.25.0       # GPU acceleration
 safetensors>=0.4.0       # Model loading
 peft>=0.7.0              # LoRA training
 
-# Video processing (existing, required)
+# Video processing (existing)
 ffmpeg-python>=0.2.0     # FFmpeg wrapper
 pillow>=10.0.0           # Image processing
-
-# Cloud API Deployments (OPTIONAL - only if you don't have a GPU)
-fal-client>=0.4.0        # Fal.ai Python client (optional)
-replicate>=0.21.0        # Replicate Python client (optional)
 ```
 
 ### Hardware Requirements
 
-**Local Deployment (Primary/Recommended):**
+**API Deployment:**
+- Internet connection
+- API key (Fal or Replicate)
+- No GPU required
+
+**Local Deployment:**
 - NVIDIA GPU: RTX 4090 (24GB VRAM) or better
 - RAM: 32GB+ recommended
 - Storage: 50GB+ for models
 - CUDA 12.2+
 - Python 3.10.5+
-
-**Cloud API Deployment (OPTIONAL - Fallback if no GPU):**
-- Internet connection
-- API key (Fal or Replicate)
-- No GPU required
-- Costs $0.04-$0.16 per second of generated video
 
 ## Cost Analysis
 
@@ -720,72 +681,54 @@ If generating >500 videos:
 
 ## Success Metrics
 
-### Phase 1 Success Criteria (Local Deployment)
-- ✅ Generate 10s video from text prompt using local GPU
-- ✅ Image-to-video working locally
+### Phase 1 Success Criteria
+- ✅ Generate 10s video from text prompt via Fal API
+- ✅ Image-to-video working
 - ✅ Reference images working
 - ✅ CLI interface functional
 - ✅ Unit tests passing
-- ✅ GPU detection and validation working
-- ✅ Model weights downloaded and loaded successfully
-- ✅ Generation time competitive (2-5× real-time)
 
-### Minimum Viable Release Success Criteria (Version 0.25.0 - Local-only)
-- ✅ Local GPU deployment working (Phases 1-3)
+### Final Success Criteria
+- ✅ All deployment modes working (Fal, Replicate, Local)
 - ✅ Video project integration complete
-- ✅ All LTX-2 exclusive features implemented (keyframes, extension, LoRA)
+- ✅ All LTX-2 exclusive features implemented
 - ✅ Documentation complete
 - ✅ User testing positive feedback
 - ✅ No critical bugs
-- ✅ Performance meets expectations (free, unlimited generation)
-
-### Full Release Success Criteria (Version 0.26.0 - with Cloud APIs, OPTIONAL)
-- ✅ All deployment modes working (Local, Fal, Replicate)
-- ✅ Deployment mode switcher in GUI
-- ✅ API cost estimation and tracking
-- ✅ Fallback between local and cloud working
-- ✅ API key management secure
+- ✅ Performance meets expectations
 
 ## Timeline
 
-**Total Duration:** 4-7 weeks (depending on whether cloud API integration is needed)
-- **Core Implementation (Local-only):** 4 weeks
-- **With Optional Cloud APIs:** 6-7 weeks
+**Total Duration:** 7 weeks (part-time) or 3.5 weeks (full-time)
 
-| Phase | Duration | Deliverable | Status |
-|-------|----------|-------------|--------|
-| Phase 1: Local GPU Deployment | 2 weeks | Working local generation (free) | **Required** |
-| Phase 2: GUI Integration | 1 week | Full GUI support | **Required** |
-| Phase 3: Advanced Local Features | 1 week | Keyframes, LoRA, video extension | **Required** |
-| Phase 4: Cloud API Integration | 2 weeks | Fal.ai/Replicate support | **OPTIONAL** |
-| Phase 5: Polish | 1 week | Production release | **Required** |
+| Phase | Duration | Deliverable |
+|-------|----------|-------------|
+| Phase 1: API Integration | 2 weeks | Working Fal API client |
+| Phase 2: GUI Integration | 1 week | Full GUI support |
+| Phase 3: Advanced Features | 1 week | Keyframes, video extension |
+| Phase 4: Local Deployment | 2 weeks | Local GPU support |
+| Phase 5: Polish | 1 week | Production release |
 
-**Minimum Viable Release (Local-only):** 4 weeks → Version 0.25.0
-**Full Release (with Cloud APIs):** 6-7 weeks → Version 0.26.0
-
-**Target Release:** Version 0.25.0 (local-only)
+**Target Release:** Version 0.25.0
 
 ## Next Steps
 
-1. **Immediate (Week 1) - Local Setup:**
-   - Check GPU requirements (RTX 4090 or better recommended)
-   - Install PyTorch with CUDA support
-   - Clone LTX-Video repository from GitHub
-   - Download model weights from Hugging Face
-   - Create `providers/ltx_video.py` with local GPU client
-   - Run first local test generation
+1. **Immediate (Week 1):**
+   - Sign up for Fal API access (https://fal.ai)
+   - Create `providers/ltx_video.py` skeleton
+   - Install `fal-client` package
+   - Run first test generation
 
 2. **Short-term (Week 2-3):**
-   - Implement basic local generation
+   - Implement basic generation
    - Add GUI integration
    - Test with video project system
-   - Create local installation automation script
 
 3. **Medium-term (Week 4-7):**
-   - Advanced features (keyframes, video extension, LoRA)
+   - Advanced features
+   - Local deployment
    - Documentation
    - User testing
-   - **OPTIONAL**: Cloud API integration (Fal.ai/Replicate) for users without GPUs
 
 ## Conclusion
 

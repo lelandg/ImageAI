@@ -9,18 +9,6 @@ from core.utils import read_readme_text, extract_api_key_help
 from core.lyrics_to_prompts import LyricsToPromptsGenerator, load_lyrics_from_file
 from providers import get_provider, preload_provider
 
-# Import LTX-Video components
-try:
-    from providers.ltx_video import (
-        LTXVideoClient,
-        LTXGenerationConfig,
-        LTXDeploymentMode,
-        LTXModel
-    )
-    LTX_AVAILABLE = True
-except ImportError:
-    LTX_AVAILABLE = False
-
 
 def resolve_api_key(
     cli_key: Optional[str],
@@ -77,130 +65,6 @@ def store_api_key(api_key: str, provider: str = "google") -> None:
     config = ConfigManager()
     config.set_api_key(provider, api_key)
     config.save()
-
-
-def handle_ltx_video(args) -> int:
-    """
-    Handle LTX-Video generation.
-
-    Args:
-        args: Parsed command-line arguments
-
-    Returns:
-        Exit code (0 for success)
-    """
-    if not LTX_AVAILABLE:
-        print("Error: LTX-Video provider not available.")
-        print("Install dependencies: pip install -r requirements-ltx.txt")
-        return 2
-
-    if not args.prompt:
-        print("Error: --prompt required for video generation")
-        return 2
-
-    # Get LTX-Video settings from args
-    deployment = getattr(args, "ltx_deployment", "local")
-    model_name = getattr(args, "ltx_model", "ltx-video-2b")
-    resolution = getattr(args, "ltx_resolution", "1080p")
-    aspect_ratio = getattr(args, "ltx_aspect", "16:9")
-    fps = getattr(args, "ltx_fps", 30)
-    duration = getattr(args, "ltx_duration", 5)
-    image_path = getattr(args, "ltx_image", None)
-    camera_motion = getattr(args, "ltx_camera_motion", None)
-    guidance_scale = getattr(args, "ltx_guidance", 7.5)
-    num_steps = getattr(args, "ltx_steps", 50)
-    seed = getattr(args, "ltx_seed", None)
-
-    # Map deployment string to enum
-    deployment_map = {
-        "local": LTXDeploymentMode.LOCAL_GPU,
-        "fal": LTXDeploymentMode.FAL_API,
-        "replicate": LTXDeploymentMode.REPLICATE_API,
-        "comfyui": LTXDeploymentMode.COMFYUI,
-    }
-    deployment_mode = deployment_map.get(deployment, LTXDeploymentMode.LOCAL_GPU)
-
-    # Map model string to enum
-    model_map = {
-        "ltx-video-2b": LTXModel.LTX_VIDEO_2B,
-        "ltx-video-13b": LTXModel.LTX_VIDEO_13B,
-        "ltx-2-fast": LTXModel.LTX_2_FAST,
-        "ltx-2-pro": LTXModel.LTX_2_PRO,
-        "ltx-2-ultra": LTXModel.LTX_2_ULTRA,
-    }
-    model = model_map.get(model_name, LTXModel.LTX_VIDEO_2B)
-
-    # Get API key if needed (for cloud deployments)
-    api_key = None
-    if deployment_mode != LTXDeploymentMode.LOCAL_GPU:
-        config = ConfigManager()
-        # For Fal or Replicate, get the appropriate API key
-        key_provider = "fal" if deployment_mode == LTXDeploymentMode.FAL_API else "replicate"
-        api_key = config.get_api_key(key_provider)
-        if not api_key:
-            print(f"Error: API key required for {deployment} deployment")
-            print(f"Set with: python main.py --provider {key_provider} --api-key YOUR_KEY --set-key")
-            return 2
-
-    try:
-        # Initialize client
-        print(f"Initializing LTX-Video client ({deployment} mode)...")
-        client = LTXVideoClient(
-            deployment=deployment_mode,
-            api_key=api_key
-        )
-
-        # Create generation config
-        print(f"Configuring generation...")
-        print(f"  Model: {model_name}")
-        print(f"  Resolution: {resolution} @ {aspect_ratio}")
-        print(f"  Duration: {duration}s @ {fps}fps")
-        if camera_motion:
-            print(f"  Camera: {camera_motion}")
-
-        config = LTXGenerationConfig(
-            model=model,
-            deployment=deployment_mode,
-            prompt=args.prompt,
-            resolution=resolution,
-            aspect_ratio=aspect_ratio,
-            fps=fps,
-            duration=duration,
-            image=Path(image_path) if image_path else None,
-            camera_motion=camera_motion,
-            guidance_scale=guidance_scale,
-            num_inference_steps=num_steps,
-            seed=seed,
-        )
-
-        # Generate video
-        print(f"\nGenerating video...")
-        print(f"Prompt: {args.prompt}")
-        print("-" * 60)
-
-        result = client.generate_video_sync(config)
-
-        if result.success:
-            print(f"\n✅ Video generation successful!")
-            print(f"  Output: {result.video_path}")
-            print(f"  Duration: {result.duration:.1f}s")
-            print(f"  Resolution: {result.resolution[0]}x{result.resolution[1]}")
-            print(f"  FPS: {result.fps}")
-            print(f"  File size: {result.file_size / 1024 / 1024:.1f} MB")
-            print(f"  Generation time: {result.generation_time:.1f}s")
-            if result.cost > 0:
-                print(f"  Cost: ${result.cost:.4f}")
-            return 0
-        else:
-            print(f"\n❌ Video generation failed")
-            print(f"Error: {result.error}")
-            return 4
-
-    except Exception as e:
-        print(f"Error during video generation: {e}")
-        import traceback
-        traceback.print_exc()
-        return 4
 
 
 def handle_lyrics_to_prompts(args) -> int:
@@ -407,14 +271,10 @@ def run_cli(args) -> int:
     
     # Handle --prompt
     if args.prompt:
-        # Check if this is LTX-Video
-        if provider == "ltx-video":
-            return handle_ltx_video(args)
-
         if auth_mode == "api-key" and not key and provider != "local_sd":
             print("No API key. Use --api-key/--api-key-file or --set-key.")
             return 2
-
+        
         try:
             provider_instance = get_provider(provider, provider_config)
             

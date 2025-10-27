@@ -20,7 +20,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     # Provider selection
     parser.add_argument(
         "--provider",
-        choices=["google", "openai", "stability", "local_sd", "ltx-video"],
+        choices=["google", "openai", "stability", "local_sd"],
         default="google",
         help="AI provider to use (default: google)"
     )
@@ -118,73 +118,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Output JSON file for generated prompts"
     )
 
-    # LTX-Video options
-    ltx_group = parser.add_argument_group("ltx-video options")
-    ltx_group.add_argument(
-        "--ltx-deployment",
-        choices=["local", "fal", "replicate", "comfyui"],
-        default="local",
-        help="LTX-Video deployment mode (default: local)"
-    )
-    ltx_group.add_argument(
-        "--ltx-model",
-        choices=["ltx-video-2b", "ltx-video-13b", "ltx-2-fast", "ltx-2-pro", "ltx-2-ultra"],
-        default="ltx-video-2b",
-        help="LTX-Video model (default: ltx-video-2b)"
-    )
-    ltx_group.add_argument(
-        "--ltx-resolution",
-        choices=["720p", "1080p", "4K"],
-        default="1080p",
-        help="Video resolution (default: 1080p)"
-    )
-    ltx_group.add_argument(
-        "--ltx-aspect",
-        choices=["16:9", "9:16", "1:1", "21:9"],
-        default="16:9",
-        help="Video aspect ratio (default: 16:9)"
-    )
-    ltx_group.add_argument(
-        "--ltx-fps",
-        type=int,
-        choices=[24, 30, 50],
-        default=30,
-        help="Video FPS (default: 30)"
-    )
-    ltx_group.add_argument(
-        "--ltx-duration",
-        type=int,
-        default=5,
-        help="Video duration in seconds, 1-10 (default: 5)"
-    )
-    ltx_group.add_argument(
-        "--ltx-image",
-        help="Start frame image for image-to-video"
-    )
-    ltx_group.add_argument(
-        "--ltx-camera-motion",
-        choices=["pan_left", "pan_right", "zoom_in", "zoom_out", "orbit",
-                 "dolly_forward", "dolly_backward", "crane_up", "crane_down"],
-        help="Camera motion type"
-    )
-    ltx_group.add_argument(
-        "--ltx-guidance",
-        type=float,
-        default=7.5,
-        help="Guidance scale (default: 7.5)"
-    )
-    ltx_group.add_argument(
-        "--ltx-steps",
-        type=int,
-        default=50,
-        help="Number of inference steps (default: 50)"
-    )
-    ltx_group.add_argument(
-        "--ltx-seed",
-        type=int,
-        help="Random seed for reproducibility"
-    )
-
     # Help options
     help_group = parser.add_argument_group("help")
     help_group.add_argument(
@@ -192,5 +125,5 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Show API key setup instructions"
     )
-
+    
     return parser
