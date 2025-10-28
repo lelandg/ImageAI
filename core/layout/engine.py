@@ -106,6 +106,46 @@ class LayoutEngine:
         img.save(out_path)
         logger.info(f"Page rendered successfully to {out_path}")
 
+    def render_page_to_image(
+        self,
+        page: PageSpec,
+        page_variables: Optional[dict] = None,
+        process_template: bool = True
+    ) -> Image.Image:
+        """
+        Render a single page to a PIL Image object (for GUI display).
+
+        Args:
+            page: PageSpec describing the page layout
+            page_variables: Optional variables for template substitution
+            process_template: Whether to process template variables
+
+        Returns:
+            PIL Image object
+        """
+        # Process template variables if enabled
+        if process_template:
+            page = self.template_engine.process_page(page, page_variables)
+
+        W, H = page.page_size_px
+        bg = page.background or "#FFFFFF"
+
+        # Create image with background
+        img = Image.new("RGB", (W, H), self._hex_to_rgb(bg))
+        draw = ImageDraw.Draw(img)
+
+        # Render each block
+        for block in page.blocks:
+            try:
+                if isinstance(block, ImageBlock):
+                    self._render_image_block(img, draw, block)
+                elif isinstance(block, TextBlock):
+                    self._render_text_block(img, draw, block)
+            except Exception as e:
+                logger.error(f"Failed to render block {block.id}: {e}")
+
+        return img
+
     def _render_image_block(self, img: Image.Image, draw: ImageDraw.ImageDraw, block: ImageBlock) -> None:
         """Render an image block onto the page using Phase 2 ImageProcessor."""
         if not block.image_path or not Path(block.image_path).exists():

@@ -491,14 +491,24 @@ class MainWindow(QMainWindow):
         self.tab_video = QWidget()  # Placeholder widget
         self._video_tab_loaded = False  # Track if real video tab is loaded
 
+        # Create layout tab
+        try:
+            from gui.layout import LayoutTab
+            self.tab_layout = LayoutTab(config=self.config)
+            logger.info("Layout tab created successfully")
+        except Exception as e:
+            logger.error(f"Failed to create layout tab: {e}", exc_info=True)
+            self.tab_layout = QWidget()  # Fallback placeholder
+
         # Add tabs
         self.tabs.addTab(self.tab_generate, "🎨 Image")
         self.tabs.addTab(self.tab_templates, "📝 Templates")
         self.tabs.addTab(self.tab_video, "🎬 Video")
+        self.tabs.addTab(self.tab_layout, "📖 Layout")
         self.tabs.addTab(self.tab_settings, "⚙️ Settings")
         self.tabs.addTab(self.tab_help, "❓ Help")
         self.tabs.addTab(self.tab_history, "📜 History")  # Always add history tab
-        
+
         self._init_generate_tab()
         self._init_templates_tab()
         self._init_settings_tab()
