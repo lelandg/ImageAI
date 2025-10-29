@@ -4391,6 +4391,8 @@ For more detailed information, please refer to the full documentation.
             return
 
         # Check for resolution in prompt and warn user
+        # NOTE: Only block LITERAL dimensions (1024x768, 1920x1080, etc.) that get rendered as text.
+        # Quality descriptors like "8K resolution", "4K quality" are artistic direction and are fine.
         import re
         resolution_patterns = [
             r'\(\d+\s*[xX]\s*\d+\)',  # (1024x768)
@@ -4398,7 +4400,7 @@ For more detailed information, please refer to the full documentation.
             r'\b\d{3,4}\s*[xX]\s*\d{3,4}\b',  # 1024x768 or 1920x1080
             r'\bat\s+\d+\s*[xX]\s*\d+',  # at 1024x768
             r'\b\d+\s*[xX]\s*\d+\s*(resolution|pixels?|size)',  # 1024x768 resolution
-            r'\b(4K|8K|HD|FHD|Full\s*HD|UHD)\s*(resolution|size)?',  # 4K resolution
+            # Removed 4K/8K/HD pattern - these are quality descriptors, not literal dimensions
         ]
 
         detected_resolutions = []
@@ -4410,8 +4412,8 @@ For more detailed information, please refer to the full documentation.
             # Create warning dialog
             msg = QMessageBox(self)
             msg.setIcon(QMessageBox.Warning)
-            msg.setWindowTitle("Resolution Detected in Prompt")
-            msg.setText("Your prompt contains resolution specifications. Please remove them and use the Resolution/Aspect Ratio controls in the GUI instead.")
+            msg.setWindowTitle("Literal Dimensions Detected in Prompt")
+            msg.setText("Your prompt contains literal pixel dimensions (e.g., '1024x768') which may be rendered as text in the image. Please remove them and use the Resolution/Aspect Ratio controls instead.\n\nNote: Quality descriptors like '8K resolution' or '4K quality' are fine and won't trigger this warning.")
 
             # Show what was detected
             # Convert tuples to strings (regex patterns with capture groups return tuples)
@@ -4423,7 +4425,7 @@ For more detailed information, please refer to the full documentation.
                 else:
                     detected_strings.append(str(match))
             detected_text = ", ".join(set(detected_strings))
-            msg.setInformativeText(f"Detected: {detected_text}\n\nThe GUI controls will handle resolution properly.")
+            msg.setInformativeText(f"Detected literal dimensions: {detected_text}\n\nUse the Resolution/Aspect Ratio controls in the GUI to specify your desired output size.")
 
             # Add buttons
             remove_btn = msg.addButton("Remove and Continue", QMessageBox.AcceptRole)
@@ -4447,7 +4449,7 @@ For more detailed information, please refer to the full documentation.
                 # Update the prompt in the GUI
                 self.prompt_edit.setPlainText(cleaned_prompt)
                 prompt = cleaned_prompt
-                self._append_to_console(f"Removed resolution text from prompt", "#66ccff")  # Blue
+                self._append_to_console(f"Removed literal dimensions from prompt", "#66ccff")  # Blue
 
         # Store original prompt (before reference image modifications)
         original_prompt = prompt
