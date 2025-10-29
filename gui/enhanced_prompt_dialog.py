@@ -470,35 +470,51 @@ class EnhancedPromptDialog(QDialog):
             QMessageBox.warning(self, "Prompt Required", "Please enter a prompt to enhance.")
             return
 
-        # Get API key
+        # Get LLM provider
         llm_provider = self.llm_provider_combo.currentText()
+
+        # Check authentication mode (for Google Cloud auth support)
+        auth_mode = "api-key"  # Default
+        if self.config and llm_provider.lower() in ["google", "gemini"]:
+            auth_mode = self.config.get("auth_mode", "api-key")
+            # Normalize auth mode values
+            if auth_mode in ["api_key", "API Key"]:
+                auth_mode = "api-key"
+            elif auth_mode == "Google Cloud Account":
+                auth_mode = "gcloud"
+
+        # Get API key (only required for api-key mode)
         api_key = None
-        if self.config:
-            provider_lower = llm_provider.lower()
+        if auth_mode == "api-key":
+            if self.config:
+                provider_lower = llm_provider.lower()
 
-            if provider_lower == "openai":
-                api_key = self.config.get_api_key('openai')
+                if provider_lower == "openai":
+                    api_key = self.config.get_api_key('openai')
+                    if not api_key:
+                        api_key = self.config.get('openai_api_key')
+
+                elif provider_lower in ["gemini", "google"]:
+                    api_key = self.config.get_api_key('google')
+                    if not api_key:
+                        api_key = self.config.get('google_api_key') or self.config.get('api_key')
+
+                elif provider_lower in ["claude", "anthropic"]:
+                    api_key = self.config.get_api_key('anthropic')
+                    if not api_key:
+                        api_key = self.config.get('anthropic_api_key')
+
                 if not api_key:
-                    api_key = self.config.get('openai_api_key')
-
-            elif provider_lower in ["gemini", "google"]:
-                api_key = self.config.get_api_key('google')
-                if not api_key:
-                    api_key = self.config.get('google_api_key') or self.config.get('api_key')
-
-            elif provider_lower in ["claude", "anthropic"]:
-                api_key = self.config.get_api_key('anthropic')
-                if not api_key:
-                    api_key = self.config.get('anthropic_api_key')
-
-            if not api_key:
-                QMessageBox.warning(
-                    self, "API Key Required",
-                    f"Please configure your {llm_provider} API key in Settings."
-                )
+                    QMessageBox.warning(
+                        self, "API Key Required",
+                        f"Please configure your {llm_provider} API key in Settings."
+                    )
+                    return
+            else:
                 return
         else:
-            return
+            # Using Google Cloud auth - no API key needed
+            self.status_console.log("Using Google Cloud authentication", "INFO")
 
         # Get enhancement level
         level_map = {

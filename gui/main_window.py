@@ -4414,7 +4414,15 @@ For more detailed information, please refer to the full documentation.
             msg.setText("Your prompt contains resolution specifications. Please remove them and use the Resolution/Aspect Ratio controls in the GUI instead.")
 
             # Show what was detected
-            detected_text = ", ".join(set(detected_resolutions))
+            # Convert tuples to strings (regex patterns with capture groups return tuples)
+            detected_strings = []
+            for match in detected_resolutions:
+                if isinstance(match, tuple):
+                    # Join non-empty tuple elements
+                    detected_strings.append(" ".join(filter(None, match)))
+                else:
+                    detected_strings.append(str(match))
+            detected_text = ", ".join(set(detected_strings))
             msg.setInformativeText(f"Detected: {detected_text}\n\nThe GUI controls will handle resolution properly.")
 
             # Add buttons

@@ -435,13 +435,83 @@ class LayoutTab(QWidget):
 
         if file_path:
             try:
-                # Future: load project file
                 logger.info(f"Loading project: {file_path}")
+
+                # Load JSON file
+                import json
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    doc_dict = json.load(f)
+
+                # Deserialize to DocumentSpec
+                from core.layout.models import DocumentSpec, PageSpec, TextBlock, ImageBlock, TextStyle, ImageStyle
+
+                # Helper function to deserialize blocks
+                def deserialize_block(block_dict):
+                    if block_dict.get('type') == 'text':
+                        # Deserialize TextStyle
+                        style_dict = block_dict.get('style', {})
+                        style = TextStyle(**style_dict)
+
+                        # Create TextBlock
+                        return TextBlock(
+                            id=block_dict['id'],
+                            rect=tuple(block_dict['rect']),
+                            text=block_dict.get('text', ''),
+                            style=style
+                        )
+                    elif block_dict.get('type') == 'image':
+                        # Deserialize ImageStyle
+                        style_dict = block_dict.get('style', {})
+                        style = ImageStyle(**style_dict)
+
+                        # Create ImageBlock
+                        return ImageBlock(
+                            id=block_dict['id'],
+                            rect=tuple(block_dict['rect']),
+                            image_path=block_dict.get('image_path'),
+                            style=style,
+                            alt_text=block_dict.get('alt_text')
+                        )
+                    else:
+                        raise ValueError(f"Unknown block type: {block_dict.get('type')}")
+
+                # Deserialize pages
+                pages = []
+                for page_dict in doc_dict.get('pages', []):
+                    blocks = [deserialize_block(b) for b in page_dict.get('blocks', [])]
+
+                    page = PageSpec(
+                        page_size_px=tuple(page_dict['page_size_px']),
+                        margin_px=page_dict.get('margin_px', 64),
+                        bleed_px=page_dict.get('bleed_px', 0),
+                        background=page_dict.get('background'),
+                        blocks=blocks,
+                        variables=page_dict.get('variables', {})
+                    )
+                    pages.append(page)
+
+                # Create DocumentSpec
+                self.current_document = DocumentSpec(
+                    title=doc_dict.get('title', 'Untitled'),
+                    author=doc_dict.get('author'),
+                    pages=pages,
+                    theme=doc_dict.get('theme', {}),
+                    metadata=doc_dict.get('metadata', {})
+                )
+
+                # Update UI
+                self.current_page_index = 0
+                self.canvas.set_document(self.current_document, 0)
+                self.inspector.set_block(None)  # Clear selection
+                self.update_page_info()
+
+                logger.info(f"Loaded project: {self.current_document.title} with {len(self.current_document.pages)} pages")
                 QMessageBox.information(
                     self,
-                    "Open Project",
-                    f"Project loading will be implemented soon.\n\nFile: {file_path}"
+                    "Project Loaded",
+                    f"Successfully loaded: {self.current_document.title}\n\nPages: {len(self.current_document.pages)}"
                 )
+
             except Exception as e:
                 logger.error(f"Failed to open project: {e}", exc_info=True)
                 QMessageBox.critical(self, "Error", f"Failed to open project:\n{e}")
@@ -454,22 +524,38 @@ class LayoutTab(QWidget):
             QMessageBox.warning(self, "No Document", "No document to save.")
             return
 
+        # Default filename based on document title
+        default_filename = f"{self.current_document.title or 'untitled'}.layout.json"
+        default_filename = default_filename.replace(' ', '_')  # Replace spaces
+
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Layout Project",
-            str(Path.home() / "untitled.layout.json"),
+            str(Path.home() / default_filename),
             "Layout Project (*.layout.json);;All Files (*.*)"
         )
 
         if file_path:
             try:
-                # Future: save project file
                 logger.info(f"Saving project: {file_path}")
+
+                # Serialize DocumentSpec to dict using dataclasses.asdict
+                from dataclasses import asdict
+                import json
+
+                doc_dict = asdict(self.current_document)
+
+                # Save to JSON file
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    json.dump(doc_dict, f, indent=2)
+
+                logger.info(f"Saved project: {self.current_document.title} ({len(self.current_document.pages)} pages)")
                 QMessageBox.information(
                     self,
-                    "Save Project",
-                    f"Project saving will be implemented soon.\n\nFile: {file_path}"
+                    "Project Saved",
+                    f"Successfully saved: {self.current_document.title}\n\nFile: {Path(file_path).name}"
                 )
+
             except Exception as e:
                 logger.error(f"Failed to save project: {e}", exc_info=True)
                 QMessageBox.critical(self, "Error", f"Failed to save project:\n{e}")

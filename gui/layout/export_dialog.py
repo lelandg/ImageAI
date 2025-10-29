@@ -185,6 +185,30 @@ class ExportDialog(QDialog):
         """Initialize the UI."""
         layout = QVBoxLayout(self)
 
+        # Export presets
+        preset_group = QGroupBox("Quick Presets")
+        preset_layout = QHBoxLayout()
+
+        preset_label = QLabel("Preset:")
+        preset_layout.addWidget(preset_label)
+
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItems([
+            "Custom",
+            "Web (PNG 72 DPI)",
+            "Draft Print (PDF 150 DPI)",
+            "High Quality Print (PDF 300 DPI)",
+            "Ultra High Res (PNG 600 DPI)"
+        ])
+        self.preset_combo.setToolTip("Choose a preset or select Custom for manual settings")
+        self.preset_combo.currentIndexChanged.connect(self._on_preset_changed)
+        preset_layout.addWidget(self.preset_combo)
+
+        preset_layout.addStretch()
+
+        preset_group.setLayout(preset_layout)
+        layout.addWidget(preset_group)
+
         # Format selection
         format_group = QGroupBox("Export Format")
         format_layout = QVBoxLayout()
@@ -289,6 +313,41 @@ class ExportDialog(QDialog):
         """Handle range radio button toggle."""
         self.start_page_spin.setEnabled(checked)
         self.end_page_spin.setEnabled(checked)
+
+    def _on_preset_changed(self, index: int):
+        """Handle preset selection change."""
+        preset_name = self.preset_combo.currentText()
+
+        # Define presets
+        presets = {
+            "Web (PNG 72 DPI)": {
+                "format": "png",
+                "dpi": 72
+            },
+            "Draft Print (PDF 150 DPI)": {
+                "format": "pdf",
+                "dpi": 150
+            },
+            "High Quality Print (PDF 300 DPI)": {
+                "format": "pdf",
+                "dpi": 300
+            },
+            "Ultra High Res (PNG 600 DPI)": {
+                "format": "png",
+                "dpi": 600
+            }
+        }
+
+        if preset_name in presets:
+            preset = presets[preset_name]
+
+            # Apply preset settings
+            if preset["format"] == "png":
+                self.png_radio.setChecked(True)
+            elif preset["format"] == "pdf":
+                self.pdf_radio.setChecked(True)
+
+            self.dpi_spin.setValue(preset["dpi"])
 
     def load_settings(self):
         """Load settings from config."""
