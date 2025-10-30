@@ -623,7 +623,7 @@ class MainWindow(QMainWindow):
         provider_model_layout.addWidget(self.model_combo)
         provider_model_layout.addStretch()
         v.addLayout(provider_model_layout)
-        
+
         # Create vertical splitter for prompt and image
         from gui.common.splitter_style import apply_splitter_style
         splitter = QSplitter(Qt.Vertical)
@@ -644,7 +644,22 @@ class MainWindow(QMainWindow):
         find_tip = QLabel("(Ctrl+F to search)")
         find_tip.setStyleSheet("color: #888; font-size: 9pt;")
         prompt_header_layout.addWidget(find_tip)
+
         prompt_header_layout.addStretch()
+
+        # Add quick reference tag insertion buttons (dynamically created based on reference count)
+        self.ref_tag_buttons_widget = QWidget()
+        self.ref_tag_buttons_layout = QHBoxLayout(self.ref_tag_buttons_widget)
+        self.ref_tag_buttons_layout.setContentsMargins(0, 0, 0, 0)
+        self.ref_tag_buttons_layout.setSpacing(2)
+
+        self.ref_tag_label = QLabel("Insert ref:")
+        self.ref_tag_buttons_layout.addWidget(self.ref_tag_label)
+        # Buttons will be created dynamically in _update_reference_buttons()
+
+        self.ref_tag_buttons_widget.setVisible(False)  # Hidden initially
+        prompt_header_layout.addWidget(self.ref_tag_buttons_widget)
+
         prompt_layout.addLayout(prompt_header_layout)
 
         self.prompt_edit = QTextEdit()
@@ -788,10 +803,6 @@ class MainWindow(QMainWindow):
             quality_v_layout.setContentsMargins(0, 0, 0, 0)
             quality_v_layout.setSpacing(3)
 
-            quality_label = QLabel("Model Quality:")
-            quality_label.setMaximumHeight(20)
-            quality_v_layout.addWidget(quality_label)
-
             self.quality_selector = QualitySelector(self.current_provider)
             self.quality_selector.settingsChanged.connect(self._on_quality_settings_changed)
             quality_v_layout.addWidget(self.quality_selector)
@@ -904,8 +915,8 @@ class MainWindow(QMainWindow):
 
         bottom_layout.addWidget(self.image_settings_container)
 
-        # Reference Image Settings (collapsible flyout)
-        self.ref_image_toggle = QPushButton("▶ Reference Image (Google Only)")
+        # Reference Image Settings (collapsible flyout) - Multi-reference for Imagen 3
+        self.ref_image_toggle = QPushButton("▶ Reference Images (Google Only - Imagen 3)")
         self.ref_image_toggle.setCheckable(True)
         self.ref_image_toggle.setChecked(False)
         self.ref_image_toggle.clicked.connect(lambda checked: self._toggle_ref_image_settings(checked))
@@ -928,163 +939,18 @@ class MainWindow(QMainWindow):
         ref_container_layout = QVBoxLayout(self.ref_image_container)
         ref_container_layout.setContentsMargins(10, 0, 0, 0)  # Indent for hierarchy
 
-        # Add reference image section
-        ref_image_group = QGroupBox()
-        ref_image_layout = QVBoxLayout()
-        ref_image_layout.setSpacing(5)
-
-        # Horizontal layout for reference image controls
-        ref_controls_layout = QHBoxLayout()
-
-        # Reference image button
-        self.btn_select_ref_image = QPushButton("Select &Reference Image...")
-        self.btn_select_ref_image.setToolTip("Choose a starting image for generation (Google Gemini only)")
-        self.btn_select_ref_image.clicked.connect(self._select_reference_image)
-        ref_controls_layout.addWidget(self.btn_select_ref_image)
-
-        # Use current image button
-        self.btn_use_current_as_ref = QPushButton("&Use Current Image")
-        self.btn_use_current_as_ref.setToolTip("Use the currently displayed image as reference")
-        self.btn_use_current_as_ref.clicked.connect(self._use_current_as_reference)
-        self.btn_use_current_as_ref.setEnabled(False)  # Initially disabled
-        ref_controls_layout.addWidget(self.btn_use_current_as_ref)
-
-        # Enable/disable checkbox
-        self.ref_image_enabled = QCheckBox("Use reference")
-        self.ref_image_enabled.setChecked(False)
-        self.ref_image_enabled.setEnabled(False)  # Disabled until image selected
-        self.ref_image_enabled.toggled.connect(self._on_ref_image_toggled)
-        ref_controls_layout.addWidget(self.ref_image_enabled)
-
-        # Clear button
-        self.btn_clear_ref_image = QPushButton("&Clear")
-        self.btn_clear_ref_image.setEnabled(False)
-        self.btn_clear_ref_image.clicked.connect(self._clear_reference_image)
-        ref_controls_layout.addWidget(self.btn_clear_ref_image)
-
-        ref_controls_layout.addStretch()
-        ref_image_layout.addLayout(ref_controls_layout)
-
-        # Container for image preview and controls
-        ref_preview_container = QHBoxLayout()
-
-        # Reference image preview (initially hidden)
-        self.ref_image_preview = QLabel()
-        self.ref_image_preview.setAlignment(Qt.AlignCenter)
-        self.ref_image_preview.setMaximumHeight(150)
-        self.ref_image_preview.setMaximumWidth(200)
-        self.ref_image_preview.setStyleSheet("border: 1px solid #ccc; background-color: #f9f9f9;")
-        self.ref_image_preview.setScaledContents(False)
-        self.ref_image_preview.setVisible(False)
-        ref_preview_container.addWidget(self.ref_image_preview)
-
-        # Reference image options (initially hidden)
-        self.ref_options_widget = QWidget()
-        self.ref_options_widget.setVisible(False)
-        ref_options_layout = QVBoxLayout(self.ref_options_widget)
-        ref_options_layout.setSpacing(3)
-
-        # Placement style dropdown
-        style_layout = QHBoxLayout()
-        style_label = QLabel("Style:")
-        style_label.setMinimumWidth(60)
-        style_layout.addWidget(style_label)
-
-        self.ref_style_combo = QComboBox()
-        self.ref_style_combo.addItems([
-            "Seamless merge",
-            "Natural blend",
-            "In center",
-            "Blurred edges",
-            "In circle",
-            "In frame",
-            "As background",
-            "As overlay",
-            "Split screen"
-        ])
-        self.ref_style_combo.setCurrentText("Seamless merge")  # Set as default
-        self.ref_style_combo.currentTextChanged.connect(self._on_ref_style_changed)
-        style_layout.addWidget(self.ref_style_combo)
-        ref_options_layout.addLayout(style_layout)
-
-        # Position dropdown
-        position_layout = QHBoxLayout()
-        position_label = QLabel("Position:")
-        position_label.setMinimumWidth(60)
-        position_layout.addWidget(position_label)
-
-        self.ref_position_combo = QComboBox()
-        self.ref_position_combo.addItems([
-            "Auto",
-            "Left",
-            "Center",
-            "Right",
-            "Top",
-            "Bottom",
-            "Top-left",
-            "Top-right",
-            "Bottom-left",
-            "Bottom-right"
-        ])
-        self.ref_position_combo.currentTextChanged.connect(self._on_ref_position_changed)
-        position_layout.addWidget(self.ref_position_combo)
-        ref_options_layout.addLayout(position_layout)
-
-        # Type dropdown
-        type_layout = QHBoxLayout()
-        type_label = QLabel("Type:")
-        type_label.setMinimumWidth(60)
-        type_layout.addWidget(type_label)
-
-        self.ref_type_combo = QComboBox()
-        self.ref_type_combo.addItems([
-            "CHARACTER",
-            "OBJECT",
-            "ENVIRONMENT",
-            "STYLE"
-        ])
-        self.ref_type_combo.setToolTip("Specify how this reference should be used")
-        self.ref_type_combo.currentTextChanged.connect(self._on_ref_type_changed)
-        type_layout.addWidget(self.ref_type_combo)
-        ref_options_layout.addLayout(type_layout)
-
-        # How to use (freeform text)
-        usage_layout = QHBoxLayout()
-        usage_label = QLabel("How to use:")
-        usage_label.setMinimumWidth(60)
-        usage_layout.addWidget(usage_label)
-
-        self.ref_usage_edit = QLineEdit()
-        self.ref_usage_edit.setPlaceholderText("e.g., 'Match the character's outfit and hairstyle'")
-        self.ref_usage_edit.setToolTip("Freeform text describing how to use this reference")
-        self.ref_usage_edit.textChanged.connect(self._on_ref_usage_changed)
-        usage_layout.addWidget(self.ref_usage_edit)
-        ref_options_layout.addLayout(usage_layout)
-
-        # Tips label
-        tips_label = QLabel("Tips: Gemini understands natural language\ninstructions about your reference image.")
-        tips_label.setStyleSheet("color: #666; font-size: 9pt; padding: 5px 0;")
-        tips_label.setWordWrap(True)
-        ref_options_layout.addWidget(tips_label)
-
-        # Auto-insert preview
-        self.ref_instruction_label = QLabel("Will insert: [nothing]")
-        self.ref_instruction_label.setStyleSheet("color: #0066cc; font-size: 9pt; padding: 5px; background: #f0f8ff; border: 1px solid #cce0ff; border-radius: 3px;")
-        self.ref_instruction_label.setWordWrap(True)
-        ref_options_layout.addWidget(self.ref_instruction_label)
-
-        ref_preview_container.addWidget(self.ref_options_widget)
-        ref_preview_container.addStretch()
-        ref_image_layout.addLayout(ref_preview_container)
-
-        ref_image_group.setLayout(ref_image_layout)
-        ref_container_layout.addWidget(ref_image_group)
+        # Add Imagen 3 multi-reference widget
+        from gui.imagen_reference_widget import ImagenReferenceWidget
+        self.imagen_reference_widget = ImagenReferenceWidget()
+        self.imagen_reference_widget.references_changed.connect(self._on_imagen_references_changed)
+        ref_container_layout.addWidget(self.imagen_reference_widget)
         bottom_layout.addWidget(self.ref_image_container)
 
-        # Store reference image data
+        # Store reference image data (legacy - kept for backward compatibility)
+        # NEW: Multi-reference data is stored in self.imagen_reference_widget
         self.reference_image_path = None
         self.reference_image_data = None
-        
+
         # Advanced Settings (collapsible)
         if AdvancedSettingsPanel:
             self.advanced_panel = AdvancedSettingsPanel(self.current_provider)
@@ -1351,6 +1217,16 @@ class MainWindow(QMainWindow):
 
         # Load reference image from config if available
         self._load_reference_image_from_config()
+
+        # Load Imagen multi-reference images from config
+        self._load_imagen_references_from_config()
+
+        # Restore reference images expansion state
+        if hasattr(self, 'ref_image_toggle'):
+            expanded = self.config.get('reference_images_expanded', False)
+            self.ref_image_toggle.setChecked(expanded)
+            self.ref_image_container.setVisible(expanded)
+            self.ref_image_toggle.setText("▼ Reference Images (Google Only - Imagen 3)" if expanded else "▶ Reference Images (Google Only - Imagen 3)")
 
         # Check provider support for reference images
         if hasattr(self, 'btn_select_ref_image'):
@@ -3496,6 +3372,9 @@ For more detailed information, please refer to the full documentation.
             if hasattr(self, 'btn_social_sizes') and self.btn_social_sizes:
                 self.btn_social_sizes.setVisible(provider_name != "midjourney")
 
+            # Update Imagen reference widget visibility
+            self._update_imagen_reference_visibility()
+
     def _on_model_changed(self, model_name: str):
         """Handle model selection change."""
         if self.current_provider.lower() == "local_sd" and hasattr(self, 'steps_spin'):
@@ -3508,6 +3387,9 @@ For more detailed information, please refer to the full documentation.
                     idx = self.resolution_combo.findText("1024x1024", Qt.MatchContains)
                     if idx >= 0:
                         self.resolution_combo.setCurrentIndex(idx)
+
+        # Show/hide Imagen reference widget based on provider and model
+        self._update_imagen_reference_visibility()
     
     def _on_provider_changed(self, provider: str):
         """Handle provider change from Settings tab."""
@@ -3525,6 +3407,99 @@ For more detailed information, please refer to the full documentation.
                 # Midjourney command is now built by the provider, no update needed
             else:
                 self.output_stack.setCurrentIndex(0)  # Show image widget
+
+    def _update_imagen_reference_visibility(self):
+        """Update visibility of Reference Images toggle based on provider."""
+        if not hasattr(self, 'ref_image_toggle'):
+            return
+
+        # Show Reference Images section only for Google provider
+        current_provider = self.image_provider_combo.currentText().lower()
+        show_toggle = current_provider == "google"
+
+        self.ref_image_toggle.setVisible(show_toggle)
+
+        # If switching away from Google and section is expanded, collapse it
+        if not show_toggle and self.ref_image_toggle.isChecked():
+            self.ref_image_toggle.setChecked(False)
+            self.ref_image_container.setVisible(False)
+
+        # If switching TO Google, show a helpful message if there are references
+        if show_toggle and hasattr(self, 'imagen_reference_widget'):
+            if self.imagen_reference_widget.has_references():
+                logger.info(f"Google provider selected with {len(self.imagen_reference_widget.get_references())} reference images ready")
+
+        logger.debug(f"Reference images toggle visibility: {show_toggle} (provider: {current_provider})")
+
+    def _update_reference_buttons(self, num_references):
+        """Dynamically create/update reference insertion buttons based on count."""
+        if not hasattr(self, 'ref_tag_buttons_layout'):
+            return
+
+        # Remove existing buttons (keep the label)
+        while self.ref_tag_buttons_layout.count() > 1:  # Keep "Insert ref:" label
+            item = self.ref_tag_buttons_layout.takeAt(1)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Create buttons for each reference
+        for i in range(1, num_references + 1):
+            btn = QPushButton(f"[{i}]")
+            btn.setFixedSize(35, 22)
+            btn.setToolTip(f"Insert reference tag [{i}] at cursor position")
+            btn.clicked.connect(lambda checked, tag=f"[{i}]": self._insert_reference_tag(tag))
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #2196F3;
+                    color: white;
+                    border: none;
+                    border-radius: 3px;
+                    font-weight: bold;
+                    font-size: 9pt;
+                }
+                QPushButton:hover {
+                    background-color: #1976D2;
+                }
+            """)
+            self.ref_tag_buttons_layout.addWidget(btn)
+
+    def _on_imagen_references_changed(self):
+        """Handle when Imagen reference images change."""
+        if not hasattr(self, 'imagen_reference_widget'):
+            return
+
+        references = self.imagen_reference_widget.get_references()
+        logger.info(f"Imagen references changed: {len(references)} references")
+
+        # Auto-save to config
+        self._save_imagen_references_to_config()
+
+        # Update reference tag insertion buttons dynamically
+        if hasattr(self, 'ref_tag_buttons_widget'):
+            self._update_reference_buttons(len(references))
+            self.ref_tag_buttons_widget.setVisible(len(references) > 0)
+
+        # Update prompt placeholder if references exist
+        if references and hasattr(self, 'prompt_edit'):
+            ref_tags = ", ".join([f"[{i+1}]" for i in range(len(references))])
+            hint = f"Use {ref_tags} in your prompt to reference the images above"
+            current_placeholder = self.prompt_edit.placeholderText()
+            if "[" not in current_placeholder:  # Don't override if already has hint
+                self.prompt_edit.setPlaceholderText(
+                    f"Describe what to generate... (Ctrl+Enter to generate)\n{hint}"
+                )
+        else:
+            # Reset placeholder when no references
+            if hasattr(self, 'prompt_edit'):
+                self.prompt_edit.setPlaceholderText("Describe what to generate... (Ctrl+Enter to generate)")
+
+    def _insert_reference_tag(self, tag: str):
+        """Insert a reference tag at the current cursor position in the prompt."""
+        if hasattr(self, 'prompt_edit'):
+            cursor = self.prompt_edit.textCursor()
+            cursor.insertText(tag)
+            self.prompt_edit.setFocus()
+            logger.debug(f"Inserted reference tag: {tag}")
 
         # Update Generate button text for Midjourney
         if hasattr(self, 'btn_generate'):
@@ -4456,7 +4431,7 @@ For more detailed information, please refer to the full documentation.
 
         # Check if using Google Cloud auth mode (no API key needed)
         is_using_gcloud = False
-        if self.current_provider.lower() == "google":
+        if self.current_provider.lower() in ["google", "imagen_customization"]:
             auth_mode_text = self.auth_mode_combo.currentText()
             is_using_gcloud = auth_mode_text == "Google Cloud Account"
 
@@ -4739,6 +4714,72 @@ For more detailed information, please refer to the full documentation.
 
             # The provider will handle command building and mode selection
 
+        # Check for Imagen 3 multi-reference generation
+        use_imagen_customization = False
+
+        # First, check if user has references but is NOT using Google
+        if (hasattr(self, 'imagen_reference_widget') and
+            self.imagen_reference_widget.has_references() and
+            self.current_provider.lower() != "google"):
+
+            # User has reference images but is using a non-Google provider
+            error_msg = (f"Reference images are only supported with Google Imagen 3.\n\n"
+                        f"Current provider: {self.current_provider}\n\n"
+                        f"Please either:\n"
+                        f"• Switch to Google provider in Settings, or\n"
+                        f"• Remove the reference images to use {self.current_provider}")
+            self._append_to_console(f"ERROR: {error_msg}", "#ff6666")
+            QMessageBox.warning(self, APP_NAME, error_msg)
+            self.btn_generate.setEnabled(True)
+            return
+
+        # Now check if using Google with references
+        if (hasattr(self, 'imagen_reference_widget') and
+            self.imagen_reference_widget.has_references() and
+            self.current_provider.lower() == "google"):
+
+            # Get references from widget
+            references = self.imagen_reference_widget.get_references()
+
+            # Validate references
+            is_valid, errors = self.imagen_reference_widget.validate_references()
+            if not is_valid:
+                error_msg = "Invalid reference images:\n" + "\n".join(errors)
+                self._append_to_console(f"ERROR: {error_msg}", "#ff6666")
+                QMessageBox.warning(self, APP_NAME, error_msg)
+                self.btn_generate.setEnabled(True)
+                return
+
+            # Validate prompt has reference tags [N]
+            import re
+            ref_tags = re.findall(r'\[(\d+)\]', prompt)
+            if not ref_tags:
+                msg = (f"Your prompt must reference the images using tags like [1], [2], etc.\n\n"
+                       f"You have {len(references)} reference image(s).\n"
+                       f"Example: 'A photo of [1] and [2] at the beach'")
+                self._append_to_console(f"ERROR: {msg}", "#ff6666")
+                QMessageBox.warning(self, APP_NAME, msg)
+                self.btn_generate.setEnabled(True)
+                return
+
+            # Switch to ImagenCustomizationProvider
+            use_imagen_customization = True
+            original_provider = self.current_provider
+            self.current_provider = "imagen_customization"
+
+            # Pass references in kwargs
+            kwargs['references'] = references
+
+            self._append_to_console(
+                f"Using Imagen 3 Customization with {len(references)} reference image(s)",
+                "#00ff00"
+            )
+            for i, ref in enumerate(references, start=1):
+                self._append_to_console(
+                    f"  [{i}] {ref.reference_type.value.upper()}: {ref.path.name}",
+                    "#66ccff"
+                )
+
         # Show status for provider loading
         self.status_bar.showMessage(f"Connecting to {self.current_provider}...")
         self._append_to_console(f"Connecting to {self.current_provider}...", "#66ccff")  # Blue
@@ -4748,7 +4789,7 @@ For more detailed information, please refer to the full documentation.
         self.gen_thread = QThread()
         # Get the actual auth mode from config
         auth_mode = "api-key"  # default
-        if self.current_provider.lower() == "google":
+        if self.current_provider.lower() == "google" or use_imagen_customization:
             auth_mode_text = self.auth_mode_combo.currentText()
             if auth_mode_text == "Google Cloud Account":
                 auth_mode = "gcloud"
@@ -5792,7 +5833,11 @@ For more detailed information, please refer to the full documentation.
             
             # Image settings visibility
             project_data['ui_state']['image_settings_expanded'] = self.image_settings_container.isVisible()
-            
+
+            # Save Imagen multi-reference images
+            if hasattr(self, 'imagen_reference_widget'):
+                project_data['ui_state']['imagen_references'] = self.imagen_reference_widget.to_dict()
+
             # Encode image data
             import base64
             project_data['image_data'] = base64.b64encode(self.current_image_data).decode('utf-8')
@@ -5901,7 +5946,11 @@ For more detailed information, please refer to the full documentation.
                     self.image_settings_container.setVisible(False)
                     self.image_settings_toggle.setText("▶ &Image Settings")
                     self.image_settings_toggle.setChecked(False)
-            
+
+            # Load Imagen multi-reference images
+            if 'imagen_references' in ui_state and hasattr(self, 'imagen_reference_widget'):
+                self.imagen_reference_widget.from_dict(ui_state['imagen_references'])
+
             # Load and display image
             if 'image_data' in project_data:
                 import base64
@@ -6523,10 +6572,10 @@ For more detailed information, please refer to the full documentation.
     def _toggle_ref_image_settings(self, checked):
         """Toggle the reference image settings panel visibility."""
         self.ref_image_container.setVisible(checked)
-        self.ref_image_toggle.setText("▼ Reference Image (Google Only)" if checked else "▶ Reference Image (Google Only)")
+        self.ref_image_toggle.setText("▼ Reference Images (Google Only - Imagen 3)" if checked else "▶ Reference Images (Google Only - Imagen 3)")
 
         # Save the expansion state
-        self.config.set('ref_image_expanded', checked)
+        self.config.set('reference_images_expanded', checked)
         self.config.save()
 
         # Trigger image resize after layout change
@@ -6822,6 +6871,13 @@ For more detailed information, please refer to the full documentation.
 
     def _load_reference_image_from_config(self):
         """Load reference image from settings."""
+        # NOTE: This is legacy single-reference image loading
+        # The new multi-reference system uses _load_imagen_references_from_config()
+
+        # Check if the old UI elements exist (they may have been removed)
+        if not hasattr(self, 'ref_image_preview'):
+            return
+
         # Load from global settings
         ref_images = self.config.get('reference_images', {})
         ref_image_data = ref_images.get('image_tab')
@@ -6875,6 +6931,41 @@ For more detailed information, please refer to the full documentation.
 
                 except Exception as e:
                     logger.warning(f"Failed to load reference image from config: {e}")
+
+    def _save_imagen_references_to_config(self):
+        """Save Imagen multi-reference images to config."""
+        if not hasattr(self, 'imagen_reference_widget'):
+            return
+
+        try:
+            # Get reference data from widget
+            ref_data = self.imagen_reference_widget.to_dict()
+
+            # Save to config
+            self.config.set('imagen_references', ref_data)
+            self.config.save()
+
+            logger.info(f"Saved {len(ref_data)} Imagen references to config")
+
+        except Exception as e:
+            logger.error(f"Failed to save Imagen references to config: {e}")
+
+    def _load_imagen_references_from_config(self):
+        """Load Imagen multi-reference images from config."""
+        if not hasattr(self, 'imagen_reference_widget'):
+            return
+
+        try:
+            # Get reference data from config
+            ref_data = self.config.get('imagen_references', [])
+
+            if ref_data:
+                # Load into widget
+                self.imagen_reference_widget.from_dict(ref_data)
+                logger.info(f"Loaded {len(ref_data)} Imagen references from config")
+
+        except Exception as e:
+            logger.error(f"Failed to load Imagen references from config: {e}")
 
     def _save_ui_state(self):
         """Save all UI widget states to config."""

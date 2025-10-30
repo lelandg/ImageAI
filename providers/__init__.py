@@ -69,6 +69,14 @@ def _get_providers() -> Dict[str, Type[ImageProvider]]:
                 _PROVIDERS["google"] = GoogleProvider
         except Exception as e:
             logging.debug(f"Could not load Google provider: {e}")
+
+        # Try to import Imagen 3 Customization provider (multi-reference support)
+        try:
+            with suppress_stderr():
+                from .imagen_customization import ImagenCustomizationProvider
+                _PROVIDERS["imagen_customization"] = ImagenCustomizationProvider
+        except Exception as e:
+            logging.debug(f"Could not load Imagen Customization provider: {e}")
         
         # Try to import OpenAI provider
         try:
