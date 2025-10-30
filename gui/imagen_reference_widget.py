@@ -68,16 +68,21 @@ class ImagenReferenceItemWidget(QWidget):
             QComboBox {
                 padding: 3px;
                 background-color: white;
+                color: black;
                 border: 1px solid #ccc;
                 border-radius: 3px;
             }
             QComboBox:hover {
                 border: 1px solid #4A90E2;
+                background-color: white;
+                color: black;
             }
             QComboBox QAbstractItemView {
                 border: 1px solid #999;
                 selection-background-color: #4A90E2;
+                selection-color: white;
                 background-color: white;
+                color: black;
             }
         """)
         self.setMaximumWidth(250)

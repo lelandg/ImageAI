@@ -448,10 +448,10 @@ class ImagenCustomizationProvider(ImageProvider):
         # Load image data if not already loaded
         image_data = ref.load_image_data()
 
-        # Apply transparent canvas fix if aspect ratio doesn't match target
-        if aspect_ratio:
-            from .google import apply_transparent_canvas_fix
-            image_data = apply_transparent_canvas_fix(image_data, aspect_ratio, logger)
+        # NOTE: Do NOT apply transparent canvas fix to reference images
+        # The Imagen API needs to see the actual reference content, not a small image
+        # surrounded by transparency. The canvas fix is only for output images.
+        # Reference images are sent as-is to the API.
 
         # Encode to base64
         image_base64 = base64.b64encode(image_data).decode('utf-8')
