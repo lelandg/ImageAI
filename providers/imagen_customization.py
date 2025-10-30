@@ -207,15 +207,17 @@ class ImagenCustomizationProvider(ImageProvider):
         logger.info(f"Aspect ratio: {aspect_ratio}")
         if negative_prompt:
             logger.info(f"Negative prompt: {negative_prompt}")
-        if seed is not None:
+        if seed is not None and seed >= 0:
             logger.info(f"Seed: {seed}")
+        elif seed is not None and seed < 0:
+            logger.info(f"Seed: Random (value={seed})")
         logger.info(f"Person generation: {person_generation}")
         logger.info("=" * 60)
 
         # Build reference images array
         reference_images = []
         for ref in references:
-            ref_dict = self._build_reference_dict(ref)
+            ref_dict = self._build_reference_dict(ref, aspect_ratio)
             reference_images.append(ref_dict)
 
         # Log the exact API structure being sent (without image data)
@@ -246,8 +248,11 @@ class ImagenCustomizationProvider(ImageProvider):
         if negative_prompt:
             parameters["negativePrompt"] = negative_prompt
 
-        if seed is not None:
+        # Only pass seed if it's non-negative (negative seeds should randomize)
+        if seed is not None and seed >= 0:
             parameters["seed"] = seed
+        elif seed is not None and seed < 0:
+            logger.debug(f"Ignoring negative seed value: {seed} (will use random)")
 
         try:
             # Call Imagen 3 Customization API
@@ -429,18 +434,24 @@ class ImagenCustomizationProvider(ImageProvider):
             logger.error(f"API predict call failed: {e}", exc_info=True)
             raise
 
-    def _build_reference_dict(self, ref: ImagenReference) -> Dict[str, Any]:
+    def _build_reference_dict(self, ref: ImagenReference, aspect_ratio: str = None) -> Dict[str, Any]:
         """
         Build API reference dictionary from ImagenReference object.
 
         Args:
             ref: ImagenReference object
+            aspect_ratio: Target aspect ratio for generation (e.g., "16:9")
 
         Returns:
             Dictionary formatted for Imagen 3 API
         """
         # Load image data if not already loaded
         image_data = ref.load_image_data()
+
+        # Apply transparent canvas fix if aspect ratio doesn't match target
+        if aspect_ratio:
+            from .google import apply_transparent_canvas_fix
+            image_data = apply_transparent_canvas_fix(image_data, aspect_ratio, logger)
 
         # Encode to base64
         image_base64 = base64.b64encode(image_data).decode('utf-8')

@@ -24,6 +24,8 @@ class UpscalingSelector(QWidget):
 
     def init_ui(self):
         """Initialize the UI."""
+        from PySide6.QtWidgets import QSizePolicy
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
@@ -31,10 +33,14 @@ class UpscalingSelector(QWidget):
         self.group = QGroupBox("Image Upscaling")
         group_layout = QVBoxLayout(self.group)
 
+        # Set size policy to prevent compression
+        self.group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+
         # Info label
         self.info_label = QLabel("Target resolution exceeds provider capabilities. Choose upscaling method:")
         self.info_label.setWordWrap(True)
         self.info_label.setStyleSheet("color: #ff9900; padding: 5px;")
+        self.info_label.setMinimumHeight(30)  # Ensure enough height for wrapped text
         group_layout.addWidget(self.info_label)
 
         # Method selection
@@ -132,6 +138,9 @@ class UpscalingSelector(QWidget):
         self.esrgan_model_combo.currentTextChanged.connect(self._on_settings_changed)
 
         layout.addWidget(self.group)
+
+        # Set widget size policy to prevent compression
+        self.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
 
     def _on_method_changed(self):
         """Handle method selection change."""

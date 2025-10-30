@@ -226,6 +226,13 @@ class MainWindow(QMainWindow):
         
         # Initialize provider (respect last selection, including Midjourney)
         self.current_provider = self.config.get("provider", "google")
+
+        # Migrate old imagen_customization selection to google
+        # imagen_customization is now integrated into google provider
+        if self.current_provider == "imagen_customization":
+            self.current_provider = "google"
+            self.config.set("provider", "google")
+
         self.current_api_key = self.config.get_api_key(self.current_provider)
         self.current_model = DEFAULT_MODEL
         self.auto_copy_filename = self.config.get("auto_copy_filename", False)
@@ -605,6 +612,9 @@ class MainWindow(QMainWindow):
             import logging as _logging
             _logging.getLogger(__name__).debug(f"Provider discovery failed: {e}")
             available_providers = ["google", "openai", "midjourney"]
+
+        # Filter out imagen_customization - it's used internally by google provider
+        available_providers = [p for p in available_providers if p != "imagen_customization"]
         self.image_provider_combo.addItems(available_providers)
         if self.current_provider in available_providers:
             self.image_provider_combo.setCurrentText(self.current_provider)
@@ -765,6 +775,10 @@ class MainWindow(QMainWindow):
         # Container for image settings (initially hidden)
         self.image_settings_container = QWidget()
         self.image_settings_container.setVisible(False)
+        # Set size policy to prevent compression when other sections expand
+        self.image_settings_container.setSizePolicy(
+            QSizePolicy.Preferred, QSizePolicy.Minimum
+        )
         image_settings_layout = QVBoxLayout(self.image_settings_container)
         image_settings_layout.setSpacing(5)
         image_settings_layout.setContentsMargins(10, 0, 0, 0)  # Indent for hierarchy
@@ -975,7 +989,7 @@ class MainWindow(QMainWindow):
             self.guidance_spin.setValue(7.5)
             self.guidance_spin.setToolTip("Guidance scale (0.0 for Turbo models, 7-8 for regular)")
             advanced_layout.addRow("Guidance:", self.guidance_spin)
-            
+
             advanced_group.setLayout(advanced_layout)
             bottom_layout.addWidget(advanced_group)
             self.advanced_group = advanced_group
@@ -1166,17 +1180,17 @@ class MainWindow(QMainWindow):
         
         # Add bottom widget to splitter
         splitter.addWidget(bottom_widget)
-        
-        # Set initial splitter sizes (small prompt, large image area)
-        splitter.setSizes([100, 600])  # 100px for prompt, 600px for rest
+
+        # Set initial splitter sizes (small prompt, large bottom area)
+        splitter.setSizes([80, 800])  # 80px for prompt, 800px for rest (more space for expanded sections)
         splitter.setStretchFactor(0, 0)  # Don't stretch prompt section
-        splitter.setStretchFactor(1, 1)  # Stretch image section
-        # Set minimum sizes to prevent prompt from disappearing
+        splitter.setStretchFactor(1, 3)  # Give bottom section more stretch priority
+        # Set minimum sizes to prevent sections from disappearing
         font_metrics = self.prompt_edit.fontMetrics()
         min_prompt_height = font_metrics.lineSpacing() * 3 + 35  # 3 lines + label + padding
         splitter.setChildrenCollapsible(False)  # Prevent sections from collapsing
         prompt_container.setMinimumHeight(min_prompt_height)
-        bottom_widget.setMinimumHeight(200)  # Minimum for image area
+        bottom_widget.setMinimumHeight(400)  # Increased minimum to accommodate expanded settings sections
         
         # Add splitter to main layout
         v.addWidget(splitter)
@@ -1316,6 +1330,9 @@ class MainWindow(QMainWindow):
             import logging as _logging
             _logging.getLogger(__name__).debug(f"Provider discovery failed (settings tab): {e}")
             available_providers = ["google", "openai", "midjourney"]
+
+        # Filter out imagen_customization - it's used internally by google provider
+        available_providers = [p for p in available_providers if p != "imagen_customization"]
         self.provider_combo.addItems(available_providers)
         if self.current_provider in available_providers:
             self.provider_combo.setCurrentText(self.current_provider)
@@ -4540,8 +4557,10 @@ For more detailed information, please refer to the full documentation.
                         width, height = map(int, resolution.split('x'))
 
                 if width and height:
-                    # For non-Gemini providers, use closest aspect ratio and store target for scaling
-                    if self.current_provider.lower() != "google":
+                    # Google providers (google and imagen_customization) support exact aspect ratios
+                    google_providers = ["google", "imagen_customization"]
+                    if self.current_provider.lower() not in google_providers:
+                        # Non-Google providers: use closest aspect ratio and store target for scaling
                         self.target_resolution = (width, height)
                         closest_ar = self._find_closest_aspect_ratio(width, height, self.current_provider)
                         kwargs['aspect_ratio'] = closest_ar
@@ -4558,7 +4577,7 @@ For more detailed information, please refer to the full documentation.
                             kwargs['resolution'] = resolution_map
                         # Keep aspect_ratio for fallback - providers use it
                     else:
-                        # Gemini: use exact dimensions and calculate aspect ratio
+                        # Google providers: use exact dimensions and calculate aspect ratio
                         kwargs['width'] = width
                         kwargs['height'] = height
                         # Calculate aspect ratio for proper logging and prompt generation
@@ -4764,7 +4783,8 @@ For more detailed information, please refer to the full documentation.
 
             # Switch to ImagenCustomizationProvider
             use_imagen_customization = True
-            original_provider = self.current_provider
+            # Store original provider to restore after generation
+            self._imagen_original_provider = self.current_provider
             self.current_provider = "imagen_customization"
 
             # Pass references in kwargs
@@ -5081,6 +5101,11 @@ For more detailed information, please refer to the full documentation.
 
     def _on_error(self, error: str):
         """Handle generation error."""
+        # Restore original provider if we used Imagen customization
+        if hasattr(self, '_imagen_original_provider'):
+            self.current_provider = self._imagen_original_provider
+            delattr(self, '_imagen_original_provider')
+
         self.status_label.setText("Error occurred.")
         self.status_bar.showMessage(f"Error: {error[:50]}...")  # Show truncated error in status
         self._append_to_console(f"ERROR: {error}", "#ff6666")  # Red
@@ -5090,6 +5115,11 @@ For more detailed information, please refer to the full documentation.
 
     def _on_generation_finished(self, texts: List[str], images: List[bytes]):
         """Handle successful generation."""
+        # Restore original provider if we used Imagen customization
+        if hasattr(self, '_imagen_original_provider'):
+            self.current_provider = self._imagen_original_provider
+            delattr(self, '_imagen_original_provider')
+
         # Check if this is a Midjourney mode response
         if texts:
             for text in texts:
@@ -6376,8 +6406,10 @@ For more detailed information, please refer to the full documentation.
             # Import and create the real video tab
             from gui.video.video_project_tab import VideoProjectTab
 
+            # Filter out imagen_customization - it's used internally by google provider
+            available_providers = [p for p in list_providers() if p != "imagen_customization"]
             providers_dict = {
-                'available': list_providers(),
+                'available': available_providers,
                 'current': self.current_provider,
                 'config': self.config
             }

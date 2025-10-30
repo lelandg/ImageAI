@@ -55,18 +55,34 @@ class ImagenReferenceItemWidget(QWidget):
         """Initialize user interface."""
         # Main vertical layout for compact side-by-side display
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(5, 5, 5, 5)
+        layout.setContentsMargins(5, 5, 5, 10)  # Extra bottom padding for combo boxes
         layout.setSpacing(5)
 
-        # Add border frame
+        # Add border frame and ensure proper z-ordering for combo boxes
         self.setStyleSheet("""
             ImagenReferenceItemWidget {
                 border: 1px solid #ddd;
                 border-radius: 5px;
                 background-color: #fafafa;
             }
+            QComboBox {
+                padding: 3px;
+                background-color: white;
+                border: 1px solid #ccc;
+                border-radius: 3px;
+            }
+            QComboBox:hover {
+                border: 1px solid #4A90E2;
+            }
+            QComboBox QAbstractItemView {
+                border: 1px solid #999;
+                selection-background-color: #4A90E2;
+                background-color: white;
+            }
         """)
         self.setMaximumWidth(250)
+        # Compact height without extra stretch space
+        self.setMinimumHeight(280)
 
         # Top row: ID badge and remove button
         top_row = QHBoxLayout()
@@ -131,25 +147,27 @@ class ImagenReferenceItemWidget(QWidget):
         layout.addWidget(self.filename_label)
 
         # Reference type selector
-        type_layout = QVBoxLayout()
-        type_layout.setSpacing(3)
+        type_layout = QHBoxLayout()
+        type_layout.setSpacing(5)
         type_layout.addWidget(QLabel("Type:"))
         self.type_combo = QComboBox()
+        self.type_combo.setAutoFillBackground(True)  # Ensure opaque background
         self.type_combo.addItems([
             ImagenReferenceType.SUBJECT.value.upper(),
             ImagenReferenceType.STYLE.value.upper(),
             ImagenReferenceType.CONTROL.value.upper()
         ])
         self.type_combo.currentTextChanged.connect(self._on_type_changed)
-        type_layout.addWidget(self.type_combo)
+        type_layout.addWidget(self.type_combo, 1)  # Stretch combo to fill space
         layout.addLayout(type_layout)
 
         # Subject type selector (only for SUBJECT references)
-        subject_layout = QVBoxLayout()
-        subject_layout.setSpacing(3)
+        subject_layout = QHBoxLayout()
+        subject_layout.setSpacing(5)
         self.subject_label = QLabel("Subject:")
         subject_layout.addWidget(self.subject_label)
         self.subject_type_combo = QComboBox()
+        self.subject_type_combo.setAutoFillBackground(True)  # Ensure opaque background
         self.subject_type_combo.addItems([
             ImagenSubjectType.PERSON.value.upper(),
             ImagenSubjectType.ANIMAL.value.upper(),
@@ -157,23 +175,24 @@ class ImagenReferenceItemWidget(QWidget):
             ImagenSubjectType.DEFAULT.value.upper()
         ])
         self.subject_type_combo.currentTextChanged.connect(self._on_subject_type_changed)
-        subject_layout.addWidget(self.subject_type_combo)
+        subject_layout.addWidget(self.subject_type_combo, 1)  # Stretch combo to fill space
         layout.addLayout(subject_layout)
 
         # Control type selector (only for CONTROL references)
         from core.reference.imagen_reference import ImagenControlType
-        control_layout = QVBoxLayout()
-        control_layout.setSpacing(3)
-        self.control_label = QLabel("Control Type:")
+        control_layout = QHBoxLayout()
+        control_layout.setSpacing(5)
+        self.control_label = QLabel("Control:")
         control_layout.addWidget(self.control_label)
         self.control_type_combo = QComboBox()
+        self.control_type_combo.setAutoFillBackground(True)  # Ensure opaque background
         self.control_type_combo.addItems([
             ImagenControlType.CANNY.value.upper(),
             ImagenControlType.SCRIBBLE.value.upper(),
             ImagenControlType.FACE_MESH.value.upper()
         ])
         self.control_type_combo.currentTextChanged.connect(self._on_control_type_changed)
-        control_layout.addWidget(self.control_type_combo)
+        control_layout.addWidget(self.control_type_combo, 1)  # Stretch combo to fill space
         layout.addLayout(control_layout)
 
         # Description field
@@ -186,8 +205,6 @@ class ImagenReferenceItemWidget(QWidget):
         self.description_edit.textChanged.connect(lambda: self.reference_changed.emit())
         desc_layout.addWidget(self.description_edit)
         layout.addLayout(desc_layout)
-
-        layout.addStretch()
 
         # Update visibility based on initial type
         self._on_type_changed()
@@ -354,17 +371,10 @@ class ImagenReferenceWidget(QWidget):
         self.items_container = QWidget()
         self.items_layout = QHBoxLayout(self.items_container)
         self.items_layout.setContentsMargins(0, 0, 0, 0)
-        self.items_layout.setSpacing(10)
+        self.items_layout.setSpacing(20)  # Increased spacing to prevent widget overlap
         self.items_layout.addStretch()
 
         main_layout.addWidget(self.items_container)
-
-        # Info label
-        info_label = QLabel("💡 Use [1], [2], [3], [4] in your prompt to reference these images\n"
-                           "⚠️ Only works with Google Imagen 3 provider")
-        info_label.setStyleSheet("color: #666; font-size: 9pt; padding: 5px;")
-        info_label.setWordWrap(True)
-        main_layout.addWidget(info_label)
 
     def _add_reference(self):
         """Add a new reference image."""

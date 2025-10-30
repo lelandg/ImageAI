@@ -71,6 +71,8 @@ def _get_providers() -> Dict[str, Type[ImageProvider]]:
             logging.debug(f"Could not load Google provider: {e}")
 
         # Try to import Imagen 3 Customization provider (multi-reference support)
+        # Note: This is used internally by google provider when reference images are present
+        # Should not be shown as separate option in UI
         try:
             with suppress_stderr():
                 from .imagen_customization import ImagenCustomizationProvider

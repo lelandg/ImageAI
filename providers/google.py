@@ -41,6 +41,148 @@ except ImportError:
         crop_to_aspect_ratio = None
 
 
+def apply_transparent_canvas_fix(image_bytes: bytes, target_aspect_ratio: str, logger_instance=None, console_logger=None) -> bytes:
+    """
+    Apply transparent canvas fix to an image that doesn't match the target aspect ratio.
+
+    Creates a transparent canvas with the correct aspect ratio and centers the original image on it.
+    This ensures that Gemini receives images with the expected aspect ratio.
+
+    Args:
+        image_bytes: Original image data as bytes
+        target_aspect_ratio: Target aspect ratio string (e.g., "16:9", "4:3", "1:1")
+        logger_instance: Logger instance to use (defaults to module logger)
+        console_logger: Optional callback for console messages (e.g., main_window._append_to_console)
+
+    Returns:
+        Processed image bytes with correct aspect ratio
+    """
+    from PIL import Image
+    import io
+    import time
+    from pathlib import Path
+    import platform
+    import os
+
+    log = logger_instance or logger
+
+    try:
+        # Open the image
+        img = Image.open(io.BytesIO(image_bytes))
+        ref_width, ref_height = img.size
+        ref_aspect = ref_width / ref_height
+
+        # Calculate expected aspect ratio
+        expected_aspect = 1.0
+        if target_aspect_ratio and ':' in target_aspect_ratio:
+            ar_parts = target_aspect_ratio.split(':')
+            expected_aspect = float(ar_parts[0]) / float(ar_parts[1])
+
+        # Check if there's a significant mismatch (more than 10% difference)
+        if abs(ref_aspect - expected_aspect) <= 0.1:
+            # Aspect ratios match, no fix needed
+            log.debug(f"Aspect ratio matches ({ref_aspect:.2f} ≈ {expected_aspect:.2f}), no canvas fix needed")
+            return image_bytes
+
+        log.warning(f"⚠️ ASPECT RATIO MISMATCH: Image is {ref_width}x{ref_height} "
+                    f"(aspect {ref_aspect:.2f}) but requesting {target_aspect_ratio} "
+                    f"(aspect {expected_aspect:.2f}). Applying canvas centering fix...")
+
+        # Log to console if callback provided
+        if console_logger:
+            console_logger(
+                f"📐 Reference image aspect ratio mismatch detected: {ref_width}x{ref_height} → {target_aspect_ratio}",
+                "#FFA500"  # Orange
+            )
+            console_logger(
+                f"   Centering image on transparent canvas to match target aspect ratio...",
+                "#888888"  # Gray
+            )
+
+        # Create a transparent canvas with the target aspect ratio
+        # Calculate canvas dimensions based on image max dimension
+        max_ref_dim = max(ref_width, ref_height)
+
+        # Calculate canvas dimensions maintaining target aspect ratio
+        if expected_aspect >= 1.0:  # Landscape or square
+            canvas_width = max_ref_dim
+            canvas_height = int(max_ref_dim / expected_aspect)
+        else:  # Portrait
+            canvas_height = max_ref_dim
+            canvas_width = int(max_ref_dim * expected_aspect)
+
+        # Make sure canvas is large enough to contain the image
+        if canvas_width < ref_width:
+            canvas_width = ref_width
+            canvas_height = int(ref_width / expected_aspect)
+        if canvas_height < ref_height:
+            canvas_height = ref_height
+            canvas_width = int(ref_height * expected_aspect)
+
+        log.info(f"Creating transparent canvas: {canvas_width}x{canvas_height} (aspect {expected_aspect:.2f})")
+        log.info(f"Image will be centered: {ref_width}x{ref_height}")
+
+        # Create transparent canvas
+        canvas = Image.new('RGBA', (canvas_width, canvas_height), (0, 0, 0, 0))
+
+        # Calculate position to center the image
+        x_offset = (canvas_width - ref_width) // 2
+        y_offset = (canvas_height - ref_height) // 2
+
+        # Convert image to RGBA if needed
+        if img.mode != 'RGBA':
+            img_rgba = img.convert('RGBA')
+        else:
+            img_rgba = img
+
+        # Paste the image centered on the canvas
+        canvas.paste(img_rgba, (x_offset, y_offset), img_rgba)
+
+        # Save the composed canvas for debugging (use microseconds to avoid collisions)
+        timestamp = int(time.time() * 1000000)  # Microseconds for uniqueness
+        debug_filename = f"DEBUG_CANVAS_COMPOSED_{timestamp}.png"
+
+        # Get platform-specific generated directory
+        system = platform.system()
+        home = Path.home()
+        if system == "Windows":
+            base = Path(os.getenv("APPDATA", home / "AppData" / "Roaming"))
+            config_dir = base / "ImageAI"
+        elif system == "Darwin":  # macOS
+            config_dir = home / "Library" / "Application Support" / "ImageAI"
+        else:  # Linux/Unix
+            base = Path(os.getenv("XDG_CONFIG_HOME", home / ".config"))
+            config_dir = base / "ImageAI"
+        generated_dir = config_dir / "generated"
+
+        # Ensure directory exists
+        generated_dir.mkdir(parents=True, exist_ok=True)
+        debug_path = generated_dir / debug_filename
+        canvas.save(debug_path, 'PNG')
+        log.info(f"Saved composed canvas for debugging: {debug_path}")
+
+        # Convert canvas back to bytes
+        output = io.BytesIO()
+        canvas.save(output, format='PNG')
+        processed_bytes = output.getvalue()
+
+        log.info(f"Using composed canvas ({canvas_width}x{canvas_height}) instead of original image")
+
+        # Log success to console
+        if console_logger:
+            console_logger(
+                f"✓ Canvas created: {canvas_width}x{canvas_height} (debug: {debug_path.name})",
+                "#00AA00"  # Green
+            )
+
+        return processed_bytes
+
+    except Exception as e:
+        log.error(f"Failed to apply transparent canvas fix: {e}")
+        # Return original bytes on error
+        return image_bytes
+
+
 # Check if Google Cloud is available but don't import yet
 try:
     import importlib.util
@@ -968,51 +1110,30 @@ class GoogleProvider(ImageProvider):
             return False, f"Error checking authentication: {e}"
     
     def get_models(self) -> Dict[str, str]:
-        """Get available Google models."""
+        """Get available Google image generation models.
+
+        Note: This only includes image generation models, not text/chat LLM models.
+        """
         return {
-            "gemini-2.5-flash-image": "Gemini 2.5 Flash Image (Production)",
-            "gemini-2.5-flash-image-preview": "Gemini 2.5 Flash Image (Preview - Deprecated)",
-            "gemini-2.5-flash": "Gemini 2.5 Flash",
-            "gemini-2.5-pro": "Gemini 2.5 Pro",
-            "gemini-1.5-flash": "Gemini 1.5 Flash",
-            "gemini-1.5-pro": "Gemini 1.5 Pro",
+            "gemini-2.5-flash-image": "Gemini 2.5 Flash Image (Nano Banana)",
         }
     
     def get_models_with_details(self) -> Dict[str, Dict[str, str]]:
-        """Get available Google models with detailed display information.
-        
+        """Get available Google image generation models with detailed display information.
+
         Returns:
             Dictionary mapping model IDs to display information including:
             - name: Short display name
             - nickname: Optional nickname/codename
             - description: Optional brief description
+
+        Note: This only includes image generation models, not text/chat LLM models.
         """
         return {
             "gemini-2.5-flash-image": {
                 "name": "Gemini 2.5 Flash Image",
                 "nickname": "Nano Banana",
                 "description": "Production image generation with aspect ratio support"
-            },
-            "gemini-2.5-flash-image-preview": {
-                "name": "Gemini 2.5 Flash Image Preview",
-                "nickname": "Nano Banana (Old)",
-                "description": "Deprecated - Use production version instead"
-            },
-            "gemini-2.5-flash": {
-                "name": "Gemini 2.5 Flash",
-                "description": "Fast performance on everyday tasks"
-            },
-            "gemini-2.5-pro": {
-                "name": "Gemini 2.5 Pro",
-                "description": "Advanced reasoning and complex problems"
-            },
-            "gemini-1.5-flash": {
-                "name": "Gemini 1.5 Flash",
-                "description": "Balanced speed and capability"
-            },
-            "gemini-1.5-pro": {
-                "name": "Gemini 1.5 Pro",
-                "description": "Wide-range reasoning tasks"
             },
         }
     

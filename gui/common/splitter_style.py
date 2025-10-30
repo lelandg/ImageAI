@@ -11,18 +11,23 @@ from PySide6.QtWidgets import QSplitter
 # Centralized splitter stylesheet
 SPLITTER_STYLESHEET = """
     QSplitter::handle {
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-            stop:0 #e0e0e0, stop:0.5 #888888, stop:1 #e0e0e0);
-        border: 1px solid #cccccc;
+        background: #e8e8e8;
+        border: none;
+        margin: 1px 0;
     }
     QSplitter::handle:hover {
-        background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-            stop:0 #a0a0ff, stop:0.5 #6060ff, stop:1 #a0a0ff);
+        background: #b0b0ff;
+    }
+    QSplitter::handle:vertical {
+        height: 6px;
+    }
+    QSplitter::handle:horizontal {
+        width: 6px;
     }
 """
 
 # Default handle width for splitters
-DEFAULT_HANDLE_WIDTH = 8
+DEFAULT_HANDLE_WIDTH = 6
 
 
 def apply_splitter_style(splitter: QSplitter, handle_width: int = DEFAULT_HANDLE_WIDTH):

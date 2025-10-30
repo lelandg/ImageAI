@@ -456,13 +456,14 @@ class ResolutionSelector(QWidget):
         self.size_widget.setLayout(size_layout)
         layout.addWidget(self.size_widget)
 
-        # Resolution combo (moved below spinners)
+        # Note: Resolution combo removed - use width/height spinboxes directly
+        # Keeping combo object for compatibility but hiding it
         self.combo = QComboBox()
-        self.combo.setEditable(True)  # Allow custom input
+        self.combo.setEditable(True)
         self.combo.currentTextChanged.connect(self._on_resolution_changed)
         if hasattr(self.combo, 'lineEdit'):
             self.combo.lineEdit().editingFinished.connect(self._on_custom_resolution)
-        layout.addWidget(self.combo)
+        self.combo.hide()  # Hidden - not needed with direct width/height inputs
 
         # Info label
         self.info_label = QLabel()
@@ -1364,7 +1365,10 @@ class AdvancedSettingsPanel(QWidget):
         
         # Stability settings
         if hasattr(self, 'seed_spin'):
-            current_settings['seed'] = self.seed_spin.value()
+            # Only include seed if it's non-negative (-1 means random)
+            seed_value = self.seed_spin.value()
+            if seed_value >= 0:
+                current_settings['seed'] = seed_value
         
         if hasattr(self, 'cfg_spin'):
             current_settings['cfg_scale'] = self.cfg_spin.value()
