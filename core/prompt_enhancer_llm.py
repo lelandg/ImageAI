@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List
 from pathlib import Path
 
 from core.prompt_enhancer import PromptEnhancer, EnhancementLevel
+from gui.llm_utils import LLMResponseParser
 
 
 class PromptEnhancerLLM:
@@ -71,6 +72,10 @@ class PromptEnhancerLLM:
 
         target_models = provider_map.get(provider, ['openai_dalle3', 'gemini_imagen'])
 
+        # Extract max_tokens from kwargs BEFORE passing to build_user_prompt
+        # (build_user_prompt doesn't accept max_tokens)
+        max_tokens = kwargs.pop('max_tokens', 4000)
+
         # Build the user prompt
         user_prompt = self.enhancer.build_user_prompt(
             user_prompt=prompt,
@@ -97,7 +102,7 @@ class PromptEnhancerLLM:
                 self.logger.info("Using litellm for enhancement")
                 # Use litellm for the call
                 response = self._call_with_litellm(
-                    actual_llm_provider, model, user_prompt, temperature
+                    actual_llm_provider, model, user_prompt, temperature, max_tokens
                 )
             elif hasattr(self.llm_provider, 'enhance_prompt'):
                 self.logger.info("Using UnifiedLLMProvider.enhance_prompt as fallback")
@@ -134,7 +139,7 @@ class PromptEnhancerLLM:
             return self._create_fallback_response(prompt, provider, enhancement_level)
 
     def _call_with_litellm(self, provider: str, model: Optional[str],
-                          user_prompt: str, temperature: float) -> Dict[str, Any]:
+                          user_prompt: str, temperature: float, max_tokens: int = 4000) -> Dict[str, Any]:
         """
         Call LLM using litellm library.
 
@@ -143,6 +148,7 @@ class PromptEnhancerLLM:
             model: Model name
             user_prompt: The formatted user prompt
             temperature: Temperature parameter
+            max_tokens: Maximum tokens for response (default 4000)
 
         Returns:
             Parsed JSON response from LLM
@@ -185,7 +191,7 @@ class PromptEnhancerLLM:
                 {"role": "user", "content": user_prompt}
             ],
             "temperature": temperature,
-            token_param: 1000  # Enough for detailed JSON response
+            token_param: max_tokens
         }
 
         # Check if LLM logging is enabled
@@ -243,30 +249,16 @@ class PromptEnhancerLLM:
 
             content = response.choices[0].message.content.strip()
 
-            # Try to extract JSON from the response
-            # Sometimes LLMs add markdown formatting
-            if "```json" in content:
-                # Extract JSON from markdown code block
-                start = content.find("```json") + 7
-                end = content.find("```", start)
-                if end > start:
-                    content = content[start:end].strip()
-            elif "```" in content:
-                # Generic code block
-                start = content.find("```") + 3
-                end = content.find("```", start)
-                if end > start:
-                    content = content[start:end].strip()
+            # Use robust parser that handles markdown code fences
+            parsed = LLMResponseParser.parse_json_response(content, expected_type=dict)
 
-            # Parse JSON
-            try:
-                parsed = json.loads(content)
+            if parsed:
                 self.logger.debug(f"Successfully parsed JSON response: {type(parsed)}")
                 return parsed
-            except json.JSONDecodeError as e:
-                self.logger.error(f"Failed to parse JSON from LLM response: {e}")
+            else:
+                self.logger.error("Failed to parse JSON from LLM response")
                 self.logger.error(f"Content was: {content}")
-                raise
+                raise ValueError("Failed to parse JSON from LLM response")
 
         else:
             self.logger.error("Empty response from LLM - no choices or content")

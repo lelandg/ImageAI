@@ -120,7 +120,8 @@ class EnhanceWorker(QObject):
                 enhancement_level=self.enhancement_level,
                 style_preset=self.style_preset,
                 temperature=self.temperature,
-                llm_provider=self.llm_provider
+                llm_provider=self.llm_provider,
+                max_tokens=self.max_tokens
             )
 
             # Extract the enhanced prompt
