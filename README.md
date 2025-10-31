@@ -329,7 +329,21 @@ pip install -r requirements-local-sd.txt
 
 - **Windows**: Ensure Python is added to PATH during installation
 - **macOS**: You may need to install Xcode Command Line Tools
-- **Linux**: Install python3-venv if not present: `sudo apt install python3-venv`
+- **Linux**: You may need to install the venv module first:
+  ```bash
+  # Ubuntu/Debian:
+  sudo apt install python3.10-venv
+  # Or for Python 3.11:
+  sudo apt install python3.11-venv
+  # Or use your specific Python version:
+  sudo apt install python3-venv
+
+  # Fedora/RHEL:
+  sudo dnf install python3-pip python3-devel
+
+  # Arch Linux:
+  sudo pacman -S python-pip
+  ```
 
 ## 4. Running the Application
 

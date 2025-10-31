@@ -6429,59 +6429,86 @@ For more detailed information, please refer to the full documentation.
     def _load_video_tab(self):
         """Lazy load the video tab when first accessed."""
         self.logger.info("=== _LOAD_VIDEO_TAB CALLED ===")
-        try:
-            # Import and create the real video tab
-            from gui.video.video_project_tab import VideoProjectTab
+        self.logger.info(f"Thread ID: {__import__('threading').current_thread().ident}")
+        self.logger.info(f"Current platform: {__import__('sys').platform}")
 
-            # Filter out imagen_customization - it's used internally by google provider
+        try:
+            # Step 1: Import
+            self.logger.info("STEP 1: Importing VideoProjectTab...")
+            from gui.video.video_project_tab import VideoProjectTab
+            self.logger.info("STEP 1: Import successful")
+
+            # Step 2: Prepare providers
+            self.logger.info("STEP 2: Preparing providers dictionary...")
             available_providers = [p for p in list_providers() if p != "imagen_customization"]
+            self.logger.info(f"STEP 2: Available providers: {available_providers}")
             providers_dict = {
                 'available': available_providers,
                 'current': self.current_provider,
                 'config': self.config
             }
+            self.logger.info("STEP 2: Providers dictionary created")
 
-            # Store the index before replacing
+            # Step 3: Get tab index
+            self.logger.info("STEP 3: Getting video tab index...")
             video_index = self.tabs.indexOf(self.tab_video)
-            self.logger.info(f"Video tab index for replacement: {video_index}")
+            self.logger.info(f"STEP 3: Video tab index = {video_index}")
 
-            # Create the real video tab
-            self.logger.info("Creating VideoProjectTab instance...")
+            # Step 4: Create video tab
+            self.logger.info("STEP 4: Creating VideoProjectTab instance...")
+            self.logger.info(f"STEP 4: Passing config type: {type(self.config)}")
+            self.logger.info(f"STEP 4: Passing providers_dict keys: {providers_dict.keys()}")
             real_video_tab = VideoProjectTab(self.config, providers_dict)
-            self.logger.info("VideoProjectTab instance created")
+            self.logger.info("STEP 4: VideoProjectTab instance created successfully")
 
-            # Connect signals
+            # Step 5: Connect signals
+            self.logger.info("STEP 5: Connecting signals...")
             if hasattr(real_video_tab, 'image_provider_changed'):
                 real_video_tab.image_provider_changed.connect(self._on_video_image_provider_changed)
+                self.logger.info("STEP 5: Connected image_provider_changed signal")
             if hasattr(real_video_tab, 'llm_provider_changed'):
                 real_video_tab.llm_provider_changed.connect(self._on_video_llm_provider_changed)
+                self.logger.info("STEP 5: Connected llm_provider_changed signal")
             if hasattr(real_video_tab, 'add_to_history_signal'):
                 real_video_tab.add_to_history_signal.connect(self.add_to_history)
+                self.logger.info("STEP 5: Connected add_to_history_signal")
+            self.logger.info("STEP 5: Signal connections complete")
 
-            # Replace the placeholder with the real tab
-            self.logger.info(f"Removing placeholder tab at index {video_index}")
+            # Step 6: Replace placeholder tab
+            self.logger.info("STEP 6: Replacing placeholder tab...")
+            self.logger.info(f"STEP 6a: Removing placeholder tab at index {video_index}")
             self.tabs.removeTab(video_index)
-            self.logger.info(f"Inserting real video tab at index {video_index}")
+            self.logger.info(f"STEP 6b: Inserting real video tab at index {video_index}")
             self.tabs.insertTab(video_index, real_video_tab, "🎬 Video")
-            self.logger.info(f"Setting current index to {video_index}")
+            self.logger.info(f"STEP 6c: Setting current index to {video_index}")
             self.tabs.setCurrentIndex(video_index)
+            self.logger.info("STEP 6: Tab replacement complete")
 
-            # Update references
+            # Step 7: Update references
+            self.logger.info("STEP 7: Updating internal references...")
             self.tab_video = real_video_tab
             self._video_tab_loaded = True
-            self.logger.info("Video tab loading complete, _video_tab_loaded = True")
+            self.logger.info("STEP 7: References updated, _video_tab_loaded = True")
 
-            # Sync LLM provider to video tab if it's set
+            # Step 8: Sync LLM provider
+            self.logger.info("STEP 8: Syncing LLM provider settings...")
             if hasattr(self, 'llm_provider_combo') and self.llm_provider_combo.currentText() != "None":
                 provider_name = self.llm_provider_combo.currentText()
                 model_name = self.llm_model_combo.currentText() if self.llm_model_combo.isEnabled() else None
+                self.logger.info(f"STEP 8: Syncing provider={provider_name}, model={model_name}")
                 if hasattr(self.tab_video, 'set_llm_provider'):
                     self.tab_video.set_llm_provider(provider_name, model_name)
+                    self.logger.info("STEP 8: LLM provider synced")
+            else:
+                self.logger.info("STEP 8: No LLM provider to sync")
+
+            self.logger.info("=== _LOAD_VIDEO_TAB COMPLETE ===")
 
         except Exception as e:
             import traceback
-            QMessageBox.warning(self, "Video Tab Error",
-                              f"Failed to load video tab: {str(e)}\n\n{traceback.format_exc()}")
+            error_msg = f"Failed to load video tab: {str(e)}\n\n{traceback.format_exc()}"
+            self.logger.error(f"VIDEO TAB LOAD ERROR:\n{error_msg}")
+            QMessageBox.warning(self, "Video Tab Error", error_msg)
     
     def _trigger_help_render(self):
         """Trigger rendering by doing a minimal scroll."""

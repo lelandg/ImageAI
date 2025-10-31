@@ -265,38 +265,56 @@ class WorkspaceWidget(QWidget):
         super().__init__()
         self.logger = logging.getLogger(__name__)
         self.logger.info("=== WorkspaceWidget.__init__ CALLED ===")
+        self.logger.info(f"Thread ID: {__import__('threading').current_thread().ident}")
 
         # Suppress FFmpeg console output (set before creating media player)
+        self.logger.info("WORKSPACE STEP 1: Setting FFmpeg environment variables...")
         import os
         # Suppress all FFmpeg info/debug messages and AAC decoder warnings
         os.environ['QT_LOGGING_RULES'] = 'qt.multimedia.ffmpeg.info=false;qt.multimedia.ffmpeg.warning=false'
+        self.logger.info("WORKSPACE STEP 1: FFmpeg environment configured")
 
+        self.logger.info("WORKSPACE STEP 2: Storing config and providers...")
         self.config = config
         self.providers = providers
-        self.video_config = VideoConfig()
-        self.project_manager = ProjectManager(self.video_config.get_projects_dir())
-        self.current_project = None
+        self.logger.info("WORKSPACE STEP 2: Config and providers stored")
 
-        # Wizard widget initialization (will be created when project is loaded)
+        self.logger.info("WORKSPACE STEP 3: Creating VideoConfig...")
+        self.video_config = VideoConfig()
+        self.logger.info("WORKSPACE STEP 3: VideoConfig created")
+
+        self.logger.info("WORKSPACE STEP 4: Creating ProjectManager...")
+        projects_dir = self.video_config.get_projects_dir()
+        self.logger.info(f"WORKSPACE STEP 4: Projects dir: {projects_dir}")
+        self.project_manager = ProjectManager(projects_dir)
+        self.logger.info("WORKSPACE STEP 4: ProjectManager created")
+
+        self.logger.info("WORKSPACE STEP 5: Initializing workspace state...")
+        self.current_project = None
         self.wizard_widget = None
+        self.logger.info("WORKSPACE STEP 5: Workspace state initialized")
 
         # Create image preview widget
+        self.logger.info("WORKSPACE STEP 6: Creating ImageHoverPreview...")
         self.image_preview = ImageHoverPreview(self)
+        self.logger.info("WORKSPACE STEP 6: ImageHoverPreview created")
 
         # Track row clicks for image/video toggle
+        self.logger.info("WORKSPACE STEP 7: Initializing UI state tracking...")
         self.last_clicked_row = None
         self.showing_video = False  # True if showing video, False if showing image
-
-        # Track currently playing scene for sequential playback
         self.current_playing_scene = None
+        self.logger.info("WORKSPACE STEP 7: UI state tracking initialized")
 
-        self.logger.info("Calling init_ui()...")
+        self.logger.info("WORKSPACE STEP 8: Calling init_ui()...")
         self.init_ui()
-        self.logger.info("init_ui() complete")
+        self.logger.info("WORKSPACE STEP 8: init_ui() complete")
 
         # Auto-reload last project if enabled (deferred until widget is shown)
-        self.logger.info("Scheduling auto_load_last_project in 100ms...")
+        self.logger.info("WORKSPACE STEP 9: Scheduling auto_load_last_project in 100ms...")
         QTimer.singleShot(100, self.auto_load_last_project)
+        self.logger.info("WORKSPACE STEP 9: Timer scheduled")
+
         self.logger.info("=== WorkspaceWidget.__init__ COMPLETE ===")
 
     def changeEvent(self, event):
@@ -1625,32 +1643,49 @@ class WorkspaceWidget(QWidget):
     
     def auto_load_last_project(self):
         """Auto-load the last opened project if enabled"""
-        from gui.video.project_browser import get_last_project_path
-
         self.logger.info("=== AUTO-LOAD TRIGGERED ===")
+        self.logger.info(f"Thread ID: {__import__('threading').current_thread().ident}")
         self.logger.info(f"Widget visible: {self.isVisible()}")
         self.logger.info(f"Widget has parent: {self.parent() is not None}")
 
+        self.logger.info("AUTO-LOAD STEP 1: Importing get_last_project_path...")
+        from gui.video.project_browser import get_last_project_path
+        self.logger.info("AUTO-LOAD STEP 1: Import successful")
+
+        self.logger.info("AUTO-LOAD STEP 2: Getting last project path...")
         last_project = get_last_project_path()
+        self.logger.info(f"AUTO-LOAD STEP 2: Last project path: {last_project}")
+
         if last_project:
-            self.logger.info(f"Auto-loading last project: {last_project}")
+            self.logger.info(f"AUTO-LOAD STEP 3: Loading project from {last_project}...")
             try:
                 # Suppress error dialogs during auto-load on startup
                 self.load_project_from_path(last_project, show_error_dialog=False)
-                self.logger.info(f"=== AUTO-LOAD COMPLETE - Style after load: {self._get_current_style()} ===")
-                # Restore UI state after loading project
+                self.logger.info(f"AUTO-LOAD STEP 3: Project loaded successfully")
+
+                self.logger.info("AUTO-LOAD STEP 4: Restoring UI state...")
                 self._restore_splitter_positions()
+                self.logger.info("AUTO-LOAD STEP 4a: Splitter positions restored")
                 self._restore_column_widths()
+                self.logger.info("AUTO-LOAD STEP 4b: Column widths restored")
                 self._restore_scrollbar_positions()
+                self.logger.info("AUTO-LOAD STEP 4c: Scrollbar positions restored")
+
+                self.logger.info(f"=== AUTO-LOAD COMPLETE ===")
             except Exception as e:
-                self.logger.warning(f"Could not auto-load last project: {e}")
+                self.logger.warning(f"AUTO-LOAD STEP 3: ERROR loading project: {e}", exc_info=True)
                 # User will start with a clean slate instead
         else:
-            self.logger.info("No last project to auto-load")
+            self.logger.info("AUTO-LOAD STEP 3: No last project to auto-load")
             # Restore UI state even without a project
+            self.logger.info("AUTO-LOAD STEP 4: Restoring UI state (no project)...")
             self._restore_splitter_positions()
+            self.logger.info("AUTO-LOAD STEP 4a: Splitter positions restored")
             self._restore_column_widths()
+            self.logger.info("AUTO-LOAD STEP 4b: Column widths restored")
             self._restore_scrollbar_positions()
+            self.logger.info("AUTO-LOAD STEP 4c: Scrollbar positions restored")
+            self.logger.info("=== AUTO-LOAD COMPLETE (no project) ===")
     
     def browse_projects(self):
         """Browse and open projects using the project browser"""

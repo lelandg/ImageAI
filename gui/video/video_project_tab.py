@@ -1249,31 +1249,60 @@ class VideoProjectTab(QWidget):
 
     def __init__(self, config: ConfigManager, providers: Dict[str, Any]):
         super().__init__()
-        self.config = config
-        self.providers = providers
-        self.video_config = VideoConfig()
-        self.project_manager = ProjectManager(self.video_config.get_projects_dir())
-        self.current_project = None
-        self.generation_thread = None
 
         self.logger = logging.getLogger(__name__)
         self.logger.info("=== VideoProjectTab.__init__ CALLED ===")
+        self.logger.info(f"Thread ID: {__import__('threading').current_thread().ident}")
 
+        self.logger.info("INIT STEP 1: Storing config and providers...")
+        self.config = config
+        self.providers = providers
+        self.logger.info(f"INIT STEP 1: Config type: {type(config)}")
+        self.logger.info(f"INIT STEP 1: Providers keys: {providers.keys()}")
+
+        self.logger.info("INIT STEP 2: Creating VideoConfig...")
+        self.video_config = VideoConfig()
+        self.logger.info("INIT STEP 2: VideoConfig created")
+
+        self.logger.info("INIT STEP 3: Creating ProjectManager...")
+        projects_dir = self.video_config.get_projects_dir()
+        self.logger.info(f"INIT STEP 3: Projects directory: {projects_dir}")
+        self.project_manager = ProjectManager(projects_dir)
+        self.logger.info("INIT STEP 3: ProjectManager created")
+
+        self.logger.info("INIT STEP 4: Initializing project state...")
+        self.current_project = None
+        self.generation_thread = None
+        self.logger.info("INIT STEP 4: Project state initialized")
+
+        self.logger.info("INIT STEP 5: Calling init_ui()...")
         self.init_ui()
+        self.logger.info("INIT STEP 5: init_ui() complete")
+
         self.logger.info("=== VideoProjectTab.__init__ COMPLETE ===")
     
     def init_ui(self):
         """Initialize the user interface with sub-tabs"""
+        self.logger.info("UI STEP 1: Creating main layout...")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        
+        self.logger.info("UI STEP 1: Main layout created")
+
         # Create tab widget for sub-tabs
+        self.logger.info("UI STEP 2: Creating QTabWidget for sub-tabs...")
         self.tab_widget = QTabWidget()
+        self.logger.info("UI STEP 2: QTabWidget created")
 
         # Create workspace tab
-        self.logger.info("Creating WorkspaceWidget...")
-        self.workspace_widget = WorkspaceWidget(self.config, self.providers)
-        self.logger.info("WorkspaceWidget created successfully")
+        self.logger.info("UI STEP 3: Creating WorkspaceWidget...")
+        try:
+            self.workspace_widget = WorkspaceWidget(self.config, self.providers)
+            self.logger.info("UI STEP 3: WorkspaceWidget created successfully")
+        except Exception as e:
+            self.logger.error(f"UI STEP 3: ERROR creating WorkspaceWidget: {e}", exc_info=True)
+            raise
+
+        self.logger.info("UI STEP 4: Connecting workspace signals...")
         self.workspace_widget.project_changed.connect(self.on_project_changed)
         self.workspace_widget.generation_requested.connect(self.on_generation_requested)
         # Forward the image provider change signal
@@ -1282,29 +1311,61 @@ class VideoProjectTab(QWidget):
         # Forward the LLM provider change signal
         if hasattr(self.workspace_widget, 'llm_provider_changed'):
             self.workspace_widget.llm_provider_changed.connect(lambda provider, model: self.on_llm_provider_changed(provider, model))
+        self.logger.info("UI STEP 4: Workspace signals connected")
+
+        self.logger.info("UI STEP 5: Adding workspace tab to tab widget...")
         self.tab_widget.addTab(self.workspace_widget, "Workspace")
-        
+        self.logger.info("UI STEP 5: Workspace tab added")
+
         # Sync with any project that was already loaded during workspace init
+        self.logger.info("UI STEP 6: Syncing current project...")
         if self.workspace_widget.current_project:
             self.current_project = self.workspace_widget.current_project
-        
+            self.logger.info(f"UI STEP 6: Current project synced: {self.current_project.name if hasattr(self.current_project, 'name') else 'unnamed'}")
+        else:
+            self.logger.info("UI STEP 6: No current project to sync")
+
         # Create history tab
-        self.history_widget = HistoryTab()
+        self.logger.info("UI STEP 7: Creating HistoryTab...")
+        try:
+            self.history_widget = HistoryTab()
+            self.logger.info("UI STEP 7: HistoryTab created successfully")
+        except Exception as e:
+            self.logger.error(f"UI STEP 7: ERROR creating HistoryTab: {e}", exc_info=True)
+            raise
+
+        self.logger.info("UI STEP 8: Connecting history signals...")
         self.history_widget.restore_requested.connect(self.on_restore_requested)
         self.tab_widget.addTab(self.history_widget, "History")
+        self.logger.info("UI STEP 8: History tab added")
 
         # Create reference library tab
-        from gui.video.reference_library_widget import ReferenceLibraryWidget
-        self.reference_library_widget = ReferenceLibraryWidget(self, None)
+        self.logger.info("UI STEP 9: Creating ReferenceLibraryWidget...")
+        try:
+            from gui.video.reference_library_widget import ReferenceLibraryWidget
+            self.reference_library_widget = ReferenceLibraryWidget(self, None)
+            self.logger.info("UI STEP 9: ReferenceLibraryWidget created successfully")
+        except Exception as e:
+            self.logger.error(f"UI STEP 9: ERROR creating ReferenceLibraryWidget: {e}", exc_info=True)
+            raise
+
+        self.logger.info("UI STEP 10: Connecting reference library signals...")
         self.reference_library_widget.references_changed.connect(self.on_references_changed)
         self.tab_widget.addTab(self.reference_library_widget, "📸 References")
+        self.logger.info("UI STEP 10: Reference library tab added")
 
         # Update reference library when project changes
+        self.logger.info("UI STEP 11: Syncing reference library with current project...")
         if self.current_project:
             self.reference_library_widget.set_project(self.current_project)
+            self.logger.info("UI STEP 11: Reference library synced with project")
+        else:
+            self.logger.info("UI STEP 11: No project to sync with reference library")
 
         # Add tabs to layout
+        self.logger.info("UI STEP 12: Adding tab widget to layout...")
         layout.addWidget(self.tab_widget)
+        self.logger.info("UI STEP 12: Tab widget added to layout - init_ui COMPLETE")
     
     def set_provider(self, provider_name: str):
         """Set the image provider and sync with workspace widget."""
