@@ -79,8 +79,13 @@ I've added comprehensive logging to track down the video tab hang issue on Nick'
 ### Log File Location
 
 The application writes logs to:
-- **Linux:** `~/.config/ImageAI/imageai.log`
+- **Linux:** `~/.config/ImageAI/logs/imageai_YYYYMMDD_HHMMSS.log` (timestamped files)
+  - Example: `~/.config/ImageAI/logs/imageai_20250131_143022.log`
+  - New log file created each time app starts
+  - Keeps last 5 log files (10MB each, rotated)
 - **Current Directory:** `./imageai_current.log` (copied automatically on exit)
+  - This is the most recent log, copied when app closes
+  - Easiest to find and share
 
 ### Log File Analysis
 
@@ -143,11 +148,17 @@ This would tell us the WorkspaceWidget constructor is where it hangs.
 
 4. **Collect the log file**:
    ```bash
-   # Check the current directory for the auto-copied log
-   cat imageai_current.log > video_tab_hang.log
+   # EASIEST: Check the current directory for the auto-copied log
+   # (Only exists if app exited cleanly)
+   cat imageai_current.log
 
-   # Or get it from the config directory
-   cat ~/.config/ImageAI/imageai.log > video_tab_hang.log
+   # OR: Get the most recent timestamped log from config directory
+   ls -lt ~/.config/ImageAI/logs/imageai_*.log | head -1
+   # Then copy that file:
+   cat ~/.config/ImageAI/logs/imageai_20250131_143022.log > video_tab_hang.log
+
+   # OR: Just look at the latest log directly
+   less ~/.config/ImageAI/logs/imageai_$(ls -t ~/.config/ImageAI/logs/ | head -1)
    ```
 
 5. **Send the log file** - Share `video_tab_hang.log` so we can see exactly where it hung
