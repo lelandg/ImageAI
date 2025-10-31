@@ -12,7 +12,7 @@ from typing import List, Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QScrollArea, QFrame, QComboBox, QLineEdit,
-    QSizePolicy, QMessageBox
+    QSizePolicy, QMessageBox, QRadioButton, QButtonGroup
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -331,10 +331,15 @@ class ImagenReferenceWidget(QWidget):
 
     Allows adding up to 4 reference images with types and descriptions.
     Provides signals for when references change.
+
+    Supports two modes:
+    - Flexible: Single reference, style transformation (Google Gemini)
+    - Strict: Multi-reference, subject preservation (Imagen 3 Customization)
     """
 
     # Signals
     references_changed = Signal()  # Emitted when reference list changes
+    mode_changed = Signal(str)     # Emitted when mode changes (flexible/strict)
 
     def __init__(self, parent=None):
         """
@@ -347,6 +352,7 @@ class ImagenReferenceWidget(QWidget):
         self.max_references = 4
         self.reference_items: List[ImagenReferenceItemWidget] = []
         self.logger = logging.getLogger(__name__)
+        self.current_mode = "strict"  # Default to strict mode
 
         self._init_ui()
 
@@ -355,6 +361,41 @@ class ImagenReferenceWidget(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(5)
+
+        # Mode selector (Flexible vs Strict)
+        mode_layout = QHBoxLayout()
+        mode_label = QLabel("Reference Mode:")
+        mode_label.setStyleSheet("font-weight: bold;")
+        mode_layout.addWidget(mode_label)
+
+        # Create button group for exclusive selection
+        self.mode_button_group = QButtonGroup(self)
+
+        # Flexible mode radio button
+        self.radio_flexible = QRadioButton("Flexible")
+        self.radio_flexible.setToolTip(
+            "Transform image style (cartoons, artistic styles).\n"
+            "Single reference only. Uses Google Gemini."
+        )
+        self.mode_button_group.addButton(self.radio_flexible, 0)
+        mode_layout.addWidget(self.radio_flexible)
+
+        # Strict mode radio button
+        self.radio_strict = QRadioButton("Strict")
+        self.radio_strict.setToolTip(
+            "Preserve subjects as-is, change scene/composition.\n"
+            "Multi-reference support. Uses Imagen 3 Customization."
+        )
+        self.radio_strict.setChecked(True)  # Default to strict
+        self.mode_button_group.addButton(self.radio_strict, 1)
+        mode_layout.addWidget(self.radio_strict)
+
+        mode_layout.addStretch()
+
+        # Connect mode change signal
+        self.mode_button_group.buttonClicked.connect(self._on_mode_changed)
+
+        main_layout.addLayout(mode_layout)
 
         # Header with count and add button
         header_layout = QHBoxLayout()
@@ -381,14 +422,53 @@ class ImagenReferenceWidget(QWidget):
 
         main_layout.addWidget(self.items_container)
 
+    def _on_mode_changed(self):
+        """Handle mode change between Flexible and Strict."""
+        new_mode = "flexible" if self.radio_flexible.isChecked() else "strict"
+
+        if new_mode == self.current_mode:
+            return
+
+        old_mode = self.current_mode
+        self.current_mode = new_mode
+
+        self.logger.info(f"Reference mode changed: {old_mode} -> {new_mode}")
+
+        # If switching to Flexible mode and have more than 1 reference, remove extras
+        if new_mode == "flexible" and len(self.reference_items) > 1:
+            # Ask user if they want to keep first reference
+            from PySide6.QtWidgets import QMessageBox
+            reply = QMessageBox.question(
+                self,
+                "Mode Change",
+                "Flexible mode only supports 1 reference image.\nKeep the first reference and remove the others?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+
+            if reply == QMessageBox.Yes:
+                # Remove all but first
+                while len(self.reference_items) > 1:
+                    self._remove_reference(self.reference_items[-1])
+            else:
+                # Revert mode change
+                self.radio_strict.setChecked(True)
+                self.current_mode = old_mode
+                return
+
+        self._update_ui()
+        self.mode_changed.emit(new_mode)
+
     def _add_reference(self):
         """Add a new reference image."""
-        # Check max references
-        if len(self.reference_items) >= self.max_references:
+        # Check max references based on mode
+        max_allowed = 1 if self.current_mode == "flexible" else self.max_references
+
+        if len(self.reference_items) >= max_allowed:
+            mode_name = "Flexible" if self.current_mode == "flexible" else "Strict"
             QMessageBox.warning(
                 self,
                 "Maximum References",
-                f"Maximum {self.max_references} reference images allowed for Imagen 3."
+                f"{mode_name} mode allows maximum {max_allowed} reference image(s)."
             )
             return
 
@@ -446,8 +526,11 @@ class ImagenReferenceWidget(QWidget):
     def _update_ui(self):
         """Update UI elements based on current state."""
         count = len(self.reference_items)
-        self.count_label.setText(f"Reference Images ({count}/{self.max_references})")
-        self.btn_add.setEnabled(count < self.max_references)
+        max_allowed = 1 if self.current_mode == "flexible" else self.max_references
+
+        # Update count label with mode-aware max
+        self.count_label.setText(f"Reference Images ({count}/{max_allowed})")
+        self.btn_add.setEnabled(count < max_allowed)
         self.references_changed.emit()
 
     def get_references(self) -> List[ImagenReference]:
@@ -473,6 +556,33 @@ class ImagenReferenceWidget(QWidget):
         """
         return len(self.get_references()) > 0
 
+    def get_mode(self) -> str:
+        """
+        Get the current reference mode.
+
+        Returns:
+            "flexible" or "strict"
+        """
+        return self.current_mode
+
+    def is_flexible_mode(self) -> bool:
+        """
+        Check if currently in flexible mode.
+
+        Returns:
+            True if in flexible mode (style transfer)
+        """
+        return self.current_mode == "flexible"
+
+    def is_strict_mode(self) -> bool:
+        """
+        Check if currently in strict mode.
+
+        Returns:
+            True if in strict mode (subject preservation)
+        """
+        return self.current_mode == "strict"
+
     def validate_references(self) -> tuple[bool, list[str]]:
         """
         Validate all references.
@@ -492,22 +602,25 @@ class ImagenReferenceWidget(QWidget):
         for item in list(self.reference_items):
             self._remove_reference(item)
 
-    def to_dict(self) -> list:
+    def to_dict(self) -> dict:
         """
-        Serialize all references to a list of dictionaries.
+        Serialize all references and mode to a dictionary.
 
         Returns:
-            List of reference dictionaries
+            Dictionary with mode and references
         """
         references = self.get_references()
-        return [ref.to_dict() for ref in references]
+        return {
+            "mode": self.current_mode,
+            "references": [ref.to_dict() for ref in references]
+        }
 
-    def from_dict(self, data: list):
+    def from_dict(self, data):
         """
-        Load references from a list of dictionaries.
+        Load references and mode from dictionary or list.
 
         Args:
-            data: List of reference dictionaries
+            data: Dictionary with mode and references, or legacy list of reference dicts
         """
         # Clear existing references
         self.clear_all()
@@ -515,9 +628,26 @@ class ImagenReferenceWidget(QWidget):
         if not data:
             return
 
+        # Handle both new dict format and legacy list format
+        if isinstance(data, dict):
+            # New format with mode
+            mode = data.get("mode", "strict")
+            if mode == "flexible":
+                self.radio_flexible.setChecked(True)
+            else:
+                self.radio_strict.setChecked(True)
+            self.current_mode = mode
+
+            ref_list = data.get("references", [])
+        else:
+            # Legacy list format - assume strict mode
+            ref_list = data
+            self.radio_strict.setChecked(True)
+            self.current_mode = "strict"
+
         # Load each reference
         from core.reference.imagen_reference import ImagenReference
-        for ref_dict in data:
+        for ref_dict in ref_list:
             try:
                 # Create ImagenReference from dict
                 ref = ImagenReference.from_dict(ref_dict)

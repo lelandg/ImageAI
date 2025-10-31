@@ -4769,36 +4769,63 @@ For more detailed information, please refer to the full documentation.
                 self.btn_generate.setEnabled(True)
                 return
 
-            # Validate prompt has reference tags [N]
-            import re
-            ref_tags = re.findall(r'\[(\d+)\]', prompt)
-            if not ref_tags:
-                msg = (f"Your prompt must reference the images using tags like [1], [2], etc.\n\n"
-                       f"You have {len(references)} reference image(s).\n"
-                       f"Example: 'A photo of [1] and [2] at the beach'")
-                self._append_to_console(f"ERROR: {msg}", "#ff6666")
-                QMessageBox.warning(self, APP_NAME, msg)
-                self.btn_generate.setEnabled(True)
-                return
+            # Check mode: Flexible or Strict
+            mode = self.imagen_reference_widget.get_mode()
 
-            # Switch to ImagenCustomizationProvider
-            use_imagen_customization = True
-            # Store original provider to restore after generation
-            self._imagen_original_provider = self.current_provider
-            self.current_provider = "imagen_customization"
+            if mode == "flexible":
+                # Flexible mode: Use Google Gemini with single reference (style transfer)
+                if len(references) != 1:
+                    msg = "Flexible mode requires exactly 1 reference image."
+                    self._append_to_console(f"ERROR: {msg}", "#ff6666")
+                    QMessageBox.warning(self, APP_NAME, msg)
+                    self.btn_generate.setEnabled(True)
+                    return
 
-            # Pass references in kwargs
-            kwargs['references'] = references
+                # Read the reference image as bytes for Google provider
+                ref_path = references[0].path
+                with open(ref_path, 'rb') as f:
+                    reference_image_bytes = f.read()
 
-            self._append_to_console(
-                f"Using Imagen 3 Customization with {len(references)} reference image(s)",
-                "#00ff00"
-            )
-            for i, ref in enumerate(references, start=1):
+                # Pass as reference_image parameter (old Google provider behavior)
+                kwargs['reference_image'] = reference_image_bytes
+
                 self._append_to_console(
-                    f"  [{i}] {ref.reference_type.value.upper()}: {ref.path.name}",
-                    "#66ccff"
+                    f"Using Flexible mode (style transfer) with reference: {ref_path.name}",
+                    "#00ff00"
                 )
+
+            else:
+                # Strict mode: Use Imagen 3 Customization (subject preservation)
+                # Validate prompt has reference tags [N]
+                import re
+                ref_tags = re.findall(r'\[(\d+)\]', prompt)
+                if not ref_tags:
+                    msg = (f"Your prompt must reference the images using tags like [1], [2], etc.\n\n"
+                           f"You have {len(references)} reference image(s).\n"
+                           f"Example: 'A photo of [1] and [2] at the beach'")
+                    self._append_to_console(f"ERROR: {msg}", "#ff6666")
+                    QMessageBox.warning(self, APP_NAME, msg)
+                    self.btn_generate.setEnabled(True)
+                    return
+
+                # Switch to ImagenCustomizationProvider
+                use_imagen_customization = True
+                # Store original provider to restore after generation
+                self._imagen_original_provider = self.current_provider
+                self.current_provider = "imagen_customization"
+
+                # Pass references in kwargs
+                kwargs['references'] = references
+
+                self._append_to_console(
+                    f"Using Strict mode (Imagen 3 Customization) with {len(references)} reference image(s)",
+                    "#00ff00"
+                )
+                for i, ref in enumerate(references, start=1):
+                    self._append_to_console(
+                        f"  [{i}] {ref.reference_type.value.upper()}: {ref.path.name}",
+                        "#66ccff"
+                    )
 
         # Show status for provider loading
         self.status_bar.showMessage(f"Connecting to {self.current_provider}...")
