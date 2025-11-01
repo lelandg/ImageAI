@@ -7,7 +7,120 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.24.0] - 2025-10-24
 
-- Update ReadMe to include new features.
+### Added
+
+#### Google Imagen 3 Integration
+- **Full Imagen 3 Support**: Complete integration with Google's Imagen 3 model
+  - Multi-reference image support with flexible and strict modes
+  - Advanced reference image handling with positioning and style options
+  - Direct PIL Image integration with Google AI SDK for better compatibility
+  - Google Cloud authentication support for Gemini image analysis
+  - Improved provider UI with Imagen-specific controls
+  - Enhanced combo box styles for better user experience
+
+#### Layout Engine System (NEW!)
+- **Complete Layout/Books Feature**: Professional layout system for creating photo books and documents
+  - Core layout engine with starter templates
+  - Advanced layout features (Phase 2 implementation)
+  - Template management system (Phase 3 implementation)
+  - Project save/open functionality for layout projects
+  - Export presets for various output formats
+  - Full GUI for layout design and editing
+
+#### LTX-Video Integration (NEW!)
+- **Local Video Generation**: Support for LTX-Video model running locally
+  - LTX-Video deployment with GUI integration
+  - Automatic fallback to Veo when LTX-Video not installed
+  - Comprehensive implementation plan document
+  - Seamless switching between local and cloud video generation
+
+#### Enhanced Video Project Features
+- **Advanced Scene Processing**:
+  - Scene batching system for efficient multi-scene processing
+  - Instrumental gap detection and intelligent handling
+  - Video clip selection with timing synchronization
+  - Frame extraction tab in reference library widget
+  - Frame-accurate lyric timing with MIDI integration
+  - Scene environment and marker support for better organization
+  - Camera movement controls and prompt flow options
+  - Section marker detection for structured video content
+  - Improved scene prompt styling and image selection UI
+  - Preserved instrumental sections by deferring scene splitting
+
+- **Veo 3 Video Enhancements**:
+  - Tempo BPM support in video prompt generation
+  - Timing markers and BPM descriptor transformation
+  - Rhythm prompting research integration for musical accuracy
+  - First frame handling in video generation results
+  - Video prompt generator with enhanced scene continuity
+  - MIDI timing sync propagating to video clips
+  - Veo 3.1 preview support with raw bytes response handling
+
+#### Google Cloud Authentication
+- **Enhanced Authentication Options**:
+  - gcloud access token support for enterprise deployments
+  - Background thread for non-blocking auth status checks
+  - Refactored Google Cloud project ID handling
+  - Vertex AI mode initialization for genai client
+  - Improved auth state caching and validation
+
+#### Logging and Debugging
+- **Comprehensive Logging System**:
+  - Detailed workspace UI initialization logging
+  - Debug logging for video tab loading sequences
+  - Full LLM conversation logging in scene batching
+  - Enhanced log file collection and organization
+  - Automatic log/project file copying on application exit
+
+#### Documentation
+- **Project Documentation**:
+  - CONTRIBUTING.md with contribution guidelines
+  - ImageAI installation guides for all platforms
+  - Prompt style preservation documentation
+  - LTX-Video implementation plan
+  - Veo 3 tempo and rhythm prompting research notes
+
+### Changed
+
+- **LLM Integration Improvements**:
+  - Enhanced response parsing with robust fallback mechanisms
+  - Added max_tokens parameter support across providers
+  - Improved timing field validation in LLM synchronization
+  - Better error handling for malformed LLM responses
+
+- **UI/UX Enhancements**:
+  - Updated reference image combo box styles
+  - Refined resolution detection in prompt validation
+  - Improved splitter styling in scene table
+  - Enhanced QWebEngineView initialization with fallback
+  - Updated allowed commands in settings configuration
+
+- **Video Processing Improvements**:
+  - Refactored scene splitting to preserve instrumental sections
+  - Moved batching logic to workspace_widget for better control
+  - Enhanced scene processing algorithms for lyrics
+  - Improved instrumental detection accuracy
+
+- **Provider Updates**:
+  - Veo integration now uses Veo 3.1 preview model
+  - Handle raw bytes response format from Veo API
+  - Refactored Gemini request to use PIL Image objects
+  - Better resolution handling across all providers
+
+### Fixed
+
+- Fixed timing synchronization issues in video projects
+- Resolved QWebEngineView initialization errors
+- Corrected frame extraction and reference library integration
+- Fixed instrumental scene preservation during splitting
+- Improved error handling in Veo video generation
+
+### Technical
+
+- Refactored Google Cloud auth to run checks in background threads
+- Enhanced video prompt generation system architecture
+- Improved scene batching and processing pipeline
+- Updated .gitignore patterns for better project organization
 
 ## [0.23.1] - 2025-10-24
 
