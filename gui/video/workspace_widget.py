@@ -3560,7 +3560,7 @@ class WorkspaceWidget(QWidget):
         """Safely stop media player if it exists"""
         if self.media_player:
             try:
-                self._safe_stop_media_player()
+                self.media_player.stop()
             except Exception as e:
                 self.logger.warning(f"Failed to stop media player: {e}")
 
@@ -6137,8 +6137,8 @@ class WorkspaceWidget(QWidget):
         self.current_project.enable_camera_movements = self.enable_camera_movements_check.isChecked()
         self.current_project.enable_prompt_flow = self.enable_prompt_flow_check.isChecked()
 
-        # Save video player settings
-        self.current_project.video_muted = self.audio_output.isMuted()
+        # Save video player settings (default to muted if no audio support)
+        self.current_project.video_muted = self.audio_output.isMuted() if self.audio_output else True
 
         # Save continuity settings
         self.current_project.enable_continuity = self.enable_continuity_checkbox.isChecked()
@@ -6357,8 +6357,8 @@ class WorkspaceWidget(QWidget):
             else:
                 self.enable_prompt_flow_check.setChecked(True)  # Default to enabled
 
-            # Load video player settings
-            if hasattr(self.current_project, 'video_muted'):
+            # Load video player settings (skip if no audio support)
+            if hasattr(self.current_project, 'video_muted') and self.audio_output:
                 is_muted = self.current_project.video_muted
                 self.audio_output.setMuted(is_muted)
                 self.mute_btn.setChecked(is_muted)
