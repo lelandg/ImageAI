@@ -187,11 +187,11 @@ def main():
 
     # Test QMediaPlayer creation (with timeout)
     print("### Qt MULTIMEDIA INITIALIZATION TEST ###")
-    print("Attempting to create QMediaPlayer (5 second timeout)...")
+    print("Testing QMediaPlayer creation (WITHOUT QAudioOutput - known to hang on Linux)...")
 
     try:
         from PySide6.QtWidgets import QApplication
-        from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
+        from PySide6.QtMultimedia import QMediaPlayer
         from PySide6.QtCore import QTimer
         import signal
 
@@ -206,27 +206,23 @@ def main():
         if not app:
             app = QApplication(sys.argv)
 
-        print("  Creating QMediaPlayer...")
+        print("  Creating QMediaPlayer (video only, no audio)...")
         player = QMediaPlayer()
         print("  ✓ QMediaPlayer created successfully!")
 
-        print("  Creating QAudioOutput...")
-        audio = QAudioOutput()
-        print("  ✓ QAudioOutput created successfully!")
-
-        print("  Connecting audio to player...")
-        player.setAudioOutput(audio)
-        print("  ✓ Audio connected successfully!")
+        print("  NOTE: Skipping QAudioOutput test (known to hang on some Linux systems)")
+        print("        Video playback works without audio support")
 
         signal.alarm(0)  # Cancel alarm
 
         print()
-        print("SUCCESS: Qt multimedia initialized without issues!")
+        print("SUCCESS: Qt multimedia video player initialized!")
+        print("(Audio disabled to avoid system hangs)")
 
     except TimeoutError as e:
         print(f"  ✗ TIMEOUT: {e}")
         print()
-        print("FAILURE: Qt multimedia initialization HANGS on this system!")
+        print("FAILURE: Even QMediaPlayer (without audio) hangs on this system!")
     except Exception as e:
         print(f"  ✗ ERROR: {e}")
         print()

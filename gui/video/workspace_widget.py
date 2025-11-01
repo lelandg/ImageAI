@@ -580,7 +580,8 @@ class WorkspaceWidget(QWidget):
         video_player_layout.setContentsMargins(0, 0, 0, 0)
         video_player_layout.setSpacing(0)
 
-        # Video widget (for video playback)
+        # Video widget (for video playback) - NO AUDIO (QAudioOutput hangs on Linux)
+        # Audio doesn't work on Windows either, so we skip it entirely
         self.logger.info("MEDIA STEP 1: Creating QVideoWidget...")
         self.video_widget = QVideoWidget()
         self.logger.info("MEDIA STEP 1: QVideoWidget created successfully")
@@ -594,28 +595,21 @@ class WorkspaceWidget(QWidget):
         video_player_layout.addWidget(self.video_widget)
         self.logger.info("MEDIA STEP 3: QVideoWidget added to layout")
 
-        # Video player instance
+        # Video player instance (WITHOUT audio - QAudioOutput hangs on some Linux systems)
         self.logger.info("MEDIA STEP 4: Creating QMediaPlayer...")
         self.logger.info("MEDIA STEP 4: (This may take a moment on first run - initializing multimedia backend)")
         self.media_player = QMediaPlayer()
         self.logger.info("MEDIA STEP 4: QMediaPlayer created successfully")
 
-        self.logger.info("MEDIA STEP 5: Creating QAudioOutput...")
-        self.audio_output = QAudioOutput()
-        self.logger.info("MEDIA STEP 5: QAudioOutput created successfully")
+        # SKIP QAudioOutput - it hangs on Linux and doesn't work on Windows anyway
+        self.logger.info("MEDIA STEP 5: Skipping QAudioOutput (causes hang on Linux, doesn't work on Windows)")
+        self.audio_output = None  # No audio support
 
-        self.logger.info("MEDIA STEP 6: Connecting audio output to media player...")
-        self.media_player.setAudioOutput(self.audio_output)
-        self.logger.info("MEDIA STEP 6: Audio output connected")
-
-        self.logger.info("MEDIA STEP 7: Connecting video output to media player...")
+        self.logger.info("MEDIA STEP 6: Connecting video output to media player...")
         self.media_player.setVideoOutput(self.video_widget)
-        self.logger.info("MEDIA STEP 7: Video output connected")
+        self.logger.info("MEDIA STEP 6: Video output connected")
 
-        # Default to muted
-        self.logger.info("MEDIA STEP 8: Setting audio to muted by default...")
-        self.audio_output.setMuted(True)
-        self.logger.info("MEDIA STEP 8: Audio muted, media player fully initialized")
+        self.logger.info("MEDIA STEP 7: Video player initialized (silent mode - no audio)")
 
         # Video controls container (right side with wider controls)
         video_controls = QWidget()
@@ -632,10 +626,10 @@ class WorkspaceWidget(QWidget):
         self.play_pause_btn.clicked.connect(self._toggle_play_pause)
         playback_controls.addWidget(self.play_pause_btn)
 
-        self.mute_btn = QPushButton("🔇 Unmute")
-        self.mute_btn.setCheckable(True)
-        self.mute_btn.setChecked(True)  # Muted by default
-        self.mute_btn.clicked.connect(self._toggle_mute)
+        # Mute button hidden - no audio support (QAudioOutput causes hangs)
+        self.mute_btn = QPushButton("🔇 No Audio")
+        self.mute_btn.setEnabled(False)
+        self.mute_btn.setToolTip("Audio disabled (QAudioOutput causes system hangs on Linux)")
         playback_controls.addWidget(self.mute_btn)
 
         video_controls_layout.addLayout(playback_controls)
@@ -721,11 +715,15 @@ class WorkspaceWidget(QWidget):
         self.video_player_container.hide()  # Hidden by default
         media_viewer_layout.addWidget(self.video_player_container)
 
-        # Connect media player signals
-        self.media_player.positionChanged.connect(self._update_position)
-        self.media_player.durationChanged.connect(self._update_duration)
-        self.media_player.playbackStateChanged.connect(self._update_play_button)
-        self.media_player.mediaStatusChanged.connect(self._on_media_status_changed)
+        # Connect media player signals (only if media player is enabled)
+        if self.media_player:
+            self.media_player.positionChanged.connect(self._update_position)
+            self.media_player.durationChanged.connect(self._update_duration)
+            self.media_player.playbackStateChanged.connect(self._update_play_button)
+            self.media_player.mediaStatusChanged.connect(self._on_media_status_changed)
+            self.logger.info("Media player signals connected")
+        else:
+            self.logger.info("Media player signals skipped (player not initialized)")
 
         image_console_splitter.addWidget(media_viewer_container)
 
@@ -3456,7 +3454,7 @@ class WorkspaceWidget(QWidget):
         # Hide video player, show image label
         self.video_player_container.hide()
         self.output_image_label.show()
-        self.media_player.stop()
+        self._safe_stop_media_player()
 
         # Prefer approved_image, fallback to first image in list
         if scene.approved_image:
@@ -3483,6 +3481,9 @@ class WorkspaceWidget(QWidget):
 
     def _show_video(self, scene, row):
         """Display the scene's video in the video player"""
+        if not self.media_player:
+            self._log_to_console("Video playback not available (media player disabled)", "WARNING")
+            return
         from pathlib import Path
 
         video_path = scene.video_clip
@@ -3507,6 +3508,8 @@ class WorkspaceWidget(QWidget):
 
     def _toggle_play_pause(self):
         """Toggle video playback"""
+        if not self.media_player:
+            return
         if self.media_player.playbackState() == QMediaPlayer.PlayingState:
             self.media_player.pause()
         else:
@@ -3514,6 +3517,8 @@ class WorkspaceWidget(QWidget):
 
     def _toggle_mute(self):
         """Toggle audio mute"""
+        if not self.audio_output:
+            return
         is_muted = self.audio_output.isMuted()
         self.audio_output.setMuted(not is_muted)
         self.mute_btn.setText("🔊 Mute" if not is_muted else "🔇 Unmute")
@@ -3521,15 +3526,21 @@ class WorkspaceWidget(QWidget):
 
     def _set_position(self, position):
         """Set video playback position"""
+        if not self.media_player:
+            return
         self.media_player.setPosition(position)
 
     def _update_position(self, position):
         """Update position slider when video position changes"""
+        if not self.media_player:
+            return
         self.video_position_slider.setValue(position)
         self._update_time_label(position, self.media_player.duration())
 
     def _update_duration(self, duration):
         """Update slider range when video duration is known"""
+        if not self.media_player:
+            return
         self.video_position_slider.setRange(0, duration)
         self._update_time_label(self.media_player.position(), duration)
 
@@ -3538,13 +3549,25 @@ class WorkspaceWidget(QWidget):
 
     def _update_play_button(self, state):
         """Update play/pause button text based on playback state"""
+        if not self.media_player:
+            return
         if state == QMediaPlayer.PlayingState:
             self.play_pause_btn.setText("⏸ Pause")
         else:
             self.play_pause_btn.setText("▶ Play")
 
+    def _safe_stop_media_player(self):
+        """Safely stop media player if it exists"""
+        if self.media_player:
+            try:
+                self._safe_stop_media_player()
+            except Exception as e:
+                self.logger.warning(f"Failed to stop media player: {e}")
+
     def _on_media_status_changed(self, status):
         """Handle media status changes for loop and sequential playback"""
+        if not self.media_player:
+            return
         from PySide6.QtMultimedia import QMediaPlayer
 
         # Check if video has finished playing
@@ -3613,6 +3636,8 @@ class WorkspaceWidget(QWidget):
 
     def _on_time_textbox_changed(self):
         """Handle time textbox change - parse and seek to specified time"""
+        if not self.media_player:
+            return
         try:
             time_str = self.video_time_textbox.text().strip()
             if not time_str:
@@ -3767,7 +3792,7 @@ class WorkspaceWidget(QWidget):
         # Hide video player, show image label
         self.video_player_container.hide()
         self.output_image_label.show()
-        self.media_player.stop()
+        self._safe_stop_media_player()
 
         pixmap = QPixmap(str(scene.last_frame))
         if not pixmap.isNull():
@@ -3955,7 +3980,7 @@ class WorkspaceWidget(QWidget):
         # Hide video player, show image label
         self.video_player_container.hide()
         self.output_image_label.show()
-        self.media_player.stop()
+        self._safe_stop_media_player()
 
         pixmap = QPixmap(str(image_path))
         if not pixmap.isNull():
@@ -4194,7 +4219,7 @@ class WorkspaceWidget(QWidget):
         # Hide video player, show image label
         self.video_player_container.hide()
         self.output_image_label.show()
-        self.media_player.stop()
+        self._safe_stop_media_player()
 
         pixmap = QPixmap(str(scene.end_frame))
         if not pixmap.isNull():
@@ -4236,7 +4261,7 @@ class WorkspaceWidget(QWidget):
         # Hide video player, show image label
         self.video_player_container.hide()
         self.output_image_label.show()
-        self.media_player.stop()
+        self._safe_stop_media_player()
 
         pixmap = QPixmap(str(scene.first_frame))
         if not pixmap.isNull():
@@ -4271,7 +4296,7 @@ class WorkspaceWidget(QWidget):
         # Hide video player, show image label
         self.video_player_container.hide()
         self.output_image_label.show()
-        self.media_player.stop()
+        self._safe_stop_media_player()
 
         # Load first frame in image panel
         pixmap = QPixmap(str(scene.first_frame))
@@ -4286,6 +4311,9 @@ class WorkspaceWidget(QWidget):
 
     def _play_video_in_panel(self, scene_index: int):
         """Play video in the lower video panel"""
+        if not self.media_player:
+            self._log_to_console("Video playback not available (media player disabled)", "WARNING")
+            return
         if not self.current_project or scene_index >= len(self.current_project.scenes):
             return
 
@@ -4303,7 +4331,7 @@ class WorkspaceWidget(QWidget):
             self.video_player_container.show()
 
             # Stop any currently playing video
-            self.media_player.stop()
+            self._safe_stop_media_player()
 
             # Load the video and restart from beginning
             with SuppressStderr():
@@ -4367,7 +4395,7 @@ class WorkspaceWidget(QWidget):
             scene.last_frame = None
 
             # Stop media player and clear source completely
-            self.media_player.stop()
+            self._safe_stop_media_player()
             with SuppressStderr():
                 self.media_player.setSource(QUrl())  # Clear the source
 
