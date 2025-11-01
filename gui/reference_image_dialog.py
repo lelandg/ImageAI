@@ -658,6 +658,7 @@ class ReferenceImageDialog(QDialog):
         """Load LLM settings from config."""
         # Load available providers (doesn't need config)
         from gui.main_window import MainWindow
+
         providers = MainWindow.get_llm_providers()
 
         # Filter out "None" as it's not valid for image analysis
@@ -668,7 +669,7 @@ class ReferenceImageDialog(QDialog):
 
         # Try to restore saved settings if config is available
         if self.config:
-            # Set saved provider if available, or default to first provider
+            # Set saved provider if available
             saved_provider = self.config.get('llm_provider', '')
             if saved_provider and saved_provider != "None":
                 index = self.llm_provider_combo.findText(saved_provider)
@@ -679,11 +680,11 @@ class ReferenceImageDialog(QDialog):
                     if self.llm_provider_combo.count() > 0:
                         self.llm_provider_combo.setCurrentIndex(0)
             else:
-                # No saved provider or was "None", select first available
+                # No saved provider, use first available
                 if self.llm_provider_combo.count() > 0:
                     self.llm_provider_combo.setCurrentIndex(0)
         else:
-            # No config, just select first available provider
+            # No config, use first available
             if self.llm_provider_combo.count() > 0:
                 self.llm_provider_combo.setCurrentIndex(0)
 

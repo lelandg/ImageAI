@@ -34,6 +34,7 @@ from core.video.project_manager import ProjectManager
 from core.video.storyboard import StoryboardGenerator
 from core.video.config import VideoConfig
 from core.security import SecureKeyStorage
+from core.gcloud_utils import get_default_llm_provider
 from gui.common.dialog_manager import get_dialog_manager
 from gui.video.wizard_widget import WorkflowWizardWidget
 from gui.video.frame_button import FrameButton
@@ -1675,9 +1676,16 @@ class WorkspaceWidget(QWidget):
                 self.save_project()
             elif reply == QMessageBox.Cancel:
                 return
-        
+
         self.current_project = VideoProject(name=self.project_name.text() or "Untitled")
         self.project_name.setText(self.current_project.name)
+
+        # Set default LLM provider based on gcloud auth status or Google API key
+        default_provider = get_default_llm_provider(self.config)
+        index = self.llm_provider_combo.findText(default_provider)
+        if index >= 0:
+            self.llm_provider_combo.setCurrentIndex(index)
+            self.logger.info(f"New project: Setting default LLM provider to {default_provider}")
 
         # Create wizard widget for new project
         self._create_wizard_widget()
@@ -5352,7 +5360,9 @@ class WorkspaceWidget(QWidget):
         self._auto_save_settings()
 
     def _get_available_llm_providers(self) -> list:
-        """Get list of LLM providers with configured API keys"""
+        """Get list of LLM providers with configured API keys or gcloud available"""
+        from core.gcloud_utils import find_gcloud_command
+
         available = ["None"]
 
         # Map providers to their API key config names
@@ -5365,8 +5375,17 @@ class WorkspaceWidget(QWidget):
         }
 
         for provider, key_name in key_map.items():
+            # Special handling for Google - show if API key OR gcloud command exists
+            # (Don't check auth status here - that's too slow for UI creation)
+            if provider == "Google":
+                has_api_key = bool(self.config.get(key_name))
+                has_gcloud = find_gcloud_command() is not None
+                if has_api_key or has_gcloud:
+                    available.append(provider)
+                    if has_gcloud and not has_api_key:
+                        self.logger.info("Adding Google to LLM providers (gcloud available)")
             # If no key needed (local providers) or key is configured
-            if key_name is None or self.config.get(key_name):
+            elif key_name is None or self.config.get(key_name):
                 available.append(provider)
 
         return available
@@ -6236,7 +6255,14 @@ class WorkspaceWidget(QWidget):
                     else:
                         self.logger.warning(f"LLM provider not found in combo: {provider_text}")
                 else:
-                    self.llm_provider_combo.setCurrentIndex(0)  # Set to "None"
+                    # Set default based on gcloud auth status or Google API key
+                    default_provider = get_default_llm_provider(self.config)
+                    index = self.llm_provider_combo.findText(default_provider)
+                    if index >= 0:
+                        self.llm_provider_combo.setCurrentIndex(index)
+                        self.logger.info(f"No saved LLM provider, defaulting to: {default_provider}")
+                    else:
+                        self.llm_provider_combo.setCurrentIndex(0)  # Fallback to "None"
                 
                 # Load image provider settings
                 if self.current_project.image_provider:

@@ -728,10 +728,20 @@ class PromptQuestionDialog(QDialog):
         self.llm_provider_combo.addItems(providers)
 
         if self.config:
-            provider = self.config.get("llm_provider", "OpenAI")
-            index = self.llm_provider_combo.findText(provider)
-            if index >= 0:
-                self.llm_provider_combo.setCurrentIndex(index)
+            # Use saved provider, or default to first available
+            provider = self.config.get("llm_provider", "")
+            if provider and provider != "None":
+                index = self.llm_provider_combo.findText(provider)
+                if index >= 0:
+                    self.llm_provider_combo.setCurrentIndex(index)
+                else:
+                    # Saved provider not available, use first
+                    if self.llm_provider_combo.count() > 0:
+                        self.llm_provider_combo.setCurrentIndex(0)
+            else:
+                # No saved provider, use first available
+                if self.llm_provider_combo.count() > 0:
+                    self.llm_provider_combo.setCurrentIndex(0)
 
             self.update_llm_models()
 

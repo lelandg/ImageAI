@@ -122,11 +122,77 @@ def get_gcloud_project_id() -> Optional[str]:
     return None
 
 
+def is_gcloud_authenticated() -> bool:
+    """
+    Quick check if gcloud is authenticated (used for setting defaults).
+    Returns True if authenticated, False otherwise.
+    This is a lightweight version that doesn't return detailed messages.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    if not GCLOUD_AVAILABLE:
+        logger.debug("gcloud libraries not available")
+        return False
+
+    try:
+        gcloud_cmd = find_gcloud_command()
+        if not gcloud_cmd:
+            logger.debug("gcloud command not found")
+            return False
+
+        logger.debug(f"Checking gcloud auth with command: {gcloud_cmd}")
+
+        # Quick check for authentication
+        result = subprocess.run(
+            [gcloud_cmd, "auth", "application-default", "print-access-token"],
+            capture_output=True,
+            text=True,
+            timeout=3,  # Short timeout for quick check
+            shell=(platform.system() == "Windows")
+        )
+
+        is_authenticated = result.returncode == 0
+        logger.debug(f"gcloud auth check result: {is_authenticated}")
+        return is_authenticated
+    except subprocess.TimeoutExpired:
+        logger.debug("gcloud auth check timed out (>3s)")
+        return False
+    except Exception as e:
+        logger.debug(f"gcloud auth check failed: {type(e).__name__}: {e}")
+        return False
+
+
+def get_default_llm_provider(config=None) -> str:
+    """
+    Get the default LLM provider.
+    Returns "Google" if gcloud is authenticated OR Google API key is configured.
+    Otherwise returns "OpenAI".
+
+    Args:
+        config: Optional ConfigManager instance to check for Google API key
+
+    Returns:
+        str: "Google" or "OpenAI"
+    """
+    # Check if Google API key is configured
+    if config:
+        google_api_key = config.get("google_api_key")
+        if google_api_key:
+            return "Google"
+
+    # Check if gcloud is authenticated
+    if is_gcloud_authenticated():
+        return "Google"
+
+    return "OpenAI"
+
+
 def check_gcloud_auth_status() -> Tuple[bool, str]:
     """Check if gcloud is authenticated. Returns (is_authenticated, status_message)."""
     if not GCLOUD_AVAILABLE:
         return False, "Google Cloud AI Platform library not installed. Run: pip install google-cloud-aiplatform"
-    
+
     try:
         gcloud_cmd = find_gcloud_command()
         if not gcloud_cmd:
@@ -142,7 +208,7 @@ def check_gcloud_auth_status() -> Tuple[bool, str]:
                               "2. Or run from PowerShell where gcloud is installed")
             else:
                 return False, "Google Cloud CLI not installed. Visit: https://cloud.google.com/sdk/docs/install"
-        
+
         # Check authentication status
         result = subprocess.run(
             [gcloud_cmd, "auth", "application-default", "print-access-token"],
@@ -151,7 +217,7 @@ def check_gcloud_auth_status() -> Tuple[bool, str]:
             timeout=5,  # Reduced from 10s to 5s - runs in background thread now, so shorter timeout is safer
             shell=(platform.system() == "Windows")  # Use shell on Windows for .cmd files
         )
-        
+
         if result.returncode == 0:
             # Also check if APIs are enabled
             project_id = get_gcloud_project_id()
