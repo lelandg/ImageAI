@@ -8,6 +8,10 @@ All UI components and configuration will automatically use the updated lists.
 
 from typing import Dict, List, Optional
 from dataclasses import dataclass
+import logging
+import requests
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -197,3 +201,59 @@ def format_provider_dict() -> Dict[str, Dict[str, any]]:
         if provider.endpoint:
             result[provider_id]['endpoint'] = provider.endpoint
     return result
+
+
+def fetch_ollama_models(endpoint: str = "http://localhost:11434") -> List[str]:
+    """
+    Fetch installed Ollama models from the Ollama server.
+
+    Args:
+        endpoint: Ollama server endpoint
+
+    Returns:
+        List of model names (e.g., ['llama3.2:latest', 'dolphin-mixtral:8x7b'])
+    """
+    try:
+        response = requests.get(f"{endpoint}/api/tags", timeout=5)
+        response.raise_for_status()
+        data = response.json()
+
+        models = []
+        if "models" in data:
+            for model_info in data["models"]:
+                model_name = model_info.get("name", "")
+                if model_name:
+                    models.append(model_name)
+                    logger.debug(f"Found Ollama model: {model_name}")
+
+        logger.info(f"Detected {len(models)} Ollama models")
+        return models
+
+    except requests.exceptions.ConnectionError:
+        logger.debug(f"Could not connect to Ollama at {endpoint}")
+        return []
+    except Exception as e:
+        logger.debug(f"Error fetching Ollama models: {e}")
+        return []
+
+
+def update_ollama_models(endpoint: str = "http://localhost:11434") -> bool:
+    """
+    Update the Ollama provider's model list with dynamically detected models.
+
+    Args:
+        endpoint: Ollama server endpoint
+
+    Returns:
+        True if models were updated, False otherwise
+    """
+    detected_models = fetch_ollama_models(endpoint)
+
+    if detected_models:
+        # Update the LLM_PROVIDERS dictionary
+        LLM_PROVIDERS['ollama'].models = detected_models
+        logger.info(f"Updated Ollama models: {len(detected_models)} models")
+        return True
+    else:
+        logger.debug("No Ollama models detected, keeping default list")
+        return False

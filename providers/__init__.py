@@ -120,6 +120,16 @@ def _get_providers() -> Dict[str, Type[ImageProvider]]:
             logging.debug(f"Could not load Midjourney provider: {e}")
             pass
 
+        # Try to import Ollama provider
+        try:
+            with suppress_stderr():
+                from .ollama import OllamaProvider
+                _PROVIDERS["ollama"] = OllamaProvider
+        except Exception as e:
+            import logging
+            logging.debug(f"Could not load Ollama provider: {e}")
+            pass
+
     return _PROVIDERS
 
 

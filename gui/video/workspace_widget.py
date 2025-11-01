@@ -5345,12 +5345,18 @@ class WorkspaceWidget(QWidget):
         else:
             self.llm_model_combo.setEnabled(True)
             # Populate with actual models for provider using centralized lists
-            provider_map = {"claude": "anthropic", "lm studio": "lmstudio"}
+            # Map display names to provider IDs
+            provider_map = {
+                "claude": "anthropic",
+                "google": "gemini",  # Map Google to gemini provider ID
+                "lm studio": "lmstudio"
+            }
             provider_id = provider_map.get(provider.lower(), provider.lower())
 
             models = get_provider_models(provider_id)
             if models:
                 self.llm_model_combo.addItems(models)
+                self.logger.info(f"Loaded {len(models)} models for {provider} (provider_id: {provider_id})")
 
         # Emit signal to notify other tabs
         model = self.llm_model_combo.currentText() if provider != "None" else None
