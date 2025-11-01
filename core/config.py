@@ -116,17 +116,45 @@ class ConfigManager:
         self.config["providers"][provider] = config
     
     def get_api_key(self, provider: str) -> Optional[str]:
-        """Get API key for a provider."""
+        """Get API key for a provider.
+
+        For Google provider with gcloud auth mode, returns a fresh access token.
+        Otherwise returns the stored API key.
+        """
+        # Special handling for Google provider with gcloud auth
+        if provider == "google" and self.get_auth_mode("google") == "gcloud":
+            try:
+                from .gcloud_utils import find_gcloud_command
+                import subprocess
+                import platform
+
+                gcloud_cmd = find_gcloud_command()
+                if gcloud_cmd:
+                    result = subprocess.run(
+                        [gcloud_cmd, "auth", "application-default", "print-access-token"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                        shell=(platform.system() == "Windows")
+                    )
+                    if result.returncode == 0:
+                        token = result.stdout.strip()
+                        if token:
+                            return token
+            except Exception:
+                # Fall through to normal API key lookup if gcloud fails
+                pass
+
         # Try keyring first (most secure)
         key = secure_storage.retrieve_key(provider)
         if key:
             return key
-        
+
         # Check provider-specific config
         provider_config = self.get_provider_config(provider)
         if "api_key" in provider_config:
             return provider_config["api_key"]
-        
+
         return None
     
     def set_api_key(self, provider: str, api_key: str) -> None:
