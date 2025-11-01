@@ -479,13 +479,20 @@ class WorkspaceWidget(QWidget):
         self.logger.info("  - Creating storyboard panel...")
         # Add storyboard with stretch factor so it expands to fill available space
         right_layout.addWidget(self.create_storyboard_panel(), stretch=3)
+        self.logger.info("  - Storyboard panel created successfully")
+
         self.logger.info("  - Creating export panel...")
         # Export panel stays compact at bottom
         right_layout.addWidget(self.create_export_panel(), stretch=0)
+        self.logger.info("  - Export panel created successfully")
+
+        self.logger.info("Adding right panel to splitter...")
         # Remove addStretch() so storyboard can grow to fill available vertical space
         self.h_splitter.addWidget(right_panel)
+        self.logger.info("Right panel added to splitter")
 
         # Set initial splitter sizes (wizard, left panel, right panel)
+        self.logger.info("Setting splitter sizes and constraints...")
         self.h_splitter.setSizes([300, 400, 600])
         # Equal stretch factors so manual resizing works smoothly
         self.h_splitter.setStretchFactor(0, 1)  # Wizard can stretch
@@ -499,20 +506,32 @@ class WorkspaceWidget(QWidget):
 
         # Connect to splitter moved signal to enforce max 50% width constraint
         self.h_splitter.splitterMoved.connect(self._on_splitter_moved)
+        self.logger.info("Splitter configuration complete")
 
         # Add splitter to h_container
+        self.logger.info("Adding splitter to h_container...")
         h_container_layout.addWidget(self.h_splitter)
+        self.logger.info("Splitter added to h_container")
 
+        self.logger.info("Adding h_container to workspace layout...")
         workspace_layout.addWidget(h_container)
+        self.logger.info("h_container added to workspace layout")
 
         # Status bar
+        self.logger.info("Creating status bar...")
         workspace_layout.addWidget(self.create_status_bar())
+        self.logger.info("Status bar created")
 
         # Set workspace widget in scroll area
+        self.logger.info("Setting workspace in scroll area...")
         workspace_scroll.setWidget(workspace_widget)
         main_splitter.addWidget(workspace_scroll)
+        self.logger.info("Workspace scroll area configured")
 
         # Bottom section - Image view and status console
+        self.logger.info("="*60)
+        self.logger.info("CREATING BOTTOM SECTION (Media Player & Console)")
+        self.logger.info("="*60)
         bottom_widget = QWidget()
         bottom_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         bottom_layout = QVBoxLayout(bottom_widget)
@@ -562,18 +581,41 @@ class WorkspaceWidget(QWidget):
         video_player_layout.setSpacing(0)
 
         # Video widget (for video playback)
+        self.logger.info("MEDIA STEP 1: Creating QVideoWidget...")
         self.video_widget = QVideoWidget()
+        self.logger.info("MEDIA STEP 1: QVideoWidget created successfully")
+
+        self.logger.info("MEDIA STEP 2: Styling QVideoWidget...")
         self.video_widget.setStyleSheet("border: 1px solid #ccc; background-color: #000;")
         self.video_widget.setMinimumHeight(150)
+        self.logger.info("MEDIA STEP 2: QVideoWidget styled")
+
+        self.logger.info("MEDIA STEP 3: Adding QVideoWidget to layout...")
         video_player_layout.addWidget(self.video_widget)
+        self.logger.info("MEDIA STEP 3: QVideoWidget added to layout")
 
         # Video player instance
+        self.logger.info("MEDIA STEP 4: Creating QMediaPlayer...")
+        self.logger.info("MEDIA STEP 4: (This may take a moment on first run - initializing multimedia backend)")
         self.media_player = QMediaPlayer()
+        self.logger.info("MEDIA STEP 4: QMediaPlayer created successfully")
+
+        self.logger.info("MEDIA STEP 5: Creating QAudioOutput...")
         self.audio_output = QAudioOutput()
+        self.logger.info("MEDIA STEP 5: QAudioOutput created successfully")
+
+        self.logger.info("MEDIA STEP 6: Connecting audio output to media player...")
         self.media_player.setAudioOutput(self.audio_output)
+        self.logger.info("MEDIA STEP 6: Audio output connected")
+
+        self.logger.info("MEDIA STEP 7: Connecting video output to media player...")
         self.media_player.setVideoOutput(self.video_widget)
+        self.logger.info("MEDIA STEP 7: Video output connected")
+
         # Default to muted
+        self.logger.info("MEDIA STEP 8: Setting audio to muted by default...")
         self.audio_output.setMuted(True)
+        self.logger.info("MEDIA STEP 8: Audio muted, media player fully initialized")
 
         # Video controls container (right side with wider controls)
         video_controls = QWidget()
@@ -744,6 +786,10 @@ class WorkspaceWidget(QWidget):
 
         # Write "Ready." to status console in green on startup
         QTimer.singleShot(100, lambda: self._log_to_console("Ready.", "SUCCESS"))
+
+        self.logger.info("="*60)
+        self.logger.info("WORKSPACE UI INITIALIZATION COMPLETE")
+        self.logger.info("="*60)
     
     def create_project_header(self) -> QWidget:
         """Create project header with name and controls"""
