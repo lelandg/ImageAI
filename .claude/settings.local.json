@@ -33,7 +33,12 @@
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/video/video_project_tab.py)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI status --short)",
       "Read(//tmp/**)",
-      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff core/video/veo_client.py)"
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff core/video/veo_client.py)",
+      "Read(//mnt/e/Pictures/Screenshots/2025/**)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/image/reference_image_widget.py)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --all --grep=\"reference\" -20)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --since=\"2025-10-10\")",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --all)"
     ],
     "deny": [],
     "ask": []
