@@ -190,6 +190,7 @@ imageai_current_project.json
 Plans/ImageAI-Prompt-Enhancer-Pack.zip
 Notes/Dictation.md
 test_*.py
+!test_ollama.py
 Notes/discord-rich-presence-kit-AgentReady/src/discord_presence_helper/encryption.py
 Notes/discord-rich-presence-kit-AgentReady/src/discord_presence_helper/client.py
 Notes/discord-rich-presence-kit-AgentReady/src/discord_presence_helper/agent_api.py
