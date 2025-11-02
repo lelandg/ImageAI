@@ -52,8 +52,14 @@ class EnhanceWorker(QObject):
     def run(self):
         """Run the enhancement operation."""
         try:
+            if self._stopped:
+                return
+
             self.progress.emit("Enhancing prompt...")
             self.log_message.emit("Starting prompt enhancement...", "INFO")
+
+            if self._stopped:
+                return
 
             # Log request details
             logger.info(f"LLM Request - Provider: {self.llm_provider}, Model: {self.llm_model}")
@@ -764,9 +770,28 @@ class EnhancedPromptDialog(QDialog):
         """Handle close event."""
         # Stop any running worker
         if self.worker and self.thread and self.thread.isRunning():
+            # Tell worker to stop
             self.worker.stop()
+
+            # Disconnect signals to prevent crashes during cleanup
+            try:
+                self.thread.started.disconnect()
+                self.worker.finished.disconnect()
+                self.worker.error.disconnect()
+                self.worker.progress.disconnect()
+                self.worker.log_message.disconnect()
+            except:
+                pass  # Signals may already be disconnected
+
+            # Try to quit the thread gracefully
             self.thread.quit()
-            self.thread.wait()
+
+            # Wait up to 2 seconds for thread to finish
+            if not self.thread.wait(2000):
+                logger.warning("Worker thread did not finish in time, forcing termination")
+                console.warning("Worker thread did not finish in time")
+                # Thread is still running, but we've disconnected signals
+                # The thread will clean up when the LLM call completes
 
         # Save settings
         self.save_dialog_settings()

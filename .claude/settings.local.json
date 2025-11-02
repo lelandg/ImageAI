@@ -39,7 +39,8 @@
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --all --grep=\"reference\" -20)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --since=\"2025-10-10\")",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --all)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --all --grep=\"auth\" -20)"
     ],
     "deny": [],
     "ask": []

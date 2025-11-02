@@ -41,12 +41,23 @@ class LLMWorker(QObject):
         self.max_tokens = max_tokens
         self.reasoning_effort = reasoning_effort
         self.verbosity = verbosity
+        self._stopped = False
+
+    def stop(self):
+        """Stop the worker."""
+        self._stopped = True
 
     def run(self):
         """Run the LLM operation."""
         try:
+            if self._stopped:
+                return
+
             self.progress.emit(f"Generating {self.num_variations} prompt variations...")
             self.log_message.emit(f"Generating {self.num_variations} prompt variations...", "INFO")
+
+            if self._stopped:
+                return
 
             # Log LLM request details to both log file and console
             logger.info(f"LLM Request - Provider: {self.llm_provider}, Model: {self.llm_model}")
@@ -327,6 +338,16 @@ class LLMWorker(QObject):
                         "temperature": self.temperature,
                         "max_tokens": self.max_tokens
                     }
+
+                    # Only add API key if provided (for API key auth mode)
+                    # For gcloud auth, LiteLLM will use Application Default Credentials
+                    if self.api_key:
+                        request_data['api_key'] = self.api_key
+                        logger.info(f"  Using API key authentication")
+                        console.info(f"  Using API key authentication")
+                    else:
+                        logger.info(f"  Using Google Cloud authentication (ADC)")
+                        console.info(f"  Using Google Cloud authentication (ADC)")
 
                     logger.info(f"LLM Request - Sending via LiteLLM to Gemini:")
                     console.info(f"LLM Request - Sending via LiteLLM to Gemini:")
@@ -959,52 +980,66 @@ class PromptGenerationDialog(QDialog):
         llm_provider = self.llm_provider_combo.currentText()
         llm_model = self.llm_model_combo.currentText()
 
-        # Get API key using same method as enhance prompt for backward compatibility
+        # Check authentication mode (for Google Cloud auth support)
+        auth_mode = "api-key"  # Default
+        if self.config and llm_provider.lower() in ["google", "gemini"]:
+            auth_mode = self.config.get("auth_mode", "api-key")
+            # Normalize auth mode values
+            if auth_mode in ["api_key", "API Key"]:
+                auth_mode = "api-key"
+            elif auth_mode == "Google Cloud Account":
+                auth_mode = "gcloud"
+
+        # Get API key (only required for api-key mode)
         api_key = None
-        if self.config:
-            provider_lower = llm_provider.lower()
+        if auth_mode == "api-key":
+            if self.config:
+                provider_lower = llm_provider.lower()
 
-            # Try multiple locations for backward compatibility
-            if provider_lower == "openai":
-                # Use ConfigManager's get_api_key method
-                api_key = self.config.get_api_key('openai')
-                # Check direct config as fallback
-                if not api_key:
-                    api_key = self.config.get('openai_api_key')
+                # Try multiple locations for backward compatibility
+                if provider_lower == "openai":
+                    # Use ConfigManager's get_api_key method
+                    api_key = self.config.get_api_key('openai')
+                    # Check direct config as fallback
+                    if not api_key:
+                        api_key = self.config.get('openai_api_key')
 
-            elif provider_lower == "gemini" or provider_lower == "google":
-                # Use ConfigManager's get_api_key method
-                api_key = self.config.get_api_key('google')
-                # Check direct config (try multiple keys)
-                if not api_key:
-                    api_key = self.config.get('google_api_key') or self.config.get('api_key')
-                # Check using get_api_key method
-                if not api_key:
+                elif provider_lower == "gemini" or provider_lower == "google":
+                    # Use ConfigManager's get_api_key method
                     api_key = self.config.get_api_key('google')
+                    # Check direct config (try multiple keys)
+                    if not api_key:
+                        api_key = self.config.get('google_api_key') or self.config.get('api_key')
+                    # Check using get_api_key method
+                    if not api_key:
+                        api_key = self.config.get_api_key('google')
 
-            elif provider_lower == "claude" or provider_lower == "anthropic":
-                # Use ConfigManager's get_api_key method
-                api_key = self.config.get_api_key('anthropic')
-                # Check direct config as fallback
+                elif provider_lower == "claude" or provider_lower == "anthropic":
+                    # Use ConfigManager's get_api_key method
+                    api_key = self.config.get_api_key('anthropic')
+                    # Check direct config as fallback
+                    if not api_key:
+                        api_key = self.config.get('anthropic_api_key')
+
+                elif provider_lower == "stability":
+                    # Use ConfigManager's get_api_key method
+                    api_key = self.config.get_api_key('stability')
+                    # Check direct config as fallback
+                    if not api_key:
+                        api_key = self.config.get('stability_api_key')
+
                 if not api_key:
-                    api_key = self.config.get('anthropic_api_key')
-
-            elif provider_lower == "stability":
-                # Use ConfigManager's get_api_key method
-                api_key = self.config.get_api_key('stability')
-                # Check direct config as fallback
-                if not api_key:
-                    api_key = self.config.get('stability_api_key')
-
-            if not api_key:
-                QMessageBox.warning(
-                    self, "API Key Required",
-                    f"Please configure your {llm_provider} API key in Settings."
-                )
+                    QMessageBox.warning(
+                        self, "API Key Required",
+                        f"Please configure your {llm_provider} API key in Settings."
+                    )
+                    return
+            else:
+                QMessageBox.warning(self, "Config Error", "Configuration not available.")
                 return
         else:
-            QMessageBox.warning(self, "Config Error", "Configuration not available.")
-            return
+            # Using Google Cloud auth - no API key needed
+            self.status_console.log("Using Google Cloud authentication", "INFO")
 
         # Save session for restoration
         self.save_last_session()
@@ -1390,9 +1425,28 @@ class PromptGenerationDialog(QDialog):
         """Handle close event."""
         # Stop any running worker
         if self.worker and self.thread and self.thread.isRunning():
+            # Tell worker to stop
             self.worker.stop()
+
+            # Disconnect signals to prevent crashes during cleanup
+            try:
+                self.thread.started.disconnect()
+                self.worker.finished.disconnect()
+                self.worker.error.disconnect()
+                self.worker.progress.disconnect()
+                self.worker.log_message.disconnect()
+            except:
+                pass  # Signals may already be disconnected
+
+            # Try to quit the thread gracefully
             self.thread.quit()
-            self.thread.wait()
+
+            # Wait up to 2 seconds for thread to finish
+            if not self.thread.wait(2000):
+                logger.warning("Worker thread did not finish in time, forcing termination")
+                console.warning("Worker thread did not finish in time")
+                # Thread is still running, but we've disconnected signals
+                # The thread will clean up when the LLM call completes
 
         # Save session state
         self.save_last_session()

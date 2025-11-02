@@ -38,12 +38,23 @@ class QuestionWorker(QObject):
         self.reasoning_effort = reasoning_effort
         self.verbosity = verbosity
         self.conversation_history = conversation_history or []
+        self._stopped = False
+
+    def stop(self):
+        """Stop the worker."""
+        self._stopped = True
 
     def run(self):
         """Run the LLM question operation."""
         try:
+            if self._stopped:
+                return
+
             self.progress.emit("Processing question...")
             self.log_message.emit("Starting AI conversation...", "INFO")
+
+            if self._stopped:
+                return
 
             # Log request details
             logger.info(f"LLM Request - Provider: {self.llm_provider}, Model: {self.llm_model}")
@@ -132,7 +143,17 @@ class QuestionWorker(QObject):
 
             elif self.llm_provider.lower() in ["google", "gemini"]:
                 import google.generativeai as genai
-                genai.configure(api_key=self.api_key)
+
+                # Configure authentication based on available credentials
+                if self.api_key:
+                    genai.configure(api_key=self.api_key)
+                    logger.info("Using API key authentication for Gemini")
+                    console.info("Using API key authentication for Gemini")
+                else:
+                    # Use Application Default Credentials (gcloud auth)
+                    # genai SDK will automatically use ADC if no API key is provided
+                    logger.info("Using Google Cloud authentication (ADC) for Gemini")
+                    console.info("Using Google Cloud authentication (ADC) for Gemini")
 
                 model_name = self.llm_model or "gemini-2.0-flash-exp"
                 model = genai.GenerativeModel(model_name)
@@ -560,20 +581,34 @@ class PromptQuestionDialog(QDialog):
             QMessageBox.warning(self, "LLM Not Configured", "Please select an AI provider and model.")
             return
 
-        # Get API key
-        api_key = None
-        if self.config:
-            if llm_provider.lower() == "openai":
-                api_key = self.config.get_api_key('openai')
-            elif llm_provider.lower() in ["google", "gemini"]:
-                api_key = self.config.get_api_key('google')
-            elif llm_provider.lower() in ["anthropic", "claude"]:
-                api_key = self.config.get_api_key('anthropic')
+        # Check authentication mode (for Google Cloud auth support)
+        auth_mode = "api-key"  # Default
+        if self.config and llm_provider.lower() in ["google", "gemini"]:
+            auth_mode = self.config.get("auth_mode", "api-key")
+            # Normalize auth mode values
+            if auth_mode in ["api_key", "API Key"]:
+                auth_mode = "api-key"
+            elif auth_mode == "Google Cloud Account":
+                auth_mode = "gcloud"
 
-        if not api_key:
-            QMessageBox.warning(self, "API Key Missing",
-                                f"Please configure your {llm_provider} API key in Settings.")
-            return
+        # Get API key (only required for api-key mode)
+        api_key = None
+        if auth_mode == "api-key":
+            if self.config:
+                if llm_provider.lower() == "openai":
+                    api_key = self.config.get_api_key('openai')
+                elif llm_provider.lower() in ["google", "gemini"]:
+                    api_key = self.config.get_api_key('google')
+                elif llm_provider.lower() in ["anthropic", "claude"]:
+                    api_key = self.config.get_api_key('anthropic')
+
+            if not api_key:
+                QMessageBox.warning(self, "API Key Missing",
+                                    f"Please configure your {llm_provider} API key in Settings.")
+                return
+        else:
+            # Using Google Cloud auth - no API key needed
+            self.status_console.log("Using Google Cloud authentication", "INFO")
 
         # Prepare conversation history if continuing
         conv_history = []
@@ -850,9 +885,28 @@ class PromptQuestionDialog(QDialog):
     def closeEvent(self, event):
         """Handle close event."""
         if self.worker and self.thread and self.thread.isRunning():
+            # Tell worker to stop
             self.worker.stop()
+
+            # Disconnect signals to prevent crashes during cleanup
+            try:
+                self.thread.started.disconnect()
+                self.worker.finished.disconnect()
+                self.worker.error.disconnect()
+                self.worker.progress.disconnect()
+                self.worker.log_message.disconnect()
+            except:
+                pass  # Signals may already be disconnected
+
+            # Try to quit the thread gracefully
             self.thread.quit()
-            self.thread.wait()
+
+            # Wait up to 2 seconds for thread to finish
+            if not self.thread.wait(2000):
+                logger.warning("Worker thread did not finish in time, forcing termination")
+                console.warning("Worker thread did not finish in time")
+                # Thread is still running, but we've disconnected signals
+                # The thread will clean up when the LLM call completes
 
         self.save_dialog_settings()
         self.save_settings()

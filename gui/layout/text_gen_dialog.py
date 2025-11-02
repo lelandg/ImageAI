@@ -69,14 +69,29 @@ class TextGenerationWorker(QThread):
             # Map provider to llm_models.py provider ID (google -> gemini)
             provider_id = "gemini" if provider_id_for_api == "google" else provider_id_for_api
 
-            # Get API key using the API-compatible provider ID
-            api_key = self.config.get_api_key(provider_id_for_api)
+            # Check authentication mode (for Google Cloud auth support)
+            auth_mode = "api-key"  # Default
+            if provider_id_for_api == "google":
+                auth_mode = self.config.get("auth_mode", "api-key")
+                # Normalize auth mode values
+                if auth_mode in ["api_key", "API Key"]:
+                    auth_mode = "api-key"
+                elif auth_mode == "Google Cloud Account":
+                    auth_mode = "gcloud"
 
-            if not api_key:
-                self.error.emit(f"No API key configured for provider: {provider}")
-                return
-
-            self.progress.emit(f"Using LLM provider: {provider}")
+            # Get API key (only required for api-key mode)
+            api_key = None
+            if auth_mode == "api-key":
+                api_key = self.config.get_api_key(provider_id_for_api)
+                if not api_key:
+                    self.error.emit(f"No API key configured for provider: {provider}")
+                    return
+                self.progress.emit(f"Using LLM provider: {provider} (API key)")
+            else:
+                # Using Google Cloud auth - no API key needed
+                self.progress.emit(f"Using LLM provider: {provider} (Google Cloud auth)")
+                logger.info("Using Google Cloud authentication (ADC)")
+                console_logger.info("Using Google Cloud authentication (ADC)")
 
             # Build the prompt
             prompt = self._build_prompt()
@@ -110,9 +125,13 @@ class TextGenerationWorker(QThread):
             completion_kwargs = {
                 "model": model,
                 "messages": messages,
-                "temperature": self.temperature,
-                "api_key": api_key
+                "temperature": self.temperature
             }
+
+            # Only add API key if provided (for API key auth mode)
+            # For gcloud auth, LiteLLM will use Application Default Credentials
+            if api_key:
+                completion_kwargs["api_key"] = api_key
 
             response = litellm.completion(**completion_kwargs)
 
@@ -589,3 +608,26 @@ class TextGenerationDialog(QDialog):
         # Return edited text from preview
         text = self.preview_edit.toPlainText().strip()
         return text if text else None
+
+    def closeEvent(self, event):
+        """Handle close event - ensure worker thread is stopped."""
+        if self.worker and self.worker.isRunning():
+            # Disconnect signals to prevent crashes during cleanup
+            try:
+                self.worker.progress.disconnect()
+                self.worker.finished.disconnect()
+                self.worker.error.disconnect()
+            except:
+                pass  # Signals may already be disconnected
+
+            # Try to quit the thread gracefully
+            self.worker.quit()
+
+            # Wait up to 2 seconds for thread to finish
+            if not self.worker.wait(2000):
+                logger.warning("Worker thread did not finish in time, forcing termination")
+                console_logger.warning("Worker thread did not finish in time")
+                # Thread is still running, but we've disconnected signals
+                # QThread's destructor will wait for it
+
+        super().closeEvent(event)

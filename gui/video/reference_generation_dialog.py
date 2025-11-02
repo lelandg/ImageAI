@@ -675,3 +675,25 @@ class ReferenceGenerationDialog(QDialog):
             logger.error(f"Failed to add references to project: {e}", exc_info=True)
             self.status_label.setText(f"✗ Failed to add: {str(e)}")
             self.status_label.setStyleSheet("color: red;")
+
+    def closeEvent(self, event):
+        """Handle close event - ensure worker thread is stopped."""
+        if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
+            # Disconnect signals to prevent crashes during cleanup
+            try:
+                self.worker.progress.disconnect()
+                self.worker.reference_generated.disconnect()
+                self.worker.generation_complete.disconnect()
+            except:
+                pass  # Signals may already be disconnected
+
+            # Try to quit the thread gracefully
+            self.worker.quit()
+
+            # Wait up to 2 seconds for thread to finish
+            if not self.worker.wait(2000):
+                logger.warning("Worker thread did not finish in time, forcing termination")
+                # Thread is still running, but we've disconnected signals
+                # QThread's destructor will wait for it
+
+        super().closeEvent(event)
