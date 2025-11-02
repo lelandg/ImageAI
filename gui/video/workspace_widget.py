@@ -4923,7 +4923,8 @@ class WorkspaceWidget(QWidget):
             self,
             f"Select Reference Image {slot_idx + 1} for Scene {scene_index + 1}",
             "",
-            "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if file_path:
