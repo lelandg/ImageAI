@@ -543,12 +543,13 @@ class ReferenceLibraryWidget(QWidget):
         if not self.project:
             return
 
-        # File dialog
+        # File dialog - use Qt's own dialog on Linux to avoid native dialog issues
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Reference Image",
             str(Path.home()),
-            "Images (*.png *.jpg *.jpeg)"
+            "Images (*.png *.jpg *.jpeg)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if not file_path:
