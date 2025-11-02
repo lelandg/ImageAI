@@ -237,6 +237,19 @@ class MainWindow(QMainWindow):
         self.current_model = DEFAULT_MODEL
         self.auto_copy_filename = self.config.get("auto_copy_filename", False)
         
+        # Auto-detect Ollama models if available
+        try:
+            from core.llm_models import update_ollama_models, get_provider_models
+            print("Detecting Ollama models...")
+            if update_ollama_models():
+                models = get_provider_models('ollama')
+                print(f"✓ Detected {len(models)} Ollama models: {', '.join(models[:3])}{'...' if len(models) > 3 else ''}")
+            else:
+                print("No Ollama installation detected (using defaults)")
+        except Exception as e:
+            print(f"Ollama detection failed: {e}")
+            self.logger.debug(f"Ollama model detection skipped: {e}")
+
         # Session state
         print("Scanning image history...")
         self.history_paths: List[Path] = scan_disk_history(project_only=True)
@@ -6490,17 +6503,27 @@ For more detailed information, please refer to the full documentation.
             self._video_tab_loaded = True
             self.logger.info("STEP 7: References updated, _video_tab_loaded = True")
 
-            # Step 8: Sync LLM provider
-            self.logger.info("STEP 8: Syncing LLM provider settings...")
+            # Step 8: Refresh Ollama models (in case they were detected during startup)
+            self.logger.info("STEP 8: Refreshing Ollama models...")
+            try:
+                from core.llm_models import update_ollama_models, get_provider_models
+                if update_ollama_models():
+                    models = get_provider_models('ollama')
+                    self.logger.info(f"Refreshed Ollama models: {models}")
+            except Exception as e:
+                self.logger.debug(f"Ollama refresh skipped: {e}")
+
+            # Step 9: Sync LLM provider
+            self.logger.info("STEP 9: Syncing LLM provider settings...")
             if hasattr(self, 'llm_provider_combo') and self.llm_provider_combo.currentText() != "None":
                 provider_name = self.llm_provider_combo.currentText()
                 model_name = self.llm_model_combo.currentText() if self.llm_model_combo.isEnabled() else None
-                self.logger.info(f"STEP 8: Syncing provider={provider_name}, model={model_name}")
+                self.logger.info(f"STEP 9: Syncing provider={provider_name}, model={model_name}")
                 if hasattr(self.tab_video, 'set_llm_provider'):
                     self.tab_video.set_llm_provider(provider_name, model_name)
-                    self.logger.info("STEP 8: LLM provider synced")
+                    self.logger.info("STEP 9: LLM provider synced")
             else:
-                self.logger.info("STEP 8: No LLM provider to sync")
+                self.logger.info("STEP 9: No LLM provider to sync")
 
             self.logger.info("=== _LOAD_VIDEO_TAB COMPLETE ===")
 
