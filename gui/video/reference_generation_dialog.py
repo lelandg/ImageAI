@@ -1,11 +1,13 @@
 """
 Reference Generation Wizard Dialog.
 Generates character reference images (3 angles) for video project consistency.
+Standalone dialog with its own provider/model selection and settings persistence.
 """
 
 import logging
+import time
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
@@ -16,32 +18,67 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QPixmap
 
-from core.video.project import ReferenceImage
+from core.video.project import ReferenceImage, VideoProject
 from core.video.reference_manager import ReferenceImageType, ReferenceImageValidator
+from core.config import ConfigManager
+from providers import list_providers
 
 logger = logging.getLogger(__name__)
 
 
 class ReferenceGenerationWorker(QThread):
-    """Worker thread for generating reference images"""
+    """Worker thread for generating reference images - matches GenWorker pattern"""
 
     progress = Signal(int, str)  # progress_percent, status_message
     reference_generated = Signal(int, str)  # index (1-3), file_path
     generation_complete = Signal(bool, str)  # success, message
 
-    def __init__(self, description: str, style: str, output_dir: Path, image_generator, reference_image: Optional[Path] = None):
+    def __init__(self,
+                 description: str,
+                 style: str,
+                 output_dir: Path,
+                 provider_name: str,
+                 model: str,
+                 auth_mode: str = "api-key",
+                 aspect_ratio: str = "1:1",
+                 reference_image: Optional[Path] = None):
         super().__init__()
         self.description = description
         self.style = style
         self.output_dir = output_dir
-        self.image_generator = image_generator
+        self.provider_name = provider_name
+        self.model = model
+        self.auth_mode = auth_mode
+        self.aspect_ratio = aspect_ratio
         self.reference_image = reference_image
         self.generated_paths = []
 
     def run(self):
-        """Generate 3 reference images"""
+        """Generate 3 reference images - matches GenWorker pattern"""
         try:
             self.progress.emit(0, "Starting reference generation...")
+
+            # Get configuration and instantiate provider (like GenWorker does)
+            from core.config import ConfigManager
+            from providers import get_provider
+
+            config = ConfigManager()
+            api_key = config.get_api_key(self.provider_name) if self.auth_mode == "api-key" else None
+
+            # Create provider config
+            provider_config = {
+                "api_key": api_key,
+                "auth_mode": self.auth_mode,
+            }
+
+            # Instantiate the provider
+            provider = get_provider(self.provider_name, provider_config)
+
+            if not provider:
+                self.generation_complete.emit(False, f"Failed to initialize provider: {self.provider_name}")
+                return
+
+            logger.info(f"✓ Initialized provider: {self.provider_name} (auth_mode: {self.auth_mode})")
 
             # Create prompts for 3 angles
             prompts = [
@@ -56,31 +93,60 @@ class ReferenceGenerationWorker(QThread):
                 self.progress.emit(int((i-1)/3 * 100), f"Generating reference {i}/3 ({angle} view)...")
 
                 try:
-                    # Generate image
+                    # Generate image using provider directly
                     logger.info(f"Generating reference {i}/3: {prompt[:80]}...")
 
-                    # Pass reference image if provided
-                    if self.reference_image:
-                        image_path = self.image_generator(prompt, self.output_dir, f"char_ref_{angle}", self.reference_image)
-                    else:
-                        image_path = self.image_generator(prompt, self.output_dir, f"char_ref_{angle}")
+                    # Prepare generation kwargs (matching GenWorker pattern)
+                    # NOTE: model is passed separately as a parameter to generate(), not in kwargs
+                    gen_kwargs = {
+                        "aspect_ratio": self.aspect_ratio,
+                    }
 
-                    if image_path and image_path.exists():
-                        # Validate
-                        validator = ReferenceImageValidator()
-                        info = validator.validate_reference_image(image_path)
+                    # Add reference image if provided
+                    if self.reference_image and self.reference_image.exists():
+                        from PIL import Image
+                        ref_img = Image.open(self.reference_image)
+                        gen_kwargs["reference_image"] = ref_img
+                        logger.info(f"Using reference image: {self.reference_image.name}")
 
-                        if info.is_valid:
-                            self.generated_paths.append(image_path)
-                            self.reference_generated.emit(i, str(image_path))
-                            logger.info(f"✓ Generated reference {i}/3: {image_path.name}")
+                    # Generate the image using provider.generate() with proper parameter signature
+                    # generate(prompt, model, **kwargs) - model is separate from kwargs
+                    texts, images = provider.generate(
+                        prompt=prompt,
+                        model=self.model,
+                        **gen_kwargs
+                    )
+
+                    # Save the first image (providers typically return 1 image)
+                    if images and len(images) > 0:
+                        # Create output path with timestamp and index to avoid collisions
+                        timestamp = int(time.time())
+                        filename = f"char_ref_{angle}_{timestamp}_{i}.png"
+                        output_path = self.output_dir / filename
+
+                        # Save image bytes to file
+                        with open(output_path, 'wb') as f:
+                            f.write(images[0])
+
+                        if output_path.exists():
+                            # Validate
+                            validator = ReferenceImageValidator()
+                            info = validator.validate_reference_image(output_path)
+
+                            if info.is_valid:
+                                self.generated_paths.append(output_path)
+                                self.reference_generated.emit(i, str(output_path))
+                                logger.info(f"✓ Generated reference {i}/3: {output_path.name}")
+                            else:
+                                error_msg = "; ".join(info.validation_errors)
+                                logger.warning(f"✗ Reference {i}/3 failed validation: {error_msg}")
+                                self.progress.emit(int(i/3 * 100), f"⚠️ Reference {i} validation failed: {error_msg}")
                         else:
-                            error_msg = "; ".join(info.validation_errors)
-                            logger.warning(f"✗ Reference {i}/3 failed validation: {error_msg}")
-                            self.progress.emit(int(i/3 * 100), f"⚠️ Reference {i} validation failed: {error_msg}")
+                            logger.error(f"✗ Failed to save image to: {output_path}")
+                            self.progress.emit(int(i/3 * 100), f"⚠️ Reference {i} save failed")
                     else:
-                        logger.error(f"✗ Failed to generate reference {i}/3")
-                        self.progress.emit(int(i/3 * 100), f"⚠️ Reference {i} generation failed")
+                        logger.error(f"✗ No image data returned for reference {i}/3")
+                        self.progress.emit(int(i/3 * 100), f"⚠️ Reference {i} generation failed - no data")
 
                 except Exception as e:
                     logger.error(f"Error generating reference {i}/3: {e}", exc_info=True)
@@ -101,14 +167,19 @@ class ReferenceGenerationWorker(QThread):
 
 
 class ReferenceGenerationDialog(QDialog):
-    """Dialog for generating character reference images"""
+    """
+    Standalone dialog for generating character reference images.
+    Has its own provider/model selection and settings persistence.
+    """
 
     references_generated = Signal(list)  # List[Path] of generated reference paths
 
-    def __init__(self, parent=None, project=None, image_generator=None):
+    def __init__(self, parent=None, project: Optional[VideoProject] = None,
+                 config: Optional[ConfigManager] = None, providers: Optional[Dict[str, Any]] = None):
         super().__init__(parent)
         self.project = project
-        self.image_generator = image_generator
+        self.config = config
+        self.providers = providers or {}
         self.generated_paths = []
         self.worker = None
 
@@ -116,7 +187,48 @@ class ReferenceGenerationDialog(QDialog):
         self.setModal(True)
         self.resize(800, 900)
 
+        # Load saved settings
+        self.load_settings()
+
         self.setup_ui()
+
+    def load_settings(self):
+        """Load saved settings from config"""
+        if self.config:
+            self.saved_provider = self.config.get('char_ref_provider', 'google')
+            self.saved_model = self.config.get('char_ref_model', 'gemini-2.5-flash-image')
+            self.saved_style = self.config.get('char_ref_style', 'cinematic lighting, high detail, photorealistic')
+            self.saved_quality = self.config.get('char_ref_quality', 'high')
+            self.saved_description = self.config.get('char_ref_description', '')
+            self.saved_reference_image = self.config.get('char_ref_reference_image', '')
+        else:
+            self.saved_provider = 'google'
+            self.saved_model = 'gemini-2.5-flash-image'
+            self.saved_style = 'cinematic lighting, high detail, photorealistic'
+            self.saved_quality = 'high'
+            self.saved_description = ''
+            self.saved_reference_image = ''
+
+    def save_settings(self):
+        """Save current settings to config"""
+        if self.config and hasattr(self, 'provider_combo'):
+            self.config.set('char_ref_provider', self.provider_combo.currentText())
+            self.config.set('char_ref_model', self.model_combo.currentText())
+            self.config.set('char_ref_style', self.style_combo.currentText())
+            self.config.set('char_ref_quality', self.quality_combo.currentText())
+
+            # Save description text
+            if hasattr(self, 'description_edit'):
+                self.config.set('char_ref_description', self.description_edit.toPlainText().strip())
+
+            # Save reference image path
+            if hasattr(self, 'reference_image_path') and self.reference_image_path:
+                self.config.set('char_ref_reference_image', str(self.reference_image_path))
+            else:
+                self.config.set('char_ref_reference_image', '')
+
+            self.config.save()
+            logger.info("Saved character reference dialog settings")
 
     def setup_ui(self):
         """Setup dialog UI"""
@@ -129,6 +241,44 @@ class ReferenceGenerationDialog(QDialog):
         )
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
+
+        # === PROVIDER/MODEL SELECTION ===
+        provider_group = QGroupBox("Image Generation Settings")
+        provider_layout = QGridLayout(provider_group)
+
+        # Provider dropdown
+        provider_layout.addWidget(QLabel("Provider:"), 0, 0)
+        self.provider_combo = QComboBox()
+        self.provider_combo.setMinimumWidth(150)
+
+        # Get available providers
+        try:
+            available_providers = list_providers()
+            available_providers = [p for p in available_providers if p != "imagen_customization"]
+        except Exception as e:
+            logger.error(f"Failed to list providers: {e}")
+            available_providers = ["google", "openai", "stability"]
+
+        self.provider_combo.addItems(available_providers)
+
+        # Set saved provider
+        if self.saved_provider in available_providers:
+            self.provider_combo.setCurrentText(self.saved_provider)
+
+        self.provider_combo.currentTextChanged.connect(self.on_provider_changed)
+        provider_layout.addWidget(self.provider_combo, 0, 1)
+
+        # Model dropdown
+        provider_layout.addWidget(QLabel("Model:"), 1, 0)
+        self.model_combo = QComboBox()
+        self.model_combo.setMinimumWidth(300)
+        self.model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        provider_layout.addWidget(self.model_combo, 1, 1)
+
+        # Update model list based on initial provider
+        self.on_provider_changed(self.provider_combo.currentText())
+
+        layout.addWidget(provider_group)
 
         # Splitter for input and preview
         from gui.common.splitter_style import apply_splitter_style
@@ -153,6 +303,11 @@ class ReferenceGenerationDialog(QDialog):
         self.description_edit = QTextEdit()
         self.description_edit.setPlaceholderText("Enter character description...")
         self.description_edit.setMaximumHeight(100)
+
+        # Restore saved description
+        if hasattr(self, 'saved_description') and self.saved_description:
+            self.description_edit.setPlainText(self.saved_description)
+
         desc_layout.addWidget(self.description_edit)
 
         input_layout.addWidget(desc_group)
@@ -173,13 +328,14 @@ class ReferenceGenerationDialog(QDialog):
             "watercolor style, soft edges, artistic"
         ])
         self.style_combo.setEditable(True)
+        self.style_combo.setCurrentText(self.saved_style)
         style_layout.addWidget(self.style_combo, 0, 1)
 
         # Quality
         style_layout.addWidget(QLabel("Quality:"), 1, 0)
         self.quality_combo = QComboBox()
         self.quality_combo.addItems(["high", "medium", "low"])
-        self.quality_combo.setCurrentText("high")
+        self.quality_combo.setCurrentText(self.saved_quality)
         style_layout.addWidget(self.quality_combo, 1, 1)
 
         # Resolution hint
@@ -221,8 +377,16 @@ class ReferenceGenerationDialog(QDialog):
         ref_image_layout.addLayout(ref_controls_layout)
         input_layout.addWidget(ref_image_group)
 
-        # Store reference image path
+        # Store reference image path - restore from saved settings
         self.reference_image_path = None
+        if hasattr(self, 'saved_reference_image') and self.saved_reference_image:
+            saved_path = Path(self.saved_reference_image)
+            if saved_path.exists():
+                self.reference_image_path = saved_path
+                self.ref_image_label.setText(saved_path.name)
+                self.ref_image_label.setStyleSheet("color: #00cc66; font-weight: bold;")
+                self.ref_image_clear_btn.setVisible(True)
+                logger.info(f"Restored reference image: {saved_path.name}")
 
         # Import from library button
         self.import_library_btn = QPushButton("📚 Import from Reference Library")
@@ -337,6 +501,42 @@ class ReferenceGenerationDialog(QDialog):
         button_layout.addWidget(cancel_btn)
 
         layout.addLayout(button_layout)
+
+    def on_provider_changed(self, provider: str):
+        """Handle provider change - update model list"""
+        self.model_combo.clear()
+
+        provider_lower = provider.lower()
+
+        if provider_lower in ["google", "gemini"]:
+            self.model_combo.addItems([
+                "gemini-2.5-flash-image",
+                "gemini-2.5-flash-image-preview",
+                "gemini-2.5-flash",
+                "gemini-2.5-pro",
+                "gemini-1.5-flash",
+                "gemini-1.5-pro"
+            ])
+        elif provider_lower == "openai":
+            self.model_combo.addItems([
+                "dall-e-3",
+                "dall-e-2"
+            ])
+        elif provider_lower == "stability":
+            self.model_combo.addItems([
+                "stable-diffusion-xl-1024-v1-0",
+                "stable-diffusion-xl-1024-v0-9",
+                "stable-diffusion-512-v2-1"
+            ])
+        else:
+            # Generic fallback
+            self.model_combo.addItems(["default"])
+
+        # Try to restore saved model
+        if hasattr(self, 'saved_model') and self.saved_model:
+            index = self.model_combo.findText(self.saved_model)
+            if index >= 0:
+                self.model_combo.setCurrentIndex(index)
 
     def upload_reference_image(self):
         """Upload a reference image to guide 3-view generation"""
@@ -464,8 +664,7 @@ class ReferenceGenerationDialog(QDialog):
             self.status_label.setStyleSheet("color: green; font-weight: bold;")
 
             # Enable add to project button
-            if hasattr(self, 'add_btn'):
-                self.add_btn.setEnabled(True)
+            self.add_to_project_btn.setEnabled(True)
 
     def import_from_files(self):
         """Import references from disk files"""
@@ -523,23 +722,52 @@ class ReferenceGenerationDialog(QDialog):
         if self.generated_paths:
             self.status_label.setText(f"✓ Imported {len(self.generated_paths)} reference(s) from files")
             self.status_label.setStyleSheet("color: green; font-weight: bold;")
-
-            # Enable add to project button
-            if hasattr(self, 'add_btn'):
-                self.add_btn.setEnabled(True)
+            self.add_to_project_btn.setEnabled(True)
 
     def start_generation(self):
-        """Start reference generation"""
+        """Start reference generation using selected provider/model - matches image tab pattern"""
         description = self.description_edit.toPlainText().strip()
         if not description:
             self.status_label.setText("⚠️ Please enter a character description")
             self.status_label.setStyleSheet("color: orange;")
             return
 
-        if not self.image_generator:
-            self.status_label.setText("⚠️ No image generator available")
-            self.status_label.setStyleSheet("color: red;")
+        # Get selected provider name
+        provider_name = self.provider_combo.currentText().lower()
+        provider_key = provider_name if provider_name != 'gemini' else 'google'
+
+        # Get selected model
+        model = self.model_combo.currentText()
+        if not model:
+            self.status_label.setText("⚠️ Please select a model")
+            self.status_label.setStyleSheet("color: orange;")
             return
+
+        # Determine auth mode (like main_window.py does for GenWorker)
+        auth_mode = "api-key"  # default
+        if provider_key == "google":
+            # Check if using cloud auth - match main_window.py auth mode handling
+            if self.config:
+                auth_mode_value = self.config.get("auth_mode", "api-key")
+                # Handle legacy/display values (same as main_window.py lines 293-297)
+                if auth_mode_value in ["api_key", "API Key"]:
+                    auth_mode = "api-key"
+                elif auth_mode_value == "Google Cloud Account" or auth_mode_value == "gcloud":
+                    auth_mode = "gcloud"
+                    logger.info("Using Google Cloud authentication for reference generation")
+                else:
+                    auth_mode = auth_mode_value  # Use as-is if not a known value
+
+        # Save settings for next time
+        self.save_settings()
+
+        # Show auth mode in status
+        auth_info = f"Using {provider_key} provider"
+        if provider_key == "google":
+            auth_info += f" with {auth_mode} authentication"
+        self.status_label.setText(f"Starting generation... ({auth_info})")
+        self.status_label.setStyleSheet("color: blue; font-style: italic;")
+        logger.info(f"Starting reference generation: {auth_info}")
 
         # Get style
         style = self.style_combo.currentText()
@@ -553,6 +781,8 @@ class ReferenceGenerationDialog(QDialog):
         self.description_edit.setEnabled(False)
         self.style_combo.setEnabled(False)
         self.quality_combo.setEnabled(False)
+        self.provider_combo.setEnabled(False)
+        self.model_combo.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
 
@@ -564,8 +794,17 @@ class ReferenceGenerationDialog(QDialog):
             status_label.setText("Generating...")
             status_label.setStyleSheet("color: blue; font-style: italic;")
 
-        # Start worker
-        self.worker = ReferenceGenerationWorker(description, style, output_dir, self.image_generator, self.reference_image_path)
+        # Start worker (pass provider_name and auth_mode like GenWorker)
+        self.worker = ReferenceGenerationWorker(
+            description=description,
+            style=style,
+            output_dir=output_dir,
+            provider_name=provider_key,
+            model=model,
+            auth_mode=auth_mode,
+            aspect_ratio="1:1",
+            reference_image=self.reference_image_path
+        )
         self.worker.progress.connect(self.on_progress)
         self.worker.reference_generated.connect(self.on_reference_generated)
         self.worker.generation_complete.connect(self.on_generation_complete)
@@ -604,6 +843,8 @@ class ReferenceGenerationDialog(QDialog):
         self.description_edit.setEnabled(True)
         self.style_combo.setEnabled(True)
         self.quality_combo.setEnabled(True)
+        self.provider_combo.setEnabled(True)
+        self.model_combo.setEnabled(True)
 
         # Update status
         self.status_label.setText(message)
@@ -679,7 +920,10 @@ class ReferenceGenerationDialog(QDialog):
             self.status_label.setStyleSheet("color: red;")
 
     def closeEvent(self, event):
-        """Handle close event - ensure worker thread is stopped."""
+        """Handle close event - ensure worker thread is stopped and settings are saved."""
+        # Save settings before closing
+        self.save_settings()
+
         if hasattr(self, 'worker') and self.worker and self.worker.isRunning():
             # Disconnect signals to prevent crashes during cleanup
             try:

@@ -508,33 +508,27 @@ class ReferenceLibraryWidget(QWidget):
         """Handle generate button clicked"""
         from gui.video.reference_generation_dialog import ReferenceGenerationDialog
 
-        # Walk up the parent chain to find video_project_tab with generate_reference_image_sync
+        # Walk up the parent chain to find video_project_tab with config and providers
         parent_tab = self.parent()
-        while parent_tab and not hasattr(parent_tab, 'generate_reference_image_sync'):
+        while parent_tab and not hasattr(parent_tab, 'config'):
             parent_tab = parent_tab.parent()
 
-        if not parent_tab:
+        if not parent_tab or not hasattr(parent_tab, 'providers'):
             QMessageBox.warning(
                 self,
-                "Image Generator Not Available",
-                "Could not find parent tab with image generation capability.\n\n"
+                "Configuration Not Available",
+                "Could not find parent tab with configuration.\n\n"
                 "This should not happen - please report this issue."
             )
             return
 
-        # Create image generator wrapper
-        def image_generator(prompt: str, output_dir: Path, filename_prefix: str) -> Optional[Path]:
-            """Wrapper for image generation"""
-            try:
-                # Generate image using parent tab's method
-                result_path = parent_tab.generate_reference_image_sync(prompt, output_dir, filename_prefix)
-                return result_path
-            except Exception as e:
-                logger.error(f"Image generation failed: {e}", exc_info=True)
-                return None
-
-        # Open dialog
-        dialog = ReferenceGenerationDialog(self, self.project, image_generator)
+        # Open dialog with config and providers
+        dialog = ReferenceGenerationDialog(
+            parent=self,
+            project=self.project,
+            config=parent_tab.config,
+            providers=parent_tab.providers
+        )
         dialog.references_generated.connect(self.on_references_generated)
         dialog.exec()
 

@@ -5170,25 +5170,13 @@ class WorkspaceWidget(QWidget):
             QMessageBox.warning(self, "No Project", "Please create or open a project first")
             return
 
-        # Get parent video_project_tab for image generator
-        parent_tab = self.parent()
-        while parent_tab and not hasattr(parent_tab, 'generate_reference_image_sync'):
-            parent_tab = parent_tab.parent()
-
-        if not parent_tab:
-            QMessageBox.warning(
-                self,
-                "Image Generator Not Available",
-                "Could not find parent tab with image generation capability"
-            )
-            return
-
-        # Create image generator wrapper
-        def image_generator(prompt: str, output_dir: Path, filename_prefix: str):
-            return parent_tab.generate_reference_image_sync(prompt, output_dir, filename_prefix)
-
-        # Open dialog
-        dialog = ReferenceGenerationDialog(self, self.current_project, image_generator)
+        # Open dialog with config and providers (dialog is now standalone)
+        dialog = ReferenceGenerationDialog(
+            parent=self,
+            project=self.current_project,
+            config=self.config,
+            providers=self.providers
+        )
         dialog.references_generated.connect(self._on_references_generated)
         dialog.exec()
 
@@ -5341,6 +5329,30 @@ class WorkspaceWidget(QWidget):
                 self.img_provider_combo.blockSignals(False)
                 # Trigger the provider change handler to update models
                 self.on_img_provider_changed(self.img_provider_combo.currentText())
+
+    @property
+    def image_provider(self):
+        """
+        Get the current image provider instance based on combo box selection.
+        Returns the provider from self.providers dict based on current selection.
+        """
+        if not hasattr(self, 'img_provider_combo') or not self.providers:
+            return None
+
+        # Get current provider name from combo box
+        provider_name = self.img_provider_combo.currentText().lower()
+
+        # Map combo box names to provider keys
+        provider_map = {
+            'google': 'google',
+            'gemini': 'google',  # Support both names
+            'openai': 'openai',
+            'stability': 'stability',
+            'local sd': 'local_sd'
+        }
+
+        provider_key = provider_map.get(provider_name, provider_name)
+        return self.providers.get(provider_key)
 
     def set_llm_provider(self, provider_name: str, model_name: str = None):
         """Set the LLM provider from external source (e.g., Image tab)."""

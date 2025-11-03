@@ -574,15 +574,54 @@ class GoogleProvider(ImageProvider):
 
         # Create the proper config object using types
         # This is required for aspect_ratio to work with the new SDK
+        # Try to use ImageConfig if available, otherwise fall back to dict
         if aspect_ratio:
             logger.info(f"Using Gemini aspect ratio: {aspect_ratio} (target dimensions: {width}x{height})")
             logger.info(f"Setting image_config with aspect_ratio={aspect_ratio}")
 
-            config = types.GenerateContentConfig(
-                response_modalities=["IMAGE"],
-                image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
-                **config_params
-            )
+            # Try to use types.ImageConfig if it exists, otherwise use dict format
+            config = None
+            config_created = False
+
+            # First attempt: Try using ImageConfig class if it exists
+            if hasattr(types, 'ImageConfig'):
+                try:
+                    logger.info("Attempting to use types.ImageConfig class")
+                    config = types.GenerateContentConfig(
+                        response_modalities=["IMAGE"],
+                        image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
+                        **config_params
+                    )
+                    config_created = True
+                    logger.info("Successfully created config with ImageConfig")
+                except Exception as e:
+                    logger.warning(f"Failed to use ImageConfig class: {e}")
+
+            # Second attempt: Try dict format
+            if not config_created:
+                try:
+                    logger.info("Attempting dict format for image_config")
+                    config = types.GenerateContentConfig(
+                        response_modalities=["IMAGE"],
+                        image_config={"aspect_ratio": aspect_ratio},
+                        **config_params
+                    )
+                    config_created = True
+                    logger.info("Successfully created config with dict format")
+                except Exception as e:
+                    logger.warning(f"Failed to use dict format: {e}")
+
+            # Final fallback: Config without image_config, add dimensions to prompt
+            if not config_created:
+                logger.warning(f"Could not configure aspect ratio in config. Will add dimensions to prompt as fallback.")
+                config = types.GenerateContentConfig(
+                    response_modalities=["IMAGE"],
+                    **config_params
+                )
+                # Add dimensions to prompt for models that don't support image_config
+                if width and height and aspect_ratio != "1:1":
+                    prompt = f"{prompt} ({width}x{height})"
+                    logger.info(f"Added dimensions to prompt: {prompt}")
         else:
             # No aspect ratio specified, use basic config
             logger.info(f"No aspect ratio specified, using default")
