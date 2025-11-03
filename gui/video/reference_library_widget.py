@@ -540,19 +540,34 @@ class ReferenceLibraryWidget(QWidget):
 
     def on_add_existing_clicked(self):
         """Handle add existing button clicked"""
+        logger.info("=== ADD EXISTING IMAGE CLICKED ===")
+
         if not self.project:
+            logger.warning("No project loaded - cannot add reference image")
+            QMessageBox.warning(self, "No Project", "Please create or load a project first.")
             return
 
-        # File dialog - use Qt's own dialog on Linux to avoid native dialog issues
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Reference Image",
-            str(Path.home()),
-            "Images (*.png *.jpg *.jpeg)",
-            options=QFileDialog.Option.DontUseNativeDialog
-        )
+        logger.info("Opening file dialog...")
+
+        try:
+            # File dialog - use Qt's own dialog on Linux to avoid native dialog issues
+            file_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select Reference Image",
+                str(Path.home()),
+                "Images (*.png *.jpg *.jpeg)",
+                options=QFileDialog.Option.DontUseNativeDialog
+            )
+
+            logger.info(f"File dialog returned: {file_path}")
+
+        except Exception as e:
+            logger.error(f"File dialog exception: {e}", exc_info=True)
+            QMessageBox.critical(self, "Error", f"File dialog failed: {e}")
+            return
 
         if not file_path:
+            logger.info("No file selected (user cancelled)")
             return
 
         path = Path(file_path)
