@@ -313,7 +313,8 @@ class OpenProjectDialog(QDialog):
         folder = QFileDialog.getExistingDirectory(
             self,
             "Select Project Folder",
-            str(self.project_manager.base_dir)
+            str(self.project_manager.base_dir),
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         
         if folder:

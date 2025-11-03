@@ -452,12 +452,13 @@ class HistoryTab(QWidget):
         
         from PySide6.QtWidgets import QFileDialog
         import json
-        
+
         filename, _ = QFileDialog.getSaveFileName(
             self,
             "Export History",
             f"{self.project_id}_history.json",
-            "JSON Files (*.json)"
+            "JSON Files (*.json)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         
         if filename:

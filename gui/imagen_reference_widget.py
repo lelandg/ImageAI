@@ -477,7 +477,8 @@ class ImagenReferenceWidget(QWidget):
             self,
             "Select Reference Image",
             "",
-            "Image Files (*.png *.jpg *.jpeg *.gif *.webp);;All Files (*.*)"
+            "Image Files (*.png *.jpg *.jpeg *.gif *.webp);;All Files (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if not file_path:

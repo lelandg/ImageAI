@@ -430,7 +430,8 @@ class LayoutTab(QWidget):
             self,
             "Open Layout Project",
             str(Path.home()),
-            "Layout Project (*.layout.json);;All Files (*.*)"
+            "Layout Project (*.layout.json);;All Files (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if file_path:
@@ -532,7 +533,8 @@ class LayoutTab(QWidget):
             self,
             "Save Layout Project",
             str(Path.home() / default_filename),
-            "Layout Project (*.layout.json);;All Files (*.*)"
+            "Layout Project (*.layout.json);;All Files (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if file_path:

@@ -1812,7 +1812,8 @@ class WorkspaceWidget(QWidget):
         filename, _ = QFileDialog.getOpenFileName(
             self, "Open Project",
             str(self.video_config.get_projects_dir()),
-            "ImageAI Projects (*.iaproj.json)"
+            "ImageAI Projects (*.iaproj.json)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         self.logger.info(f"Selected filename: {filename}")
         if filename:
@@ -4066,7 +4067,8 @@ class WorkspaceWidget(QWidget):
             self,
             "Select Start Frame Image",
             str(Path.home()),
-            "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if file_path:
@@ -4546,7 +4548,8 @@ class WorkspaceWidget(QWidget):
             self,
             "Select End Frame Image",
             str(Path.home()),
-            "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+            "Images (*.png *.jpg *.jpeg *.bmp *.gif)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if file_path:
@@ -5594,7 +5597,8 @@ class WorkspaceWidget(QWidget):
         """Load input from file"""
         filename, _ = QFileDialog.getOpenFileName(
             self, "Load Input File",
-            "", "Text Files (*.txt *.md);;All Files (*.*)"
+            "", "Text Files (*.txt *.md);;All Files (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         if filename:
             try:
@@ -5609,7 +5613,8 @@ class WorkspaceWidget(QWidget):
         """Browse for audio file"""
         filename, _ = QFileDialog.getOpenFileName(
             self, "Select Audio File",
-            "", "Audio Files (*.mp3 *.wav *.m4a *.ogg);;All Files (*.*)"
+            "", "Audio Files (*.mp3 *.wav *.m4a *.ogg);;All Files (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         if filename:
             self.audio_file_label.setText(Path(filename).name)
@@ -5639,7 +5644,8 @@ class WorkspaceWidget(QWidget):
         """Browse for MIDI file"""
         filename, _ = QFileDialog.getOpenFileName(
             self, "Select MIDI File",
-            "", "MIDI Files (*.mid *.midi);;All Files (*.*)"
+            "", "MIDI Files (*.mid *.midi);;All Files (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         if filename:
             try:

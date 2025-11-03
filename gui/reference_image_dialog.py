@@ -614,7 +614,8 @@ class ReferenceImageDialog(QDialog):
             self,
             "Select Reference Image",
             "",
-            "Image Files (*.png *.jpg *.jpeg *.gif *.bmp *.webp *.tiff *.tif *.ico *.svg);;All Files (*.*)"
+            "Image Files (*.png *.jpg *.jpeg *.gif *.bmp *.webp *.tiff *.tif *.ico *.svg);;All Files (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if file_path:

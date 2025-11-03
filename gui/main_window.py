@@ -3790,7 +3790,7 @@ For more detailed information, please refer to the full documentation.
             self,
             "Select Downloads Folder",
             current_path,
-            QFileDialog.ShowDirsOnly
+            QFileDialog.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog
         )
         if folder:
             self.midjourney_downloads_edit.setText(folder)
@@ -5468,7 +5468,8 @@ For more detailed information, please refer to the full documentation.
             self,
             "Save Image",
             str(Path.home() / default_name),
-            all_formats
+            all_formats,
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         
         if path:
@@ -5854,13 +5855,14 @@ For more detailed information, please refer to the full documentation.
         if not self.current_image_data:
             QMessageBox.warning(self, APP_NAME, "No image to save in project.")
             return
-        
+
         # Get save path
         path, _ = QFileDialog.getSaveFileName(
             self,
             "Save Project",
             str(Path.home() / "project.imgai"),
-            "ImageAI Projects (*.imgai)"
+            "ImageAI Projects (*.imgai)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         
         if not path:
@@ -5935,7 +5937,8 @@ For more detailed information, please refer to the full documentation.
             self,
             "Load Project",
             str(Path.home()),
-            "ImageAI Projects (*.imgai)"
+            "ImageAI Projects (*.imgai)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
         
         if path:
@@ -6700,7 +6703,8 @@ For more detailed information, please refer to the full documentation.
             self,
             "Select Reference Image",
             str(images_output_dir()),
-            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tiff *.tif *.ico *.svg);;All files (*.*)"
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tiff *.tif *.ico *.svg);;All files (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if file_path:

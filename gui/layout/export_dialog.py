@@ -384,7 +384,8 @@ class ExportDialog(QDialog):
             self,
             "Export Layout",
             str(Path.home() / default_filename),
-            filter_str
+            filter_str,
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if not output_path:

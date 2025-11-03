@@ -252,7 +252,8 @@ class DialogHistoryWidget(QWidget):
             self,
             "Export History",
             f"{self.dialog_name}_history.json",
-            "JSON Files (*.json);;All Files (*.*)"
+            "JSON Files (*.json);;All Files (*.*)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if file_path:

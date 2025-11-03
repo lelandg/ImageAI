@@ -344,7 +344,8 @@ class ReferenceGenerationDialog(QDialog):
             self,
             "Select Reference Image",
             str(Path.home()),
-            "Images (*.png *.jpg *.jpeg)"
+            "Images (*.png *.jpg *.jpeg)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if not file_path:
@@ -472,7 +473,8 @@ class ReferenceGenerationDialog(QDialog):
             self,
             "Select Reference Images (up to 3)",
             str(Path.home()),
-            "Images (*.png *.jpg *.jpeg)"
+            "Images (*.png *.jpg *.jpeg)",
+            options=QFileDialog.Option.DontUseNativeDialog
         )
 
         if not file_paths:
