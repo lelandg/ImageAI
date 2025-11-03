@@ -216,7 +216,7 @@ Add camera movement (pan, zoom, dolly, tilt, etc.) and subtle motion over time.
 
         timing_info = ""
         if context.lyric_timings and len(context.lyric_timings) > 1:
-            timing_info = "\n\nTiming breakdown for this scene (within 8-second Veo clip):\n"
+            timing_info = "\n\n⚠️ MULTI-SEGMENT TIMING (You MUST use MULTIPLE time markers):\n"
             for timing in context.lyric_timings:
                 # Add descriptors for very short segments
                 duration_sec = timing['end_sec'] - timing['start_sec']
@@ -227,7 +227,8 @@ Add camera movement (pan, zoom, dolly, tilt, etc.) and subtle motion over time.
                 else:
                     duration_desc = ""
                 timing_info += f"  {timing['start_sec']:.1f}-{timing['end_sec']:.1f}s: {timing['text']}{duration_desc}\n"
-            timing_info += "\nDescribe how the visuals evolve through these timing segments."
+            timing_info += f"\n⚠️ REQUIRED: Your prompt MUST break into {len(context.lyric_timings)} segments matching these exact times.\n"
+            timing_info += "Example format: \"0-0.1s: [action1], 0.1-0.3s: [action2], 0.3-0.4s: [action3]\""
 
         # Add tempo guidance using XML tags (prevents literal "BPM" from appearing in output)
         tempo_guidance = ""
@@ -264,7 +265,7 @@ Note: This will be part of an 8-second Veo generation
 Generate a prompt describing camera movement and scene evolution that flows naturally from the previous scene.
 
 IMPORTANT:
-- If timing breakdown is provided, use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ...") to describe visual evolution
+- If "MULTI-SEGMENT TIMING" is shown, you MUST use MULTIPLE time markers matching those exact segments
 - For ultra-brief moments (<0.5s), use terms like "flash", "blink", "flicker"
 - Do NOT include any quoted text or lyrics. Only describe pure visual elements.
 - PRESERVE all style descriptors from the start frame description (e.g., "hi-res cartoon", "photorealistic", "cinematic", etc.)"""
@@ -278,7 +279,7 @@ Note: This will be part of an 8-second Veo generation
 Generate a prompt describing camera movement and scene evolution for Veo video generation.
 
 IMPORTANT:
-- If timing breakdown is provided, use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ...") to describe visual evolution
+- If "MULTI-SEGMENT TIMING" is shown, you MUST use MULTIPLE time markers matching those exact segments
 - For ultra-brief moments (<0.5s), use terms like "flash", "blink", "flicker"
 - Do NOT include any quoted text or lyrics. Only describe pure visual elements.
 - PRESERVE all style descriptors from the start frame description (e.g., "hi-res cartoon", "photorealistic", "cinematic", etc.)"""
@@ -292,7 +293,7 @@ Note: This will be part of an 8-second Veo generation
 Generate a prompt describing subject motion and scene evolution for Veo video generation (minimal camera movement).
 
 IMPORTANT:
-- If timing breakdown is provided, use explicit time markers (e.g., "0-2.5s: ..., 2.5-5s: ...") to describe visual evolution
+- If "MULTI-SEGMENT TIMING" is shown, you MUST use MULTIPLE time markers matching those exact segments
 - For ultra-brief moments (<0.5s), use terms like "flash", "blink", "flicker"
 - Do NOT include any quoted text or lyrics. Only describe pure visual elements.
 - PRESERVE all style descriptors from the start frame description (e.g., "hi-res cartoon", "photorealistic", "cinematic", etc.)"""
@@ -301,11 +302,18 @@ IMPORTANT:
             # Call LLM provider using LiteLLM
             import litellm
 
-            # Prepare model string for LiteLLM
-            model_id = f"{provider}/{model}" if provider else model
+            # Map provider names to LiteLLM format
+            # LiteLLM uses "gemini" not "google" for Google Gemini models
+            litellm_provider = "gemini" if provider == "google" else provider
 
-            self.logger.info(f"Generating video prompt with {provider}/{model}")
+            # Prepare model string for LiteLLM
+            model_id = f"{litellm_provider}/{model}" if litellm_provider else model
+
+            self.logger.info(f"Generating video prompt with {provider}/{model} (LiteLLM: {model_id})")
             self.logger.debug(f"Context: start='{context.start_prompt[:50]}...', camera={context.enable_camera_movements}, flow={context.enable_prompt_flow}")
+
+            # Log the full user prompt for debugging
+            self.logger.info(f"User prompt sent to LLM:\n{'-'*80}\n{user_prompt}\n{'-'*80}")
 
             response = litellm.completion(
                 model=model_id,
@@ -314,17 +322,35 @@ IMPORTANT:
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=temperature,
-                max_tokens=200
+                max_tokens=500  # Increased from 200 to avoid truncation
             )
 
-            # Extract response text
-            response_text = response.choices[0].message.content.strip()
+            # CRITICAL: Check if content is None (known LiteLLM+Gemini bug)
+            # See: https://github.com/BerriAI/litellm/issues/10721
+            message_content = response.choices[0].message.content
+            finish_reason = response.choices[0].finish_reason if response.choices else "unknown"
 
-            self.logger.info(f"Generated video prompt:\n{response_text}")
+            # Log the full response for debugging
+            self.logger.info(f"LLM Response (finish_reason={finish_reason}):\n{'-'*80}\n{message_content}\n{'-'*80}")
+
+            if message_content is None:
+                self.logger.error(f"❌ LLM returned None content (finish_reason: {finish_reason}). This is a known LiteLLM+Gemini bug.")
+                self.logger.error("Falling back to basic prompt. Consider using Anthropic/OpenAI instead.")
+                return self._fallback_prompt(context)
+
+            response_text = message_content.strip()
+
+            if not response_text:
+                self.logger.warning("⚠️ LLM returned empty response, using fallback")
+                return self._fallback_prompt(context)
+
+            self.logger.info(f"✅ Generated video prompt ({len(response_text)} chars):\n{response_text}")
             return response_text
 
         except Exception as e:
             self.logger.error(f"LLM generation failed: {e}")
+            import traceback
+            self.logger.error(f"Traceback:\n{traceback.format_exc()}")
             return self._fallback_prompt(context)
 
     def _fallback_prompt(self, context: VideoPromptContext) -> str:
@@ -440,7 +466,7 @@ Scenes:\n\n"""
 
                 # Add timing breakdown for batched scenes WITH lyric context
                 if ctx.lyric_timings and len(ctx.lyric_timings) > 1:
-                    batch_prompt += f"   Timing breakdown (within 8-second clip):\n"
+                    batch_prompt += f"   ⚠️ MULTI-SEGMENT TIMING (MUST use MULTIPLE time markers):\n"
                     for t in ctx.lyric_timings:
                         # Include lyric text so LLM knows what's happening at each timestamp
                         lyric_text = t.get('text', '')
@@ -452,18 +478,23 @@ Scenes:\n\n"""
                         else:
                             seg_desc = ""
                         batch_prompt += f"     • {t['start_sec']:.1f}-{t['end_sec']:.1f}s: \"{lyric_text}\"{seg_desc}\n"
+                    batch_prompt += f"   ⚠️ REQUIRED FORMAT: Break this into {len(ctx.lyric_timings)} segments matching the times above\n"
 
             batch_prompt += "\n"
 
         batch_prompt += f"""Return {len(contexts)} numbered video prompts.
 
-MANDATORY for ALL prompts: Use explicit time markers "X-Ys:" regardless of scene duration.
-- Short scenes (0.5-2s): "0-1.5s: [complete action]"
-- Medium scenes (2-5s): "0-2.5s: [action1], 2.5-5s: [action2]"
-- Long scenes (5-8s): "0-2s: [action1], 2-4s: [action2], 4-8s: [action3]"
+MANDATORY TIMING RULES:
+1. IF a scene shows "MULTI-SEGMENT TIMING", you MUST use MULTIPLE time markers matching those exact segments
+   Example: If timing shows "0.0-0.1s", "0.1-0.3s", "0.3-0.4s", your output MUST be:
+   "0-0.1s: [action1], 0.1-0.3s: [action2], 0.3-0.4s: [action3]"
+
+2. IF no timing breakdown provided, use ONE marker based on total duration:
+   - Short (0.5-2s): "0-1.5s: [complete action]"
+   - Medium (2-5s): "0-2.5s: [action1], 2.5-5s: [action2]"
+   - Long (5-8s): "0-2s: [action1], 2-4s: [action2], 4-8s: [action3]"
 
 CRITICAL REQUIREMENTS:
-- ALL prompts MUST begin with timing markers "X-Ys:"
 - Transform <tempo_bpm> values to natural descriptors (NEVER output "BPM" text)
 - Describe smooth transitions between time segments
 - ONE continuous shot per scene (no cuts)
@@ -473,9 +504,16 @@ CRITICAL REQUIREMENTS:
         try:
             import litellm
 
-            model_id = f"{provider}/{model}" if provider else model
+            # Map provider names to LiteLLM format
+            # LiteLLM uses "gemini" not "google" for Google Gemini models
+            litellm_provider = "gemini" if provider == "google" else provider
 
-            self.logger.info(f"Batch generating {len(contexts)} video prompts with {provider}/{model}")
+            model_id = f"{litellm_provider}/{model}" if litellm_provider else model
+
+            self.logger.info(f"Batch generating {len(contexts)} video prompts with {provider}/{model} (LiteLLM: {model_id})")
+
+            # Log the full batch prompt for debugging
+            self.logger.info(f"Batch prompt sent to LLM ({len(batch_prompt)} chars):\n{'-'*80}\n{batch_prompt[:1000]}...\n{'-'*80}")
 
             response = litellm.completion(
                 model=model_id,
@@ -484,11 +522,38 @@ CRITICAL REQUIREMENTS:
                     {"role": "user", "content": batch_prompt}
                 ],
                 temperature=temperature,
-                max_tokens=200 * len(contexts)  # ~200 tokens per video prompt
+                max_tokens=500 * len(contexts)  # Increased from 200 to 500 tokens per video prompt
             )
 
-            # Parse numbered response
-            response_text = response.choices[0].message.content.strip()
+            # CRITICAL: Check if content is None (known LiteLLM+Gemini bug)
+            # See: https://github.com/BerriAI/litellm/issues/10721
+            message_content = response.choices[0].message.content
+            finish_reason = response.choices[0].finish_reason if response.choices else "unknown"
+
+            # Log the full response for debugging
+            self.logger.info(f"Batch LLM Response (finish_reason={finish_reason}, {len(message_content) if message_content else 0} chars):\n{'-'*80}\n{message_content}\n{'-'*80}")
+
+            if message_content is None:
+                self.logger.error(f"❌ LLM returned None content (finish_reason: {finish_reason}). This is a known LiteLLM+Gemini bug.")
+                self.logger.error("Falling back to individual generation. Consider using Anthropic/OpenAI instead.")
+                # Fallback to individual generation
+                results = []
+                for i, context in enumerate(contexts):
+                    self.logger.info(f"Generating video prompt {i+1}/{len(contexts)} (individual fallback)")
+                    prompt = self.generate_video_prompt(context, provider, model, temperature)
+                    results.append(prompt)
+                return results
+
+            response_text = message_content.strip()
+
+            if not response_text:
+                self.logger.warning("⚠️ Batch LLM returned empty response, falling back to individual generation")
+                results = []
+                for i, context in enumerate(contexts):
+                    self.logger.info(f"Generating video prompt {i+1}/{len(contexts)} (empty response fallback)")
+                    prompt = self.generate_video_prompt(context, provider, model, temperature)
+                    results.append(prompt)
+                return results
 
             # Split by numbered markers (1., 2., etc.)
             import re
@@ -512,11 +577,13 @@ CRITICAL REQUIREMENTS:
 
         except Exception as e:
             self.logger.error(f"Batch video generation failed: {e}")
+            import traceback
+            self.logger.error(f"Traceback:\n{traceback.format_exc()}")
             # Fallback to individual generation
             self.logger.info("Falling back to individual generation")
             results = []
             for i, context in enumerate(contexts):
-                self.logger.info(f"Generating video prompt {i+1}/{len(contexts)} (fallback)")
+                self.logger.info(f"Generating video prompt {i+1}/{len(contexts)} (exception fallback)")
                 prompt = self.generate_video_prompt(context, provider, model, temperature)
                 results.append(prompt)
             return results

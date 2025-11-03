@@ -216,3 +216,4 @@ test_lyrics.txt
 EXTRACT_FRAMES_README.md
 extract_all_last_frames.py
 extract_all_last_frames.ps1
+npm_update.sh

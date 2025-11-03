@@ -2015,6 +2015,27 @@ class WorkspaceWidget(QWidget):
             if hasattr(midi_timing, 'duration_sec'):
                 midi_duration_sec = midi_timing.duration_sec
                 self.logger.info(f"MIDI duration: {midi_duration_sec:.1f}s")
+
+            # ⚠️ CRITICAL: Check if lyrics have been extracted from MIDI
+            has_karaoke = self.current_project and hasattr(self.current_project, 'karaoke_data') and self.current_project.karaoke_data
+            if not has_karaoke:
+                self.logger.warning("⚠️ MIDI file loaded but lyrics NOT extracted!")
+                dialog_manager = get_dialog_manager(self)
+                response = dialog_manager.show_question(
+                    "MIDI Without Lyrics",
+                    "You have a MIDI file loaded, but you haven't extracted lyrics from it yet.\n\n"
+                    f"Without lyric extraction, scene timing will be INCORRECT (may be {midi_duration_sec:.0f}s song compressed into a few seconds).\n\n"
+                    "Would you like to:\n"
+                    "• Click 'Extract Lyrics' button first (RECOMMENDED)\n"
+                    "• Or continue anyway with incorrect timing?",
+                    buttons=["Cancel", "Continue Anyway"]
+                )
+                if response != "Continue Anyway":
+                    self.logger.info("User cancelled storyboard generation to extract lyrics first")
+                    self._log_to_console("⚠️ Please extract lyrics from MIDI first, then generate storyboard", "WARNING")
+                    return
+                else:
+                    self.logger.warning("User chose to continue without lyric extraction - timing will be incorrect")
         else:
             self.logger.info("No MIDI timing data available")
 
