@@ -1,8 +1,5 @@
-I'll analyze the ImageAI repository to help you create effective Claude Desktop project instructions.This is a fantastic project! Let me fetch a few more key files to understand the codebase structure better before crafting the project instructions.Perfect! Now I have excellent context. Let me create comprehensive Claude Desktop project instructions for your ImageAI repository. This will be tailored for code improvement work in Claude Desktop.
-
----
-
 # **CLAUDE.md - ImageAI Project Instructions**
+*Created for use with Claude Desktop | ImageAI v0.20.0*
 
 ## Project Overview
 
@@ -362,4 +359,3 @@ When improving code:
 
 ---
 
-*Created for use with Claude Desktop | ImageAI v0.10.5*
