@@ -77,9 +77,11 @@ class UnifiedLLMProvider:
         # Try to import litellm
         try:
             import litellm
+            import os
             self.litellm = litellm
             self.litellm.drop_params = True  # Drop unsupported params
-            self.litellm.set_verbose = False  # Reduce logging noise
+            # Use environment variable instead of deprecated set_verbose
+            os.environ['LITELLM_LOG'] = 'ERROR'  # Only show errors, not verbose info
         except ImportError:
             self.logger.warning("LiteLLM not installed. Install with: pip install litellm")
             self.litellm = None

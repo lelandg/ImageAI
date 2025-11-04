@@ -93,7 +93,9 @@ class LLMWorker(QObject):
                 litellm_logger.addHandler(console_handler)
 
                 litellm.drop_params = True  # Drop unsupported params
-                litellm.set_verbose = True  # Enable verbose for debugging
+                # Set verbose logging via environment variable instead of deprecated method
+                import os
+                os.environ['LITELLM_LOG'] = 'INFO'  # or 'DEBUG' for more verbose
                 use_litellm = True
 
                 logger.info("LiteLLM imported successfully")
@@ -258,7 +260,7 @@ class LLMWorker(QObject):
 
                 content = content.strip()
                 logger.info(f"LLM Response - Raw content: {content}")
-                console.info(f"LLM Response - Raw content: {content}")
+                # Don't show raw response in console, only log it
 
                 # Remove markdown formatting if present
                 if content.startswith("```"):
@@ -416,7 +418,7 @@ class LLMWorker(QObject):
                 console.info(f"LLM Response - Status: Success")
 
                 logger.info(f"LLM Response - Raw content: {content}")
-                console.info(f"LLM Response - Raw content: {content}")
+                # Don't show raw response in console, only log it
 
                 # Clean up response
                 if content.startswith("```"):
@@ -587,7 +589,7 @@ class LLMWorker(QObject):
                     content = str(response)
 
                 logger.info(f"LLM Response - Raw content: {content}")
-                console.info(f"LLM Response - Raw content: {content}")
+                # Don't show raw response in console, only log it
 
                 # Handle None content
                 if not content:
@@ -817,15 +819,15 @@ class PromptGenerationDialog(QDialog):
         self.generate_btn.clicked.connect(self.generate_prompts)
         generate_layout.addWidget(self.generate_btn)
 
-        # Add shortcut hint label
-        shortcut_label = QLabel("<small style='color: gray;'>Shortcuts: Ctrl+Enter to generate, Esc to close</small>")
-        shortcut_label.setAlignment(Qt.AlignCenter)
-        generate_layout.addWidget(shortcut_label)
+        # Add shortcut hint label (store reference to update it later)
+        self.shortcut_label = QLabel("<small style='color: gray;'>Shortcuts: Ctrl+Enter to generate, Esc to close</small>")
+        self.shortcut_label.setAlignment(Qt.AlignCenter)
+        generate_layout.addWidget(self.shortcut_label)
 
         # Set up keyboard shortcuts
-        # Ctrl+Enter to generate prompts
-        generate_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
-        generate_shortcut.activated.connect(self.generate_prompts)
+        # Ctrl+Enter to generate prompts (will change to OK after generation)
+        self.ctrl_enter_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
+        self.ctrl_enter_shortcut.activated.connect(self.generate_prompts)
 
         # Escape to close
         escape_shortcut = QShortcut(QKeySequence("Escape"), self)
@@ -892,13 +894,16 @@ class PromptGenerationDialog(QDialog):
             self.tab_widget.setCurrentIndex(0)
 
         # Dialog buttons
-        buttons = QDialogButtonBox(
+        self.buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
             Qt.Horizontal
         )
-        buttons.accepted.connect(self.accept_selection)
-        buttons.rejected.connect(self.reject)
-        main_layout.addWidget(buttons)
+        self.buttons.accepted.connect(self.accept_selection)
+        self.buttons.rejected.connect(self.reject)
+        main_layout.addWidget(self.buttons)
+
+        # Store reference to OK button
+        self.ok_button = self.buttons.button(QDialogButtonBox.Ok)
 
         # Connect list selection to preview
         self.results_list.currentItemChanged.connect(self.on_selection_changed)
@@ -906,6 +911,12 @@ class PromptGenerationDialog(QDialog):
         # Update LLM models when provider changes
         self.llm_provider_combo.currentTextChanged.connect(self.update_llm_models)
         self.llm_model_combo.currentTextChanged.connect(self.on_model_changed)
+
+        # Set initial focus to input text
+        self.input_text.setFocus()
+
+        # Track if we have generated prompts
+        self.prompts_generated = False
 
     def load_llm_settings(self):
         """Load LLM settings from config."""
@@ -974,6 +985,22 @@ class PromptGenerationDialog(QDialog):
         if not input_text:
             QMessageBox.warning(self, "Input Required", "Please enter an idea or concept.")
             return
+
+        # Reset shortcuts and defaults when starting a new generation
+        if self.prompts_generated:
+            # Reset Ctrl+Enter back to generate
+            try:
+                self.ctrl_enter_shortcut.activated.disconnect()
+            except:
+                pass
+            self.ctrl_enter_shortcut.activated.connect(self.generate_prompts)
+
+            # Reset defaults
+            self.generate_btn.setDefault(True)
+            self.ok_button.setDefault(False)
+
+            # Reset shortcut label
+            self.shortcut_label.setText("<small style='color: gray;'>Shortcuts: Ctrl+Enter to generate, Esc to close</small>")
 
         # Get settings
         num_variations = self.num_variations_spin.value()
@@ -1102,6 +1129,7 @@ class PromptGenerationDialog(QDialog):
     def on_generation_finished(self, prompts: List[str]):
         """Handle successful generation."""
         self.generated_prompts = prompts
+        self.prompts_generated = True  # Mark that prompts have been generated
         self.status_console.log(f"Successfully generated {len(prompts)} prompts!", "SUCCESS")
 
         # Add to results list
@@ -1121,6 +1149,24 @@ class PromptGenerationDialog(QDialog):
         # Re-enable UI
         self.generate_btn.setEnabled(True)
         self.generate_btn.setText("Generate Prompts")
+
+        # After generation: make OK button default, set focus to it, and update Ctrl+Enter
+        self.ok_button.setDefault(True)
+        self.generate_btn.setDefault(False)
+        self.ok_button.setFocus()
+
+        # Update Ctrl+Enter shortcut to trigger OK button after generation
+        try:
+            self.ctrl_enter_shortcut.activated.disconnect()
+        except:
+            pass  # In case it's already disconnected
+        self.ctrl_enter_shortcut.activated.connect(self.accept_selection)
+
+        # Update shortcut hint label
+        self.shortcut_label.setText("<small style='color: gray;'>Shortcuts: Ctrl+Enter to use selected prompt, Esc to close</small>")
+
+        # Log to status console
+        self.status_console.log("Press Enter or Ctrl+Enter to use the selected prompt", "INFO")
 
     def on_generation_error(self, error: str):
         """Handle generation error."""

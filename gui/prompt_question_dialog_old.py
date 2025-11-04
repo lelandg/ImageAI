@@ -61,8 +61,10 @@ class QuestionWorker(QObject):
             # Try to import and use litellm for better compatibility
             try:
                 import litellm
+                import os
                 litellm.drop_params = True  # Drop unsupported params
-                litellm.set_verbose = False  # Reduce logging noise
+                # Use environment variable instead of deprecated set_verbose
+                os.environ['LITELLM_LOG'] = 'ERROR'  # Only show errors, not verbose info
                 use_litellm = True
             except ImportError:
                 logger.warning("LiteLLM not installed, falling back to direct SDK")

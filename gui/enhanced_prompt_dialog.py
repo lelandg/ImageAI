@@ -392,19 +392,19 @@ class EnhancedPromptDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel
         )
-        ok_button = buttons.button(QDialogButtonBox.Ok)
-        ok_button.setText("Use Enhanced Prompt")
-        ok_button.setToolTip("Use the enhanced prompt in the main window")
+        self.ok_button = buttons.button(QDialogButtonBox.Ok)
+        self.ok_button.setText("Use Enhanced Prompt")
+        self.ok_button.setToolTip("Use the enhanced prompt in the main window")
         cancel_button = buttons.button(QDialogButtonBox.Cancel)
         cancel_button.setToolTip("Cancel without using enhanced prompt (Esc)")
         buttons.accepted.connect(self.accept_selection)
         buttons.rejected.connect(self.reject)
         main_layout.addWidget(buttons)
 
-        # Add shortcut hint label
-        shortcut_label = QLabel("<small style='color: gray;'>Shortcuts: Ctrl+Enter to enhance, Esc to cancel</small>")
-        shortcut_label.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(shortcut_label)
+        # Add shortcut hint label (store reference to update later)
+        self.shortcut_label = QLabel("<small style='color: gray;'>Shortcuts: Ctrl+Enter to enhance, Esc to cancel</small>")
+        self.shortcut_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(self.shortcut_label)
 
         # Connect provider and model changes
         self.llm_provider_combo.currentTextChanged.connect(self.update_llm_models)
@@ -413,11 +413,17 @@ class EnhancedPromptDialog(QDialog):
         # Add keyboard shortcuts
         self.setup_shortcuts()
 
+        # Set initial focus to current prompt
+        self.prompt_display.setFocus()
+
+        # Track if we have enhanced prompt
+        self.prompt_enhanced = False
+
     def setup_shortcuts(self):
         """Set up keyboard shortcuts."""
-        # Ctrl+Enter to enhance
-        enhance_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
-        enhance_shortcut.activated.connect(self.enhance_prompt)
+        # Ctrl+Enter to enhance (will change to OK after enhancement)
+        self.ctrl_enter_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
+        self.ctrl_enter_shortcut.activated.connect(self.enhance_prompt)
 
         # Escape to close
         escape_shortcut = QShortcut(QKeySequence("Escape"), self)
@@ -486,6 +492,22 @@ class EnhancedPromptDialog(QDialog):
         if not prompt:
             QMessageBox.warning(self, "Prompt Required", "Please enter a prompt to enhance.")
             return
+
+        # Reset shortcuts and defaults when starting a new enhancement
+        if self.prompt_enhanced:
+            # Reset Ctrl+Enter back to enhance
+            try:
+                self.ctrl_enter_shortcut.activated.disconnect()
+            except:
+                pass
+            self.ctrl_enter_shortcut.activated.connect(self.enhance_prompt)
+
+            # Reset defaults
+            self.enhance_btn.setDefault(True)
+            self.ok_button.setDefault(False)
+
+            # Reset shortcut label
+            self.shortcut_label.setText("<small style='color: gray;'>Shortcuts: Ctrl+Enter to enhance, Esc to cancel</small>")
 
         # Get LLM provider
         llm_provider = self.llm_provider_combo.currentText()
@@ -602,9 +624,28 @@ class EnhancedPromptDialog(QDialog):
     def on_enhancement_finished(self, enhanced_prompt):
         """Handle successful enhancement."""
         self.result_display.setPlainText(enhanced_prompt)
+        self.prompt_enhanced = True  # Mark that prompt has been enhanced
         self.enhance_btn.setEnabled(True)
         self.enhance_btn.setText("Enhance Prompt")
         self.status_console.log("Enhancement completed successfully!", "SUCCESS")
+
+        # After enhancement: make OK button default, set focus to it, and update Ctrl+Enter
+        self.ok_button.setDefault(True)
+        self.enhance_btn.setDefault(False)
+        self.ok_button.setFocus()
+
+        # Update Ctrl+Enter shortcut to trigger OK button after enhancement
+        try:
+            self.ctrl_enter_shortcut.activated.disconnect()
+        except:
+            pass  # In case it's already disconnected
+        self.ctrl_enter_shortcut.activated.connect(self.accept_selection)
+
+        # Update shortcut hint label
+        self.shortcut_label.setText("<small style='color: gray;'>Shortcuts: Ctrl+Enter to use enhanced prompt, Esc to cancel</small>")
+
+        # Log to status console
+        self.status_console.log("Press Enter or Ctrl+Enter to use the enhanced prompt", "INFO")
 
     def on_enhancement_error(self, error):
         """Handle enhancement error."""
