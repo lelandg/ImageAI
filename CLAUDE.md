@@ -192,3 +192,4 @@ When the code map needs updating:
 - **Scaling**: For target resolutions > 1024px, scale proportionally so max is 1024, then upscale result
 - **Reference images**: When reference image aspect doesn't match target, create transparent canvas with correct aspect ratio and center the reference image
 - Always log what aspect_ratio is sent via image_config
+- Folder _transfer is shared with VM. Latest Linux logs are there.

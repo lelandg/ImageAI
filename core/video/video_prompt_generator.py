@@ -329,12 +329,23 @@ IMPORTANT:
             api_key = None
             if auth_mode == "api-key":
                 if self.config:
-                    if provider == "google":
-                        api_key = self.config.get_api_key('google')
-                    elif provider == "openai":
-                        api_key = self.config.get_api_key('openai')
-                    elif provider in ["anthropic", "claude"]:
-                        api_key = self.config.get_api_key('anthropic')
+                    # Handle both ConfigManager object and dict config
+                    if hasattr(self.config, 'get_api_key'):
+                        # ConfigManager instance
+                        if provider == "google":
+                            api_key = self.config.get_api_key('google')
+                        elif provider == "openai":
+                            api_key = self.config.get_api_key('openai')
+                        elif provider in ["anthropic", "claude"]:
+                            api_key = self.config.get_api_key('anthropic')
+                    elif isinstance(self.config, dict):
+                        # Dict config from get_provider_config()
+                        if provider == "google":
+                            api_key = self.config.get('google_api_key')
+                        elif provider == "openai":
+                            api_key = self.config.get('openai_api_key')
+                        elif provider in ["anthropic", "claude"]:
+                            api_key = self.config.get('anthropic_api_key')
 
                 if not api_key:
                     self.logger.error(f"No API key found for provider '{provider}'")
