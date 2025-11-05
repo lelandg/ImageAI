@@ -1,5 +1,7 @@
 """Constants and default values for ImageAI."""
 
+import os
+import platform
 from pathlib import Path
 
 # Application metadata
@@ -82,3 +84,23 @@ IMAGE_FORMATS = {
     "WebP": "*.webp",
     "All Images": "*.png *.jpg *.jpeg *.webp",
 }
+
+
+def get_user_data_dir() -> Path:
+    """Get platform-specific user data directory for ImageAI.
+
+    Returns:
+        Path to the user data directory where configuration, logs, and generated
+        images are stored.
+    """
+    system = platform.system()
+    home = Path.home()
+
+    if system == "Windows":
+        base = Path(os.getenv("APPDATA", home / "AppData" / "Roaming"))
+        return base / APP_NAME
+    elif system == "Darwin":  # macOS
+        return home / "Library" / "Application Support" / APP_NAME
+    else:  # Linux/Unix
+        base = Path(os.getenv("XDG_CONFIG_HOME", home / ".config"))
+        return base / APP_NAME

@@ -325,7 +325,8 @@ class ReferenceLibraryWidget(QWidget):
 
         # Help text
         help_text = QLabel(
-            "Reference images maintain character/object/environment consistency across all scenes."
+            "Reference images maintain character/object/environment consistency across all scenes.\n"
+            "Multiple references can be auto-composited into character design sheets for models with limits."
         )
         help_text.setWordWrap(True)
         help_text.setStyleSheet("color: gray; font-size: 11px; font-style: italic; padding: 5px;")
@@ -544,13 +545,12 @@ class ReferenceLibraryWidget(QWidget):
         logger.info("Opening file dialog...")
 
         try:
-            # File dialog - use Qt's own dialog on Linux to avoid native dialog issues
+            # File dialog
             file_path, _ = QFileDialog.getOpenFileName(
                 self,
                 "Select Reference Image",
                 str(Path.home()),
-                "Images (*.png *.jpg *.jpeg)",
-                options=QFileDialog.Option.DontUseNativeDialog
+                "Images (*.png *.jpg *.jpeg)"
             )
 
             logger.info(f"File dialog returned: {file_path}")

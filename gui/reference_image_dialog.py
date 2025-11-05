@@ -619,8 +619,7 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
             self,
             "Select Reference Image",
             "",
-            "Image Files (*.png *.jpg *.jpeg *.gif *.bmp *.webp *.tiff *.tif *.ico *.svg);;All Files (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog
+            "Image Files (*.png *.jpg *.jpeg *.gif *.bmp *.webp *.tiff *.tif *.ico *.svg);;All Files (*.*)"
         )
 
         if file_path:

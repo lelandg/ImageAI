@@ -3790,7 +3790,7 @@ For more detailed information, please refer to the full documentation.
             self,
             "Select Downloads Folder",
             current_path,
-            QFileDialog.ShowDirsOnly | QFileDialog.Option.DontUseNativeDialog
+            QFileDialog.ShowDirsOnly
         )
         if folder:
             self.midjourney_downloads_edit.setText(folder)
@@ -4786,26 +4786,83 @@ For more detailed information, please refer to the full documentation.
             mode = self.imagen_reference_widget.get_mode()
 
             if mode == "flexible":
-                # Flexible mode: Use Google Gemini with single reference (style transfer)
-                if len(references) != 1:
-                    msg = "Flexible mode requires exactly 1 reference image."
-                    self._append_to_console(f"ERROR: {msg}", "#ff6666")
-                    QMessageBox.warning(self, APP_NAME, msg)
-                    self.btn_generate.setEnabled(True)
-                    return
+                # Flexible mode: Use Google Gemini with reference(s) (style transfer)
+                # Multiple references are auto-composited into a single image
 
-                # Read the reference image as bytes for Google provider
-                ref_path = references[0].path
+                ref_path = None  # Will hold either single ref or composite
+
+                if len(references) == 1:
+                    # Single reference: use as-is
+                    ref_path = references[0].path
+                    self._append_to_console(
+                        f"Using Flexible mode (style transfer) with reference: {ref_path.name}",
+                        "#00ff00"
+                    )
+
+                elif len(references) > 1:
+                    # Multiple references: composite them
+                    self._append_to_console(
+                        f"Compositing {len(references)} reference images...",
+                        "#ffaa00"
+                    )
+
+                    # Import compositor
+                    from core.reference.image_compositor import ReferenceImageCompositor
+                    from core.constants import get_user_data_dir
+
+                    # Create compositor
+                    compositor = ReferenceImageCompositor(canvas_size=1024)
+
+                    # Collect image paths
+                    image_paths = [ref.path for ref in references]
+
+                    # Create output path for composite
+                    composite_dir = get_user_data_dir() / "composites"
+                    composite_dir.mkdir(parents=True, exist_ok=True)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    composite_path = composite_dir / f"composite_{timestamp}.png"
+
+                    # Composite images
+                    ref_path = compositor.composite_images(
+                        image_paths=image_paths,
+                        output_path=composite_path,
+                        arrangement="grid"
+                    )
+
+                    if not ref_path or not ref_path.exists():
+                        msg = "Failed to composite reference images. Check console for details."
+                        self._append_to_console(f"ERROR: {msg}", "#ff6666")
+                        QMessageBox.warning(self, APP_NAME, msg)
+                        self.btn_generate.setEnabled(True)
+                        return
+
+                    self._append_to_console(
+                        f"✓ Composited {len(references)} images: {ref_path.name}",
+                        "#00ff00"
+                    )
+
+                    # Enhance prompt with arrangement instructions
+                    # User's prompt should be like "These people as cartoon characters"
+                    # We append the arrangement instructions
+                    composite_prompt = ReferenceImageCompositor.generate_composite_prompt(
+                        prompt,  # User's prompt is the composite description
+                        len(references)
+                    )
+
+                    # Use the enhanced prompt
+                    prompt = composite_prompt
+
+                    self._append_to_console(
+                        f"Enhanced prompt: {prompt}",
+                        "#ffaa00"
+                    )
+
+                # Read the reference image as bytes (single or composite)
                 with open(ref_path, 'rb') as f:
                     reference_image_bytes = f.read()
 
-                # Pass as reference_image parameter (old Google provider behavior)
+                # Pass as reference_image parameter (Google provider behavior)
                 kwargs['reference_image'] = reference_image_bytes
-
-                self._append_to_console(
-                    f"Using Flexible mode (style transfer) with reference: {ref_path.name}",
-                    "#00ff00"
-                )
 
             else:
                 # Strict mode: Use Imagen 3 Customization (subject preservation)
@@ -5468,8 +5525,7 @@ For more detailed information, please refer to the full documentation.
             self,
             "Save Image",
             str(Path.home() / default_name),
-            all_formats,
-            options=QFileDialog.Option.DontUseNativeDialog
+            all_formats
         )
         
         if path:
@@ -5861,8 +5917,7 @@ For more detailed information, please refer to the full documentation.
             self,
             "Save Project",
             str(Path.home() / "project.imgai"),
-            "ImageAI Projects (*.imgai)",
-            options=QFileDialog.Option.DontUseNativeDialog
+            "ImageAI Projects (*.imgai)"
         )
         
         if not path:
@@ -5937,8 +5992,7 @@ For more detailed information, please refer to the full documentation.
             self,
             "Load Project",
             str(Path.home()),
-            "ImageAI Projects (*.imgai)",
-            options=QFileDialog.Option.DontUseNativeDialog
+            "ImageAI Projects (*.imgai)"
         )
         
         if path:
@@ -6703,8 +6757,7 @@ For more detailed information, please refer to the full documentation.
             self,
             "Select Reference Image",
             str(images_output_dir()),
-            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tiff *.tif *.ico *.svg);;All files (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.tiff *.tif *.ico *.svg);;All files (*.*)"
         )
 
         if file_path:

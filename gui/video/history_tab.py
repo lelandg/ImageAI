@@ -457,8 +457,7 @@ class HistoryTab(QWidget):
             self,
             "Export History",
             f"{self.project_id}_history.json",
-            "JSON Files (*.json)",
-            options=QFileDialog.Option.DontUseNativeDialog
+            "JSON Files (*.json)"
         )
         
         if filename:

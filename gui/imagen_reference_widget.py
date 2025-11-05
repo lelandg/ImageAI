@@ -12,7 +12,7 @@ from typing import List, Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QScrollArea, QFrame, QComboBox, QLineEdit,
-    QSizePolicy, QMessageBox, QRadioButton, QButtonGroup
+    QSizePolicy, QMessageBox, QRadioButton, QButtonGroup, QDialog
 )
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
@@ -349,7 +349,7 @@ class ImagenReferenceWidget(QWidget):
             parent: Parent widget
         """
         super().__init__(parent)
-        self.max_references = 4
+        self.max_references_strict = 3  # Max for strict mode (Imagen 3 Customization)
         self.reference_items: List[ImagenReferenceItemWidget] = []
         self.logger = logging.getLogger(__name__)
         self.current_mode = "strict"  # Default to strict mode
@@ -375,7 +375,7 @@ class ImagenReferenceWidget(QWidget):
         self.radio_flexible = QRadioButton("Flexible")
         self.radio_flexible.setToolTip(
             "Transform image style (cartoons, artistic styles).\n"
-            "Single reference only. Uses Google Gemini."
+            "Multiple references supported (auto-composited). Uses Google Gemini."
         )
         self.mode_button_group.addButton(self.radio_flexible, 0)
         mode_layout.addWidget(self.radio_flexible)
@@ -384,7 +384,7 @@ class ImagenReferenceWidget(QWidget):
         self.radio_strict = QRadioButton("Strict")
         self.radio_strict.setToolTip(
             "Preserve subjects as-is, change scene/composition.\n"
-            "Multi-reference support. Uses Imagen 3 Customization."
+            "Up to 3 references. Uses Imagen 3 Customization."
         )
         self.radio_strict.setChecked(True)  # Default to strict
         self.mode_button_group.addButton(self.radio_strict, 1)
@@ -397,17 +397,32 @@ class ImagenReferenceWidget(QWidget):
 
         main_layout.addLayout(mode_layout)
 
+        # Help text for multiple references in flexible mode
+        self.multi_ref_help = QLabel()
+        self.multi_ref_help.setWordWrap(True)
+        self.multi_ref_help.setStyleSheet(
+            "background-color: #fff3cd; color: #856404; "
+            "border: 1px solid #ffc107; border-radius: 4px; "
+            "padding: 8px; font-size: 10pt;"
+        )
+        self.multi_ref_help.setText(
+            "💡 Multiple references: Enter your prompt like "
+            "'These people as high resolution cartoon characters'."
+        )
+        self.multi_ref_help.setVisible(False)  # Hidden by default
+        main_layout.addWidget(self.multi_ref_help)
+
         # Header with count and add button
         header_layout = QHBoxLayout()
 
-        self.count_label = QLabel("Reference Images (0/4)")
+        self.count_label = QLabel("Reference Images (0/3)")
         self.count_label.setStyleSheet("font-weight: bold; font-size: 10pt;")
         header_layout.addWidget(self.count_label)
 
         header_layout.addStretch()
 
         self.btn_add = QPushButton("+ Add Reference Image")
-        self.btn_add.setToolTip("Add a reference image (max 4)")
+        self.btn_add.setToolTip("Add a reference image")
         self.btn_add.clicked.connect(self._add_reference)
         header_layout.addWidget(self.btn_add)
 
@@ -434,51 +449,63 @@ class ImagenReferenceWidget(QWidget):
 
         self.logger.info(f"Reference mode changed: {old_mode} -> {new_mode}")
 
-        # If switching to Flexible mode and have more than 1 reference, remove extras
-        if new_mode == "flexible" and len(self.reference_items) > 1:
-            # Ask user if they want to keep first reference
-            from PySide6.QtWidgets import QMessageBox
-            reply = QMessageBox.question(
-                self,
-                "Mode Change",
-                "Flexible mode only supports 1 reference image.\nKeep the first reference and remove the others?",
-                QMessageBox.Yes | QMessageBox.No
+        # If switching to Strict mode and have more than 3 references, show selection dialog
+        if new_mode == "strict" and len(self.reference_items) > self.max_references_strict:
+            # Show selection dialog to choose which 3 to keep
+            from gui.reference_selection_dialog import ReferenceSelectionDialog
+
+            image_paths = [item.reference_path for item in self.reference_items if item.reference_path]
+
+            dialog = ReferenceSelectionDialog(
+                image_paths=image_paths,
+                max_selection=self.max_references_strict,
+                title="Select References for Strict Mode",
+                message=f"Strict mode allows maximum {self.max_references_strict} reference images.\n"
+                        f"Please select {self.max_references_strict} images to keep:",
+                parent=self
             )
 
-            if reply == QMessageBox.Yes:
-                # Remove all but first
-                while len(self.reference_items) > 1:
-                    self._remove_reference(self.reference_items[-1])
-            else:
-                # Revert mode change
-                self.radio_strict.setChecked(True)
+            if dialog.exec() != QDialog.Accepted:
+                # User cancelled - revert mode change
+                self.radio_flexible.setChecked(True)
                 self.current_mode = old_mode
                 return
+
+            # Get selected paths
+            selected_paths = dialog.get_selected_paths()
+
+            # Remove items not in selection
+            items_to_remove = [
+                item for item in self.reference_items
+                if item.reference_path not in selected_paths
+            ]
+
+            for item in items_to_remove:
+                self._remove_reference(item)
 
         self._update_ui()
         self.mode_changed.emit(new_mode)
 
     def _add_reference(self):
         """Add a new reference image."""
-        # Check max references based on mode
-        max_allowed = 1 if self.current_mode == "flexible" else self.max_references
-
-        if len(self.reference_items) >= max_allowed:
-            mode_name = "Flexible" if self.current_mode == "flexible" else "Strict"
-            QMessageBox.warning(
-                self,
-                "Maximum References",
-                f"{mode_name} mode allows maximum {max_allowed} reference image(s)."
-            )
-            return
+        # Check max references based on mode (only for strict mode)
+        if self.current_mode == "strict":
+            max_allowed = self.max_references_strict
+            if len(self.reference_items) >= max_allowed:
+                QMessageBox.warning(
+                    self,
+                    "Maximum References",
+                    f"Strict mode allows maximum {max_allowed} reference images."
+                )
+                return
+        # Flexible mode has no limit (images will be composited)
 
         # Open file dialog
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Reference Image",
             "",
-            "Image Files (*.png *.jpg *.jpeg *.gif *.webp);;All Files (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog
+            "Image Files (*.png *.jpg *.jpeg *.gif *.webp);;All Files (*.*)"
         )
 
         if not file_path:
@@ -527,11 +554,24 @@ class ImagenReferenceWidget(QWidget):
     def _update_ui(self):
         """Update UI elements based on current state."""
         count = len(self.reference_items)
-        max_allowed = 1 if self.current_mode == "flexible" else self.max_references
 
-        # Update count label with mode-aware max
-        self.count_label.setText(f"Reference Images ({count}/{max_allowed})")
-        self.btn_add.setEnabled(count < max_allowed)
+        # Update count label and button based on mode
+        if self.current_mode == "flexible":
+            # Flexible mode: unlimited images
+            self.count_label.setText(f"Reference Images ({count})")
+            self.btn_add.setEnabled(True)
+
+            # Show help text if multiple images
+            self.multi_ref_help.setVisible(count > 1)
+        else:
+            # Strict mode: max 3 images
+            max_allowed = self.max_references_strict
+            self.count_label.setText(f"Reference Images ({count}/{max_allowed})")
+            self.btn_add.setEnabled(count < max_allowed)
+
+            # Hide help text in strict mode
+            self.multi_ref_help.setVisible(False)
+
         self.references_changed.emit()
 
     def get_references(self) -> List[ImagenReference]:
@@ -583,6 +623,15 @@ class ImagenReferenceWidget(QWidget):
             True if in strict mode (subject preservation)
         """
         return self.current_mode == "strict"
+
+    def needs_compositing(self) -> bool:
+        """
+        Check if images need to be composited before generation.
+
+        Returns:
+            True if in flexible mode with multiple images
+        """
+        return self.is_flexible_mode() and len(self.reference_items) > 1
 
     def validate_references(self) -> tuple[bool, list[str]]:
         """

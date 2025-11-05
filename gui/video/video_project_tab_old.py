@@ -598,8 +598,7 @@ class VideoProjectTab(QWidget):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open Project",
             str(self.video_config.get_projects_dir()),
-            "ImageAI Project (*.iaproj.json)",
-            options=QFileDialog.Option.DontUseNativeDialog
+            "ImageAI Project (*.iaproj.json)"
         )
         
         if file_path:
@@ -628,8 +627,7 @@ class VideoProjectTab(QWidget):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Load Input File",
             "",
-            "Text Files (*.txt *.md);;All Files (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog
+            "Text Files (*.txt *.md);;All Files (*.*)"
         )
         
         if file_path:
@@ -646,8 +644,7 @@ class VideoProjectTab(QWidget):
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Select Audio File",
             "",
-            "Audio Files (*.mp3 *.wav *.m4a *.flac *.ogg);;All Files (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog
+            "Audio Files (*.mp3 *.wav *.m4a *.flac *.ogg);;All Files (*.*)"
         )
         
         if file_path:

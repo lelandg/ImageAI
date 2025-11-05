@@ -404,8 +404,7 @@ class InspectorWidget(QWidget):
             self,
             "Select Image",
             str(Path.home()),
-            "Images (*.png *.jpg *.jpeg *.webp *.gif);;All Files (*.*)",
-            options=QFileDialog.Option.DontUseNativeDialog
+            "Images (*.png *.jpg *.jpeg *.webp *.gif);;All Files (*.*)"
         )
 
         if file_path:
