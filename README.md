@@ -418,6 +418,36 @@ Configuration and keys are stored in platform-specific directories:
 - **macOS**: `~/Library/Application Support/ImageAI/config.json`
 - **Linux**: `~/.config/ImageAI/config.json`
 
+### Log File Locations
+
+Application logs are stored in platform-specific directories for easy debugging:
+
+- **Windows**: `%APPDATA%\ImageAI\logs\`
+  - Full path: `C:\Users\<username>\AppData\Roaming\ImageAI\logs`
+- **macOS**: `~/Library/Application Support/ImageAI/logs/`
+  - Full path: `/Users/<username>/Library/Application Support/ImageAI/logs`
+- **Linux**: `~/.config/ImageAI/logs/`
+  - Full path: `/home/<username>/.config/ImageAI/logs`
+
+**Log file format**: `imageai_YYYYMMDD_HHMMSS.log` (timestamp when app starts)
+
+**Additional features**:
+- **Automatic rotation**: Log files rotate at 10MB with 5 backups kept
+- **Current log copy**: On application exit, the most recent log is automatically copied to `./imageai_current.log` in your current directory for easy access
+- Use these log files when reporting issues or debugging problems
+
+**Quick access to most recent log**:
+```bash
+# Windows (PowerShell)
+ls "$env:APPDATA\ImageAI\logs" | sort LastWriteTime -Descending | select -First 1
+
+# macOS
+ls -lt ~/Library/Application\ Support/ImageAI/logs/imageai_*.log | head -1
+
+# Linux
+ls -lt ~/.config/ImageAI/logs/imageai_*.log | head -1
+```
+
 ### Authentication Precedence
 
 For each provider, the authentication order is:

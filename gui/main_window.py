@@ -4803,7 +4803,7 @@ For more detailed information, please refer to the full documentation.
                     # Multiple references: composite them
                     self._append_to_console(
                         f"Compositing {len(references)} reference images...",
-                        "#ffaa00"
+                        "#66ccff"
                     )
 
                     # Import compositor
@@ -4854,7 +4854,7 @@ For more detailed information, please refer to the full documentation.
 
                     self._append_to_console(
                         f"Enhanced prompt: {prompt}",
-                        "#ffaa00"
+                        "#66ccff"
                     )
 
                 # Read the reference image as bytes (single or composite)

@@ -84,9 +84,9 @@ def apply_transparent_canvas_fix(image_bytes: bytes, target_aspect_ratio: str, l
             log.debug(f"Aspect ratio matches ({ref_aspect:.2f} ≈ {expected_aspect:.2f}), no canvas fix needed")
             return image_bytes
 
-        log.warning(f"⚠️ ASPECT RATIO MISMATCH: Image is {ref_width}x{ref_height} "
-                    f"(aspect {ref_aspect:.2f}) but requesting {target_aspect_ratio} "
-                    f"(aspect {expected_aspect:.2f}). Applying canvas centering fix...")
+        log.info(f"Aspect ratio adjustment: Image is {ref_width}x{ref_height} "
+                 f"(aspect {ref_aspect:.2f}) but requesting {target_aspect_ratio} "
+                 f"(aspect {expected_aspect:.2f}). Applying canvas centering fix...")
 
         # Log to console if callback provided
         if console_logger:
@@ -662,9 +662,9 @@ class GoogleProvider(ImageProvider):
                     # Check if there's a significant mismatch (more than 10% difference)
                     if abs(ref_aspect - expected_aspect) > 0.1:
                         ar_display = aspect_ratio if aspect_ratio else f"{width}:{height}"
-                        logger.warning(f"⚠️ ASPECT RATIO MISMATCH: Reference image is {ref_width}x{ref_height} "
-                                     f"(aspect {ref_aspect:.2f}) but requesting {ar_display} "
-                                     f"(aspect {expected_aspect:.2f}). Applying canvas centering fix...")
+                        logger.info(f"Aspect ratio adjustment: Reference image is {ref_width}x{ref_height} "
+                                    f"(aspect {ref_aspect:.2f}) but requesting {ar_display} "
+                                    f"(aspect {expected_aspect:.2f}). Applying canvas centering fix...")
 
                         # Create a transparent canvas with the target aspect ratio
                         # Calculate canvas dimensions based on reference image max dimension

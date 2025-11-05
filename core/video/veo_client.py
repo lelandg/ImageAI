@@ -408,9 +408,9 @@ class VeoClient:
 
                             # Check if aspect ratios match (within tolerance)
                             if abs(ref_aspect - expected_aspect) > 0.1:
-                                self.logger.warning(f"⚠️ ASPECT RATIO MISMATCH: Reference image {idx+1} is {ref_width}x{ref_height} "
-                                                  f"(aspect {ref_aspect:.2f}) but requesting {config.aspect_ratio} "
-                                                  f"(aspect {expected_aspect:.2f}). Applying canvas centering fix...")
+                                self.logger.info(f"Aspect ratio adjustment: Reference image {idx+1} is {ref_width}x{ref_height} "
+                                               f"(aspect {ref_aspect:.2f}) but requesting {config.aspect_ratio} "
+                                               f"(aspect {expected_aspect:.2f}). Applying canvas centering fix...")
 
                                 # Create a transparent canvas with the target aspect ratio
                                 # Calculate canvas dimensions based on reference image max dimension

@@ -154,7 +154,8 @@ class ImagenReferenceItemWidget(QWidget):
         # Reference type selector
         type_layout = QHBoxLayout()
         type_layout.setSpacing(5)
-        type_layout.addWidget(QLabel("Type:"))
+        self.type_label = QLabel("Type:")
+        type_layout.addWidget(self.type_label)
         self.type_combo = QComboBox()
         self.type_combo.setAutoFillBackground(True)  # Ensure opaque background
         self.type_combo.addItems([
@@ -323,6 +324,28 @@ class ImagenReferenceItemWidget(QWidget):
     def _on_subject_type_changed(self):
         """Handle subject type change."""
         self.reference_changed.emit()
+
+    def set_combos_visible(self, visible: bool):
+        """
+        Show or hide the type and subject combo boxes.
+
+        Used when switching between flexible and strict modes.
+        In flexible mode, combo boxes are hidden since the mode is style transfer.
+
+        Args:
+            visible: True to show combos, False to hide
+        """
+        # Hide/show type combo and label
+        self.type_combo.setVisible(visible)
+        self.type_label.setVisible(visible)
+
+        # Hide/show subject combo and label
+        self.subject_type_combo.setVisible(visible)
+        self.subject_label.setVisible(visible)
+
+        # Hide/show control combo and label
+        self.control_type_combo.setVisible(visible)
+        self.control_label.setVisible(visible)
 
 
 class ImagenReferenceWidget(QWidget):
@@ -563,6 +586,10 @@ class ImagenReferenceWidget(QWidget):
 
             # Show help text if multiple images
             self.multi_ref_help.setVisible(count > 1)
+
+            # Hide combo boxes in flexible mode (style transfer doesn't need type/subject)
+            for item in self.reference_items:
+                item.set_combos_visible(False)
         else:
             # Strict mode: max 3 images
             max_allowed = self.max_references_strict
@@ -571,6 +598,10 @@ class ImagenReferenceWidget(QWidget):
 
             # Hide help text in strict mode
             self.multi_ref_help.setVisible(False)
+
+            # Show combo boxes in strict mode (need to specify type/subject)
+            for item in self.reference_items:
+                item.set_combos_visible(True)
 
         self.references_changed.emit()
 

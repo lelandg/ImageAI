@@ -315,15 +315,52 @@ IMPORTANT:
             # Log the full user prompt for debugging
             self.logger.info(f"User prompt sent to LLM:\n{'-'*80}\n{user_prompt}\n{'-'*80}")
 
-            response = litellm.completion(
-                model=model_id,
-                messages=[
+            # Check auth mode for Google/Gemini providers
+            auth_mode = "api-key"  # Default
+            if self.config and provider == "google":
+                auth_mode = self.config.get("auth_mode", "api-key")
+                # Normalize auth mode values
+                if auth_mode in ["api_key", "API Key"]:
+                    auth_mode = "api-key"
+                elif auth_mode == "Google Cloud Account":
+                    auth_mode = "gcloud"
+
+            # Get API key (only required for api-key mode)
+            api_key = None
+            if auth_mode == "api-key":
+                if self.config:
+                    if provider == "google":
+                        api_key = self.config.get_api_key('google')
+                    elif provider == "openai":
+                        api_key = self.config.get_api_key('openai')
+                    elif provider in ["anthropic", "claude"]:
+                        api_key = self.config.get_api_key('anthropic')
+
+                if not api_key:
+                    self.logger.error(f"No API key found for provider '{provider}'")
+                    return self._fallback_prompt(context)
+
+                self.logger.info(f"Using API key authentication: {'***' + api_key[-4:] if api_key and len(api_key) > 4 else 'None'}")
+            else:
+                self.logger.info(f"Using gcloud authentication (Application Default Credentials)")
+
+            # Prepare request parameters
+            request_params = {
+                "model": model_id,
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=temperature,
-                max_tokens=500  # Increased from 200 to avoid truncation
-            )
+                "temperature": temperature,
+                "max_tokens": 500  # Increased from 200 to avoid truncation
+            }
+
+            # Only add API key if provided (for API key auth mode)
+            # For gcloud auth, LiteLLM will use Application Default Credentials
+            if api_key:
+                request_params['api_key'] = api_key
+
+            response = litellm.completion(**request_params)
 
             # CRITICAL: Check if content is None (known LiteLLM+Gemini bug)
             # See: https://github.com/BerriAI/litellm/issues/10721

@@ -882,9 +882,9 @@ class VideoGenerationThread(QThread):
 
                     # Check if there's a significant mismatch (more than 10% difference)
                     if abs(ref_aspect - expected_aspect) > 0.1:
-                        logger.warning(f"⚠️ ASPECT RATIO MISMATCH: Reference image is {ref_width}x{ref_height} "
-                                     f"(aspect {ref_aspect:.2f}) but requesting {aspect_ratio} "
-                                     f"(aspect {expected_aspect:.2f}). Applying canvas centering fix...")
+                        logger.info(f"Aspect ratio adjustment: Reference image is {ref_width}x{ref_height} "
+                                    f"(aspect {ref_aspect:.2f}) but requesting {aspect_ratio} "
+                                    f"(aspect {expected_aspect:.2f}). Applying canvas centering fix...")
 
                         # Create a transparent canvas with the target aspect ratio
                         # Calculate canvas dimensions based on reference image max dimension
