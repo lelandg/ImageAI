@@ -255,7 +255,8 @@ class LiteLLMHandler:
 
     @staticmethod
     def prepare_request(provider: str, model: str, messages: List[Dict[str, str]],
-                        temperature: float = 0.7, max_tokens: int = 1000) -> Dict[str, Any]:
+                        temperature: float = 0.7, max_tokens: int = 1000,
+                        api_key: Optional[str] = None) -> Dict[str, Any]:
         """
         Prepare request data for LiteLLM.
 
@@ -265,14 +266,24 @@ class LiteLLMHandler:
             messages: Message list
             temperature: Temperature parameter
             max_tokens: Maximum tokens
+            api_key: Optional API key (determines auth mode for Google/Gemini)
 
         Returns:
             Request dictionary
         """
         # Handle provider-specific model naming
         if provider.lower() == "google" or provider.lower() == "gemini":
-            if not model.startswith("gemini/"):
-                model = f"gemini/{model}"
+            # Determine model prefix based on auth mode
+            # - API key mode: use "gemini/" (Google AI Studio API)
+            # - gcloud/ADC mode: use "vertex_ai/" (Google Cloud Vertex AI)
+            if api_key:
+                # API key authentication - use Google AI Studio
+                if not model.startswith("gemini/"):
+                    model = f"gemini/{model}"
+            else:
+                # Google Cloud authentication (ADC) - use Vertex AI
+                if not model.startswith("vertex_ai/"):
+                    model = f"vertex_ai/{model}"
 
         return {
             "model": model,

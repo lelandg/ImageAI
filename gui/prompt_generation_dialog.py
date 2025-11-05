@@ -333,8 +333,24 @@ class LLMWorker(QObject):
 
                 if use_litellm:
                     # Use litellm for better compatibility
+                    # Determine model prefix based on auth mode
+                    # - API key mode: use "gemini/" (Google AI Studio API)
+                    # - gcloud/ADC mode: use "vertex_ai/" (Google Cloud Vertex AI)
+                    if self.api_key:
+                        # API key authentication - use Google AI Studio
+                        if not model_name.startswith("gemini/"):
+                            litellm_model = f"gemini/{model_name}"
+                        else:
+                            litellm_model = model_name
+                    else:
+                        # Google Cloud authentication (ADC) - use Vertex AI
+                        if not model_name.startswith("vertex_ai/"):
+                            litellm_model = f"vertex_ai/{model_name}"
+                        else:
+                            litellm_model = model_name
+
                     request_data = {
-                        "model": f"gemini/{model_name}" if not model_name.startswith("gemini/") else model_name,
+                        "model": litellm_model,
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
@@ -347,11 +363,11 @@ class LLMWorker(QObject):
                     # For gcloud auth, LiteLLM will use Application Default Credentials
                     if self.api_key:
                         request_data['api_key'] = self.api_key
-                        logger.info(f"  Using API key authentication")
-                        console.info(f"  Using API key authentication")
+                        logger.info(f"  Using API key authentication (Google AI Studio)")
+                        console.info(f"  Using API key authentication (Google AI Studio)")
                     else:
-                        logger.info(f"  Using Google Cloud authentication (ADC)")
-                        console.info(f"  Using Google Cloud authentication (ADC)")
+                        logger.info(f"  Using Google Cloud authentication (Vertex AI with ADC)")
+                        console.info(f"  Using Google Cloud authentication (Vertex AI with ADC)")
 
                     logger.info(f"LLM Request - Sending via LiteLLM to Gemini:")
                     console.info(f"LLM Request - Sending via LiteLLM to Gemini:")
