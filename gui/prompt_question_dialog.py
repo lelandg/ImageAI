@@ -13,6 +13,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 
 from .llm_utils import DialogStatusConsole
 from .history_widget import DialogHistoryWidget
+from .dialog_utils import OperationGuardMixin, guard_operation
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -195,7 +196,7 @@ class QuestionWorker(QObject):
             self.log_message.emit(error_msg, "ERROR")
 
 
-class PromptQuestionDialog(QDialog):
+class PromptQuestionDialog(QDialog, OperationGuardMixin):
     """Enhanced dialog for AI conversations and prompt analysis."""
 
     def __init__(self, parent=None, config=None, current_prompt=""):
@@ -221,6 +222,10 @@ class PromptQuestionDialog(QDialog):
         self.restore_settings()
 
         self.init_ui()
+
+        # Initialize operation guard AFTER UI is created (needs status_console)
+        self.init_operation_guard(block_all_input=True)
+
         self.load_llm_settings()
         self.restore_dialog_settings()
 
@@ -564,6 +569,7 @@ class PromptQuestionDialog(QDialog):
             # Close dialog
             self.reject()
 
+    @guard_operation("LLM Question")
     def ask_question(self):
         """Process the current question."""
         question = self.question_input.toPlainText().strip()
@@ -622,6 +628,9 @@ class PromptQuestionDialog(QDialog):
         # Clear status console
         self.status_console.clear()
         self.status_console.log(f"Asking {llm_provider} {llm_model}...", "INFO")
+
+        # Mark operation as started (enables input blocking)
+        self.start_operation("LLM Question")
 
         # Get temperature
         temperature = self.temperature_spin.value()
@@ -704,6 +713,9 @@ class PromptQuestionDialog(QDialog):
 
         self.status_console.log("Answer received successfully!", "SUCCESS")
 
+        # End operation (disables input blocking)
+        self.end_operation()
+
     def on_error(self, error):
         """Handle errors."""
         QMessageBox.critical(self, "Error", error)
@@ -712,6 +724,9 @@ class PromptQuestionDialog(QDialog):
         # Re-enable UI
         self.ask_btn.setEnabled(True)
         self.ask_btn.setText("Ask Question")
+
+        # End operation (disables input blocking)
+        self.end_operation()
 
     def clear_conversation(self):
         """Clear the conversation history."""

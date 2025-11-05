@@ -13,6 +13,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 
 from .llm_utils import DialogStatusConsole
 from .history_widget import DialogHistoryWidget
+from .dialog_utils import OperationGuardMixin, guard_operation
 from core.prompt_enhancer import EnhancementLevel
 
 logger = logging.getLogger(__name__)
@@ -165,7 +166,7 @@ class EnhanceWorker(QObject):
             self.error.emit(error_msg)
 
 
-class EnhancedPromptDialog(QDialog):
+class EnhancedPromptDialog(QDialog, OperationGuardMixin):
     """Dialog for enhancing prompts with LLM."""
 
     promptEnhanced = Signal(str)
@@ -187,6 +188,10 @@ class EnhancedPromptDialog(QDialog):
         self.restore_settings()
 
         self.init_ui()
+
+        # Initialize operation guard AFTER UI is created (needs status_console)
+        self.init_operation_guard(block_all_input=True)
+
         self.load_llm_settings()
         # Restore dialog settings after UI is created
         self.restore_dialog_settings()
@@ -486,6 +491,7 @@ class EnhancedPromptDialog(QDialog):
         self.gpt5_params_widget.setVisible(is_gpt5)
         self.standard_params_widget.setVisible(not is_gpt5)
 
+    @guard_operation("Prompt Enhancement")
     def enhance_prompt(self):
         """Enhance the prompt using LLM."""
         prompt = self.prompt_display.toPlainText().strip()
@@ -578,6 +584,9 @@ class EnhancedPromptDialog(QDialog):
         self.status_console.clear()
         self.status_console.log("Starting enhancement...", "INFO")
 
+        # Mark operation as started (enables input blocking)
+        self.start_operation("Prompt Enhancement")
+
         # Create worker thread
         self.thread = QThread()
 
@@ -629,6 +638,9 @@ class EnhancedPromptDialog(QDialog):
         self.enhance_btn.setText("Enhance Prompt")
         self.status_console.log("Enhancement completed successfully!", "SUCCESS")
 
+        # End operation (disables input blocking)
+        self.end_operation()
+
         # After enhancement: make OK button default, set focus to it, and update Ctrl+Enter
         self.ok_button.setDefault(True)
         self.enhance_btn.setDefault(False)
@@ -653,6 +665,9 @@ class EnhancedPromptDialog(QDialog):
         self.enhance_btn.setEnabled(True)
         self.enhance_btn.setText("Enhance Prompt")
         self.status_console.log(f"Error: {error}", "ERROR")
+
+        # End operation (disables input blocking)
+        self.end_operation()
 
     def on_log_message(self, message, level):
         """Handle log message from worker."""

@@ -19,6 +19,7 @@ from PySide6.QtGui import QPixmap, QImage, QKeySequence, QShortcut
 
 from .llm_utils import DialogStatusConsole
 from .history_widget import DialogHistoryWidget
+from .dialog_utils import OperationGuardMixin, guard_operation
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -365,7 +366,7 @@ class ImageAnalysisWorker(QObject):
             self.error.emit(error_msg)
 
 
-class ReferenceImageDialog(QDialog):
+class ReferenceImageDialog(QDialog, OperationGuardMixin):
     """Dialog for analyzing reference images with LLM."""
 
     descriptionGenerated = Signal(str)
@@ -387,6 +388,10 @@ class ReferenceImageDialog(QDialog):
         self.restore_settings()
 
         self.init_ui()
+
+        # Initialize operation guard AFTER UI is created (needs status_console)
+        self.init_operation_guard(block_all_input=True)
+
         self.load_llm_settings()
 
         # Load image if provided, or restore previous image
@@ -739,15 +744,11 @@ class ReferenceImageDialog(QDialog):
             self.max_tokens_spin.setEnabled(True)
             self.max_tokens_spin.setToolTip("Maximum length of generated description")
 
+    @guard_operation("Image Analysis")
     def analyze_image(self):
         """Analyze the loaded image with LLM."""
         if not self.image_path:
             QMessageBox.warning(self, "No Image", "Please load an image first.")
-            return
-
-        # Check if analysis is already running
-        if self.thread and self.thread.isRunning():
-            self.status_console.log("Analysis already in progress, please wait...", "WARNING")
             return
 
         # Get LLM settings
@@ -806,6 +807,9 @@ class ReferenceImageDialog(QDialog):
         # Log to status console
         self.status_console.clear()
         self.status_console.log(f"Analyzing image with {llm_provider} {llm_model}...", "INFO")
+
+        # Mark operation as started (enables input blocking)
+        self.start_operation("Image Analysis")
 
         # Get GPT-5 specific params if applicable
         is_gpt5 = self.gpt5_params_widget.isVisible()
@@ -870,6 +874,9 @@ class ReferenceImageDialog(QDialog):
         self.analyze_btn.setEnabled(True)
         self.analyze_btn.setText("Analyze Image")
 
+        # End operation (disables input blocking)
+        self.end_operation()
+
     def on_analysis_error(self, error: str):
         """Handle analysis error."""
         QMessageBox.critical(self, "Analysis Error", error)
@@ -878,6 +885,9 @@ class ReferenceImageDialog(QDialog):
         # Re-enable UI
         self.analyze_btn.setEnabled(True)
         self.analyze_btn.setText("Analyze Image")
+
+        # End operation (disables input blocking)
+        self.end_operation()
 
     def accept(self):
         """Override accept to emit description if requested."""

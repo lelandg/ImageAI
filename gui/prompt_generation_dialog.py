@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QThread, QObject, QSettings
 from PySide6.QtGui import QKeySequence, QShortcut
 
+from .dialog_utils import OperationGuardMixin, guard_operation
+
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
 
@@ -676,7 +678,7 @@ class LLMWorker(QObject):
             self.error.emit(f"LLM generation failed: {str(e)}")
 
 
-class PromptGenerationDialog(QDialog):
+class PromptGenerationDialog(QDialog, OperationGuardMixin):
     """Dialog for generating prompts using LLM."""
 
     promptSelected = Signal(str)
@@ -699,6 +701,10 @@ class PromptGenerationDialog(QDialog):
         self.restore_settings()
 
         self.init_ui()
+
+        # Initialize operation guard AFTER UI is created (needs status_console)
+        self.init_operation_guard(block_all_input=True)
+
         self.load_llm_settings()
         self.restore_last_session()
         self.update_history_list()  # Populate history list on dialog open
@@ -979,6 +985,7 @@ class PromptGenerationDialog(QDialog):
         self.gpt5_params_widget.setVisible(is_gpt5)
         self.standard_params_widget.setVisible(not is_gpt5)
 
+    @guard_operation("Prompt Generation")
     def generate_prompts(self):
         """Generate prompts using LLM."""
         input_text = self.input_text.toPlainText().strip()
@@ -1077,6 +1084,9 @@ class PromptGenerationDialog(QDialog):
 
         # Clear previous results
         self.results_list.clear()
+
+        # Mark operation as started (enables input blocking)
+        self.start_operation("Prompt Generation")
         self.preview_text.clear()
 
         # Log to status console
@@ -1132,6 +1142,9 @@ class PromptGenerationDialog(QDialog):
         self.prompts_generated = True  # Mark that prompts have been generated
         self.status_console.log(f"Successfully generated {len(prompts)} prompts!", "SUCCESS")
 
+        # End operation (disables input blocking)
+        self.end_operation()
+
         # Add to results list
         for i, prompt in enumerate(prompts, 1):
             item = QListWidgetItem(f"Variation {i}: {prompt[:80]}...")
@@ -1179,6 +1192,9 @@ class PromptGenerationDialog(QDialog):
 
         self.generate_btn.setEnabled(True)
         self.generate_btn.setText("Generate Prompts")
+
+        # End operation (disables input blocking)
+        self.end_operation()
 
     def on_generation_progress(self, message: str):
         """Handle progress updates."""
