@@ -26,18 +26,56 @@ class ParsedLine:
     timestamp: Optional[float] = None  # in seconds
     section: Optional[str] = None  # e.g., "Verse 1", "Chorus"
     line_number: int = 0
+    duration: Optional[float] = None  # explicit duration in seconds from [5s] syntax
 
 
 class LyricParser:
     """Parse lyrics/text in various formats"""
-    
+
     # Regex patterns for different formats
     TIMESTAMP_PATTERN = re.compile(r'^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]\s*(.*)$')
     SECTION_PATTERN = re.compile(r'^#\s*(.+)$')
-    
+    DURATION_PATTERN = re.compile(r'^\[(\d+(?:\.\d+)?)\s*s\](.*)$|^(.*)\[(\d+(?:\.\d+)?)\s*s\]$')
+
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-    
+
+    def extract_explicit_duration(self, text: str) -> Tuple[str, Optional[float]]:
+        """
+        Extract [5s] or [5.5s] timing markers from text (prefix or suffix).
+
+        Supports both formats:
+        - Prefix: "[5s] Scene description"
+        - Suffix: "Scene description [5s]"
+
+        Args:
+            text: Input text potentially containing duration marker
+
+        Returns:
+            Tuple of (cleaned_text, duration_in_seconds)
+            If no duration marker found, returns (original_text, None)
+
+        Examples:
+            "[5s] Scene description" -> ("Scene description", 5.0)
+            "Scene description [5s]" -> ("Scene description", 5.0)
+            "[8.5s] Wide shot" -> ("Wide shot", 8.5)
+            "Scene description" -> ("Scene description", None)
+        """
+        match = self.DURATION_PATTERN.match(text.strip())
+
+        if match:
+            if match.group(1):  # Prefix format: [5s] Text
+                duration = float(match.group(1))
+                cleaned_text = match.group(2).strip()
+            else:  # Suffix format: Text [5s]
+                duration = float(match.group(4))
+                cleaned_text = match.group(3).strip()
+
+            self.logger.debug(f"Extracted explicit duration: {duration}s from '{text[:50]}...'")
+            return cleaned_text, duration
+
+        return text, None
+
     def detect_format(self, text: str) -> InputFormat:
         """
         Auto-detect the format of input text.
@@ -158,33 +196,48 @@ class LyricParser:
     def parse_plain(self, text: str) -> List[ParsedLine]:
         """
         Parse plain text (no timestamps or structure).
-        
+
         Args:
             text: Plain input text
-            
+
         Returns:
-            List of parsed lines
+            List of parsed lines with explicit durations extracted
         """
         lines = []
         line_number = 0
         current_section = None
-        
+
         for raw_line in text.strip().split('\n'):
             line_number += 1
             stripped = raw_line.strip()
-            
+
             # Check if this is a section marker even in plain format
             if stripped and stripped.startswith('[') and stripped.endswith(']'):
-                # Extract section name for metadata but keep the line
-                current_section = stripped[1:-1].strip()
-            
+                # Check if it's a duration marker [5s] vs section marker [Verse]
+                cleaned_text, duration = self.extract_explicit_duration(stripped)
+
+                if duration is not None:
+                    # It's a duration-only line (just [5s] with no text)
+                    # Skip it as it's not a valid scene
+                    self.logger.warning(f"Line {line_number}: Ignoring standalone duration marker '{stripped}'")
+                    continue
+                else:
+                    # It's a section marker [Verse], [Chorus], etc.
+                    current_section = stripped[1:-1].strip()
+
             if stripped:
-                lines.append(ParsedLine(
-                    text=stripped,
-                    line_number=line_number,
-                    section=current_section if not (stripped.startswith('[') and stripped.endswith(']')) else current_section
-                ))
-        
+                # Extract explicit duration from the line
+                cleaned_text, duration = self.extract_explicit_duration(stripped)
+
+                # Only add non-section-marker lines
+                if not (stripped.startswith('[') and stripped.endswith(']') and duration is None):
+                    lines.append(ParsedLine(
+                        text=cleaned_text,
+                        line_number=line_number,
+                        section=current_section,
+                        duration=duration
+                    ))
+
         return lines
     
     def parse(self, text: str, format_hint: Optional[InputFormat] = None) -> List[ParsedLine]:
@@ -930,6 +983,9 @@ class StoryboardGenerator:
             self.logger.warning("No content found in input text")
             return []
         
+        # Check if any lines have explicit durations
+        has_explicit_durations = any(line.duration is not None for line in parsed_lines)
+
         # Calculate durations
         if any(line.timestamp is not None for line in parsed_lines):
             # Has timestamps - use them
@@ -946,12 +1002,13 @@ class StoryboardGenerator:
             durations = self.timing.calculate_durations_with_preset(
                 len(parsed_lines), preset, weights
             )
-        
+
         # Create scenes (skip section markers)
         scenes = []
         scene_index = 0
         skipped_markers = 0
         current_environment = None  # Track current environment from NEW SCENE markers
+        explicit_count = 0
 
         for i, (line, duration) in enumerate(zip(parsed_lines, durations)):
             # Check for NEW SCENE markers: === NEW SCENE: <environment> ===
@@ -968,10 +1025,17 @@ class StoryboardGenerator:
                 skipped_markers += 1
                 continue
 
+            # Use explicit duration if provided, otherwise use calculated duration
+            final_duration = line.duration if line.duration is not None else duration
+
+            if line.duration is not None:
+                explicit_count += 1
+                self.logger.info(f"Scene {scene_index}: Using explicit duration {line.duration}s from [Xs] syntax")
+
             scene = Scene(
                 source=line.text,
                 prompt=line.text,  # Initial prompt is the source text
-                duration_sec=duration,
+                duration_sec=final_duration,
                 order=scene_index
             )
 
@@ -980,6 +1044,9 @@ class StoryboardGenerator:
                 scene.metadata["timestamp"] = line.timestamp
             if line.section:
                 scene.metadata["section"] = line.section
+            if line.duration is not None:
+                scene.metadata["has_explicit_timing"] = True
+                scene.metadata["explicit_duration"] = line.duration
 
             # Set environment from current NEW SCENE marker (if any)
             if current_environment:
@@ -988,15 +1055,19 @@ class StoryboardGenerator:
 
             scenes.append(scene)
             scene_index += 1
-        
+
         # Apply MIDI synchronization if available
         if midi_timing_data and sync_mode != "none":
             scenes = self.sync_scenes_to_midi(
                 scenes, midi_timing_data, sync_mode, snap_strength
             )
 
-        self.logger.info(f"Generated {len(scenes)} content scenes (skipped {skipped_markers} section markers), "
-                        f"total duration: {sum(s.duration_sec for s in scenes):.1f} seconds")
+        # Summary logging
+        summary = f"Generated {len(scenes)} content scenes (skipped {skipped_markers} section markers), " \
+                  f"total duration: {sum(s.duration_sec for s in scenes):.1f} seconds"
+        if explicit_count > 0:
+            summary += f" ({explicit_count} scenes with explicit [Xs] timing)"
+        self.logger.info(summary)
 
         # NOTE: Splitting and batching are deferred to workspace_widget.py
         # This is because instrumental scenes are inserted AFTER scene generation,

@@ -242,7 +242,216 @@ class LLMSyncAssistant:
             return base_duration * 1.3
         else:
             return base_duration
-    
+
+    def estimate_timing_from_descriptions(
+        self,
+        scene_descriptions: List[str],
+        target_duration: Optional[float] = None,
+        match_target: bool = False
+    ) -> List[TimedLyric]:
+        """
+        Use LLM to estimate realistic timing for scene descriptions when no MIDI is available.
+
+        Args:
+            scene_descriptions: List of scene description texts
+            target_duration: Optional target total duration in seconds
+            match_target: If True, scale estimates to match target_duration
+
+        Returns:
+            List[TimedLyric] with start_time, end_time for each scene
+        """
+        if not scene_descriptions:
+            self.logger.warning("No scene descriptions provided for timing estimation")
+            return []
+
+        if not self.llm_provider:
+            self.logger.warning("LLM provider not available, falling back to even distribution")
+            # Fallback to simple even distribution
+            total = target_duration if target_duration else len(scene_descriptions) * 6.0
+            return self._simple_timing_distribution(scene_descriptions, total)
+
+        self.logger.info(f"Estimating timing for {len(scene_descriptions)} scenes using {self.provider}/{self.model}")
+
+        # Build LLM prompt
+        system_prompt = """You are a video script timing expert. Your task is to estimate realistic duration for each scene in a video storyboard.
+
+Consider:
+- Scene complexity (simple shots: 2-4s, complex action: 6-10s)
+- Action described (quick cuts: 2-3s, slow pans: 6-8s, establishing shots: 5-8s)
+- Video pacing (typical: 3-7 seconds per scene)
+- Veo 3 generates 8-second clips (scenes will be batched to ~8s for generation)
+
+Return ONLY valid JSON in this exact format:
+{
+  "scenes": [
+    {"duration_sec": 5.0, "reasoning": "Brief explanation"},
+    {"duration_sec": 3.0, "reasoning": "Quick cut"},
+    ...
+  ],
+  "total_duration": 45.0
+}"""
+
+        # Format scene descriptions for the prompt
+        scenes_text = "\n".join([f"{i+1}. {desc}" for i, desc in enumerate(scene_descriptions)])
+
+        user_prompt = f"""Estimate realistic duration for each of these {len(scene_descriptions)} scenes:
+
+{scenes_text}
+
+{"Target total duration: " + str(target_duration) + " seconds (scale your estimates to match this)" if match_target and target_duration else "Estimate natural duration for each scene."}
+
+Return JSON with duration_sec for each scene."""
+
+        try:
+            # Call LLM
+            self.logger.debug(f"Sending timing estimation request to {self.provider}")
+
+            # Handle GPT-5's temperature restriction (only supports temperature=1)
+            temperature = 1.0 if self.model and "gpt-5" in self.model.lower() else 0.3
+
+            response = self.llm_provider.generate(
+                model=self.model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=temperature,
+                max_tokens=2000
+            )
+
+            self.logger.debug(f"LLM timing response: {response[:500]}...")
+
+            # Parse JSON response
+            import json
+            # Clean markdown formatting if present
+            response = response.strip()
+            if response.startswith("```json"):
+                response = response[7:]
+            if response.startswith("```"):
+                response = response[3:]
+            if response.endswith("```"):
+                response = response[:-3]
+            response = response.strip()
+
+            result = json.loads(response)
+            durations = [scene["duration_sec"] for scene in result["scenes"]]
+
+            if len(durations) != len(scene_descriptions):
+                self.logger.error(f"LLM returned {len(durations)} durations for {len(scene_descriptions)} scenes")
+                raise ValueError("Duration count mismatch")
+
+            # Scale to target if requested
+            if match_target and target_duration:
+                current_total = sum(durations)
+                if current_total > 0:
+                    scale_factor = target_duration / current_total
+                    durations = [d * scale_factor for d in durations]
+                    self.logger.info(f"Scaled durations by {scale_factor:.2f}x to match target {target_duration}s")
+
+            # Convert to TimedLyric objects with cumulative timestamps
+            timed_lyrics = []
+            current_time = 0.0
+            for i, (desc, duration) in enumerate(zip(scene_descriptions, durations)):
+                timed_lyrics.append(TimedLyric(
+                    text=desc,
+                    start_time=current_time,
+                    end_time=current_time + duration,
+                    section_type=None
+                ))
+                current_time += duration
+
+            self.logger.info(f"LLM estimated timing: {len(timed_lyrics)} scenes, total {current_time:.1f}s")
+            return timed_lyrics
+
+        except Exception as e:
+            self.logger.error(f"LLM timing estimation failed: {e}")
+            # Fallback to simple distribution
+            total = target_duration if target_duration else len(scene_descriptions) * 6.0
+            self.logger.info(f"Falling back to even distribution: {total}s")
+            return self._simple_timing_distribution(scene_descriptions, total)
+
+    def estimate_timing_with_explicit(
+        self,
+        scene_descriptions: List[str],
+        explicit_durations: List[Optional[float]],
+        target_duration: Optional[float] = None,
+        match_target: bool = False
+    ) -> List[TimedLyric]:
+        """
+        Estimate timing for scenes WITHOUT explicit durations, preserve those WITH.
+
+        Args:
+            scene_descriptions: All scene texts
+            explicit_durations: List with duration or None for each scene
+            target_duration: Optional target total duration
+            match_target: Whether to scale to target (only affects LLM-estimated scenes)
+
+        Returns:
+            List[TimedLyric] with timing for ALL scenes
+        """
+        if not scene_descriptions:
+            return []
+
+        if len(scene_descriptions) != len(explicit_durations):
+            self.logger.error(f"Mismatch: {len(scene_descriptions)} scenes, {len(explicit_durations)} durations")
+            return []
+
+        # Identify scenes needing LLM estimation
+        needs_estimation = [(i, desc) for i, (desc, dur) in enumerate(zip(scene_descriptions, explicit_durations)) if dur is None]
+        has_explicit = [(i, desc, dur) for i, (desc, dur) in enumerate(zip(scene_descriptions, explicit_durations)) if dur is not None]
+
+        self.logger.info(f"Hybrid timing: {len(has_explicit)} explicit, {len(needs_estimation)} need LLM estimation")
+
+        if not needs_estimation:
+            # All have explicit timing - just convert to TimedLyric
+            timed_lyrics = []
+            current_time = 0.0
+            for desc, dur in zip(scene_descriptions, explicit_durations):
+                timed_lyrics.append(TimedLyric(
+                    text=desc,
+                    start_time=current_time,
+                    end_time=current_time + dur,
+                    section_type=None
+                ))
+                current_time += dur
+            return timed_lyrics
+
+        # Calculate how much duration is already allocated
+        explicit_total = sum(dur for dur in explicit_durations if dur is not None)
+
+        # Calculate target for LLM-estimated scenes
+        if match_target and target_duration:
+            llm_target = max(0, target_duration - explicit_total)
+            self.logger.info(f"Target duration: {target_duration}s, explicit: {explicit_total}s, LLM budget: {llm_target}s")
+        else:
+            llm_target = None
+
+        # Get LLM estimates for missing scenes
+        scenes_to_estimate = [desc for _, desc in needs_estimation]
+        llm_estimates = self.estimate_timing_from_descriptions(
+            scenes_to_estimate,
+            target_duration=llm_target,
+            match_target=match_target and llm_target is not None
+        )
+
+        # Merge explicit and LLM-estimated timings
+        final_durations = list(explicit_durations)  # Copy
+        for (idx, _), timed_lyric in zip(needs_estimation, llm_estimates):
+            final_durations[idx] = timed_lyric.end_time - timed_lyric.start_time
+
+        # Build final TimedLyric list with cumulative timestamps
+        timed_lyrics = []
+        current_time = 0.0
+        for desc, duration in zip(scene_descriptions, final_durations):
+            timed_lyrics.append(TimedLyric(
+                text=desc,
+                start_time=current_time,
+                end_time=current_time + duration,
+                section_type=None
+            ))
+            current_time += duration
+
+        self.logger.info(f"Hybrid timing complete: {len(timed_lyrics)} scenes, total {current_time:.1f}s")
+        return timed_lyrics
+
     def sync_with_llm(self, lyrics: str, audio_path: Optional[str] = None, 
                       total_duration: Optional[float] = None,
                       sections: Optional[Dict[str, List[Tuple[float, float]]]] = None) -> List[TimedLyric]:

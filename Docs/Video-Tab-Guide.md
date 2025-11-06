@@ -58,11 +58,75 @@ The Video tab follows a sequential workflow from text input to final rendered vi
      - **Fast**: Quick cuts, energetic (3-5s per scene)
      - **Medium**: Balanced (5-8s per scene)
      - **Slow**: Contemplative, longer scenes (8-12s per scene)
+   - **Match Target** ☑️: (For manual storyboards without MIDI)
+     - **Checked**: LLM scales scene durations to match target length
+     - **Unchecked**: LLM uses natural timing estimates
+     - Only applies when using LLM timing estimation (no MIDI file)
 
 4. **Generate Storyboard**: Breaks your text into timed scenes
    - Creates a scene for each line of text
    - Distributes timing based on pacing and target length
    - Populates the Scene Table with your content
+
+### Advanced Timing Options
+
+#### Explicit Duration Syntax
+
+You can specify exact durations for individual scenes using **`[Xs]` markers** in your input text:
+
+**Prefix format**:
+```
+[5s] Wide shot of cityscape at sunset
+[3s] Quick cut to character's face
+[8s] Slow pan across the room
+```
+
+**Suffix format**:
+```
+Wide shot of cityscape at sunset [5s]
+Quick cut to character's face [3s]
+Slow pan across the room [8s]
+```
+
+**Features**:
+- Supports both whole numbers (`[5s]`) and decimals (`[5.5s]`)
+- Mix explicit timing with LLM-estimated scenes
+- LLM will estimate timing for scenes without `[Xs]` markers
+- Explicit timing overrides all other duration calculations
+
+**Example - Mixed Mode**:
+```
+[5s] Opening establishing shot (exactly 5 seconds)
+Main dialogue scene (LLM will estimate duration)
+Action sequence (LLM will estimate duration)
+[3s] Quick reaction shot (exactly 3 seconds)
+[8s] Closing wide shot (exactly 8 seconds)
+```
+
+#### LLM Timing Estimation (No MIDI)
+
+When no MIDI file is loaded, ImageAI can use an LLM to estimate realistic timing:
+
+1. **Select LLM Provider and Model** in settings
+2. **Enter scene descriptions** (plain text format)
+3. **Check/uncheck "Match Target"**:
+   - ✅ **Checked**: LLM estimates durations, then scales to match target length
+   - ⬜ **Unchecked**: LLM freely estimates optimal duration per scene
+4. **Click "Generate Storyboard"**
+
+The LLM analyzes each scene description and estimates duration based on:
+- Scene complexity (simple vs. complex action)
+- Action described (quick cuts vs. slow pans vs. establishing shots)
+- Typical video pacing (2-12 seconds per scene)
+- Veo 3 clip generation constraints (8-second batches)
+
+**Status messages**:
+- `⏱️ Estimating scene timing with [Provider]/[Model]...` - LLM is analyzing scenes
+- `📏 Target duration: Xs` - Shows target when "Match Target" is checked
+- `✓ Found N scenes with explicit [Xs] timing` - Shows count of explicit timings
+- `✓ LLM estimated timing for N scenes` - Estimation complete
+
+**Fallback behavior**: If LLM timing fails, falls back to even distribution based on pacing preset
 
 ### 3. Configure Generation Settings
 

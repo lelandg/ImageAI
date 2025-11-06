@@ -967,6 +967,17 @@ class WorkspaceWidget(QWidget):
         self.pacing_combo.setToolTip("Scene transition pacing:\n- Fast: Quick cuts, energetic\n- Medium: Balanced pacing\n- Slow: Longer scenes, contemplative")
         timing_layout.addWidget(self.pacing_combo)
 
+        # Match target duration checkbox (for LLM timing estimation without MIDI)
+        self.match_target_duration_checkbox = QCheckBox("Match Target")
+        self.match_target_duration_checkbox.setChecked(True)  # Default ON
+        self.match_target_duration_checkbox.setToolTip(
+            "When using LLM timing estimation (no MIDI):\n"
+            "• Checked: Scale scene durations to match target length\n"
+            "• Unchecked: Use LLM's natural timing estimates\n"
+            "• Not used when MIDI timing is available"
+        )
+        timing_layout.addWidget(self.match_target_duration_checkbox)
+
         self.generate_storyboard_btn = QPushButton("&Generate Storyboard")  # Alt+G
         self.generate_storyboard_btn.setToolTip("Generate scene breakdown from input text (Alt+G)")
         self.generate_storyboard_btn.clicked.connect(self.generate_storyboard)
@@ -2079,8 +2090,98 @@ class WorkspaceWidget(QWidget):
             env = getattr(scenes[i], 'environment', None)
             self.logger.info(f"BEFORE LLM SYNC - Scene {i}: environment='{env}', source='{scenes[i].source[:40]}...'")
 
+        # NEW: Apply LLM timing estimation if no MIDI available
+        # Check for plain text format (handles "Plain text", "plain", Auto-detect/None)
+        is_plain_text = (format_type is None or
+                         (isinstance(format_type, str) and "plain" in format_type.lower()))
+        self.logger.info(f"Format type check: format_type='{format_type}', is_plain_text={is_plain_text}")
+
+        if use_llm_sync and not midi_timing and is_plain_text:
+            self.logger.info("No MIDI timing - using LLM for timing estimation")
+            self._log_to_console(f"⏱️ Estimating scene timing with {llm_provider}/{llm_model}...", "INFO")
+
+            # Extract scene descriptions and explicit durations
+            scene_descriptions = []
+            explicit_durations = []
+            for scene in scenes:
+                scene_descriptions.append(scene.source)
+                # Check if scene has explicit timing from [5s] syntax
+                explicit_durations.append(scene.metadata.get('explicit_duration'))
+
+            has_any_explicit = any(d is not None for d in explicit_durations)
+            has_all_explicit = all(d is not None for d in explicit_durations)
+            explicit_count = sum(1 for d in explicit_durations if d is not None)
+
+            # Get target duration and match setting (needed for both paths)
+            target_duration_sec = self.duration_spin.value()
+            match_target = self.match_target_duration_checkbox.isChecked()
+
+            if has_all_explicit:
+                self.logger.info(f"All {len(scenes)} scenes have explicit [Xs] timing - no LLM estimation needed")
+                self._log_to_console(f"✓ All {len(scenes)} scenes have explicit timing", "INFO")
+
+                # Calculate actual total and warn if different from target
+                actual_total = sum(scene.duration_sec for scene in scenes)
+                if abs(actual_total - target_duration_sec) > 1.0:  # Allow 1s tolerance
+                    self.logger.warning(f"⚠️ Explicit timing total ({actual_total:.1f}s) differs from target ({target_duration_sec:.1f}s)")
+                    self._log_to_console(
+                        f"⚠️ Total duration: {actual_total:.1f}s (target: {target_duration_sec:.1f}s) - using explicit timing",
+                        "WARNING"
+                    )
+
+                # Mark scenes to prevent splitting
+                for scene in scenes:
+                    if not scene.metadata.get('has_explicit_timing'):
+                        scene.metadata['has_explicit_timing'] = True
+            else:
+                self.logger.info(f"Scene timing - Total: {len(scenes)}, Explicit: {explicit_count}, Need LLM: {len(scenes) - explicit_count}")
+                self.logger.info(f"Match target duration: {match_target}")
+                if match_target:
+                    self._log_to_console(f"📏 Target duration: {target_duration_sec}s", "INFO")
+
+                if has_any_explicit:
+                    self._log_to_console(f"✓ Found {explicit_count} scenes with explicit [Xs] timing", "INFO")
+
+                # Create LLM sync assistant
+                config = self.get_provider_config()
+                sync_assistant = LLMSyncAssistant(provider=llm_provider.lower(), model=llm_model, config=config)
+
+                # Estimate timing (handles mixed explicit + LLM)
+                try:
+                    if has_any_explicit:
+                        timed_lyrics = sync_assistant.estimate_timing_with_explicit(
+                            scene_descriptions, explicit_durations, target_duration_sec, match_target
+                        )
+                    else:
+                        timed_lyrics = sync_assistant.estimate_timing_from_descriptions(
+                            scene_descriptions, target_duration_sec, match_target
+                        )
+
+                    if timed_lyrics:
+                        self.logger.info(f"LLM timing estimation complete: {len(timed_lyrics)} scenes, total {sum(t.end_time - t.start_time for t in timed_lyrics):.1f}s")
+                        self._log_to_console(f"✓ LLM estimated timing for {len(timed_lyrics)} scenes", "INFO")
+
+                        # Apply LLM-estimated timing to scenes (same structure as MIDI sync)
+                        for scene, timed_lyric in zip(scenes, timed_lyrics):
+                            scene.duration_sec = timed_lyric.end_time - timed_lyric.start_time
+                            scene.metadata['llm_start_time'] = timed_lyric.start_time
+                            scene.metadata['llm_end_time'] = timed_lyric.end_time
+                            scene.metadata['llm_timing_used'] = True  # Flag to prevent splitting later
+                            self.logger.debug(
+                                f"Scene '{scene.source[:40]}...': {scene.duration_sec:.1f}s "
+                                f"({timed_lyric.start_time:.1f}-{timed_lyric.end_time:.1f})"
+                            )
+                    else:
+                        self.logger.warning("LLM timing estimation returned no results")
+                        self._log_to_console("⚠️ LLM timing estimation failed - using default durations", "WARNING")
+
+                except Exception as e:
+                    self.logger.error(f"LLM timing estimation failed: {e}", exc_info=True)
+                    self._log_to_console(f"⚠️ LLM timing estimation failed: {e}", "ERROR")
+                    # Scenes keep their original durations from storyboard generation
+
         # Apply LLM sync if enabled and we have timing data
-        if use_llm_sync and midi_timing:
+        elif use_llm_sync and midi_timing:
             self.logger.info(f"Starting LLM sync with {llm_provider}/{llm_model}...")
             self._log_to_console(f"🎵 Starting LLM sync with {llm_provider}/{llm_model}...", "INFO")
             import time
@@ -2272,9 +2373,21 @@ class WorkspaceWidget(QWidget):
             env = getattr(scenes[i], 'environment', None)
             self.logger.info(f"BEFORE SPLIT - Scene {i}: environment='{env}', source='{scenes[i].source[:40]}...'")
 
-        self.logger.info(f"Splitting long scenes (>{storyboard_gen.target_scene_duration}s)...")
-        scenes = storyboard_gen.split_long_scenes(scenes, max_duration=storyboard_gen.target_scene_duration)
-        self.logger.info(f"After splitting: {len(scenes)} scenes")
+        # Check if LLM timing OR explicit timing was used - if so, skip splitting
+        # Splitting should ONLY happen with default preset timing (even distribution)
+        has_manual_timing = any(
+            scene.metadata.get('llm_timing_used', False) or
+            scene.metadata.get('has_explicit_timing', False)
+            for scene in scenes
+        )
+
+        if has_manual_timing:
+            self.logger.info("⏭️ Skipping scene splitting - using explicit or LLM timing (scenes can be any length)")
+            self._log_to_console("⏭️ Preserving scene durations - no splitting", "INFO")
+        else:
+            self.logger.info(f"Splitting long scenes (>{storyboard_gen.target_scene_duration}s)...")
+            scenes = storyboard_gen.split_long_scenes(scenes, max_duration=storyboard_gen.target_scene_duration)
+            self.logger.info(f"After splitting: {len(scenes)} scenes")
 
         self.logger.info(f"Batching {len(scenes)} scenes to aim for {storyboard_gen.target_scene_duration}-second optimal duration...")
         scenes = storyboard_gen._batch_scenes_for_optimal_duration(scenes)
