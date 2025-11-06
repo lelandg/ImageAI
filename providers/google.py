@@ -905,6 +905,17 @@ class GoogleProvider(ImageProvider):
                                             logger.info(f"Image aspect ratio {current_aspect:.3f} matches target {target_aspect:.3f}, skipping crop")
 
                                     images.append(image_bytes)
+                    else:
+                        # Log why candidate was skipped
+                        logger.warning(f"DEBUG: Candidate {cand_idx} skipped - missing content or parts")
+                        if hasattr(cand, 'finish_reason'):
+                            logger.warning(f"DEBUG: Candidate {cand_idx} finish_reason: {cand.finish_reason}")
+                        if hasattr(cand, 'safety_ratings'):
+                            logger.warning(f"DEBUG: Candidate {cand_idx} safety_ratings: {cand.safety_ratings}")
+                        if not getattr(cand, "content", None):
+                            logger.warning(f"DEBUG: Candidate {cand_idx} has no content (likely blocked by safety filter)")
+                        elif not getattr(cand.content, "parts", None):
+                            logger.warning(f"DEBUG: Candidate {cand_idx} has content but no parts")
         except Exception as e:
             # Log the error that triggered fallback
             logger.error(f"Primary generation failed with error: {e}")
@@ -1062,6 +1073,11 @@ class GoogleProvider(ImageProvider):
                                     images.append(image_bytes)
             except Exception as e2:
                 raise RuntimeError(f"Google generation failed: {e2}")
+
+        # Warn if no images were generated
+        if not images:
+            logger.error("No images were generated! Check if candidates were blocked by safety filters or had errors.")
+            logger.error("Review the DEBUG messages above for finish_reason and safety_ratings.")
 
         return texts, images
     
