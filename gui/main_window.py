@@ -786,19 +786,6 @@ class MainWindow(QMainWindow):
 
         prompt_header_layout.addStretch()
 
-        # Add quick reference tag insertion buttons (dynamically created based on reference count)
-        self.ref_tag_buttons_widget = QWidget()
-        self.ref_tag_buttons_layout = QHBoxLayout(self.ref_tag_buttons_widget)
-        self.ref_tag_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        self.ref_tag_buttons_layout.setSpacing(2)
-
-        self.ref_tag_label = QLabel("Insert ref:")
-        self.ref_tag_buttons_layout.addWidget(self.ref_tag_label)
-        # Buttons will be created dynamically in _update_reference_buttons()
-
-        self.ref_tag_buttons_widget.setVisible(False)  # Hidden initially
-        prompt_header_layout.addWidget(self.ref_tag_buttons_widget)
-
         prompt_layout.addLayout(prompt_header_layout)
 
         self.prompt_edit = QTextEdit()
@@ -3597,38 +3584,6 @@ For more detailed information, please refer to the full documentation.
 
         logger.debug(f"Reference images toggle visibility: {show_toggle} (provider: {current_provider})")
 
-    def _update_reference_buttons(self, num_references):
-        """Dynamically create/update reference insertion buttons based on count."""
-        if not hasattr(self, 'ref_tag_buttons_layout'):
-            return
-
-        # Remove existing buttons (keep the label)
-        while self.ref_tag_buttons_layout.count() > 1:  # Keep "Insert ref:" label
-            item = self.ref_tag_buttons_layout.takeAt(1)
-            if item.widget():
-                item.widget().deleteLater()
-
-        # Create buttons for each reference
-        for i in range(1, num_references + 1):
-            btn = QPushButton(f"[{i}]")
-            btn.setFixedSize(35, 22)
-            btn.setToolTip(f"Insert reference tag [{i}] at cursor position")
-            btn.clicked.connect(lambda checked, tag=f"[{i}]": self._insert_reference_tag(tag))
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2196F3;
-                    color: white;
-                    border: none;
-                    border-radius: 3px;
-                    font-weight: bold;
-                    font-size: 9pt;
-                }
-                QPushButton:hover {
-                    background-color: #1976D2;
-                }
-            """)
-            self.ref_tag_buttons_layout.addWidget(btn)
-
     def _on_imagen_references_changed(self):
         """Handle when Imagen reference images change."""
         if not hasattr(self, 'imagen_reference_widget'):
@@ -3639,11 +3594,6 @@ For more detailed information, please refer to the full documentation.
 
         # Auto-save to config
         self._save_imagen_references_to_config()
-
-        # Update reference tag insertion buttons dynamically
-        if hasattr(self, 'ref_tag_buttons_widget'):
-            self._update_reference_buttons(len(references))
-            self.ref_tag_buttons_widget.setVisible(len(references) > 0)
 
         # Update prompt placeholder if references exist
         if references and hasattr(self, 'prompt_edit'):
@@ -3658,103 +3608,6 @@ For more detailed information, please refer to the full documentation.
             # Reset placeholder when no references
             if hasattr(self, 'prompt_edit'):
                 self.prompt_edit.setPlaceholderText("Describe what to generate... (Ctrl+Enter to generate)")
-
-    def _insert_reference_tag(self, tag: str):
-        """Insert a reference tag at the current cursor position in the prompt."""
-        if hasattr(self, 'prompt_edit'):
-            cursor = self.prompt_edit.textCursor()
-            cursor.insertText(tag)
-            self.prompt_edit.setFocus()
-            logger.debug(f"Inserted reference tag: {tag}")
-
-        # Update Generate button text for Midjourney
-        if hasattr(self, 'btn_generate'):
-            self._update_generate_button_for_provider(self.current_provider)
-
-        # Hide resolution selector for Midjourney (aspect ratio only)
-        if hasattr(self, 'resolution_selector') and self.resolution_selector:
-            if self.current_provider.lower() == "midjourney":
-                self.resolution_selector.setVisible(False)
-                # Keep aspect ratio visible and enabled
-                if hasattr(self, 'aspect_selector') and self.aspect_selector:
-                    self.aspect_selector.setEnabled(True)
-                    self.aspect_selector.setToolTip("Midjourney aspect ratio (e.g., --ar 16:9)")
-            else:
-                self.resolution_selector.setVisible(True)
-                if hasattr(self, 'aspect_selector') and self.aspect_selector:
-                    self.aspect_selector.setEnabled(True)
-                    self.aspect_selector.setToolTip("Select aspect ratio for your image")
-
-        # Show/hide Midjourney options
-        if hasattr(self, 'midjourney_options_group'):
-            self.midjourney_options_group.setVisible(self.current_provider.lower() == "midjourney")
-
-        # Hide advanced settings for Midjourney
-        if hasattr(self, 'advanced_panel') and self.advanced_panel:
-            self.advanced_panel.setVisible(self.current_provider != "midjourney")
-        elif hasattr(self, 'advanced_group'):
-            self.advanced_group.setVisible(self.current_provider != "midjourney")
-
-        # Show status but don't preload - it will load on first use
-        self.status_bar.showMessage(f"Image provider changed to {self.current_provider}")
-
-        # Sync with Image tab provider combo
-        if hasattr(self, 'image_provider_combo'):
-            self.image_provider_combo.blockSignals(True)
-            self.image_provider_combo.setCurrentText(self.current_provider)
-            self.image_provider_combo.blockSignals(False)
-
-        # Sync with Video tab if it's loaded
-        if self._video_tab_loaded and hasattr(self.tab_video, 'set_provider'):
-            self.tab_video.set_provider(self.current_provider)
-
-        # Don't preload provider here - it will be loaded when actually used
-
-        # Update new widgets if available
-        if hasattr(self, 'resolution_selector') and self.resolution_selector:
-            self.resolution_selector.update_provider(self.current_provider)
-        if hasattr(self, 'quality_selector') and self.quality_selector:
-            self.quality_selector.update_provider(self.current_provider)
-        if hasattr(self, 'advanced_panel') and self.advanced_panel:
-            self.advanced_panel.update_provider(self.current_provider)
-
-        # All providers now support aspect ratios including Google Gemini
-        if hasattr(self, 'aspect_selector') and self.aspect_selector:
-            self.aspect_selector.setEnabled(True)
-            self.aspect_selector.setToolTip("Aspect ratio is preserved across provider changes")
-
-        # Update model list for new provider
-        self._update_model_list()
-        
-        # Update cost estimate
-        self._update_cost_estimate()
-        
-        # Update API key field reference based on provider
-        if self.current_provider.lower() == "google":
-            self.api_key_edit = self.google_key_edit
-            self.current_api_key = self.google_key_edit.text().strip()
-        elif self.current_provider.lower() == "openai":
-            self.api_key_edit = self.openai_key_edit
-            self.current_api_key = self.openai_key_edit.text().strip()
-        elif self.current_provider.lower() == "stability":
-            self.api_key_edit = self.stability_key_edit
-            self.current_api_key = self.stability_key_edit.text().strip()
-        else:
-            # For unknown providers or local_sd
-            if not hasattr(self, '_dummy_key_edit'):
-                self._dummy_key_edit = QLineEdit(self)  # Add parent to prevent popup
-                self._dummy_key_edit.setVisible(False)
-            self.api_key_edit = self._dummy_key_edit
-            self.current_api_key = self.config.get_api_key(self.current_provider) or ""
-        
-        # Update auth visibility
-        self._update_auth_visibility()
-        
-        # Update Local SD widget visibility
-        if hasattr(self, 'local_sd_group') and self.local_sd_group:
-            self.local_sd_group.setVisible(self.current_provider.lower() == "local_sd")
-
-        # Midjourney is now in its own tab, no provider-specific settings needed
 
     def _update_generate_button_for_provider(self, provider_name: str):
         """Set the Generate button text/tooltip based on provider + settings."""

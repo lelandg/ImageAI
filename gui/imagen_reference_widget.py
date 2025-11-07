@@ -599,7 +599,7 @@ class ImagenReferenceWidget(QWidget):
         self.mode_changed.emit(new_mode)
 
     def _add_reference(self):
-        """Add a new reference image."""
+        """Add one or more reference images."""
         # Check max references based on mode (only for strict mode)
         if self.current_mode == "strict":
             max_allowed = self.max_references_strict
@@ -610,32 +610,44 @@ class ImagenReferenceWidget(QWidget):
                     f"Strict mode allows maximum {max_allowed} reference images."
                 )
                 return
-        # Flexible mode has no limit (images will be composited)
 
-        # Open file dialog
-        file_path, _ = QFileDialog.getOpenFileName(
+        # Open file dialog for multiple selection
+        file_paths, _ = QFileDialog.getOpenFileNames(
             self,
-            "Select Reference Image",
+            "Select Reference Image(s)",
             "",
             "Image Files (*.png *.jpg *.jpeg *.gif *.webp);;All Files (*.*)"
         )
 
-        if not file_path:
+        if not file_paths:
             return
 
-        # Create reference item
-        reference_id = len(self.reference_items) + 1
-        item_widget = ImagenReferenceItemWidget(reference_id, parent=self)
-        item_widget.set_reference_image(Path(file_path))
-        item_widget.reference_changed.connect(self._on_reference_changed)
-        item_widget.remove_requested.connect(lambda: self._remove_reference(item_widget))
+        # Check if adding these would exceed strict mode limit
+        if self.current_mode == "strict":
+            total_after = len(self.reference_items) + len(file_paths)
+            if total_after > self.max_references_strict:
+                QMessageBox.warning(
+                    self,
+                    "Too Many References",
+                    f"Strict mode allows maximum {self.max_references_strict} reference images.\n"
+                    f"You selected {len(file_paths)} images, but only {self.max_references_strict - len(self.reference_items)} can be added."
+                )
+                return
 
-        # Add to flow layout
-        self.items_layout.addWidget(item_widget)
-        self.reference_items.append(item_widget)
+        # Add each selected file
+        for file_path in file_paths:
+            reference_id = len(self.reference_items) + 1
+            item_widget = ImagenReferenceItemWidget(reference_id, parent=self)
+            item_widget.set_reference_image(Path(file_path))
+            item_widget.reference_changed.connect(self._on_reference_changed)
+            item_widget.remove_requested.connect(lambda w=item_widget: self._remove_reference(w))
+
+            # Add to flow layout
+            self.items_layout.addWidget(item_widget)
+            self.reference_items.append(item_widget)
 
         self._update_ui()
-        self.logger.info(f"Added reference image {reference_id}: {file_path}")
+        self.logger.info(f"Added {len(file_paths)} reference image(s)")
 
     def _remove_reference(self, item_widget: ImagenReferenceItemWidget):
         """
