@@ -44,7 +44,8 @@
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --no-decorate -5)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --all --grep=\"video.*slow\\|performance\\|Windows\\|platform\" -20)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline -20 -- providers/google.py)",
-      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff 2533d70~1 2533d70 -- providers/google.py)"
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff 2533d70~1 2533d70 -- providers/google.py)",
+      "Bash(mkdir:*)"
     ],
     "deny": [],
     "ask": []

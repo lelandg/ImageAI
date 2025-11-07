@@ -1062,6 +1062,16 @@ Comic Strip: "Monday Morning"
 - Zoom In/Out
 
 #### Tools Menu
+- **Search Wikimedia Commons**: Search and download free images from Wikimedia Commons
+  - Search millions of freely licensed images
+  - Download single or multiple images
+  - Automatically add to reference images (Google provider)
+  - Images saved to `<output_dir>/wikimedia/`
+- **Character Transformation Builder**: Build modular character transformation prompts
+  - Editable combo boxes with presets for all options
+  - Optional fields: subject, transformation style, art style, medium, background, pose, artist, lighting, mood
+  - Save/load prompt history
+  - Example: "Headshot of attached as full color super-exaggerated caricature cartoon, on a clean white background, facing forward, suitable as character design sheet, use line work and cross-hatching, no text"
 - Model Browser (Local SD)
 - Batch Generator
 - Template Editor
@@ -1329,6 +1339,70 @@ Example config:
   }
 }
 ```
+
+### Customizing Prompt Data
+
+The Character Transformation Builder uses JSON data files that you can customize to add your own options:
+
+**Data Files Location**:
+- `data/prompts/artists.json` - Artist names and styles
+- `data/prompts/styles.json` - Art styles (Abstract, Anime, Cyberpunk, etc.)
+- `data/prompts/mediums.json` - Art mediums and techniques (Oil Painting, Digital Art, etc.)
+- `data/prompts/colors.json` - Color schemes
+- `data/prompts/lighting.json` - Lighting options
+- `data/prompts/moods.json` - Mood descriptors
+- `data/prompts/banners.json` - Banner/composition options
+
+**Editing Data Files**:
+
+All data files use simple JSON array format:
+```json
+[
+  "Option 1",
+  "Option 2",
+  "Option 3"
+]
+```
+
+**Adding Custom Options**:
+
+1. Open the appropriate JSON file in any text editor
+2. Add your new option to the array (maintain JSON format):
+```json
+[
+  "Existing Option",
+  "Your New Option",
+  "Another New Option"
+]
+```
+3. Save the file
+4. Restart ImageAI or reload the Character Transformation Builder
+
+**Examples**:
+
+Add a new artist to `artists.json`:
+```json
+[
+  "Pablo Picasso",
+  "Your Favorite Artist",
+  "Another Artist"
+]
+```
+
+Add a new style to `styles.json`:
+```json
+[
+  "Cyberpunk",
+  "My Custom Style",
+  "Retro Future"
+]
+```
+
+**Tips**:
+- Keep entries concise and descriptive
+- Test your custom options in the Character Transformation Builder
+- Backup files before editing
+- Maintain valid JSON format (commas between items, no trailing comma)
 
 ### Local Stable Diffusion Settings
 

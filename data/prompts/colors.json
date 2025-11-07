@@ -1,0 +1,91 @@
+[
+  {
+    "name": "",
+    "colors": []
+  },
+  {
+    "name": "Analogous",
+    "colors": ["#FF0000", "#FF7F00", "#FFFF00", "#FFBF00", "#FFC400"]
+  },
+  {
+    "name": "Black and White",
+    "colors": ["#000000", "#FFFFFF"]
+  },
+  {
+    "name": "Complementary",
+    "colors": [
+      "#00FF00", "#FF00FF",
+      "#FFA500", "#0055FF",
+      "#800080", "#FFFF00"
+    ]
+
+  },
+  {
+    "name": "Cool",
+    "colors": ["#1E90FF", "#00CED1", "#20B2AA", "#4682B4", "#5F9EA0"]
+  },
+  {
+    "name": "Double-Complementary",
+    "colors": ["#FF0000", "#0000FF", "#00FF00", "#FF00FF"]
+  },
+  {
+    "name": "Duotone",
+    "colors": ["#0F2027", "#203A43", "#2C5364", "#FF6B6B"]
+  },
+  {
+    "name": "Earth",
+    "colors": ["#8B4513", "#A0522D", "#CD853F", "#DEB887", "#556B2F"]
+  },
+  {
+    "name": "Flat UI",
+    "colors": ["#1ABC9C", "#2ECC71", "#3498DB", "#9B59B6", "#34495E"]
+  },
+  {
+    "name": "High Contrast",
+    "colors": ["#000000", "#FFFFFF"]
+  },
+  {
+    "name": "Material Design",
+    "colors": ["#F44336", "#E91E63", "#9C27B0", "#673AB7", "#3F51B5"]
+  },
+  {
+    "name": "Monochrome",
+    "colors": ["#000000", "#333333", "#666666", "#999999", "#CCCCCC", "#FFFFFF"]
+  },
+  {
+    "name": "Neon",
+    "colors": ["#FF6EC7", "#39FF14", "#0AFF02", "#F6358A", "#FFF700"]
+  },
+  {
+    "name": "Ocean",
+    "colors": ["#024872", "#058ED9", "#061E40", "#00A8E8"]
+  },
+  {
+    "name": "Pastel",
+    "colors": ["#FFD1DC", "#B0E0E6", "#E6E6FA", "#FFFACD", "#E0FFFF"]
+  },
+  {
+    "name": "Split-Complementary",
+    "colors": ["#FF0000", "#00FFFF", "#00FF80"]
+  },
+  {
+    "name": "Sunset",
+    "colors": ["#FF7E5F", "#FEB47B", "#FFD194", "#D1913C"]
+  },
+  {
+    "name": "Tetradic",
+    "colors": ["#FF0000", "#00FF00", "#0000FF", "#FFFF00"]
+  },
+  {
+    "name": "Triadic",
+    "colors": ["#FF0000", "#00FF00", "#0000FF"]
+  },
+  {
+    "name": "Vintage",
+    "colors": ["#D4B483", "#C9ADA1", "#99738E", "#6B4226", "#A1866F"]
+  },
+  {
+    "name": "Warm",
+    "colors": ["#FF4500", "#FF8C00", "#FFD700", "#FFA07A", "#FF6347"]
+  }
+]

@@ -1,0 +1,44 @@
+[
+    {
+        "filename": "robo-generate.png",
+        "path": "assets/robo-generate.png",
+        "description": "Robot generating ideas.  (Created with ChatGPT)",
+        "added_date": "2023-01-01",
+        "is_current": false
+    },
+    {
+        "filename": "banner.png",
+        "path": "assets/banner.png",
+        "description": "Original Prompt Forge banner (created with ChatGPT)",
+        "added_date": "2022-12-01",
+        "is_current": false
+    },
+    {
+        "filename": "banner_20250508_125615.png",
+        "path": "assets/banner_20250508_125615.png",
+        "description": "Happy Playful Digital Art Cyberpunk Fantasy by Moebius by Basil Wolverton --ar 1:1 --profile j33tuvp --stylize 250 --v 7",
+        "added_date": "2025-05-08",
+        "is_current": false
+    },
+    {
+        "filename": "banner_20250508_165345.png",
+        "path": "assets/banner_20250508_165345.png",
+        "description": "Happy Playful Digital Art Cyberpunk Fantasy by Moebius by Basil Wolverton --ar 1:1 --profile j33tuvp --stylize 250 --v 7",
+        "added_date": "2025-05-08",
+        "is_current": false
+    },
+    {
+        "filename": "banner_20250508_165421.png",
+        "path": "assets/banner_20250508_165421.png",
+        "description": "Happy Playful Digital Art Cyberpunk Fantasy by Moebius by Basil Wolverton --ar 1:1 --profile j33tuvp --stylize 250 --v 7",
+        "added_date": "2025-05-08",
+        "is_current": false
+    },
+    {
+        "filename": "banner_20250508_165438.png",
+        "path": "assets/banner_20250508_165438.png",
+        "description": "Happy Playful Digital Art Cyberpunk Fantasy by Moebius by Basil Wolverton --ar 1:1 --profile j33tuvp --stylize 250 --v 7",
+        "added_date": "2025-05-08",
+        "is_current": true
+    }
+]

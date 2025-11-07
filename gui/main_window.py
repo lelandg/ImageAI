@@ -683,6 +683,14 @@ class MainWindow(QMainWindow):
         # Tools menu
         tools_menu = mb.addMenu("Tools")
 
+        act_wikimedia = QAction("Search Wikimedia Commons...", self)
+        act_wikimedia.triggered.connect(self._open_wikimedia_search)
+        tools_menu.addAction(act_wikimedia)
+
+        act_char_prompt = QAction("Character Transformation Builder...", self)
+        act_char_prompt.triggered.connect(self._open_character_prompt_builder)
+        tools_menu.addAction(act_char_prompt)
+
         # Help menu
         help_menu = mb.addMenu("Help")
         
@@ -832,6 +840,11 @@ class MainWindow(QMainWindow):
         self.btn_ask_about = QPushButton("&Ask About Prompt")
         self.btn_ask_about.setToolTip("Ask questions about your prompt (Alt+A)")
         buttons_layout.addWidget(self.btn_ask_about)
+
+        self.btn_char_transform = QPushButton("&Transform Character")
+        self.btn_char_transform.setToolTip("Build character transformation prompts (Alt+T)")
+        self.btn_char_transform.clicked.connect(self._open_character_prompt_builder)
+        buttons_layout.addWidget(self.btn_char_transform)
 
         self.btn_generate = QPushButton("&Generate")
         self.btn_generate.setToolTip("Generate image (Alt+G or Ctrl+Enter)")
@@ -1068,6 +1081,15 @@ class MainWindow(QMainWindow):
         self.ref_image_container.setVisible(False)
         ref_container_layout = QVBoxLayout(self.ref_image_container)
         ref_container_layout.setContentsMargins(10, 0, 0, 0)  # Indent for hierarchy
+
+        # Add Wikimedia search button at top of reference section
+        wikimedia_btn_layout = QHBoxLayout()
+        self.btn_wikimedia_search = QPushButton("🔍 Search Wikimedia Commons")
+        self.btn_wikimedia_search.setToolTip("Search and download free images from Wikimedia Commons")
+        self.btn_wikimedia_search.clicked.connect(self._open_wikimedia_search)
+        wikimedia_btn_layout.addWidget(self.btn_wikimedia_search)
+        wikimedia_btn_layout.addStretch()
+        ref_container_layout.addLayout(wikimedia_btn_layout)
 
         # Add Imagen 3 multi-reference widget
         from gui.imagen_reference_widget import ImagenReferenceWidget
@@ -7654,6 +7676,73 @@ For more detailed information, please refer to the full documentation.
                 
                 # Store the history item data in the first column for easy retrieval
                 datetime_item.setData(Qt.UserRole, item)
+
+    def _open_wikimedia_search(self):
+        """Open Wikimedia Commons image search dialog."""
+        from gui.wikimedia_search_dialog import WikimediaSearchDialog
+
+        dialog = WikimediaSearchDialog(self)
+
+        # Connect to add downloaded images to reference images
+        def on_images_downloaded(image_paths):
+            if not image_paths:
+                return
+
+            # Check if we're using Google provider
+            if self.current_provider.lower() != "google":
+                QMessageBox.information(
+                    self,
+                    "Provider Note",
+                    "Downloaded images are available. Switch to Google provider to use them as reference images."
+                )
+                return
+
+            # Add images to reference widget
+            if hasattr(self, 'imagen_reference_widget'):
+                # Add each image
+                for img_path in image_paths:
+                    # Create reference item
+                    reference_id = len(self.imagen_reference_widget.reference_items) + 1
+                    from gui.imagen_reference_widget import ImagenReferenceItemWidget
+                    item_widget = ImagenReferenceItemWidget(reference_id, parent=self.imagen_reference_widget)
+                    item_widget.set_reference_image(Path(img_path))
+                    item_widget.reference_changed.connect(self.imagen_reference_widget._on_reference_changed)
+                    item_widget.remove_requested.connect(lambda w=item_widget: self.imagen_reference_widget._remove_reference(w))
+
+                    # Add to flow layout
+                    self.imagen_reference_widget.items_layout.addWidget(item_widget)
+                    self.imagen_reference_widget.reference_items.append(item_widget)
+
+                # Update UI
+                self.imagen_reference_widget._update_ui()
+
+                # Expand reference images section if collapsed
+                if hasattr(self, 'ref_image_toggle') and not self.ref_image_toggle.isChecked():
+                    self.ref_image_toggle.setChecked(True)
+
+                # Save project
+                self._save_project_to_config()
+
+                self.status_bar.showMessage(f"Added {len(image_paths)} image(s) to reference images")
+
+        dialog.images_downloaded.connect(on_images_downloaded)
+        dialog.exec()
+
+    def _open_character_prompt_builder(self):
+        """Open character transformation prompt builder dialog."""
+        from gui.character_prompt_builder import CharacterPromptBuilder
+
+        dialog = CharacterPromptBuilder(self)
+
+        # Connect to populate prompt field
+        def on_prompt_generated(prompt):
+            if hasattr(self, 'prompt_edit'):
+                self.prompt_edit.setPlainText(prompt)
+                self.status_bar.showMessage("Character transformation prompt loaded")
+
+        dialog.prompt_generated.connect(on_prompt_generated)
+        dialog.exec()
+
     def _show_log_location(self):
         """Show the location of log files to the user."""
         from core.logging_config import get_error_report_info
