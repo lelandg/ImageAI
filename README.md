@@ -1229,12 +1229,41 @@ python -c "import torch; print(torch.cuda.is_available())"
 
 #### Startup Performance
 
-The application may take a few seconds to start as it loads AI provider libraries:
-- **Google Cloud AI**: ~10-15 seconds on first load (largest library)
-- **Google Gemini**: ~2 seconds
-- **OpenAI**: ~3 seconds
+**Typical startup time: 20-30 seconds** on first launch. This is normal and expected due to Qt/PySide6 framework initialization and complex UI creation.
 
-You'll see "Loading provider: [name]..." in the console during startup. Provider libraries are cached after first load, so switching between providers is faster after the initial import.
+**Startup Time Breakdown:**
+- **Qt Framework Loading** (~6 seconds): PySide6/Qt initialization and main window creation
+- **UI Tab Creation** (~8 seconds): Building complex tabs like Layout (with templates), Video tab components, and widget initialization
+- **Provider Preloading** (<1 second): Loading the selected AI provider (Google, OpenAI, etc.)
+- **Settings Restoration** (<1 second): Restoring window geometry, last selections, and UI state
+- **History Scanning** (<1 second): Fast scan of generated images folder (optimized to skip debug files)
+
+**What takes the longest:**
+1. **Layout Tab**: Template system, schema validation, and font rendering setup
+2. **Video Tab Components**: MIDI support, timeline widgets, and scene management UI
+3. **Qt WebEngine**: If Help tab uses QtWebEngine for rich rendering
+4. **Reference Image Widgets**: Loading and initializing image preview components
+
+**Performance Tips:**
+- Startup time is consistent after first launch (libraries are cached)
+- Provider switching is faster after initial load (<1 second)
+- File scanning is now optimized and near-instant (skips debug images)
+- The time is spent on UI creation, not file operations
+
+**Console Output During Startup:**
+You'll see progress messages like:
+```
+Creating application window...
+Cleaning up debug images...
+Scanning image history...
+Creating user interface...
+Setting up menus...
+Preloading [provider] provider...
+Restoring window state...
+Application ready!
+```
+
+**Note:** The startup performance is typical for full-featured Qt applications with rich UI components. Lightweight CLI mode starts much faster since it skips all GUI initialization.
 
 #### Authentication Errors
 
