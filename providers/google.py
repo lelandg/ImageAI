@@ -4,6 +4,7 @@ import os
 import subprocess
 import platform
 import logging
+import time
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple, List
 from base64 import b64decode
@@ -365,7 +366,11 @@ class GoogleProvider(ImageProvider):
         
         texts: List[str] = []
         images: List[bytes] = []
-        
+
+        # Retry configuration for NO_IMAGE errors (transient API issues)
+        max_retries = 3
+        retry_delay = 2  # seconds between retries
+
         # Build generation config for Gemini models
         # Updated: Google Gemini now supports aspect_ratio via image_config parameter
         # Must use types.GenerateContentConfig for the new SDK
@@ -694,36 +699,66 @@ class GoogleProvider(ImageProvider):
                 # Fall back to text-only prompt
                 contents = prompt
 
-        try:
-            # Log the full request being sent to Gemini
-            logger.info("=" * 60)
-            logger.info(f"SENDING TO GOOGLE GEMINI API")
-            logger.info(f"Model: {model}")
-            if isinstance(contents, str):
-                logger.info(f"Prompt: {contents}")
-            elif isinstance(contents, list):
-                for item in contents:
-                    if isinstance(item, str):
-                        logger.info(f"Prompt: {item}")
-                    else:
-                        logger.info(f"Additional content: {type(item)}")
-            if config:
-                logger.info(f"Generation config: {config}")
-            logger.info("=" * 60)
+        # Retry loop for handling transient NO_IMAGE errors
+        attempt = 0
+        no_image_error = False
 
-            # Call API with proper config parameter for new SDK
-            if config:
-                response = self.client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                    config=config
-                )
-            else:
-                response = self.client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                )
-            
+        try:
+            while attempt < max_retries:
+                attempt += 1
+
+                # Log the full request being sent to Gemini
+                logger.info("=" * 60)
+                if attempt > 1:
+                    logger.info(f"RETRYING GOOGLE GEMINI API (attempt {attempt}/{max_retries})")
+                else:
+                    logger.info(f"SENDING TO GOOGLE GEMINI API")
+                logger.info(f"Model: {model}")
+                if isinstance(contents, str):
+                    logger.info(f"Prompt: {contents}")
+                elif isinstance(contents, list):
+                    for item in contents:
+                        if isinstance(item, str):
+                            logger.info(f"Prompt: {item}")
+                        else:
+                            logger.info(f"Additional content: {type(item)}")
+                if config:
+                    logger.info(f"Generation config: {config}")
+                logger.info("=" * 60)
+
+                # Call API with proper config parameter for new SDK
+                if config:
+                    response = self.client.models.generate_content(
+                        model=model,
+                        contents=contents,
+                        config=config
+                    )
+                else:
+                    response = self.client.models.generate_content(
+                        model=model,
+                        contents=contents,
+                    )
+
+                # Check for NO_IMAGE error before processing candidates
+                no_image_error = False
+                if response and response.candidates:
+                    for cand in response.candidates:
+                        if hasattr(cand, 'finish_reason'):
+                            finish_reason_str = str(cand.finish_reason)
+                            if 'NO_IMAGE' in finish_reason_str:
+                                no_image_error = True
+                                logger.warning(f"⚠ Attempt {attempt}/{max_retries}: Gemini returned NO_IMAGE (transient error)")
+                                break
+
+                # If NO_IMAGE error and we have retries left, wait and retry
+                if no_image_error and attempt < max_retries:
+                    logger.info(f"⏳ Waiting {retry_delay} seconds before retry...")
+                    time.sleep(retry_delay)
+                    continue
+
+                # If we got here without NO_IMAGE error, or we're out of retries, break the loop
+                break
+
             if response and response.candidates:
                 # Process all candidates (for multiple images)
                 logger.info(f"DEBUG: Response has {len(response.candidates)} candidates")
@@ -1022,8 +1057,14 @@ class GoogleProvider(ImageProvider):
 
         # Warn if no images were generated
         if not images:
-            logger.error("No images were generated! Check if candidates were blocked by safety filters or had errors.")
-            logger.error("Review the DEBUG messages above for finish_reason and safety_ratings.")
+            if no_image_error:
+                logger.error(f"❌ No images were generated after {max_retries} attempts!")
+                logger.error("Gemini returned NO_IMAGE error (transient API issue).")
+                logger.error("This is not a prompt or safety issue - the API had a temporary problem.")
+                logger.error("Please try again in a moment.")
+            else:
+                logger.error("No images were generated! Check if candidates were blocked by safety filters or had errors.")
+                logger.error("Review the DEBUG messages above for finish_reason and safety_ratings.")
 
         return texts, images
     
