@@ -70,9 +70,9 @@ class ImagenReference:
 
     def __post_init__(self):
         """Validate reference data after initialization."""
-        # Validate reference ID range
-        if not 1 <= self.reference_id <= 4:
-            raise ValueError(f"reference_id must be 1-4, got {self.reference_id}")
+        # Validate reference ID is positive
+        if self.reference_id < 1:
+            raise ValueError(f"reference_id must be >= 1, got {self.reference_id}")
 
         # Validate path exists
         if not self.path.exists():
@@ -212,8 +212,6 @@ def validate_references(references: list['ImagenReference']) -> tuple[bool, list
     # Check count
     if len(references) == 0:
         errors.append("At least 1 reference image required")
-    elif len(references) > 4:
-        errors.append(f"Maximum 4 references allowed, got {len(references)}")
 
     # Check reference IDs are sequential and unique
     reference_ids = [ref.reference_id for ref in references]

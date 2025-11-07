@@ -1087,18 +1087,38 @@ class MainWindow(QMainWindow):
         self.imagen_reference_widget = ImagenReferenceWidget()
         self.imagen_reference_widget.references_changed.connect(self._on_imagen_references_changed)
         ref_container_layout.addWidget(self.imagen_reference_widget)
-        bottom_layout.addWidget(self.ref_image_container)
+
+        # Create splitter below reference images to allow independent resizing
+        ref_splitter = QSplitter(Qt.Vertical)
+        ref_splitter.setChildrenCollapsible(False)
+
+        # Add reference images container to TOP of splitter
+        ref_splitter.addWidget(self.ref_image_container)
+
+        # Bottom section widget for everything below reference images
+        ref_bottom_section = QWidget()
+        ref_bottom_layout = QVBoxLayout(ref_bottom_section)
+        ref_bottom_layout.setContentsMargins(0, 0, 0, 0)
+        ref_bottom_layout.setSpacing(5)
+        ref_splitter.addWidget(ref_bottom_section)
+
+        # Set splitter sizes (reference images: 250px, bottom section: rest)
+        ref_splitter.setSizes([250, 500])
+        ref_splitter.setStretchFactor(0, 0)  # Reference images don't auto-stretch
+        ref_splitter.setStretchFactor(1, 1)  # Bottom section stretches to fill
+
+        bottom_layout.addWidget(ref_splitter, 1)  # Stretch to fill
 
         # Store reference image data (legacy - kept for backward compatibility)
         # NEW: Multi-reference data is stored in self.imagen_reference_widget
         self.reference_image_path = None
         self.reference_image_data = None
 
-        # Advanced Settings (collapsible)
+        # Advanced Settings (collapsible) - now added to ref_bottom_layout
         if AdvancedSettingsPanel:
             self.advanced_panel = AdvancedSettingsPanel(self.current_provider)
             self.advanced_panel.settingsChanged.connect(self._on_advanced_settings_changed)
-            bottom_layout.addWidget(self.advanced_panel)
+            ref_bottom_layout.addWidget(self.advanced_panel)
         else:
             # Fallback to old advanced settings
             advanced_group = QGroupBox("Advanced Settings")
@@ -1120,7 +1140,7 @@ class MainWindow(QMainWindow):
             advanced_layout.addRow("Guidance:", self.guidance_spin)
 
             advanced_group.setLayout(advanced_layout)
-            bottom_layout.addWidget(advanced_group)
+            ref_bottom_layout.addWidget(advanced_group)
             self.advanced_group = advanced_group
             self.advanced_panel = None
         
@@ -1200,13 +1220,13 @@ class MainWindow(QMainWindow):
         mj_layout.addRow("Seed:", self.mj_seed_spin)
 
         self.midjourney_options_group.setLayout(mj_layout)
-        bottom_layout.addWidget(self.midjourney_options_group)
+        ref_bottom_layout.addWidget(self.midjourney_options_group)
         self.midjourney_options_group.setVisible(False)  # Initially hidden
 
         # Status - compact
         self.status_label = QLabel("Ready.")
         self.status_label.setMaximumHeight(20)
-        bottom_layout.addWidget(self.status_label)
+        ref_bottom_layout.addWidget(self.status_label)
         
         # Create a vertical splitter for image and status console
         image_console_splitter = QSplitter(Qt.Vertical)
@@ -1305,7 +1325,7 @@ class MainWindow(QMainWindow):
         image_console_splitter.setStretchFactor(0, 3)  # Image gets more stretch
         image_console_splitter.setStretchFactor(1, 1)  # Console can grow when resizing
 
-        bottom_layout.addWidget(image_console_splitter, 1)
+        ref_bottom_layout.addWidget(image_console_splitter, 1)
         
         # Add bottom widget to splitter
         splitter.addWidget(bottom_widget)

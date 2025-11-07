@@ -12,9 +12,9 @@ from typing import List, Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QScrollArea, QFrame, QComboBox, QLineEdit,
-    QSizePolicy, QMessageBox, QRadioButton, QButtonGroup, QDialog
+    QSizePolicy, QMessageBox, QRadioButton, QButtonGroup, QDialog, QLayout
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QRect, QSize, QPoint
 from PySide6.QtGui import QPixmap
 
 from core.reference.imagen_reference import (
@@ -23,6 +23,91 @@ from core.reference.imagen_reference import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class FlowLayout(QLayout):
+    """
+    A layout that arranges widgets in a flowing manner, wrapping to new rows as needed.
+    Widgets flow left-to-right, top-to-bottom, wrapping when they reach the edge.
+    """
+
+    def __init__(self, parent=None, margin=0, spacing=-1):
+        super().__init__(parent)
+        if parent is not None:
+            self.setContentsMargins(margin, margin, margin, margin)
+        self.setSpacing(spacing)
+        self._item_list = []
+
+    def __del__(self):
+        item = self.takeAt(0)
+        while item:
+            item = self.takeAt(0)
+
+    def addItem(self, item):
+        self._item_list.append(item)
+
+    def count(self):
+        return len(self._item_list)
+
+    def itemAt(self, index):
+        if 0 <= index < len(self._item_list):
+            return self._item_list[index]
+        return None
+
+    def takeAt(self, index):
+        if 0 <= index < len(self._item_list):
+            return self._item_list.pop(index)
+        return None
+
+    def expandingDirections(self):
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self):
+        return True
+
+    def heightForWidth(self, width):
+        height = self._do_layout(QRect(0, 0, width, 0), True)
+        return height
+
+    def setGeometry(self, rect):
+        super().setGeometry(rect)
+        self._do_layout(rect, False)
+
+    def sizeHint(self):
+        return self.minimumSize()
+
+    def minimumSize(self):
+        size = QSize()
+        for item in self._item_list:
+            size = size.expandedTo(item.minimumSize())
+        margin, _, _, _ = self.getContentsMargins()
+        size += QSize(2 * margin, 2 * margin)
+        return size
+
+    def _do_layout(self, rect, test_only):
+        x = rect.x()
+        y = rect.y()
+        line_height = 0
+
+        for item in self._item_list:
+            wid = item.widget()
+            space_x = self.spacing()
+            space_y = self.spacing()
+            next_x = x + item.sizeHint().width() + space_x
+
+            if next_x - space_x > rect.right() and line_height > 0:
+                x = rect.x()
+                y = y + line_height + space_y
+                next_x = x + item.sizeHint().width() + space_x
+                line_height = 0
+
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+
+            x = next_x
+            line_height = max(line_height, item.sizeHint().height())
+
+        return y + line_height - rect.y()
 
 
 class ImagenReferenceItemWidget(QWidget):
@@ -451,14 +536,18 @@ class ImagenReferenceWidget(QWidget):
 
         main_layout.addLayout(header_layout)
 
-        # Horizontal container for reference items (side-by-side)
-        self.items_container = QWidget()
-        self.items_layout = QHBoxLayout(self.items_container)
-        self.items_layout.setContentsMargins(0, 0, 0, 0)
-        self.items_layout.setSpacing(20)  # Increased spacing to prevent widget overlap
-        self.items_layout.addStretch()
+        # Scrollable container for reference items with flow layout (wraps automatically)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
 
-        main_layout.addWidget(self.items_container)
+        self.items_container = QWidget()
+        self.items_layout = FlowLayout(self.items_container, margin=0, spacing=20)
+
+        scroll_area.setWidget(self.items_container)
+        main_layout.addWidget(scroll_area)
 
     def _on_mode_changed(self):
         """Handle mode change between Flexible and Strict."""
@@ -541,8 +630,8 @@ class ImagenReferenceWidget(QWidget):
         item_widget.reference_changed.connect(self._on_reference_changed)
         item_widget.remove_requested.connect(lambda: self._remove_reference(item_widget))
 
-        # Add to layout (before stretch)
-        self.items_layout.insertWidget(len(self.reference_items), item_widget)
+        # Add to flow layout
+        self.items_layout.addWidget(item_widget)
         self.reference_items.append(item_widget)
 
         self._update_ui()
@@ -761,8 +850,8 @@ class ImagenReferenceWidget(QWidget):
                 item_widget.reference_changed.connect(self._on_reference_changed)
                 item_widget.remove_requested.connect(lambda w=item_widget: self._remove_reference(w))
 
-                # Add to layout (before stretch)
-                self.items_layout.insertWidget(len(self.reference_items), item_widget)
+                # Add to flow layout
+                self.items_layout.addWidget(item_widget)
                 self.reference_items.append(item_widget)
 
             except Exception as e:

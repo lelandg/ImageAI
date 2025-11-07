@@ -436,27 +436,28 @@ def cleanup_debug_images() -> tuple[int, int]:
         # Step 3: Check each DEBUG_RAW_GEMINI image
         for debug_path in out_dir.glob("DEBUG_RAW_GEMINI_*.*"):
             try:
-                # Extract timestamp from filename (microseconds)
-                # Format: DEBUG_RAW_GEMINI_1762523421.png
-                name_parts = debug_path.stem.split("_")
-                if len(name_parts) >= 4:
-                    timestamp_us = int(name_parts[3])
-                    timestamp_s = timestamp_us // 1000000  # Convert to seconds
+                # Get debug image mtime and resolution (don't parse filename - use filesystem)
+                debug_mtime = int(debug_path.stat().st_mtime)
+                debug_data = debug_path.read_bytes()
+                debug_img = Image.open(io.BytesIO(debug_data))
+                debug_width, debug_height = debug_img.size
 
-                    # Get debug image resolution
-                    debug_data = debug_path.read_bytes()
-                    debug_img = Image.open(io.BytesIO(debug_data))
-                    debug_width, debug_height = debug_img.size
-
-                    # Check if there's a matching final image
-                    if timestamp_s in final_images:
-                        for final_path, final_width, final_height in final_images[timestamp_s]:
+                # Check if there's a matching final image within time window
+                # Search within ±10 seconds for generous matching
+                matched = False
+                for offset in range(-10, 11):
+                    check_time = debug_mtime + offset
+                    if check_time in final_images:
+                        for final_path, final_width, final_height in final_images[check_time]:
                             # Match if resolution is same (or very close)
                             if abs(final_width - debug_width) <= 10 and abs(final_height - debug_height) <= 10:
                                 # Redundant - delete it
                                 debug_path.unlink()
                                 raw_deleted += 1
+                                matched = True
                                 break
+                    if matched:
+                        break
             except (OSError, IOError, ValueError, Exception):
                 pass
 
