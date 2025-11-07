@@ -514,8 +514,9 @@ class ImagenReferenceWidget(QWidget):
             "padding: 8px; font-size: 10pt;"
         )
         self.multi_ref_help.setText(
-            "💡 Multiple references: Enter your prompt like "
-            "'These people as high resolution cartoon characters'."
+            "💡 Multiple references: Creates a composite character design sheet image. "
+            "Enter your prompt like 'These people as high resolution cartoon characters'. "
+            "See Help tab for details."
         )
         self.multi_ref_help.setVisible(False)  # Hidden by default
         main_layout.addWidget(self.multi_ref_help)

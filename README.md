@@ -14,7 +14,7 @@
 
 ## Overview
 
-**ImageAI** is a powerful desktop application and CLI tool for AI image generation supporting multiple providers including Google's Gemini API, OpenAI's DALL·E models, Stability AI's Stable Diffusion, and local Stable Diffusion models. It features enterprise-grade authentication options, secure credential management, and works seamlessly across Windows, macOS, and Linux.
+**ImageAI** is a powerful desktop application and CLI tool for AI image generation, video creation, and professional layout design. It supports multiple providers including Google's Gemini API (with Imagen 3 and Veo 3), OpenAI's DALL·E models, Stability AI's Stable Diffusion, and local Stable Diffusion models. Beyond image generation, ImageAI provides a complete workflow for creating AI-powered videos with MIDI synchronization, karaoke overlays, and a professional layout engine for photo books, comics, and publications. It features enterprise-grade authentication options, secure credential management, and works seamlessly across Windows, macOS, and Linux.
 
 ## Table of Contents
 - [Project Review & Recommendations](Docs/ProjectReview.md)
@@ -25,6 +25,13 @@
 - [Authentication Management](#5-authentication-management)
 - [CLI Reference](#6-cli-reference)
 - [GUI Features](#7-gui-features)
+  - [Image Tab](#image-tab-primary)
+  - [Templates Tab](#templates-tab)
+  - [Video Tab](#video-tab)
+  - [Layout/Books Tab (NEW!)](#layoutbooks-tab-new)
+  - [Settings Tab](#settings-tab)
+  - [History Tab](#history-tab)
+  - [Help Tab](#help-tab)
 - [Image Management](#8-image-management)
 - [Examples and Templates](#9-examples-and-templates)
 - [Advanced Features](#10-advanced-features)
@@ -65,22 +72,35 @@
 - Environment variable support for CI/CD integration
 - Per-provider API key management
 
-### 💻 Triple Interface
+### 💻 Quad Interface
 - **Modern GUI** - User-friendly desktop interface built with Qt/PySide6
 - **Video Project** - Full-featured 🎬 Video tab for creating AI-powered videos with version control
+- **Layout/Books** - 📖 Professional layout engine for photo books, comics, and publications
 - **Powerful CLI** - Full-featured command-line interface for automation
 - Cross-platform support (Windows, macOS, Linux)
 - Responsive layout with resizable panels
 
 ### 🎯 Advanced Generation Controls
 
-- **Reference Image Support** - Start with an existing image (provider-dependent):
-    - Select reference image from file
-    - Enable/disable reference with checkbox
-    - Clear reference with one click
-    - Thumbnail preview of selected image
-    - Provider-optimized reference handling
-    - Automatic prompt enhancement with reference context
+- **Multiple Reference Images** - Professional multi-reference image support with two modes:
+    - **Flexible Mode** (Google Gemini):
+      - Unlimited reference images
+      - Style transformation and cartoonification
+      - Automatic compositing for 2+ images (creates character design sheet)
+      - Perfect for: "Convert these photos to cartoon characters"
+    - **Strict Mode** (Imagen 3 Customization):
+      - Up to 3 reference images with precise control
+      - Subject preservation with scene/composition changes
+      - Reference types: SUBJECT (person/animal/product), STYLE, CONTROL (canny/scribble/face_mesh)
+      - Subject-specific types with optional descriptions
+      - Perfect for: Maintaining character consistency across generations
+    - **Smart Features**:
+      - Multi-select file dialog (add multiple images at once)
+      - Flow layout (automatically wraps to fit window)
+      - Reference IDs ([1], [2], [3]) for prompt referencing
+      - Mode switching with automatic reference limit handling
+      - Thumbnail previews with individual controls per reference
+      - Per-reference type selectors and descriptions
 - **Enhanced Aspect Ratio Selector** - Interactive preview rectangles with custom input support:
   - Visual preset buttons for common ratios (1:1, 3:4, 4:3, 16:9, 9:16, 21:9)
   - **Custom aspect ratio input** - Enter any ratio like "16:10" or decimal "1.6"
@@ -571,17 +591,35 @@ python main.py video --in script.txt --veo-model veo-3.0-generate-001 \
   - Quality settings (Standard/HD)
   - Batch size selector (1-4 images)
   - Cost estimator showing real-time pricing
-- **Reference Image** (Google Gemini only):
-  - Select a starting image to guide generation
-  - Visual preview thumbnail with controls
-  - Style options: Natural blend, Blurred edges, In circle, In frame, As background, etc.
-  - Position options: Auto, Left, Center, Right, Top, Bottom, corners
-  - Auto-inserts natural language instructions into prompt
-  - Shows preview of what will be inserted
-  - Tip: Press Ctrl+F to search text in prompt field
-  - Includes resolution info automatically
-  - Enable/disable checkbox
-  - Clear button to remove reference
+- **Multiple Reference Images** - Two modes for different use cases:
+  - **Flexible Mode** (Google Gemini - Style Transfer):
+    - Click "+ Add Reference Image" to select one or multiple files at once
+    - Unlimited reference images (adds as many as you select)
+    - When 2+ images: Automatically composites into character design sheet
+    - Use case: "These people as high resolution cartoon characters"
+    - Use case: Style transformation, artistic interpretations
+    - Type/subject selectors hidden (mode focuses on style transfer)
+    - Visual help tooltip appears when using multiple images
+  - **Strict Mode** (Imagen 3 Customization - Subject Preservation):
+    - Maximum 3 reference images with precise control
+    - Each reference has:
+      - **Type selector**: SUBJECT, STYLE, or CONTROL
+      - **Subject Type** (for SUBJECT): Person, Animal, Product, Default
+      - **Control Type** (for CONTROL): Canny, Scribble, Face Mesh
+      - **Description field**: Optional text description per reference
+      - **Reference ID**: [1], [2], [3] for use in prompts
+    - Use case: Keep character appearance while changing scene
+    - Use case: Maintain product consistency in different contexts
+  - **Mode Switching**:
+    - Toggle between Flexible and Strict with radio buttons
+    - If switching Strict→Flexible with >3 refs: Shows selection dialog
+    - References automatically revalidated on mode change
+  - **UI Features**:
+    - Multi-select file dialog (Ctrl+Click or Shift+Click)
+    - Flow layout wraps thumbnails automatically
+    - Individual remove buttons (✕) per reference
+    - Visual thumbnails (120×120) with file names
+    - Reference count display: "Reference Images (2/3)" or "(5)"
 - **Advanced Settings** (collapsible panel):
   - Inference steps slider (1-50)
   - Guidance scale (CFG) control
@@ -840,6 +878,99 @@ I’m tap-tap-tappin’ in my head
 | "Karaoke export blank" | Ensure MIDI file contains lyric events and is properly formatted |
 | "Generated images don't match style" | Use consistent LLM provider and set strong style descriptors in prompts |
 
+#### Layout/Books Tab (NEW!)
+
+⚠️ <b>Layout tab Development is in Progress — It's not yet fully functional.</b>
+
+The Layout/Books tab provides a professional layout engine for creating photo books, comics, children's books, and magazine-style publications with AI-generated images.
+
+**Core Features**:
+- **Template-Driven Design**: Pre-built templates for common layouts
+  - Children's book: Single illustration per page with text
+  - Comic book: Multi-panel grid layouts (3-panel, 4-panel, etc.)
+  - Magazine: Two-column layouts with pull quotes
+  - Photo book: Grid layouts with captions
+- **Intelligent Placement**: Automatic positioning of text and images
+- **Professional Typography**:
+  - Advanced text rendering with word wrapping
+  - Hyphenation support (framework ready)
+  - Widow/orphan control
+  - Text justification with word spacing
+  - Multiple fonts and styles per page
+- **Image Processing**:
+  - Rounded corners with anti-aliasing
+  - Image filters (blur, grayscale, sepia, sharpen)
+  - Borders and strokes
+  - Multiple fit modes (cover, contain, fill)
+  - Brightness, contrast, saturation adjustments
+- **Smart Layout Algorithms**:
+  - Auto-fit text to available space
+  - Text overflow handling across pages
+  - Panel grid computation for comics
+  - Column flow for magazine layouts
+  - Safe area margins and bleed handling
+
+**Template System**:
+- **Variable Substitution**: Use `{{variable}}` syntax in templates
+- **Color Palettes**: Define theme colors with automatic variants
+- **Per-Page Overrides**: Customize variables on specific pages
+- **Theme Files**: Load color schemes from JSON
+
+**Workflow**:
+1. **Select Template**: Choose from built-in templates or create custom
+2. **Set Theme**: Configure colors, fonts, and spacing
+3. **Add Content**:
+   - Import AI-generated images from Generate tab
+   - Write or paste text content
+   - Use LLM to generate story text
+4. **Customize Layout**: Adjust positions, sizes, and styles
+5. **Export**: Generate high-resolution PDF or PNG (300 DPI default)
+
+**Use Cases**:
+- **Children's Books**: Illustrated stories with consistent page layouts
+- **Comic Books**: Sequential art with panel-based storytelling
+- **Photo Books**: Family albums with captions and decorative layouts
+- **Magazine Articles**: Multi-column text with pull quotes and images
+- **Marketing Materials**: Brochures, flyers, and promotional content
+
+**Advanced Features**:
+- **Font Management**:
+  - System font discovery (Windows, macOS, Linux)
+  - Custom font directory support
+  - Font fallback chains
+- **Export Options**:
+  - Configurable DPI (default 300 for print quality)
+  - PDF with embedded fonts
+  - PNG sequence for individual pages
+- **LLM Integration**: Generate story text with AI assistance
+- **Multi-Page Projects**: Create complete publications with consistent styling
+
+**Example Projects**:
+```
+Children's Book: "The Adventure"
+- Generate 10 scene images in Image tab with prompt: "Illustrated children's book scene showing [description]"
+- Switch to Layout tab
+- Select "Children's Book" template
+- Import generated images
+- Add text for each page
+- Customize colors to match story mood
+- Export as PDF for printing
+
+Comic Strip: "Monday Morning"
+- Generate 3 comic panels in Image tab
+- Switch to Layout tab
+- Select "Comic 3-Panel" template
+- Import panels in sequence
+- Add speech bubbles and captions
+- Export as high-res PNG
+```
+
+**Tips for Best Results**:
+- Generate images with consistent style and color palette
+- Use Layout tab's theme colors to match your generated images
+- Export at 300 DPI for print-quality results
+- Test with low-DPI preview before final high-res export
+
 #### Settings Tab
 - **Provider Selection**: Switch between Google, OpenAI, Stability AI, and Local SD
 - **Authentication Mode** (Google only):
@@ -1049,6 +1180,58 @@ The template system allows you to create consistent, reusable prompts with varia
 - Leaving a field empty removes it from the final prompt
 - Multiple instances of the same variable use the same value
 - Commas are automatically managed when variables are empty
+
+### Using Multiple Reference Images
+
+**Flexible Mode Examples**:
+
+```
+Scenario 1: Family Cartoon Conversion
+1. Select Flexible Mode
+2. Click "+ Add Reference Image" → Select 4 family photos
+3. Images automatically composite into character design sheet
+4. Enter prompt: "These people as Pixar-style animated characters"
+5. Generate → Creates cartoon versions with all family members
+
+Scenario 2: Style Transfer
+1. Select Flexible Mode
+2. Add single reference image (person's photo)
+3. Enter prompt: "This person as a watercolor painting"
+4. Generate → Applies artistic style to the photo
+```
+
+**Strict Mode Examples**:
+
+```
+Scenario 1: Product Consistency (E-commerce)
+1. Select Strict Mode
+2. Add reference image → Type: SUBJECT, Subject Type: PRODUCT
+3. Description: "Red ceramic coffee mug with handle"
+4. Enter prompt: "Show [1] on a wooden kitchen table with morning light"
+5. Generate → Shows same mug in new scene
+
+Scenario 2: Character in Multiple Scenes
+1. Select Strict Mode
+2. Add 3 character references:
+   - Front view → Type: SUBJECT, Subject Type: PERSON, Desc: "Sarah, main character"
+   - Side view → Type: SUBJECT, Subject Type: PERSON
+   - Full body → Type: SUBJECT, Subject Type: PERSON
+3. Enter prompt: "Show [1] walking through a forest at sunset"
+4. Generate → Character maintains appearance across generations
+
+Scenario 3: Control with Edge Detection
+1. Select Strict Mode
+2. Add reference → Type: CONTROL, Control Type: CANNY
+3. Enter prompt: "Follow the structural lines of [1], create modern architecture"
+4. Generate → Uses edge structure while changing content
+```
+
+**Tips for Best Results**:
+- **Flexible Mode**: Works best with consistent lighting across input images
+- **Strict Mode**: Use all 3 reference slots for best subject preservation
+- **Reference IDs**: Use [1], [2], [3] in prompts to explicitly reference images
+- **Compositing**: When using 2+ images in Flexible, use prompts like "these people" or "all subjects"
+- **Mode Selection**: Use Flexible for creative transformations, Strict for consistency
 
 ### Tips for Better Results
 
@@ -1661,11 +1844,14 @@ ImageAI/
 - ✅ Stability AI integration (completed)
 - ✅ Local Stable Diffusion support (completed)
 - ✅ Video Project System with version control (completed)
-- Google Veo AI video generation (in progress)
-- Advanced video transitions and effects
-- Multi-track audio support
+- ✅ Google Veo AI video generation (completed)
+- ✅ Layout/Books system for photo books and comics (completed)
+- ✅ Multiple reference images with Imagen 3 (completed)
+- Advanced video transitions and effects (in progress)
+- Multi-track audio support (in progress)
 - Image editing capabilities (inpainting, outpainting) - Partially implemented
 - Local model management GUI (Phase 3 in progress)
+- Layout template marketplace and custom template editor
 - Batch processing improvements
 - Plugin system for custom providers
 - Additional providers (Midjourney API, Adobe Firefly, etc.)
