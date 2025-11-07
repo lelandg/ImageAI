@@ -288,6 +288,8 @@ def auto_save_images(images: list, base_stub: str = "gen") -> list:
 def scan_disk_history(max_items: int = 500, project_only: bool = False) -> list[Path]:
     """Scan generated dir for images and return sorted list by mtime desc.
 
+    Optimized to collect mtime in single pass and exit early when enough files found.
+
     Args:
         max_items: Maximum number of items to return
         project_only: If True, only return images with metadata sidecar files
@@ -295,19 +297,41 @@ def scan_disk_history(max_items: int = 500, project_only: bool = False) -> list[
     try:
         out_dir = images_output_dir()
         exts = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
-        items = [p for p in out_dir.iterdir() if p.is_file() and p.suffix.lower() in exts]
 
-        # Filter for project images (those with metadata sidecars)
-        if project_only:
-            filtered_items = []
-            for item in items:
-                sidecar_path = item.with_suffix(item.suffix + ".json")
-                if sidecar_path.exists():
-                    filtered_items.append(item)
-            items = filtered_items
+        # Collect files with mtime in single pass (avoid double stat calls)
+        items_with_time = []
+        scan_limit = max_items * 3  # Scan up to 3x max_items for early exit
 
-        items.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-        return items[:max_items]
+        for p in out_dir.iterdir():
+            # Skip DEBUG images entirely for performance
+            if p.name.startswith("DEBUG_"):
+                continue
+
+            # Check file type
+            if not (p.is_file() and p.suffix.lower() in exts):
+                continue
+
+            # Check for sidecar if project_only
+            if project_only:
+                sidecar = p.with_suffix(p.suffix + ".json")
+                if not sidecar.exists():
+                    continue
+
+            # Get mtime once
+            try:
+                mtime = p.stat().st_mtime
+                items_with_time.append((mtime, p))
+            except (OSError, AttributeError):
+                continue
+
+            # Early exit if we have enough files
+            if len(items_with_time) >= scan_limit:
+                break
+
+        # Sort by mtime (descending) and return top max_items
+        items_with_time.sort(reverse=True, key=lambda x: x[0])
+        return [p for _, p in items_with_time[:max_items]]
+
     except (OSError, IOError, AttributeError):
         return []
 
@@ -354,3 +378,88 @@ def default_model_for_provider(provider: str) -> str:
     if provider == "openai":
         return "dall-e-3"
     return "gemini-2.5-flash-image-preview"
+
+
+def cleanup_debug_images() -> tuple[int, int]:
+    """Clean up debug images at startup.
+
+    - Delete all DEBUG_CANVAS_COMPOSED images
+    - Delete DEBUG_RAW_GEMINI images that are redundant (same timestamp/resolution as final image)
+
+    Returns:
+        Tuple of (composed_deleted, raw_deleted)
+    """
+    try:
+        from PIL import Image
+        import io
+
+        out_dir = images_output_dir()
+        composed_deleted = 0
+        raw_deleted = 0
+
+        # Step 1: Delete all DEBUG_CANVAS_COMPOSED images
+        for p in out_dir.glob("DEBUG_CANVAS_COMPOSED_*.png"):
+            try:
+                p.unlink()
+                composed_deleted += 1
+            except (OSError, IOError):
+                pass
+
+        # Step 2: Find and delete redundant DEBUG_RAW_GEMINI images
+        # Build a map of final images by timestamp (within 5 second window)
+        final_images = {}  # timestamp_range -> (path, width, height)
+        for p in out_dir.iterdir():
+            # Skip debug files
+            if p.name.startswith("DEBUG_"):
+                continue
+            # Only process images
+            if not (p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg"}):
+                continue
+
+            try:
+                # Get timestamp from file mtime
+                mtime = int(p.stat().st_mtime)
+                # Get resolution
+                img_data = p.read_bytes()
+                img = Image.open(io.BytesIO(img_data))
+                width, height = img.size
+
+                # Store in map with timestamp range (within 5 seconds)
+                for offset in range(-5, 6):  # -5 to +5 seconds
+                    ts = mtime + offset
+                    if ts not in final_images:
+                        final_images[ts] = []
+                    final_images[ts].append((p, width, height))
+            except (OSError, IOError, Exception):
+                pass
+
+        # Step 3: Check each DEBUG_RAW_GEMINI image
+        for debug_path in out_dir.glob("DEBUG_RAW_GEMINI_*.*"):
+            try:
+                # Extract timestamp from filename (microseconds)
+                # Format: DEBUG_RAW_GEMINI_1762523421.png
+                name_parts = debug_path.stem.split("_")
+                if len(name_parts) >= 4:
+                    timestamp_us = int(name_parts[3])
+                    timestamp_s = timestamp_us // 1000000  # Convert to seconds
+
+                    # Get debug image resolution
+                    debug_data = debug_path.read_bytes()
+                    debug_img = Image.open(io.BytesIO(debug_data))
+                    debug_width, debug_height = debug_img.size
+
+                    # Check if there's a matching final image
+                    if timestamp_s in final_images:
+                        for final_path, final_width, final_height in final_images[timestamp_s]:
+                            # Match if resolution is same (or very close)
+                            if abs(final_width - debug_width) <= 10 and abs(final_height - debug_height) <= 10:
+                                # Redundant - delete it
+                                debug_path.unlink()
+                                raw_deleted += 1
+                                break
+            except (OSError, IOError, ValueError, Exception):
+                pass
+
+        return (composed_deleted, raw_deleted)
+    except Exception:
+        return (0, 0)

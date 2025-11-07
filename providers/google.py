@@ -138,29 +138,6 @@ def apply_transparent_canvas_fix(image_bytes: bytes, target_aspect_ratio: str, l
         # Paste the image centered on the canvas
         canvas.paste(img_rgba, (x_offset, y_offset), img_rgba)
 
-        # Save the composed canvas for debugging (use microseconds to avoid collisions)
-        timestamp = int(time.time() * 1000000)  # Microseconds for uniqueness
-        debug_filename = f"DEBUG_CANVAS_COMPOSED_{timestamp}.png"
-
-        # Get platform-specific generated directory
-        system = platform.system()
-        home = Path.home()
-        if system == "Windows":
-            base = Path(os.getenv("APPDATA", home / "AppData" / "Roaming"))
-            config_dir = base / "ImageAI"
-        elif system == "Darwin":  # macOS
-            config_dir = home / "Library" / "Application Support" / "ImageAI"
-        else:  # Linux/Unix
-            base = Path(os.getenv("XDG_CONFIG_HOME", home / ".config"))
-            config_dir = base / "ImageAI"
-        generated_dir = config_dir / "generated"
-
-        # Ensure directory exists
-        generated_dir.mkdir(parents=True, exist_ok=True)
-        debug_path = generated_dir / debug_filename
-        canvas.save(debug_path, 'PNG')
-        log.info(f"Saved composed canvas for debugging: {debug_path}")
-
         # Convert canvas back to bytes
         output = io.BytesIO()
         canvas.save(output, format='PNG')
@@ -171,7 +148,7 @@ def apply_transparent_canvas_fix(image_bytes: bytes, target_aspect_ratio: str, l
         # Log success to console
         if console_logger:
             console_logger(
-                f"✓ Canvas created: {canvas_width}x{canvas_height} (debug: {debug_path.name})",
+                f"✓ Canvas created: {canvas_width}x{canvas_height}",
                 "#00AA00"  # Green
             )
 
@@ -704,37 +681,6 @@ class GoogleProvider(ImageProvider):
 
                         # Paste the reference image centered on the canvas
                         canvas.paste(img_rgba, (x_offset, y_offset), img_rgba)
-
-                        # Save the composed canvas for debugging
-                        import time
-                        from pathlib import Path
-                        import platform
-                        import os
-                        timestamp = int(time.time())
-                        debug_filename = f"DEBUG_CANVAS_COMPOSED_{timestamp}.png"
-
-                        # Get platform-specific generated directory
-                        if 'output_dir' in self.config and self.config['output_dir']:
-                            generated_dir = Path(self.config['output_dir'])
-                        else:
-                            # Use platform-specific config directory
-                            system = platform.system()
-                            home = Path.home()
-                            if system == "Windows":
-                                base = Path(os.getenv("APPDATA", home / "AppData" / "Roaming"))
-                                config_dir = base / "ImageAI"
-                            elif system == "Darwin":  # macOS
-                                config_dir = home / "Library" / "Application Support" / "ImageAI"
-                            else:  # Linux/Unix
-                                base = Path(os.getenv("XDG_CONFIG_HOME", home / ".config"))
-                                config_dir = base / "ImageAI"
-                            generated_dir = config_dir / "generated"
-
-                        # Ensure directory exists
-                        generated_dir.mkdir(parents=True, exist_ok=True)
-                        debug_path = generated_dir / debug_filename
-                        canvas.save(debug_path, 'PNG')
-                        logger.info(f"Saved composed canvas for debugging: {debug_path}")
 
                         # Use the composed canvas instead of original image
                         img = canvas

@@ -214,7 +214,7 @@ def fetch_ollama_models(endpoint: str = "http://localhost:11434") -> List[str]:
         List of model names (e.g., ['llama3.2:latest', 'dolphin-mixtral:8x7b'])
     """
     try:
-        response = requests.get(f"{endpoint}/api/tags", timeout=5)
+        response = requests.get(f"{endpoint}/api/tags", timeout=1)
         response.raise_for_status()
         data = response.json()
 

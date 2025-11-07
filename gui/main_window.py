@@ -180,7 +180,7 @@ from gui.dialogs import ExamplesDialog
 from gui.shortcut_hint_widget import create_shortcut_hint
 # Defer video tab import to improve startup speed
 # from gui.video.video_project_tab import VideoProjectTab
-from gui.workers import GenWorker
+from gui.workers import GenWorker, HistoryLoaderWorker, OllamaDetectionWorker
 from gui.image_crop_dialog import ImageCropDialog
 from gui.find_dialog import FindDialog
 from gui.prompt_generation_dialog import PromptGenerationDialog
@@ -236,29 +236,28 @@ class MainWindow(QMainWindow):
         self.current_api_key = self.config.get_api_key(self.current_provider)
         self.current_model = DEFAULT_MODEL
         self.auto_copy_filename = self.config.get("auto_copy_filename", False)
-        
-        # Auto-detect Ollama models if available
-        try:
-            from core.llm_models import update_ollama_models, get_provider_models
-            print("Detecting Ollama models...")
-            if update_ollama_models():
-                models = get_provider_models('ollama')
-                print(f"✓ Detected {len(models)} Ollama models: {', '.join(models[:3])}{'...' if len(models) > 3 else ''}")
-            else:
-                print("No Ollama installation detected (using defaults)")
-        except Exception as e:
-            print(f"Ollama detection failed: {e}")
-            self.logger.debug(f"Ollama model detection skipped: {e}")
 
         # Session state
+        print("Cleaning up debug images...")
+        from core.utils import cleanup_debug_images
+        composed_deleted, raw_deleted = cleanup_debug_images()
+        if composed_deleted > 0 or raw_deleted > 0:
+            print(f"Deleted {composed_deleted} DEBUG_COMPOSED and {raw_deleted} redundant DEBUG_RAW images")
+
         print("Scanning image history...")
         self.history_paths: List[Path] = scan_disk_history(project_only=True)
         print(f"Found {len(self.history_paths)} images in history")
 
         self.history = []  # Initialize empty history list
+        self.history_loaded_count = 0  # Track how many items are loaded
+        self.history_initial_load_size = 50  # Load only 50 items initially
         self.current_prompt: str = ""
         self.gen_thread: Optional[QThread] = None
         self.gen_worker: Optional[GenWorker] = None
+        self.history_loader_thread: Optional[QThread] = None
+        self.history_loader_worker: Optional[HistoryLoaderWorker] = None
+        self.ollama_detection_thread: Optional[QThread] = None
+        self.ollama_detection_worker: Optional[OllamaDetectionWorker] = None
         self.current_image_data: Optional[bytes] = None
         self._last_template_context: Optional[dict] = None
         self._video_tab_loaded = False  # Track lazy loading of video tab
@@ -326,6 +325,13 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # Start background loading of remaining history items
+        if self.history_loaded_count < len(self.history_paths):
+            self._start_background_history_loader()
+
+        # Start background Ollama model detection
+        self._start_background_ollama_detection()
+
         print("Application ready!")
         self.status_bar.showMessage("Ready")
         QApplication.processEvents()
@@ -333,45 +339,32 @@ class MainWindow(QMainWindow):
 
     def _on_show_all_images_toggled(self, checked: bool):
         """Handle toggle of show all images checkbox."""
+        # Stop any running background loader
+        if self.history_loader_worker:
+            self.history_loader_worker.stop()
+        if self.history_loader_thread and self.history_loader_thread.isRunning():
+            self.history_loader_thread.quit()
+            self.history_loader_thread.wait()
+
         # Reload history with new filter
         self.history_paths = scan_disk_history(project_only=not checked)
 
         # Clear existing history data
         self.history = []
+        self.history_loaded_count = 0
 
-        # Load metadata for new set of images
-        print(f"Loading metadata for {len(self.history_paths)} images...")
-        for img_path in self.history_paths[:100]:  # Limit to first 100 for performance
-            meta = read_image_sidecar(img_path)
-            if meta:
-                self.history.append({
-                    'path': img_path,
-                    'prompt': meta.get('prompt', ''),
-                    'timestamp': meta.get('timestamp', ''),
-                    'model': meta.get('model', ''),
-                    'provider': meta.get('provider', ''),
-                    'cost': meta.get('cost', 0.0),
-                    'width': meta.get('width', 0),
-                    'height': meta.get('height', 0)
-                })
-            elif checked:  # Only add non-project images if showing all
-                # For non-project images, create minimal entry
-                self.history.append({
-                    'path': img_path,
-                    'prompt': '',
-                    'timestamp': datetime.fromtimestamp(img_path.stat().st_mtime).isoformat(),
-                    'model': '',
-                    'provider': '',
-                    'cost': 0.0,
-                    'width': 0,
-                    'height': 0
-                })
-
+        # Load initial batch only
+        print(f"Loading initial metadata for {min(self.history_initial_load_size, len(self.history_paths))} of {len(self.history_paths)} images...")
+        self._load_history_from_disk()
         print(f"Loaded metadata for {len(self.history)} images")
 
         # Refresh the history table
         if hasattr(self, 'history_table'):
             self._refresh_history_table()
+
+        # Start background loading of remaining items
+        if self.history_loaded_count < len(self.history_paths):
+            self._start_background_history_loader()
 
     def _enable_original_toggle(self, original_path, cropped_path):
         """Enable toggle button for switching between original and cropped."""
@@ -451,13 +444,30 @@ class MainWindow(QMainWindow):
         """Deprecated - no longer auto-resize console."""
         pass  # Let user control console size via splitter
 
-    def _load_history_from_disk(self):
-        """Load history from disk into memory with enhanced metadata."""
+    def _load_history_from_disk(self, load_all: bool = False):
+        """Load history from disk into memory with enhanced metadata.
+
+        Args:
+            load_all: If True, load all remaining items. Otherwise, load only initial batch.
+        """
         total = len(self.history_paths)
-        for i, path in enumerate(self.history_paths):
+
+        # Determine how many items to load
+        if load_all:
+            start_idx = self.history_loaded_count
+            end_idx = total
+            items_to_load = self.history_paths[start_idx:end_idx]
+        else:
+            # Load only initial batch
+            end_idx = min(self.history_initial_load_size, total)
+            items_to_load = self.history_paths[:end_idx]
+
+        for i, path in enumerate(items_to_load):
+            actual_idx = self.history_loaded_count + i
+
             # Update progress every 10 images or on first/last
-            if i == 0 or (i + 1) % 10 == 0 or i == total - 1:
-                print(f"\rLoading image metadata... ({i + 1}/{total})", end='', flush=True)
+            if i == 0 or (i + 1) % 10 == 0 or actual_idx == total - 1:
+                print(f"\rLoading image metadata... ({actual_idx + 1}/{total})", end='', flush=True)
 
             try:
                 # Try to read sidecar file for metadata
@@ -488,7 +498,113 @@ class MainWindow(QMainWindow):
                     })
             except Exception:
                 pass
-    
+
+        # Update loaded count
+        self.history_loaded_count = len(self.history)
+
+    def _start_background_history_loader(self):
+        """Start background thread to load remaining history items."""
+        if self.history_loader_thread and self.history_loader_thread.isRunning():
+            return  # Already running
+
+        # Create worker and thread
+        self.history_loader_worker = HistoryLoaderWorker(
+            history_paths=self.history_paths,
+            start_index=self.history_loaded_count,
+            batch_size=25
+        )
+        self.history_loader_thread = QThread()
+        self.history_loader_worker.moveToThread(self.history_loader_thread)
+
+        # Connect signals
+        self.history_loader_worker.batch_loaded.connect(self._on_history_batch_loaded)
+        self.history_loader_worker.progress.connect(self._on_history_load_progress)
+        self.history_loader_worker.finished.connect(self._on_history_load_finished)
+        self.history_loader_worker.error.connect(self._on_history_load_error)
+        self.history_loader_thread.started.connect(self.history_loader_worker.run)
+
+        # Start thread
+        self.history_loader_thread.start()
+        print(f"Background loading {len(self.history_paths) - self.history_loaded_count} remaining history items...")
+
+    def _on_history_batch_loaded(self, batch_items: list):
+        """Handle a batch of history items loaded in background."""
+        self.history.extend(batch_items)
+        self.history_loaded_count = len(self.history)
+        # Refresh history display if on history tab
+        if hasattr(self, 'history_table'):
+            self._refresh_history_table()
+
+    def _on_history_load_progress(self, loaded: int, total: int):
+        """Update status bar with loading progress."""
+        remaining = total - loaded
+        if remaining > 0 and hasattr(self, 'status_bar'):
+            self.status_bar.showMessage(f"Loading history: {loaded}/{total} ({remaining} remaining)")
+
+    def _on_history_load_finished(self):
+        """Handle completion of background history loading."""
+        print(f"\rBackground history loading complete! Total: {len(self.history)} items")
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("Ready", 3000)
+
+        # Clean up thread
+        if self.history_loader_thread:
+            self.history_loader_thread.quit()
+            self.history_loader_thread.wait()
+            self.history_loader_thread = None
+            self.history_loader_worker = None
+
+    def _on_history_load_error(self, error_msg: str):
+        """Handle error during background history loading."""
+        self.logger.error(f"History loading error: {error_msg}")
+        if hasattr(self, 'status_bar'):
+            self.status_bar.showMessage("History loading error", 5000)
+
+    def _start_background_ollama_detection(self):
+        """Start background thread to detect Ollama models."""
+        if self.ollama_detection_thread and self.ollama_detection_thread.isRunning():
+            return  # Already running
+
+        # Create worker and thread
+        self.ollama_detection_worker = OllamaDetectionWorker()
+        self.ollama_detection_thread = QThread()
+        self.ollama_detection_worker.moveToThread(self.ollama_detection_thread)
+
+        # Connect signals
+        self.ollama_detection_worker.models_detected.connect(self._on_ollama_models_detected)
+        self.ollama_detection_worker.no_ollama.connect(self._on_ollama_not_available)
+        self.ollama_detection_worker.finished.connect(self._on_ollama_detection_finished)
+        self.ollama_detection_worker.error.connect(self._on_ollama_detection_error)
+        self.ollama_detection_thread.started.connect(self.ollama_detection_worker.run)
+
+        # Start thread
+        self.ollama_detection_thread.start()
+        print("Detecting Ollama models in background...")
+
+    def _on_ollama_models_detected(self, models: list):
+        """Handle successful Ollama model detection."""
+        print(f"✓ Detected {len(models)} Ollama models: {', '.join(models[:3])}{'...' if len(models) > 3 else ''}")
+        # Update any UI that depends on Ollama models
+        # (e.g., LLM provider dropdowns in dialogs)
+
+    def _on_ollama_not_available(self):
+        """Handle case when Ollama is not available."""
+        print("No Ollama installation detected (using defaults)")
+
+    def _on_ollama_detection_finished(self):
+        """Handle completion of Ollama detection."""
+        # Clean up thread
+        if self.ollama_detection_thread:
+            self.ollama_detection_thread.quit()
+            self.ollama_detection_thread.wait()
+            self.ollama_detection_thread = None
+            self.ollama_detection_worker = None
+
+    def _on_ollama_detection_error(self, error_msg: str):
+        """Handle error during Ollama detection."""
+        self.logger.debug(f"Ollama detection error: {error_msg}")
+        # Don't show to user - Ollama is optional
+
     def _init_ui(self):
         """Initialize the user interface."""
         # Create status bar
