@@ -687,7 +687,7 @@ class MainWindow(QMainWindow):
         act_wikimedia.triggered.connect(self._open_wikimedia_search)
         tools_menu.addAction(act_wikimedia)
 
-        act_char_prompt = QAction("Character Transformation Builder...", self)
+        act_char_prompt = QAction("Prompt Builder...", self)
         act_char_prompt.triggered.connect(self._open_character_prompt_builder)
         tools_menu.addAction(act_char_prompt)
 
@@ -841,8 +841,8 @@ class MainWindow(QMainWindow):
         self.btn_ask_about.setToolTip("Ask questions about your prompt (Alt+A)")
         buttons_layout.addWidget(self.btn_ask_about)
 
-        self.btn_char_transform = QPushButton("&Transform Character")
-        self.btn_char_transform.setToolTip("Build character transformation prompts (Alt+T)")
+        self.btn_char_transform = QPushButton("&Prompt Builder")
+        self.btn_char_transform.setToolTip("Build prompts from modular components or transform characters (Alt+P)")
         self.btn_char_transform.clicked.connect(self._open_character_prompt_builder)
         buttons_layout.addWidget(self.btn_char_transform)
 
@@ -7729,16 +7729,16 @@ For more detailed information, please refer to the full documentation.
         dialog.exec()
 
     def _open_character_prompt_builder(self):
-        """Open character transformation prompt builder dialog."""
-        from gui.character_prompt_builder import CharacterPromptBuilder
+        """Open prompt builder dialog."""
+        from gui.prompt_builder import PromptBuilder
 
-        dialog = CharacterPromptBuilder(self)
+        dialog = PromptBuilder(self)
 
         # Connect to populate prompt field
         def on_prompt_generated(prompt):
             if hasattr(self, 'prompt_edit'):
                 self.prompt_edit.setPlainText(prompt)
-                self.status_bar.showMessage("Character transformation prompt loaded")
+                self.status_bar.showMessage("Prompt loaded from builder")
 
         dialog.prompt_generated.connect(on_prompt_generated)
         dialog.exec()

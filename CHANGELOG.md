@@ -5,6 +5,57 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+#### Prompt Builder (formerly Character Transformation Builder)
+- **Renamed and Enhanced**: Character Transformation Builder → Prompt Builder
+  - Updated name to reflect general-purpose prompt building capabilities
+  - Emphasizes dual functionality: create prompts from scratch OR transform reference images
+  - Updated UI labels, tooltips, and menu items throughout application
+  - Button renamed to "Prompt Builder" with keyboard shortcut Alt+P
+
+- **Tabbed Interface**: Converted from side panel to two-tab layout
+  - **Builder Tab**: All prompt construction controls
+  - **History Tab**: Dedicated view for saved prompts with detailed information
+  - Better space utilization and clearer workflow separation
+
+- **Enhanced History Features**:
+  - Detailed view panel showing complete prompt and all settings
+  - Full timestamp display (YYYY-MM-DD HH:MM:SS) instead of truncated format
+  - Click to view details, double-click to load into builder
+  - Visual separation between history list and detail view
+  - "Clear All History" option with confirmation dialog
+
+- **Improved Exclusion Field**:
+  - Changed from dropdown to multi-line text edit for better flexibility
+  - Automatically prepends "no" to each comma-separated item
+  - Example: entering "text, watermark, background" → "no text, no watermark, no background"
+  - Smart handling avoids duplicate "no" prefixes
+  - Clear placeholder instructions explain the auto-processing behavior
+
+- **Export/Import Functionality**:
+  - **Export Current**: Save current prompt configuration to JSON file
+  - **Export All History**: Export complete history with metadata
+  - **Smart Import**: Automatically detects file type:
+    - Single prompt files → load directly to builder
+    - Full history exports → choose to import all or load most recent
+  - Facilitates prompt sharing and backup/restore workflows
+
+- **Window Settings Persistence**:
+  - Saves and restores window position and size using QSettings
+  - Remembers active tab (Builder or History) between sessions
+  - Persists on close, cancel, and accept actions
+  - Seamless user experience across application restarts
+
+### Technical
+- Created new file: `gui/prompt_builder.py` (772 lines)
+- Updated `gui/main_window.py` with new import and UI labels
+- Removed old file: `gui/character_prompt_builder.py`
+- History file renamed: `prompt_builder_history.json` (from `character_prompt_history.json`)
+- Uses QSettings for window geometry persistence
+
 ## [0.24.0] - 2025-10-24
 
 ### Added
