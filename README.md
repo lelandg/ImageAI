@@ -5,12 +5,12 @@
 **Version 0.24.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
-- **LelandGreen.com on Discord - The Intersection of Art and AI [Discord](https://discord.gg/a64xRg9w)**
+- **ChatMaster BBS - The Intersection of Art and AI - Support and Fun: [ChatMaster BBS Discord Server](https://discord.gg/chatmaster)**
 - **Facebook Page: [Leland Green Productions](https://www.facebook.com/LelandGreenProductions)**
 - **Facebook Group: [The Intersection of Art and AI Community](https://www.facebook.com/groups/4047864425428695)**
  
-#### Created with _JetBrains **PyCharm**_ and AI assistance from Junie, Claude Code, Codex. With Google auth guidance from Gemini CLI.
-###### Enterprise-ready with multiple authentication methods and provider support  
+#### Created primarily with _Antrhopic **Claude Code**_, with PyCharm IDE and AI assistance from Junie (early-on), Codex. Extra Google auth guidance from Gemini CLI.
+#### Enterprise-ready with multiple authentication methods and provider support  
 
 ## Overview
 
@@ -1062,16 +1062,155 @@ Comic Strip: "Monday Morning"
 - Zoom In/Out
 
 #### Tools Menu
-- **Search Wikimedia Commons**: Search and download free images from Wikimedia Commons
-  - Search millions of freely licensed images
-  - Download single or multiple images
-  - Automatically add to reference images (Google provider)
-  - Images saved to `<output_dir>/wikimedia/`
-- **Character Transformation Builder**: Build modular character transformation prompts
-  - Editable combo boxes with presets for all options
-  - Optional fields: subject, transformation style, art style, medium, background, pose, artist, lighting, mood
-  - Save/load prompt history
-  - Example: "Headshot of attached as full color super-exaggerated caricature cartoon, on a clean white background, facing forward, suitable as character design sheet, use line work and cross-hatching, no text"
+
+##### Search Wikimedia Commons
+
+Access millions of freely licensed images from Wikimedia Commons for use as reference images or inspiration.
+
+**Features:**
+- **Advanced Search**: Search by keywords with real-time results
+- **Category Browsing**: Browse by media type (images, photos, drawings, etc.)
+- **License Filtering**: Filter by license type (Public Domain, CC BY, CC BY-SA, etc.)
+- **Batch Download**: Select and download multiple images at once
+- **Auto-Integration**: Downloaded images automatically added to reference images panel (Google provider)
+- **Organized Storage**: Images saved to `<output_dir>/wikimedia/` with metadata
+- **Image Preview**: Full-size preview with licensing information
+- **Attribution Info**: Complete licensing and author information for each image
+
+**Usage:**
+1. Open **Tools → Search Wikimedia Commons**
+2. Enter search terms (e.g., "mountain landscape", "vintage cars")
+3. Browse results with thumbnail previews
+4. Click image for full preview and licensing details
+5. Select images to download (single or multiple)
+6. Downloaded images appear in reference images panel
+7. Use in your prompts for style transfer or reference
+
+**Example Workflows:**
+- **Character Reference**: Search "portrait photography" → Download reference → Use in Flexible mode for style transformation
+- **Style Reference**: Search "oil painting landscape" → Download → Use as style reference in Strict mode
+- **Historical Reference**: Search "1920s architecture" → Download → Use for period-accurate generation
+
+##### Prompt Builder
+
+Build comprehensive, modular prompts with a professional template system. Perfect for character transformations, style transfers, and consistent prompt generation.
+
+**Features:**
+- **Dual Tab Interface**:
+  - **Builder Tab**: Create and preview prompts in real-time
+  - **History Tab**: Access previously saved prompts with full details
+- **Modular Prompt Components**: Optional fields for complete control
+  - Subject type (Headshot, Full body, Portrait, Character sheet, etc.)
+  - Transformation style (Caricature, Cartoon, Anime, Oil painting, etc.)
+  - Art style (from `styles.json` - Abstract, Cyberpunk, Baroque, etc.)
+  - Medium/Technique (from `mediums.json` - Oil painting, Digital art, etc.)
+  - Background options (Clean white, Solid black, Transparent, Studio, etc.)
+  - Pose/Orientation (Facing forward, Three-quarter view, Dynamic pose, etc.)
+  - Purpose/Context (Character design, Avatar, Game character, etc.)
+  - Technique details (Line work, Bold outlines, Photorealistic, etc.)
+  - Artist style (from `artists.json` - specific artist influences)
+  - Lighting (from `lighting.json` - Golden hour, Studio lighting, etc.)
+  - Mood (from `moods.json` - Dramatic, Peaceful, Energetic, etc.)
+  - Exclusions (Automatic "no" prefix for negative prompts)
+  - Additional notes (Free-form custom details)
+- **Smart Exclusion Processing**: Automatically adds "no" to exclusion items
+- **Live Preview**: Real-time preview of assembled prompt
+- **Keyboard Shortcuts**:
+  - **Ctrl+Enter**: Use current prompt (Builder tab)
+  - **Escape**: Close dialog
+- **History Management**:
+  - Auto-save to history when using prompts
+  - Manual save option for building without using
+  - Full prompt display in history list (no truncation)
+  - Timestamp for each entry (YYYY-MM-DD HH:MM)
+  - Double-click to load prompt into builder
+  - Delete individual entries
+  - Clear all history option
+- **Import/Export**:
+  - **Export**: Single button with smart dialog
+    - Export current prompt (JSON format with all settings)
+    - Export all history (N entries with metadata)
+    - Automatically detects what's available
+  - **Import**: Load prompts from JSON files
+    - Single prompt files
+    - Full history exports (import all or load most recent)
+- **Editable Combo Boxes**: All dropdowns allow custom entries
+- **Data-Driven**: Uses JSON files for customizable options
+- **Session Persistence**: Remembers window position and last tab
+
+**Data Files** (customizable):
+- `data/prompts/artists.json` - Artist names and styles
+- `data/prompts/styles.json` - Art styles
+- `data/prompts/mediums.json` - Art mediums and techniques
+- `data/prompts/lighting.json` - Lighting options
+- `data/prompts/moods.json` - Mood descriptors
+
+**Usage:**
+1. Open **Tools → Prompt Builder** (or use keyboard shortcut if configured)
+2. Fill in desired fields (all optional):
+   - Select subject type or enter custom
+   - Choose transformation style
+   - Pick art style, medium, etc.
+   - Add exclusions (text, watermark, etc.) - "no" automatically added
+   - Enter additional custom details
+3. Watch live preview update as you build
+4. Press **Ctrl+Enter** or click **Use Prompt** to apply
+5. Prompt is automatically saved to history
+6. Switch to **History Tab** to browse previous prompts
+
+**Example Prompts:**
+
+*Cartoon Character Transformation*:
+```
+Subject: Headshot of attached
+Transform As: as full color super-exaggerated caricature cartoon
+Background: on a clean white background
+Pose: facing forward
+Purpose: suitable as character design sheet
+Technique: use line work and cross-hatching
+Exclude: text
+
+Result: "Headshot of attached as full color super-exaggerated caricature cartoon,
+on a clean white background, facing forward, suitable as character design sheet,
+use line work and cross-hatching, no text"
+```
+
+*Artistic Portrait*:
+```
+Subject: Portrait of attached
+Art Style: Impressionist
+Medium: Oil Painting
+Artist Style: Claude Monet
+Lighting: Golden Hour
+Mood: Peaceful
+Exclude: modern elements, photographs
+
+Result: "Portrait of attached in Impressionist style, using Oil Painting, in the
+style of Claude Monet, with Golden Hour, Peaceful mood, no modern elements, no
+photographs"
+```
+
+*Anime Character Design*:
+```
+Subject: Full body of attached
+Transform As: as anime character
+Background: with gradient background
+Pose: dynamic pose
+Purpose: for character concept art
+Technique: with cel shading
+Mood: Energetic
+
+Result: "Full body of attached as anime character, with gradient background,
+dynamic pose, for character concept art, with cel shading, Energetic mood"
+```
+
+**Tips:**
+- Leave fields blank to omit from prompt
+- Use exclusions to prevent unwanted elements
+- Save multiple variations in history for A/B testing
+- Export your best prompts for sharing or backup
+- Import community prompt collections
+
 - Model Browser (Local SD)
 - Batch Generator
 - Template Editor
@@ -1342,7 +1481,7 @@ Example config:
 
 ### Customizing Prompt Data
 
-The Character Transformation Builder uses JSON data files that you can customize to add your own options:
+The Prompt Builder uses JSON data files that you can customize to add your own options:
 
 **Data Files Location**:
 - `data/prompts/artists.json` - Artist names and styles
@@ -1376,7 +1515,7 @@ All data files use simple JSON array format:
 ]
 ```
 3. Save the file
-4. Restart ImageAI or reload the Character Transformation Builder
+4. Restart ImageAI or reload the Prompt Builder
 
 **Examples**:
 
@@ -1400,7 +1539,7 @@ Add a new style to `styles.json`:
 
 **Tips**:
 - Keep entries concise and descriptive
-- Test your custom options in the Character Transformation Builder
+- Test your custom options in the Prompt Builder
 - Backup files before editing
 - Maintain valid JSON format (commas between items, no trailing comma)
 
@@ -1981,6 +2120,9 @@ Created by Leland Green | [LelandGreen.com](https://www.lelandgreen.com)
 Contact: | [contact@lelandgreen.com](mailto:contact@lelandgreen.com)
 
 Built with:
+- Claude Code and online
+- Codex CLI and online
+- Gemini CLI
 - JetBrains PyCharm
 - PySide6/Qt Framework
 - Google Gemini API

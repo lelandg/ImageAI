@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QTextBrowser
 )
 from PySide6.QtCore import Qt, Signal, QSettings
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QKeySequence
 
 from core.prompt_data_loader import PromptDataLoader
 from core.config import ConfigManager
@@ -245,9 +245,9 @@ class PromptBuilder(QDialog):
 
         button_layout.addStretch()
 
-        export_current_btn = QPushButton("Export Current")
-        export_current_btn.clicked.connect(self._export_current)
-        button_layout.addWidget(export_current_btn)
+        export_btn = QPushButton("Export")
+        export_btn.clicked.connect(self._export)
+        button_layout.addWidget(export_btn)
 
         import_btn = QPushButton("Import")
         import_btn.clicked.connect(self._import_prompt)
@@ -309,9 +309,9 @@ class PromptBuilder(QDialog):
 
         history_btn_layout.addStretch()
 
-        export_all_btn = QPushButton("Export All History")
-        export_all_btn.clicked.connect(self._export_all_history)
-        history_btn_layout.addWidget(export_all_btn)
+        export_btn = QPushButton("Export")
+        export_btn.clicked.connect(self._export)
+        history_btn_layout.addWidget(export_btn)
 
         clear_history_btn = QPushButton("Clear All History")
         clear_history_btn.clicked.connect(self._clear_all_history)
@@ -462,6 +462,9 @@ class PromptBuilder(QDialog):
             QMessageBox.warning(self, "Empty Prompt", "Please build a prompt first.")
             return
 
+        # Auto-save to history
+        self._save_to_history_silent()
+
         self.prompt_generated.emit(prompt)
         self.accept()
 
@@ -503,6 +506,43 @@ class PromptBuilder(QDialog):
         self._update_history_list()
 
         QMessageBox.information(self, "Saved", "Prompt saved to history.")
+
+    def _save_to_history_silent(self):
+        """Save current prompt to history without showing a message box."""
+        prompt = self.preview_text.toPlainText()
+        if prompt == "[Empty prompt]":
+            return
+
+        # Create history entry
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "prompt": prompt,
+            "settings": {
+                "subject": self.subject_combo.currentText(),
+                "transformation": self.transformation_combo.currentText(),
+                "style": self.style_combo.currentText(),
+                "medium": self.medium_combo.currentText(),
+                "background": self.background_combo.currentText(),
+                "pose": self.pose_combo.currentText(),
+                "purpose": self.purpose_combo.currentText(),
+                "technique": self.technique_combo.currentText(),
+                "artist": self.artist_combo.currentText(),
+                "lighting": self.lighting_combo.currentText(),
+                "mood": self.mood_combo.currentText(),
+                "exclusion": self.exclusion_edit.toPlainText(),  # Save raw text
+                "notes": self.notes_edit.toPlainText()
+            }
+        }
+
+        self.history.insert(0, entry)  # Add to beginning
+
+        # Limit history size
+        if len(self.history) > 100:
+            self.history = self.history[:100]
+
+        self._save_history()
+        self._update_history_list()
+        logger.info("Prompt auto-saved to history on use")
 
     def _show_history_details(self, item: QListWidgetItem):
         """Show detailed information about selected history item."""
@@ -618,11 +658,53 @@ class PromptBuilder(QDialog):
             except:
                 time_str = timestamp[:16]
 
-            # Truncate prompt for display
-            display_prompt = prompt if len(prompt) < 60 else prompt[:57] + "..."
-
-            item_text = f"{time_str}: {display_prompt}"
+            # Show full prompt in history list
+            item_text = f"{time_str}: {prompt}"
             self.history_list.addItem(item_text)
+
+    def _export(self):
+        """Show dialog to choose between exporting current prompt or all history."""
+        prompt = self.preview_text.toPlainText()
+        has_current = prompt != "[Empty prompt]"
+        has_history = len(self.history) > 0
+
+        # Build message based on what's available
+        if not has_current and not has_history:
+            QMessageBox.information(
+                self, "Nothing to Export",
+                "There is no current prompt and no history to export."
+            )
+            return
+
+        # Create custom message box
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Export")
+        msg.setIcon(QMessageBox.Question)
+
+        if has_current and has_history:
+            msg.setText("What would you like to export?")
+            current_btn = msg.addButton("Current Prompt", QMessageBox.ActionRole)
+            history_btn = msg.addButton(f"All History ({len(self.history)} entries)", QMessageBox.ActionRole)
+            cancel_btn = msg.addButton(QMessageBox.Cancel)
+            msg.exec()
+
+            clicked = msg.clickedButton()
+            if clicked == current_btn:
+                self._export_current()
+            elif clicked == history_btn:
+                self._export_all_history()
+        elif has_current:
+            # Only current prompt available
+            msg.setText("Export current prompt?")
+            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
+            if msg.exec() == QMessageBox.Yes:
+                self._export_current()
+        else:
+            # Only history available
+            msg.setText(f"Export all history ({len(self.history)} entries)?")
+            msg.setStandardButtons(QMessageBox.Yes | QMessageBox.Cancel)
+            if msg.exec() == QMessageBox.Yes:
+                self._export_all_history()
 
     def _export_current(self):
         """Export current prompt to JSON file."""
@@ -805,6 +887,15 @@ class PromptBuilder(QDialog):
         """Save window position and size to settings."""
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("activeTab", self.tabs.currentIndex())
+
+    def keyPressEvent(self, event):
+        """Handle keyboard shortcuts."""
+        # Ctrl+Enter to use prompt
+        if event.key() == Qt.Key_Return and event.modifiers() == Qt.ControlModifier:
+            self._use_prompt()
+            event.accept()
+        else:
+            super().keyPressEvent(event)
 
     def closeEvent(self, event):
         """Handle close event to save geometry."""
