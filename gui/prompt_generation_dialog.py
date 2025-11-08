@@ -16,6 +16,7 @@ from PySide6.QtCore import Qt, Signal, QThread, QObject, QSettings
 from PySide6.QtGui import QKeySequence, QShortcut
 
 from .dialog_utils import OperationGuardMixin, guard_operation
+from .history_widget import DialogHistoryWidget
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -703,7 +704,6 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         super().__init__(parent)
         self.config = config
         self.generated_prompts = []
-        self.prompt_history = self.load_history()
         self.last_session = self.load_last_session()
         self.worker = None
         self.thread = None
@@ -723,7 +723,6 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
 
         self.load_llm_settings()
         self.restore_last_session()
-        self.update_history_list()  # Populate history list on dialog open
 
     def init_ui(self):
         """Initialize the UI."""
@@ -873,19 +872,10 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
 
         self.tab_widget.addTab(generate_widget, "Generate")
 
-        # History tab
-        history_widget = QWidget()
-        history_layout = QVBoxLayout(history_widget)
-
-        self.history_list = QListWidget()
-        self.history_list.itemDoubleClicked.connect(self.on_history_item_double_clicked)
-        history_layout.addWidget(self.history_list)
-
-        clear_history_btn = QPushButton("Clear History")
-        clear_history_btn.clicked.connect(self.clear_history)
-        history_layout.addWidget(clear_history_btn)
-
-        self.tab_widget.addTab(history_widget, "History")
+        # History tab - use DialogHistoryWidget for consistent UX
+        self.history_widget = DialogHistoryWidget("prompt_generation", self)
+        self.history_widget.itemDoubleClicked.connect(self.load_history_item)
+        self.tab_widget.addTab(self.history_widget, "History")
 
         layout.addWidget(self.tab_widget)
 
@@ -894,7 +884,6 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
 
         # Status console at the bottom
         from .llm_utils import DialogStatusConsole
-        from .history_widget import DialogHistoryWidget
         self.status_console = DialogStatusConsole("Status", self)
         splitter.addWidget(self.status_console)
 
@@ -1171,9 +1160,20 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         if self.results_list.count() > 0:
             self.results_list.setCurrentRow(0)
 
-        # Save to history (no error)
-        self.save_to_history(self.input_text.toPlainText(), prompts, error=None)
-        self.update_history_list()
+        # Save to history (save each prompt variant separately for easy access)
+        input_text = self.input_text.toPlainText()
+        for prompt in prompts:
+            self.history_widget.add_entry(
+                input_text,
+                prompt,
+                self.llm_provider_combo.currentText(),
+                self.llm_model_combo.currentText(),
+                {
+                    'num_variations': len(prompts),
+                    'temperature': self.temperature_spin.value() if not self.gpt5_params_widget.isVisible() else 1.0,
+                    'max_tokens': self.max_tokens_spin.value() if not self.gpt5_params_widget.isVisible() else 1500
+                }
+            )
 
         # Re-enable UI
         self.generate_btn.setEnabled(True)
@@ -1202,9 +1202,7 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         QMessageBox.critical(self, "Generation Error", error)
         self.status_console.log(f"Error: {error}", "ERROR")
 
-        # Save to history with error
-        self.save_to_history(self.input_text.toPlainText(), [], error=error)
-        self.update_history_list()
+        # Don't save errors to history - only save successful generations
 
         self.generate_btn.setEnabled(True)
         self.generate_btn.setText("Generate Prompts")
@@ -1242,11 +1240,64 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         self.promptSelected.emit(prompt)
         self.accept()
 
-    def on_history_item_double_clicked(self, item):
-        """Handle double-click on history item."""
-        prompt = item.data(Qt.UserRole)
-        self.promptSelected.emit(prompt)
-        self.accept()
+    def load_history_item(self, item):
+        """Load a history item when double-clicked."""
+        # Switch to Generate tab
+        self.tab_widget.setCurrentIndex(0)
+
+        # Restore the input
+        original_input = item.get('input', '')
+        if original_input:
+            self.input_text.setPlainText(original_input)
+
+        # Load the generated prompt directly into results
+        generated_prompt = item.get('response', '')
+        if generated_prompt:
+            self.results_list.clear()
+            self.generated_prompts = [generated_prompt]
+
+            # Add to results list
+            list_item = QListWidgetItem(f"From History: {generated_prompt[:80]}...")
+            list_item.setData(Qt.UserRole, generated_prompt)
+            self.results_list.addItem(list_item)
+            self.results_list.setCurrentRow(0)
+            self.preview_text.setPlainText(generated_prompt)
+
+            # Show in status console
+            self.status_console.clear()
+            self.status_console.log("="*60, "INFO")
+            self.status_console.log("Restored from history:", "INFO")
+            self.status_console.log(f"Original Input: {original_input}", "INFO")
+            self.status_console.log("-"*40, "INFO")
+            self.status_console.log(f"Generated Prompt:\n{generated_prompt}", "SUCCESS")
+            self.status_console.log("="*60, "INFO")
+
+            # Show metadata if available
+            if 'metadata' in item:
+                metadata = item['metadata']
+                if 'num_variations' in metadata:
+                    self.status_console.log(f"Number of variations: {metadata['num_variations']}", "INFO")
+                if 'temperature' in metadata:
+                    self.status_console.log(f"Temperature: {metadata['temperature']}", "INFO")
+                if 'max_tokens' in metadata:
+                    self.status_console.log(f"Max tokens: {metadata['max_tokens']}", "INFO")
+            if 'provider' in item and item['provider']:
+                self.status_console.log(f"Provider: {item['provider']} ({item.get('model', 'Unknown')})", "INFO")
+
+            # Mark as generated so Ctrl+Enter will use it
+            self.prompts_generated = True
+            self.ok_button.setDefault(True)
+            self.generate_btn.setDefault(False)
+
+            # Update Ctrl+Enter shortcut to trigger OK button
+            try:
+                self.ctrl_enter_shortcut.activated.disconnect()
+            except:
+                pass
+            self.ctrl_enter_shortcut.activated.connect(self.accept_selection)
+
+            # Update shortcut hint label
+            self.shortcut_label.setText("<small style='color: gray;'>Shortcuts: Ctrl+Enter to use selected prompt, Esc to close</small>")
 
     def accept_selection(self):
         """Accept the selected prompt."""
@@ -1273,20 +1324,30 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
                     "No Selection",
                     "Please select a prompt from the list.\n\nDouble-click a prompt or select one and click OK."
                 )
-        else:  # History tab
-            current_item = self.history_list.currentItem()
-            if current_item:
-                # Check if it's an error entry
-                prompt = current_item.data(Qt.UserRole)
-                if prompt and prompt.startswith("Error:"):
+        else:  # History tab - use the selected item from DialogHistoryWidget
+            # Get the selected history item from the table
+            selected_rows = self.history_widget.history_table.selectedItems()
+            if selected_rows:
+                # Get the full item data from the first column
+                row = selected_rows[0].row()
+                item_data = self.history_widget.history_table.item(row, 0).data(Qt.UserRole)
+                if item_data:
+                    prompt = item_data.get('response', '')
+                    if prompt:
+                        self.promptSelected.emit(prompt)
+                        self.accept()
+                    else:
+                        QMessageBox.warning(
+                            self,
+                            "Invalid Entry",
+                            "This history entry doesn't contain a valid prompt."
+                        )
+                else:
                     QMessageBox.warning(
                         self,
-                        "Error Entry Selected",
-                        "You've selected an error entry. Please select a valid prompt from the history."
+                        "No Selection",
+                        "Please select a prompt from the history.\n\nDouble-click a prompt or select one and click OK."
                     )
-                    return
-                self.promptSelected.emit(prompt)
-                self.accept()
             else:
                 QMessageBox.warning(
                     self,
@@ -1294,76 +1355,6 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
                     "Please select a prompt from the history.\n\nDouble-click a prompt or select one and click OK."
                 )
 
-    def save_to_history(self, input_text: str, prompts: List[str], error: str = None):
-        """Save generated prompts to history."""
-        entry = {
-            "timestamp": datetime.now().isoformat(),
-            "input": input_text,
-            "prompts": prompts,
-            "provider": self.llm_provider_combo.currentText(),
-            "model": self.llm_model_combo.currentText(),
-            "error": error  # Track if there was an error
-        }
-        self.prompt_history.append(entry)
-        self.save_history()
-
-    def load_history(self) -> List[Dict]:
-        """Load prompt history from file."""
-        if self.config:
-            history_file = Path(self.config.config_dir) / "prompt_history.json"
-            if history_file.exists():
-                try:
-                    with open(history_file, 'r') as f:
-                        return json.load(f)
-                except Exception as e:
-                    logger.error(f"Failed to load prompt history: {e}")
-        return []
-
-    def save_history(self):
-        """Save prompt history to file."""
-        if self.config:
-            history_file = Path(self.config.config_dir) / "prompt_history.json"
-            try:
-                with open(history_file, 'w') as f:
-                    json.dump(self.prompt_history, f, indent=2)
-            except Exception as e:
-                logger.error(f"Failed to save prompt history: {e}")
-
-    def update_history_list(self):
-        """Update the history list widget."""
-        self.history_list.clear()
-        for entry in reversed(self.prompt_history):  # Show newest first
-            timestamp = entry.get("timestamp", "")
-            input_text = entry.get("input", "")[:50]
-            prompts = entry.get("prompts", [])
-            error = entry.get("error")
-
-            if error:
-                # Show error entry
-                display_text = f"[{timestamp[:10]}] ❌ ERROR: {input_text}... - {error[:50]}..."
-                item = QListWidgetItem(display_text)
-                item.setData(Qt.UserRole, f"Error: {error}")
-                item.setForeground(Qt.red)
-                self.history_list.addItem(item)
-            else:
-                # Show successful entries
-                for prompt in prompts:
-                    display_text = f"[{timestamp[:10]}] {input_text}... → {prompt[:80]}..."
-                    item = QListWidgetItem(display_text)
-                    item.setData(Qt.UserRole, prompt)
-                    self.history_list.addItem(item)
-
-    def clear_history(self):
-        """Clear the prompt history."""
-        reply = QMessageBox.question(
-            self, "Clear History",
-            "Are you sure you want to clear all prompt history?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        if reply == QMessageBox.Yes:
-            self.prompt_history.clear()
-            self.save_history()
-            self.update_history_list()
 
     def save_last_session(self):
         """Save the current session state."""
@@ -1393,7 +1384,7 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
                 with open(session_file, 'w') as f:
                     json.dump(session, f, indent=2)
             except Exception as e:
-                self.logger.error(f"Failed to save session: {e}")
+                logger.error(f"Failed to save session: {e}")
 
     def load_last_session(self) -> Dict:
         """Load the last session state."""

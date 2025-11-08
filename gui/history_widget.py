@@ -24,9 +24,6 @@ class DialogHistoryWidget(QWidget):
         super().__init__(parent)
         self.dialog_name = dialog_name
         self.history = []  # Full history loaded from file
-        self.displayed_count = 0  # Number of items currently displayed
-        self.initial_load_count = 100  # Load first 100 items
-        self.pagination_size = 25  # Load 25 more at a time
         self.settings = QSettings("ImageAI", f"{dialog_name}_history")
         self.init_ui()
         self.load_history()
@@ -69,12 +66,6 @@ class DialogHistoryWidget(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeToContents)  # Provider
 
         top_layout.addWidget(self.history_table)
-
-        # Add "Load More" button for pagination
-        self.load_more_btn = QPushButton("Load 25 More Items...")
-        self.load_more_btn.clicked.connect(self.load_more_items)
-        self.load_more_btn.setVisible(False)  # Hidden initially
-        top_layout.addWidget(self.load_more_btn)
 
         splitter.addWidget(top_widget)
 
@@ -127,22 +118,16 @@ class DialogHistoryWidget(QWidget):
         }
 
         self.history.insert(0, entry)  # Add to beginning
-        # Increment displayed count when adding new item (so it shows immediately)
-        if self.displayed_count > 0:
-            self.displayed_count += 1
         self.refresh_table()
-        self._update_load_more_button()
         self.save_history()
 
         return entry
 
     def refresh_table(self):
-        """Refresh the history table with current data (pagination-aware)."""
-        # Only display items up to displayed_count for performance
-        items_to_show = self.history[:self.displayed_count] if self.displayed_count > 0 else self.history
-        self.history_table.setRowCount(len(items_to_show))
+        """Refresh the history table with current data."""
+        self.history_table.setRowCount(len(self.history))
 
-        for row, item in enumerate(items_to_show):
+        for row, item in enumerate(self.history):
             # Date & Time
             timestamp = item.get('timestamp', '')
             datetime_str = ''
@@ -181,13 +166,8 @@ class DialogHistoryWidget(QWidget):
             provider_item = QTableWidgetItem(provider_text)
             self.history_table.setItem(row, 3, provider_item)
 
-        # Update label showing displayed vs total
-        total = len(self.history)
-        displayed = len(items_to_show)
-        if displayed < total:
-            self.history_label.setText(f"History ({displayed} of {total} items shown)")
-        else:
-            self.history_label.setText(f"History ({total} items)")
+        # Update label with total count
+        self.history_label.setText(f"History ({len(self.history)} items)")
 
         # Sort by date descending (newest first)
         self.history_table.sortByColumn(0, Qt.DescendingOrder)
@@ -221,9 +201,7 @@ class DialogHistoryWidget(QWidget):
     def clear_history(self):
         """Clear all history."""
         self.history = []
-        self.displayed_count = 0
         self.refresh_table()
-        self._update_load_more_button()
         self.save_history()
         self.detail_view.clear()
 
@@ -249,7 +227,7 @@ class DialogHistoryWidget(QWidget):
             print(f"Failed to save history: {e}")
 
     def load_history(self):
-        """Load history from settings (pagination-optimized)."""
+        """Load history from settings."""
         # Use platform-specific path
         if sys.platform == "win32":
             history_file = Path(os.environ.get('APPDATA', '')) / 'ImageAI' / f'{self.dialog_name}_history.json'
@@ -262,31 +240,10 @@ class DialogHistoryWidget(QWidget):
             try:
                 with open(history_file, 'r') as f:
                     self.history = json.load(f)
-                    # Load only first batch initially for fast startup
-                    self.displayed_count = min(self.initial_load_count, len(self.history))
                     self.refresh_table()
-                    self._update_load_more_button()
             except Exception as e:
                 print(f"Failed to load history: {e}")
                 self.history = []
-                self.displayed_count = 0
-
-    def load_more_items(self):
-        """Load next batch of history items (smart pagination)."""
-        new_count = min(self.displayed_count + self.pagination_size, len(self.history))
-        if new_count > self.displayed_count:
-            self.displayed_count = new_count
-            self.refresh_table()
-            self._update_load_more_button()
-
-    def _update_load_more_button(self):
-        """Update Load More button visibility and text."""
-        remaining = len(self.history) - self.displayed_count
-        if remaining > 0:
-            self.load_more_btn.setText(f"Load {min(self.pagination_size, remaining)} More Items ({remaining} remaining)")
-            self.load_more_btn.setVisible(True)
-        else:
-            self.load_more_btn.setVisible(False)
 
     def export_history(self):
         """Export history to a file."""

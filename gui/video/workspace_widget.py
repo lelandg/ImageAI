@@ -1461,7 +1461,7 @@ class WorkspaceWidget(QWidget):
         self.generate_start_end_prompts_btn.setEnabled(False)
         controls_layout.addWidget(self.generate_start_end_prompts_btn)
 
-        self.generate_images_btn = QPushButton("Generate &Images")  # Alt+I (conflicts with Insert, will use Ctrl+Shift+I)
+        self.generate_images_btn = QPushButton("Generate Images")  # No Alt key, use Ctrl+Shift+I
         self.generate_images_btn.setToolTip("Generate images for all scenes with prompts (Ctrl+Shift+I)")
         self.generate_images_btn.setShortcut("Ctrl+Shift+I")
         self.generate_images_btn.clicked.connect(self.generate_images)

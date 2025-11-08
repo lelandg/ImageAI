@@ -825,8 +825,8 @@ class MainWindow(QMainWindow):
         buttons_layout.setSpacing(3)
 
         # All buttons in one row - reordered as requested
-        self.btn_generate_prompts = QPushButton("Generate &Prompts")
-        self.btn_generate_prompts.setToolTip("Generate multiple prompt variations (Alt+P)")
+        self.btn_generate_prompts = QPushButton("Genera&te Prompts")
+        self.btn_generate_prompts.setToolTip("Generate multiple prompt variations (Alt+T)")
         buttons_layout.addWidget(self.btn_generate_prompts)
 
         self.btn_enhance_prompt = QPushButton("&Enhance")
