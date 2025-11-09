@@ -69,7 +69,7 @@ class SocialSizesTreeDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Social Media Image Sizes")
+        self.setWindowTitle("Image Size Presets")
         self.resize(900, 650)
         self._selected_resolution: Optional[str] = None
         self._selected_platform: Optional[str] = None
@@ -196,90 +196,131 @@ class SocialSizesTreeDialog(QDialog):
         escape_shortcut.activated.connect(self.reject)
 
     def _load_data(self):
-        # Load markdown
+        """Load size presets from multiple markdown files organized by category."""
         repo_root = Path(__file__).resolve().parents[1]
-        md_path = repo_root / "Plans" / "social-media-image-sizes-2025.md"
-        if not md_path.exists():
-            show_warning(self, "Not Found", f"Could not find {md_path}")
-            return
-        try:
-            text = md_path.read_text(encoding="utf-8", errors="ignore")
-        except Exception as e:
-            show_error(self, "Read Error", f"Could not read {md_path}", exception=e)
-            return
 
-        headers, rows = _parse_markdown_table(text)
-        if not headers or not rows:
-            show_warning(self, "Parse Error", "No table rows found in sizes document.")
-            logger.warning("SocialSizesTreeDialog: No table rows parsed from %s", md_path)
-            return
+        # Define categories and their markdown files
+        categories = [
+            {
+                "name": "📱 Social Media",
+                "file": "social-media-image-sizes-2025.md",
+                "icon_name": None
+            },
+            {
+                "name": "🔖 Favicon Sizes",
+                "file": "favicon-sizes.md",
+                "icon_name": None
+            },
+            {
+                "name": "🖼️ Common Sizes",
+                "file": "common-sizes.md",
+                "icon_name": None
+            }
+        ]
 
-        # Map columns by normalized name
-        def norm(s: str) -> str:
-            s = (s or '').lower()
-            return re.sub(r"[^a-z0-9]+", "", s)
+        total_loaded = 0
 
-        name_to_idx = {norm(h): i for i, h in enumerate(headers)}
-        idx_platform = name_to_idx.get("platform")
-        idx_type = name_to_idx.get("imagetype")
-        idx_size = name_to_idx.get("recommendedsizepx") or name_to_idx.get("recommendedsize")
-        idx_ratio = name_to_idx.get("aspectratio")
-        idx_notes = name_to_idx.get("notes") if "notes" in name_to_idx else -1
+        for category_info in categories:
+            category_name = category_info["name"]
+            md_path = repo_root / "Plans" / category_info["file"]
 
-        if None in (idx_platform, idx_type, idx_size, idx_ratio):
-            show_warning(self, "Parse Error", f"Unexpected table headers: {headers}")
-            logger.warning("SocialSizesTreeDialog: Header mapping failed. Headers=%s", headers)
-            return
-
-        # Build tree structure
-        platform_items: Dict[str, QTreeWidgetItem] = {}
-
-        for row in rows:
-            platform = row[idx_platform] if idx_platform >= 0 else ""
-            img_type = row[idx_type] if idx_type >= 0 else ""
-            size_text = row[idx_size] if idx_size >= 0 else ""
-            ratio = row[idx_ratio] if idx_ratio >= 0 else ""
-            notes = row[idx_notes] if idx_notes >= 0 else ""
-
-            if not platform:
+            if not md_path.exists():
+                logger.warning(f"Size file not found: {md_path}")
                 continue
 
-            # Get or create platform item
-            if platform not in platform_items:
-                platform_item = QTreeWidgetItem(self.tree)
-                platform_item.setText(0, platform)
-                platform_item.setFlags(platform_item.flags() & ~Qt.ItemIsSelectable)
-                # Set icon if available
-                if platform in self._platform_icons:
-                    platform_item.setIcon(0, self._platform_icons[platform])
-                # Bold font for platform headers
-                font = QFont()
-                font.setBold(True)
-                platform_item.setFont(0, font)
-                platform_items[platform] = platform_item
-            else:
-                platform_item = platform_items[platform]
+            try:
+                text = md_path.read_text(encoding="utf-8", errors="ignore")
+            except Exception as e:
+                logger.error(f"Could not read {md_path}: {e}")
+                continue
 
-            # Create size item under platform
-            size_item = QTreeWidgetItem(platform_item)
-            size_item.setText(0, img_type)
-            size_item.setText(1, size_text)
-            size_item.setText(2, ratio)
-            size_item.setText(3, notes)
+            headers, rows = _parse_markdown_table(text)
+            if not headers or not rows:
+                logger.warning(f"No table rows parsed from {md_path}")
+                continue
 
-            # Store resolution for quick retrieval
-            resolution = _extract_resolution_px(size_text)
-            size_item.setData(0, Qt.UserRole, resolution)
+            # Map columns by normalized name
+            def norm(s: str) -> str:
+                s = (s or '').lower()
+                return re.sub(r"[^a-z0-9]+", "", s)
 
-            # Make non-editable
-            for col in range(4):
-                size_item.setFlags(size_item.flags() & ~Qt.ItemIsEditable)
+            name_to_idx = {norm(h): i for i, h in enumerate(headers)}
+            idx_platform = name_to_idx.get("platform")
+            idx_type = name_to_idx.get("imagetype")
+            idx_size = name_to_idx.get("recommendedsizepx") or name_to_idx.get("recommendedsize")
+            idx_ratio = name_to_idx.get("aspectratio")
+            idx_notes = name_to_idx.get("notes") if "notes" in name_to_idx else -1
+
+            if None in (idx_platform, idx_type, idx_size, idx_ratio):
+                logger.warning(f"Header mapping failed for {md_path}. Headers={headers}")
+                continue
+
+            # Create category item at top level
+            category_item = QTreeWidgetItem(self.tree)
+            category_item.setText(0, category_name)
+            category_item.setFlags(category_item.flags() & ~Qt.ItemIsSelectable)
+
+            # Bold and larger font for category headers
+            font = QFont()
+            font.setBold(True)
+            font.setPointSize(font.pointSize() + 1)
+            category_item.setFont(0, font)
+
+            # Color category headers
+            category_item.setForeground(0, QBrush(QColor(40, 100, 180)))
+
+            # Build tree structure under this category
+            platform_items: Dict[str, QTreeWidgetItem] = {}
+
+            for row in rows:
+                platform = row[idx_platform] if idx_platform >= 0 else ""
+                img_type = row[idx_type] if idx_type >= 0 else ""
+                size_text = row[idx_size] if idx_size >= 0 else ""
+                ratio = row[idx_ratio] if idx_ratio >= 0 else ""
+                notes = row[idx_notes] if idx_notes >= 0 else ""
+
+                if not platform:
+                    continue
+
+                # Get or create platform item under category
+                platform_key = f"{category_name}::{platform}"
+                if platform_key not in platform_items:
+                    platform_item = QTreeWidgetItem(category_item)
+                    platform_item.setText(0, platform)
+                    platform_item.setFlags(platform_item.flags() & ~Qt.ItemIsSelectable)
+                    # Set icon if available (mainly for social media)
+                    if platform in self._platform_icons:
+                        platform_item.setIcon(0, self._platform_icons[platform])
+                    # Bold font for platform headers
+                    pfont = QFont()
+                    pfont.setBold(True)
+                    platform_item.setFont(0, pfont)
+                    platform_items[platform_key] = platform_item
+                else:
+                    platform_item = platform_items[platform_key]
+
+                # Create size item under platform
+                size_item = QTreeWidgetItem(platform_item)
+                size_item.setText(0, img_type)
+                size_item.setText(1, size_text)
+                size_item.setText(2, ratio)
+                size_item.setText(3, notes)
+
+                # Store resolution for quick retrieval
+                resolution = _extract_resolution_px(size_text)
+                size_item.setData(0, Qt.UserRole, resolution)
+
+                # Make non-editable
+                for col in range(4):
+                    size_item.setFlags(size_item.flags() & ~Qt.ItemIsEditable)
+
+                total_loaded += 1
 
         # Collapse all by default
         self.tree.collapseAll()
 
-        logger.info("SocialSizesTreeDialog: Loaded %d platforms from %s",
-                   len(platform_items), md_path)
+        logger.info("SocialSizesTreeDialog: Loaded %d total size presets from %d categories",
+                   total_loaded, len(categories))
 
     def _apply_filter(self, text: str):
         text = (text or '').lower().strip()

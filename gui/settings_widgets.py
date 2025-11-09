@@ -610,14 +610,17 @@ class ResolutionSelector(QWidget):
         logger.info(f"  Last edited field: {self._last_edited}")
 
         if self._using_aspect_ratio:
-            # Recalculate based on which field was last edited
-            # Force=True to ensure recalculation happens when aspect ratio changes
-            if self._last_edited == "width":
-                logger.debug(f"Recalculating from width: {current_width}px")
+            # NEW BEHAVIOR: Always preserve the larger dimension
+            # Determine which dimension is larger
+            if current_width >= current_height:
+                # Width is larger or equal - keep width, recalculate height
+                logger.info(f"  Width ({current_width}px) >= Height ({current_height}px) - preserving width")
                 self._on_width_changed(current_width, force=True)
             else:
-                logger.debug(f"Recalculating from height: {current_height}px")
+                # Height is larger - keep height, recalculate width
+                logger.info(f"  Height ({current_height}px) > Width ({current_width}px) - preserving height")
                 self._on_height_changed(current_height, force=True)
+
             self._update_info_text()
             # Calculate suggested resolution based on aspect ratio
             self._update_suggested_resolution(ratio)
@@ -836,7 +839,9 @@ class ResolutionSelector(QWidget):
         else:
             self._custom_height = self._custom_width
 
+        # Display initial resolution
         self._update_info_text()
+        logger.info(f"ResolutionSelector: Initialized with {self._custom_width}×{self._custom_height}px (aspect ratio: {self._aspect_ratio})")
         # Emit signal to trigger initial upscaling check
         self.resolutionChanged.emit("auto")
 

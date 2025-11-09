@@ -964,8 +964,8 @@ class MainWindow(QMainWindow):
         social_label.setMaximumHeight(20)
         social_v_layout.addWidget(social_label)
 
-        self.btn_social_sizes = QPushButton("&Social Sizes…")
-        self.btn_social_sizes.setToolTip("Browse common social media sizes and apply")
+        self.btn_social_sizes = QPushButton("&Size Presets…")
+        self.btn_social_sizes.setToolTip("Browse size presets: social media, favicon, web, print, and more")
         self.btn_social_sizes.clicked.connect(self._open_social_sizes_dialog)
         social_v_layout.addWidget(self.btn_social_sizes)
 
