@@ -954,11 +954,17 @@ class VideoGenerationThread(QThread):
                 use_reference_images = None
                 use_start_frame = Path(seed_image_path) if seed_image_path and Path(seed_image_path).exists() else None
 
-                # Snap duration to Veo-compatible value (4, 6, or 8 seconds)
-                veo_duration = snap_duration_to_veo(scene.duration_sec)
+                # CRITICAL: Veo 3.0 and 3.1 ONLY support 8-second clips
+                # Use 8 seconds for generation, then trim during final render
+                veo_duration = 8
                 if veo_duration != scene.duration_sec:
-                    logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s for Veo 3 compatibility")
-                    self.progress_update.emit(14, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3 requires 4/6/8s)")
+                    logger.info(f"Generating 8-second clip for Veo 3.0/3.1 (scene duration: {scene.duration_sec}s)")
+                    logger.info(f"   Clip will be trimmed to {scene.duration_sec}s during final render")
+                    self.progress_update.emit(14, f"Generating 8s clip (will trim to {scene.duration_sec}s in final video)")
+
+                # Store the intended duration in scene metadata for trimming later
+                scene.metadata['intended_duration_sec'] = scene.duration_sec
+                scene.metadata['generated_duration_sec'] = veo_duration
 
                 if use_start_frame:
                     logger.info(f"🔄 Using 'Image-to-Video' mode with start frame (reference images DISABLED)")
@@ -972,10 +978,17 @@ class VideoGenerationThread(QThread):
                 selected_model = VeoModel.VEO_3_1_GENERATE
                 use_reference_images = reference_image_paths
                 use_start_frame = None  # No start frame in reference mode
-                veo_duration = 8  # Force 8 seconds for reference_to_video mode
+
+                # CRITICAL: Veo 3.1 with references ONLY supports 8-second clips
+                veo_duration = 8
                 if veo_duration != scene.duration_sec:
-                    logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s (Veo 3.1 reference mode requires 8s)")
-                    self.progress_update.emit(14, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3.1 references require 8s)")
+                    logger.info(f"Generating 8-second clip for Veo 3.1 references (scene duration: {scene.duration_sec}s)")
+                    logger.info(f"   Clip will be trimmed to {scene.duration_sec}s during final render")
+                    self.progress_update.emit(14, f"Generating 8s clip (will trim to {scene.duration_sec}s in final video)")
+
+                # Store the intended duration in scene metadata for trimming later
+                scene.metadata['intended_duration_sec'] = scene.duration_sec
+                scene.metadata['generated_duration_sec'] = veo_duration
                 logger.info(f"🔄 Using Veo 3.1 'Ingredients to Video' mode ({len(reference_image_paths)} reference(s))")
                 logger.info(f"   Reference images will guide character/style (no start/end frames)")
                 self.progress_update.emit(12, f"Using Veo 3.1 'Ingredients to Video' with {len(reference_image_paths)} ref(s)...")
@@ -984,11 +997,17 @@ class VideoGenerationThread(QThread):
                 use_reference_images = None
                 use_start_frame = None
 
-                # Snap duration to Veo-compatible value (4, 6, or 8 seconds)
-                veo_duration = snap_duration_to_veo(scene.duration_sec)
+                # CRITICAL: Veo 3.0 and 3.1 ONLY support 8-second clips
+                # Use 8 seconds for generation, then trim during final render
+                veo_duration = 8
                 if veo_duration != scene.duration_sec:
-                    logger.info(f"Snapped duration from {scene.duration_sec}s to {veo_duration}s for Veo 3 compatibility")
-                    self.progress_update.emit(14, f"Adjusted duration from {scene.duration_sec}s to {veo_duration}s (Veo 3 requires 4/6/8s)")
+                    logger.info(f"Generating 8-second clip for Veo 3.0/3.1 (scene duration: {scene.duration_sec}s)")
+                    logger.info(f"   Clip will be trimmed to {scene.duration_sec}s during final render")
+                    self.progress_update.emit(14, f"Generating 8s clip (will trim to {scene.duration_sec}s in final video)")
+
+                # Store the intended duration in scene metadata for trimming later
+                scene.metadata['intended_duration_sec'] = scene.duration_sec
+                scene.metadata['generated_duration_sec'] = veo_duration
 
                 logger.info(f"🔄 Using 'Text-to-Video' mode (no references, no frames)")
                 self.progress_update.emit(12, f"Using Text-to-Video mode...")
@@ -1225,9 +1244,43 @@ class VideoGenerationThread(QThread):
             self.generation_complete.emit(False, f"FFmpeg rendering failed: {e}")
     
     def _render_with_veo(self):
-        """Render video using Veo API"""
-        # Implementation from original file
-        pass
+        """Render video from Veo-generated clips with proper trimming"""
+        from core.video.ffmpeg_renderer import FFmpegRenderer, RenderSettings
+        from pathlib import Path
+
+        try:
+            renderer = FFmpegRenderer()
+
+            # Prepare render settings
+            settings = RenderSettings(
+                resolution="1920x1080",
+                fps=24,
+                aspect_ratio=self.kwargs.get('aspect_ratio', '16:9'),
+                transition_duration=0  # No transitions for Veo clips
+            )
+
+            # Define output path
+            self.project.project_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = self.project.project_dir / f"{self.project.name}_veo_{timestamp}.mp4"
+
+            # Progress callback
+            def progress_callback(percent, status):
+                self.progress_update.emit(int(percent), status)
+
+            # Render from Veo clips with trimming
+            self.progress_update.emit(0, "Starting Veo clip rendering...")
+            rendered_path = renderer.render_from_clips(
+                self.project,
+                output_path,
+                settings,
+                progress_callback
+            )
+
+            self.generation_complete.emit(True, f"Video saved to: {rendered_path}")
+
+        except Exception as e:
+            self.generation_complete.emit(False, f"Veo rendering failed: {e}")
     
     def _preview_video(self):
         """Generate preview video"""

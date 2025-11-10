@@ -134,7 +134,166 @@ class FFmpegRenderer:
             shutil.copy2(final_path, output_path)
             
         return output_path
-    
+
+    def render_from_clips(self,
+                         project: VideoProject,
+                         output_path: Path,
+                         settings: Optional[RenderSettings] = None,
+                         progress_callback: Optional[callable] = None,
+                         add_karaoke: bool = False) -> Path:
+        """
+        Render final video from Veo-generated clips with proper trimming.
+
+        This method handles Veo clips that may be longer than the intended scene duration
+        (e.g., Veo 3.0/3.1 always generate 8-second clips but scenes may be shorter).
+
+        Args:
+            project: Video project with scenes containing video_clip paths
+            output_path: Output video file path
+            settings: Render settings (uses defaults if None)
+            progress_callback: Callback for progress updates
+            add_karaoke: Whether to add karaoke overlay
+
+        Returns:
+            Path to rendered video
+        """
+        if not settings:
+            settings = RenderSettings()
+
+        # Create temp directory for processing
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+
+            # Prepare trimmed clips
+            trimmed_clips = []
+            for i, scene in enumerate(project.scenes):
+                if not scene.video_clip or not scene.video_clip.exists():
+                    self.logger.warning(f"Scene {scene.id} has no video clip, skipping")
+                    continue
+
+                # Get intended duration from metadata (fallback to scene.duration_sec)
+                intended_duration = scene.metadata.get('intended_duration_sec', scene.duration_sec)
+                generated_duration = scene.metadata.get('generated_duration_sec', 8.0)
+
+                # Create trimmed clip if needed
+                if abs(intended_duration - generated_duration) > 0.01:
+                    # Trim the clip to intended duration
+                    trimmed_path = temp_path / f"trimmed_scene_{i}.mp4"
+                    self._trim_clip(
+                        scene.video_clip,
+                        trimmed_path,
+                        intended_duration
+                    )
+                    trimmed_clips.append(trimmed_path)
+                    self.logger.info(f"Trimmed scene {i} from {generated_duration}s to {intended_duration}s")
+                else:
+                    # Duration matches, use as-is
+                    trimmed_clips.append(scene.video_clip)
+
+                if progress_callback:
+                    progress = int((i + 1) / len(project.scenes) * 30)  # 0-30% for trimming
+                    progress_callback(progress, f"Preparing clip {i+1}/{len(project.scenes)}")
+
+            if not trimmed_clips:
+                raise ValueError("No video clips available to render")
+
+            # Create concat file for FFmpeg
+            concat_file = temp_path / "concat.txt"
+            with open(concat_file, 'w') as f:
+                for clip_path in trimmed_clips:
+                    f.write(f"file '{clip_path.absolute()}'\n")
+
+            self.logger.info(f"Created concat file with {len(trimmed_clips)} clips")
+
+            # Concatenate all clips
+            if progress_callback:
+                progress_callback(40, "Concatenating video clips...")
+
+            concat_video_path = temp_path / "concatenated.mp4"
+            self._concatenate_clips(concat_file, concat_video_path, settings)
+
+            if progress_callback:
+                progress_callback(70, "Clips concatenated")
+
+            # Add audio if available
+            final_path = concat_video_path
+            if project.audio_tracks and project.audio_tracks[0].file_path:
+                if progress_callback:
+                    progress_callback(75, "Adding audio track...")
+                audio_video_path = temp_path / "with_audio.mp4"
+                self._add_audio_track(
+                    concat_video_path, project.audio_tracks[0], audio_video_path, settings
+                )
+                final_path = audio_video_path
+
+            # Add karaoke overlay if requested
+            if add_karaoke and project.karaoke_config and project.midi_timing_data:
+                if progress_callback:
+                    progress_callback(85, "Adding karaoke overlay...")
+                karaoke_path = temp_path / "karaoke_final.mp4"
+                self._add_karaoke_overlay(
+                    final_path, project, karaoke_path, settings
+                )
+                final_path = karaoke_path
+
+            # Copy to output location
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(final_path, output_path)
+
+            if progress_callback:
+                progress_callback(100, f"Video rendered: {output_path.name}")
+
+        self.logger.info(f"Final video rendered: {output_path}")
+        return output_path
+
+    def _trim_clip(self, input_path: Path, output_path: Path, duration: float):
+        """
+        Trim a video clip to specified duration.
+
+        Args:
+            input_path: Input video path
+            output_path: Output trimmed video path
+            duration: Target duration in seconds
+        """
+        cmd = [
+            self.ffmpeg_path,
+            "-i", str(input_path),
+            "-t", str(duration),  # Trim to duration
+            "-c:v", "copy",  # Copy video codec (no re-encoding for speed)
+            "-c:a", "copy",  # Copy audio codec
+            "-y",
+            str(output_path)
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        if result.returncode != 0:
+            self.logger.error(f"FFmpeg trim error: {result.stderr}")
+            raise subprocess.CalledProcessError(result.returncode, cmd)
+
+    def _concatenate_clips(self, concat_file: Path, output_path: Path, settings: RenderSettings):
+        """
+        Concatenate video clips using FFmpeg concat demuxer.
+
+        Args:
+            concat_file: Path to concat.txt file
+            output_path: Output video path
+            settings: Render settings
+        """
+        cmd = [
+            self.ffmpeg_path,
+            "-f", "concat",
+            "-safe", "0",
+            "-i", str(concat_file),
+            "-c", "copy",  # Copy codecs (no re-encoding)
+            "-y",
+            str(output_path)
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            self.logger.error(f"FFmpeg concat error: {result.stderr}")
+            raise subprocess.CalledProcessError(result.returncode, cmd)
+
     def _prepare_ken_burns_images(self,
                                   scenes: List[Scene],
                                   temp_dir: Path,
