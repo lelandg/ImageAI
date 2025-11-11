@@ -10,14 +10,15 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QTextEdit, QGroupBox, QFormLayout, QMessageBox,
     QListWidget, QListWidgetItem, QWidget, QTabWidget, QFileDialog,
-    QTextBrowser, QScrollArea, QSizePolicy, QLineEdit
+    QTextBrowser, QScrollArea, QSizePolicy, QLineEdit, QCheckBox
 )
-from PySide6.QtCore import Qt, Signal, QSettings
+from PySide6.QtCore import Qt, Signal, QSettings, QTimer
 from PySide6.QtGui import QFont, QKeySequence
 
 from core.prompt_data_loader import PromptDataLoader
 from core.preset_loader import PresetLoader
 from core.config import ConfigManager
+from core.tag_searcher import TagSearcher
 
 logger = logging.getLogger(__name__)
 
@@ -180,6 +181,7 @@ class PromptBuilder(QDialog):
         self.data_loader = PromptDataLoader()
         self.preset_loader = PresetLoader()
         self.config = ConfigManager()
+        self.tag_searcher = TagSearcher()
 
         # Settings for window position
         self.settings = QSettings("ImageAI", "PromptBuilder")
@@ -188,6 +190,14 @@ class PromptBuilder(QDialog):
         self.history_file = self.config.config_dir / "prompt_builder_history.json"
         self.history: List[Dict] = []
         self._load_history()
+
+        # Store original combo box items for filter restoration
+        self.original_combo_items: Dict[str, List[str]] = {}
+
+        # Search debounce timer
+        self.search_timer = QTimer()
+        self.search_timer.setSingleShot(True)
+        self.search_timer.timeout.connect(self._execute_search)
 
         self.setWindowTitle("Prompt Builder")
         self.setMinimumSize(900, 700)
@@ -224,6 +234,10 @@ class PromptBuilder(QDialog):
         # Preset panel
         preset_panel = self._create_preset_panel()
         builder_layout.addWidget(preset_panel)
+
+        # Search panel
+        search_panel = self._create_search_panel()
+        builder_layout.addWidget(search_panel)
 
         # Instructions
         instructions = QLabel(
@@ -833,16 +847,17 @@ class PromptBuilder(QDialog):
         save_btn = QPushButton("💾 Save as Preset")
         save_btn.setToolTip("Save current settings as a custom preset")
         save_btn.clicked.connect(self._on_save_custom_preset)
+        save_btn.setAutoDefault(False)  # Not the default action
         save_btn.setStyleSheet("""
             QPushButton {
                 padding: 6px 12px;
-                border: 2px solid #4CAF50;
+                border: 1px solid #4CAF50;
                 border-radius: 4px;
-                background-color: #E8F5E9;
-                font-weight: bold;
+                background-color: #F1F8F4;
+                font-weight: normal;
             }
             QPushButton:hover {
-                background-color: #C8E6C9;
+                background-color: #E8F5E9;
             }
         """)
         layout.addWidget(save_btn)
@@ -851,6 +866,87 @@ class PromptBuilder(QDialog):
 
         preset_group.setLayout(layout)
         return preset_group
+
+    def _create_search_panel(self) -> QGroupBox:
+        """Create the semantic search panel.
+
+        Returns:
+            QGroupBox containing the search bar and controls
+        """
+        search_group = QGroupBox("🔍 Smart Search")
+
+        # Main layout
+        layout = QVBoxLayout()
+
+        # Top row: search bar and buttons
+        search_row = QHBoxLayout()
+
+        # Search input
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search artists, styles, moods... (e.g., 'Mad Magazine', 'cyberpunk', '1960s') - Press Enter or enable Auto-filter")
+        self.search_input.setMinimumWidth(450)
+        self.search_input.textChanged.connect(self._on_search_text_changed)
+        self.search_input.returnPressed.connect(self._on_search_enter_pressed)
+        search_row.addWidget(self.search_input, stretch=3)
+
+        # Auto-filter checkbox
+        self.auto_filter_check = QCheckBox("Auto-filter")
+        self.auto_filter_check.setToolTip("Automatically filter as you type (300ms delay)")
+        self.auto_filter_check.setChecked(False)  # Default: manual trigger
+        self.auto_filter_check.stateChanged.connect(self._on_auto_filter_changed)
+        search_row.addWidget(self.auto_filter_check)
+
+        # Search button (manual trigger)
+        self.search_btn = QPushButton("Search")
+        self.search_btn.setToolTip("Filter dropdowns based on search query (or press Enter)")
+        self.search_btn.setAutoDefault(False)
+        self.search_btn.clicked.connect(self._trigger_manual_search)
+        self.search_btn.setStyleSheet("""
+            QPushButton {
+                padding: 6px 16px;
+                border: 2px solid #2196F3;
+                border-radius: 4px;
+                background-color: #E3F2FD;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #BBDEFB;
+            }
+        """)
+        search_row.addWidget(self.search_btn)
+
+        # Clear filters button
+        self.clear_filters_btn = QPushButton("Clear")
+        self.clear_filters_btn.setToolTip("Restore all items and clear search")
+        self.clear_filters_btn.setAutoDefault(False)
+        self.clear_filters_btn.clicked.connect(self._clear_search_filters)
+        self.clear_filters_btn.setEnabled(False)  # Disabled until search is active
+        self.clear_filters_btn.setStyleSheet("""
+            QPushButton {
+                padding: 6px 12px;
+                border: 2px solid #757575;
+                border-radius: 4px;
+                background-color: #F5F5F5;
+            }
+            QPushButton:hover {
+                background-color: #E0E0E0;
+            }
+            QPushButton:disabled {
+                border-color: #BDBDBD;
+                color: #9E9E9E;
+            }
+        """)
+        search_row.addWidget(self.clear_filters_btn)
+
+        layout.addLayout(search_row)
+
+        # Result indicator label
+        self.search_results_label = QLabel("💡 Tip: Type a search term and press Enter, or enable Auto-filter")
+        self.search_results_label.setStyleSheet("color: #666; font-style: italic; padding: 4px;")
+        layout.addWidget(self.search_results_label)
+
+        search_group.setLayout(layout)
+        return search_group
 
     def _on_preset_selected(self, index: int):
         """Handle preset combobox selection.
@@ -1239,6 +1335,235 @@ class PromptBuilder(QDialog):
             event.accept()
         else:
             super().keyPressEvent(event)
+
+    def _save_combo_items(self):
+        """Save original combo box items for filter restoration."""
+        # Map category names to combo boxes
+        combo_mapping = {
+            'artists': self.artist_combo,
+            'styles': self.style_combo,
+            'mediums': self.medium_combo,
+            'lighting': self.lighting_combo,
+            'moods': self.mood_combo
+        }
+
+        for category, combo in combo_mapping.items():
+            items = [combo.itemText(i) for i in range(combo.count())]
+            self.original_combo_items[category] = items
+
+        logger.debug("Saved original combo items for search filtering")
+
+    def _on_search_text_changed(self, text: str):
+        """Handle search text changes.
+
+        Args:
+            text: Current search text
+        """
+        # Clear search if text is empty
+        if not text or not text.strip():
+            self.search_timer.stop()
+            if self.original_combo_items:  # Only clear if we've filtered before
+                self._clear_search_filters()
+            else:
+                # Just update the tip label
+                self.search_results_label.setText("💡 Tip: Type a search term and press Enter, or enable Auto-filter")
+            return
+
+        # If auto-filter is enabled, use debounced search
+        if self.auto_filter_check.isChecked():
+            self.search_timer.stop()
+            self.search_timer.start(300)  # 300ms delay
+            self.search_results_label.setText("⏱️ Typing...")
+        else:
+            # Manual mode - just show instruction
+            self.search_results_label.setText(f"💡 Press Enter or click Search to filter results for '{text.strip()}'")
+
+    def _on_auto_filter_changed(self, state: int):
+        """Handle auto-filter checkbox state change.
+
+        Args:
+            state: Checkbox state
+        """
+        if state == Qt.Checked:
+            # Auto-filter enabled - trigger search if there's text
+            text = self.search_input.text().strip()
+            if text:
+                self.search_timer.stop()
+                self.search_timer.start(300)
+                self.search_results_label.setText("⏱️ Auto-filter enabled, searching...")
+        else:
+            # Auto-filter disabled - stop any pending search
+            self.search_timer.stop()
+            text = self.search_input.text().strip()
+            if text:
+                self.search_results_label.setText(f"💡 Press Enter or click Search to filter results for '{text}'")
+            else:
+                self.search_results_label.setText("💡 Tip: Type a search term and press Enter, or enable Auto-filter")
+
+    def _on_search_enter_pressed(self):
+        """Handle Enter key pressed in search box."""
+        self._trigger_manual_search()
+
+    def _trigger_manual_search(self):
+        """Manually trigger search (from button or Enter key)."""
+        self.search_timer.stop()  # Cancel any pending auto-search
+        text = self.search_input.text().strip()
+        if text:
+            self.search_results_label.setText("🔍 Searching...")
+            self._execute_search()
+        else:
+            self.search_results_label.setText("⚠️ Please enter a search term")
+
+    def _execute_search(self):
+        """Execute the search (called by timer or manual trigger)."""
+        text = self.search_input.text().strip()
+        if text:
+            self._perform_search(text)
+
+    def _perform_search(self, query: str):
+        """Perform semantic search and filter combo boxes.
+
+        Args:
+            query: Search query
+        """
+        try:
+            # Save original items if not already saved
+            if not self.original_combo_items:
+                self._save_combo_items()
+                logger.info("Saved original combo items before first search")
+
+            if not self.tag_searcher.loaded:
+                logger.warning("Tag searcher not loaded, cannot perform search")
+                self.search_results_label.setText("⚠️ Search unavailable (metadata not loaded)")
+                return
+
+            # Search across all categories
+            logger.debug(f"Performing search for: '{query}'")
+            results_by_category = self.tag_searcher.search_by_category(
+                query=query,
+                max_per_category=50,  # Show up to 50 results per category
+                min_score=5.0
+            )
+
+            # Map category names to combo boxes
+            combo_mapping = {
+                'artists': self.artist_combo,
+                'styles': self.style_combo,
+                'mediums': self.medium_combo,
+                'lighting': self.lighting_combo,
+                'moods': self.mood_combo
+            }
+
+            # Filter each combo box
+            total_results = 0
+            results_text_parts = []
+
+            for category, combo in combo_mapping.items():
+                if category in results_by_category:
+                    results = results_by_category[category]
+                    matched_items = [r.item for r in results]
+
+                    # Add empty option if not present
+                    if "" not in matched_items:
+                        matched_items.insert(0, "")
+
+                    # Update combo with filtered items
+                    current_text = combo.currentText()
+                    combo.blockSignals(True)
+                    combo.clear()
+                    combo.addItems(matched_items)
+
+                    # Restore selection if still available
+                    if current_text in matched_items:
+                        combo.setCurrentText(current_text)
+                    else:
+                        combo.setCurrentIndex(0)
+
+                    combo.blockSignals(False)
+
+                    # Track results
+                    total_results += len(results)
+                    category_display = category.capitalize()
+                    results_text_parts.append(f"{category_display} ({len(results)})")
+                    logger.debug(f"  {category}: {len(results)} results")
+
+                else:
+                    # No results for this category - show only empty option
+                    current_text = combo.currentText()
+                    combo.blockSignals(True)
+                    combo.clear()
+                    combo.addItem("")
+                    combo.blockSignals(False)
+                    logger.debug(f"  {category}: 0 results")
+
+            # Update results label
+            if total_results > 0:
+                results_summary = ", ".join(results_text_parts)
+                self.search_results_label.setText(f"✓ Found {total_results} items: {results_summary}")
+                self.clear_filters_btn.setEnabled(True)
+                logger.info(f"Search '{query}' found {total_results} results across {len(results_text_parts)} categories")
+            else:
+                self.search_results_label.setText(f"❌ No results found for '{query}'")
+                self.clear_filters_btn.setEnabled(True)
+                logger.info(f"Search '{query}' returned no results")
+
+            # Force UI update
+            self.search_results_label.repaint()
+
+        except Exception as e:
+            logger.error(f"Error performing search: {e}", exc_info=True)
+            self.search_results_label.setText(f"⚠️ Search error: {str(e)}")
+            QMessageBox.warning(self, "Search Error", f"An error occurred during search:\n{e}")
+
+    def _clear_search_filters(self):
+        """Clear search filters and restore all combo box items."""
+        try:
+            if not self.original_combo_items:
+                # Nothing to restore
+                self.search_results_label.setText("💡 Tip: Type a search term and press Enter, or enable Auto-filter")
+                self.clear_filters_btn.setEnabled(False)
+                return
+
+            # Map category names to combo boxes
+            combo_mapping = {
+                'artists': self.artist_combo,
+                'styles': self.style_combo,
+                'mediums': self.medium_combo,
+                'lighting': self.lighting_combo,
+                'moods': self.mood_combo
+            }
+
+            # Restore original items
+            for category, combo in combo_mapping.items():
+                if category in self.original_combo_items:
+                    original_items = self.original_combo_items[category]
+                    current_text = combo.currentText()
+
+                    combo.blockSignals(True)
+                    combo.clear()
+                    combo.addItems(original_items)
+
+                    # Restore selection if still available
+                    if current_text in original_items:
+                        combo.setCurrentText(current_text)
+                    else:
+                        combo.setCurrentIndex(0)
+
+                    combo.blockSignals(False)
+
+            # Clear search input and results label
+            self.search_input.blockSignals(True)
+            self.search_input.clear()
+            self.search_input.blockSignals(False)
+
+            self.search_results_label.setText("✓ Filters cleared - all items restored")
+            self.clear_filters_btn.setEnabled(False)
+
+            logger.info("Cleared search filters and restored all items")
+
+        except Exception as e:
+            logger.error(f"Error clearing filters: {e}", exc_info=True)
+            self.search_results_label.setText(f"⚠️ Error clearing filters: {str(e)}")
 
     def closeEvent(self, event):
         """Handle close event to save geometry."""
