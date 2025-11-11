@@ -178,10 +178,12 @@ class PromptBuilder(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.data_loader = PromptDataLoader()
-        self.preset_loader = PresetLoader()
+
+        # Initialize data loaders but don't load data yet
+        self.data_loader = None
+        self.preset_loader = None
         self.config = ConfigManager()
-        self.tag_searcher = TagSearcher()
+        self.tag_searcher = None
 
         # Settings for window position
         self.settings = QSettings("ImageAI", "PromptBuilder")
@@ -189,7 +191,6 @@ class PromptBuilder(QDialog):
         # History file
         self.history_file = self.config.config_dir / "prompt_builder_history.json"
         self.history: List[Dict] = []
-        self._load_history()
 
         # Store original combo box items for filter restoration
         self.original_combo_items: Dict[str, List[str]] = {}
@@ -199,11 +200,112 @@ class PromptBuilder(QDialog):
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self._execute_search)
 
+        # Track if data has been loaded
+        self._data_loaded = False
+        self.presets_list = []
+
         self.setWindowTitle("Prompt Builder")
         self.setMinimumSize(900, 700)
         self._init_ui()
         self._restore_geometry()
+
+    def _load_all_data(self):
+        """Load all data from files (called when dialog is shown)."""
+        if self._data_loaded:
+            return
+
+        logger.info("Loading Prompt Builder data...")
+
+        # Load data loaders
+        self.data_loader = PromptDataLoader()
+        self.preset_loader = PresetLoader()
+        self.tag_searcher = TagSearcher()
+
+        # Load history
+        self._load_history()
+
+        # Populate combo boxes with data
+        self._populate_combo_boxes()
+
+        # Populate presets
+        self._populate_presets()
+
+        # Load example prompt
         self._load_example()
+
+        self._data_loaded = True
+        logger.info("Prompt Builder data loaded successfully")
+
+    def _populate_combo_boxes(self):
+        """Populate combo boxes with loaded data."""
+        # Style
+        styles = [""] + self.data_loader.get_styles()
+        self.style_combo.blockSignals(True)
+        self.style_combo.clear()
+        self.style_combo.addItems(styles)
+        self.style_combo.blockSignals(False)
+
+        # Medium
+        mediums = [""] + self.data_loader.get_mediums()
+        self.medium_combo.blockSignals(True)
+        self.medium_combo.clear()
+        self.medium_combo.addItems(mediums)
+        self.medium_combo.blockSignals(False)
+
+        # Artist
+        artists = [""] + self.data_loader.get_artists()
+        self.artist_combo.blockSignals(True)
+        self.artist_combo.clear()
+        self.artist_combo.addItems(artists)
+        self.artist_combo.blockSignals(False)
+
+        # Lighting
+        lighting = [""] + self.data_loader.get_lighting()
+        self.lighting_combo.blockSignals(True)
+        self.lighting_combo.clear()
+        self.lighting_combo.addItems(lighting)
+        self.lighting_combo.blockSignals(False)
+
+        # Mood
+        moods = [""] + self.data_loader.get_moods()
+        self.mood_combo.blockSignals(True)
+        self.mood_combo.clear()
+        self.mood_combo.addItems(moods)
+        self.mood_combo.blockSignals(False)
+
+        logger.debug("Populated combo boxes with data")
+
+    def _populate_presets(self):
+        """Populate presets combo box with loaded presets."""
+        # Load presets
+        self.presets_list = self.preset_loader.get_presets(sort_by_popularity=True)
+
+        # Block signals while populating
+        self.preset_combo.blockSignals(True)
+
+        # Clear existing items (except the placeholder at index 0)
+        while self.preset_combo.count() > 1:
+            self.preset_combo.removeItem(1)
+
+        # Add presets to combobox
+        for i, preset in enumerate(self.presets_list, start=1):
+            icon = preset.get("icon", "⭐")
+            name = preset.get("name", "Unnamed")
+            category = preset.get("category", "")
+
+            # Display format: "icon name (category)"
+            display_text = f"{icon} {name}"
+            if category:
+                display_text += f" ({category})"
+
+            self.preset_combo.addItem(display_text)
+
+            # Set tooltip to description
+            description = preset.get("description", "")
+            self.preset_combo.setItemData(i, description, Qt.ToolTipRole)
+
+        self.preset_combo.blockSignals(False)
+        logger.debug(f"Populated {len(self.presets_list)} presets")
 
     def _init_ui(self):
         """Initialize the user interface."""
@@ -282,14 +384,12 @@ class PromptBuilder(QDialog):
         ])
         form_layout.addRow("Transform As:", self.transformation_combo)
 
-        # Style (from styles.json)
-        styles = [""] + self.data_loader.get_styles()
-        self.style_combo = self._create_combo(styles)
+        # Style (from styles.json) - will be populated on show
+        self.style_combo = self._create_combo([""])
         form_layout.addRow("Art Style:", self.style_combo)
 
-        # Medium (from mediums.json)
-        mediums = [""] + self.data_loader.get_mediums()
-        self.medium_combo = self._create_combo(mediums)
+        # Medium (from mediums.json) - will be populated on show
+        self.medium_combo = self._create_combo([""])
         form_layout.addRow("Medium/Technique:", self.medium_combo)
 
         # Background
@@ -347,19 +447,16 @@ class PromptBuilder(QDialog):
         ])
         form_layout.addRow("Technique:", self.technique_combo)
 
-        # Artist (from artists.json)
-        artists = [""] + self.data_loader.get_artists()
-        self.artist_combo = self._create_combo(artists)
+        # Artist (from artists.json) - will be populated on show
+        self.artist_combo = self._create_combo([""])
         form_layout.addRow("Artist Style:", self.artist_combo)
 
-        # Lighting (from lighting.json)
-        lighting = [""] + self.data_loader.get_lighting()
-        self.lighting_combo = self._create_combo(lighting)
+        # Lighting (from lighting.json) - will be populated on show
+        self.lighting_combo = self._create_combo([""])
         form_layout.addRow("Lighting:", self.lighting_combo)
 
-        # Mood (from moods.json)
-        moods = [""] + self.data_loader.get_moods()
-        self.mood_combo = self._create_combo(moods)
+        # Mood (from moods.json) - will be populated on show
+        self.mood_combo = self._create_combo([""])
         form_layout.addRow("Mood:", self.mood_combo)
 
         # Exclusions - Updated to remove 'no' from choices
@@ -814,29 +911,9 @@ class PromptBuilder(QDialog):
         self.preset_combo = QComboBox()
         self.preset_combo.setMinimumWidth(300)
 
-        # Load presets
-        self.presets_list = self.preset_loader.get_presets(sort_by_popularity=True)
-
-        # Add empty/default option
+        # Add empty/default option (presets will be loaded on show)
         self.preset_combo.addItem("-- Select a Style Preset --")
         self.preset_combo.setItemData(0, "Choose a preset to quickly populate all fields", Qt.ToolTipRole)
-
-        # Add presets to combobox
-        for i, preset in enumerate(self.presets_list, start=1):
-            icon = preset.get("icon", "⭐")
-            name = preset.get("name", "Unnamed")
-            category = preset.get("category", "")
-
-            # Display format: "icon name (category)"
-            display_text = f"{icon} {name}"
-            if category:
-                display_text += f" ({category})"
-
-            self.preset_combo.addItem(display_text)
-
-            # Set tooltip to description
-            description = preset.get("description", "")
-            self.preset_combo.setItemData(i, description, Qt.ToolTipRole)
 
         # Connect signal
         self.preset_combo.currentIndexChanged.connect(self._on_preset_selected)
@@ -1000,6 +1077,11 @@ class PromptBuilder(QDialog):
     def _on_save_custom_preset(self):
         """Show dialog to save current settings as a custom preset."""
         try:
+            # Ensure data is loaded
+            if not self._data_loaded or not self.preset_loader:
+                QMessageBox.warning(self, "Not Ready", "Data is still loading. Please wait a moment and try again.")
+                return
+
             # Show save preset dialog
             dialog = SavePresetDialog(self.preset_loader, self)
             if dialog.exec() == QDialog.Accepted:
@@ -1040,11 +1122,14 @@ class PromptBuilder(QDialog):
                 )
 
                 if success:
+                    # Reload presets to show the new one immediately
+                    self._populate_presets()
+
                     QMessageBox.information(
                         self,
                         "Preset Saved",
-                        f"Custom preset '{preset_data['name']}' has been saved successfully.\n\n"
-                        "Restart the Prompt Builder to see your new preset."
+                        f"Custom preset '{preset_data['name']}' has been saved successfully!\n\n"
+                        "Your new preset is now available in the dropdown."
                     )
                     logger.info(f"Saved custom preset: {preset_data['name']}")
                 else:
@@ -1338,6 +1423,9 @@ class PromptBuilder(QDialog):
 
     def _save_combo_items(self):
         """Save original combo box items for filter restoration."""
+        if not self._data_loaded:
+            return
+
         # Map category names to combo boxes
         combo_mapping = {
             'artists': self.artist_combo,
@@ -1427,12 +1515,18 @@ class PromptBuilder(QDialog):
             query: Search query
         """
         try:
+            # Ensure data is loaded
+            if not self._data_loaded:
+                logger.warning("Search attempted before data loaded")
+                self.search_results_label.setText("⚠️ Loading data, please wait...")
+                return
+
             # Save original items if not already saved
             if not self.original_combo_items:
                 self._save_combo_items()
                 logger.info("Saved original combo items before first search")
 
-            if not self.tag_searcher.loaded:
+            if not self.tag_searcher or not self.tag_searcher.loaded:
                 logger.warning("Tag searcher not loaded, cannot perform search")
                 self.search_results_label.setText("⚠️ Search unavailable (metadata not loaded)")
                 return
@@ -1564,6 +1658,13 @@ class PromptBuilder(QDialog):
         except Exception as e:
             logger.error(f"Error clearing filters: {e}", exc_info=True)
             self.search_results_label.setText(f"⚠️ Error clearing filters: {str(e)}")
+
+    def showEvent(self, event):
+        """Handle show event to load data on first display."""
+        super().showEvent(event)
+        # Load data on first show
+        if not self._data_loaded:
+            self._load_all_data()
 
     def closeEvent(self, event):
         """Handle close event to save geometry."""
