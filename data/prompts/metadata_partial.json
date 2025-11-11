@@ -1,0 +1,37 @@
+{
+  "artists": {
+    "Ai Weiwei": {
+      "tags": [
+        "ai",
+        "weiwei"
+      ],
+      "cultural_keywords": [
+        "Ai Weiwei"
+      ],
+      "description": "Ai Weiwei - artists",
+      "popularity": 5
+    },
+    "Al Jaffee": {
+      "tags": [
+        "al",
+        "jaffee"
+      ],
+      "cultural_keywords": [
+        "Al Jaffee"
+      ],
+      "description": "Al Jaffee - artists",
+      "popularity": 5
+    },
+    "Alphonse Mucha": {
+      "tags": [
+        "alphonse",
+        "mucha"
+      ],
+      "cultural_keywords": [
+        "Alphonse Mucha"
+      ],
+      "description": "Alphonse Mucha - artists",
+      "popularity": 5
+    }
+  }
+}

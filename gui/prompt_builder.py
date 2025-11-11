@@ -10,15 +10,164 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QComboBox, QTextEdit, QGroupBox, QFormLayout, QMessageBox,
     QListWidget, QListWidgetItem, QWidget, QTabWidget, QFileDialog,
-    QTextBrowser
+    QTextBrowser, QScrollArea, QSizePolicy, QLineEdit
 )
 from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtGui import QFont, QKeySequence
 
 from core.prompt_data_loader import PromptDataLoader
+from core.preset_loader import PresetLoader
 from core.config import ConfigManager
 
 logger = logging.getLogger(__name__)
+
+
+class SavePresetDialog(QDialog):
+    """Dialog for saving a custom preset."""
+
+    def __init__(self, preset_loader: PresetLoader, parent=None):
+        """Initialize the save preset dialog.
+
+        Args:
+            preset_loader: PresetLoader instance for saving
+            parent: Parent widget
+        """
+        super().__init__(parent)
+        self.preset_loader = preset_loader
+        self.preset_data: Optional[Dict] = None
+
+        self.setWindowTitle("Save Custom Preset")
+        self.setMinimumWidth(500)
+        self._init_ui()
+
+    def _init_ui(self):
+        """Initialize the user interface."""
+        layout = QVBoxLayout()
+
+        # Instructions
+        instructions = QLabel(
+            "<b>Save your current Prompt Builder settings as a reusable preset.</b><br>"
+            "Give it a memorable name and description so you can easily find it later."
+        )
+        instructions.setWordWrap(True)
+        layout.addWidget(instructions)
+
+        # Form
+        form_layout = QFormLayout()
+
+        # Name (required)
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("e.g., 'My Custom Style'")
+        form_layout.addRow("Preset Name *:", self.name_edit)
+
+        # Description
+        self.description_edit = QTextEdit()
+        self.description_edit.setPlaceholderText("Brief description of this preset...")
+        self.description_edit.setMaximumHeight(60)
+        form_layout.addRow("Description:", self.description_edit)
+
+        # Category
+        self.category_combo = QComboBox()
+        categories = [
+            "Custom",
+            "Comics",
+            "Digital",
+            "Fine Art",
+            "Anime",
+            "Photography",
+            "Vintage",
+            "Modern",
+            "Fantasy",
+            "Other"
+        ]
+        self.category_combo.addItems(categories)
+        form_layout.addRow("Category:", self.category_combo)
+
+        # Icon selector
+        self.icon_combo = QComboBox()
+        icons = [
+            "⭐ Star",
+            "🎨 Palette",
+            "🎭 Drama",
+            "🌃 Night City",
+            "🖼️ Frame",
+            "📜 Scroll",
+            "⚔️ Sword",
+            "🌅 Sunrise",
+            "💫 Sparkle",
+            "🎪 Circus",
+            "🏛️ Classical",
+            "🌈 Rainbow",
+            "🔮 Crystal",
+            "🎬 Film",
+            "📸 Camera"
+        ]
+        self.icon_combo.addItems(icons)
+        form_layout.addRow("Icon:", self.icon_combo)
+
+        # Tags
+        self.tags_edit = QLineEdit()
+        self.tags_edit.setPlaceholderText("e.g., 'cyberpunk, neon, futuristic' (comma-separated)")
+        form_layout.addRow("Tags:", self.tags_edit)
+
+        layout.addLayout(form_layout)
+
+        # Buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+
+        save_btn = QPushButton("Save Preset")
+        save_btn.setDefault(True)
+        save_btn.clicked.connect(self._on_save)
+        button_layout.addWidget(save_btn)
+
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+
+    def _on_save(self):
+        """Handle save button click."""
+        # Validate name
+        name = self.name_edit.text().strip()
+        if not name:
+            QMessageBox.warning(self, "Missing Name", "Please enter a preset name.")
+            self.name_edit.setFocus()
+            return
+
+        # Get other fields
+        description = self.description_edit.toPlainText().strip()
+        category = self.category_combo.currentText()
+
+        # Extract icon (first character/emoji before the space)
+        icon_text = self.icon_combo.currentText()
+        icon = icon_text.split()[0] if icon_text else "⭐"
+
+        # Parse tags
+        tags_text = self.tags_edit.text().strip()
+        tags = [t.strip() for t in tags_text.split(",") if t.strip()] if tags_text else []
+
+        # Store preset data for retrieval
+        self.preset_data = {
+            "name": name,
+            "description": description,
+            "category": category,
+            "icon": icon,
+            "tags": tags
+        }
+
+        # Accept dialog
+        self.accept()
+
+    def get_preset_data(self) -> Optional[Dict]:
+        """Get the preset data entered by the user.
+
+        Returns:
+            Dictionary with preset metadata or None if dialog was cancelled
+        """
+        return self.preset_data
 
 
 class PromptBuilder(QDialog):
@@ -29,6 +178,7 @@ class PromptBuilder(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.data_loader = PromptDataLoader()
+        self.preset_loader = PresetLoader()
         self.config = ConfigManager()
 
         # Settings for window position
@@ -70,6 +220,10 @@ class PromptBuilder(QDialog):
         """Create the builder tab."""
         builder_widget = QWidget()
         builder_layout = QVBoxLayout()
+
+        # Preset panel
+        preset_panel = self._create_preset_panel()
+        builder_layout.addWidget(preset_panel)
 
         # Instructions
         instructions = QLabel(
@@ -627,8 +781,197 @@ class PromptBuilder(QDialog):
             self.details_browser.clear()
             QMessageBox.information(self, "Cleared", "All history has been cleared.")
 
+    def _create_preset_panel(self) -> QGroupBox:
+        """Create the preset panel with quick-start style combinations.
+
+        Returns:
+            QGroupBox containing the preset selector
+        """
+        preset_group = QGroupBox("🎨 Style Presets")
+
+        # Layout
+        layout = QHBoxLayout()
+
+        # Label
+        label = QLabel("Quick Start:")
+        layout.addWidget(label)
+
+        # Preset combobox
+        self.preset_combo = QComboBox()
+        self.preset_combo.setMinimumWidth(300)
+
+        # Load presets
+        self.presets_list = self.preset_loader.get_presets(sort_by_popularity=True)
+
+        # Add empty/default option
+        self.preset_combo.addItem("-- Select a Style Preset --")
+        self.preset_combo.setItemData(0, "Choose a preset to quickly populate all fields", Qt.ToolTipRole)
+
+        # Add presets to combobox
+        for i, preset in enumerate(self.presets_list, start=1):
+            icon = preset.get("icon", "⭐")
+            name = preset.get("name", "Unnamed")
+            category = preset.get("category", "")
+
+            # Display format: "icon name (category)"
+            display_text = f"{icon} {name}"
+            if category:
+                display_text += f" ({category})"
+
+            self.preset_combo.addItem(display_text)
+
+            # Set tooltip to description
+            description = preset.get("description", "")
+            self.preset_combo.setItemData(i, description, Qt.ToolTipRole)
+
+        # Connect signal
+        self.preset_combo.currentIndexChanged.connect(self._on_preset_selected)
+
+        layout.addWidget(self.preset_combo)
+
+        # Add "Save Custom Preset" button
+        save_btn = QPushButton("💾 Save as Preset")
+        save_btn.setToolTip("Save current settings as a custom preset")
+        save_btn.clicked.connect(self._on_save_custom_preset)
+        save_btn.setStyleSheet("""
+            QPushButton {
+                padding: 6px 12px;
+                border: 2px solid #4CAF50;
+                border-radius: 4px;
+                background-color: #E8F5E9;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #C8E6C9;
+            }
+        """)
+        layout.addWidget(save_btn)
+
+        layout.addStretch()
+
+        preset_group.setLayout(layout)
+        return preset_group
+
+    def _on_preset_selected(self, index: int):
+        """Handle preset combobox selection.
+
+        Args:
+            index: Selected index in combobox
+        """
+        # Index 0 is the placeholder "-- Select a Style Preset --"
+        if index == 0:
+            return
+
+        try:
+            # Get preset from list (index - 1 because of placeholder at 0)
+            preset_index = index - 1
+            if 0 <= preset_index < len(self.presets_list):
+                preset = self.presets_list[preset_index]
+
+                # Load preset settings
+                self._load_preset(preset)
+
+                # Show notification
+                preset_name = preset.get("name", "Preset")
+                logger.info(f"Loaded preset: {preset_name}")
+
+                # Update preview
+                self._update_preview()
+
+                # Reset combobox to placeholder after loading
+                # Use blockSignals to prevent triggering the signal again
+                self.preset_combo.blockSignals(True)
+                self.preset_combo.setCurrentIndex(0)
+                self.preset_combo.blockSignals(False)
+
+        except Exception as e:
+            logger.error(f"Error loading preset: {e}")
+            QMessageBox.warning(self, "Error", f"Failed to load preset:\n{e}")
+
+    def _load_preset(self, preset: Dict):
+        """Load a preset's settings into the prompt builder.
+
+        Args:
+            preset: The preset dictionary containing settings
+        """
+        settings = preset.get("settings", {})
+
+        # Apply settings using the existing _apply_settings method
+        self._apply_settings(settings)
+
+        logger.info(f"Applied preset: {preset.get('name', 'Unknown')}")
+
+    def _on_save_custom_preset(self):
+        """Show dialog to save current settings as a custom preset."""
+        try:
+            # Show save preset dialog
+            dialog = SavePresetDialog(self.preset_loader, self)
+            if dialog.exec() == QDialog.Accepted:
+                preset_data = dialog.get_preset_data()
+
+                if not preset_data:
+                    return
+
+                # Collect current settings from all combos
+                current_settings = {
+                    "subject": self.subject_combo.currentText(),
+                    "transformation": self.transformation_combo.currentText(),
+                    "style": self.style_combo.currentText(),
+                    "medium": self.medium_combo.currentText(),
+                    "background": self.background_combo.currentText(),
+                    "pose": self.pose_combo.currentText(),
+                    "purpose": self.purpose_combo.currentText(),
+                    "technique": self.technique_combo.currentText(),
+                    "artist": self.artist_combo.currentText(),
+                    "lighting": self.lighting_combo.currentText(),
+                    "mood": self.mood_combo.currentText(),
+                    "exclusion": self.exclusion_edit.toPlainText(),
+                    "notes": self.notes_edit.toPlainText()
+                }
+
+                # Remove empty settings to keep preset lean
+                current_settings = {k: v for k, v in current_settings.items() if v}
+
+                # Save the preset
+                success = self.preset_loader.save_custom_preset(
+                    name=preset_data["name"],
+                    settings=current_settings,
+                    description=preset_data.get("description", ""),
+                    category=preset_data.get("category", "Custom"),
+                    icon=preset_data.get("icon", "⭐"),
+                    tags=preset_data.get("tags", []),
+                    popularity=5
+                )
+
+                if success:
+                    QMessageBox.information(
+                        self,
+                        "Preset Saved",
+                        f"Custom preset '{preset_data['name']}' has been saved successfully.\n\n"
+                        "Restart the Prompt Builder to see your new preset."
+                    )
+                    logger.info(f"Saved custom preset: {preset_data['name']}")
+                else:
+                    QMessageBox.warning(
+                        self,
+                        "Save Failed",
+                        "Failed to save custom preset. Check the log for details."
+                    )
+
+        except Exception as e:
+            logger.error(f"Error saving custom preset: {e}")
+            QMessageBox.critical(
+                self,
+                "Error",
+                f"An error occurred while saving the preset:\n{e}"
+            )
+
     def _apply_settings(self, settings: Dict):
-        """Apply settings from history."""
+        """Apply settings from history or preset.
+
+        Args:
+            settings: Dictionary of prompt builder settings
+        """
         self.subject_combo.setCurrentText(settings.get("subject", ""))
         self.transformation_combo.setCurrentText(settings.get("transformation", ""))
         self.style_combo.setCurrentText(settings.get("style", ""))

@@ -1,0 +1,570 @@
+{
+  "presets": [
+    {
+      "id": "mad_magazine",
+      "name": "MAD Magazine Style",
+      "description": "Classic satirical comic art from MAD Magazine",
+      "category": "Comics",
+      "icon": "🎭",
+      "settings": {
+        "subject": "Headshot of attached",
+        "transformation": "as full color super-exaggerated caricature cartoon",
+        "style": "Comic Art",
+        "medium": "Airbrush Art",
+        "artist": "Al Jaffee",
+        "mood": "Humorous",
+        "technique": "use line work and cross-hatching",
+        "lighting": "Flat lighting"
+      },
+      "variations": [
+        {"artist": "Mort Drucker", "description": "Movie parody style"},
+        {"artist": "Don Martin", "description": "Visual gag style"},
+        {"artist": "Dave Berg", "description": "Everyday life satire"}
+      ],
+      "tags": ["comics", "satire", "vintage", "1960s", "caricature"],
+      "popularity": 9
+    },
+    {
+      "id": "cyberpunk_neon",
+      "name": "Cyberpunk Neon",
+      "description": "Futuristic dystopian cityscape with neon lighting",
+      "category": "Digital",
+      "icon": "🌃",
+      "settings": {
+        "subject": "Portrait of attached",
+        "transformation": "as digital art",
+        "style": "Cyberpunk",
+        "medium": "Digital Art",
+        "lighting": "Neon lighting",
+        "mood": "Dystopian",
+        "background": "in urban setting",
+        "technique": "with dramatic lighting"
+      },
+      "variations": [
+        {"lighting": "Blue hour lighting", "description": "Moody blue tones"},
+        {"mood": "Mysterious", "description": "Dark and enigmatic"}
+      ],
+      "tags": ["sci-fi", "futuristic", "neon", "cyberpunk", "digital"],
+      "popularity": 8
+    },
+    {
+      "id": "renaissance_portrait",
+      "name": "Renaissance Portrait",
+      "description": "Classical Renaissance painting style",
+      "category": "Fine Art",
+      "icon": "🖼️",
+      "settings": {
+        "subject": "Portrait of attached",
+        "transformation": "as oil painting",
+        "style": "Renaissance",
+        "medium": "Oil Painting",
+        "artist": "Leonardo da Vinci",
+        "lighting": "Chiaroscuro lighting",
+        "mood": "Contemplative",
+        "technique": "photorealistic"
+      },
+      "variations": [
+        {"artist": "Michelangelo", "description": "Dramatic poses"},
+        {"style": "Baroque", "description": "More dramatic lighting"}
+      ],
+      "tags": ["classical", "fine art", "renaissance", "oil painting", "portrait"],
+      "popularity": 7
+    },
+    {
+      "id": "anime_character",
+      "name": "Anime Character",
+      "description": "Japanese anime and manga style",
+      "category": "Anime",
+      "icon": "🎨",
+      "settings": {
+        "subject": "Full body of attached",
+        "transformation": "as anime character",
+        "style": "Anime",
+        "artist": "Hayao Miyazaki",
+        "lighting": "Soft lighting",
+        "mood": "Cheerful",
+        "purpose": "for character concept art",
+        "technique": "with cel shading"
+      },
+      "variations": [
+        {"artist": "Makoto Shinkai", "description": "Cinematic style"},
+        {"artist": "Studio Ghibli", "description": "Whimsical fantasy"}
+      ],
+      "tags": ["anime", "manga", "japanese", "character", "cel shading"],
+      "popularity": 9
+    },
+    {
+      "id": "impressionist_landscape",
+      "name": "Impressionist Landscape",
+      "description": "Soft, dreamy impressionist painting",
+      "category": "Fine Art",
+      "icon": "🌅",
+      "settings": {
+        "transformation": "as watercolor painting",
+        "style": "Impressionism",
+        "medium": "Watercolor",
+        "artist": "Claude Monet",
+        "lighting": "Golden hour",
+        "mood": "Serene",
+        "background": "in natural setting",
+        "technique": "with soft shading"
+      },
+      "variations": [
+        {"artist": "Pierre-Auguste Renoir", "description": "Warmer tones"},
+        {"artist": "Vincent van Gogh", "description": "Bold brushstrokes"}
+      ],
+      "tags": ["impressionism", "landscape", "painting", "nature", "soft"],
+      "popularity": 6
+    },
+    {
+      "id": "art_deco_poster",
+      "name": "Art Deco Poster",
+      "description": "Vintage 1920s-1930s advertising poster style",
+      "category": "Vintage",
+      "icon": "📜",
+      "settings": {
+        "subject": "Portrait of attached",
+        "transformation": "as digital art",
+        "style": "Art Deco",
+        "medium": "Poster Art",
+        "artist": "Alphonse Mucha",
+        "lighting": "High key lighting",
+        "mood": "Elegant",
+        "purpose": "for poster design",
+        "technique": "with bold outlines"
+      },
+      "variations": [
+        {"style": "Art Nouveau", "description": "More organic curves"},
+        {"mood": "Glamorous", "description": "High society feel"}
+      ],
+      "tags": ["art deco", "vintage", "1920s", "poster", "elegant"],
+      "popularity": 7
+    },
+    {
+      "id": "fantasy_concept_art",
+      "name": "Fantasy Concept Art",
+      "description": "Epic fantasy game/movie concept art",
+      "category": "Digital",
+      "icon": "⚔️",
+      "settings": {
+        "subject": "Full body of attached",
+        "transformation": "as digital art",
+        "style": "Fantasy",
+        "medium": "Digital Art",
+        "artist": "Boris Vallejo",
+        "lighting": "Dramatic lighting",
+        "mood": "Epic",
+        "purpose": "for game character",
+        "technique": "photorealistic"
+      },
+      "variations": [
+        {"artist": "Frank Frazetta", "description": "Classic fantasy style"},
+        {"artist": "Julie Bell", "description": "Heroic poses"}
+      ],
+      "tags": ["fantasy", "concept art", "game art", "epic", "digital"],
+      "popularity": 8
+    },
+    {
+      "id": "pop_art_portrait",
+      "name": "Pop Art Portrait",
+      "description": "Bold, colorful Pop Art style like Andy Warhol",
+      "category": "Modern",
+      "icon": "🎨",
+      "settings": {
+        "subject": "Headshot of attached",
+        "transformation": "as digital art",
+        "style": "Pop Art",
+        "artist": "Roy Lichtenstein",
+        "lighting": "Flat lighting",
+        "mood": "Bold",
+        "technique": "with bold outlines",
+        "background": "on a solid black background"
+      },
+      "variations": [
+        {"artist": "Keith Haring", "description": "Graffiti-inspired"},
+        {"style": "Street Art", "description": "Urban contemporary"}
+      ],
+      "tags": ["pop art", "modern", "bold", "colorful", "contemporary"],
+      "popularity": 7
+    },
+    {
+      "id": "manga_action",
+      "name": "Manga Action",
+      "description": "Dynamic Japanese manga style with action poses",
+      "category": "Comics",
+      "icon": "📚",
+      "settings": {
+        "subject": "Full body of attached",
+        "transformation": "as comic book character",
+        "style": "Anime",
+        "artist": "Katsuhiro Otomo",
+        "lighting": "Dramatic lighting",
+        "mood": "Energetic",
+        "pose": "action pose",
+        "technique": "with bold outlines"
+      },
+      "variations": [
+        {"artist": "Ryoichi Ikegami", "description": "Detailed realistic"},
+        {"mood": "Intense", "description": "High energy action"}
+      ],
+      "tags": ["manga", "anime", "action", "dynamic", "japanese"],
+      "popularity": 8
+    },
+    {
+      "id": "superhero_comic",
+      "name": "Superhero Comic",
+      "description": "Classic American superhero comic book style",
+      "category": "Comics",
+      "icon": "🦸",
+      "settings": {
+        "subject": "Full body of attached",
+        "transformation": "as comic book character",
+        "style": "Comic Art",
+        "lighting": "Dramatic lighting",
+        "mood": "Heroic",
+        "pose": "dynamic pose",
+        "purpose": "for character concept art",
+        "technique": "with bold outlines"
+      },
+      "variations": [
+        {"artist": "Bernie Wrightson", "description": "Dark detailed style"},
+        {"mood": "Powerful", "description": "Heroic presence"}
+      ],
+      "tags": ["superhero", "comics", "heroic", "action", "american"],
+      "popularity": 8
+    },
+    {
+      "id": "underground_comix",
+      "name": "Underground Comix",
+      "description": "1960s counterculture underground comics style",
+      "category": "Comics",
+      "icon": "☮️",
+      "settings": {
+        "subject": "Headshot of attached",
+        "transformation": "as cartoon character",
+        "style": "Comic Art",
+        "artist": "Robert Crumb",
+        "mood": "Psychedelic",
+        "technique": "use line work and cross-hatching"
+      },
+      "variations": [
+        {"artist": "Gilbert Shelton", "description": "Humorous style"},
+        {"artist": "Spain Rodriguez", "description": "Bold political"}
+      ],
+      "tags": ["underground", "counterculture", "1960s", "psychedelic", "comix"],
+      "popularity": 6
+    },
+    {
+      "id": "portrait_photography",
+      "name": "Portrait Photography",
+      "description": "Professional studio portrait photography",
+      "category": "Photography",
+      "icon": "📸",
+      "settings": {
+        "subject": "Portrait of attached",
+        "transformation": "as realistic portrait",
+        "style": "Photorealism",
+        "lighting": "Butterfly lighting",
+        "mood": "Confident",
+        "background": "with studio lighting background",
+        "technique": "photorealistic"
+      },
+      "variations": [
+        {"lighting": "Rembrandt lighting", "description": "Classic dramatic"},
+        {"lighting": "Loop lighting", "description": "Soft flattering"}
+      ],
+      "tags": ["photography", "portrait", "studio", "professional", "realistic"],
+      "popularity": 7
+    },
+    {
+      "id": "street_photography",
+      "name": "Street Photography",
+      "description": "Candid urban street photography style",
+      "category": "Photography",
+      "icon": "🚶",
+      "settings": {
+        "transformation": "as realistic portrait",
+        "style": "Photorealism",
+        "lighting": "Natural lighting",
+        "mood": "Authentic",
+        "background": "in urban setting",
+        "technique": "photorealistic"
+      },
+      "variations": [
+        {"mood": "Gritty", "description": "Raw urban feel"},
+        {"lighting": "Golden hour", "description": "Warm natural light"}
+      ],
+      "tags": ["photography", "street", "urban", "candid", "documentary"],
+      "popularity": 6
+    },
+    {
+      "id": "fashion_photography",
+      "name": "Fashion Photography",
+      "description": "High-fashion editorial photography style",
+      "category": "Photography",
+      "icon": "👗",
+      "settings": {
+        "subject": "Full body of attached",
+        "transformation": "as realistic portrait",
+        "style": "Photorealism",
+        "lighting": "High key lighting",
+        "mood": "Elegant",
+        "pose": "standing pose",
+        "purpose": "for illustration",
+        "technique": "photorealistic"
+      },
+      "variations": [
+        {"lighting": "Dramatic lighting", "description": "Moody editorial"},
+        {"mood": "Glamorous", "description": "Luxury fashion"}
+      ],
+      "tags": ["photography", "fashion", "editorial", "glamour", "style"],
+      "popularity": 7
+    },
+    {
+      "id": "cubist_portrait",
+      "name": "Cubist Portrait",
+      "description": "Abstract cubist geometric style like Picasso",
+      "category": "Fine Art",
+      "icon": "🔷",
+      "settings": {
+        "subject": "Portrait of attached",
+        "transformation": "as abstract art",
+        "style": "Cubism",
+        "artist": "Pablo Picasso",
+        "mood": "Contemplative",
+        "technique": "with bold outlines"
+      },
+      "variations": [
+        {"style": "Analytical Cubism", "description": "Monochromatic fragments"},
+        {"mood": "Bold", "description": "Colorful geometric"}
+      ],
+      "tags": ["cubism", "abstract", "geometric", "picasso", "modern"],
+      "popularity": 5
+    },
+    {
+      "id": "surrealist_dream",
+      "name": "Surrealist Dream",
+      "description": "Dreamlike surrealist imagery in style of Dalí",
+      "category": "Fine Art",
+      "icon": "🌀",
+      "settings": {
+        "subject": "Portrait of attached",
+        "transformation": "as oil painting",
+        "style": "Surrealism",
+        "artist": "Salvador Dalí",
+        "medium": "Oil Painting",
+        "lighting": "Dramatic lighting",
+        "mood": "Mysterious",
+        "technique": "photorealistic"
+      },
+      "variations": [
+        {"mood": "Dreamlike", "description": "Ethereal fantasy"},
+        {"artist": "René Magritte", "description": "Conceptual surreal"}
+      ],
+      "tags": ["surrealism", "dream", "fantasy", "dali", "mysterious"],
+      "popularity": 7
+    },
+    {
+      "id": "game_art_stylized",
+      "name": "Stylized Game Art",
+      "description": "Modern stylized video game character art",
+      "category": "Digital",
+      "icon": "🎮",
+      "settings": {
+        "subject": "Full body of attached",
+        "transformation": "as digital art",
+        "style": "Video Game Art",
+        "medium": "Digital Art",
+        "lighting": "Cinematic lighting",
+        "mood": "Bold",
+        "purpose": "for game character",
+        "technique": "stylized"
+      },
+      "variations": [
+        {"artist": "Beeple", "description": "3D rendered"},
+        {"mood": "Playful", "description": "Cartoon game style"}
+      ],
+      "tags": ["game art", "video games", "stylized", "3d", "character"],
+      "popularity": 8
+    },
+    {
+      "id": "concept_art_cinematic",
+      "name": "Cinematic Concept Art",
+      "description": "Hollywood movie concept art and matte painting",
+      "category": "Digital",
+      "icon": "🎬",
+      "settings": {
+        "transformation": "as digital art",
+        "style": "Cinematic Art",
+        "medium": "Digital Art",
+        "artist": "James Gurney",
+        "lighting": "Cinematic lighting",
+        "mood": "Epic",
+        "technique": "photorealistic"
+      },
+      "variations": [
+        {"mood": "Dramatic", "description": "Intense atmosphere"},
+        {"lighting": "Moody lighting", "description": "Dark cinematic"}
+      ],
+      "tags": ["concept art", "cinematic", "movie", "matte painting", "epic"],
+      "popularity": 7
+    },
+    {
+      "id": "childrens_book",
+      "name": "Children's Book",
+      "description": "Whimsical children's book illustration style",
+      "category": "Illustration",
+      "icon": "📖",
+      "settings": {
+        "subject": "Full body of attached",
+        "transformation": "as cartoon character",
+        "style": "Cartoon Art",
+        "medium": "Watercolor",
+        "lighting": "Soft lighting",
+        "mood": "Playful",
+        "purpose": "for illustration",
+        "technique": "with soft shading"
+      },
+      "variations": [
+        {"mood": "Whimsical", "description": "Magical fantasy"},
+        {"technique": "with bold outlines", "description": "Classic style"}
+      ],
+      "tags": ["children", "illustration", "whimsical", "storybook", "kids"],
+      "popularity": 7
+    },
+    {
+      "id": "editorial_illustration",
+      "name": "Editorial Illustration",
+      "description": "Modern editorial magazine illustration",
+      "category": "Illustration",
+      "icon": "📰",
+      "settings": {
+        "transformation": "as digital art",
+        "style": "Contemporary Art",
+        "medium": "Digital Art",
+        "lighting": "Flat lighting",
+        "mood": "Thoughtful",
+        "purpose": "for illustration",
+        "technique": "stylized"
+      },
+      "variations": [
+        {"mood": "Bold", "description": "Strong graphic style"},
+        {"technique": "minimalist", "description": "Simple clean"}
+      ],
+      "tags": ["editorial", "illustration", "magazine", "modern", "graphic"],
+      "popularity": 6
+    },
+    {
+      "id": "technical_illustration",
+      "name": "Technical Illustration",
+      "description": "Precise technical and scientific illustration",
+      "category": "Illustration",
+      "icon": "🔧",
+      "settings": {
+        "transformation": "as digital art",
+        "style": "Photorealism",
+        "medium": "Digital Art",
+        "lighting": "Flat lighting",
+        "technique": "photorealistic",
+        "background": "on a clean white background"
+      },
+      "variations": [
+        {"style": "Isometric", "description": "3D technical view"},
+        {"technique": "use line work and cross-hatching", "description": "Classic blueprint"}
+      ],
+      "tags": ["technical", "illustration", "scientific", "precise", "diagram"],
+      "popularity": 5
+    },
+    {
+      "id": "1950s_advertising",
+      "name": "1950s Advertising",
+      "description": "Retro 1950s American advertising art",
+      "category": "Vintage",
+      "icon": "📺",
+      "settings": {
+        "subject": "Portrait of attached",
+        "transformation": "as digital art",
+        "style": "American Scene Painting",
+        "medium": "Poster Art",
+        "lighting": "High key lighting",
+        "mood": "Cheerful",
+        "purpose": "for poster design",
+        "technique": "with bold outlines"
+      },
+      "variations": [
+        {"mood": "Nostalgic", "description": "Warm vintage feel"},
+        {"style": "Pop Art", "description": "Bold colorful"}
+      ],
+      "tags": ["1950s", "vintage", "advertising", "retro", "americana"],
+      "popularity": 7
+    },
+    {
+      "id": "retro_poster",
+      "name": "Retro Poster",
+      "description": "Bold retro poster with limited color palette",
+      "category": "Vintage",
+      "icon": "🎪",
+      "settings": {
+        "subject": "Portrait of attached",
+        "transformation": "as digital art",
+        "medium": "Poster Art",
+        "lighting": "Flat lighting",
+        "mood": "Bold",
+        "purpose": "for poster design",
+        "technique": "with bold outlines",
+        "background": "on a solid black background"
+      },
+      "variations": [
+        {"style": "Constructivism", "description": "Soviet propaganda style"},
+        {"mood": "Energetic", "description": "Dynamic composition"}
+      ],
+      "tags": ["retro", "poster", "vintage", "bold", "graphic"],
+      "popularity": 7
+    },
+    {
+      "id": "film_noir",
+      "name": "Film Noir",
+      "description": "Classic 1940s film noir cinematography style",
+      "category": "Photography",
+      "icon": "🎬",
+      "settings": {
+        "subject": "Portrait of attached",
+        "transformation": "as realistic portrait",
+        "style": "Photorealism",
+        "lighting": "Low key lighting",
+        "mood": "Mysterious",
+        "background": "in urban setting",
+        "technique": "photorealistic"
+      },
+      "variations": [
+        {"lighting": "Chiaroscuro lighting", "description": "High contrast shadows"},
+        {"mood": "Morose", "description": "Dark and gritty"}
+      ],
+      "tags": ["film noir", "1940s", "mystery", "black and white", "cinematic"],
+      "popularity": 6
+    },
+    {
+      "id": "expressionist",
+      "name": "Expressionist",
+      "description": "Emotional German Expressionist art style",
+      "category": "Fine Art",
+      "icon": "🎭",
+      "settings": {
+        "subject": "Portrait of attached",
+        "transformation": "as oil painting",
+        "style": "Expressionism",
+        "artist": "Edvard Munch",
+        "medium": "Oil Painting",
+        "lighting": "Dramatic lighting",
+        "mood": "Anguished",
+        "technique": "with bold outlines"
+      },
+      "variations": [
+        {"style": "German Expressionism", "description": "Angular distorted"},
+        {"mood": "Intense", "description": "Raw emotional"}
+      ],
+      "tags": ["expressionism", "emotional", "munch", "dramatic", "german"],
+      "popularity": 5
+    }
+  ]
+}
