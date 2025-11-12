@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2025-01-12
+
+### Added
+
+#### Semantic Search and Tag System for Prompt Builder
+- **Intelligent Search**: Semantic search powered by AI-generated metadata
+  - Search across Artists, Styles, Mediums, Lighting, and Moods simultaneously
+  - Semantic matching finds items by concepts, not just exact names
+  - Cultural keyword recognition for pop culture references
+  - Tag-based discovery with fuzzy matching for typos
+  - Popularity scoring prioritizes well-known items in results
+- **Auto-filter by Default**: Search filters dropdown options as you type (300ms debounce)
+  - Can be disabled for manual search (press Enter or click Search button)
+  - Real-time result counter shows matches per category
+  - Clear filters button restores all items
+- **Metadata System**: Comprehensive metadata file (`data/prompts/metadata.json`)
+  - Semantic tags for each artist, style, mood, medium, lighting option
+  - Cross-category relationships (artists ↔ styles ↔ moods)
+  - Cultural keywords for natural language search
+  - Era information and popularity scores
+  - Descriptions for each item
+- **Tag Generation Script**: `scripts/generate_tags.py` utility
+  - Uses AI (Google Gemini or OpenAI) to generate semantic metadata
+  - Resume capability - save progress on interruption (Ctrl+C)
+  - Incremental saves prevent data loss
+  - Rate limit handling with exponential backoff
+  - Progress tracking with tqdm
+  - Detailed logging for debugging
+  - Test mode for quick validation
+- **Customization Documentation**: Complete guide for metadata customization
+  - How to use generate_tags.py script
+  - Manual tag editing instructions
+  - Community contribution guidelines
+  - Metadata best practices
+
+#### Prompt Builder Performance
+- **Lazy Data Loading**: Data now loads when dialog opens, not at app startup
+  - Faster application startup (data loads on-demand)
+  - Dynamic preset reloading - new presets appear immediately after saving
+  - No restart required to see new custom presets
+  - Improved responsiveness when opening Prompt Builder
+
 ### Changed
 
 #### Prompt Builder (formerly Character Transformation Builder)

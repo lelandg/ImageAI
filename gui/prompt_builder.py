@@ -969,7 +969,7 @@ class PromptBuilder(QDialog):
         # Auto-filter checkbox
         self.auto_filter_check = QCheckBox("Auto-filter")
         self.auto_filter_check.setToolTip("Automatically filter as you type (300ms delay)")
-        self.auto_filter_check.setChecked(False)  # Default: manual trigger
+        self.auto_filter_check.setChecked(True)  # Default: enabled for instant feedback
         self.auto_filter_check.stateChanged.connect(self._on_auto_filter_changed)
         search_row.addWidget(self.auto_filter_check)
 
@@ -1018,7 +1018,7 @@ class PromptBuilder(QDialog):
         layout.addLayout(search_row)
 
         # Result indicator label
-        self.search_results_label = QLabel("💡 Tip: Type a search term and press Enter, or enable Auto-filter")
+        self.search_results_label = QLabel("💡 Tip: Type a search term to automatically filter results")
         self.search_results_label.setStyleSheet("color: #666; font-style: italic; padding: 4px;")
         layout.addWidget(self.search_results_label)
 
@@ -1454,7 +1454,7 @@ class PromptBuilder(QDialog):
                 self._clear_search_filters()
             else:
                 # Just update the tip label
-                self.search_results_label.setText("💡 Tip: Type a search term and press Enter, or enable Auto-filter")
+                self.search_results_label.setText("💡 Tip: Type a search term to automatically filter results")
             return
 
         # If auto-filter is enabled, use debounced search
@@ -1484,9 +1484,9 @@ class PromptBuilder(QDialog):
             self.search_timer.stop()
             text = self.search_input.text().strip()
             if text:
-                self.search_results_label.setText(f"💡 Press Enter or click Search to filter results for '{text}'")
+                self.search_results_label.setText(f"💡 Enable Auto-filter or press Enter to search for '{text}'")
             else:
-                self.search_results_label.setText("💡 Tip: Type a search term and press Enter, or enable Auto-filter")
+                self.search_results_label.setText("💡 Tip: Type a search term to automatically filter results")
 
     def _on_search_enter_pressed(self):
         """Handle Enter key pressed in search box."""
@@ -1650,7 +1650,7 @@ class PromptBuilder(QDialog):
             self.search_input.clear()
             self.search_input.blockSignals(False)
 
-            self.search_results_label.setText("✓ Filters cleared - all items restored")
+            self.search_results_label.setText("💡 Tip: Type a search term to automatically filter results")
             self.clear_filters_btn.setEnabled(False)
 
             logger.info("Cleared search filters and restored all items")

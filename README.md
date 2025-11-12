@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.24.0**
+**Version 0.25.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **ChatMaster BBS - The Intersection of Art and AI - Support and Fun: [ChatMaster BBS Discord Server](https://discord.gg/chatmaster)**
@@ -1211,6 +1211,46 @@ dynamic pose, for character concept art, with cel shading, Energetic mood"
 - Export your best prompts for sharing or backup
 - Import community prompt collections
 
+#### Semantic Search & Tag System
+
+The Prompt Builder includes an intelligent search system powered by semantic metadata to help you discover artists, styles, moods, and other prompt elements naturally.
+
+**Smart Search Panel** (at top of Builder tab):
+- **Auto-filter**: Enabled by default - filters dropdown options as you type (300ms debounce)
+- **Manual Search**: Disable auto-filter to search on-demand (press Enter or click Search button)
+- **Clear Filters**: Restore all items after filtering
+- **Multi-category Search**: Searches across Artists, Styles, Mediums, Lighting, and Moods simultaneously
+
+**Search Features**:
+- **Semantic Matching**: Search by concepts, not just exact names
+  - "60s satire" finds Al Jaffee and MAD Magazine-related artists
+  - "cyberpunk" discovers related styles, moods, and lighting options
+  - "vintage comics" surfaces comic artists and relevant art styles
+- **Cultural Keywords**: Recognizes common search terms and pop culture references
+- **Tag-Based Discovery**: Items tagged with related concepts appear in results
+- **Fuzzy Matching**: Typo-tolerant search helps even with misspellings
+- **Popularity Scoring**: More popular/well-known items appear higher in results
+
+**How It Works**:
+1. Type a search term (e.g., "Mad Magazine", "cyberpunk", "1960s")
+2. With auto-filter enabled, results appear automatically after 300ms pause
+3. Dropdown menus filter to show only matching items
+4. Result counter shows matches per category: "Artists (3), Styles (5), Moods (2)"
+5. Select from filtered results or click "Clear" to restore all items
+
+**Example Searches**:
+- "MAD Magazine" → Finds Al Jaffee, Jack Davis, Mort Drucker, Comic Art style
+- "1960s" → Discovers period artists, vintage styles, retro moods
+- "cyberpunk" → Returns Cyberpunk style, neon lighting, futuristic moods
+- "watercolor" → Finds Watercolor Painting medium, related artists, soft moods
+- "dramatic" → Surfaces Dramatic mood, related lighting options, intense styles
+
+**Metadata System**:
+The search is powered by a comprehensive metadata file (`data/prompts/metadata.json`) containing semantic tags, cultural keywords, descriptions, relationships, and popularity scores for every item in the prompt builder.
+
+**Generating and Customizing Tags**:
+See the "Customizing Search Metadata" section below for information on how to regenerate metadata with your own preferences, add custom tags, or contribute improved metadata to the community.
+
 - Model Browser (Local SD)
 - Batch Generator
 - Template Editor
@@ -1542,6 +1582,168 @@ Add a new style to `styles.json`:
 - Test your custom options in the Prompt Builder
 - Backup files before editing
 - Maintain valid JSON format (commas between items, no trailing comma)
+
+### Customizing Search Metadata
+
+The Prompt Builder's semantic search is powered by metadata tags generated using AI. You can regenerate this metadata with your own preferences, add custom tags, or contribute improved metadata back to the community.
+
+#### Understanding the Metadata File
+
+The metadata file (`data/prompts/metadata.json`) contains structured information for each item:
+
+```json
+{
+  "artists": {
+    "Al Jaffee": {
+      "tags": ["mad_magazine", "caricature", "satire", "1960s", "comics"],
+      "related_styles": ["Comic Art", "Cartoon Art"],
+      "related_moods": ["Satirical", "Humorous"],
+      "cultural_keywords": ["MAD Magazine", "fold-in", "satirical cartoons"],
+      "description": "Legendary MAD Magazine cartoonist",
+      "era": "1960s-2010s",
+      "popularity": 8
+    }
+  }
+}
+```
+
+**Metadata Fields**:
+- **tags**: Lowercase keywords for search matching (use underscores, not spaces)
+- **related_styles/moods/artists**: Cross-category relationships for discovery
+- **cultural_keywords**: Common search terms people might use
+- **description**: Brief 1-sentence description
+- **era**: Time period (for artists/styles)
+- **popularity**: 1-10 score (higher = more well-known)
+
+#### Using generate_tags.py
+
+The `scripts/generate_tags.py` utility uses AI (Google Gemini or OpenAI) to automatically generate semantic metadata for all prompt builder items.
+
+**Basic Usage**:
+
+```bash
+# Test mode: Generate tags for first 10 items of each category
+python scripts/generate_tags.py --test
+
+# Full generation using default provider (Google Gemini)
+python scripts/generate_tags.py
+
+# Use OpenAI instead
+python scripts/generate_tags.py --provider openai
+
+# Limit to specific number of items per category
+python scripts/generate_tags.py --limit 50
+
+# Use specific model
+python scripts/generate_tags.py --provider google --model gemini-2.0-flash-exp
+python scripts/generate_tags.py --provider openai --model gpt-5-chat-latest
+```
+
+**Authentication**:
+- **Google**: Requires API key or gcloud authentication (same as ImageAI Settings)
+- **OpenAI**: Requires API key set in ImageAI Settings
+- Script automatically detects your authentication method
+
+**Features**:
+- **Resume Capability**: If interrupted (Ctrl+C), progress is saved automatically
+  - Run script again to resume - already-processed items are skipped
+  - Incremental saves after each category prevent data loss
+- **Rate Limit Handling**: Automatic exponential backoff on quota errors
+- **Progress Tracking**: Real-time progress bar with tqdm
+- **Detailed Logging**: Complete log file saved for debugging (`generate_tags_YYYYMMDD_HHMMSS.log`)
+- **Graceful Shutdown**: Ctrl+C saves progress cleanly
+
+**Process**:
+1. Script loads all items from `data/prompts/*.json` files
+2. For each item, sends a prompt to the LLM asking for metadata
+3. LLM responds with JSON containing tags, relationships, descriptions, etc.
+4. Metadata is validated and saved incrementally to `metadata.json`
+5. Progress is saved after each category completes
+
+**Example Session**:
+```bash
+$ python scripts/generate_tags.py --test
+======================================================================
+  ImageAI - Tag Generation Script
+======================================================================
+  Log file: generate_tags_20250112_143022.log
+  Press Ctrl+C to abort (progress will be saved)
+======================================================================
+
+2025-01-12 14:30:22 - INFO - Test mode: processing only first 10 items per category
+2025-01-12 14:30:23 - INFO - Initialized TagGenerator with provider=google, model=gemini/gemini-2.0-flash-exp
+2025-01-12 14:30:23 - INFO - Loading prompt builder items...
+2025-01-12 14:30:23 - INFO - Processing 60 items across 6 categories
+Generating metadata: 100%|████████████████| 60/60 [02:15<00:00,  2.25s/it]
+2025-01-12 14:32:38 - INFO - ✓ Saved progress: 60 items total
+2025-01-12 14:32:38 - INFO - Metadata saved to: data/prompts/metadata.json
+```
+
+#### Adding Custom Tags Manually
+
+You can also edit `metadata.json` directly to add custom tags or improve existing metadata:
+
+1. **Open metadata.json** in any text editor
+2. **Find the item** you want to enhance (e.g., "Al Jaffee" under "artists")
+3. **Add tags**: Include relevant keywords in the "tags" array
+4. **Add cultural_keywords**: Terms people might search for
+5. **Update relationships**: Link to related styles, moods, artists
+6. **Save the file**
+7. **Restart ImageAI** or reload Prompt Builder
+
+**Example - Adding Custom Tags**:
+```json
+{
+  "artists": {
+    "Al Jaffee": {
+      "tags": [
+        "mad_magazine",
+        "caricature",
+        "satire",
+        "1960s",
+        "comics",
+        "fold_in",          // Added: distinctive MAD feature
+        "political_satire"  // Added: specific genre
+      ],
+      "cultural_keywords": [
+        "MAD Magazine",
+        "fold-in",
+        "satirical cartoons",
+        "Spy vs Spy"        // Added: related MAD content
+      ]
+    }
+  }
+}
+```
+
+**Tips for Manual Editing**:
+- Use lowercase with underscores for tags: `comic_book_art`, not `Comic Book Art`
+- Keep tags concise (1-3 words max)
+- Add common misspellings to cultural_keywords for better discovery
+- Test your changes in the Prompt Builder search
+- Keep a backup of the original file
+
+#### Contributing Improved Metadata
+
+If you generate high-quality metadata or manually curate better tags, consider sharing:
+
+1. **Test thoroughly**: Ensure search works well with your changes
+2. **Document additions**: Note any new tags or relationships you added
+3. **Share metadata.json**: Submit via GitHub issue or pull request
+4. **Describe methodology**: If using custom LLM prompts, share your approach
+
+**Community Benefits**:
+- Better search results for all users
+- More accurate cultural keywords and relationships
+- Improved discovery of lesser-known artists and styles
+- Shared AI prompts for generating consistent metadata
+
+**Metadata Best Practices**:
+- **Accuracy**: Verify artist names, eras, and descriptions
+- **Completeness**: Include all relevant tags and relationships
+- **Consistency**: Use consistent tag formats across similar items
+- **Cultural Sensitivity**: Use respectful, inclusive terminology
+- **Attribution**: Note sources for factual information (eras, popularity)
 
 ### Local Stable Diffusion Settings
 
