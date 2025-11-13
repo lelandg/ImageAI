@@ -35,18 +35,18 @@ class OpenAIProvider(ImageProvider):
     def _ensure_client(self):
         """Ensure OpenAI client is available."""
         global OpenAIClient
-        
+
         if not OPENAI_AVAILABLE:
             raise ImportError(
                 "The 'openai' package is not installed. "
                 "Please run: pip install openai"
             )
-        
+
         # Lazy import on first use
         if OpenAIClient is None:
             print("Loading OpenAI provider...")
             from openai import OpenAI as OpenAIClient
-        
+
         if not self.client:
             if not self.api_key:
                 raise ValueError("OpenAI requires an API key")
@@ -63,11 +63,11 @@ class OpenAIProvider(ImageProvider):
     ) -> Tuple[List[str], List[bytes]]:
         """Generate images using OpenAI DALL-E with enhanced settings."""
         self._ensure_client()
-        
+
         model = model or self.get_default_model()
         texts: List[str] = []
         images: List[bytes] = []
-        
+
         # Apply rate limiting
         rate_limiter.check_rate_limit('openai', wait=True)
         

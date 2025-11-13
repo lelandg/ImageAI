@@ -659,14 +659,21 @@ class MainWindow(QMainWindow):
         mb = self.menuBar()
         file_menu = mb.addMenu("File")
         
-        # Project actions
-        act_save_project = QAction("Save Project...", self)
+        # Project actions (video tab)
+        act_save_project = QAction("Save Project", self)
+        act_save_project.setShortcut("Ctrl+S")
         act_save_project.triggered.connect(self._save_project)
         file_menu.addAction(act_save_project)
-        
-        act_load_project = QAction("Load Project...", self)
-        act_load_project.triggered.connect(self._load_project)
-        file_menu.addAction(act_load_project)
+
+        act_save_project_as = QAction("Save Project As...", self)
+        act_save_project_as.setShortcut("Ctrl+Shift+S")
+        act_save_project_as.triggered.connect(self._save_project_as)
+        file_menu.addAction(act_save_project_as)
+
+        act_open_project = QAction("Open Project...", self)
+        act_open_project.setShortcut("Ctrl+O")
+        act_open_project.triggered.connect(self._open_project)
+        file_menu.addAction(act_open_project)
         
         file_menu.addSeparator()
         
@@ -5918,7 +5925,16 @@ For more detailed information, please refer to the full documentation.
             self.status_label.setText(f"Error loading image: {e}")
     
     def _save_project(self):
-        """Save current project including image and all settings."""
+        """Save current project - delegates to active tab."""
+        current_tab_index = self.tabs.currentIndex()
+
+        # Check if we're on the video tab
+        if current_tab_index == 3:  # Video tab
+            if hasattr(self, 'video_tab') and hasattr(self.video_tab, 'workspace_widget'):
+                self.video_tab.workspace_widget.save_project()
+            return
+
+        # Otherwise, handle image tab project save
         if not self.current_image_data:
             QMessageBox.warning(self, APP_NAME, "No image to save in project.")
             return
@@ -5997,15 +6013,37 @@ For more detailed information, please refer to the full documentation.
         except Exception as e:
             QMessageBox.critical(self, APP_NAME, f"Error saving project:\n{e}")
     
-    def _load_project(self):
-        """Load a project file."""
+    def _save_project_as(self):
+        """Save project as - delegates to active tab."""
+        current_tab_index = self.tabs.currentIndex()
+
+        # Check if we're on the video tab
+        if current_tab_index == 3:  # Video tab
+            if hasattr(self, 'video_tab') and hasattr(self.video_tab, 'workspace_widget'):
+                self.video_tab.workspace_widget.save_project_as()
+            return
+
+        # Otherwise, just call regular save for image tab
+        self._save_project()
+
+    def _open_project(self):
+        """Open a project - delegates to active tab."""
+        current_tab_index = self.tabs.currentIndex()
+
+        # Check if we're on the video tab
+        if current_tab_index == 3:  # Video tab
+            if hasattr(self, 'video_tab') and hasattr(self.video_tab, 'workspace_widget'):
+                self.video_tab.workspace_widget.open_project()
+            return
+
+        # Otherwise, handle image tab project load
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "Load Project",
+            "Open Project",
             str(Path.home()),
             "ImageAI Projects (*.imgai)"
         )
-        
+
         if path:
             self._load_project_file(Path(path))
     

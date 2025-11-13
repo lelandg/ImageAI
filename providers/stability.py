@@ -53,11 +53,11 @@ class StabilityProvider(ImageProvider):
     def get_supported_features(self) -> List[str]:
         """
         Get list of supported features.
-        
+
         Returns:
             List of feature names
         """
-        return ["generate", "edit", "inpaint"]
+        return ["generate", "edit", "inpaint", "reference_image"]
     
     def get_api_key_url(self) -> str:
         """
@@ -107,18 +107,37 @@ class StabilityProvider(ImageProvider):
     ) -> Tuple[List[str], List[bytes]]:
         """
         Generate images from a text prompt using REST API.
-        
+
         Args:
             prompt: Text prompt for generation
             model: Model to use (provider-specific)
             **kwargs: Additional provider-specific parameters
-        
+                     - reference_image: bytes or Path - Reference image for img2img
+                     - reference_strength: float (0.0-1.0) - How much to follow reference (default: 0.5)
+
         Returns:
             Tuple of (text_outputs, image_bytes_list)
         """
         if not self.api_key:
             raise RuntimeError("Stability AI API key not provided")
-        
+
+        # Check for reference image - if present, use img2img instead
+        reference_image = kwargs.get("reference_image")
+        if reference_image:
+            # Load reference image
+            ref_bytes = self._load_reference_image(reference_image)
+            if ref_bytes:
+                # Use img2img (edit_image) for reference-based generation
+                reference_strength = kwargs.get("reference_strength", 0.5)
+                logger.info(f"Using reference image with strength {reference_strength}")
+                return self.edit_image(
+                    image=ref_bytes,
+                    prompt=prompt,
+                    model=model,
+                    strength=reference_strength,
+                    **kwargs
+                )
+
         try:
             # Use specified model or default
             selected_model = model or self.model

@@ -811,26 +811,10 @@ class WorkspaceWidget(QWidget):
         self.new_btn.clicked.connect(self.new_project)
         layout.addWidget(self.new_btn)
 
-        self.open_btn = QPushButton("&Open")  # Alt+O
-        self.open_btn.setStyleSheet(button_style)
-        self.open_btn.clicked.connect(self.open_project)
-        layout.addWidget(self.open_btn)
-
         self.browse_btn = QPushButton("&Browse")  # Alt+B
         self.browse_btn.setStyleSheet(button_style)
         self.browse_btn.clicked.connect(self.browse_projects)
         layout.addWidget(self.browse_btn)
-
-        self.save_btn = QPushButton("&Save")  # Alt+S (or Ctrl+S via QKeySequence.Save)
-        self.save_btn.setStyleSheet(button_style)
-        self.save_btn.setShortcut(QKeySequence.Save)  # Ctrl+S
-        self.save_btn.clicked.connect(self.save_project)
-        layout.addWidget(self.save_btn)
-
-        self.save_as_btn = QPushButton("Save &As")  # Alt+A
-        self.save_as_btn.setStyleSheet(button_style)
-        self.save_as_btn.clicked.connect(self.save_project_as)
-        layout.addWidget(self.save_as_btn)
 
         layout.addStretch()
 
@@ -1461,19 +1445,6 @@ class WorkspaceWidget(QWidget):
         self.generate_start_end_prompts_btn.setEnabled(False)
         controls_layout.addWidget(self.generate_start_end_prompts_btn)
 
-        self.generate_images_btn = QPushButton("Generate Images")  # No Alt key, use Ctrl+Shift+I
-        self.generate_images_btn.setToolTip("Generate images for all scenes with prompts (Ctrl+Shift+I)")
-        self.generate_images_btn.setShortcut("Ctrl+Shift+I")
-        self.generate_images_btn.clicked.connect(self.generate_images)
-        self.generate_images_btn.setEnabled(False)
-        controls_layout.addWidget(self.generate_images_btn)
-
-        # Character Reference Generation button
-        self.char_ref_btn = QPushButton("🎨 Character Refs")
-        self.char_ref_btn.setToolTip("Generate character reference images for consistency across scenes")
-        self.char_ref_btn.clicked.connect(self.open_character_reference_wizard)
-        controls_layout.addWidget(self.char_ref_btn)
-
         # Visual Reference Library button
         self.ref_library_btn = QPushButton("📸 Ref Library")
         self.ref_library_btn.setToolTip("Open visual reference library to manage global references")
@@ -1676,6 +1647,7 @@ class WorkspaceWidget(QWidget):
     # Event handlers
     def new_project(self):
         """Create a new project"""
+        # Check if current project has unsaved changes
         if self.current_project and len(self.current_project.scenes) > 0:
             dialog_manager = get_dialog_manager(self)
             reply = dialog_manager.show_question(
@@ -1688,7 +1660,28 @@ class WorkspaceWidget(QWidget):
             elif reply == QMessageBox.Cancel:
                 return
 
-        self.current_project = VideoProject(name=self.project_name.text() or "Untitled")
+        # Prompt for new project name
+        from PySide6.QtWidgets import QInputDialog
+        project_name, ok = QInputDialog.getText(
+            self, "New Project",
+            "Enter project name:",
+            text=""
+        )
+
+        # If user cancels, abort
+        if not ok:
+            return
+
+        # Use "Untitled" if name is empty
+        if not project_name.strip():
+            project_name = "Untitled"
+
+        # Clear input text and storyboard
+        self.input_text.clear()
+        self.scene_table.setRowCount(0)
+
+        # Create new project
+        self.current_project = VideoProject(name=project_name)
         self.project_name.setText(self.current_project.name)
 
         # Set default LLM provider based on gcloud auth status or Google API key
@@ -6206,16 +6199,12 @@ class WorkspaceWidget(QWidget):
         has_images = has_scenes and any(s.images for s in self.current_project.scenes)
         has_video_clips = has_scenes and any(s.video_clip for s in self.current_project.scenes)
 
-        self.save_btn.setEnabled(has_project)
-        self.save_as_btn.setEnabled(has_project)
         self.generate_storyboard_btn.setEnabled(True)
         self.enhance_prompts_btn.setEnabled(has_scenes)
         # Enable video enhancement and start/end frame generation when scenes have prompts (image prompts are used as base)
         has_prompts = has_scenes and any(s.prompt for s in self.current_project.scenes)
         self.enhance_video_prompts_btn.setEnabled(has_prompts)
         self.generate_start_end_prompts_btn.setEnabled(has_prompts)
-        # Enable generate images only when at least one scene has a prompt
-        self.generate_images_btn.setEnabled(has_prompts)
         self.preview_btn.setEnabled(has_images)
         # Enable render button if there are either images OR video clips
         self.render_btn.setEnabled(has_images or has_video_clips)

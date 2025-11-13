@@ -236,6 +236,9 @@ class PromptBuilder(QDialog):
         self._data_loaded = True
         logger.info("Prompt Builder data loaded successfully")
 
+        # Restore builder state after data is loaded
+        self._restore_builder_state()
+
     def _populate_combo_boxes(self):
         """Populate combo boxes with loaded data."""
         # Style
@@ -364,6 +367,8 @@ class PromptBuilder(QDialog):
             "Attached",
             "Image of attached"
         ])
+        # Connect subject change to auto-update exclusions
+        self.subject_combo.currentTextChanged.connect(self._on_subject_changed)
         form_layout.addRow("Subject:", self.subject_combo)
 
         # Transformation style
@@ -383,6 +388,10 @@ class PromptBuilder(QDialog):
             "as 3D render"
         ])
         form_layout.addRow("Transform As:", self.transformation_combo)
+
+        # Artist (from artists.json) - will be populated on show
+        self.artist_combo = self._create_combo([""])
+        form_layout.addRow("Artist:", self.artist_combo)
 
         # Style (from styles.json) - will be populated on show
         self.style_combo = self._create_combo([""])
@@ -447,10 +456,6 @@ class PromptBuilder(QDialog):
         ])
         form_layout.addRow("Technique:", self.technique_combo)
 
-        # Artist (from artists.json) - will be populated on show
-        self.artist_combo = self._create_combo([""])
-        form_layout.addRow("Artist Style:", self.artist_combo)
-
         # Lighting (from lighting.json) - will be populated on show
         self.lighting_combo = self._create_combo([""])
         form_layout.addRow("Lighting:", self.lighting_combo)
@@ -500,11 +505,13 @@ class PromptBuilder(QDialog):
         # Buttons
         button_layout = QHBoxLayout()
 
-        load_example_btn = QPushButton("Load Example")
-        load_example_btn.clicked.connect(self._load_example)
-        button_layout.addWidget(load_example_btn)
+        restore_defaults_btn = QPushButton("Restore Defaults")
+        restore_defaults_btn.setToolTip("Load the default example prompt")
+        restore_defaults_btn.clicked.connect(self._load_example)
+        button_layout.addWidget(restore_defaults_btn)
 
         clear_btn = QPushButton("Clear All")
+        clear_btn.setToolTip("Clear all fields")
         clear_btn.clicked.connect(self._clear_all)
         button_layout.addWidget(clear_btn)
 
@@ -632,6 +639,26 @@ class PromptBuilder(QDialog):
 
         return ", ".join(processed_items)
 
+    def _on_subject_changed(self, subject_text: str):
+        """Handle subject combo changes to auto-populate exclusions.
+
+        Args:
+            subject_text: The selected subject text
+        """
+        # Get current exclusions
+        current_exclusions = self.exclusion_edit.toPlainText().strip()
+
+        # Define exclusions for specific subjects
+        subject_exclusions = {
+            "Headshot of attached": "background, hands, body",
+            "Character sheet of attached": "background"
+        }
+
+        # If the subject has default exclusions and exclusion field is empty, populate it
+        if subject_text in subject_exclusions and not current_exclusions:
+            self.exclusion_edit.setPlainText(subject_exclusions[subject_text])
+            logger.debug(f"Auto-populated exclusions for '{subject_text}': {subject_exclusions[subject_text]}")
+
     def _update_preview(self):
         """Update the prompt preview."""
         prompt_parts = []
@@ -710,7 +737,7 @@ class PromptBuilder(QDialog):
         self.artist_combo.setCurrentText("")
         self.lighting_combo.setCurrentText("")
         self.mood_combo.setCurrentText("")
-        self.exclusion_edit.setPlainText("text")  # Will become "no text"
+        self.exclusion_edit.setPlainText("background, hands, body, text")  # Will become "no background, no hands, no body, no text"
         self.notes_edit.clear()
 
     def _clear_all(self):
@@ -1407,10 +1434,90 @@ class PromptBuilder(QDialog):
         if 0 <= last_tab < self.tabs.count():
             self.tabs.setCurrentIndex(last_tab)
 
+    def _restore_builder_state(self):
+        """Restore all combo box settings and search state from previous session."""
+        # Wait until data is loaded
+        if not self._data_loaded:
+            return
+
+        # Check if we have any saved settings
+        has_saved_settings = self.settings.contains("subject")
+
+        if not has_saved_settings:
+            # No saved settings - keep the example prompt that was already loaded
+            logger.info("No saved settings found, using example prompt")
+            return
+
+        # Block signals while restoring to avoid triggering updates
+        for combo in self._get_all_combos():
+            combo.blockSignals(True)
+
+        # Restore combo box selections
+        self.subject_combo.setCurrentText(self.settings.value("subject", ""))
+        self.transformation_combo.setCurrentText(self.settings.value("transformation", ""))
+        self.style_combo.setCurrentText(self.settings.value("style", ""))
+        self.medium_combo.setCurrentText(self.settings.value("medium", ""))
+        self.background_combo.setCurrentText(self.settings.value("background", ""))
+        self.pose_combo.setCurrentText(self.settings.value("pose", ""))
+        self.purpose_combo.setCurrentText(self.settings.value("purpose", ""))
+        self.technique_combo.setCurrentText(self.settings.value("technique", ""))
+        self.artist_combo.setCurrentText(self.settings.value("artist", ""))
+        self.lighting_combo.setCurrentText(self.settings.value("lighting", ""))
+        self.mood_combo.setCurrentText(self.settings.value("mood", ""))
+
+        # Restore text fields
+        self.exclusion_edit.setPlainText(self.settings.value("exclusion", ""))
+        self.notes_edit.setPlainText(self.settings.value("notes", ""))
+
+        # Restore search text and auto-filter state
+        search_text = self.settings.value("searchText", "")
+        auto_filter = self.settings.value("autoFilter", True, type=bool)
+
+        self.search_input.setText(search_text)
+        self.auto_filter_check.setChecked(auto_filter)
+
+        # Re-enable signals
+        for combo in self._get_all_combos():
+            combo.blockSignals(False)
+
+        # Apply search if there was one
+        if search_text.strip():
+            self._perform_search(search_text)
+
+        # Update preview
+        self._update_preview()
+
+        logger.info("Restored Prompt Builder state from previous session")
+
     def _save_geometry(self):
         """Save window position and size to settings."""
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("activeTab", self.tabs.currentIndex())
+
+    def _save_builder_state(self):
+        """Save all combo box settings and search state for next session."""
+        # Save combo box selections
+        self.settings.setValue("subject", self.subject_combo.currentText())
+        self.settings.setValue("transformation", self.transformation_combo.currentText())
+        self.settings.setValue("style", self.style_combo.currentText())
+        self.settings.setValue("medium", self.medium_combo.currentText())
+        self.settings.setValue("background", self.background_combo.currentText())
+        self.settings.setValue("pose", self.pose_combo.currentText())
+        self.settings.setValue("purpose", self.purpose_combo.currentText())
+        self.settings.setValue("technique", self.technique_combo.currentText())
+        self.settings.setValue("artist", self.artist_combo.currentText())
+        self.settings.setValue("lighting", self.lighting_combo.currentText())
+        self.settings.setValue("mood", self.mood_combo.currentText())
+
+        # Save text fields
+        self.settings.setValue("exclusion", self.exclusion_edit.toPlainText())
+        self.settings.setValue("notes", self.notes_edit.toPlainText())
+
+        # Save search state
+        self.settings.setValue("searchText", self.search_input.text())
+        self.settings.setValue("autoFilter", self.auto_filter_check.isChecked())
+
+        logger.debug("Saved Prompt Builder state for next session")
 
     def keyPressEvent(self, event):
         """Handle keyboard shortcuts."""
@@ -1667,16 +1774,19 @@ class PromptBuilder(QDialog):
             self._load_all_data()
 
     def closeEvent(self, event):
-        """Handle close event to save geometry."""
+        """Handle close event to save geometry and state."""
         self._save_geometry()
+        self._save_builder_state()
         super().closeEvent(event)
 
     def accept(self):
-        """Handle accept (OK/Use Prompt) to save geometry."""
+        """Handle accept (OK/Use Prompt) to save geometry and state."""
         self._save_geometry()
+        self._save_builder_state()
         super().accept()
 
     def reject(self):
-        """Handle reject (Cancel/Close) to save geometry."""
+        """Handle reject (Cancel/Close) to save geometry and state."""
         self._save_geometry()
+        self._save_builder_state()
         super().reject()

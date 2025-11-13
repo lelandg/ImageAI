@@ -28,12 +28,16 @@ class ImageProvider(ABC):
     ) -> Tuple[List[str], List[bytes]]:
         """
         Generate content from a text prompt.
-        
+
         Args:
             prompt: Text prompt for generation
             model: Model to use (provider-specific)
             **kwargs: Additional provider-specific parameters
-        
+                     Common kwargs:
+                     - reference_image: bytes or Path - Reference image for style/composition
+                     - reference_strength: float (0.0-1.0) - How much to follow reference
+                     - Other provider-specific parameters
+
         Returns:
             Tuple of (text_outputs, image_bytes_list)
         """
@@ -131,15 +135,39 @@ class ImageProvider(ABC):
     ) -> Tuple[List[str], List[bytes]]:
         """
         Inpaint masked regions of an image.
-        
+
         Args:
             image: Original image bytes
             mask: Mask image bytes (white = inpaint region)
             prompt: Description of what to inpaint
             model: Model to use
             **kwargs: Additional parameters
-        
+
         Returns:
             Tuple of (text_outputs, inpainted_image_bytes_list)
         """
         raise NotImplementedError(f"{self.__class__.__name__} does not support inpainting")
+
+    def _load_reference_image(self, reference_image) -> Optional[bytes]:
+        """
+        Load reference image from path or bytes.
+
+        Args:
+            reference_image: Path, str, or bytes of reference image
+
+        Returns:
+            Image bytes or None if not provided
+        """
+        if reference_image is None:
+            return None
+
+        if isinstance(reference_image, bytes):
+            return reference_image
+
+        # Handle Path or str
+        ref_path = Path(reference_image) if not isinstance(reference_image, Path) else reference_image
+        if ref_path.exists():
+            with open(ref_path, 'rb') as f:
+                return f.read()
+
+        return None
