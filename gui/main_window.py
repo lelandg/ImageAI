@@ -6557,19 +6557,22 @@ For more detailed information, please refer to the full documentation.
                 pos = event.pos()
                 item = self.history_table.itemAt(pos)
                 if item:
-                    row = item.row()
-                    # Get image path from the datetime column (column 1) where history data is stored
-                    datetime_item = self.history_table.item(row, 1)
-                    if datetime_item:
-                        history_data = datetime_item.data(Qt.UserRole)
-                        if isinstance(history_data, dict):
-                            image_path = history_data.get('path')
-                            if image_path:
-                                # Show preview at cursor position
-                                global_pos = self.history_table.viewport().mapToGlobal(pos)
-                                self.preview_popup.show_preview(image_path, global_pos)
-                                return False
-                # Hide preview if not over an item
+                    # Only show preview if hovering over thumbnail column (column 0)
+                    col = item.column()
+                    if col == 0:
+                        row = item.row()
+                        # Get image path from the datetime column (column 1) where history data is stored
+                        datetime_item = self.history_table.item(row, 1)
+                        if datetime_item:
+                            history_data = datetime_item.data(Qt.UserRole)
+                            if isinstance(history_data, dict):
+                                image_path = history_data.get('path')
+                                if image_path:
+                                    # Show preview at cursor position
+                                    global_pos = self.history_table.viewport().mapToGlobal(pos)
+                                    self.preview_popup.show_preview(image_path, global_pos)
+                                    return False
+                # Hide preview if not over thumbnail column
                 if hasattr(self, 'preview_popup'):
                     self.preview_popup.schedule_hide(100)
             elif event.type() == QEvent.Leave:
