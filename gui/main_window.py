@@ -3135,12 +3135,12 @@ For more detailed information, please refer to the full documentation.
         v.addLayout(h)
 
         # Add shortcuts hint with enhanced visibility
-        history_shortcuts_label = create_shortcut_hint("Alt+L to load, Alt+C to clear, Click to select and load item")
+        history_shortcuts_label = create_shortcut_hint("Alt+L to load, Alt+C to clear, Double-click to load item")
         v.addWidget(history_shortcuts_label)
 
         # Connect signals
-        self.history_table.selectionModel().selectionChanged.connect(self._on_history_selection_changed)
-        self.history_table.itemClicked.connect(self._on_history_item_clicked)
+        # Only load on double-click, not single-click or selection change
+        self.history_table.itemDoubleClicked.connect(self._on_history_item_double_clicked)
         self.btn_load_history.clicked.connect(self._load_selected_history)
         self.btn_clear_history.clicked.connect(self._clear_history)
 
@@ -6376,8 +6376,8 @@ For more detailed information, please refer to the full documentation.
         self.prompt_edit.setPlainText(template_text)
         self.tabs.setCurrentWidget(self.tab_generate)
     
-    def _on_history_item_clicked(self, item):
-        """Handle single click on history item - restore prompt and switch to appropriate tab."""
+    def _on_history_item_double_clicked(self, item):
+        """Handle double-click on history item - load into image/video tab."""
         row = self.history_table.row(item)
         if row >= 0:
             # Get the history data from the DateTime column (column 1) where it's stored
@@ -6406,116 +6406,79 @@ For more detailed information, please refer to the full documentation.
                                     self.tab_video.workspace_widget.output_image_label.setPixmap(scaled)
                                     self.tab_video.workspace_widget._log_to_console(f"Loaded from history: {path.name}", "INFO")
                     else:
-                        # Default to image tab
-                        prompt = history_item.get('prompt', '')
-                        if prompt:
-                            # Switch to Generate tab
-                            self.tabs.setCurrentWidget(self.tab_generate)
-                            # Set the prompt in the input box
-                            self.prompt_edit.setPlainText(prompt)
-                            # Show status message
-                        self.status_bar.showMessage(f"Loaded prompt from history", 3000)
+                        # Load into image tab
+                        path = history_item.get('path')
+                        if path and path.exists():
+                            try:
+                                # Switch to Generate tab
+                                self.tabs.setCurrentWidget(self.tab_generate)
 
-    def _on_history_selection_changed(self, selected, deselected):
-        """Handle history selection change - display the image in appropriate tab."""
-        indexes = self.history_table.selectionModel().selectedRows()
-        if not indexes:
-            return
+                                # Read and display the image
+                                image_data = path.read_bytes()
+                                self._last_displayed_image_path = path  # Track last displayed image
 
-        # Get the selected history item from the table
-        row = indexes[0].row()
-        date_item = self.history_table.item(row, 1)  # Column 1 has the full history data
-        if date_item:
-            history_item = date_item.data(Qt.UserRole)
-            if isinstance(history_item, dict):
-                # Check which tab the image came from
-                source_tab = history_item.get('source_tab', 'image')
+                                self.current_image_data = image_data
 
-                path = history_item.get('path')
-                if path and path.exists():
-                    try:
-                        # Read and display the image
-                        image_data = path.read_bytes()
-                        self._last_displayed_image_path = path  # Track last displayed image
+                                # Display in output label
+                                pixmap = QPixmap()
+                                if pixmap.loadFromData(image_data):
+                                    # Get the label's current size
+                                    label_size = self.output_image_label.size()
 
-                        # Display in the appropriate tab
-                        if source_tab == 'video' and hasattr(self, 'tab_video'):
-                            # Display in video tab - handled by _on_history_item_clicked
-                            return
-                        # Otherwise display in image tab (default)
+                                    # Ensure we have valid dimensions
+                                    if label_size.width() <= 0 or label_size.height() <= 0:
+                                        # Label not ready yet, use _display_image which handles this
+                                        self._display_image(image_data)
+                                    else:
+                                        # Scale to fit the label while maintaining aspect ratio
+                                        scaled = pixmap.scaled(
+                                            label_size.width() - 4,  # Account for border
+                                            label_size.height() - 4,  # Account for border
+                                            Qt.KeepAspectRatio,
+                                            Qt.SmoothTransformation
+                                        )
+                                        self.output_image_label.setPixmap(scaled)
 
-                        # TODO: Re-enable auto-crop after fixing the algorithm
-                        # Currently disabled as it's cropping incorrectly
-                        # # Apply auto-crop for Google provider images if available
-                        # provider = history_item.get('provider', '')
-                        # if provider == 'google':
-                        #     try:
-                        #         from core.image_utils import auto_crop_solid_borders
-                        #         image_data = auto_crop_solid_borders(image_data)
-                        #     except ImportError:
-                        #         pass  # image_utils not available, skip auto-crop
+                                        # Store the original pixmap for resizing
+                                        self.output_image_label.setProperty("original_pixmap", pixmap)
+                                        # Ensure scaling after layout completes
+                                        for delay in [50, 100, 200, 500]:
+                                            try:
+                                                QTimer.singleShot(delay, self._perform_image_resize)
+                                            except Exception:
+                                                pass
 
-                        self.current_image_data = image_data
+                                # Enable save and copy buttons since we have an image
+                                self.btn_save_image.setEnabled(True)
+                                self.btn_copy_image.setEnabled(True)
 
-                        # Display in output label
-                        pixmap = QPixmap()
-                        if pixmap.loadFromData(image_data):
-                            # Get the label's current size
-                            label_size = self.output_image_label.size()
+                                # Load metadata
+                                prompt = history_item.get('prompt', '')
+                                self.prompt_edit.setPlainText(prompt)
 
-                            # Ensure we have valid dimensions
-                            if label_size.width() <= 0 or label_size.height() <= 0:
-                                # Label not ready yet, use _display_image which handles this
-                                self._display_image(image_data)
-                            else:
-                                # Scale to fit the label while maintaining aspect ratio
-                                scaled = pixmap.scaled(
-                                    label_size.width() - 4,  # Account for border
-                                    label_size.height() - 4,  # Account for border
-                                    Qt.KeepAspectRatio,
-                                    Qt.SmoothTransformation
-                                )
-                                self.output_image_label.setPixmap(scaled)
+                                # Load model if available
+                                model = history_item.get('model', '')
+                                if model:
+                                    idx = self._find_model_in_combo(model)
+                                    if idx >= 0:
+                                        self.model_combo.setCurrentIndex(idx)
 
-                                # Store the original pixmap for resizing
-                                self.output_image_label.setProperty("original_pixmap", pixmap)
-                                # Ensure scaling after layout completes
-                                for delay in [50, 100, 200, 500]:
-                                    try:
-                                        QTimer.singleShot(delay, self._perform_image_resize)
-                                    except Exception:
-                                        pass
-                        
-                        # Enable save and copy buttons since we have an image
-                        self.btn_save_image.setEnabled(True)
-                        self.btn_copy_image.setEnabled(True)
-                        
-                        # Load metadata
-                        prompt = history_item.get('prompt', '')
-                        self.prompt_edit.setPlainText(prompt)
-                        
-                        # Load model if available
-                        model = history_item.get('model', '')
-                        if model:
-                            idx = self._find_model_in_combo(model)
-                            if idx >= 0:
-                                self.model_combo.setCurrentIndex(idx)
-                        
-                        # Load provider if available and different
-                        provider = history_item.get('provider', '')
-                        if provider and provider != self.current_provider:
-                            idx = self.provider_combo.findText(provider)
-                            if idx >= 0:
-                                self.provider_combo.setCurrentIndex(idx)
-                        
-                        # Update status
-                        self.status_label.setText("Loaded from history")
+                                # Load provider if available and different
+                                provider = history_item.get('provider', '')
+                                if provider and provider != self.current_provider:
+                                    idx = self.provider_combo.findText(provider)
+                                    if idx >= 0:
+                                        self.provider_combo.setCurrentIndex(idx)
 
-                        # Update use current button state after loading history
-                        self._update_use_current_button_state()
+                                # Update status
+                                self.status_label.setText("Loaded from history")
+                                self.status_bar.showMessage(f"Loaded from history", 3000)
 
-                    except Exception as e:
-                        self.output_image_label.setText(f"Error loading image: {e}")
+                                # Update use current button state after loading history
+                                self._update_use_current_button_state()
+
+                            except Exception as e:
+                                self.output_image_label.setText(f"Error loading image: {e}")
     
     def _load_history_item(self, item):
         """Load a history item and switch to Generate tab."""
