@@ -293,7 +293,7 @@ class Scene:
     prompt: str = ""  # AI-enhanced prompt for image generation (start frame)
     video_prompt: str = ""  # AI-enhanced prompt for video generation with motion/camera
     prompt_history: List[str] = field(default_factory=list)  # All previous prompt versions
-    duration_sec: float = 4.0  # Scene duration in seconds
+    duration_sec: float = 8.0  # Scene duration in seconds
     images: List[ImageVariant] = field(default_factory=list)  # Generated image variants (start frames)
     approved_image: Optional[Path] = None  # Selected image for final video (start frame)
     video_clip: Optional[Path] = None  # Generated video clip path
@@ -360,7 +360,7 @@ class Scene:
             prompt=data.get("prompt", ""),
             video_prompt=data.get("video_prompt", ""),
             prompt_history=data.get("prompt_history", []),
-            duration_sec=data.get("duration_sec", 4.0),
+            duration_sec=data.get("duration_sec", 8.0),
             images=[ImageVariant.from_dict(img) for img in data.get("images", [])],
             approved_image=Path(data["approved_image"]) if data.get("approved_image") else None,
             video_clip=Path(data["video_clip"]) if data.get("video_clip") else None,
@@ -783,7 +783,7 @@ class VideoProject:
 
         return project
     
-    def add_scene(self, source: str, prompt: str = "", duration: float = 4.0) -> Scene:
+    def add_scene(self, source: str, prompt: str = "", duration: float = 8.0) -> Scene:
         """Add a new scene to the project"""
         scene = Scene(
             source=source,

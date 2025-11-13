@@ -3008,10 +3008,18 @@ For more detailed information, please refer to the full documentation.
         self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.history_table.setSortingEnabled(True)
 
+        # Enable mouse tracking for hover preview
+        self.history_table.setMouseTracking(True)
+        self.history_table.viewport().setMouseTracking(True)
+
         # Set custom delegate for thumbnail column (owner draw) if available
         if ThumbnailDelegate:
             thumbnail_delegate = ThumbnailDelegate(self.thumbnail_cache, self.history_table)
             self.history_table.setItemDelegateForColumn(0, thumbnail_delegate)
+
+        # Initialize hover preview popup
+        from gui.image_preview_popup import ImagePreviewPopup
+        self.preview_popup = ImagePreviewPopup(self, max_width=600, max_height=600)
         
         # Set column widths
         header = self.history_table.horizontalHeader()
@@ -3135,6 +3143,10 @@ For more detailed information, please refer to the full documentation.
         self.history_table.itemClicked.connect(self._on_history_item_clicked)
         self.btn_load_history.clicked.connect(self._load_selected_history)
         self.btn_clear_history.clicked.connect(self._clear_history)
+
+        # Install event filter for hover preview and keyboard navigation
+        self.history_table.viewport().installEventFilter(self)
+        self.history_table.installEventFilter(self)
     
     def _find_model_in_combo(self, model_id: str) -> int:
         """Find a model by its ID in the combo box.
@@ -5379,16 +5391,20 @@ For more detailed information, please refer to the full documentation.
                     "timestamp": datetime.now().isoformat(),
                     "cost": generation_cost / len(images),  # Cost per image
                 }
-                
+
                 # Add resolution info if we got it
                 if 'width' in settings:
                     meta["width"] = settings["width"]
                     meta["height"] = settings["height"]
-                
+
                 # Add quality/style info
                 if hasattr(self, 'quality_settings'):
                     meta.update(self.quality_settings)
-                
+
+                # Add reference image if available
+                if hasattr(self, 'reference_image_path') and self.reference_image_path:
+                    meta["reference_image"] = str(self.reference_image_path)
+
                 write_image_sidecar(path, meta)
             
             # Store original path references
@@ -5431,6 +5447,10 @@ For more detailed information, please refer to the full documentation.
                 if 'width' in settings:
                     history_entry['width'] = settings['width']
                     history_entry['height'] = settings['height']
+
+                # Add reference image if available
+                if hasattr(self, 'reference_image_path') and self.reference_image_path:
+                    history_entry['reference_image'] = str(self.reference_image_path)
                 
                 # Add to history list
                 self.history.append(history_entry)
@@ -6514,14 +6534,75 @@ For more detailed information, please refer to the full documentation.
     def _clear_history(self):
         """Clear history."""
         reply = QMessageBox.question(
-            self, APP_NAME, 
+            self, APP_NAME,
             "Clear all history?",
             QMessageBox.Yes | QMessageBox.No
         )
         if reply == QMessageBox.Yes:
             self.history.clear()
             self.history_table.setRowCount(0)
-    
+
+    def eventFilter(self, obj, event):
+        """Handle events for history table - hover preview and keyboard navigation."""
+        from PySide6.QtCore import QEvent
+
+        # Guard: Only process events if history_table exists
+        if not hasattr(self, 'history_table'):
+            return super().eventFilter(obj, event)
+
+        # Handle hover preview on history table viewport
+        if obj == self.history_table.viewport() and hasattr(self, 'preview_popup'):
+            if event.type() == QEvent.MouseMove:
+                # Get item at cursor position
+                pos = event.pos()
+                item = self.history_table.itemAt(pos)
+                if item:
+                    row = item.row()
+                    # Get image path from the datetime column (column 1) where history data is stored
+                    datetime_item = self.history_table.item(row, 1)
+                    if datetime_item:
+                        history_data = datetime_item.data(Qt.UserRole)
+                        if isinstance(history_data, dict):
+                            image_path = history_data.get('path')
+                            if image_path:
+                                # Show preview at cursor position
+                                global_pos = self.history_table.viewport().mapToGlobal(pos)
+                                self.preview_popup.show_preview(image_path, global_pos)
+                                return False
+                # Hide preview if not over an item
+                if hasattr(self, 'preview_popup'):
+                    self.preview_popup.schedule_hide(100)
+            elif event.type() == QEvent.Leave:
+                # Hide preview when mouse leaves table
+                if hasattr(self, 'preview_popup'):
+                    self.preview_popup.schedule_hide(100)
+
+        # Handle keyboard navigation on history table
+        if obj == self.history_table and event.type() == QEvent.KeyPress:
+            key = event.key()
+
+            # Home - go to first row
+            if key == Qt.Key_Home:
+                if self.history_table.rowCount() > 0:
+                    self.history_table.selectRow(0)
+                    self.history_table.scrollToTop()
+                return True
+
+            # End - go to last row
+            elif key == Qt.Key_End:
+                if self.history_table.rowCount() > 0:
+                    last_row = self.history_table.rowCount() - 1
+                    self.history_table.selectRow(last_row)
+                    self.history_table.scrollToBottom()
+                return True
+
+            # Enter/Return - load selected image
+            elif key in (Qt.Key_Return, Qt.Key_Enter):
+                self._load_selected_history()
+                return True
+
+        return super().eventFilter(obj, event)
+
     def _on_tab_changed(self, index):
         """Handle tab change events."""
         current_widget = self.tabs.widget(index)

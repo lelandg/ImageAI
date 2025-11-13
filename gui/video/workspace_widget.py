@@ -311,6 +311,15 @@ class WorkspaceWidget(QWidget):
         self.init_ui()
         self.logger.info("WORKSPACE STEP 8: init_ui() complete")
 
+        # Setup keyboard shortcuts for Save and Save As
+        self.logger.info("WORKSPACE STEP 8.5: Setting up keyboard shortcuts...")
+        from PySide6.QtGui import QShortcut, QKeySequence
+        self.save_shortcut = QShortcut(QKeySequence("Ctrl+S"), self)
+        self.save_shortcut.activated.connect(self.save_project)
+        self.save_as_shortcut = QShortcut(QKeySequence("Ctrl+Shift+S"), self)
+        self.save_as_shortcut.activated.connect(self.save_project_as)
+        self.logger.info("WORKSPACE STEP 8.5: Keyboard shortcuts configured")
+
         # Auto-reload last project if enabled (deferred until widget is shown)
         self.logger.info("WORKSPACE STEP 9: Scheduling auto_load_last_project in 100ms...")
         QTimer.singleShot(100, self.auto_load_last_project)
@@ -3172,18 +3181,28 @@ class WorkspaceWidget(QWidget):
 
             self.scene_table.setCellWidget(i, 4, self._create_top_aligned_widget(video_btn))
 
-            # Column 5: Time (use label widget for proper top alignment)
-            time_label = QLabel(f"{scene.duration_sec:.3f}")
-            time_label.setAlignment(Qt.AlignTop | Qt.AlignCenter)
+            # Column 5: Time (editable QLineEdit)
+            from PySide6.QtWidgets import QLineEdit
+            from PySide6.QtGui import QDoubleValidator
+            time_edit = QLineEdit(f"{scene.duration_sec:.1f}")
+            time_edit.setAlignment(Qt.AlignCenter)
+            # Set validator to accept decimals between 1.0 and 8.0
+            validator = QDoubleValidator(1.0, 8.0, 1, time_edit)
+            validator.setNotation(QDoubleValidator.StandardNotation)
+            time_edit.setValidator(validator)
+            time_edit.setMaximumWidth(60)
 
             # Validate duration: must be <= 8.0 seconds
             if scene.duration_sec > 8.0:
-                time_label.setStyleSheet("padding: 2px; background-color: #ffcccc; color: #cc0000; font-weight: bold;")
-                time_label.setToolTip(f"⚠️ WARNING: Scene duration ({scene.duration_sec:.3f}s) exceeds maximum of 8.0s")
+                time_edit.setStyleSheet("padding: 2px; background-color: #ffcccc; color: #cc0000; font-weight: bold;")
+                time_edit.setToolTip(f"⚠️ WARNING: Scene duration ({scene.duration_sec:.3f}s) exceeds maximum of 8.0s")
             else:
-                time_label.setStyleSheet("padding: 2px;")
+                time_edit.setStyleSheet("padding: 2px;")
 
-            self.scene_table.setCellWidget(i, 5, self._create_top_aligned_widget(time_label))
+            # Connect to handler for when editing is finished
+            time_edit.editingFinished.connect(lambda idx=i, edit=time_edit: self._on_duration_changed(idx, edit))
+
+            self.scene_table.setCellWidget(i, 5, self._create_top_aligned_widget(time_edit))
 
             # Column 6: Wrap button (⤵️)
             wrap_btn = QPushButton("⤵️")
@@ -4974,6 +4993,44 @@ class WorkspaceWidget(QWidget):
 
         self.save_project()
         self.logger.info(f"Reference image {slot_idx+1} for scene {scene_index} updated")
+
+    def _on_duration_changed(self, scene_index: int, line_edit):
+        """Handle duration change for a scene"""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        try:
+            # Get the new duration value
+            new_duration = float(line_edit.text())
+
+            # Validate range (1.0 to 8.0 seconds)
+            if new_duration < 1.0:
+                new_duration = 1.0
+                line_edit.setText(f"{new_duration:.1f}")
+            elif new_duration > 8.0:
+                new_duration = 8.0
+                line_edit.setText(f"{new_duration:.1f}")
+
+            # Update scene duration
+            scene = self.current_project.scenes[scene_index]
+            if scene.duration_sec != new_duration:
+                scene.duration_sec = new_duration
+                self.save_project()
+                self.logger.info(f"Scene {scene_index} duration updated to {new_duration}s")
+
+                # Update styling based on validation
+                if new_duration > 8.0:
+                    line_edit.setStyleSheet("padding: 2px; background-color: #ffcccc; color: #cc0000; font-weight: bold;")
+                    line_edit.setToolTip(f"⚠️ WARNING: Scene duration ({new_duration:.3f}s) exceeds maximum of 8.0s")
+                else:
+                    line_edit.setStyleSheet("padding: 2px;")
+                    line_edit.setToolTip("")
+
+        except ValueError:
+            # Invalid input - restore original value
+            scene = self.current_project.scenes[scene_index]
+            line_edit.setText(f"{scene.duration_sec:.1f}")
+            self.logger.warning(f"Invalid duration input for scene {scene_index}")
 
     def _select_reference_from_scenes(self, scene_index: int, slot_idx: int):
         """Select reference image from any scene's images"""
