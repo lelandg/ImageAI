@@ -12,7 +12,7 @@ from typing import List, Optional
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QScrollArea, QFrame, QComboBox, QLineEdit,
-    QSizePolicy, QMessageBox, QRadioButton, QButtonGroup, QDialog, QLayout
+    QSizePolicy, QMessageBox, QRadioButton, QButtonGroup, QDialog, QLayout, QCheckBox
 )
 from PySide6.QtCore import Qt, Signal, QRect, QSize, QPoint
 from PySide6.QtGui import QPixmap
@@ -530,6 +530,15 @@ class ImagenReferenceWidget(QWidget):
 
         header_layout.addStretch()
 
+        # Edit Mode checkbox
+        self.chk_edit_mode = QCheckBox("Edit Mode")
+        self.chk_edit_mode.setToolTip(
+            "When enabled with a single reference image, auto-prefix the prompt with:\n"
+            "\"Edit this image. Keep everything already in the image exactly the same.\""
+        )
+        self.chk_edit_mode.stateChanged.connect(self._on_edit_mode_changed)
+        header_layout.addWidget(self.chk_edit_mode)
+
         self.btn_add = QPushButton("+ Add Reference Image")
         self.btn_add.setToolTip("Add a reference image")
         self.btn_add.clicked.connect(self._add_reference)
@@ -674,6 +683,12 @@ class ImagenReferenceWidget(QWidget):
 
     def _on_reference_changed(self):
         """Handle when a reference item changes."""
+        self._update_ui()
+        self.references_changed.emit()
+
+    def _on_edit_mode_changed(self):
+        """Handle when edit mode checkbox changes."""
+        # Just emit signal - MainWindow will handle the logic
         self.references_changed.emit()
 
     def _update_ui(self):
@@ -704,6 +719,13 @@ class ImagenReferenceWidget(QWidget):
             # Show combo boxes in strict mode (need to specify type/subject)
             for item in self.reference_items:
                 item.set_combos_visible(True)
+
+        # Update edit mode checkbox state
+        # Edit mode only applicable when exactly 1 reference image
+        self.chk_edit_mode.setEnabled(count == 1)
+        if count != 1:
+            # Auto-disable if not exactly 1 reference
+            self.chk_edit_mode.setChecked(False)
 
         self.references_changed.emit()
 
@@ -765,6 +787,30 @@ class ImagenReferenceWidget(QWidget):
             True if in flexible mode with multiple images
         """
         return self.is_flexible_mode() and len(self.reference_items) > 1
+
+    def is_edit_mode_active(self) -> bool:
+        """
+        Check if edit mode is active.
+
+        Edit mode is active when:
+        - The checkbox is enabled AND checked
+        - There is exactly one reference image
+
+        Returns:
+            True if edit mode is active
+        """
+        return (self.chk_edit_mode.isEnabled() and
+                self.chk_edit_mode.isChecked() and
+                len(self.reference_items) == 1)
+
+    def get_edit_mode_prefix(self) -> str:
+        """
+        Get the edit mode prompt prefix.
+
+        Returns:
+            The prefix string to add to prompts in edit mode
+        """
+        return "Edit this image. Keep everything already in the image exactly the same.\n"
 
     def validate_references(self) -> tuple[bool, list[str]]:
         """

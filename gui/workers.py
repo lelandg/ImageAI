@@ -100,7 +100,7 @@ class HistoryLoaderWorker(QObject):
                         # Try to read sidecar file for metadata
                         sidecar = read_image_sidecar(path)
                         if sidecar:
-                            batch_items.append({
+                            history_entry = {
                                 'path': path,
                                 'prompt': sidecar.get('prompt', ''),
                                 'timestamp': sidecar.get('timestamp', path.stat().st_mtime),
@@ -112,7 +112,14 @@ class HistoryLoaderWorker(QObject):
                                 'quality': sidecar.get('quality', ''),
                                 'style': sidecar.get('style', ''),
                                 'cost': sidecar.get('cost', 0.0)
-                            })
+                            }
+                            # Include reference images if present in sidecar
+                            if 'imagen_references' in sidecar:
+                                history_entry['imagen_references'] = sidecar['imagen_references']
+                            elif 'reference_image' in sidecar:
+                                history_entry['reference_image'] = sidecar['reference_image']
+
+                            batch_items.append(history_entry)
                         else:
                             # No sidecar, just add path with basic info
                             batch_items.append({

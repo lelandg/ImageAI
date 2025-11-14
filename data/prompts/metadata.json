@@ -3743,6 +3743,169 @@
       "description": "Contemporary pop surrealist known for his cinematic portraits of empowered, cigarette-smoking women.",
       "era": "1990s-2020s",
       "popularity": 7
+    },
+    "Art Spiegelman": {
+      "tags": [
+        "graphic_novelist",
+        "comics",
+        "autobiographical",
+        "pulitzer_prize",
+        "underground_comix",
+        "black_and_white",
+        "visual_storytelling"
+      ],
+      "related_styles": [
+        "Graphic Novel",
+        "Comic Art",
+        "Sequential Art"
+      ],
+      "related_moods": [
+        "Reflective",
+        "Dark",
+        "Introspective",
+        "Historical"
+      ],
+      "cultural_keywords": [
+        "Maus",
+        "underground comix",
+        "Pulitzer Prize",
+        "Holocaust representation",
+        "meta-narrative",
+        "art comics"
+      ],
+      "description": "Pulitzer Prize-winning cartoonist known for his groundbreaking graphic novel 'Maus'.",
+      "era": "1970s–present",
+      "popularity": 9
+    },
+    "James Warhola": {
+      "tags": [
+        "mad_magazine",
+        "illustration",
+        "pop_art",
+        "humor",
+        "caricature",
+        "fantasy",
+        "commercial_art"
+      ],
+      "related_styles": [
+        "Comic Art",
+        "Cartoon Art",
+        "Illustration",
+        "Pop Art"
+      ],
+      "related_moods": [
+        "Playful",
+        "Humorous",
+        "Whimsical",
+        "Nostalgic"
+      ],
+      "cultural_keywords": [
+        "MAD Magazine",
+        "Andy Warhol family",
+        "satirical illustration",
+        "fantasy art",
+        "American illustration"
+      ],
+      "description": "American illustrator known for his humorous MAD Magazine artwork and vibrant pop-influenced illustrations.",
+      "era": "1970s-present",
+      "popularity": 6
+    },
+    "John Pound": {
+      "tags": [
+        "garbage_pail_kids",
+        "trading_cards",
+        "cartoon_grotesque",
+        "parody_art",
+        "humor",
+        "comic_art",
+        "illustration",
+        "pop_culture"
+      ],
+      "related_styles": [
+        "Cartoon Art",
+        "Comic Art",
+        "Pop Surrealism"
+      ],
+      "related_moods": [
+        "Humorous",
+        "Playful",
+        "Gross-out",
+        "Satirical"
+      ],
+      "cultural_keywords": [
+        "Garbage Pail Kids",
+        "Topps trading cards",
+        "comic illustration",
+        "80s nostalgia",
+        "satirical pop art"
+      ],
+      "description": "Illustrator best known for his witty and grotesque artwork on Garbage Pail Kids trading cards.",
+      "era": "1970s-2020s",
+      "popularity": 7
+    },
+    "Tom Bunk": {
+      "tags": [
+        "mad_magazine",
+        "caricature",
+        "surreal_humor",
+        "satire",
+        "comics",
+        "illustration",
+        "cartoonish",
+        "absurdism"
+      ],
+      "related_styles": [
+        "Comic Art",
+        "Cartoon Art",
+        "Surrealism"
+      ],
+      "related_moods": [
+        "Humorous",
+        "Whimsical",
+        "Satirical",
+        "Playful"
+      ],
+      "cultural_keywords": [
+        "MAD Magazine",
+        "Topps trading cards",
+        "Wacky Packages",
+        "Garbage Pail Kids",
+        "satirical art"
+      ],
+      "description": "German-born cartoonist known for his dense, surreal, and comically detailed illustrations for MAD Magazine and trading cards.",
+      "era": "1970s-2020s",
+      "popularity": 7
+    },
+    "Bob Sabiston": {
+      "tags": [
+        "rotoscoping",
+        "animation",
+        "digital_art",
+        "indie_film",
+        "experimental",
+        "software_development",
+        "sketchy_animation"
+      ],
+      "related_styles": [
+        "Rotoscope Animation",
+        "Digital Illustration",
+        "Experimental Animation"
+      ],
+      "related_moods": [
+        "Reflective",
+        "Dreamlike",
+        "Innovative"
+      ],
+      "cultural_keywords": [
+        "Waking Life",
+        "A Scanner Darkly",
+        "Flat Black Films",
+        "Rotoshop",
+        "independent animation"
+      ],
+      "description": "Innovative animator and filmmaker known for pioneering digital rotoscoping techniques.",
+      "era": "1990s-2020s",
+      "popularity": 7
     }
   },
   "styles": {
@@ -11917,6 +12080,116 @@
       ],
       "description": "Woodcut is a relief printmaking technique where an image is carved into a wooden surface and inked for printing on paper or fabric.",
       "popularity": 7
+    },
+    "Collectible Cards": {
+      "tags": [
+        "trading cards",
+        "illustration",
+        "gaming",
+        "pop culture",
+        "collectibles",
+        "printed art"
+      ],
+      "related_styles": [
+        "fantasy art",
+        "comic art",
+        "digital illustration"
+      ],
+      "cultural_keywords": [
+        "TCG",
+        "collectibles",
+        "fan art",
+        "merchandise"
+      ],
+      "description": "Collectible cards are printed artworks combining design and illustration, often created for trading, gaming, or themed collections.",
+      "popularity": 8
+    },
+    "Sticker Cards": {
+      "tags": [
+        "collectible",
+        "illustration",
+        "printed",
+        "adhesive",
+        "decorative"
+      ],
+      "related_styles": [
+        "pop art",
+        "street art",
+        "graphic design"
+      ],
+      "cultural_keywords": [
+        "trading",
+        "custom",
+        "fan art"
+      ],
+      "description": "Sticker cards are small printed artworks combining collectible cards with adhesive sticker elements for decorative or trading use.",
+      "popularity": 7
+    },
+    "Sticker Card Art": {
+      "tags": [
+        "mixed media",
+        "collectible",
+        "illustration",
+        "pop art",
+        "craft"
+      ],
+      "related_styles": [
+        "street art",
+        "graphic design",
+        "lowbrow art"
+      ],
+      "cultural_keywords": [
+        "fan culture",
+        "merchandise",
+        "trading cards"
+      ],
+      "description": "Sticker Card Art combines illustrative design and sticker materials to create collectible and customizable small-format artworks.",
+      "popularity": 7
+    },
+    "Trading Cards": {
+      "tags": [
+        "collectible",
+        "illustration",
+        "print",
+        "game",
+        "miniature",
+        "artwork"
+      ],
+      "related_styles": [
+        "pop art",
+        "digital illustration",
+        "fantasy art"
+      ],
+      "cultural_keywords": [
+        "collecting",
+        "fan art",
+        "gaming",
+        "merchandise"
+      ],
+      "description": "Trading cards are small printed artworks often used for collecting, gaming, or promotional purposes featuring unique designs or characters.",
+      "popularity": 8
+    },
+    "Interpolated Rotoscoping": {
+      "tags": [
+        "animation",
+        "digital art",
+        "rotoscoping",
+        "ai-assisted",
+        "motion interpolation",
+        "mixed media"
+      ],
+      "related_styles": [
+        "experimental animation",
+        "surrealism",
+        "digital impressionism"
+      ],
+      "cultural_keywords": [
+        "ai animation",
+        "video art",
+        "visual effects"
+      ],
+      "description": "Interpolated rotoscoping is a digital animation technique that combines traditional rotoscoping with motion interpolation algorithms to create fluid, stylized motion from live-action footage.",
+      "popularity": 6
     }
   },
   "colors": {

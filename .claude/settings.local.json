@@ -46,7 +46,10 @@
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline -20 -- providers/google.py)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff 2533d70~1 2533d70 -- providers/google.py)",
       "Bash(mkdir:*)",
-      "Bash(jq:*)"
+      "Bash(jq:*)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/image_history_widget.py)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/history_widget.py)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff e4a45d1 -- gui/layout/image_history_dialog.py)"
     ],
     "deny": [],
     "ask": []

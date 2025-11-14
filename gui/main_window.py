@@ -473,7 +473,7 @@ class MainWindow(QMainWindow):
                 # Try to read sidecar file for metadata
                 sidecar = read_image_sidecar(path)
                 if sidecar:
-                    self.history.append({
+                    history_entry = {
                         'path': path,
                         'prompt': sidecar.get('prompt', ''),
                         'timestamp': sidecar.get('timestamp', path.stat().st_mtime),
@@ -485,7 +485,14 @@ class MainWindow(QMainWindow):
                         'quality': sidecar.get('quality', ''),
                         'style': sidecar.get('style', ''),
                         'cost': sidecar.get('cost', 0.0)
-                    })
+                    }
+                    # Include reference images if present in sidecar
+                    if 'imagen_references' in sidecar:
+                        history_entry['imagen_references'] = sidecar['imagen_references']
+                    elif 'reference_image' in sidecar:
+                        history_entry['reference_image'] = sidecar['reference_image']
+
+                    self.history.append(history_entry)
                 else:
                     # No sidecar, just add path with basic info
                     self.history.append({
@@ -4425,6 +4432,12 @@ For more detailed information, please refer to the full documentation.
             QMessageBox.warning(self, APP_NAME, "Please enter a prompt.")
             return
 
+        # Apply edit mode prefix if active (single reference + checkbox enabled)
+        if hasattr(self, 'imagen_reference_widget') and self.imagen_reference_widget.is_edit_mode_active():
+            edit_prefix = self.imagen_reference_widget.get_edit_mode_prefix()
+            prompt = edit_prefix + prompt
+            self._append_to_console("Edit mode active - auto-prefixed prompt", "#66ccff")  # Blue
+
         # Check for resolution in prompt and warn user
         # NOTE: Only block LITERAL dimensions (1024x768, 1920x1080, etc.) that get rendered as text.
         # Quality descriptors like "8K resolution", "4K quality" are artistic direction and are fine.
@@ -5401,8 +5414,11 @@ For more detailed information, please refer to the full documentation.
                 if hasattr(self, 'quality_settings'):
                     meta.update(self.quality_settings)
 
-                # Add reference image if available
-                if hasattr(self, 'reference_image_path') and self.reference_image_path:
+                # Add reference images if available (new multi-reference format)
+                if hasattr(self, 'imagen_reference_widget') and self.imagen_reference_widget.has_references():
+                    meta["imagen_references"] = self.imagen_reference_widget.to_dict()
+                # Legacy single reference (kept for backward compatibility)
+                elif hasattr(self, 'reference_image_path') and self.reference_image_path:
                     meta["reference_image"] = str(self.reference_image_path)
 
                 write_image_sidecar(path, meta)
@@ -5448,8 +5464,11 @@ For more detailed information, please refer to the full documentation.
                     history_entry['width'] = settings['width']
                     history_entry['height'] = settings['height']
 
-                # Add reference image if available
-                if hasattr(self, 'reference_image_path') and self.reference_image_path:
+                # Add reference images if available (new multi-reference format)
+                if hasattr(self, 'imagen_reference_widget') and self.imagen_reference_widget.has_references():
+                    history_entry['imagen_references'] = self.imagen_reference_widget.to_dict()
+                # Legacy single reference (kept for backward compatibility)
+                elif hasattr(self, 'reference_image_path') and self.reference_image_path:
                     history_entry['reference_image'] = str(self.reference_image_path)
                 
                 # Add to history list
@@ -6416,37 +6435,10 @@ For more detailed information, please refer to the full documentation.
                                 # Read and display the image
                                 image_data = path.read_bytes()
                                 self._last_displayed_image_path = path  # Track last displayed image
-
                                 self.current_image_data = image_data
 
-                                # Display in output label
-                                pixmap = QPixmap()
-                                if pixmap.loadFromData(image_data):
-                                    # Get the label's current size
-                                    label_size = self.output_image_label.size()
-
-                                    # Ensure we have valid dimensions
-                                    if label_size.width() <= 0 or label_size.height() <= 0:
-                                        # Label not ready yet, use _display_image which handles this
-                                        self._display_image(image_data)
-                                    else:
-                                        # Scale to fit the label while maintaining aspect ratio
-                                        scaled = pixmap.scaled(
-                                            label_size.width() - 4,  # Account for border
-                                            label_size.height() - 4,  # Account for border
-                                            Qt.KeepAspectRatio,
-                                            Qt.SmoothTransformation
-                                        )
-                                        self.output_image_label.setPixmap(scaled)
-
-                                        # Store the original pixmap for resizing
-                                        self.output_image_label.setProperty("original_pixmap", pixmap)
-                                        # Ensure scaling after layout completes
-                                        for delay in [50, 100, 200, 500]:
-                                            try:
-                                                QTimer.singleShot(delay, self._perform_image_resize)
-                                            except Exception:
-                                                pass
+                                # Use _display_image which handles all edge cases and resize logic
+                                self._display_image(image_data)
 
                                 # Enable save and copy buttons since we have an image
                                 self.btn_save_image.setEnabled(True)
@@ -6469,6 +6461,28 @@ For more detailed information, please refer to the full documentation.
                                     idx = self.provider_combo.findText(provider)
                                     if idx >= 0:
                                         self.provider_combo.setCurrentIndex(idx)
+
+                                # Load reference images if available
+                                if hasattr(self, 'imagen_reference_widget'):
+                                    # Try new multi-reference format first
+                                    if 'imagen_references' in history_item:
+                                        self.imagen_reference_widget.from_dict(history_item['imagen_references'])
+                                    # Fall back to legacy single reference
+                                    elif 'reference_image' in history_item:
+                                        ref_path_str = history_item['reference_image']
+                                        # Convert legacy format to new dict format and load
+                                        legacy_data = {
+                                            "mode": "strict",
+                                            "references": [{
+                                                "reference_id": 1,
+                                                "path": ref_path_str,  # Correct key name for ImagenReference
+                                                "reference_type": "subject"
+                                            }]
+                                        }
+                                        self.imagen_reference_widget.from_dict(legacy_data)
+                                    else:
+                                        # No reference images in history - clear any existing ones
+                                        self.imagen_reference_widget.clear_all()
 
                                 # Update status
                                 self.status_label.setText("Loaded from history")

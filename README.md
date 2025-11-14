@@ -101,6 +101,7 @@
       - Mode switching with automatic reference limit handling
       - Thumbnail previews with individual controls per reference
       - Per-reference type selectors and descriptions
+      - **Edit Mode** - When using a single reference image, enable checkbox to auto-prefix prompt with "Edit this image. Keep everything already in the image exactly the same."
 - **Enhanced Aspect Ratio Selector** - Interactive preview rectangles with custom input support:
   - Visual preset buttons for common ratios (1:1, 3:4, 4:3, 16:9, 9:16, 21:9)
   - **Custom aspect ratio input** - Enter any ratio like "16:10" or decimal "1.6"
@@ -1415,6 +1416,26 @@ Scenario 3: Control with Edge Detection
 2. Add reference → Type: CONTROL, Control Type: CANNY
 3. Enter prompt: "Follow the structural lines of [1], create modern architecture"
 4. Generate → Uses edge structure while changing content
+```
+
+**Edit Mode** (Single Reference Only):
+
+When you have exactly one reference image, you can enable **Edit Mode** to make precise edits while preserving everything else in the image:
+
+```
+Example: Changing one element while keeping everything else
+1. Add a single reference image (e.g., photo of a room)
+2. Check the "Edit Mode" checkbox (appears next to "+ Add Reference Image")
+3. Enter your edit instruction: "Replace the sofa with a modern blue sectional"
+4. Generate → The prompt is auto-prefixed with:
+   "Edit this image. Keep everything already in the image exactly the same."
+5. Result: Only the specified element changes, everything else stays identical
+
+Tips for Edit Mode:
+- Be specific about what to change: "Replace X with Y", "Change the color of X to Y"
+- Works best with clear, focused edit requests
+- The checkbox is only enabled when exactly 1 reference image is present
+- Automatically disabled when adding more images or removing the last image
 ```
 
 **Tips for Best Results**:

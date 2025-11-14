@@ -242,41 +242,41 @@ class PromptBuilder(QDialog):
     def _populate_combo_boxes(self):
         """Populate combo boxes with loaded data."""
         # Style
-        styles = [""] + self.data_loader.get_styles()
+        styles = [""] + sorted(self.data_loader.get_styles())
         self.style_combo.blockSignals(True)
         self.style_combo.clear()
         self.style_combo.addItems(styles)
         self.style_combo.blockSignals(False)
 
         # Medium
-        mediums = [""] + self.data_loader.get_mediums()
+        mediums = [""] + sorted(self.data_loader.get_mediums())
         self.medium_combo.blockSignals(True)
         self.medium_combo.clear()
         self.medium_combo.addItems(mediums)
         self.medium_combo.blockSignals(False)
 
         # Artist
-        artists = [""] + self.data_loader.get_artists()
+        artists = [""] + sorted(self.data_loader.get_artists())
         self.artist_combo.blockSignals(True)
         self.artist_combo.clear()
         self.artist_combo.addItems(artists)
         self.artist_combo.blockSignals(False)
 
         # Lighting
-        lighting = [""] + self.data_loader.get_lighting()
+        lighting = [""] + sorted(self.data_loader.get_lighting())
         self.lighting_combo.blockSignals(True)
         self.lighting_combo.clear()
         self.lighting_combo.addItems(lighting)
         self.lighting_combo.blockSignals(False)
 
         # Mood
-        moods = [""] + self.data_loader.get_moods()
+        moods = [""] + sorted(self.data_loader.get_moods())
         self.mood_combo.blockSignals(True)
         self.mood_combo.clear()
         self.mood_combo.addItems(moods)
         self.mood_combo.blockSignals(False)
 
-        logger.debug("Populated combo boxes with data")
+        logger.debug("Populated combo boxes with data (sorted)")
 
     def _populate_presets(self):
         """Populate presets combo box with loaded presets."""
@@ -372,21 +372,23 @@ class PromptBuilder(QDialog):
         form_layout.addRow("Subject:", self.subject_combo)
 
         # Transformation style
-        self.transformation_combo = self._create_combo([
+        transformation_options = [
             "",
-            "as full color super-exaggerated caricature cartoon",
+            "as 3D render",
+            "as abstract art",
+            "as anime character",
             "as caricature",
             "as cartoon character",
             "as comic book character",
-            "as anime character",
-            "as realistic portrait",
-            "as abstract art",
-            "as oil painting",
-            "as watercolor painting",
-            "as pencil sketch",
             "as digital art",
-            "as 3D render"
-        ])
+            "as full color super-exaggerated caricature cartoon",
+            "as oil painting",
+            "as pencil sketch",
+            "as perfect pencil sketch",
+            "as realistic portrait",
+            "as watercolor painting"
+        ]
+        self.transformation_combo = self._create_combo(transformation_options)
         form_layout.addRow("Transform As:", self.transformation_combo)
 
         # Artist (from artists.json) - will be populated on show
@@ -475,6 +477,23 @@ class PromptBuilder(QDialog):
         form_layout.addRow("Exclude:", self.exclusion_edit)
 
         builder_layout.addLayout(form_layout)
+
+        # Special Instructions group
+        special_group = QGroupBox("Special Instructions")
+        special_layout = QVBoxLayout()
+
+        self.exact_likeness_check = QCheckBox("Make it look identical to them and ONLY draw their head and face")
+        self.exact_likeness_check.setToolTip("Ensures exact facial likeness, focusing only on head and face")
+        self.exact_likeness_check.stateChanged.connect(self._update_preview)
+        special_layout.addWidget(self.exact_likeness_check)
+
+        self.detailed_analysis_check = QCheckBox("Focus on every single detail and do a full analysis scan of their face before generating it")
+        self.detailed_analysis_check.setToolTip("Instructs AI to perform detailed facial analysis before generation")
+        self.detailed_analysis_check.stateChanged.connect(self._update_preview)
+        special_layout.addWidget(self.detailed_analysis_check)
+
+        special_group.setLayout(special_layout)
+        builder_layout.addWidget(special_group)
 
         # Additional notes
         builder_layout.addWidget(QLabel("Additional Details (optional):"))
@@ -713,6 +732,13 @@ class PromptBuilder(QDialog):
         if mood:
             prompt_parts.append(f"{mood} mood")
 
+        # Special instructions
+        if self.exact_likeness_check.isChecked():
+            prompt_parts.append("Make it look identical to them and ONLY draw their head and face")
+
+        if self.detailed_analysis_check.isChecked():
+            prompt_parts.append("Focus on every single detail and do a full analysis scan of their face before generating it")
+
         if exclusion:
             prompt_parts.append(exclusion)
 
@@ -746,6 +772,8 @@ class PromptBuilder(QDialog):
             combo.setCurrentIndex(0)
         self.exclusion_edit.clear()
         self.notes_edit.clear()
+        self.exact_likeness_check.setChecked(False)
+        self.detailed_analysis_check.setChecked(False)
 
     def _use_prompt(self):
         """Emit the prompt and close dialog."""
@@ -784,7 +812,9 @@ class PromptBuilder(QDialog):
                 "lighting": self.lighting_combo.currentText(),
                 "mood": self.mood_combo.currentText(),
                 "exclusion": self.exclusion_edit.toPlainText(),  # Save raw text
-                "notes": self.notes_edit.toPlainText()
+                "notes": self.notes_edit.toPlainText(),
+                "exact_likeness": self.exact_likeness_check.isChecked(),
+                "detailed_analysis": self.detailed_analysis_check.isChecked()
             }
         }
 
@@ -822,7 +852,9 @@ class PromptBuilder(QDialog):
                 "lighting": self.lighting_combo.currentText(),
                 "mood": self.mood_combo.currentText(),
                 "exclusion": self.exclusion_edit.toPlainText(),  # Save raw text
-                "notes": self.notes_edit.toPlainText()
+                "notes": self.notes_edit.toPlainText(),
+                "exact_likeness": self.exact_likeness_check.isChecked(),
+                "detailed_analysis": self.detailed_analysis_check.isChecked()
             }
         }
 
@@ -1131,11 +1163,13 @@ class PromptBuilder(QDialog):
                     "lighting": self.lighting_combo.currentText(),
                     "mood": self.mood_combo.currentText(),
                     "exclusion": self.exclusion_edit.toPlainText(),
-                    "notes": self.notes_edit.toPlainText()
+                    "notes": self.notes_edit.toPlainText(),
+                    "exact_likeness": self.exact_likeness_check.isChecked(),
+                    "detailed_analysis": self.detailed_analysis_check.isChecked()
                 }
 
-                # Remove empty settings to keep preset lean
-                current_settings = {k: v for k, v in current_settings.items() if v}
+                # Remove empty settings to keep preset lean (but keep False values for checkboxes)
+                current_settings = {k: v for k, v in current_settings.items() if v or isinstance(v, bool)}
 
                 # Save the preset
                 success = self.preset_loader.save_custom_preset(
@@ -1193,6 +1227,8 @@ class PromptBuilder(QDialog):
         self.mood_combo.setCurrentText(settings.get("mood", ""))
         self.exclusion_edit.setPlainText(settings.get("exclusion", ""))  # Raw text
         self.notes_edit.setPlainText(settings.get("notes", ""))
+        self.exact_likeness_check.setChecked(settings.get("exact_likeness", False))
+        self.detailed_analysis_check.setChecked(settings.get("detailed_analysis", False))
 
     def _update_history_list(self):
         """Update the history list widget."""
@@ -1289,7 +1325,9 @@ class PromptBuilder(QDialog):
                         "lighting": self.lighting_combo.currentText(),
                         "mood": self.mood_combo.currentText(),
                         "exclusion": self.exclusion_edit.toPlainText(),
-                        "notes": self.notes_edit.toPlainText()
+                        "notes": self.notes_edit.toPlainText(),
+                        "exact_likeness": self.exact_likeness_check.isChecked(),
+                        "detailed_analysis": self.detailed_analysis_check.isChecked()
                     }
                 }
 
@@ -1469,6 +1507,10 @@ class PromptBuilder(QDialog):
         self.exclusion_edit.setPlainText(self.settings.value("exclusion", ""))
         self.notes_edit.setPlainText(self.settings.value("notes", ""))
 
+        # Restore checkboxes
+        self.exact_likeness_check.setChecked(self.settings.value("exact_likeness", False, type=bool))
+        self.detailed_analysis_check.setChecked(self.settings.value("detailed_analysis", False, type=bool))
+
         # Restore search text and auto-filter state
         search_text = self.settings.value("searchText", "")
         auto_filter = self.settings.value("autoFilter", True, type=bool)
@@ -1512,6 +1554,10 @@ class PromptBuilder(QDialog):
         # Save text fields
         self.settings.setValue("exclusion", self.exclusion_edit.toPlainText())
         self.settings.setValue("notes", self.notes_edit.toPlainText())
+
+        # Save checkboxes
+        self.settings.setValue("exact_likeness", self.exact_likeness_check.isChecked())
+        self.settings.setValue("detailed_analysis", self.detailed_analysis_check.isChecked())
 
         # Save search state
         self.settings.setValue("searchText", self.search_input.text())
