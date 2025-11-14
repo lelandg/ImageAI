@@ -766,46 +766,47 @@ These examples are based on actual production workflows used to create music vid
    **Day 1 - Project Setup (October 14):**
    - Open Video tab → Click "New Project"
    - Name project: "Do Math v2"
-   - Paste lyrics formatted with square brackets. (Like Suno and AISongGenerator use.) 
-   - Optionally, Edit to include manual scene markers:
+   - Paste lyrics formatted with square brackets. (Like Suno and AISongGenerator use.)
+   - Optionally, edit to include manual scene markers:
 ```
 === NEW SCENE: bedroom ===
 [Verse 1]
-When the night feels endless and I’m wide awake
+When the night feels endless and I'm wide awake
 
 === NEW SCENE: abstract ===
 I shuffle numbers like cards
 I hum a rhythm, let the numbers dance
-And suddenly it’s not so hard
+And suddenly it's not so hard
 
 [Chorus]
 === NEW SCENE: bedroom ===
-I’m doin’ math, I do math, I do math
-I’m tap-tap-tappin’ in my head
+I'm doin' math, I do math, I do math
+I'm tap-tap-tappin' in my head
 (etc.)
 ```
-   - Click "Load MIDI File" → Select `Do Math v2.mid` (Auto-detects tempo. E.g., 120 BPM, 4/4 time, 125 seconds)
-   - Click "Load Audio Track" → Select audio WAV file
-     - This is used in final step to produce your video. 
+   - In Audio/MIDI section, click "Browse..." next to MIDI file → Select `Do Math v2.mid`
+     - System auto-detects tempo (e.g., 120 BPM, 4/4 time, 125 seconds)
+   - Click "Browse..." next to Audio file → Select audio WAV file
+     - This is used in final step to produce your video
    - Set MIDI Sync mode: "Beat" with snap strength 1.0
-   - Configure providers. E.g.:
+   - Configure providers:
      - LLM: Google Gemini 2.5 Pro
      - Images: Google Gemini 2.5 Flash Image Preview
    - Set prompt style: "Hi-res Cartoon"
    - Set aspect ratio: 16:9 (1024×576)
-   - Project auto-saves with 22 scenes detected
+   - Scenes auto-detected (22 scenes) when you proceed to storyboard generation
 
    **Day 2 - Character Reference Setup (October 16):**
    - Generate character reference images in main Image tab
-   - Add to Video project as global references:
-     - Click "Reference Images" button in Video tab
-     - Add character images (Janelle, Dave)
-     - Add environment reference (bedroom scene)
+   - Switch to Video tab → Click "Reference Library" button (bottom of workspace)
+   - In Reference Library panel, click "Generate Character Refs"
+     - Or click "Add Reference" to load existing images
+   - Add character images (Janelle, Dave) and environment reference (bedroom scene)
    - References auto-apply to all scenes
 
    **Day 13 - Video Generation (October 27):**
-   - In Workspace tab, select scene 0
-   - Click "Generate Video" button
+   - In Workspace tab, select scene 0 in the scene table
+   - Click the 🎬 icon in the scene row to generate video
    - Veo generates 8-second clip in ~86 seconds
    - System extracts last frame automatically for continuity
    - Video saved to: `project/clips/scene_0_20251027_152943.mp4`
@@ -814,7 +815,7 @@ I’m tap-tap-tappin’ in my head
 
 2. **Structured Lyrics Without MIDI** (Simpler Workflow):
    - Create new project
-   - Paste lyrics with section headers:
+   - Paste lyrics with section headers into the input text area:
      ```
      [Verse 1]
      Your lyrics here...
@@ -825,39 +826,40 @@ I’m tap-tap-tappin’ in my head
      [Bridge]
      Your lyrics here...
      ```
-   - Click "Split Text" → Scenes auto-detected from sections
+   - Scenes are automatically detected from section headers when you generate the storyboard
    - Select LLM provider (OpenAI GPT-5, Claude 3.5, or Gemini 2.5 Pro)
    - Choose prompt style (Cinematic, Artistic, Photorealistic, etc.)
    - Click "Enhance All Prompts" → LLM generates detailed scene descriptions
-   - Choose rendering:
-     - FFmpeg Slideshow: Generate images, render with Ken Burns effects
+   - Choose rendering method:
+     - FFmpeg Slideshow: Generate images first, then render with Ken Burns effects
      - Google Veo: Generate motion video clips for each scene
-   - Click "Render Final Video"
+   - Click "Render Video" to create final output
 
 3. **Professional AI Motion Video with Continuity** (Google Veo 3.0/3.1):
-   - Create project with storyboard/lyrics
-   - Configure video provider: Select "Gemini Veo"
-   - Enable continuity: Check "Use last frame for continuous" option
+   - Create project with storyboard/lyrics (text auto-parsed into scenes)
+   - Configure video provider: Select "Gemini Veo" in provider dropdown
+   - Enable continuity: Check "Auto-link previous end frame as reference" option
    - Set up first scene:
-     - Write detailed prompt or use LLM enhancement
-     - Optional: Set reference image for style/character
-   - Generate first video clip
+     - Write detailed prompt or click ✨ button for LLM enhancement
+     - Optional: Add reference images in the Reference Images column
+   - Click 🎬 icon to generate first video clip
    - System automatically:
      - Extracts last frame from generated clip
-     - Uses it as start frame for next scene
+     - Uses it as start frame for next scene (or reference image)
      - Maintains visual continuity across scenes
    - Generate remaining scenes sequentially
    - Each 8-second clip links seamlessly to the next
-   - Final assembly: Clips combine with crossfade transitions
+   - Final assembly: Use "Render Video" to combine clips with crossfade transitions
 
 4. **Quick Slideshow from Plain Text**:
    - Create new project
-   - Paste plain text (no timestamps or markers)
-   - Click "Split Text" → Scenes created from paragraph breaks
-   - Select "Quick" preset (short scenes, fast generation)
+   - Paste plain text (no timestamps or markers) into input area
+   - Scenes are automatically created from paragraph breaks during storyboard generation
+   - Select "Quick" preset (short scenes, fast generation) if available
    - Choose image provider (Google, OpenAI, Stability AI)
-   - Generate all scene images (parallel generation)
-   - Render with FFmpeg:
+   - Click "Enhance All Prompts" to generate scene descriptions
+   - Generate all scene images (system processes multiple scenes in parallel)
+   - Click "Render Video" and configure:
      - Resolution: 1080p or 4K
      - Ken Burns: Enabled for motion
      - Transitions: Crossfade between scenes
