@@ -947,10 +947,10 @@ class WorkspaceWidget(QWidget):
         timing_layout = QHBoxLayout()
         timing_layout.addWidget(QLabel("Target Length:"))
         self.duration_spin = QSpinBox()
-        self.duration_spin.setRange(10, 600)
+        self.duration_spin.setRange(4, 600)  # Minimum 4 seconds (some models support 4s clips)
         self.duration_spin.setValue(120)
         self.duration_spin.setSuffix(" sec")
-        self.duration_spin.setToolTip("Target video length in seconds")
+        self.duration_spin.setToolTip("Target video length in seconds (minimum 4 seconds for compatible models)")
         timing_layout.addWidget(self.duration_spin)
 
         timing_layout.addWidget(QLabel("Pacing:"))

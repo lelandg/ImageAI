@@ -7,7 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.25.0] - 2025-01-12
+## [0.26.0] - 2025-11-15
+
+### Added
+
+#### History Tab Enhancements
+- **Reference Image Column**: New column in history table shows reference image indicators
+  - 📎 icon displays when reference images were used
+  - Count badge shows number of references (e.g., "📎 3" for 3 images)
+  - Tooltip displays reference image filenames and types
+  - Supports both new multi-reference format and legacy single reference format
+  - Helps track which generations used reference images for style/subject consistency
+
+#### Edit Mode for Generated Images
+- **Edit Mode Button**: New "Edit Mode" button in image tab for enhancing/modifying existing images
+  - Load any generated image from history for editing
+  - Automatically loads original prompt and metadata
+  - Preserves generation settings (provider, model, resolution)
+  - Streamlined workflow for iterative refinement
+
+#### UI/UX Improvements
+- **Double-Click History Loading**: Changed history loading from single-click to double-click
+  - Prevents accidental loading when browsing history
+  - More intuitive interaction pattern
+  - Single-click still shows preview
+  - Improved user experience and reduced errors
+
+- **Thumbnail Hover Preview**: Image preview now only shows when hovering over thumbnail column
+  - Less intrusive preview behavior
+  - Cleaner interface when browsing non-thumbnail columns
+  - Faster navigation through history
+  - Preview appears instantly on thumbnail hover
+
+- **Dynamic Provider Refresh**: Provider combo boxes automatically update when API keys are saved
+  - No restart required to see newly configured providers
+  - Instant availability of providers after adding API keys
+  - Signal-based architecture for real-time UI updates
+  - Affects both Image tab and Settings tab provider selectors
+
+#### Development Tools
+- **run.sh Script**: Added setup and execution script for Linux/macOS
+  - Automatic virtual environment creation if needed
+  - Dependency installation check
+  - One-command project launch
+  - Simplified developer onboarding
+
+### Changed
+
+#### Video Tab Improvements
+- **Minimum Clip Duration**: Reduced minimum video clip duration from 10s to 4s
+  - Supports models that can generate shorter clips (Veo 3.0/3.1)
+  - Better flexibility for fast-paced video content
+  - Updated tooltip to reflect 4-second minimum
+  - Improved pacing control for lyric-synced videos
+
+#### Video Generation Fixes
+- **Veo 3.0/3.1 Clip Duration Handling**: Fixed duration handling and trimming for Veo models
+  - Correct handling of clip durations for different Veo versions
+  - Improved trimming logic to match target scene lengths
+  - Better synchronization with MIDI timing
+  - Prevents duration mismatches in final video output
+
+### Technical
+- Added `api_keys_updated` Signal to MainWindow for provider refresh
+- New `_refresh_provider_combos()` method for dynamic provider list updates
+- Enhanced history table with 8th column for reference indicators
+- Reference tooltip builder supports both `imagen_references` and legacy `reference_image` formats
+- Updated workspace widget duration spinner range to 4-600 seconds
+
+## [0.25.0] - 2025-11-12
 
 ### Added
 
@@ -248,7 +316,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved error handling for video generation operations
 - Enhanced MIDI synchronization accuracy
 
-## [0.23.0] - 2025-01-16
+## [0.23.0] - 2025-11-08
 
 ### Added
 - **Veo 3.1 Support**: Added Google Veo 3.1 frames-to-video model to dropdown
@@ -286,7 +354,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Updated video button implementation in `gui/video/workspace_widget.py` with signal-based architecture
 - Added hover preview system reusing FramePreviewPopup from FrameButton
 
-## [0.22.0] - 2025-01-15
+## [0.22.0] - 2025-11-07
 
 ### Added
 - **Video Project Workflow Wizard**: New step-by-step wizard for creating video projects
@@ -342,7 +410,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Veo 3 integration provides foundation for advanced music-synced video generation
 - Enhanced batch processing capabilities improve workflow efficiency
 
-## [0.20.1] - 2025-01-06
+## [0.20.1] - 2025-11-06
 
 ### Fixed
 - **Video Tab Image Generation**: Fixed critical API key retrieval issue preventing image generation in video projects

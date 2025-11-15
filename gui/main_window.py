@@ -212,7 +212,10 @@ except ImportError:
 
 class MainWindow(QMainWindow):
     """Main application window."""
-    
+
+    # Signal emitted when API keys are saved/updated
+    api_keys_updated = Signal()
+
     def __init__(self):
         super().__init__()
         import logging
@@ -660,7 +663,53 @@ class MainWindow(QMainWindow):
         
         # Connect tab change signal to handle help tab rendering
         self.tabs.currentChanged.connect(self._on_tab_changed)
-    
+
+        # Connect API keys updated signal to refresh provider combos
+        self.api_keys_updated.connect(self._refresh_provider_combos)
+
+    def _refresh_provider_combos(self):
+        """Refresh all provider combo boxes to reflect newly available providers."""
+        from providers import list_providers
+
+        # Get available providers dynamically
+        try:
+            available_providers = list_providers()
+            # Filter out internal providers
+            available_providers = [p for p in available_providers if p != "imagen_customization"]
+            if not available_providers:
+                available_providers = ["google", "openai", "midjourney"]
+        except Exception as e:
+            self.logger.debug(f"Provider discovery failed during refresh: {e}")
+            available_providers = ["google", "openai", "midjourney"]
+
+        # Refresh Image tab provider combo
+        if hasattr(self, 'image_provider_combo'):
+            current_provider = self.image_provider_combo.currentText()
+            self.image_provider_combo.blockSignals(True)
+            self.image_provider_combo.clear()
+            self.image_provider_combo.addItems(available_providers)
+            # Restore previous selection if still valid
+            if current_provider in available_providers:
+                self.image_provider_combo.setCurrentText(current_provider)
+            elif self.current_provider in available_providers:
+                self.image_provider_combo.setCurrentText(self.current_provider)
+            self.image_provider_combo.blockSignals(False)
+
+        # Refresh Settings tab provider combo
+        if hasattr(self, 'provider_combo'):
+            current_provider = self.provider_combo.currentText()
+            self.provider_combo.blockSignals(True)
+            self.provider_combo.clear()
+            self.provider_combo.addItems(available_providers)
+            # Restore previous selection if still valid
+            if current_provider in available_providers:
+                self.provider_combo.setCurrentText(current_provider)
+            elif self.current_provider in available_providers:
+                self.provider_combo.setCurrentText(self.current_provider)
+            self.provider_combo.blockSignals(False)
+
+        self.logger.debug(f"Provider combos refreshed with: {available_providers}")
+
     def _init_menu(self):
         """Initialize menu bar."""
         mb = self.menuBar()
@@ -3004,9 +3053,9 @@ For more detailed information, please refer to the full documentation.
 
         # Create table widget for better organization
         self.history_table = QTableWidget()
-        self.history_table.setColumnCount(7)
+        self.history_table.setColumnCount(8)
         self.history_table.setHorizontalHeaderLabels([
-            "Thumbnail", "Date & Time", "Provider", "Model", "Prompt", "Resolution", "Cost"
+            "Thumbnail", "Date & Time", "Provider", "Model", "Prompt", "Resolution", "Cost", "Refs"
         ])
 
         # Configure table
@@ -3037,6 +3086,7 @@ For more detailed information, please refer to the full documentation.
         header.setSectionResizeMode(4, QHeaderView.Stretch)  # Prompt - takes remaining space
         header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Resolution
         header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Cost
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # Refs
         
         # Populate table with history
         self.history_table.setRowCount(len(self.history))
@@ -3116,13 +3166,49 @@ For more detailed information, please refer to the full documentation.
                 resolution = f"{width}x{height}" if width and height else ''
                 resolution_item = QTableWidgetItem(resolution)
                 self.history_table.setItem(row, 5, resolution_item)
-                
+
                 # Cost column (now column 5)
                 cost = item.get('cost', 0.0)
                 cost_str = f"${cost:.2f}" if cost > 0 else '-'
                 cost_item = QTableWidgetItem(cost_str)
                 self.history_table.setItem(row, 6, cost_item)
-                
+
+                # References column (column 7)
+                ref_count = 0
+                ref_tooltip = ""
+
+                # Check for new multi-reference format
+                if 'imagen_references' in item:
+                    refs_data = item['imagen_references']
+                    if isinstance(refs_data, dict) and 'references' in refs_data:
+                        ref_count = len(refs_data['references'])
+                        # Build tooltip with reference details
+                        ref_names = []
+                        for ref in refs_data['references']:
+                            ref_path = ref.get('path', '')
+                            ref_name = Path(ref_path).name if ref_path else 'Unknown'
+                            ref_type = ref.get('type', '').upper()
+                            ref_names.append(f"{ref_name} ({ref_type})" if ref_type else ref_name)
+                        ref_tooltip = "Reference Images:\n" + "\n".join(ref_names)
+                # Check for legacy single reference format
+                elif 'reference_image' in item:
+                    ref_count = 1
+                    ref_path = item['reference_image']
+                    ref_name = Path(ref_path).name if ref_path else 'Unknown'
+                    ref_tooltip = f"Reference Image:\n{ref_name}"
+
+                # Display reference indicator
+                if ref_count > 0:
+                    ref_str = f"📎 {ref_count}" if ref_count > 1 else "📎"
+                    ref_item = QTableWidgetItem(ref_str)
+                    ref_item.setToolTip(ref_tooltip)
+                    # Center align the indicator
+                    ref_item.setTextAlignment(Qt.AlignCenter)
+                else:
+                    ref_item = QTableWidgetItem("")
+
+                self.history_table.setItem(row, 7, ref_item)
+
                 # Store the history item data in the first column for easy retrieval
                 datetime_item.setData(Qt.UserRole, item)
 
@@ -3927,6 +4013,9 @@ For more detailed information, please refer to the full documentation.
 
         # Save configuration
         self.config.save()
+
+        # Emit signal to refresh provider combos across the app
+        self.api_keys_updated.emit()
 
         # Reinitialize watcher if settings changed
         if self.chk_midjourney_watch.isChecked():
@@ -7766,13 +7855,49 @@ For more detailed information, please refer to the full documentation.
                 resolution = f"{width}x{height}" if width and height else ''
                 resolution_item = QTableWidgetItem(resolution)
                 self.history_table.setItem(row, 5, resolution_item)
-                
+
                 # Cost column (now column 5)
                 cost = item.get('cost', 0.0)
                 cost_str = f"${cost:.2f}" if cost > 0 else '-'
                 cost_item = QTableWidgetItem(cost_str)
                 self.history_table.setItem(row, 6, cost_item)
-                
+
+                # References column (column 7)
+                ref_count = 0
+                ref_tooltip = ""
+
+                # Check for new multi-reference format
+                if 'imagen_references' in item:
+                    refs_data = item['imagen_references']
+                    if isinstance(refs_data, dict) and 'references' in refs_data:
+                        ref_count = len(refs_data['references'])
+                        # Build tooltip with reference details
+                        ref_names = []
+                        for ref in refs_data['references']:
+                            ref_path = ref.get('path', '')
+                            ref_name = Path(ref_path).name if ref_path else 'Unknown'
+                            ref_type = ref.get('type', '').upper()
+                            ref_names.append(f"{ref_name} ({ref_type})" if ref_type else ref_name)
+                        ref_tooltip = "Reference Images:\n" + "\n".join(ref_names)
+                # Check for legacy single reference format
+                elif 'reference_image' in item:
+                    ref_count = 1
+                    ref_path = item['reference_image']
+                    ref_name = Path(ref_path).name if ref_path else 'Unknown'
+                    ref_tooltip = f"Reference Image:\n{ref_name}"
+
+                # Display reference indicator
+                if ref_count > 0:
+                    ref_str = f"📎 {ref_count}" if ref_count > 1 else "📎"
+                    ref_item = QTableWidgetItem(ref_str)
+                    ref_item.setToolTip(ref_tooltip)
+                    # Center align the indicator
+                    ref_item.setTextAlignment(Qt.AlignCenter)
+                else:
+                    ref_item = QTableWidgetItem("")
+
+                self.history_table.setItem(row, 7, ref_item)
+
                 # Store the history item data in the first column for easy retrieval
                 datetime_item.setData(Qt.UserRole, item)
 

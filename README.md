@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.25.0**
+**Version 0.26.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **ChatMaster BBS - The Intersection of Art and AI - Support and Fun: [ChatMaster BBS Discord Server](https://discord.gg/chatmaster)**
@@ -585,6 +585,10 @@ python main.py video --in script.txt --veo-model veo-3.0-generate-001 \
     - Customizable analysis prompts
     - Copy descriptions directly to main prompt
 - **Generate Button**: Start image generation with progress tracking
+- **Edit Mode Button**: Load any generated image from history for enhancement/modification
+  - Automatically loads original prompt and all metadata
+  - Preserves generation settings (provider, model, resolution, reference images)
+  - Streamlined workflow for iterative refinement
 - **Image Display**: High-quality preview with automatic scaling
 - **Generation Controls**:
   - Aspect ratio selector with visual previews
@@ -976,6 +980,7 @@ Comic Strip: "Monday Morning"
 
 #### Settings Tab
 - **Provider Selection**: Switch between Google, OpenAI, Stability AI, and Local SD
+  - **Dynamic Provider Refresh**: Provider lists automatically update after saving API keys (no restart required)
 - **Authentication Mode** (Google only):
   - API Key mode with key input field
   - Google Cloud Account mode with status display
@@ -1010,14 +1015,17 @@ Comic Strip: "Monday Morning"
 
 #### History Tab
 - **Detailed History Table** with columns:
+  - Thumbnail preview
   - Date and time
   - Provider used
   - Model name
+  - Original prompt
   - Resolution
   - Cost (when applicable)
-  - Original prompt
+  - Reference images indicator (📎 with count and tooltip)
 - **Quick Actions**:
-  - Click to reload prompt and settings
+  - Double-click to reload prompt and settings (changed from single-click for better UX)
+  - Hover over thumbnail for instant image preview
   - Open image file location
   - View metadata sidecar
 - **Search and Filter**:
