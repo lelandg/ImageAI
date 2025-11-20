@@ -5801,27 +5801,34 @@ class WorkspaceWidget(QWidget):
                 dialog_manager.show_error("Error", f"Failed to load file: {e}")
     
     def browse_audio_file(self):
-        """Browse for audio file"""
+        """Browse for audio file or Suno package"""
         filename, _ = QFileDialog.getOpenFileName(
-            self, "Select Audio File",
-            "", "Audio Files (*.mp3 *.wav *.m4a *.ogg);;All Files (*.*)"
+            self, "Select Audio File or Suno Package",
+            "", "Audio Files (*.mp3 *.wav *.m4a *.ogg *.zip);;All Files (*.*)"
         )
         if filename:
-            self.audio_file_label.setText(Path(filename).name)
-            self.clear_audio_btn.setEnabled(True)
-            if self.current_project:
-                from core.video.project import AudioTrack
-                # Clear existing tracks and add new one
-                self.current_project.audio_tracks = []
-                self.current_project.audio_tracks.append(AudioTrack(
-                    file_path=Path(filename),
-                    volume=self.volume_slider.value() / 100.0,
-                    fade_in_duration=self.fade_in_spin.value(),
-                    fade_out_duration=self.fade_out_spin.value()
-                ))
+            file_path = Path(filename)
 
-                # Refresh wizard after audio file is loaded
-                self._refresh_wizard()
+            # Check if it's a zip file (potential Suno package)
+            if file_path.suffix.lower() == '.zip':
+                self._import_suno_package(file_path, import_audio=True, import_midi=True)
+            else:
+                # Regular audio file
+                self.audio_file_label.setText(file_path.name)
+                self.clear_audio_btn.setEnabled(True)
+                if self.current_project:
+                    from core.video.project import AudioTrack
+                    # Clear existing tracks and add new one
+                    self.current_project.audio_tracks = []
+                    self.current_project.audio_tracks.append(AudioTrack(
+                        file_path=file_path,
+                        volume=self.volume_slider.value() / 100.0,
+                        fade_in_duration=self.fade_in_spin.value(),
+                        fade_out_duration=self.fade_out_spin.value()
+                    ))
+
+                    # Refresh wizard after audio file is loaded
+                    self._refresh_wizard()
     
     def clear_audio(self):
         """Clear audio selection"""
@@ -5831,42 +5838,49 @@ class WorkspaceWidget(QWidget):
             self.current_project.audio_tracks = []
     
     def browse_midi_file(self):
-        """Browse for MIDI file"""
+        """Browse for MIDI file or Suno package"""
         filename, _ = QFileDialog.getOpenFileName(
-            self, "Select MIDI File",
-            "", "MIDI Files (*.mid *.midi);;All Files (*.*)"
+            self, "Select MIDI File or Suno Package",
+            "", "MIDI Files (*.mid *.midi *.zip);;All Files (*.*)"
         )
         if filename:
-            try:
-                # Process MIDI file
-                from core.video.midi_utils import get_midi_processor
-                processor = get_midi_processor()
-                timing_data = processor.extract_timing(Path(filename))
-                
-                # Update UI
-                self.midi_file_label.setText(Path(filename).name)
-                self.midi_info_label.setText(
-                    f"{timing_data.tempo_bpm:.0f} BPM, {timing_data.time_signature}, "
-                    f"{timing_data.duration_sec:.1f}s"
-                )
-                self.clear_midi_btn.setEnabled(True)
-                self.sync_mode_combo.setEnabled(True)
-                self.snap_strength_slider.setEnabled(True)
-                self.extract_lyrics_btn.setEnabled(True)
-                self.karaoke_group.setVisible(True)
-                
-                # Store in project
-                if self.current_project:
-                    self.current_project.midi_file_path = Path(filename)
-                    self.current_project.midi_timing_data = timing_data
+            file_path = Path(filename)
 
-                    # Refresh wizard after MIDI file is loaded
-                    self._refresh_wizard()
+            # Check if it's a zip file (potential Suno package)
+            if file_path.suffix.lower() == '.zip':
+                self._import_suno_package(file_path, import_audio=True, import_midi=True)
+            else:
+                # Regular MIDI file
+                try:
+                    # Process MIDI file
+                    from core.video.midi_utils import get_midi_processor
+                    processor = get_midi_processor()
+                    timing_data = processor.extract_timing(file_path)
 
-            except Exception as e:
-                self.logger.error(f"Failed to process MIDI file: {e}", exc_info=True)
-                dialog_manager = get_dialog_manager(self)
-                dialog_manager.show_error("MIDI Error", f"Failed to process MIDI file: {e}")
+                    # Update UI
+                    self.midi_file_label.setText(file_path.name)
+                    self.midi_info_label.setText(
+                        f"{timing_data.tempo_bpm:.0f} BPM, {timing_data.time_signature}, "
+                        f"{timing_data.duration_sec:.1f}s"
+                    )
+                    self.clear_midi_btn.setEnabled(True)
+                    self.sync_mode_combo.setEnabled(True)
+                    self.snap_strength_slider.setEnabled(True)
+                    self.extract_lyrics_btn.setEnabled(True)
+                    self.karaoke_group.setVisible(True)
+
+                    # Store in project
+                    if self.current_project:
+                        self.current_project.midi_file_path = file_path
+                        self.current_project.midi_timing_data = timing_data
+
+                        # Refresh wizard after MIDI file is loaded
+                        self._refresh_wizard()
+
+                except Exception as e:
+                    self.logger.error(f"Failed to process MIDI file: {e}", exc_info=True)
+                    dialog_manager = get_dialog_manager(self)
+                    dialog_manager.show_error("MIDI Error", f"Failed to process MIDI file: {e}")
     
     def clear_midi(self):
         """Clear MIDI file"""
@@ -5877,11 +5891,153 @@ class WorkspaceWidget(QWidget):
         self.snap_strength_slider.setEnabled(False)
         self.extract_lyrics_btn.setEnabled(False)
         self.karaoke_group.setVisible(False)
-        
+
         if self.current_project:
             self.current_project.midi_file_path = None
             self.current_project.midi_timing_data = None
-    
+
+    def _import_suno_package(self, zip_path: Path, import_audio: bool = False, import_midi: bool = False):
+        """
+        Import and preprocess Suno package (multi-file zip).
+
+        Args:
+            zip_path: Path to Suno package zip file
+            import_audio: If True, process audio stems
+            import_midi: If True, process MIDI files
+        """
+        from core.video.suno_package import detect_suno_package, merge_audio_stems, merge_midi_files
+        from gui.video.suno_preprocess_dialog import SunoPreprocessDialog, show_merge_progress_dialog
+        from PySide6.QtCore import QCoreApplication
+
+        # Detect package contents
+        self.logger.info(f"Detecting Suno package: {zip_path}")
+        package = detect_suno_package(zip_path)
+
+        if not package:
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_error(
+                "Invalid Package",
+                f"The selected file is not a valid Suno package.\n\n"
+                f"Expected: Zip file containing audio stems (*.wav) and/or MIDI files (*.mid) "
+                f"with recognizable stem names (Vocals, Drums, Bass, etc.)"
+            )
+            return
+
+        # Show preprocessing dialog
+        preprocess_dialog = SunoPreprocessDialog(package, self)
+        if preprocess_dialog.exec() != QDialog.Accepted:
+            self.logger.info("Suno package import canceled by user")
+            package.cleanup()
+            return
+
+        # Get user selections
+        selected_audio = preprocess_dialog.get_selected_audio_stems() if import_audio else set()
+        selected_midi = preprocess_dialog.get_selected_midi_files() if import_midi else set()
+
+        # Log selection details
+        linked_stems = selected_audio & selected_midi  # Intersection - stems with both formats
+        audio_only = selected_audio - selected_midi
+        midi_only = selected_midi - selected_audio
+
+        self.logger.info(f"User selected: {len(selected_audio)} audio stems, {len(selected_midi)} MIDI files")
+        if linked_stems:
+            self.logger.info(f"  🔗 Combined (both MIDI+WAV): {sorted(linked_stems)}")
+        if audio_only:
+            self.logger.info(f"  🎵 Audio only: {sorted(audio_only)}")
+        if midi_only:
+            self.logger.info(f"  🎹 MIDI only: {sorted(midi_only)}")
+
+        # Show progress dialog
+        progress = show_merge_progress_dialog(
+            self,
+            merging_audio=bool(selected_audio),
+            merging_midi=bool(selected_midi)
+        )
+        progress.show()
+        QCoreApplication.processEvents()
+
+        try:
+            # Create project subdirectory for merged files
+            suno_dir = self.current_project.project_dir / "suno_imports"
+            suno_dir.mkdir(exist_ok=True)
+            self.logger.info(f"Storing merged files in: {suno_dir}")
+
+            # Merge audio stems if selected
+            if selected_audio:
+                merged_audio = suno_dir / f"{zip_path.stem}_merged.wav"
+                self.logger.info(f"Merging {len(selected_audio)} audio stems...")
+
+                merge_audio_stems(
+                    package.audio_stems,
+                    merged_audio,
+                    selected_stems=selected_audio
+                )
+
+                # Set as project audio
+                from core.video.project import AudioTrack
+                self.current_project.audio_tracks = [AudioTrack(file_path=merged_audio)]
+                self.audio_file_label.setText(merged_audio.name)
+                self.clear_audio_btn.setEnabled(True)
+                self.logger.info(f"✓ Audio merged successfully: {merged_audio}")
+
+            # Merge MIDI files if selected
+            if selected_midi:
+                merged_midi = suno_dir / f"{zip_path.stem}_merged.mid"
+                self.logger.info(f"Merging {len(selected_midi)} MIDI files...")
+
+                merge_midi_files(
+                    package.midi_files,
+                    merged_midi,
+                    selected_files=selected_midi
+                )
+
+                # Process merged MIDI
+                from core.video.midi_utils import get_midi_processor
+                processor = get_midi_processor()
+                timing_data = processor.extract_timing(merged_midi)
+
+                self.current_project.midi_file_path = merged_midi
+                self.current_project.midi_timing_data = timing_data
+
+                # Update UI
+                self.midi_file_label.setText(merged_midi.name)
+                self.midi_info_label.setText(
+                    f"{timing_data.tempo_bpm:.0f} BPM, {timing_data.time_signature}, "
+                    f"{timing_data.duration_sec:.1f}s"
+                )
+                self.clear_midi_btn.setEnabled(True)
+                self.sync_mode_combo.setEnabled(True)
+                self.snap_strength_slider.setEnabled(True)
+                self.extract_lyrics_btn.setEnabled(True)
+                self.karaoke_group.setVisible(True)
+                self.logger.info(f"✓ MIDI merged successfully: {merged_midi}")
+
+            # Store Suno package info in project
+            self.current_project.suno_package_path = zip_path
+            self.current_project.suno_selected_stems = list(selected_audio)
+            self.current_project.suno_selected_midi = list(selected_midi)
+
+            # Refresh wizard
+            self._refresh_wizard()
+
+            self.logger.info("✓ Suno package import completed successfully")
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_info(
+                "Import Complete",
+                f"Successfully imported Suno package:\n\n"
+                f"Audio stems: {len(selected_audio)}\n"
+                f"MIDI files: {len(selected_midi)}"
+            )
+
+        except Exception as e:
+            self.logger.error(f"Failed to import Suno package: {e}", exc_info=True)
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_error("Import Failed", f"Failed to import Suno package:\n\n{e}")
+
+        finally:
+            progress.close()
+            package.cleanup()
+
     def extract_midi_lyrics(self):
         """Extract lyrics from MIDI or align to timing"""
         if not self.current_project or not self.current_project.midi_timing_data:

@@ -5,6 +5,14 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.27.0] - 2025-11-20
+
+### Fixed
+- **Suno Package Import**: Fixed issue where selecting a Suno package zip file would only import one component. Now correctly populates both audio and MIDI fields simultaneously when imported via either button.
+
+### Documentation
+- **GEMINI.md**: Comprehensive update incorporating operational guidelines from `.claude/CLAUDE.md`, adding sections for code navigation, agent workflows, plan file management, and detailed debugging procedures.
+
 ## [0.26.0] - 2025-11-15
 
 ### Added
