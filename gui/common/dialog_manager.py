@@ -97,30 +97,50 @@ class DialogManager(QObject):
             QMessageBox.StandardButton.Ok
         )
     
-    def show_question(self, title: str, message: str, 
-                     buttons: QMessageBox.StandardButton = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                     parent: Optional[QWidget] = None) -> int:
+    def show_question(self, title: str, message: str,
+                     buttons: QMessageBox.StandardButton | list[str] = QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                     parent: Optional[QWidget] = None) -> int | str:
         """
         Show question dialog with logging.
-        
+
         Args:
             title: Dialog title
             message: Question message
-            buttons: Dialog buttons
+            buttons: Dialog buttons (StandardButton flags or list of custom button labels)
             parent: Parent widget (uses default if None)
-            
+
         Returns:
-            Dialog result code
+            Dialog result code (int) or clicked button text (str) if custom buttons used
         """
         parent_widget = parent or self.parent
         self.dialog_shown.emit("QUESTION", title, message)
-        
-        return QMessageBox.question(
-            parent_widget,
-            title,
-            message,
-            buttons
-        )
+
+        # Handle custom button list
+        if isinstance(buttons, list):
+            msg_box = QMessageBox(parent_widget)
+            msg_box.setWindowTitle(title)
+            msg_box.setText(message)
+            msg_box.setIcon(QMessageBox.Icon.Question)
+
+            # Add custom buttons
+            button_objects = {}
+            for button_text in buttons:
+                btn = msg_box.addButton(button_text, QMessageBox.ButtonRole.ActionRole)
+                button_objects[btn] = button_text
+
+            msg_box.exec()
+            clicked_button = msg_box.clickedButton()
+
+            # Return the text of the clicked button
+            return button_objects.get(clicked_button, buttons[0] if buttons else "")
+        else:
+            # Handle standard buttons
+            return QMessageBox.question(
+                parent_widget,
+                title,
+                message,
+                buttons
+            )
     
     def show_generation_error(self, operation: str, error_message: str, parent: Optional[QWidget] = None) -> int:
         """

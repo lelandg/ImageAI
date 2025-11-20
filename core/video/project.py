@@ -507,6 +507,11 @@ class VideoProject:
     karaoke_config: Optional[KaraokeConfig] = None
     karaoke_export_formats: List[str] = field(default_factory=list)  # ['lrc', 'srt', 'ass']
     karaoke_generated_files: Dict[str, Path] = field(default_factory=dict)
+
+    # Suno package support (multi-file imports)
+    suno_package_path: Optional[Path] = None  # Original zip path for re-import
+    suno_selected_stems: List[str] = field(default_factory=list)  # Which stems were selected for audio merge
+    suno_selected_midi: List[str] = field(default_factory=list)  # Which MIDI files were selected for merge
     
     # Scenes
     scenes: List[Scene] = field(default_factory=list)
@@ -591,6 +596,11 @@ class VideoProject:
                 "export_formats": self.karaoke_export_formats,
                 "generated_files": {k: str(v) for k, v in self.karaoke_generated_files.items()}
             } if self.karaoke_config else None,
+            "suno_package": {
+                "package_path": str(self.suno_package_path) if self.suno_package_path else None,
+                "selected_stems": self.suno_selected_stems,
+                "selected_midi": self.suno_selected_midi
+            } if self.suno_package_path else None,
             "scenes": [scene.to_dict() for scene in self.scenes],
             "veo_batches": self.veo_batches,
             "global_reference_images": [ref.to_dict() for ref in self.global_reference_images],
@@ -696,7 +706,15 @@ class VideoProject:
                 project.karaoke_generated_files = {
                     k: Path(v) for k, v in karaoke_data["generated_files"].items()
                 }
-        
+
+        # Load Suno package configuration
+        if "suno_package" in data and data["suno_package"]:
+            suno_data = data["suno_package"]
+            if suno_data.get("package_path"):
+                project.suno_package_path = Path(suno_data["package_path"])
+            project.suno_selected_stems = suno_data.get("selected_stems", [])
+            project.suno_selected_midi = suno_data.get("selected_midi", [])
+
         # Load scenes
         project.scenes = [Scene.from_dict(scene) for scene in data.get("scenes", [])]
 
