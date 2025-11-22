@@ -215,6 +215,7 @@ class VideoConfig:
         
         ffmpeg_path = self.get("ffmpeg_path", "ffmpeg")
         
+        # Try configured/system ffmpeg
         try:
             subprocess.run(
                 [ffmpeg_path, "-version"],
@@ -223,7 +224,21 @@ class VideoConfig:
             )
             return True
         except (subprocess.CalledProcessError, FileNotFoundError):
-            self.logger.warning(f"FFmpeg not found at: {ffmpeg_path}")
+            pass
+            
+        # Fallback to imageio-ffmpeg
+        try:
+            import imageio_ffmpeg
+            exe = imageio_ffmpeg.get_ffmpeg_exe()
+            subprocess.run(
+                [exe, "-version"],
+                capture_output=True,
+                check=True
+            )
+            self.logger.info(f"Found fallback FFmpeg at: {exe}")
+            return True
+        except (ImportError, Exception) as e:
+            self.logger.warning(f"FFmpeg not found at {ffmpeg_path} and imageio-ffmpeg fallback failed: {e}")
             return False
     
     def get_veo_model_config(self, model: str) -> Dict[str, Any]:

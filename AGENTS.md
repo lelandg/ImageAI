@@ -1,52 +1,91 @@
-# Repository Guidelines
+# Repository Agents Guidelines
 
-## Project Structure & Module Organization
-- `main.py` — entry point; launches GUI by default or CLI with args.
-- `core/` — shared logic: `config.py` (ConfigManager), `security.py`, `utils.py`, logging, and `video/` pipeline modules.
-- `gui/` — PySide6 UI (image tab, video project, dialogs) with `gui/video/` for project views.
-- `cli/` — `parser.py` and `runner.py` for command-line usage; `commands/` for subcommands.
-- `providers/` — provider adapters (`google`, `openai`, `stability`, `local_sd`) and base interface.
-- `templates/` — Jinja2 prompt templates (e.g., `templates/video/*.j2`).
-- Docs: `README.md`, `Docs/`, `Plans/`, `Screenshots/`, `CHANGELOG.md`.
+This document serves as the **Source of Truth** for all AI agents (Gemini, Claude, etc.) working on the ImageAI repository. It consolidates project context, operational procedures, and coding standards.
 
-## Build, Test, and Development Commands
-- Create venv and install deps:
-  - `python -m venv .venv && source .venv/bin/activate` (Windows: `\.venv\Scripts\Activate.ps1`)
-  - `pip install -r requirements.txt` (plus `requirements-local-sd.txt` for local SD)
-- Run GUI: `python main.py`
-- CLI help: `python main.py -h`
-- Auth test: `python main.py -t` (add `--provider openai|stability|local_sd` as needed)
-- Generate: `python main.py -p "A sunset" -o out.png`
+**Note to Agents:** Before starting any task, review this file to ensure compliance with project standards.
 
-## Coding Style & Naming Conventions
-- Python 3.9+; follow PEP 8 with 4‑space indentation and type hints.
-- Names: modules/files `snake_case.py`, classes `PascalCase`, functions/vars `snake_case`, constants `UPPER_SNAKE`.
-- Keep provider logic in `providers/` behind the base interface; UI-only code in `gui/`; shared logic in `core/`.
-- Use `core.logging_config` for logs; avoid printing in library code. Never commit secrets.
+---
 
-## Testing Guidelines
-- No formal test suite yet. Add `tests/` with `pytest` if contributing tests; name files `test_<module>.py` and functions `test_*`.
-- Smoke tests:
-  - Keys: `python main.py -t` (per provider)
-  - Generation: `python main.py -p "test" -o test.png`
-  - GUI: launch `python main.py` and verify image save + metadata sidecar.
+## 1. Project Overview
+**ImageAI** is a comprehensive desktop application and CLI tool for AI image and video generation.
+- **Goal:** Unified interface for Google Gemini, OpenAI DALL·E, Stability AI, and Local Stable Diffusion.
+- **Key Features:** Video creation (lyrics/MIDI sync), publication layout engine, prompt engineering tools.
+- **Architecture:** Modular Python codebase (GUI: PySide6, Logic: `core/`, Providers: `providers/`).
 
-## Commit & Pull Request Guidelines
-- Use Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`, `test:`; optional scope (e.g., `feat(gui): ...`). See `COMMIT_MESSAGE.txt` for examples.
-- Keep subject ≤72 chars; provide a concise body with rationale and impact. Reference issues (`#123`).
-- PRs must include: summary, test plan (commands run), screenshots for UI changes (`Screenshots/`), and updates to `README.md`/`CHANGELOG.md` when user-visible.
+## 2. Code Navigation & Debugging
+*   **Code Map (`Docs/CodeMap.md`)**: This is your primary navigation tool. It contains exact line numbers, component relationships, and architectural diagrams.
+    *   **Rule:** Always check the "Last Updated" timestamp. If > 7 days old, regenerate it using the `code-map-updater` agent (or `tools/generate_code_map.py`).
+*   **Debug Files**: Checked on exit.
+    *   `./imageai_current.log`: Most recent session log.
+    *   `./imageai_current_project.json`: Last loaded project state.
+*   **Logs**: stored in `logs/` (or platform-specific: Windows `%APPDATA%`, Linux `~/.local/share`).
 
-## Security & Configuration Tips
-- Manage keys via CLI (`--set-key`, `--api-key`, `--api-key-file`) or env vars: `GOOGLE_API_KEY`, `OPENAI_API_KEY`, `STABILITY_API_KEY`.
-- Keys are stored via `core.security.secure_storage` or config; never hardcode or log secrets.
+## 3. Project Structure
+- **`main.py`**: Entry point (CLI & GUI).
+- **`core/`**: Business logic, config, utils.
+- **`gui/`**: PySide6 interface (Separated into `main_window`, `video/`, `layout/`).
+- **`cli/`**: Command-line logic (`parser`, `runner`).
+- **`providers/`**: AI backend implementations (Google, OpenAI, etc.).
+- **`data/`**: JSON resources (prompts, presets).
+- **`Docs/`**: Documentation.
 
-## Agent-Specific Instructions
-- Always consult `Docs/CodeMap.md` first to locate variables, functions, and modules before searching the tree.
-- Regenerate the map if needed: `make codemap` (or `python tools/generate_code_map.py`).
-- Use the "Module Symbols" section in the code map to jump directly to files exposing the classes/functions you need.
+## 4. Plan File Management (CRITICAL)
+Plan files in `Plans/` or `Notes/` tracks progress. You **MUST** keep them current.
 
-## Run Logs & Dialog Logging
-- Log every dialog shown to users (errors, warnings, info, questions). Use helpers in `gui/dialog_utils.py` instead of calling `QMessageBox` directly so messages are captured in logs.
-- Logs are copied on exit to `./imageai_current.log` for quick access (see `core/logging_config.py`).
-- The most recent project file is copied on exit to `./imageai_current_project.json` (see `core/project_tracker.py`).
-- When debugging issues, check these two files first to reproduce the last run context.
+### When to Update
+- **Immediately** after completing a task (✅), starting a task (⏳), creating files, or hitting blockers (❌).
+- **Recovery:** If interrupted, read the plan file first to resume context.
+
+### Format Standard
+```markdown
+## Phase N: [Name] [Status Emoji] [Progress %]
+**Last Updated:** YYYY-MM-DD HH:MM
+
+### Tasks
+1. ✅ Task Name - **COMPLETED** (file.py:line)
+   - Implementation notes...
+   - Files created: `path/to/file.py`
+2. ⏳ Task Name - **IN PROGRESS**
+```
+
+## 5. Operational Guidelines
+
+### File Navigation & Shell Commands
+- **NO `cd`**: Never change directories. Use **absolute paths** for all operations (`read_file`, `run_shell_command`).
+- **Path Examples**:
+    - Linux/WSL: `/mnt/d/Documents/Code/GitHub/ImageAI/main.py`
+    - Use `git -C /full/path status`
+- **Batch Tools**: Use parallel tool calls (e.g., searching multiple directories) for efficiency.
+
+### Credentials & Security
+- **NEVER** store API keys/secrets in the project directory.
+- **Locations**:
+    - Windows: `%APPDATA%\Roaming\ImageAI\config.json`
+    - Linux: `~/.config/ImageAI/config.json`
+- **Git**: `.gitignore` must block `config.json`, `.env`, `*.key`.
+
+### Development Environment
+- **System**: WSL (Linux) is the primary shell environment for agents.
+- **Python**:
+    - WSL: `python3` (uses `.venv_linux`).
+    - Windows (PowerShell): `python` (uses `.venv`).
+- **GUI Framework**: `PyQt6`/`PySide6`.
+    - Note: GUI tests may require a display. If in headless WSL, use mocks or skip GUI launch.
+
+### Screenshots
+- **Location**: `_screenshots` (symlink to system pictures).
+- **Usage**: Check the most recent file by timestamp to visualize UI state.
+
+### Agent Tools
+- **Playwright**: Available for web tasks. Set `NODE_PATH` to `~/.nvm/.../lib/node_modules` if needed.
+- **File Creation**: Always **verify** file existence after creation. If an agent claims to create a file but doesn't, use `write_file` explicitly.
+
+## 6. Tech Stack
+- **Language**: Python 3.9+
+- **UI**: PySide6
+- **AI**: Google GenAI SDK, OpenAI SDK, Diffusers (Local).
+- **Video**: MoviePy, ImageIO-FFmpeg, Pretty-MIDI.
+
+## 7. Commit Guidelines
+- **Conventional Commits**: `feat:`, `fix:`, `docs:`, `refactor:`, `chore:`.
+- **Style**: Concise subject (<72 chars), detailed body.

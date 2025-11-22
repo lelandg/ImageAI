@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 import re
+try:
+    import imageio_ffmpeg
+except ImportError:
+    imageio_ffmpeg = None
 
 from .project import Scene, AudioTrack, VideoProject
 
@@ -59,6 +63,7 @@ class FFmpegRenderer:
     
     def _check_ffmpeg(self) -> bool:
         """Check if FFmpeg is available"""
+        # First try the configured path (default or user specified)
         try:
             result = subprocess.run(
                 [self.ffmpeg_path, "-version"],
@@ -66,9 +71,30 @@ class FFmpegRenderer:
                 text=True,
                 timeout=5
             )
-            return result.returncode == 0
+            if result.returncode == 0:
+                return True
         except (subprocess.SubprocessError, FileNotFoundError):
-            return False
+            pass
+            
+        # If default 'ffmpeg' failed, try imageio-ffmpeg if available
+        if self.ffmpeg_path == "ffmpeg" and imageio_ffmpeg:
+            try:
+                exe = imageio_ffmpeg.get_ffmpeg_exe()
+                self.logger.info(f"System ffmpeg not found. Trying imageio-ffmpeg at: {exe}")
+                result = subprocess.run(
+                    [exe, "-version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                if result.returncode == 0:
+                    self.ffmpeg_path = exe
+                    self.logger.info(f"Using imageio-ffmpeg binary")
+                    return True
+            except Exception as e:
+                self.logger.warning(f"Failed to use imageio-ffmpeg: {e}")
+                
+        return False
     
     def render_slideshow(self,
                         project: VideoProject,

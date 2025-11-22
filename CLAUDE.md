@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+**Note:** General project context, architectural rules, and operational guidelines are consolidated in **`AGENTS.md`**. Please refer to that file for the most up-to-date shared standards.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Code Navigation

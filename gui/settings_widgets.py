@@ -1212,10 +1212,12 @@ class AdvancedSettingsPanel(QWidget):
         self.google_settings = self._create_google_settings()
         self.openai_settings = self._create_openai_settings()
         self.stability_settings = self._create_stability_settings()
+        self.local_sd_settings = self._create_local_sd_settings()
         
         container_layout.addWidget(self.google_settings)
         container_layout.addWidget(self.openai_settings)
         container_layout.addWidget(self.stability_settings)
+        container_layout.addWidget(self.local_sd_settings)
         
         layout.addWidget(self.container)
         
@@ -1324,6 +1326,42 @@ class AdvancedSettingsPanel(QWidget):
         layout.addLayout(steps_layout)
         
         return widget
+
+    def _create_local_sd_settings(self) -> QWidget:
+        """Create Local SD-specific advanced settings."""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Steps
+        steps_layout = QHBoxLayout()
+        steps_layout.addWidget(QLabel("Steps:"))
+        self.local_sd_steps_spin = QSpinBox()
+        self.local_sd_steps_spin.setRange(1, 50)
+        self.local_sd_steps_spin.setValue(20)
+        self.local_sd_steps_spin.setToolTip("Number of inference steps (1-4 for Turbo models, 20-50 for regular)")
+        self.local_sd_steps_spin.valueChanged.connect(
+            lambda v: self._update_setting("steps", v)
+        )
+        steps_layout.addWidget(self.local_sd_steps_spin)
+        steps_layout.addStretch()
+        layout.addLayout(steps_layout)
+        
+        # Guidance Scale
+        guidance_layout = QHBoxLayout()
+        guidance_layout.addWidget(QLabel("Guidance Scale:"))
+        self.local_sd_guidance_spin = QDoubleSpinBox()
+        self.local_sd_guidance_spin.setRange(0.0, 20.0)
+        self.local_sd_guidance_spin.setSingleStep(0.5)
+        self.local_sd_guidance_spin.setValue(7.5)
+        self.local_sd_guidance_spin.setToolTip("Guidance scale (0.0 for Turbo models, 7-8 for regular)")
+        self.local_sd_guidance_spin.valueChanged.connect(
+            lambda v: self._update_setting("guidance_scale", v)
+        )
+        guidance_layout.addWidget(self.local_sd_guidance_spin)
+        guidance_layout.addStretch()
+        layout.addLayout(guidance_layout)
+        
+        return widget
     
     def _on_cfg_changed(self, value: int):
         """Handle CFG scale change."""
@@ -1348,6 +1386,7 @@ class AdvancedSettingsPanel(QWidget):
         self.google_settings.setVisible(provider == "google")
         self.openai_settings.setVisible(provider == "openai")
         self.stability_settings.setVisible(provider == "stability")
+        self.local_sd_settings.setVisible(provider == "local_sd")
     
     def get_settings(self) -> dict:
         """Get current settings."""
@@ -1375,11 +1414,18 @@ class AdvancedSettingsPanel(QWidget):
             if seed_value >= 0:
                 current_settings['seed'] = seed_value
         
-        if hasattr(self, 'cfg_spin'):
-            current_settings['cfg_scale'] = self.cfg_spin.value()
+        if hasattr(self, 'cfg_slider'):
+            current_settings['cfg_scale'] = self.cfg_slider.value() / 10.0
         
         if hasattr(self, 'steps_spin'):
             current_settings['steps'] = self.steps_spin.value()
+
+        # Local SD settings
+        if hasattr(self, 'local_sd_steps_spin'):
+            current_settings['steps'] = self.local_sd_steps_spin.value()
+        
+        if hasattr(self, 'local_sd_guidance_spin'):
+            current_settings['guidance_scale'] = self.local_sd_guidance_spin.value()
         
         # Merge with any existing settings that might have been set
         return {**self.settings, **current_settings}
@@ -1403,6 +1449,28 @@ class AdvancedSettingsPanel(QWidget):
                 self.openai_hd_check.setChecked(True)
         
         if "openai_style" in settings:
+            if settings["openai_style"] == "vivid":
+                self.openai_vivid_radio.setChecked(True)
+            else:
+                self.openai_natural_radio.setChecked(True)
+        
+        # Update Stability settings
+        if "seed" in settings:
+            self.seed_spin.setValue(settings["seed"])
+        
+        if "cfg_scale" in settings:
+            val = int(float(settings["cfg_scale"]) * 10)
+            self.cfg_slider.setValue(val)
+        
+        if "steps" in settings and hasattr(self, 'steps_spin'):
+             self.steps_spin.setValue(settings["steps"])
+
+        # Update Local SD settings
+        if "steps" in settings and hasattr(self, 'local_sd_steps_spin'):
+            self.local_sd_steps_spin.setValue(settings["steps"])
+            
+        if "guidance_scale" in settings and hasattr(self, 'local_sd_guidance_spin'):
+            self.local_sd_guidance_spin.setValue(settings["guidance_scale"])
             if settings["openai_style"] == "vivid":
                 self.openai_vivid_radio.setChecked(True)
             else:
