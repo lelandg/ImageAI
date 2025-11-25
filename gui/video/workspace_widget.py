@@ -3885,13 +3885,20 @@ class WorkspaceWidget(QWidget):
             # Use ffmpeg to extract frame at precise position
             video_path = Path(self.media_player.source().toLocalFile())
 
-            from core.video.ffmpeg_renderer import FFmpegRenderer
-            renderer = FFmpegRenderer()
+            from core.video.ffmpeg_utils import ensure_ffmpeg, get_ffmpeg_path
+
+            # Ensure FFmpeg is available (auto-install if needed)
+            available, message = ensure_ffmpeg(auto_install=True)
+            if not available:
+                self.logger.error(f"FFmpeg not available: {message}")
+                return
+
+            ffmpeg_path = get_ffmpeg_path()
 
             # Extract frame using ffmpeg
             import subprocess
             cmd = [
-                "ffmpeg",
+                ffmpeg_path,
                 "-ss", str(total_seconds),  # Seek to position
                 "-i", str(video_path),
                 "-frames:v", "1",  # Extract 1 frame

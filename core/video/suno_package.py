@@ -218,11 +218,19 @@ def merge_audio_stems(stems: Dict[str, Path], output_path: Path,
         Path to merged audio file
 
     Raises:
-        RuntimeError: If ffmpeg command fails
+        RuntimeError: If ffmpeg command fails or FFmpeg not available
         ValueError: If no stems selected or stems dict empty
     """
     if not stems:
         raise ValueError("No stems provided for merging")
+
+    # Ensure FFmpeg is available (auto-install if needed)
+    from .ffmpeg_utils import ensure_ffmpeg, get_ffmpeg_path
+    available, message = ensure_ffmpeg(auto_install=True)
+    if not available:
+        raise RuntimeError(f"FFmpeg not available: {message}")
+
+    ffmpeg_path = get_ffmpeg_path()
 
     # Filter to selected stems only
     if selected_stems is None:
@@ -240,7 +248,7 @@ def merge_audio_stems(stems: Dict[str, Path], output_path: Path,
     #          -filter_complex "[0:a][1:a][2:a]amix=inputs=3:duration=longest" \
     #          -ac 2 merged.wav
 
-    cmd = ['ffmpeg', '-y']  # -y to overwrite output
+    cmd = [ffmpeg_path, '-y']  # -y to overwrite output
 
     # Add input files
     for stem_path in stems_to_merge.values():

@@ -204,41 +204,31 @@ class VideoConfig:
             else:
                 base[key] = value
     
-    def validate_ffmpeg(self) -> bool:
+    def validate_ffmpeg(self, auto_install: bool = False) -> bool:
         """
-        Check if FFmpeg is available.
-        
+        Check if FFmpeg is available, optionally auto-installing if not.
+
+        Args:
+            auto_install: If True, attempt to install imageio-ffmpeg if FFmpeg not found
+
         Returns:
             True if FFmpeg is available, False otherwise
         """
-        import subprocess
-        
-        ffmpeg_path = self.get("ffmpeg_path", "ffmpeg")
-        
-        # Try configured/system ffmpeg
-        try:
-            subprocess.run(
-                [ffmpeg_path, "-version"],
-                capture_output=True,
-                check=True
-            )
+        from .ffmpeg_utils import ensure_ffmpeg, get_ffmpeg_manager
+
+        available, message = ensure_ffmpeg(auto_install=auto_install)
+
+        if available:
+            manager = get_ffmpeg_manager()
+            # Update config with detected path
+            if manager.ffmpeg_path:
+                self.set("ffmpeg_path", manager.ffmpeg_path)
+                self.set("ffmpeg_source", manager.source)
+                self.save()
+            self.logger.info(f"FFmpeg validation: {message}")
             return True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pass
-            
-        # Fallback to imageio-ffmpeg
-        try:
-            import imageio_ffmpeg
-            exe = imageio_ffmpeg.get_ffmpeg_exe()
-            subprocess.run(
-                [exe, "-version"],
-                capture_output=True,
-                check=True
-            )
-            self.logger.info(f"Found fallback FFmpeg at: {exe}")
-            return True
-        except (ImportError, Exception) as e:
-            self.logger.warning(f"FFmpeg not found at {ffmpeg_path} and imageio-ffmpeg fallback failed: {e}")
+        else:
+            self.logger.warning(f"FFmpeg validation failed: {message}")
             return False
     
     def get_veo_model_config(self, model: str) -> Dict[str, Any]:

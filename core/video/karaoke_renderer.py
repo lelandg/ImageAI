@@ -50,9 +50,24 @@ class KaraokeConfig:
 
 class KaraokeRenderer:
     """Render karaoke overlays on videos and export lyrics formats"""
-    
-    def __init__(self, ffmpeg_path: str = "ffmpeg"):
-        self.ffmpeg = ffmpeg_path
+
+    def __init__(self, ffmpeg_path: str = None):
+        """
+        Initialize KaraokeRenderer.
+
+        Args:
+            ffmpeg_path: Path to FFmpeg executable. If None, uses centralized detection.
+        """
+        if ffmpeg_path:
+            self.ffmpeg = ffmpeg_path
+        else:
+            # Use centralized FFmpeg manager
+            from .ffmpeg_utils import ensure_ffmpeg, get_ffmpeg_path
+            available, _ = ensure_ffmpeg(auto_install=True)
+            if available:
+                self.ffmpeg = get_ffmpeg_path()
+            else:
+                self.ffmpeg = "ffmpeg"  # Fallback, may fail
         self.logger = logging.getLogger(self.__class__.__name__)
     
     def generate_lrc(self, lyrics_timing: List[Dict[str, Any]], 

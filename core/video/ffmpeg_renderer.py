@@ -15,12 +15,9 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 import re
-try:
-    import imageio_ffmpeg
-except ImportError:
-    imageio_ffmpeg = None
 
 from .project import Scene, AudioTrack, VideoProject
+from .ffmpeg_utils import get_ffmpeg_manager, ensure_ffmpeg
 
 
 @dataclass
@@ -46,55 +43,44 @@ class RenderSettings:
 
 class FFmpegRenderer:
     """Renders videos using FFmpeg with various effects"""
-    
-    def __init__(self, ffmpeg_path: str = "ffmpeg"):
+
+    def __init__(self, ffmpeg_path: str = None, auto_install: bool = True):
         """
         Initialize FFmpeg renderer.
-        
+
         Args:
-            ffmpeg_path: Path to ffmpeg executable
+            ffmpeg_path: Path to ffmpeg executable (if None, auto-detects)
+            auto_install: If True, auto-install imageio-ffmpeg if FFmpeg not found
         """
-        self.ffmpeg_path = ffmpeg_path
         self.logger = logging.getLogger(__name__)
-        
-        # Check if FFmpeg is available
-        if not self._check_ffmpeg():
-            raise RuntimeError(f"FFmpeg not found at {ffmpeg_path}")
-    
-    def _check_ffmpeg(self) -> bool:
-        """Check if FFmpeg is available"""
-        # First try the configured path (default or user specified)
+
+        # Use provided path or auto-detect via centralized manager
+        if ffmpeg_path:
+            self.ffmpeg_path = ffmpeg_path
+            if not self._verify_ffmpeg_path(ffmpeg_path):
+                raise RuntimeError(f"FFmpeg not found at {ffmpeg_path}")
+        else:
+            # Use centralized FFmpeg manager with auto-install
+            available, message = ensure_ffmpeg(auto_install=auto_install)
+            if not available:
+                raise RuntimeError(f"FFmpeg not available: {message}")
+
+            manager = get_ffmpeg_manager()
+            self.ffmpeg_path = manager.ffmpeg_path
+            self.logger.info(f"Using FFmpeg: {self.ffmpeg_path} (source: {manager.source})")
+
+    def _verify_ffmpeg_path(self, path: str) -> bool:
+        """Verify that FFmpeg exists at the given path."""
         try:
             result = subprocess.run(
-                [self.ffmpeg_path, "-version"],
+                [path, "-version"],
                 capture_output=True,
                 text=True,
                 timeout=5
             )
-            if result.returncode == 0:
-                return True
-        except (subprocess.SubprocessError, FileNotFoundError):
-            pass
-            
-        # If default 'ffmpeg' failed, try imageio-ffmpeg if available
-        if self.ffmpeg_path == "ffmpeg" and imageio_ffmpeg:
-            try:
-                exe = imageio_ffmpeg.get_ffmpeg_exe()
-                self.logger.info(f"System ffmpeg not found. Trying imageio-ffmpeg at: {exe}")
-                result = subprocess.run(
-                    [exe, "-version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                if result.returncode == 0:
-                    self.ffmpeg_path = exe
-                    self.logger.info(f"Using imageio-ffmpeg binary")
-                    return True
-            except Exception as e:
-                self.logger.warning(f"Failed to use imageio-ffmpeg: {e}")
-                
-        return False
+            return result.returncode == 0
+        except Exception:
+            return False
     
     def render_slideshow(self,
                         project: VideoProject,
@@ -729,22 +715,36 @@ class FFmpegRenderer:
     def get_video_info(self, video_path: Path) -> Dict[str, Any]:
         """
         Get information about a video file.
-        
+
         Args:
             video_path: Path to video file
-            
+
         Returns:
             Dictionary with video information
         """
+        # Try to get ffprobe path from manager
+        manager = get_ffmpeg_manager()
+        ffprobe_path = manager.ffprobe_path
+
+        # If no ffprobe available, try deriving from ffmpeg path
+        if not ffprobe_path and self.ffmpeg_path:
+            potential_ffprobe = Path(self.ffmpeg_path).parent / "ffprobe"
+            if potential_ffprobe.exists():
+                ffprobe_path = str(potential_ffprobe)
+
+        # Fallback to system ffprobe
+        if not ffprobe_path:
+            ffprobe_path = "ffprobe"
+
         cmd = [
-            "ffprobe",
+            ffprobe_path,
             "-v", "quiet",
             "-print_format", "json",
             "-show_format",
             "-show_streams",
             str(video_path)
         ]
-        
+
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, check=True)
             return json.loads(result.stdout)
