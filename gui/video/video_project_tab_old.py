@@ -825,7 +825,8 @@ class VideoProjectTab(QWidget):
         # Populate with models based on provider
         if provider == "Gemini":
             self.img_model_combo.addItems([
-                "gemini-2.5-flash-image-preview",
+                "gemini-2.5-flash-image",
+                "gemini-3-pro-image-preview",  # Nano Banana Pro - 4K support
                 "gemini-2.5-flash",
                 "gemini-2.5-pro",
                 "gemini-1.5-flash",

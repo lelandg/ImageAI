@@ -5,6 +5,15 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.28.0] - 2025-11-27
+
+### Added
+- **Claude Opus 4.5 Support**: Added `claude-opus-4-5-20251101` to Anthropic LLM models for prompt enhancement and generation
+- **Nano Banana Pro Auth Check**: When selecting the Gemini 3 Pro Image model (Nano Banana Pro) with Google Cloud authentication, ImageAI now warns that API key authentication is required and offers to switch automatically if an API key is configured
+
+### Documentation
+- **README**: Added note clarifying that Nano Banana Pro requires API key authentication (gcloud/ADC not supported)
+
 ## [0.27.0] - 2025-11-20
 
 ### Fixed

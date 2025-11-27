@@ -48,7 +48,8 @@ LLM_PROVIDERS = {
         id='anthropic',
         display_name='Anthropic',
         models=[
-            'claude-sonnet-4-5',  # NEWEST: Sonnet 4.5 (released Sept 2025)
+            'claude-opus-4-5-20251101',  # NEWEST: Opus 4.5 (released Nov 2025)
+            'claude-sonnet-4-5',  # Sonnet 4.5 (released Sept 2025)
             'claude-opus-4-1',
             'claude-opus-4',
             'claude-sonnet-4',

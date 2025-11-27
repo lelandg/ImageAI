@@ -362,6 +362,7 @@ class ResolutionSelector(QWidget):
     def __init__(self, provider: str = "google", parent=None):
         super().__init__(parent)
         self.provider = provider
+        self.model = None  # Current model ID
         self._using_aspect_ratio = True
         self._aspect_ratio = "1:1"
         self._custom_width = None
@@ -514,6 +515,8 @@ class ResolutionSelector(QWidget):
     
     def _update_info_text(self):
         """Update the info label based on current state."""
+        max_native = self._get_provider_max()
+
         if self._using_aspect_ratio:
             if self._custom_width and self._custom_height:
                 # Show lock state
@@ -522,11 +525,18 @@ class ResolutionSelector(QWidget):
                 else:
                     info = f"Free resolution: {self._custom_width}×{self._custom_height}"
 
-                # Add upscaling notice if dimensions exceed typical provider output
-                if self.provider == "google" and (self._custom_width > 1024 or self._custom_height > 1024):
-                    info += " • AI upscaling recommended"
-                elif self.provider == "openai" and (self._custom_width > 1792 or self._custom_height > 1792):
-                    info += " • Will require upscaling"
+                # Add upscaling notice only if dimensions exceed model's native max
+                current_max = max(self._custom_width, self._custom_height)
+                if current_max > max_native:
+                    info += f" • Will upscale (model max: {max_native}px)"
+                elif self.model and "gemini-3" in self.model:
+                    # Show which quality tier for Nano Banana Pro
+                    if current_max <= 1024:
+                        info += " • 1K quality"
+                    elif current_max <= 2048:
+                        info += " • 2K quality"
+                    else:
+                        info += " • 4K quality"
                 self.info_label.setText(info)
             else:
                 if self._lock_aspect_ratio:
@@ -813,8 +823,15 @@ class ResolutionSelector(QWidget):
         self._update_info_text()
 
     def _get_provider_max(self) -> int:
-        """Get maximum resolution for current provider."""
+        """Get maximum resolution for current provider and model.
+
+        Returns the native max output resolution (no upscaling needed).
+        """
         if self.provider == "google":
+            # Nano Banana Pro (gemini-3) supports up to 4K
+            if self.model and "gemini-3" in self.model:
+                return 4096
+            # Standard Nano Banana (gemini-2.5-flash-image) = 1024
             return 1024
         elif self.provider == "openai":
             return 1792
@@ -822,6 +839,38 @@ class ResolutionSelector(QWidget):
             return 1536
         else:
             return 1024
+
+    def update_model(self, model: str):
+        """Update the current model for resolution calculations.
+
+        This only updates the model reference and info text.
+        Does NOT automatically change dimensions - user controls that via Reset button.
+        """
+        if model == self.model:
+            return  # No change
+
+        old_model = self.model
+        self.model = model
+
+        # Just update the info text to reflect new model capabilities
+        old_max = self._get_model_max(old_model) if old_model else 1024
+        new_max = self._get_provider_max()
+
+        if old_max != new_max:
+            logger.info(f"Model changed: {old_model} → {model} (max resolution: {old_max} → {new_max}px)")
+
+        # Update info text to show correct upscaling status for new model
+        self._update_info_text()
+
+    def _get_model_max(self, model: str) -> int:
+        """Get max resolution for a specific model."""
+        if model and "gemini-3" in model:
+            return 4096
+        elif self.provider == "openai":
+            return 1792
+        elif self.provider == "stability":
+            return 1536
+        return 1024
 
     def _initialize_dimensions(self):
         """Initialize dimensions on startup."""

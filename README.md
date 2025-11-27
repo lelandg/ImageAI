@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.27.0**
+**Version 0.28.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **ChatMaster BBS - The Intersection of Art and AI - Support and Fun: [ChatMaster BBS Discord Server](https://discord.gg/chatmaster)**
@@ -303,6 +303,61 @@ You have two options for authenticating with Google's Gemini API:
 5. **Enable billing**:
    - Visit [Cloud Billing](https://console.cloud.google.com/billing)
    - New accounts may have free credits
+
+6. **Enable Gemini 3 Pro Image (Nano Banana Pro)** - *Optional, for 4K image generation*:
+
+   The `gemini-3-pro-image-preview` model (also known as "Nano Banana Pro") provides high-fidelity 4K image generation.
+
+   > **⚠️ Important**: Nano Banana Pro requires **API key authentication**. Google Cloud (gcloud/ADC) authentication is not supported for this model. Get an API key from [Google AI Studio](https://aistudio.google.com/apikey). If you select this model while using gcloud auth, ImageAI will prompt you to switch to API key mode.
+
+   To use it with Vertex AI (gcloud auth):
+
+   **Step 1: Ensure IAM Permissions**
+   ```bash
+   # Grant yourself the Vertex AI User role (required for API access)
+   gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+     --member="user:YOUR_EMAIL@gmail.com" \
+     --role="roles/aiplatform.user"
+
+   # Verify your roles
+   gcloud projects get-iam-policy YOUR_PROJECT_ID \
+     --flatten="bindings[].members" \
+     --filter="bindings.members:YOUR_EMAIL@gmail.com" \
+     --format="table(bindings.role)"
+   ```
+
+   **Step 2: Enable Required APIs**
+   ```bash
+   gcloud services enable aiplatform.googleapis.com
+   gcloud services enable generativelanguage.googleapis.com
+   ```
+
+   **Step 3: Try the Model in Vertex AI Studio First**
+   - Visit [Vertex AI Model Garden - Gemini 3 Pro Image](https://console.cloud.google.com/vertex-ai/publishers/google/model-garden/gemini-3-pro-image-preview)
+   - Click **"Try in Vertex AI Studio"** - this may "activate" the model for your project
+   - Generate a test image to confirm access works
+
+   **Step 4: Verify Project Configuration**
+   ```bash
+   # Check your active project
+   gcloud config get-value project
+
+   # Ensure it matches the project where you enabled APIs
+   gcloud config set project YOUR_PROJECT_ID
+   ```
+
+   **Troubleshooting 404 NOT_FOUND Errors:**
+   - The model is in **Preview** - some projects may not have automatic access
+   - Try different regions: The default is `us-central1`, but try `us-west1` or `europe-west4`
+   - Preview models may have ~30-40% failure rate during peak times - retry if needed
+   - Check [Vertex AI quotas](https://console.cloud.google.com/iam-admin/quotas) for any limits
+
+   **Alternative - Use API Key Instead:**
+   If Vertex AI access continues to fail, use API key authentication:
+   - Get a key from [Google AI Studio](https://aistudio.google.com/apikey)
+   - Enable billing for your API key
+   - In ImageAI Settings, switch to "API Key" mode instead of "Google Cloud Account"
+   - The model works via AI Studio without Vertex AI enablement
 
 ### OpenAI Authentication
 

@@ -182,6 +182,7 @@ class GoogleProvider(ImageProvider):
         super().__init__(config)
         self.client = None
         self.project_id = None
+        self._client_mode = None  # Track how client was initialized: "api_key" or "gcloud"
         
         # Get config manager for auth state
         try:
@@ -218,6 +219,7 @@ class GoogleProvider(ImageProvider):
         
         if self.api_key:
             self.client = genai.Client(api_key=self.api_key)
+            self._client_mode = "api_key"
     
     def _init_gcloud_client(self, raise_on_error=True):
         """Initialize client with Google Cloud authentication.
@@ -271,6 +273,7 @@ class GoogleProvider(ImageProvider):
                 project=project,
                 location="us-central1"
             )
+            self._client_mode = "gcloud"
             return True
             
         except DefaultCredentialsError as e:
@@ -339,12 +342,23 @@ class GoogleProvider(ImageProvider):
         **kwargs
     ) -> Tuple[List[str], List[bytes]]:
         """Generate images using Google Gemini models."""
+        # Check if client needs re-initialization due to auth mode change
+        # This handles the case where user switches between gcloud and API key at runtime
+        expected_mode = "gcloud" if self.auth_mode == "gcloud" else "api_key"
+        if self.client and self._client_mode != expected_mode:
+            logger.info(f"Auth mode changed from {self._client_mode} to {expected_mode}, reinitializing client")
+            self.client = None
+            self._client_mode = None
+
         if not self.client:
             if self.auth_mode == "gcloud":
                 # Try to initialize gcloud client, raise error if it fails
                 self._init_gcloud_client(raise_on_error=True)
             else:
-                raise ValueError("No API key configured for Google provider")
+                # Initialize API key client
+                if not self.api_key:
+                    raise ValueError("No API key configured for Google provider")
+                self._init_api_key_client()
 
         model = model or self.get_default_model()
 
@@ -418,31 +432,66 @@ class GoogleProvider(ImageProvider):
         original_width = width
         original_height = height
 
-        # For Gemini, scale to optimal size (1024px) if dimensions are too large OR too small
-        # per CLAUDE.md: "For gemini, if either resolution is greater than 1024, scale proportionally so max is 1024"
-        # NEW: Also scale up if max dimension is less than 1024 for better quality
+        # Determine max resolution based on model
+        # Nano Banana Pro (gemini-3-pro-image-preview) supports up to 4K output
+        # Regular Nano Banana (gemini-2.5-flash-image) is capped at 1024px
+        is_nano_banana_pro = model and "gemini-3" in model
+
+        if is_nano_banana_pro:
+            # Auto-determine output_quality from requested dimensions
+            # This allows users to just set dimensions and get the right quality tier
+            max_dim = max(width or 1024, height or 1024)
+            if max_dim <= 1024:
+                output_quality = '1k'
+                max_output_dim = 1024
+            elif max_dim <= 2048:
+                output_quality = '2k'
+                max_output_dim = 2048
+            else:
+                output_quality = '4k'
+                max_output_dim = 4096
+
+            # Allow explicit override if provided
+            explicit_quality = kwargs.get('output_quality')
+            if explicit_quality:
+                output_quality = explicit_quality.lower()
+                quality_max_dims = {'1k': 1024, '2k': 2048, '4k': 4096}
+                max_output_dim = quality_max_dims.get(output_quality, max_output_dim)
+
+            logger.info(f"Nano Banana Pro: {output_quality.upper()} quality tier (max {max_output_dim}px) for {width}x{height}")
+        else:
+            # Standard Nano Banana is capped at 1024
+            max_output_dim = 1024
+            output_quality = '1k'
+
+        # For Gemini, only scale if dimensions exceed model's native capability
+        # No longer force scaling to 1024 - let the model handle its native resolution
         if width and height:
             # Always store original target dimensions for post-processing
             kwargs['_target_width'] = original_width
             kwargs['_target_height'] = original_height
 
             max_dim = max(width, height)
-            if max_dim != 1024:  # Scale if not already at optimal size
-                # Scale proportionally so max dimension is 1024
-                scale_factor = 1024 / max_dim
+
+            # Only scale if dimensions exceed model's native capability
+            if max_dim > max_output_dim:
+                # Scale proportionally so max dimension fits model capability
+                scale_factor = max_output_dim / max_dim
                 scaled_width = int(width * scale_factor)
                 scaled_height = int(height * scale_factor)
 
-                if max_dim > 1024:
-                    logger.info(f"Scaling down for Gemini: {width}x{height} -> {scaled_width}x{scaled_height} (factor: {scale_factor:.3f})")
-                else:
-                    logger.info(f"Scaling up for Gemini: {width}x{height} -> {scaled_width}x{scaled_height} (factor: {scale_factor:.3f})")
+                logger.info(f"Scaling for Gemini: {width}x{height} -> {scaled_width}x{scaled_height} (exceeds {max_output_dim}px max)")
 
                 width = scaled_width
                 height = scaled_height
-                # Store that we need to scale back later
-                kwargs['_needs_upscale'] = True if max_dim > 1024 else False
-                kwargs['_needs_downscale'] = True if max_dim < 1024 else False
+                # Store that we need to upscale the result back to requested size
+                kwargs['_needs_upscale'] = True
+                kwargs['_needs_downscale'] = False
+            else:
+                # Model can handle this resolution natively - no scaling needed
+                kwargs['_needs_upscale'] = False
+                kwargs['_needs_downscale'] = False
+                logger.info(f"Using native resolution: {width}x{height} (within {max_output_dim}px max)")
 
         # Calculate aspect ratio from dimensions if not provided
         # Note: We no longer add dimensions to the prompt text as it gets rendered as literal text
@@ -553,6 +602,22 @@ class GoogleProvider(ImageProvider):
         num_images = kwargs.get('num_images', 1)
         if num_images > 1:
             config_params['candidate_count'] = num_images
+
+        # For Nano Banana Pro, add media_resolution parameter for quality control
+        # Maps to MediaResolution enum: LOW (1K), MEDIUM (2K), HIGH (4K)
+        # NOTE: media_resolution is only supported on Vertex AI, not Google AI Studio API
+        if is_nano_banana_pro and self.auth_mode == "gcloud":
+            # Map our internal quality tier to MediaResolution enum values
+            media_res_map = {
+                '1k': types.MediaResolution.MEDIA_RESOLUTION_LOW,
+                '2k': types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
+                '4k': types.MediaResolution.MEDIA_RESOLUTION_HIGH
+            }
+            media_res = media_res_map.get(output_quality, types.MediaResolution.MEDIA_RESOLUTION_MEDIUM)
+            config_params['media_resolution'] = media_res
+            logger.info(f"Nano Banana Pro: Setting media_resolution={media_res} for {output_quality.upper()} quality (Vertex AI)")
+        elif is_nano_banana_pro:
+            logger.info(f"Nano Banana Pro: media_resolution not supported on AI Studio API, using default quality")
 
         # Create the proper config object using types
         # This is required for aspect_ratio to work with the new SDK
@@ -1158,6 +1223,7 @@ class GoogleProvider(ImageProvider):
         """
         return {
             "gemini-2.5-flash-image": "Gemini 2.5 Flash Image (Nano Banana)",
+            "gemini-3-pro-image-preview": "Gemini 3 Pro Image (Nano Banana Pro) - 4K",
         }
     
     def get_models_with_details(self) -> Dict[str, Dict[str, str]]:
@@ -1176,6 +1242,11 @@ class GoogleProvider(ImageProvider):
                 "name": "Gemini 2.5 Flash Image",
                 "nickname": "Nano Banana",
                 "description": "Production image generation with aspect ratio support"
+            },
+            "gemini-3-pro-image-preview": {
+                "name": "Gemini 3 Pro Image",
+                "nickname": "Nano Banana Pro",
+                "description": "4K output, superior text rendering, up to 14 reference images"
             },
         }
     

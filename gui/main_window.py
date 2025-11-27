@@ -3312,8 +3312,10 @@ For more detailed information, please refer to the full documentation.
             # Fallback to some basic models if provider fails to load
             print(f"Error loading models for {self.current_provider}: {e}")
             if self.current_provider.lower() == "google":
-                self.model_combo.addItem("Gemini 2.5 Flash Image (gemini-2.5-flash-image-preview)", 
-                                        "gemini-2.5-flash-image-preview")
+                self.model_combo.addItem("Gemini 2.5 Flash Image (gemini-2.5-flash-image)",
+                                        "gemini-2.5-flash-image")
+                self.model_combo.addItem("Gemini 3 Pro Image - 4K (gemini-3-pro-image-preview)",
+                                        "gemini-3-pro-image-preview")
             elif self.current_provider.lower() == "openai":
                 self.model_combo.addItem("DALL·E 3 (dall-e-3)", "dall-e-3")
             elif self.current_provider.lower() == "stability":
@@ -3664,6 +3666,13 @@ For more detailed information, please refer to the full documentation.
 
     def _on_model_changed(self, model_name: str):
         """Handle model selection change."""
+        # Get the actual model ID from the combo's user data
+        model_id = self.model_combo.currentData()
+
+        # Only update if we have a valid model ID
+        if model_id and hasattr(self, 'resolution_selector') and self.resolution_selector:
+            self.resolution_selector.update_model(model_id)
+
         if self.current_provider.lower() == "local_sd" and hasattr(self, 'steps_spin'):
             # Auto-adjust for Turbo models
             if 'turbo' in model_name.lower():
@@ -3675,8 +3684,104 @@ For more detailed information, please refer to the full documentation.
                     if idx >= 0:
                         self.resolution_combo.setCurrentIndex(idx)
 
+        # Check Nano Banana Pro API key requirements
+        if model_id and self.current_provider.lower() == "google":
+            self._check_nano_banana_pro_requirements(model_id)
+
         # Show/hide Imagen reference widget based on provider and model
         self._update_imagen_reference_visibility()
+
+    def _check_nano_banana_pro_requirements(self, model_id: str):
+        """Check if Nano Banana Pro model has proper API key auth configured.
+
+        Nano Banana Pro (gemini-3-pro-image-preview) requires API key authentication
+        and does not work with Google Cloud (gcloud/ADC) authentication.
+        """
+        if model_id != "gemini-3-pro-image-preview":
+            return
+
+        # Guard against re-entry (dialog can trigger signal processing)
+        if getattr(self, '_checking_nbp_requirements', False):
+            return
+        self._checking_nbp_requirements = True
+        try:
+            self._show_nbp_auth_dialog()
+        finally:
+            self._checking_nbp_requirements = False
+
+    def _show_nbp_auth_dialog(self):
+        """Show the appropriate dialog for Nano Banana Pro auth requirements."""
+        # Get current auth mode
+        auth_mode = self.config.get("auth_mode", "api-key")
+        # Normalize legacy values
+        if auth_mode in ["api_key", "API Key"]:
+            auth_mode = "api-key"
+        elif auth_mode == "Google Cloud Account":
+            auth_mode = "gcloud"
+
+        # Check if API key is configured
+        api_key = self.config.get_api_key("google")
+        has_api_key = bool(api_key and api_key.strip())
+
+        if auth_mode == "gcloud":
+            # User is using gcloud auth, but Nano Banana Pro requires API key
+            if has_api_key:
+                # API key exists, offer to switch
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Nano Banana Pro - API Key Required")
+                msg.setText(
+                    "Nano Banana Pro (Gemini 3 Pro Image) requires API key authentication.\n\n"
+                    "Google Cloud authentication is not supported for this model.\n\n"
+                    "You have a Google API key configured. Would you like to switch to API key mode?"
+                )
+                msg.setIcon(QMessageBox.Warning)
+                switch_btn = msg.addButton("Switch to API Key", QMessageBox.AcceptRole)
+                msg.addButton("Cancel", QMessageBox.RejectRole)
+                msg.exec()
+
+                if msg.clickedButton() == switch_btn:
+                    # Switch to API key mode (block signals to avoid double-trigger)
+                    self.auth_mode_combo.blockSignals(True)
+                    self.auth_mode_combo.setCurrentText("API Key")
+                    self.auth_mode_combo.blockSignals(False)
+                    self._on_auth_mode_changed("API Key")
+                    logger.info("Switched to API key mode for Nano Banana Pro")
+            else:
+                # No API key configured
+                msg = QMessageBox(self)
+                msg.setWindowTitle("Nano Banana Pro - API Key Required")
+                msg.setText(
+                    "Nano Banana Pro (Gemini 3 Pro Image) requires API key authentication.\n\n"
+                    "Google Cloud authentication is not supported for this model.\n\n"
+                    "You'll need to configure a Google API key in Settings."
+                )
+                msg.setInformativeText("Get an API key from Google AI Studio: https://aistudio.google.com/apikey")
+                msg.setIcon(QMessageBox.Warning)
+                settings_btn = msg.addButton("Go to Settings", QMessageBox.AcceptRole)
+                msg.addButton("Cancel", QMessageBox.RejectRole)
+                msg.exec()
+
+                if msg.clickedButton() == settings_btn:
+                    # Switch to settings tab
+                    self.tabs.setCurrentWidget(self.tab_settings)
+
+        elif auth_mode == "api-key" and not has_api_key:
+            # API key mode but no key configured
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Nano Banana Pro - API Key Required")
+            msg.setText(
+                "Nano Banana Pro (Gemini 3 Pro Image) requires a Google API key.\n\n"
+                "No API key is currently configured."
+            )
+            msg.setInformativeText("Get an API key from Google AI Studio: https://aistudio.google.com/apikey")
+            msg.setIcon(QMessageBox.Warning)
+            settings_btn = msg.addButton("Go to Settings", QMessageBox.AcceptRole)
+            msg.addButton("Cancel", QMessageBox.RejectRole)
+            msg.exec()
+
+            if msg.clickedButton() == settings_btn:
+                # Switch to settings tab
+                self.tabs.setCurrentWidget(self.tab_settings)
     
     def _on_provider_changed(self, provider: str):
         """Handle provider change from Settings tab."""
@@ -3859,10 +3964,7 @@ For more detailed information, please refer to the full documentation.
                 self.api_key_edit.setEnabled(True)
             if hasattr(self, 'local_sd_widget') and self.local_sd_widget:
                 self.local_sd_widget.setVisible(False)
-        
-        # Update model list
-        self._update_model_list()
-        
+
         # Update advanced settings visibility
         self._update_advanced_visibility()
     
@@ -4462,16 +4564,22 @@ For more detailed information, please refer to the full documentation.
             logger.info("=" * 60)
             return
 
-        # Get provider maximum resolution
+        # Get model's native maximum resolution
         provider_max = 1024  # Default
         if self.current_provider.lower() == "google":
-            provider_max = 1024
+            # Check if using Nano Banana Pro (gemini-3) which supports 4K
+            model_id = self.model_combo.currentData() if hasattr(self, 'model_combo') else None
+            if model_id and "gemini-3" in model_id:
+                provider_max = 4096  # Nano Banana Pro supports 4K
+            else:
+                provider_max = 1024  # Standard Nano Banana
         elif self.current_provider.lower() == "openai":
             provider_max = 1792
         elif self.current_provider.lower() == "stability":
             provider_max = 1536
 
-        logger.info(f"Provider: {self.current_provider} (max: {provider_max}px)")
+        model_name = self.model_combo.currentData() if hasattr(self, 'model_combo') else "unknown"
+        logger.info(f"Provider: {self.current_provider}, Model: {model_name} (max: {provider_max}px)")
 
         # RULE: Show upscaling if EITHER dimension > provider max
         needs_upscaling = target_width > provider_max or target_height > provider_max
@@ -4488,16 +4596,16 @@ For more detailed information, please refer to the full documentation.
         logger.info("=" * 60)
 
         if needs_upscaling:
-            # Calculate what the provider will actually output
+            # Calculate what the provider will actually output (model's native max)
             if self.current_provider.lower() == "google":
-                # Google outputs 1024x1024 then crops to aspect
-                expected_width = expected_height = 1024
+                # Google outputs at model's max then crops to aspect
+                expected_width = expected_height = provider_max
                 if target_width != target_height:
                     aspect = target_width / target_height
                     if aspect > 1:
-                        expected_height = int(1024 / aspect)
+                        expected_height = int(provider_max / aspect)
                     else:
-                        expected_width = int(1024 * aspect)
+                        expected_width = int(provider_max * aspect)
             else:
                 # Other providers output at their max, maintaining aspect
                 scale = min(provider_max / target_width, provider_max / target_height)
