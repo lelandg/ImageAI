@@ -49,7 +49,12 @@
       "Bash(jq:*)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/image_history_widget.py)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/history_widget.py)",
-      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff e4a45d1 -- gui/layout/image_history_dialog.py)"
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff e4a45d1 -- gui/layout/image_history_dialog.py)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff providers/google.py)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/main_window.py)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/settings_widgets.py)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff --stat)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline -3)"
     ],
     "deny": [],
     "ask": []
