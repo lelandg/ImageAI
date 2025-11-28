@@ -218,8 +218,14 @@ class GoogleProvider(ImageProvider):
             from google.genai import types
         
         if self.api_key:
+            # Log masked API key for debugging
+            key_len = len(self.api_key)
+            masked_key = f"{self.api_key[:4]}...{self.api_key[-4:]}" if key_len > 8 else "***"
+            logger.info(f"Initializing Google client with API key: length={key_len}, key={masked_key}")
             self.client = genai.Client(api_key=self.api_key)
             self._client_mode = "api_key"
+        else:
+            logger.warning("_init_api_key_client called but no API key set!")
     
     def _init_gcloud_client(self, raise_on_error=True):
         """Initialize client with Google Cloud authentication.

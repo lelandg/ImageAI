@@ -26,13 +26,24 @@ class GenWorker(QObject):
     
     def run(self):
         """Run image generation in worker thread."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         try:
             self.progress.emit(f"Generating with {self.provider} ({self.model})...")
-            
+
             # Get configuration
             config = ConfigManager()
             api_key = config.get_api_key(self.provider) if self.auth_mode == "api-key" else None
-            
+
+            # Debug logging for API key (masked for security)
+            if api_key:
+                key_len = len(api_key)
+                masked_key = f"{api_key[:4]}...{api_key[-4:]}" if key_len > 8 else "***"
+                logger.info(f"API key for {self.provider}: length={key_len}, key={masked_key}")
+            else:
+                logger.warning(f"No API key found for {self.provider} (auth_mode={self.auth_mode})")
+
             # Create provider config
             provider_config = {
                 "api_key": api_key,

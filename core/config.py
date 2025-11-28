@@ -1,6 +1,7 @@
 """Configuration management for ImageAI."""
 
 import json
+import logging
 import os
 import platform
 from pathlib import Path
@@ -8,6 +9,8 @@ from typing import Optional, Dict, Any
 
 from .constants import APP_NAME, PROVIDER_KEY_URLS
 from .security import secure_storage
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
@@ -148,13 +151,17 @@ class ConfigManager:
         # Try keyring first (most secure)
         key = secure_storage.retrieve_key(provider)
         if key:
+            logger.debug(f"API key for {provider} retrieved from keyring (len={len(key)})")
             return key
 
         # Check provider-specific config
         provider_config = self.get_provider_config(provider)
         if "api_key" in provider_config:
-            return provider_config["api_key"]
+            key = provider_config["api_key"]
+            logger.debug(f"API key for {provider} retrieved from config file (len={len(key) if key else 0})")
+            return key
 
+        logger.debug(f"No API key found for {provider} in keyring or config")
         return None
     
     def set_api_key(self, provider: str, api_key: str) -> None:
