@@ -5477,6 +5477,36 @@ For more detailed information, please refer to the full documentation.
                         self._open_midjourney_external_browser(web_url, slash_command)
                         return
 
+        # Check if we actually got images - if not, show error
+        if not images:
+            self.status_label.setText("Generation failed - no image returned")
+            self.status_bar.showMessage("No image generated - check prompt or try again")
+            self._append_to_console("⚠ No image generated!", "#ff6666")  # Red
+
+            # Display any error details from the provider
+            has_error_details = False
+            if texts:
+                for text in texts:
+                    if text.startswith("ERROR:") or text.startswith("BLOCKED:"):
+                        has_error_details = True
+                        if "BLOCKED:" in text:
+                            self._append_to_console(f"🚫 {text}", "#ff6666")  # Red for blocked
+                        else:
+                            self._append_to_console(f"❌ {text}", "#ff9966")  # Orange for error
+                    elif text.startswith("Safety issue:"):
+                        has_error_details = True
+                        self._append_to_console(f"⚠ {text}", "#ffcc66")  # Yellow for safety
+                    else:
+                        self._append_to_console(f"Response: {text}", "#ffff66")
+
+            if not has_error_details:
+                self._append_to_console("The API returned success but no image data.", "#ff9966")
+                self._append_to_console("Possible causes:", "#ffcc66")
+                self._append_to_console("  • Content blocked by safety filters", "#ffcc66")
+                self._append_to_console("  • Prompt contains restricted content (political figures, logos, etc.)", "#ffcc66")
+                self._append_to_console("  • Transient API issue - try again", "#ffcc66")
+            return
+
         self.status_label.setText("Generation complete.")
         self.status_bar.showMessage("Image generated successfully")
         self._append_to_console("Generation complete!", "#00ff00")  # Green

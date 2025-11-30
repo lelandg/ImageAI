@@ -1126,16 +1126,56 @@ class GoogleProvider(ImageProvider):
             except Exception as e2:
                 raise RuntimeError(f"Google generation failed: {e2}")
 
-        # Warn if no images were generated
+        # Warn if no images were generated and provide detailed reason
         if not images:
+            error_details = []
             if no_image_error:
                 logger.error(f"❌ No images were generated after {max_retries} attempts!")
                 logger.error("Gemini returned NO_IMAGE error (transient API issue).")
-                logger.error("This is not a prompt or safety issue - the API had a temporary problem.")
-                logger.error("Please try again in a moment.")
+                error_details.append("ERROR: NO_IMAGE - Transient API issue. Please try again.")
             else:
                 logger.error("No images were generated! Check if candidates were blocked by safety filters or had errors.")
-                logger.error("Review the DEBUG messages above for finish_reason and safety_ratings.")
+                # Try to extract detailed error info from response
+                if response and response.candidates:
+                    for cand_idx, cand in enumerate(response.candidates):
+                        finish_reason = getattr(cand, 'finish_reason', None)
+                        safety_ratings = getattr(cand, 'safety_ratings', None)
+                        if finish_reason:
+                            finish_str = str(finish_reason)
+                            logger.error(f"Candidate {cand_idx} finish_reason: {finish_str}")
+                            error_details.append(f"ERROR: finish_reason={finish_str}")
+                        if safety_ratings:
+                            logger.error(f"Candidate {cand_idx} safety_ratings: {safety_ratings}")
+                            # Parse safety ratings for blocked categories
+                            for rating in safety_ratings:
+                                cat = getattr(rating, 'category', 'unknown')
+                                prob = getattr(rating, 'probability', 'unknown')
+                                blocked = getattr(rating, 'blocked', False)
+                                if blocked or 'HIGH' in str(prob):
+                                    error_details.append(f"BLOCKED: {cat} (probability: {prob})")
+                        if not getattr(cand, 'content', None):
+                            error_details.append("ERROR: No content in response (likely blocked by safety filter)")
+                elif response:
+                    # No candidates at all
+                    error_details.append("ERROR: API returned no candidates")
+                    # Check for prompt feedback
+                    if hasattr(response, 'prompt_feedback'):
+                        feedback = response.prompt_feedback
+                        logger.error(f"Prompt feedback: {feedback}")
+                        if hasattr(feedback, 'block_reason'):
+                            error_details.append(f"BLOCKED: {feedback.block_reason}")
+                        if hasattr(feedback, 'safety_ratings'):
+                            for rating in feedback.safety_ratings:
+                                cat = getattr(rating, 'category', 'unknown')
+                                prob = getattr(rating, 'probability', 'unknown')
+                                if 'HIGH' in str(prob) or 'MEDIUM' in str(prob):
+                                    error_details.append(f"Safety issue: {cat} ({prob})")
+
+            # Add error details to texts so they're passed to the UI
+            if error_details:
+                texts.extend(error_details)
+            else:
+                texts.append("ERROR: No image generated - unknown reason")
 
         return texts, images
     

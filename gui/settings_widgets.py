@@ -332,10 +332,35 @@ class AspectRatioSelector(QWidget):
 
 class ResolutionSelector(QWidget):
     """Smart resolution selector with presets and AR/resolution mode indicator."""
-    
+
     resolutionChanged = Signal(str)
     modeChanged = Signal(str)  # "resolution" or "aspect_ratio"
-    
+
+    # Maximum native resolution per model (largest dimension in pixels)
+    # Used by Reset button and aspect ratio changes to set optimal size
+    MODEL_MAX_RESOLUTIONS = {
+        # Google models
+        "gemini-3-pro-image-preview": 4096,  # Nano Banana Pro - 4K
+        "gemini-2.5-flash-image": 1024,      # Standard Nano Banana
+        "gemini-2.5-flash": 1024,
+        "gemini-2.5-pro": 1024,
+        # OpenAI models
+        "dall-e-3": 1792,
+        "dall-e-2": 1024,
+        # Stability models
+        "stable-diffusion-xl-1024-v1-0": 1024,
+        "sd3-large": 1536,
+        "sd3-medium": 1536,
+        "sd3-large-turbo": 1536,
+    }
+
+    # Default max resolution per provider (fallback if model not found)
+    PROVIDER_MAX_RESOLUTIONS = {
+        "google": 1024,
+        "openai": 1792,
+        "stability": 1536,
+    }
+
     PRESETS = {
         "google": {
             "Auto (from AR)": "auto",
@@ -610,28 +635,20 @@ class ResolutionSelector(QWidget):
         self.modeChanged.emit("resolution")
     
     def update_aspect_ratio(self, ratio: str):
-        """Update the current aspect ratio (for display)."""
+        """Update the current aspect ratio and set to max resolution for model.
+
+        When aspect ratio changes, automatically sets resolution to the model's
+        maximum for the new aspect ratio. This ensures optimal quality output.
+        """
         old_ratio = self._aspect_ratio
         self._aspect_ratio = ratio
-        current_width = self.width_spin.value()
-        current_height = self.height_spin.value()
         logger.info(f"ResolutionSelector: Aspect ratio updating from {old_ratio} to {ratio}")
-        logger.info(f"  Current dimensions before update: {current_width}×{current_height}px")
-        logger.info(f"  Last edited field: {self._last_edited}")
 
         if self._using_aspect_ratio:
-            # NEW BEHAVIOR: Always preserve the larger dimension
-            # Determine which dimension is larger
-            if current_width >= current_height:
-                # Width is larger or equal - keep width, recalculate height
-                logger.info(f"  Width ({current_width}px) >= Height ({current_height}px) - preserving width")
-                self._on_width_changed(current_width, force=True)
-            else:
-                # Height is larger - keep height, recalculate width
-                logger.info(f"  Height ({current_height}px) > Width ({current_width}px) - preserving height")
-                self._on_height_changed(current_height, force=True)
+            # Always set to max resolution for the selected model
+            # This ensures users get optimal quality when changing aspect ratio
+            self._set_to_max_for_aspect_ratio()
 
-            self._update_info_text()
             # Calculate suggested resolution based on aspect ratio
             self._update_suggested_resolution(ratio)
 
@@ -754,30 +771,8 @@ class ResolutionSelector(QWidget):
         self._last_edited = "height"
 
     def _reset_to_defaults(self):
-        """Reset to provider max resolution for current aspect ratio."""
-        max_res = self._get_provider_max()
-
-        # Calculate dimensions based on aspect ratio and provider max
-        if ':' in self._aspect_ratio:
-            ar_parts = self._aspect_ratio.split(':')
-            ar_width = float(ar_parts[0])
-            ar_height = float(ar_parts[1])
-
-            # Use max resolution as the limiting dimension
-            if ar_width >= ar_height:
-                # Landscape or square - width limited
-                self._last_edited = "width"
-                self.width_spin.setValue(max_res)
-                # Height will be calculated automatically
-            else:
-                # Portrait - height limited
-                self._last_edited = "height"
-                self.height_spin.setValue(max_res)
-                # Width will be calculated automatically
-        else:
-            # Square
-            self._last_edited = "width"
-            self.width_spin.setValue(max_res)
+        """Reset to model's max resolution for current aspect ratio."""
+        self._set_to_max_for_aspect_ratio()
 
     def _toggle_lock_aspect_ratio(self):
         """Toggle aspect ratio lock on/off."""
@@ -826,51 +821,116 @@ class ResolutionSelector(QWidget):
         """Get maximum resolution for current provider and model.
 
         Returns the native max output resolution (no upscaling needed).
+        Checks MODEL_MAX_RESOLUTIONS first, then falls back to provider defaults.
         """
-        if self.provider == "google":
-            # Nano Banana Pro (gemini-3) supports up to 4K
-            if self.model and "gemini-3" in self.model:
-                return 4096
-            # Standard Nano Banana (gemini-2.5-flash-image) = 1024
-            return 1024
-        elif self.provider == "openai":
-            return 1792
-        elif self.provider == "stability":
-            return 1536
-        else:
-            return 1024
+        # First check if we have a specific max for this model
+        if self.model and self.model in self.MODEL_MAX_RESOLUTIONS:
+            return self.MODEL_MAX_RESOLUTIONS[self.model]
+
+        # Also check for partial model matches (e.g., "gemini-3" in model ID)
+        if self.model:
+            if "gemini-3" in self.model:
+                return 4096  # Nano Banana Pro
+            elif "dall-e-3" in self.model:
+                return 1792
+            elif "sd3" in self.model:
+                return 1536
+
+        # Fall back to provider defaults
+        return self.PROVIDER_MAX_RESOLUTIONS.get(self.provider, 1024)
 
     def update_model(self, model: str):
         """Update the current model for resolution calculations.
 
-        This only updates the model reference and info text.
-        Does NOT automatically change dimensions - user controls that via Reset button.
+        When switching to a model with different max resolution, automatically
+        adjusts dimensions to the new model's max for the current aspect ratio.
         """
         if model == self.model:
             return  # No change
 
         old_model = self.model
-        self.model = model
-
-        # Just update the info text to reflect new model capabilities
         old_max = self._get_model_max(old_model) if old_model else 1024
+
+        self.model = model
         new_max = self._get_provider_max()
 
         if old_max != new_max:
             logger.info(f"Model changed: {old_model} → {model} (max resolution: {old_max} → {new_max}px)")
 
-        # Update info text to show correct upscaling status for new model
-        self._update_info_text()
+            # Auto-adjust resolution to new model's max for current aspect ratio
+            # This ensures users get optimal quality when selecting high-res models
+            self._set_to_max_for_aspect_ratio()
+        else:
+            # Just update info text if max didn't change
+            self._update_info_text()
 
     def _get_model_max(self, model: str) -> int:
         """Get max resolution for a specific model."""
-        if model and "gemini-3" in model:
-            return 4096
-        elif self.provider == "openai":
-            return 1792
-        elif self.provider == "stability":
-            return 1536
-        return 1024
+        if model and model in self.MODEL_MAX_RESOLUTIONS:
+            return self.MODEL_MAX_RESOLUTIONS[model]
+        # Check partial matches
+        if model:
+            if "gemini-3" in model:
+                return 4096
+            elif "dall-e-3" in model:
+                return 1792
+            elif "sd3" in model:
+                return 1536
+        # Fall back to provider default
+        return self.PROVIDER_MAX_RESOLUTIONS.get(self.provider, 1024)
+
+    def _set_to_max_for_aspect_ratio(self):
+        """Set resolution to max for current model and aspect ratio.
+
+        This is called when:
+        - Model changes to one with different max resolution
+        - Reset button is clicked
+        - Aspect ratio changes (to ensure max resolution is used)
+        """
+        max_res = self._get_provider_max()
+
+        # Calculate dimensions based on aspect ratio and model's max
+        if ':' in self._aspect_ratio:
+            ar_parts = self._aspect_ratio.split(':')
+            try:
+                ar_width = float(ar_parts[0])
+                ar_height = float(ar_parts[1])
+            except (ValueError, IndexError):
+                ar_width, ar_height = 1.0, 1.0
+
+            # Use max resolution as the limiting dimension
+            if ar_width >= ar_height:
+                # Landscape or square - width is max
+                new_width = max_res
+                new_height = int(max_res * ar_height / ar_width)
+            else:
+                # Portrait - height is max
+                new_height = max_res
+                new_width = int(max_res * ar_width / ar_height)
+        else:
+            # Square
+            new_width = max_res
+            new_height = max_res
+
+        # Update spinboxes
+        self.width_spin.blockSignals(True)
+        self.height_spin.blockSignals(True)
+
+        self.width_spin.setValue(new_width)
+        self.height_spin.setValue(new_height)
+
+        self.width_spin.blockSignals(False)
+        self.height_spin.blockSignals(False)
+
+        # Update stored values
+        self._custom_width = new_width
+        self._custom_height = new_height
+
+        logger.info(f"Set to max resolution for {self._aspect_ratio}: {new_width}×{new_height}px (model max: {max_res}px)")
+
+        # Update info and emit signal
+        self._update_info_text()
+        self.resolutionChanged.emit("auto")
 
     def _initialize_dimensions(self):
         """Initialize dimensions on startup."""
