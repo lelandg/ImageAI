@@ -655,6 +655,7 @@ class ResolutionSelector(QWidget):
     def _on_width_value_changed(self, value: int):
         """Handle width spinbox value change signal."""
         logger.info(f"WIDTH SPINBOX VALUE CHANGED: {value}px")
+        self._last_edited = "width"  # Set before calling handler
         self._on_width_changed(value)
 
     def _on_width_changed(self, value: int, force=False):
@@ -710,6 +711,7 @@ class ResolutionSelector(QWidget):
     def _on_height_value_changed(self, value: int):
         """Handle height spinbox value change signal."""
         logger.info(f"HEIGHT SPINBOX VALUE CHANGED: {value}px")
+        self._last_edited = "height"  # Set before calling handler
         self._on_height_changed(value)
 
     def _on_height_changed(self, value: int, force=False):
