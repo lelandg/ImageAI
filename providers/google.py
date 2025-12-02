@@ -640,9 +640,17 @@ class GoogleProvider(ImageProvider):
             if hasattr(types, 'ImageConfig'):
                 try:
                     logger.info("Attempting to use types.ImageConfig class")
+                    # Build ImageConfig params - add image_size for Nano Banana Pro
+                    image_config_params = {'aspect_ratio': aspect_ratio}
+                    if is_nano_banana_pro:
+                        # Nano Banana Pro supports 1K, 2K, 4K output quality
+                        image_size = output_quality.upper()  # Convert '1k' -> '1K'
+                        image_config_params['image_size'] = image_size
+                        logger.info(f"Nano Banana Pro: Adding image_size={image_size} to ImageConfig")
+
                     config = types.GenerateContentConfig(
                         response_modalities=["IMAGE"],
-                        image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
+                        image_config=types.ImageConfig(**image_config_params),
                         **config_params
                     )
                     config_created = True
@@ -654,9 +662,16 @@ class GoogleProvider(ImageProvider):
             if not config_created:
                 try:
                     logger.info("Attempting dict format for image_config")
+                    # Build image_config dict - add image_size for Nano Banana Pro
+                    image_config_dict = {"aspect_ratio": aspect_ratio}
+                    if is_nano_banana_pro:
+                        image_size = output_quality.upper()  # Convert '1k' -> '1K'
+                        image_config_dict["image_size"] = image_size
+                        logger.info(f"Nano Banana Pro: Adding image_size={image_size} to dict config")
+
                     config = types.GenerateContentConfig(
                         response_modalities=["IMAGE"],
-                        image_config={"aspect_ratio": aspect_ratio},
+                        image_config=image_config_dict,
                         **config_params
                     )
                     config_created = True
@@ -683,11 +698,33 @@ class GoogleProvider(ImageProvider):
                 **config_params
             ) if config_params else None
 
-        # Handle reference image if provided
-        reference_image = kwargs.get('reference_image')
+        # Handle reference image(s) if provided
+        reference_image = kwargs.get('reference_image')  # Single image (existing)
+        reference_images = kwargs.get('reference_images')  # Multiple images (new - list)
         contents = prompt  # Default to just the text prompt
 
-        if reference_image:
+        if reference_images:
+            # Multiple reference images - add each to contents list
+            try:
+                from PIL import Image
+                import io
+
+                contents = []
+                for i, ref_bytes in enumerate(reference_images):
+                    if isinstance(ref_bytes, bytes):
+                        img = Image.open(io.BytesIO(ref_bytes))
+                    else:
+                        img = ref_bytes
+                    contents.append(img)
+                    logger.info(f"Added reference image {i + 1}/{len(reference_images)}: {img.size if hasattr(img, 'size') else 'unknown size'}")
+
+                contents.append(prompt)  # Prompt at the end
+                logger.info(f"Using {len(reference_images)} reference images for generation (direct mode)")
+            except Exception as e:
+                logger.warning(f"Failed to process reference images: {e}")
+                # Fall back to text-only prompt
+                contents = prompt
+        elif reference_image:
             # Create multimodal content with reference image
             try:
                 from PIL import Image

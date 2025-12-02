@@ -195,3 +195,4 @@ When the code map needs updating:
 - **Reference images**: When reference image aspect doesn't match target, create transparent canvas with correct aspect ratio and center the reference image
 - Always log what aspect_ratio is sent via image_config
 - Folder _transfer is shared with VM. Latest Linux logs are there.
+- NBP = Nano Banana Pro

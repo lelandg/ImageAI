@@ -445,6 +445,13 @@ class ImagenReferenceWidget(QWidget):
     - Strict: Multi-reference, subject preservation (Imagen 3 Customization)
     """
 
+    # Model-specific reference image limits
+    MODEL_REF_LIMITS = {
+        'gemini-2.5-flash-image': 5,       # Standard Nano Banana
+        'gemini-3-pro-image-preview': 14,  # Nano Banana Pro - up to 14 reference images
+        'default': 3                        # Default for other models
+    }
+
     # Signals
     references_changed = Signal()  # Emitted when reference list changes
     mode_changed = Signal(str)     # Emitted when mode changes (flexible/strict)
@@ -457,7 +464,8 @@ class ImagenReferenceWidget(QWidget):
             parent: Parent widget
         """
         super().__init__(parent)
-        self.max_references_strict = 3  # Max for strict mode (Imagen 3 Customization)
+        self.current_model = None
+        self.max_references_strict = self.MODEL_REF_LIMITS['default']  # Dynamic based on model
         self.reference_items: List[ImagenReferenceItemWidget] = []
         self.logger = logging.getLogger(__name__)
         self.current_mode = "strict"  # Default to strict mode
@@ -514,9 +522,8 @@ class ImagenReferenceWidget(QWidget):
             "padding: 8px; font-size: 10pt;"
         )
         self.multi_ref_help.setText(
-            "💡 Multiple references: Creates a composite character design sheet image. "
-            "Enter your prompt like 'These people as high resolution cartoon characters'. "
-            "See Help tab for details."
+            "Multiple references: Images are sent directly to the model for free prompting. "
+            "Enable 'Composite Images' to combine them into a single grid instead."
         )
         self.multi_ref_help.setVisible(False)  # Hidden by default
         main_layout.addWidget(self.multi_ref_help)
@@ -538,6 +545,16 @@ class ImagenReferenceWidget(QWidget):
         )
         self.chk_edit_mode.stateChanged.connect(self._on_edit_mode_changed)
         header_layout.addWidget(self.chk_edit_mode)
+
+        # Composite Mode checkbox (for multiple references in flexible mode)
+        self.chk_composite_mode = QCheckBox("Composite Images")
+        self.chk_composite_mode.setToolTip(
+            "When enabled, multiple reference images are composited into a single grid.\n"
+            "When disabled, images are sent directly to the model (recommended for Gemini 3 Pro)."
+        )
+        self.chk_composite_mode.setChecked(False)  # Default OFF - send images directly
+        self.chk_composite_mode.setVisible(False)  # Only show when multiple refs in flexible mode
+        header_layout.addWidget(self.chk_composite_mode)
 
         self.btn_add = QPushButton("+ Add Reference Image")
         self.btn_add.setToolTip("Add a reference image")
@@ -701,8 +718,13 @@ class ImagenReferenceWidget(QWidget):
             self.count_label.setText(f"Reference Images ({count})")
             self.btn_add.setEnabled(True)
 
-            # Show help text if multiple images
-            self.multi_ref_help.setVisible(count > 1)
+            # Show help text only for gemini-2.5-flash (older model needs guidance)
+            # NBP (gemini-3) supports multi-reference natively, no help needed
+            is_legacy_model = self.current_model and 'gemini-2.5-flash' in self.current_model
+            self.multi_ref_help.setVisible(count > 1 and is_legacy_model)
+
+            # Show composite mode checkbox only when >1 reference in flexible mode
+            self.chk_composite_mode.setVisible(count > 1)
 
             # Hide combo boxes in flexible mode (style transfer doesn't need type/subject)
             for item in self.reference_items:
@@ -713,8 +735,9 @@ class ImagenReferenceWidget(QWidget):
             self.count_label.setText(f"Reference Images ({count}/{max_allowed})")
             self.btn_add.setEnabled(count < max_allowed)
 
-            # Hide help text in strict mode
+            # Hide help text and composite mode in strict mode
             self.multi_ref_help.setVisible(False)
+            self.chk_composite_mode.setVisible(False)
 
             # Show combo boxes in strict mode (need to specify type/subject)
             for item in self.reference_items:
@@ -728,6 +751,39 @@ class ImagenReferenceWidget(QWidget):
             self.chk_edit_mode.setChecked(False)
 
         self.references_changed.emit()
+
+    def update_model(self, model_id: str):
+        """
+        Update reference image limit based on the selected model.
+
+        Args:
+            model_id: The model identifier (e.g., 'gemini-3-pro-image-preview')
+        """
+        self.current_model = model_id
+
+        # Get model-specific limit
+        new_limit = self.MODEL_REF_LIMITS.get(model_id, self.MODEL_REF_LIMITS['default'])
+        old_limit = self.max_references_strict
+
+        if new_limit != old_limit:
+            self.max_references_strict = new_limit
+            self.logger.info(f"Reference image limit updated: {old_limit} -> {new_limit} for model {model_id}")
+
+            # Update tooltip to reflect new limit
+            is_nbp = "gemini-3" in model_id if model_id else False
+            if is_nbp:
+                self.radio_strict.setToolTip(
+                    f"Preserve subjects as-is, change scene/composition.\n"
+                    f"Up to {new_limit} references (Nano Banana Pro). Uses Imagen 3 Customization."
+                )
+            else:
+                self.radio_strict.setToolTip(
+                    f"Preserve subjects as-is, change scene/composition.\n"
+                    f"Up to {new_limit} references. Uses Imagen 3 Customization."
+                )
+
+            # Update the UI to reflect new limits
+            self._update_ui()
 
     def get_references(self) -> List[ImagenReference]:
         """
@@ -802,6 +858,19 @@ class ImagenReferenceWidget(QWidget):
         return (self.chk_edit_mode.isEnabled() and
                 self.chk_edit_mode.isChecked() and
                 len(self.reference_items) == 1)
+
+    def is_composite_mode(self) -> bool:
+        """
+        Check if composite mode is active for multiple reference images.
+
+        Composite mode combines multiple images into a single grid.
+        When disabled, images are sent directly to the model.
+
+        Returns:
+            True if images should be composited into a grid
+        """
+        return (self.chk_composite_mode.isVisible() and
+                self.chk_composite_mode.isChecked())
 
     def get_edit_mode_prefix(self) -> str:
         """

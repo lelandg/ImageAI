@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.28.0**
+**Version 0.29.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **ChatMaster BBS - The Intersection of Art and AI - Support and Fun: [ChatMaster BBS Discord Server](https://discord.gg/chatmaster)**
@@ -2406,6 +2406,10 @@ The screenshots showcase:
 
 Created by Leland Green | [LelandGreen.com](https://www.lelandgreen.com)
 Contact: | [contact@lelandgreen.com](mailto:contact@lelandgreen.com)
+
+[![Chameleon Labs](https://chameleonlabs.ai/logo.png)](https://chameleonlabs.ai/)
+
+**VP, Head of Software and Technology** at [Chameleon Labs, LLC](https://chameleonlabs.ai/)
 
 Built with:
 - Claude Code and online

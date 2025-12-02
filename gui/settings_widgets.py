@@ -628,9 +628,9 @@ class ResolutionSelector(QWidget):
                 background: rgba(33, 150, 243, 0.1);
             }
         """)
-        # Hide size controls in resolution mode
+        # Always show size controls so width/height are visible
         if hasattr(self, 'size_widget'):
-            self.size_widget.setVisible(False)
+            self.size_widget.setVisible(True)
         self._update_info_text()
         self.modeChanged.emit("resolution")
     
@@ -823,8 +823,13 @@ class ResolutionSelector(QWidget):
         """Get maximum resolution for current provider and model.
 
         Returns the native max output resolution (no upscaling needed).
-        Checks MODEL_MAX_RESOLUTIONS first, then falls back to provider defaults.
+        Checks NBP quality override first, then MODEL_MAX_RESOLUTIONS,
+        then falls back to provider defaults.
         """
+        # Check for NBP quality tier override first
+        if hasattr(self, '_nbp_max_override') and self._nbp_max_override:
+            return self._nbp_max_override
+
         # First check if we have a specific max for this model
         if self.model and self.model in self.MODEL_MAX_RESOLUTIONS:
             return self.MODEL_MAX_RESOLUTIONS[self.model]
@@ -832,7 +837,7 @@ class ResolutionSelector(QWidget):
         # Also check for partial model matches (e.g., "gemini-3" in model ID)
         if self.model:
             if "gemini-3" in self.model:
-                return 4096  # Nano Banana Pro
+                return 4096  # Nano Banana Pro (can be overridden by quality tier)
             elif "dall-e-3" in self.model:
                 return 1792
             elif "sd3" in self.model:
@@ -865,6 +870,32 @@ class ResolutionSelector(QWidget):
         else:
             # Just update info text if max didn't change
             self._update_info_text()
+
+    def update_max_resolution(self, max_resolution: int):
+        """Update the maximum resolution dynamically (e.g., for NBP quality tiers).
+
+        When NBP quality tier changes (1K/2K/4K), this sets the resolution
+        to the max for the current aspect ratio.
+
+        Args:
+            max_resolution: New maximum resolution in pixels (1024, 2048, 4096)
+        """
+        self._nbp_max_override = max_resolution
+        logger.info(f"NBP quality tier changed - setting max resolution to {max_resolution}px")
+
+        # Update spinbox maximum first
+        self.width_spin.setMaximum(max_resolution)
+        self.height_spin.setMaximum(max_resolution)
+
+        # Set resolution to max for current aspect ratio
+        self._set_to_max_for_aspect_ratio()
+
+        # Store the new values
+        self._custom_width = self.width_spin.value()
+        self._custom_height = self.height_spin.value()
+
+        self._update_info_text()
+        self.resolutionChanged.emit("auto")
 
     def _get_model_max(self, model: str) -> int:
         """Get max resolution for a specific model."""
@@ -1112,64 +1143,105 @@ class ResolutionSelector(QWidget):
 
 class QualitySelector(QWidget):
     """Quality and style selector for providers."""
-    
+
     settingsChanged = Signal(dict)
-    
+    nbpQualityChanged = Signal(str, int)  # (quality_tier, max_resolution) for NBP
+
+    # NBP pricing and resolution limits
+    NBP_TIERS = {
+        '1K': {'price': 0.134, 'max_res': 1024, 'label': '1K ($0.134)'},
+        '2K': {'price': 0.134, 'max_res': 2048, 'label': '2K ($0.134)'},
+        '4K': {'price': 0.24, 'max_res': 4096, 'label': '4K ($0.24)'},
+    }
+
     def __init__(self, provider: str = "google", parent=None):
         super().__init__(parent)
         self.provider = provider
         self.settings = {}
+        self.is_nbp_mode = False
+        self.nbp_quality = '2K'  # Default NBP quality
         self._init_ui()
-    
+
     def _init_ui(self):
         """Initialize the UI."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Quality group
+
+        # Quality group (shared container for standard and NBP modes)
         self.quality_group = QGroupBox("Quality")
         quality_layout = QHBoxLayout(self.quality_group)
-        
+
+        # Standard quality buttons (Fast/Quality or Standard/HD)
         self.quality_buttons = QButtonGroup()
         self.standard_radio = QRadioButton("Standard")
         self.hd_radio = QRadioButton("HD/High")
-        
+
         self.quality_buttons.addButton(self.standard_radio, 0)
         self.quality_buttons.addButton(self.hd_radio, 1)
         quality_layout.addWidget(self.standard_radio)
         quality_layout.addWidget(self.hd_radio)
-        
+
         self.standard_radio.setChecked(True)
         self.quality_buttons.buttonClicked.connect(self._on_quality_changed)
-        
+
+        # NBP quality buttons (1K/2K/4K) - initially hidden
+        self.nbp_buttons = QButtonGroup()
+        self.nbp_1k_radio = QRadioButton(self.NBP_TIERS['1K']['label'])
+        self.nbp_2k_radio = QRadioButton(self.NBP_TIERS['2K']['label'])
+        self.nbp_4k_radio = QRadioButton(self.NBP_TIERS['4K']['label'])
+
+        self.nbp_1k_radio.setToolTip("1024px max - Standard quality")
+        self.nbp_2k_radio.setToolTip("2048px max - High quality (recommended)")
+        self.nbp_4k_radio.setToolTip("4096px max - Ultra high quality")
+
+        self.nbp_buttons.addButton(self.nbp_1k_radio, 0)
+        self.nbp_buttons.addButton(self.nbp_2k_radio, 1)
+        self.nbp_buttons.addButton(self.nbp_4k_radio, 2)
+
+        quality_layout.addWidget(self.nbp_1k_radio)
+        quality_layout.addWidget(self.nbp_2k_radio)
+        quality_layout.addWidget(self.nbp_4k_radio)
+
+        self.nbp_2k_radio.setChecked(True)  # Default to 2K
+        self.nbp_buttons.buttonClicked.connect(self._on_nbp_quality_changed)
+
+        # Hide NBP buttons initially
+        self.nbp_1k_radio.setVisible(False)
+        self.nbp_2k_radio.setVisible(False)
+        self.nbp_4k_radio.setVisible(False)
+
         layout.addWidget(self.quality_group)
-        
+
         # Style group (OpenAI)
         self.style_group = QGroupBox("Style")
         style_layout = QHBoxLayout(self.style_group)
-        
+
         self.style_buttons = QButtonGroup()
         self.vivid_radio = QRadioButton("Vivid")
         self.vivid_radio.setToolTip("Hyper-real and cinematic")
         self.natural_radio = QRadioButton("Natural")
         self.natural_radio.setToolTip("More realistic and subtle")
-        
+
         self.style_buttons.addButton(self.vivid_radio, 0)
         self.style_buttons.addButton(self.natural_radio, 1)
         style_layout.addWidget(self.vivid_radio)
         style_layout.addWidget(self.natural_radio)
-        
+
         self.vivid_radio.setChecked(True)
         self.style_buttons.buttonClicked.connect(self._on_style_changed)
-        
+
         layout.addWidget(self.style_group)
-        
+
         self.update_provider(self.provider)
     
     def update_provider(self, provider: str):
         """Update visibility based on provider."""
         self.provider = provider
-        
+
+        # Reset NBP mode when provider changes
+        if provider != "google":
+            self._set_nbp_mode(False)
+
         if provider == "openai":
             self.quality_group.setVisible(True)
             self.style_group.setVisible(True)
@@ -1180,11 +1252,75 @@ class QualitySelector(QWidget):
             self.quality_group.setVisible(True)
             self.style_group.setVisible(False)
             self.quality_group.setTitle("Model Quality")
-            self.standard_radio.setText("Fast")
-            self.hd_radio.setText("Quality")
+            # Text depends on NBP mode, set in _set_nbp_mode
+            if not self.is_nbp_mode:
+                self.standard_radio.setText("Fast")
+                self.hd_radio.setText("Quality")
         else:
             self.quality_group.setVisible(False)
             self.style_group.setVisible(False)
+
+    def update_model(self, model_id: str):
+        """Update quality options based on selected model."""
+        is_nbp = model_id and "gemini-3" in model_id
+        self._set_nbp_mode(is_nbp)
+
+        if is_nbp:
+            # Emit signal with current NBP quality and max resolution
+            tier = self.NBP_TIERS.get(self.nbp_quality, self.NBP_TIERS['2K'])
+            self.nbpQualityChanged.emit(self.nbp_quality, tier['max_res'])
+
+    def _set_nbp_mode(self, enabled: bool):
+        """Switch between standard quality and NBP quality modes."""
+        if self.is_nbp_mode == enabled:
+            return
+
+        self.is_nbp_mode = enabled
+
+        # Toggle visibility of standard vs NBP buttons
+        self.standard_radio.setVisible(not enabled)
+        self.hd_radio.setVisible(not enabled)
+        self.nbp_1k_radio.setVisible(enabled)
+        self.nbp_2k_radio.setVisible(enabled)
+        self.nbp_4k_radio.setVisible(enabled)
+
+        if enabled:
+            self.quality_group.setTitle("Output Quality")
+        else:
+            # Restore based on provider
+            if self.provider == "google":
+                self.quality_group.setTitle("Model Quality")
+            else:
+                self.quality_group.setTitle("Quality")
+
+    def _on_nbp_quality_changed(self):
+        """Handle NBP quality tier change."""
+        if self.nbp_1k_radio.isChecked():
+            self.nbp_quality = '1K'
+        elif self.nbp_2k_radio.isChecked():
+            self.nbp_quality = '2K'
+        else:
+            self.nbp_quality = '4K'
+
+        tier = self.NBP_TIERS[self.nbp_quality]
+        logger.debug(f"NBP quality changed to: {self.nbp_quality} (max {tier['max_res']}px)")
+
+        # Emit signal with quality and max resolution
+        self.nbpQualityChanged.emit(self.nbp_quality, tier['max_res'])
+
+        # Also emit standard settings changed for cost update
+        self.settings["nbp_quality"] = self.nbp_quality
+        self.settingsChanged.emit(self.settings)
+
+    def get_nbp_quality(self) -> str:
+        """Get current NBP quality tier."""
+        return self.nbp_quality if self.is_nbp_mode else None
+
+    def get_nbp_cost_per_image(self) -> float:
+        """Get cost per image for current NBP quality tier."""
+        if not self.is_nbp_mode:
+            return 0.04  # Default Google cost
+        return self.NBP_TIERS.get(self.nbp_quality, self.NBP_TIERS['2K'])['price']
     
     def _on_quality_changed(self):
         """Handle quality change."""
@@ -1203,7 +1339,11 @@ class QualitySelector(QWidget):
         settings = {}
         # Always save quality setting if the group exists
         if hasattr(self, 'quality_group'):
-            settings["quality"] = "hd" if self.hd_radio.isChecked() else "standard"
+            if self.is_nbp_mode:
+                # NBP mode - return output_quality for API
+                settings["output_quality"] = self.nbp_quality
+            else:
+                settings["quality"] = "hd" if self.hd_radio.isChecked() else "standard"
         # Always save style setting if the group exists
         if hasattr(self, 'style_group'):
             settings["style"] = "natural" if self.natural_radio.isChecked() else "vivid"
@@ -1216,12 +1356,27 @@ class QualitySelector(QWidget):
                 self.hd_radio.setChecked(True)
             else:
                 self.standard_radio.setChecked(True)
-        
+
         if "style" in settings:
             if settings["style"] == "vivid":
                 self.vivid_radio.setChecked(True)
             else:
                 self.natural_radio.setChecked(True)
+
+        # Restore NBP quality (1K/2K/4K)
+        if "output_quality" in settings:
+            quality = settings["output_quality"]
+            self.nbp_quality = quality
+            if quality == '1K':
+                self.nbp_1k_radio.setChecked(True)
+            elif quality == '2K':
+                self.nbp_2k_radio.setChecked(True)
+            elif quality == '4K':
+                self.nbp_4k_radio.setChecked(True)
+            # Emit signal to update resolution limits if NBP mode is active
+            if self.is_nbp_mode:
+                tier = self.NBP_TIERS.get(quality, self.NBP_TIERS['2K'])
+                self.nbpQualityChanged.emit(quality, tier['max_res'])
 
 
 class BatchSelector(QWidget):
@@ -1600,10 +1755,17 @@ class AdvancedSettingsPanel(QWidget):
 
 class CostEstimator:
     """Calculate and display generation costs."""
-    
+
+    # NBP (Nano Banana Pro) pricing by quality tier
+    NBP_PRICING = {
+        '1K': 0.134,
+        '2K': 0.134,
+        '4K': 0.24,
+    }
+
     PRICING = {
         "google": {
-            "standard": 0.03,
+            "standard": 0.04,  # Standard Nano Banana
             "2k": 0.06,
             "fast": 0.02
         },
@@ -1617,16 +1779,30 @@ class CostEstimator:
             "sd15": 0.006
         }
     }
-    
+
     @classmethod
-    def calculate(cls, provider: str, settings: dict) -> float:
-        """Calculate cost based on provider and settings."""
+    def calculate(cls, provider: str, settings: dict, model: str = None) -> float:
+        """Calculate cost based on provider, settings, and model.
+
+        Args:
+            provider: The provider name (google, openai, stability)
+            settings: Dict with num_images, resolution, quality, output_quality, etc.
+            model: Optional model ID for model-specific pricing (e.g., NBP)
+        """
+        num_images = settings.get("num_images", 1)
+
+        # Check for NBP model (Nano Banana Pro - gemini-3)
+        if model and "gemini-3" in model:
+            # Use NBP pricing based on output_quality tier
+            output_quality = settings.get("output_quality", "2K")
+            price_per_image = cls.NBP_PRICING.get(output_quality, cls.NBP_PRICING["2K"])
+            return price_per_image * num_images
+
         if provider not in cls.PRICING:
             return 0.0
-        
+
         pricing = cls.PRICING[provider]
-        num_images = settings.get("num_images", 1)
-        
+
         # Provider-specific logic
         if provider == "openai":
             quality = settings.get("quality", "standard")
@@ -1640,5 +1816,5 @@ class CostEstimator:
         else:
             # Default to standard pricing
             price_per_image = pricing.get("standard", 0.01)
-        
+
         return price_per_image * num_images

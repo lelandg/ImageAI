@@ -1011,6 +1011,8 @@ class MainWindow(QMainWindow):
 
             self.quality_selector = QualitySelector(self.current_provider)
             self.quality_selector.settingsChanged.connect(self._on_quality_settings_changed)
+            # Connect NBP quality signal to update resolution limits
+            self.quality_selector.nbpQualityChanged.connect(self._on_nbp_quality_changed)
             quality_v_layout.addWidget(self.quality_selector)
 
             aspect_quality_layout.addWidget(quality_group)
@@ -1097,7 +1099,10 @@ class MainWindow(QMainWindow):
             settings_form.addRow("Batch:", self.batch_selector)
         else:
             self.batch_selector = None
-        
+
+        # NOTE: NBP quality (1K/2K/4K) is now integrated into QualitySelector
+        # It shows automatically when Nano Banana Pro model is selected
+
         image_settings_layout.addLayout(settings_form)
 
         # Add upscaling selector (initially hidden)
@@ -1121,8 +1126,8 @@ class MainWindow(QMainWindow):
 
         bottom_layout.addWidget(self.image_settings_container)
 
-        # Reference Image Settings (collapsible flyout) - Multi-reference for Imagen 3
-        self.ref_image_toggle = QPushButton("▶ Reference Images (Google Only - Imagen 3)")
+        # Reference Image Settings (collapsible flyout) - Multi-reference for Google
+        self.ref_image_toggle = QPushButton("▶ Reference Images (Google Only)")
         self.ref_image_toggle.setCheckable(True)
         self.ref_image_toggle.setChecked(False)
         self.ref_image_toggle.clicked.connect(lambda checked: self._toggle_ref_image_settings(checked))
@@ -1450,6 +1455,10 @@ class MainWindow(QMainWindow):
         shortcut_help = QShortcut(QKeySequence.StandardKey.HelpContents, self)
         shortcut_help.activated.connect(lambda: self.tabs.setCurrentWidget(self.tab_help))
 
+        # Ctrl+F for find (window-wide shortcut)
+        shortcut_find = QShortcut(QKeySequence.StandardKey.Find, self)
+        shortcut_find.activated.connect(self._open_find_dialog)
+
         # Load reference image from config if available
         self._load_reference_image_from_config()
 
@@ -1461,7 +1470,7 @@ class MainWindow(QMainWindow):
             expanded = self.config.get('reference_images_expanded', False)
             self.ref_image_toggle.setChecked(expanded)
             self.ref_image_container.setVisible(expanded)
-            self.ref_image_toggle.setText("▼ Reference Images (Google Only - Imagen 3)" if expanded else "▶ Reference Images (Google Only - Imagen 3)")
+            self.ref_image_toggle.setText("▼ Reference Images (Google Only)" if expanded else "▶ Reference Images (Google Only)")
 
         # Check provider support for reference images
         if hasattr(self, 'btn_select_ref_image'):
@@ -3688,6 +3697,27 @@ For more detailed information, please refer to the full documentation.
         if model_id and self.current_provider.lower() == "google":
             self._check_nano_banana_pro_requirements(model_id)
 
+        # Update Quality Selector for NBP (shows 1K/2K/4K instead of Fast/Quality)
+        is_nano_banana_pro = model_id and "gemini-3" in model_id
+        if hasattr(self, 'quality_selector') and self.quality_selector:
+            self.quality_selector.update_model(model_id)
+            if is_nano_banana_pro:
+                self.logger.info(f"NBP model selected: {model_id} - Quality selector showing 1K/2K/4K")
+                # Update batch cost with NBP pricing
+                if hasattr(self, 'batch_selector') and self.batch_selector:
+                    self.batch_selector.set_cost_per_image(
+                        self.quality_selector.get_nbp_cost_per_image()
+                    )
+
+        # Update reference image limit based on model
+        if hasattr(self, 'imagen_reference_widget') and self.imagen_reference_widget:
+            self.imagen_reference_widget.update_model(model_id)
+            # Auto-switch to Flexible mode for NBP (Gemini-based)
+            if is_nano_banana_pro and hasattr(self.imagen_reference_widget, 'radio_flexible'):
+                if not self.imagen_reference_widget.is_flexible_mode():
+                    self.imagen_reference_widget.radio_flexible.setChecked(True)
+                    self.logger.info("Auto-switched to Flexible mode for Nano Banana Pro")
+
         # Show/hide Imagen reference widget based on provider and model
         self._update_imagen_reference_visibility()
 
@@ -3918,7 +3948,35 @@ For more detailed information, please refer to the full documentation.
         """Handle quality/style settings change."""
         self.quality_settings = settings
         self._update_cost_estimate()
-    
+
+    def _on_nbp_quality_changed(self, quality: str, max_resolution: int):
+        """Handle Nano Banana Pro quality tier change.
+
+        Args:
+            quality: Quality tier ('1K', '2K', '4K')
+            max_resolution: Maximum resolution in pixels (1024, 2048, 4096)
+        """
+        self.logger.info(f"NBP quality changed to: {quality} (max {max_resolution}px)")
+
+        # Update ResolutionSelector max values based on NBP quality tier
+        if hasattr(self, 'resolution_selector') and self.resolution_selector:
+            # Update the model's max resolution
+            if hasattr(self.resolution_selector, 'update_max_resolution'):
+                self.resolution_selector.update_max_resolution(max_resolution)
+            else:
+                # Fallback: update the model which will set max resolution
+                model_id = self.model_combo.currentData()
+                if model_id:
+                    self.resolution_selector.update_model(model_id)
+
+        # Update batch selector cost when NBP quality changes
+        if hasattr(self, 'quality_selector') and self.quality_selector:
+            if hasattr(self, 'batch_selector') and self.batch_selector:
+                self.batch_selector.set_cost_per_image(
+                    self.quality_selector.get_nbp_cost_per_image()
+                )
+        self._update_cost_estimate()
+
     def _on_advanced_settings_changed(self, settings: dict):
         """Handle advanced settings change."""
         self.advanced_settings = settings
@@ -3927,26 +3985,34 @@ For more detailed information, please refer to the full documentation.
         """Update cost estimate display."""
         if not CostEstimator or not hasattr(self, 'batch_selector'):
             return
-        
+
         # Gather all settings
         settings = {}
-        
+
         # Get number of images
         if num_images is None and self.batch_selector:
             num_images = self.batch_selector.get_num_images()
         settings["num_images"] = num_images or 1
-        
+
         # Get resolution
         if hasattr(self, 'resolution_selector') and self.resolution_selector:
             settings["resolution"] = self.resolution_selector.get_resolution()
-        
-        # Get quality settings
-        if hasattr(self, 'quality_settings'):
+
+        # Get quality settings from QualitySelector
+        if hasattr(self, 'quality_selector') and self.quality_selector:
+            quality_settings = self.quality_selector.get_settings()
+            settings.update(quality_settings)
+        elif hasattr(self, 'quality_settings'):
             settings.update(self.quality_settings)
-        
-        # Calculate cost
-        cost = CostEstimator.calculate(self.current_provider, settings)
-        
+
+        # Get current model for model-specific pricing (e.g., NBP)
+        model = None
+        if hasattr(self, 'model_combo'):
+            model = self.model_combo.currentData() or self.model_combo.currentText()
+
+        # Calculate cost with model info
+        cost = CostEstimator.calculate(self.current_provider, settings, model=model)
+
         # Update batch selector display
         if self.batch_selector:
             self.batch_selector.set_cost_per_image(cost / settings["num_images"])
@@ -4445,9 +4511,34 @@ For more detailed information, please refer to the full documentation.
         dlg.exec()
 
     def _open_find_dialog(self):
-        """Open find dialog for prompt text."""
+        """Open find dialog for searchable text widgets based on current tab."""
+        # Determine which text widget to search based on the current tab
+        current_tab = self.tabs.currentWidget()
+        text_widget = None
+
+        if current_tab == self.tab_generate:
+            text_widget = self.prompt_edit
+        elif current_tab == self.tab_help:
+            # Help tab uses QTextBrowser or QWebEngineView
+            if hasattr(self, 'help_browser'):
+                text_widget = self.help_browser
+        elif hasattr(current_tab, 'findChild'):
+            # Try to find a QTextEdit or QPlainTextEdit in the current tab
+            from PySide6.QtWidgets import QTextEdit, QPlainTextEdit
+            text_widget = current_tab.findChild(QTextEdit) or current_tab.findChild(QPlainTextEdit)
+
+        # Default to prompt_edit if no searchable widget found
+        if text_widget is None:
+            text_widget = self.prompt_edit
+
+        # Create or update find dialog with the appropriate text widget
         if not hasattr(self, '_find_dialog') or not self._find_dialog:
-            self._find_dialog = FindDialog(self, self.prompt_edit)
+            self._find_dialog = FindDialog(self, text_widget)
+        else:
+            # Update the text widget if it changed
+            self._find_dialog.text_widget = text_widget
+            self._find_dialog.clear_search()
+
         self._find_dialog.show()
         self._find_dialog.raise_()
         self._find_dialog.activateWindow()
@@ -4854,11 +4945,14 @@ For more detailed information, please refer to the full documentation.
                 aspect_ratio = self.aspect_selector.get_ratio()
                 kwargs['aspect_ratio'] = aspect_ratio
         
-        # Get quality/style settings
+        # Get quality/style settings (includes NBP output_quality when in NBP mode)
         if hasattr(self, 'quality_selector') and self.quality_selector:
             quality_settings = self.quality_selector.get_settings()
             kwargs.update(quality_settings)
-        
+            # Log Gemini 3 Pro output quality if present
+            if 'output_quality' in quality_settings:
+                self._append_to_console(f"Gemini 3 Pro Output Quality: {quality_settings['output_quality']}", "#66ccff")
+
         # Get batch settings
         if hasattr(self, 'batch_selector') and self.batch_selector:
             num_images = self.batch_selector.get_num_images()
@@ -5039,70 +5133,81 @@ For more detailed information, please refer to the full documentation.
                         "#00ff00"
                     )
 
+                    # Read the reference image as bytes
+                    with open(ref_path, 'rb') as f:
+                        reference_image_bytes = f.read()
+
+                    # Pass as reference_image parameter (Google provider behavior)
+                    kwargs['reference_image'] = reference_image_bytes
+
                 elif len(references) > 1:
-                    # Multiple references: composite them
-                    self._append_to_console(
-                        f"Compositing {len(references)} reference images...",
-                        "#66ccff"
-                    )
+                    # Multiple references: check if composite mode is enabled
+                    if self.imagen_reference_widget.is_composite_mode():
+                        # COMPOSITE MODE: Combine into grid
+                        self._append_to_console(
+                            f"Compositing {len(references)} reference images...",
+                            "#66ccff"
+                        )
 
-                    # Import compositor
-                    from core.reference.image_compositor import ReferenceImageCompositor
-                    from core.constants import get_user_data_dir
+                        # Import compositor
+                        from core.reference.image_compositor import ReferenceImageCompositor
+                        from core.constants import get_user_data_dir
 
-                    # Create compositor
-                    compositor = ReferenceImageCompositor(canvas_size=1024)
+                        # Create compositor
+                        compositor = ReferenceImageCompositor(canvas_size=1024)
 
-                    # Collect image paths
-                    image_paths = [ref.path for ref in references]
+                        # Collect image paths
+                        image_paths = [ref.path for ref in references]
 
-                    # Create output path for composite
-                    composite_dir = get_user_data_dir() / "composites"
-                    composite_dir.mkdir(parents=True, exist_ok=True)
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    composite_path = composite_dir / f"composite_{timestamp}.png"
+                        # Create output path for composite
+                        composite_dir = get_user_data_dir() / "composites"
+                        composite_dir.mkdir(parents=True, exist_ok=True)
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        composite_path = composite_dir / f"composite_{timestamp}.png"
 
-                    # Composite images
-                    ref_path = compositor.composite_images(
-                        image_paths=image_paths,
-                        output_path=composite_path,
-                        arrangement="grid"
-                    )
+                        # Composite images
+                        ref_path = compositor.composite_images(
+                            image_paths=image_paths,
+                            output_path=composite_path,
+                            arrangement="grid"
+                        )
 
-                    if not ref_path or not ref_path.exists():
-                        msg = "Failed to composite reference images. Check console for details."
-                        self._append_to_console(f"ERROR: {msg}", "#ff6666")
-                        QMessageBox.warning(self, APP_NAME, msg)
-                        self.btn_generate.setEnabled(True)
-                        return
+                        if not ref_path or not ref_path.exists():
+                            msg = "Failed to composite reference images. Check console for details."
+                            self._append_to_console(f"ERROR: {msg}", "#ff6666")
+                            QMessageBox.warning(self, APP_NAME, msg)
+                            self.btn_generate.setEnabled(True)
+                            return
 
-                    self._append_to_console(
-                        f"✓ Composited {len(references)} images: {ref_path.name}",
-                        "#00ff00"
-                    )
+                        self._append_to_console(
+                            f"✓ Composited {len(references)} images: {ref_path.name}",
+                            "#00ff00"
+                        )
 
-                    # Enhance prompt with arrangement instructions
-                    # User's prompt should be like "These people as cartoon characters"
-                    # We append the arrangement instructions
-                    composite_prompt = ReferenceImageCompositor.generate_composite_prompt(
-                        prompt,  # User's prompt is the composite description
-                        len(references)
-                    )
+                        # Read the composite image as bytes
+                        with open(ref_path, 'rb') as f:
+                            reference_image_bytes = f.read()
 
-                    # Use the enhanced prompt
-                    prompt = composite_prompt
+                        # Pass as reference_image parameter (single composited image)
+                        kwargs['reference_image'] = reference_image_bytes
+                    else:
+                        # DIRECT MODE: Send images individually to API
+                        self._append_to_console(
+                            f"Using {len(references)} reference images directly (free prompting mode)",
+                            "#00ff00"
+                        )
 
-                    self._append_to_console(
-                        f"Enhanced prompt: {prompt}",
-                        "#66ccff"
-                    )
+                        reference_images = []
+                        for ref in references:
+                            with open(ref.path, 'rb') as f:
+                                reference_images.append(f.read())
+                            self._append_to_console(
+                                f"  Added: {ref.path.name}",
+                                "#66ccff"
+                            )
 
-                # Read the reference image as bytes (single or composite)
-                with open(ref_path, 'rb') as f:
-                    reference_image_bytes = f.read()
-
-                # Pass as reference_image parameter (Google provider behavior)
-                kwargs['reference_image'] = reference_image_bytes
+                        # Pass as reference_images parameter (list)
+                        kwargs['reference_images'] = reference_images
 
             else:
                 # Strict mode: Use Imagen 3 Customization (subject preservation)
@@ -7075,7 +7180,7 @@ For more detailed information, please refer to the full documentation.
     def _toggle_ref_image_settings(self, checked):
         """Toggle the reference image settings panel visibility."""
         self.ref_image_container.setVisible(checked)
-        self.ref_image_toggle.setText("▼ Reference Images (Google Only - Imagen 3)" if checked else "▶ Reference Images (Google Only - Imagen 3)")
+        self.ref_image_toggle.setText("▼ Reference Images (Google Only)" if checked else "▶ Reference Images (Google Only)")
 
         # Save the expansion state
         self.config.set('reference_images_expanded', checked)
