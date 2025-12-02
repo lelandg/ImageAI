@@ -1220,10 +1220,11 @@ class GoogleProvider(ImageProvider):
                     if hasattr(response, 'prompt_feedback'):
                         feedback = response.prompt_feedback
                         logger.error(f"Prompt feedback: {feedback}")
-                        if hasattr(feedback, 'block_reason'):
+                        if hasattr(feedback, 'block_reason') and feedback.block_reason:
                             error_details.append(f"BLOCKED: {feedback.block_reason}")
-                        if hasattr(feedback, 'safety_ratings'):
-                            for rating in feedback.safety_ratings:
+                        safety_ratings = getattr(feedback, 'safety_ratings', None)
+                        if safety_ratings:  # Check for None before iterating
+                            for rating in safety_ratings:
                                 cat = getattr(rating, 'category', 'unknown')
                                 prob = getattr(rating, 'probability', 'unknown')
                                 if 'HIGH' in str(prob) or 'MEDIUM' in str(prob):
