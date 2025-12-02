@@ -5716,6 +5716,9 @@ For more detailed information, please refer to the full documentation.
                 self._append_to_console("  • Content blocked by safety filters", "#ffcc66")
                 self._append_to_console("  • Prompt contains restricted content (political figures, logos, etc.)", "#ffcc66")
                 self._append_to_console("  • Transient API issue - try again", "#ffcc66")
+            # Re-enable the generate button so user can try again
+            self.btn_generate.setEnabled(True)
+            self._cleanup_thread()
             return
 
         self.status_label.setText("Generation complete.")
