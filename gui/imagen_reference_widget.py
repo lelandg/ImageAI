@@ -455,6 +455,7 @@ class ImagenReferenceWidget(QWidget):
     # Signals
     references_changed = Signal()  # Emitted when reference list changes
     mode_changed = Signal(str)     # Emitted when mode changes (flexible/strict)
+    use_current_image_requested = Signal(bool)  # Emitted when "Use Current Image" clicked (bool = add mode)
 
     def __init__(self, parent=None):
         """
@@ -562,6 +563,31 @@ class ImagenReferenceWidget(QWidget):
         header_layout.addWidget(self.btn_add)
 
         main_layout.addLayout(header_layout)
+
+        # "Use Current Image" row - separate from header for clarity
+        use_current_layout = QHBoxLayout()
+        use_current_layout.setSpacing(10)
+
+        self.btn_use_current = QPushButton("Use Current Image")
+        self.btn_use_current.setToolTip(
+            "Use the currently displayed generated image as a reference image.\n"
+            "If 'Add' is checked, appends to existing references.\n"
+            "If 'Add' is unchecked, replaces all references."
+        )
+        self.btn_use_current.setEnabled(False)  # Disabled until image is available
+        self.btn_use_current.clicked.connect(self._on_use_current_clicked)
+        use_current_layout.addWidget(self.btn_use_current)
+
+        self.chk_add_mode = QCheckBox("Add")
+        self.chk_add_mode.setToolTip(
+            "When checked, adds to existing reference images.\n"
+            "When unchecked, replaces all reference images."
+        )
+        self.chk_add_mode.setChecked(True)  # Default to add mode
+        use_current_layout.addWidget(self.chk_add_mode)
+
+        use_current_layout.addStretch()
+        main_layout.addLayout(use_current_layout)
 
         # Scrollable container for reference items with flow layout (wraps automatically)
         scroll_area = QScrollArea()
@@ -707,6 +733,60 @@ class ImagenReferenceWidget(QWidget):
         """Handle when edit mode checkbox changes."""
         # Just emit signal - MainWindow will handle the logic
         self.references_changed.emit()
+
+    def _on_use_current_clicked(self):
+        """Handle 'Use Current Image' button click."""
+        add_mode = self.chk_add_mode.isChecked()
+        self.logger.info(f"Use current image requested (add_mode={add_mode})")
+        self.use_current_image_requested.emit(add_mode)
+
+    def set_use_current_enabled(self, enabled: bool):
+        """
+        Enable or disable the 'Use Current Image' button.
+
+        Called by MainWindow when current image availability changes.
+
+        Args:
+            enabled: True to enable the button, False to disable
+        """
+        self.btn_use_current.setEnabled(enabled)
+
+    def add_reference_from_path(self, path: Path, clear_existing: bool = False):
+        """
+        Add a reference image from a file path.
+
+        Args:
+            path: Path to the image file
+            clear_existing: If True, clear all existing references first
+        """
+        if clear_existing:
+            self.clear_all()
+
+        # Check max references based on mode (only for strict mode)
+        if self.current_mode == "strict":
+            max_allowed = self.max_references_strict
+            if len(self.reference_items) >= max_allowed:
+                QMessageBox.warning(
+                    self,
+                    "Maximum References",
+                    f"Strict mode allows maximum {max_allowed} reference images."
+                )
+                return False
+
+        # Create reference item
+        reference_id = len(self.reference_items) + 1
+        item_widget = ImagenReferenceItemWidget(reference_id, parent=self)
+        item_widget.set_reference_image(path)
+        item_widget.reference_changed.connect(self._on_reference_changed)
+        item_widget.remove_requested.connect(lambda w=item_widget: self._remove_reference(w))
+
+        # Add to flow layout
+        self.items_layout.addWidget(item_widget)
+        self.reference_items.append(item_widget)
+
+        self._update_ui()
+        self.logger.info(f"Added reference image from path: {path}")
+        return True
 
     def _update_ui(self):
         """Update UI elements based on current state."""

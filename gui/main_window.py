@@ -1169,6 +1169,7 @@ class MainWindow(QMainWindow):
         from gui.imagen_reference_widget import ImagenReferenceWidget
         self.imagen_reference_widget = ImagenReferenceWidget()
         self.imagen_reference_widget.references_changed.connect(self._on_imagen_references_changed)
+        self.imagen_reference_widget.use_current_image_requested.connect(self._on_use_current_image_as_reference)
         ref_container_layout.addWidget(self.imagen_reference_widget)
 
         # Create splitter below reference images to allow independent resizing
@@ -3887,6 +3888,44 @@ For more detailed information, please refer to the full documentation.
             if hasattr(self, 'prompt_edit'):
                 self.prompt_edit.setPlaceholderText("Describe what to generate... (Ctrl+Enter to generate)")
 
+    def _on_use_current_image_as_reference(self, add_mode: bool):
+        """Handle 'Use Current Image' button click from reference widget.
+
+        Args:
+            add_mode: If True, add to existing references. If False, replace all.
+        """
+        # Check if we have a current image
+        if not hasattr(self, '_last_displayed_image_path') or not self._last_displayed_image_path:
+            QMessageBox.warning(
+                self,
+                "No Image Available",
+                "No generated image is currently displayed.\nGenerate an image first, then use this button."
+            )
+            return
+
+        image_path = Path(self._last_displayed_image_path)
+        if not image_path.exists():
+            QMessageBox.warning(
+                self,
+                "Image Not Found",
+                f"The image file no longer exists:\n{image_path}"
+            )
+            return
+
+        # Add to reference widget
+        clear_existing = not add_mode
+        success = self.imagen_reference_widget.add_reference_from_path(image_path, clear_existing=clear_existing)
+
+        if success:
+            action = "Added" if add_mode else "Set"
+            self._append_to_console(f"{action} current image as reference: {image_path.name}", "#66ccff")
+            logger.info(f"{action} current image as reference: {image_path}")
+
+            # Expand reference images section if collapsed
+            if hasattr(self, 'ref_image_toggle') and not self.ref_image_toggle.isChecked():
+                self.ref_image_toggle.setChecked(True)
+                self.ref_image_container.setVisible(True)
+
     def _update_reference_hint_label(self):
         """Update the reference hint label next to Prompt: based on reference images."""
         if not hasattr(self, 'ref_hint_label'):
@@ -5381,9 +5420,9 @@ For more detailed information, please refer to the full documentation.
             - tuple(processed_bytes, original_bytes) if cropping was done
             - bytes if no processing was needed
         """
-        # Skip processing for Gemini provider
-        if self.current_provider.lower() == "google":
-            return image_data
+        # For Google provider, check if manual crop is needed
+        # (provider returns full image when edges have varied content)
+        is_google = self.current_provider.lower() == "google"
 
         # Get target resolution
         if hasattr(self, 'target_resolution') and self.target_resolution:
@@ -5420,10 +5459,44 @@ For more detailed information, please refer to the full documentation.
             img = Image.open(io.BytesIO(image_data))
             original_width, original_height = img.size
 
-            # Check if scaling is needed
+            # Check if processing is needed
             if original_width == target_width and original_height == target_height:
                 return image_data
 
+            # For Google provider: check if crop dialog is needed (larger image returned)
+            # This happens when provider detected varied content in crop edges
+            if is_google and original_width > target_width and original_height > target_height:
+                # Check aspect ratios match (same aspect = needs crop dialog)
+                original_aspect = original_width / original_height
+                target_aspect = target_width / target_height
+                if abs(original_aspect - target_aspect) < 0.01:  # Same aspect ratio
+                    # Show crop dialog for manual selection
+                    logger.info(f"Google provider: showing crop dialog for {original_width}x{original_height} -> {target_width}x{target_height}")
+
+                    # Convert PIL to QImage
+                    img_rgba = img.convert("RGBA")
+                    data = img_rgba.tobytes("raw", "RGBA")
+                    bytes_per_line = 4 * original_width
+                    qimage = QImage(data, original_width, original_height, bytes_per_line, QImage.Format_RGBA8888)
+                    qimage = qimage.copy()
+
+                    dialog = ImageCropDialog(qimage, target_width, target_height, self)
+                    if dialog.exec() == QDialog.Accepted:
+                        result_image = dialog.get_result()
+
+                        # Convert cropped QImage back to bytes
+                        cropped_bytes = QByteArray()
+                        cropped_buffer = QBuffer(cropped_bytes)
+                        cropped_buffer.open(QIODevice.WriteOnly)
+                        result_image.save(cropped_buffer, "PNG")
+
+                        # Return both cropped and original
+                        return (bytes(cropped_bytes), image_data)
+                    else:
+                        # User cancelled - return original
+                        return image_data
+
+            # For non-Google or different aspect ratios: standard scaling flow
             # Convert PIL image to QImage properly
             img_rgba = img.convert("RGBA")
             data = img_rgba.tobytes("raw", "RGBA")
@@ -7363,23 +7436,24 @@ For more detailed information, please refer to the full documentation.
 
     def _update_use_current_button_state(self):
         """Update the state of the 'Use Current Image' button."""
-        if not hasattr(self, 'btn_use_current_as_ref'):
-            return
-
-        # Button should be enabled if:
-        # 1. Provider is Google (reference images only work with Google) AND
-        # 2. There is a current image displayed AND
-        # 3. It's not already the reference image (or reference is cleared)
+        # Check common conditions
         is_google = self.current_provider.lower() == "google"
-        has_current_image = bool(hasattr(self, 'current_image_data') and self.current_image_data)
+        has_current_image = bool(hasattr(self, '_last_displayed_image_path') and self._last_displayed_image_path)
 
-        # Check if current image is already the reference
-        is_same_as_reference = False
-        if has_current_image and hasattr(self, 'reference_image_data') and self.reference_image_data:
-            is_same_as_reference = (self.current_image_data == self.reference_image_data)
+        # Update legacy button (btn_use_current_as_ref) if it exists
+        if hasattr(self, 'btn_use_current_as_ref'):
+            # Check if current image is already the reference
+            is_same_as_reference = False
+            if has_current_image and hasattr(self, 'reference_image_data') and self.reference_image_data:
+                is_same_as_reference = (self.current_image_data == self.reference_image_data)
 
-        # Enable button only if Google provider, we have an image, and it's different from reference
-        self.btn_use_current_as_ref.setEnabled(bool(is_google and has_current_image and not is_same_as_reference))
+            # Enable button only if Google provider, we have an image, and it's different from reference
+            self.btn_use_current_as_ref.setEnabled(bool(is_google and has_current_image and not is_same_as_reference))
+
+        # Update new button in ImagenReferenceWidget
+        if hasattr(self, 'imagen_reference_widget') and self.imagen_reference_widget:
+            # Enable if Google provider and we have a displayed image
+            self.imagen_reference_widget.set_use_current_enabled(bool(is_google and has_current_image))
 
     def _on_ref_image_toggled(self, checked):
         """Handle reference image checkbox toggle."""

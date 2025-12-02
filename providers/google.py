@@ -927,6 +927,7 @@ class GoogleProvider(ImageProvider):
                                             target_aspect = target_w / target_h
                                             aspect_tolerance = 0.01  # 1% tolerance
 
+                                            image_modified = False  # Track if we need to save
                                             if abs(current_aspect - target_aspect) > aspect_tolerance:
                                                 # Aspect ratios don't match - need to crop first
                                                 logger.info(f"Aspect ratio mismatch: Gemini returned {current_aspect:.3f}, user wants {target_aspect:.3f}")
@@ -943,28 +944,43 @@ class GoogleProvider(ImageProvider):
                                                     crop_left = (current_w - new_w) // 2
                                                     img = img.crop((crop_left, 0, crop_left + new_w, current_h))
                                                 logger.info(f"Cropped to aspect ratio: {img.size}")
-
-                                            # Now scale to target dimensions
-                                            img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                                            logger.info(f"Resized to target dimensions: {target_w}x{target_h}")
-
-                                            # Apply sharpening if we downscaled
-                                            if current_w > target_w or current_h > target_h:
-                                                from PIL import ImageFilter
-                                                img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=100, threshold=3))
-                                                logger.info(f"Applied sharpness enhancement after downscaling")
-
-                                            # Convert back to bytes in original format
-                                            output = io.BytesIO()
-                                            # Preserve original format if available
-                                            save_format = original_format if 'original_format' in locals() else 'PNG'
-                                            # Use appropriate options for format
-                                            if save_format in ['JPEG', 'JPG']:
-                                                img.save(output, format='JPEG', quality=95, optimize=True)
+                                                # Update dimensions after aspect crop
+                                                current_w, current_h = img.size
+                                                # After aspect crop, we must scale to target (aspect ratio was different)
+                                                img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                                                image_modified = True
+                                                if current_w > target_w or current_h > target_h:
+                                                    logger.info(f"Downscaled to target dimensions: {target_w}x{target_h}")
+                                                else:
+                                                    logger.info(f"Upscaled to target dimensions: {target_w}x{target_h}")
                                             else:
-                                                img.save(output, format=save_format)
-                                            image_bytes = output.getvalue()
-                                            logger.info(f"Saved processed image in {save_format} format")
+                                                # Same aspect ratio - need to crop or upscale
+                                                if current_w > target_w and current_h > target_h:
+                                                    # Target is smaller - return full image for manual crop dialog
+                                                    # User can choose where to crop
+                                                    logger.info(f"Same aspect ratio, target smaller - returning full {current_w}x{current_h} image for crop dialog")
+                                                    image_modified = False
+                                                elif current_w < target_w or current_h < target_h:
+                                                    # Target is larger - need to upscale
+                                                    img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                                                    logger.info(f"Upscaled to target dimensions: {target_w}x{target_h}")
+                                                    image_modified = True
+                                                else:
+                                                    # Exact match - no modification needed
+                                                    image_modified = False
+
+                                            # Convert back to bytes in original format (only if image was modified)
+                                            if image_modified:
+                                                output = io.BytesIO()
+                                                # Preserve original format if available
+                                                save_format = original_format if 'original_format' in locals() else 'PNG'
+                                                # Use appropriate options for format
+                                                if save_format in ['JPEG', 'JPG']:
+                                                    img.save(output, format='JPEG', quality=95, optimize=True)
+                                                else:
+                                                    img.save(output, format=save_format)
+                                                image_bytes = output.getvalue()
+                                                logger.info(f"Saved processed image in {save_format} format")
 
                                     # Apply additional cropping only if aspect ratio doesn't match
                                     elif crop_to_aspect and width and height and width != height and crop_to_aspect_ratio:
@@ -1093,6 +1109,7 @@ class GoogleProvider(ImageProvider):
                                             target_aspect = target_w / target_h
                                             aspect_tolerance = 0.01  # 1% tolerance
 
+                                            image_modified = False  # Track if we need to save
                                             if abs(current_aspect - target_aspect) > aspect_tolerance:
                                                 # Aspect ratios don't match - need to crop first
                                                 logger.info(f"Aspect ratio mismatch: Gemini returned {current_aspect:.3f}, user wants {target_aspect:.3f}")
@@ -1109,28 +1126,43 @@ class GoogleProvider(ImageProvider):
                                                     crop_left = (current_w - new_w) // 2
                                                     img = img.crop((crop_left, 0, crop_left + new_w, current_h))
                                                 logger.info(f"Cropped to aspect ratio: {img.size}")
-
-                                            # Now scale to target dimensions
-                                            img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                                            logger.info(f"Resized to target dimensions: {target_w}x{target_h}")
-
-                                            # Apply sharpening if we downscaled
-                                            if current_w > target_w or current_h > target_h:
-                                                from PIL import ImageFilter
-                                                img = img.filter(ImageFilter.UnsharpMask(radius=1, percent=100, threshold=3))
-                                                logger.info(f"Applied sharpness enhancement after downscaling")
-
-                                            # Convert back to bytes in original format
-                                            output = io.BytesIO()
-                                            # Preserve original format if available
-                                            save_format = original_format if 'original_format' in locals() else 'PNG'
-                                            # Use appropriate options for format
-                                            if save_format in ['JPEG', 'JPG']:
-                                                img.save(output, format='JPEG', quality=95, optimize=True)
+                                                # Update dimensions after aspect crop
+                                                current_w, current_h = img.size
+                                                # After aspect crop, we must scale to target (aspect ratio was different)
+                                                img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                                                image_modified = True
+                                                if current_w > target_w or current_h > target_h:
+                                                    logger.info(f"Downscaled to target dimensions: {target_w}x{target_h}")
+                                                else:
+                                                    logger.info(f"Upscaled to target dimensions: {target_w}x{target_h}")
                                             else:
-                                                img.save(output, format=save_format)
-                                            image_bytes = output.getvalue()
-                                            logger.info(f"Saved processed image in {save_format} format")
+                                                # Same aspect ratio - need to crop or upscale
+                                                if current_w > target_w and current_h > target_h:
+                                                    # Target is smaller - return full image for manual crop dialog
+                                                    # User can choose where to crop
+                                                    logger.info(f"Same aspect ratio, target smaller - returning full {current_w}x{current_h} image for crop dialog")
+                                                    image_modified = False
+                                                elif current_w < target_w or current_h < target_h:
+                                                    # Target is larger - need to upscale
+                                                    img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+                                                    logger.info(f"Upscaled to target dimensions: {target_w}x{target_h}")
+                                                    image_modified = True
+                                                else:
+                                                    # Exact match - no modification needed
+                                                    image_modified = False
+
+                                            # Convert back to bytes in original format (only if image was modified)
+                                            if image_modified:
+                                                output = io.BytesIO()
+                                                # Preserve original format if available
+                                                save_format = original_format if 'original_format' in locals() else 'PNG'
+                                                # Use appropriate options for format
+                                                if save_format in ['JPEG', 'JPG']:
+                                                    img.save(output, format='JPEG', quality=95, optimize=True)
+                                                else:
+                                                    img.save(output, format=save_format)
+                                                image_bytes = output.getvalue()
+                                                logger.info(f"Saved processed image in {save_format} format")
 
                                     # Apply additional cropping only if aspect ratio doesn't match
                                     elif crop_to_aspect and width and height and width != height and crop_to_aspect_ratio:
@@ -1287,7 +1319,79 @@ class GoogleProvider(ImageProvider):
                 
         except Exception as e:
             return False, f"Error checking authentication: {e}"
-    
+
+    def _check_crop_edges_uniform(self, img, crop_left: int, crop_top: int,
+                                   crop_right: int, crop_bottom: int,
+                                   variance_threshold: float = 5.0) -> bool:
+        """Check if the edges being cropped away are uniform (background-like).
+
+        Examines the regions that would be cropped and checks color variance.
+        If variance is low (uniform color), returns True for auto-crop.
+        If variance is high (varied content), returns False for manual crop.
+
+        Args:
+            img: PIL Image to check
+            crop_left: Left edge of crop region
+            crop_top: Top edge of crop region
+            crop_right: Right edge of crop region
+            crop_bottom: Bottom edge of crop region
+            variance_threshold: Maximum std dev to consider "uniform" (default 30)
+
+        Returns:
+            True if edges are uniform (safe to auto-crop)
+            False if edges have varied content (show crop dialog)
+        """
+        import numpy as np
+
+        width, height = img.size
+
+        # Define the edge regions that will be cropped away
+        edge_regions = []
+
+        # Top edge (full width, from 0 to crop_top)
+        if crop_top > 0:
+            edge_regions.append(img.crop((0, 0, width, crop_top)))
+
+        # Bottom edge (full width, from crop_bottom to height)
+        if crop_bottom < height:
+            edge_regions.append(img.crop((0, crop_bottom, width, height)))
+
+        # Left edge (from crop_top to crop_bottom, 0 to crop_left)
+        if crop_left > 0:
+            edge_regions.append(img.crop((0, crop_top, crop_left, crop_bottom)))
+
+        # Right edge (from crop_top to crop_bottom, crop_right to width)
+        if crop_right < width:
+            edge_regions.append(img.crop((crop_right, crop_top, width, crop_bottom)))
+
+        if not edge_regions:
+            # No edges to crop - shouldn't happen but safe to auto-crop
+            return True
+
+        # Check variance in each edge region
+        for region in edge_regions:
+            # Convert to numpy array
+            region_array = np.array(region)
+
+            # Skip very small regions
+            if region_array.size < 100:
+                continue
+
+            # Calculate standard deviation across all color channels
+            # High std dev = varied content, Low std dev = uniform
+            std_dev = np.std(region_array)
+
+            logger.info(f"Edge region {region.size} std_dev: {std_dev:.1f} (threshold: {variance_threshold})")
+
+            if std_dev > variance_threshold:
+                # This edge has varied content - need manual crop
+                logger.info(f"Edge has varied content (std_dev={std_dev:.1f} > {variance_threshold})")
+                return False
+
+        # All edges are uniform
+        logger.info(f"All crop edges are uniform (below threshold {variance_threshold})")
+        return True
+
     def get_models(self) -> Dict[str, str]:
         """Get available Google image generation models.
 

@@ -128,7 +128,7 @@ class SocialSizesTreeDialog(QDialog):
     def _init_ui(self):
         v = QVBoxLayout(self)
 
-        # Selection info panel
+        # Selection info panel - always visible with fixed height to prevent layout shift
         self.info_panel = QLabel("")
         self.info_panel.setStyleSheet("""
             QLabel {
@@ -138,10 +138,10 @@ class SocialSizesTreeDialog(QDialog):
                 padding: 10px;
                 font-size: 14px;
                 color: #2c3e50;
-                min-height: 40px;
             }
         """)
-        self.info_panel.setVisible(False)
+        self.info_panel.setFixedHeight(60)
+        self._show_help_text()
         v.addWidget(self.info_panel)
 
         # Search
@@ -353,6 +353,14 @@ class SocialSizesTreeDialog(QDialog):
             if platform_visible and text:
                 platform_item.setExpanded(True)
 
+    def _show_help_text(self):
+        """Show help text in the info panel when nothing is selected."""
+        help_text = (
+            "<b>💡 Tip:</b> Expand a category to browse sizes. "
+            "Double-click or press Enter to apply a size."
+        )
+        self.info_panel.setText(help_text)
+
     def _on_selection_changed(self):
         items = self.tree.selectedItems()
         if items:
@@ -360,9 +368,12 @@ class SocialSizesTreeDialog(QDialog):
             resolution = item.data(0, Qt.UserRole)
             self.btn_use.setEnabled(bool(resolution))
 
+            # Clear previous highlights first
+            self._clear_all_highlights()
+
             # Update visual feedback
             if resolution:
-                # Highlight selected item with background color
+                # Highlight current selection
                 for col in range(4):
                     item.setBackground(col, QBrush(QColor(220, 240, 255)))
 
@@ -378,19 +389,15 @@ class SocialSizesTreeDialog(QDialog):
                     info_text = f"<b>Selected:</b> {platform} - {type_name}<br>"
                     info_text += f"<b>Size:</b> {size} | <b>Aspect Ratio:</b> {aspect}"
                     self.info_panel.setText(info_text)
-                    self.info_panel.setVisible(True)
 
                     self._selected_platform = platform
                     self._selected_type = type_name
-
-            # Clear previous highlights
-            self._clear_all_highlights()
-            # Highlight current selection
-            for col in range(4):
-                item.setBackground(col, QBrush(QColor(220, 240, 255)))
+            else:
+                # Selected a non-size item (platform header), show help
+                self._show_help_text()
         else:
             self.btn_use.setEnabled(False)
-            self.info_panel.setVisible(False)
+            self._show_help_text()
             self._clear_all_highlights()
 
     def _clear_all_highlights(self):
