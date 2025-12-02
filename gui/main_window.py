@@ -850,12 +850,18 @@ class MainWindow(QMainWindow):
         prompt_label = QLabel("Prompt:")
         prompt_header_layout.addWidget(prompt_label)
 
-        # Add find tip
+        # Dynamic reference hint (shown when NBP has multiple references)
+        self.ref_hint_label = QLabel("")
+        self.ref_hint_label.setStyleSheet("color: #2196F3; font-size: 9pt;")
+        self.ref_hint_label.setVisible(False)
+        prompt_header_layout.addWidget(self.ref_hint_label)
+
+        prompt_header_layout.addStretch()
+
+        # Add find tip (right side)
         find_tip = QLabel("(Ctrl+F to search)")
         find_tip.setStyleSheet("color: #888; font-size: 9pt;")
         prompt_header_layout.addWidget(find_tip)
-
-        prompt_header_layout.addStretch()
 
         prompt_layout.addLayout(prompt_header_layout)
 
@@ -3864,6 +3870,9 @@ For more detailed information, please refer to the full documentation.
         # Auto-save to config
         self._save_imagen_references_to_config()
 
+        # Update reference hint label (shown next to Prompt: label)
+        self._update_reference_hint_label()
+
         # Update prompt placeholder if references exist
         if references and hasattr(self, 'prompt_edit'):
             ref_tags = ", ".join([f"[{i+1}]" for i in range(len(references))])
@@ -3877,6 +3886,30 @@ For more detailed information, please refer to the full documentation.
             # Reset placeholder when no references
             if hasattr(self, 'prompt_edit'):
                 self.prompt_edit.setPlaceholderText("Describe what to generate... (Ctrl+Enter to generate)")
+
+    def _update_reference_hint_label(self):
+        """Update the reference hint label next to Prompt: based on reference images."""
+        if not hasattr(self, 'ref_hint_label'):
+            return
+
+        # Check if we have references and a NBP model with multiple refs
+        if not hasattr(self, 'imagen_reference_widget'):
+            self.ref_hint_label.setVisible(False)
+            return
+
+        references = self.imagen_reference_widget.get_references()
+        ref_count = len(references)
+
+        # Only show hint when there are multiple reference images
+        if ref_count >= 2:
+            # Build example hint: "Use [1], [2] to reference images"
+            ref_tags = ", ".join([f"[{i+1}]" for i in range(ref_count)])
+            # Show a simple example
+            example = f"(Use {ref_tags} in prompt, e.g. \"[1] and [2] sitting together\")"
+            self.ref_hint_label.setText(example)
+            self.ref_hint_label.setVisible(True)
+        else:
+            self.ref_hint_label.setVisible(False)
 
     def _update_generate_button_for_provider(self, provider_name: str):
         """Set the Generate button text/tooltip based on provider + settings."""

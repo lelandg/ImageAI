@@ -640,17 +640,11 @@ class GoogleProvider(ImageProvider):
             if hasattr(types, 'ImageConfig'):
                 try:
                     logger.info("Attempting to use types.ImageConfig class")
-                    # Build ImageConfig params - add image_size for Nano Banana Pro
-                    image_config_params = {'aspect_ratio': aspect_ratio}
-                    if is_nano_banana_pro:
-                        # Nano Banana Pro supports 1K, 2K, 4K output quality
-                        image_size = output_quality.upper()  # Convert '1k' -> '1K'
-                        image_config_params['image_size'] = image_size
-                        logger.info(f"Nano Banana Pro: Adding image_size={image_size} to ImageConfig")
-
+                    # ImageConfig only accepts aspect_ratio (not image_size)
+                    # Quality control for NBP is handled via media_resolution in config_params
                     config = types.GenerateContentConfig(
                         response_modalities=["IMAGE"],
-                        image_config=types.ImageConfig(**image_config_params),
+                        image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
                         **config_params
                     )
                     config_created = True
@@ -662,16 +656,11 @@ class GoogleProvider(ImageProvider):
             if not config_created:
                 try:
                     logger.info("Attempting dict format for image_config")
-                    # Build image_config dict - add image_size for Nano Banana Pro
-                    image_config_dict = {"aspect_ratio": aspect_ratio}
-                    if is_nano_banana_pro:
-                        image_size = output_quality.upper()  # Convert '1k' -> '1K'
-                        image_config_dict["image_size"] = image_size
-                        logger.info(f"Nano Banana Pro: Adding image_size={image_size} to dict config")
-
+                    # image_config dict only accepts aspect_ratio
+                    # Quality control for NBP is handled via media_resolution in config_params
                     config = types.GenerateContentConfig(
                         response_modalities=["IMAGE"],
-                        image_config=image_config_dict,
+                        image_config={"aspect_ratio": aspect_ratio},
                         **config_params
                     )
                     config_created = True

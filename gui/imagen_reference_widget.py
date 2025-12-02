@@ -720,7 +720,7 @@ class ImagenReferenceWidget(QWidget):
 
             # Show help text only for gemini-2.5-flash (older model needs guidance)
             # NBP (gemini-3) supports multi-reference natively, no help needed
-            is_legacy_model = self.current_model and 'gemini-2.5-flash' in self.current_model
+            is_legacy_model = bool(self.current_model and 'gemini-2.5-flash' in self.current_model)
             self.multi_ref_help.setVisible(count > 1 and is_legacy_model)
 
             # Show composite mode checkbox only when >1 reference in flexible mode

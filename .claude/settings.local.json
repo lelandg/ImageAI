@@ -54,7 +54,15 @@
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/main_window.py)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff gui/settings_widgets.py)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff --stat)",
-      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline -3)"
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline -3)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI show df40bf2:core/constants.py)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI add:*)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m \"$(cat <<''EOF''\nBump version to 0.29.0: Gemini 3 Pro quality tiers & UI improvements\n\n- Add 1K/2K/4K quality tier selector for Gemini 3 Pro (Nano Banana Pro)\n- Fix AttributeError: reference_widget → imagen_reference_widget\n- Update UI text: \"NBP\" → \"Gemini 3 Pro\" for clarity\n- Simplify reference images label: remove \"- Imagen 3\" suffix\n- Add Chameleon Labs credit with logo to README\n- Dynamic resolution limits based on selected quality tier\n- Auto-switch to Flexible mode for Gemini 3 Pro models\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline -20)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --since=\"2025-11-01\")",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI show f01821b --stat)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI show df40bf2 --stat)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI show 80e3544 --stat)"
     ],
     "deny": [],
     "ask": []

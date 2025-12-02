@@ -43,12 +43,16 @@
 - [Changelog](CHANGELOG.md)
 - [Screenshots Gallery](#17-screenshots-gallery)
 
-![screenshot_20250915.png](screenshot_20250915.png)
+![screenshot_20251202.jpg](Screenshots/screenshot_20251202.jpg)
 
 ## Key Features
 
 ### 🎨 Multi-Provider Support
 - **Google Gemini** - Access to latest Gemini models for image generation
+  - **Gemini 3 Pro Image (Nano Banana Pro)** - High-fidelity 4K image generation with quality tiers:
+    - 1K (1024px), 2K (2048px), 4K (4096px) output quality
+    - Dynamic resolution limits based on selected tier
+    - Requires API key authentication (not gcloud)
 - **OpenAI DALL·E** - Support for DALL·E-3 and DALL·E-2 models
 - **Stability AI** - Stable Diffusion XL, SD 2.1, and more via API
 - **Local Stable Diffusion** - Run models locally without API keys (GPU recommended)
@@ -221,6 +225,12 @@
 - **Adjustable Snap Strength** - Control how tightly scenes align to beats
 - **Audio Track Support** - Link MP3, WAV, M4A files without copying
 - **Volume & Fade Controls** - Professional audio mixing options
+- **Suno Package Import** - Import multi-file Suno packages directly:
+  - Auto-detect Suno zip packages with stems and MIDI
+  - Select which stems to merge (Vocals, Drums, Bass, etc.)
+  - FFmpeg-based audio merging with stem selection
+  - Multi-track MIDI merging preserving track names
+  - Project-level storage in `suno_imports/` directory
 
 ### 🔧 Developer Features
 - Modular architecture with provider abstraction
@@ -726,7 +736,7 @@ The Video Project feature provides comprehensive tools for creating AI-powered v
 **AI-Powered Enhancement**:
 - **Multi-Provider LLM Support**:
   - OpenAI GPT-5 and GPT-4o
-  - Anthropic Claude 3.5 Sonnet, Opus, Haiku
+  - Anthropic Claude Opus 4.5, Claude 3.5 Sonnet, Haiku
   - Google Gemini 2.0 Flash and Pro models
   - Local Ollama models
 - **Prompt Styles**:
@@ -2405,7 +2415,7 @@ The screenshots showcase:
 ## Credits
 
 Created by Leland Green | [LelandGreen.com](https://www.lelandgreen.com)
-Contact: | [contact@lelandgreen.com](mailto:contact@lelandgreen.com)
+Contact: | [leland@chameleonlabs.ai](mailto:leland@chameleonlabs.ai)
 
 [![Chameleon Labs](https://chameleonlabs.ai/logo.png)](https://chameleonlabs.ai/)
 
@@ -2428,7 +2438,7 @@ See LICENSE file for details.
 
 For issues, feature requests, or questions:
 - GitHub Issues: [Create an issue](https://github.com/lelandg/ImageAI/issues)
-- Support: contact@lelandgreen.com
+- Support: leland@chameleonlabs.ai
 - **LelandGreen.com on Discord -- The Intersection of Art and AI** [Discord](https://discord.gg/a64xRg9w)
 - Fun stuff:
     - Original Boogie Woogie! [Leland Green's Boogie Woogie (HQ) on SoundCloud](https://soundcloud.com/aboogieman/leland-greens-boogie-woogie-hq)

@@ -1,0 +1,7 @@
+Made some changes with Claude Code online this morning regarding the price. It's not working right.
+Update the LLM contract to use grounding search tools always get a prize for the new item. Save that.
+Research how to do this with all LLMs, and use appropriate methods.
+When I change the condition, calculate price based on that.
+Make default condition used.
+Let me edit the new item price.
+Let me refresh with AI in Add item, or Edit.
