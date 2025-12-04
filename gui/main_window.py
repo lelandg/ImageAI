@@ -902,8 +902,8 @@ class MainWindow(QMainWindow):
         self.btn_enhance_prompt.setToolTip("Improve prompt with AI (Alt+E)")
         buttons_layout.addWidget(self.btn_enhance_prompt)
 
-        self.btn_reference_image = QPushButton("Ask About &Image")
-        self.btn_reference_image.setToolTip("Analyze reference image with AI (Alt+I)")
+        self.btn_reference_image = QPushButton("Ask About F&iles")
+        self.btn_reference_image.setToolTip("Analyze images, text, code, or PDFs with AI (Alt+I)")
         buttons_layout.addWidget(self.btn_reference_image)
 
         self.btn_ask_about = QPushButton("&Ask About Prompt")
@@ -4939,18 +4939,20 @@ For more detailed information, please refer to the full documentation.
                                 width, height = map(int, resolution.split('x'))
                             elif aspect_ratio:
                                 # Calculate dimensions based on aspect ratio
-                                if aspect_ratio == '16:9':
-                                    width, height = 1024, 576
-                                elif aspect_ratio == '9:16':
-                                    width, height = 576, 1024
-                                elif aspect_ratio == '4:3':
-                                    width, height = 1024, 768
-                                elif aspect_ratio == '3:4':
-                                    width, height = 768, 1024
-                                elif aspect_ratio == '21:9':
-                                    width, height = 1024, 439
-                                else:
-                                    width, height = 1024, 1024
+                                # Valid Gemini ratios with max dimension 1024px
+                                aspect_ratio_dimensions = {
+                                    '1:1': (1024, 1024),
+                                    '21:9': (1024, 439),
+                                    '16:9': (1024, 576),
+                                    '3:2': (1024, 683),
+                                    '4:3': (1024, 768),
+                                    '5:4': (1024, 819),
+                                    '4:5': (819, 1024),
+                                    '3:4': (768, 1024),
+                                    '2:3': (683, 1024),
+                                    '9:16': (576, 1024),
+                                }
+                                width, height = aspect_ratio_dimensions.get(aspect_ratio, (1024, 1024))
 
                         # Pass width/height for all providers including Google
                         # Google provider needs these to determine if dimensions should be added to prompt
@@ -5387,8 +5389,11 @@ For more detailed information, please refer to the full documentation.
         target_ratio = target_width / target_height
 
         # Define supported aspect ratios per provider
+        # IMPORTANT: Google Gemini only supports these exact ratios:
+        # '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'
+        # Note: 2:1 and 1:2 are NOT valid for Gemini!
         aspect_ratios = {
-            "google": ["1:1", "4:3", "3:4", "16:9", "9:16", "2:1", "1:2"],
+            "google": ["1:1", "21:9", "16:9", "3:2", "4:3", "5:4", "4:5", "3:4", "2:3", "9:16"],
             "openai": ["1:1", "16:9", "9:16"],  # DALL-E 3 only supports these
             "stability": ["1:1", "4:3", "3:4", "16:9", "9:16", "3:2", "2:3"],
         }

@@ -432,7 +432,7 @@ class ResolutionSelector(QWidget):
 
         self.width_label = QLabel("Width:")
         self.width_spin = QSpinBox()
-        self.width_spin.setRange(256, 4096)
+        self.width_spin.setRange(64, 4096)  # Min 64 for small presets (Discord icons)
         self.width_spin.setSingleStep(128)
         self.width_spin.setValue(1024)
         self.width_spin.setToolTip("Width - height will be calculated from aspect ratio")
@@ -443,7 +443,7 @@ class ResolutionSelector(QWidget):
 
         self.height_label = QLabel("Height:")
         self.height_spin = QSpinBox()
-        self.height_spin.setRange(256, 4096)
+        self.height_spin.setRange(64, 4096)  # Min 64 for small presets (Discord Bot Banner 680x240)
         self.height_spin.setSingleStep(128)
         self.height_spin.setValue(576)  # Will be calculated
         self.height_spin.setToolTip("Height - width will be calculated from aspect ratio")
@@ -823,21 +823,24 @@ class ResolutionSelector(QWidget):
         """Get maximum resolution for current provider and model.
 
         Returns the native max output resolution (no upscaling needed).
-        Checks NBP quality override first, then MODEL_MAX_RESOLUTIONS,
-        then falls back to provider defaults.
+        For NBP models: uses quality tier override (1K/2K/4K) if set
+        For other models: uses MODEL_MAX_RESOLUTIONS or provider defaults
         """
-        # Check for NBP quality tier override first
-        if hasattr(self, '_nbp_max_override') and self._nbp_max_override:
+        # Check if current model is NBP (Gemini 3 Pro)
+        is_nbp = self.model and "gemini-3" in self.model
+
+        # NBP quality tier override only applies to NBP models
+        if is_nbp and hasattr(self, '_nbp_max_override') and self._nbp_max_override:
             return self._nbp_max_override
 
-        # First check if we have a specific max for this model
+        # Check if we have a specific max for this model
         if self.model and self.model in self.MODEL_MAX_RESOLUTIONS:
             return self.MODEL_MAX_RESOLUTIONS[self.model]
 
-        # Also check for partial model matches (e.g., "gemini-3" in model ID)
+        # Check for partial model matches
         if self.model:
-            if "gemini-3" in self.model:
-                return 4096  # Nano Banana Pro (can be overridden by quality tier)
+            if is_nbp:
+                return 4096  # Nano Banana Pro default (can be overridden by quality tier)
             elif "dall-e-3" in self.model:
                 return 1792
             elif "sd3" in self.model:
@@ -859,7 +862,19 @@ class ResolutionSelector(QWidget):
         old_max = self._get_model_max(old_model) if old_model else 1024
 
         self.model = model
+
+        # Clear NBP override when switching to non-NBP model
+        # This ensures each model uses its own max resolution
+        is_nbp = model and "gemini-3" in model
+        if not is_nbp and hasattr(self, '_nbp_max_override'):
+            self._nbp_max_override = None
+            logger.debug(f"Cleared NBP max override for non-NBP model: {model}")
+
         new_max = self._get_provider_max()
+
+        # Update spinbox maximum values for this model
+        self.width_spin.setMaximum(new_max)
+        self.height_spin.setMaximum(new_max)
 
         if old_max != new_max:
             logger.info(f"Model changed: {old_model} → {model} (max resolution: {old_max} → {new_max}px)")
@@ -1087,6 +1102,18 @@ class ResolutionSelector(QWidget):
                     # Unblock signals
                     self.width_spin.blockSignals(False)
                     self.height_spin.blockSignals(False)
+
+                    # IMPORTANT: Unlock aspect ratio for custom resolutions
+                    # This prevents the locked AR from overriding manually typed dimensions
+                    # (e.g., Discord Bot Banner 680x240 being changed to 680x256)
+                    if self._lock_aspect_ratio:
+                        self._lock_aspect_ratio = False
+                        if hasattr(self, 'lock_btn'):
+                            self.lock_btn.setChecked(False)
+                            self.lock_btn.setText("🔓")
+                            self.lock_btn.setToolTip("Aspect ratio unlocked (independent width/height)\nClick to lock and maintain aspect ratio")
+                        logger.info(f"Aspect ratio unlocked for custom resolution {width}x{height}")
+
                 except (ValueError, AttributeError):
                     pass  # Invalid resolution format
 

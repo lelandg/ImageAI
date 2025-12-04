@@ -1,10 +1,17 @@
-"""Reference image description dialog using LLM vision capabilities."""
+"""Reference image description dialog using LLM vision capabilities.
+
+Supports analyzing multiple files including:
+- Images (PNG, JPG, JPEG, GIF, BMP, WebP, etc.)
+- Text files (TXT, MD, JSON, XML, YAML, etc.)
+- Code files (PY, JS, TS, HTML, CSS, etc.)
+- Documents (PDF - text extraction)
+"""
 
 import base64
 import logging
 import mimetypes
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 from io import BytesIO
 
 from PySide6.QtWidgets import (
@@ -20,6 +27,7 @@ from PySide6.QtGui import QPixmap, QImage, QKeySequence, QShortcut
 from .llm_utils import DialogStatusConsole
 from .history_widget import DialogHistoryWidget
 from .dialog_utils import OperationGuardMixin, guard_operation
+from .file_attachment_widget import FileAttachmentWidget, AttachmentItem
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -61,18 +69,20 @@ def get_image_mime_type(image_path: str) -> str:
 
 
 class ImageAnalysisWorker(QObject):
-    """Worker for LLM image analysis operations."""
+    """Worker for LLM image/file analysis operations."""
     finished = Signal(str)  # Description text
     error = Signal(str)
     progress = Signal(str)
     log_message = Signal(str, str)  # Message, level (INFO/WARNING/ERROR)
 
-    def __init__(self, image_path: str, llm_provider: str, llm_model: str, api_key: str,
+    def __init__(self, attachments: List[AttachmentItem], llm_provider: str, llm_model: str, api_key: str,
                  analysis_prompt: str = None, temperature: float = 0.7,
                  max_tokens: int = 1000, reasoning_effort: str = "medium",
-                 verbosity: str = "medium", auth_mode: str = "api-key"):
+                 verbosity: str = "medium", auth_mode: str = "api-key",
+                 image_path: str = None):  # Legacy single image support
         super().__init__()
-        self.image_path = image_path
+        self.attachments = attachments
+        self.image_path = image_path  # Legacy - for backward compatibility
         self.llm_provider = llm_provider
         self.llm_model = llm_model
         self.api_key = api_key
@@ -88,14 +98,11 @@ class ImageAnalysisWorker(QObject):
         """Stop the worker."""
         self._stopped = True
 
-    def _analyze_with_google_gemini(self, image_data: bytes, mime_type: str,
-                                     temperature: float, max_tokens: int, auth_mode: str = "api-key") -> str:
+    def _analyze_with_google_gemini(self, temperature: float, max_tokens: int, auth_mode: str = "api-key") -> str:
         """
-        Analyze image using Google Gemini API.
+        Analyze files using Google Gemini API.
 
         Args:
-            image_data: Raw image bytes
-            mime_type: MIME type of the image
             temperature: Temperature parameter
             max_tokens: Maximum tokens to generate
             auth_mode: Authentication mode ("api-key" or "gcloud")
@@ -142,7 +149,7 @@ class ImageAnalysisWorker(QObject):
                 client = genai.Client(api_key=self.api_key)
 
             # Create the system prompt
-            system_prompt = """You are an expert at analyzing images and creating detailed descriptions
+            system_prompt = """You are an expert at analyzing images and files, creating detailed descriptions
             that can be used as prompts for AI image generation systems. Provide clear, detailed descriptions
             focusing on visual elements, style, composition, colors, lighting, and mood."""
 
@@ -151,13 +158,41 @@ class ImageAnalysisWorker(QObject):
 
             self.log_message.emit("Sending request to Google Gemini...", "INFO")
 
-            # Convert image bytes to PIL Image for SDK compatibility
+            # Build contents list with all attachments
             from PIL import Image
             import io
-            img = Image.open(io.BytesIO(image_data))
 
-            # Create contents as list [image, text] - SDK handles role automatically
-            contents = [img, full_prompt]
+            contents = []
+
+            for attachment in self.attachments:
+                if not attachment.load_content():
+                    self.log_message.emit(f"Warning: Failed to load {attachment.name}", "WARNING")
+                    continue
+
+                if attachment.category == 'image':
+                    # Convert image bytes to PIL Image
+                    if attachment.raw_bytes:
+                        img = Image.open(io.BytesIO(attachment.raw_bytes))
+                        contents.append(img)
+                        self.log_message.emit(f"Added image: {attachment.name}", "INFO")
+
+                elif attachment.category in ['text', 'code', 'data']:
+                    # Add text content
+                    if attachment.text_content:
+                        contents.append(f"[File: {attachment.name}]\n```\n{attachment.text_content}\n```")
+                        self.log_message.emit(f"Added text file: {attachment.name}", "INFO")
+
+                elif attachment.category == 'document':
+                    # PDF - add extracted text
+                    if attachment.text_content:
+                        contents.append(f"[PDF: {attachment.name}]\n{attachment.text_content}")
+                        self.log_message.emit(f"Added PDF text: {attachment.name}", "INFO")
+
+            # Add the prompt at the end
+            contents.append(full_prompt)
+
+            if len(contents) <= 1:
+                raise ValueError("No valid content to analyze")
 
             # Generate with vision model
             response = client.models.generate_content(
@@ -181,38 +216,26 @@ class ImageAnalysisWorker(QObject):
             raise Exception(error_msg)
 
     def run(self):
-        """Run the image analysis operation."""
+        """Run the file analysis operation."""
         try:
-            self.progress.emit("Analyzing image...")
-            self.log_message.emit("Starting image analysis...", "INFO")
+            file_count = len(self.attachments)
+            self.progress.emit(f"Analyzing {file_count} file(s)...")
+            self.log_message.emit(f"Starting analysis of {file_count} file(s)...", "INFO")
 
             # Log request details
             logger.info(f"LLM Request - Provider: {self.llm_provider}, Model: {self.llm_model}")
             console.info(f"LLM Request - Provider: {self.llm_provider}, Model: {self.llm_model}")
             self.log_message.emit(f"Provider: {self.llm_provider}, Model: {self.llm_model}", "INFO")
 
-            logger.info(f"LLM Request - Image path: {self.image_path}")
-            console.info(f"LLM Request - Image path: {self.image_path}")
-            self.log_message.emit(f"Image: {Path(self.image_path).name}", "INFO")
+            # Log attached files
+            for att in self.attachments:
+                logger.info(f"LLM Request - File: {att.name} ({att.category})")
+                console.info(f"LLM Request - File: {att.name} ({att.category})")
+                self.log_message.emit(f"File: {att.icon} {att.name}", "INFO")
 
             logger.info(f"LLM Request - Analysis prompt: {self.analysis_prompt}")
             console.info(f"LLM Request - Analysis prompt: {self.analysis_prompt}")
             self.log_message.emit(f"Prompt: {self.analysis_prompt[:100]}...", "INFO")
-
-            # Read and encode image
-            image_path = Path(self.image_path)
-            if not image_path.exists():
-                raise FileNotFoundError(f"Image file not found: {self.image_path}")
-
-            with open(image_path, 'rb') as f:
-                image_data = f.read()
-
-            # Encode to base64
-            image_base64 = base64.b64encode(image_data).decode('utf-8')
-
-            # Detect the correct MIME type
-            mime_type = get_image_mime_type(str(image_path))
-            self.log_message.emit(f"Image MIME type: {mime_type}", "INFO")
 
             # Import required modules
             from core.video.prompt_engine import UnifiedLLMProvider
@@ -249,7 +272,7 @@ class ImageAnalysisWorker(QObject):
             # For Google Gemini, use direct API or Vertex AI based on auth mode
             if provider_lower in ["google", "gemini"]:
                 description = self._analyze_with_google_gemini(
-                    image_data, mime_type, temperature, max_tokens, self.auth_mode
+                    temperature, max_tokens, self.auth_mode
                 )
                 if self._stopped:
                     return
@@ -277,48 +300,53 @@ class ImageAnalysisWorker(QObject):
                 console.info(f"  Verbosity: {self.verbosity}")
                 self.log_message.emit(f"Verbosity: {self.verbosity}", "INFO")
 
-                logger.info(f"  Temperature: {temperature}")
-                console.info(f"  Temperature: {temperature}")
-                self.log_message.emit(f"Temperature: {temperature}", "INFO")
-
-                logger.info(f"  Max tokens: {max_tokens}")
-                console.info(f"  Max tokens: {max_tokens}")
-                self.log_message.emit(f"Max tokens: {max_tokens}", "INFO")
-            else:
-                logger.info(f"  Temperature: {temperature}")
-                console.info(f"  Temperature: {temperature}")
-                self.log_message.emit(f"Temperature: {temperature}", "INFO")
-
-                logger.info(f"  Max tokens: {max_tokens}")
-                console.info(f"  Max tokens: {max_tokens}")
-                self.log_message.emit(f"Max tokens: {max_tokens}", "INFO")
-
             # Create the system prompt
-            system_prompt = """You are an expert at analyzing images and creating detailed descriptions
+            system_prompt = """You are an expert at analyzing images and files, creating detailed descriptions
             that can be used as prompts for AI image generation systems. Provide clear, detailed descriptions
             focusing on visual elements, style, composition, colors, lighting, and mood."""
 
             # Combine with user's analysis prompt
             full_prompt = f"{system_prompt}\n\n{self.analysis_prompt}"
 
-            # Prepare messages with image using correct MIME type
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": full_prompt
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{mime_type};base64,{image_base64}"
+            # Build message content with all attachments
+            content_parts = [{"type": "text", "text": full_prompt}]
+
+            for attachment in self.attachments:
+                if not attachment.load_content():
+                    self.log_message.emit(f"Warning: Failed to load {attachment.name}", "WARNING")
+                    continue
+
+                if attachment.category == 'image':
+                    # Image as base64 data URL
+                    if attachment.base64_data:
+                        content_parts.append({
+                            'type': 'image_url',
+                            'image_url': {
+                                'url': f"data:{attachment.mime_type};base64,{attachment.base64_data}"
                             }
-                        }
-                    ]
-                }
-            ]
+                        })
+                        self.log_message.emit(f"Added image: {attachment.name}", "INFO")
+
+                elif attachment.category in ['text', 'code', 'data']:
+                    # Text content
+                    if attachment.text_content:
+                        content_parts.append({
+                            'type': 'text',
+                            'text': f"[File: {attachment.name}]\n```\n{attachment.text_content}\n```"
+                        })
+                        self.log_message.emit(f"Added text file: {attachment.name}", "INFO")
+
+                elif attachment.category == 'document':
+                    # PDF - include extracted text
+                    if attachment.text_content:
+                        content_parts.append({
+                            'type': 'text',
+                            'text': f"[PDF: {attachment.name}]\n{attachment.text_content}"
+                        })
+                        self.log_message.emit(f"Added PDF text: {attachment.name}", "INFO")
+
+            # Prepare messages
+            messages = [{"role": "user", "content": content_parts}]
 
             if self._stopped:
                 return
@@ -330,7 +358,6 @@ class ImageAnalysisWorker(QObject):
             # Generate description using appropriate parameters
             if is_gpt5:
                 # GPT-5 has fixed parameters (temperature=1.0)
-                # Note: reasoning_effort is UI-only, not sent to API yet
                 description = llm.generate(
                     messages,
                     model=self.llm_model,
@@ -359,7 +386,7 @@ class ImageAnalysisWorker(QObject):
             self.finished.emit(description)
 
         except Exception as e:
-            error_msg = f"Image analysis failed: {str(e)}"
+            error_msg = f"File analysis failed: {str(e)}"
             logger.error(error_msg)
             console.error(error_msg)
             self.log_message.emit(error_msg, "ERROR")
@@ -367,22 +394,22 @@ class ImageAnalysisWorker(QObject):
 
 
 class ReferenceImageDialog(QDialog, OperationGuardMixin):
-    """Dialog for analyzing reference images with LLM."""
+    """Dialog for analyzing files (images, text, code, PDFs) with LLM."""
 
     descriptionGenerated = Signal(str)
 
     def __init__(self, parent=None, config=None, image_path=None):
         super().__init__(parent)
         self.config = config
-        self.image_path = image_path
+        self.image_path = image_path  # Legacy - for backward compatibility
         self.worker = None
         self.thread = None
         self.generated_description = None
         self.settings = QSettings("ImageAI", "ReferenceImageDialog")
 
-        self.setWindowTitle("Analyze Reference Image with AI")
+        self.setWindowTitle("Ask About Files with AI")
         self.setMinimumWidth(800)
-        self.setMinimumHeight(600)
+        self.setMinimumHeight(650)
 
         # Restore window geometry
         self.restore_settings()
@@ -394,17 +421,9 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
 
         self.load_llm_settings()
 
-        # Load image if provided, or restore previous image
+        # Load image if provided (backward compatibility)
         if image_path:
-            self.load_image(image_path)
-        else:
-            # Try to restore previous image
-            saved_image_path = self.settings.value("last_image_path", "")
-            if saved_image_path and Path(saved_image_path).exists():
-                self.load_image(saved_image_path)
-                # Add a note that we restored the previous image
-                QTimer.singleShot(100, lambda: self.status_console.log(
-                    f"Restored previous image: {Path(saved_image_path).name}", "INFO"))
+            self.attachment_widget.add_file(image_path)
 
         # Restore dialog-specific settings
         self.restore_dialog_settings()
@@ -424,35 +443,25 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
         analyze_widget = QWidget()
         main_layout = QVBoxLayout(analyze_widget)
 
-        # Image section
-        image_group = QGroupBox("Reference Image")
-        image_layout = QVBoxLayout(image_group)
+        # File attachments section
+        attachments_group = QGroupBox("Files to Analyze")
+        attachments_layout = QVBoxLayout(attachments_group)
 
-        # Image display area with scroll
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setMinimumHeight(200)
+        # Info label
+        info_label = QLabel(
+            "Attach images, text files, code files, or PDFs to analyze with AI. "
+            "Drag & drop or click 'Add Files'."
+        )
+        info_label.setStyleSheet("color: #666; font-style: italic;")
+        info_label.setWordWrap(True)
+        attachments_layout.addWidget(info_label)
 
-        self.image_label = QLabel()
-        self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setText("No image loaded")
-        self.image_label.setStyleSheet("QLabel { background-color: #f0f0f0; border: 1px dashed #ccc; }")
-        scroll_area.setWidget(self.image_label)
+        # File attachment widget
+        self.attachment_widget = FileAttachmentWidget(self, max_files=10)
+        self.attachment_widget.attachmentsChanged.connect(self.on_attachments_changed)
+        attachments_layout.addWidget(self.attachment_widget)
 
-        image_layout.addWidget(scroll_area)
-
-        # Image controls
-        image_controls = QHBoxLayout()
-        self.btn_load_image = QPushButton("Load Image...")
-        self.btn_load_image.clicked.connect(self.load_image_dialog)
-        image_controls.addWidget(self.btn_load_image)
-
-        self.image_path_label = QLabel("No image loaded")
-        image_controls.addWidget(self.image_path_label)
-        image_controls.addStretch()
-
-        image_layout.addLayout(image_controls)
-        main_layout.addWidget(image_group)
+        main_layout.addWidget(attachments_group)
 
         # Analysis settings
         settings_group = QGroupBox("Analysis Settings")
@@ -464,8 +473,8 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
 
         self.analysis_prompt = QTextEdit()
         self.analysis_prompt.setPlaceholderText(
-            "Describe what you want to know about the image...\n"
-            "Default: 'Describe this image in detail for AI image generation.'"
+            "Ask a question or describe what you want to know about the attached files...\n"
+            "Examples: 'Describe this image for AI generation', 'Summarize this code', 'What does this document say?'"
         )
         self.analysis_prompt.setMaximumHeight(80)
         prompt_layout.addWidget(self.analysis_prompt)
@@ -536,12 +545,12 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
         main_layout.addWidget(settings_group)
 
         # Result section
-        result_group = QGroupBox("Generated Description")
+        result_group = QGroupBox("AI Response")
         result_layout = QVBoxLayout(result_group)
 
         self.result_text = QTextEdit()
         self.result_text.setReadOnly(True)
-        self.result_text.setPlaceholderText("Description will appear here after analysis...")
+        self.result_text.setPlaceholderText("Response will appear here after analysis...")
         result_layout.addWidget(self.result_text)
 
         # Copy to prompt checkbox
@@ -555,20 +564,20 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
         main_layout.addWidget(result_group)
 
         # Analyze button
-        self.analyze_btn = QPushButton("Analyze Image")
-        self.analyze_btn.setToolTip("Analyze the reference image with AI (Ctrl+Enter)")
+        self.analyze_btn = QPushButton("Analyze Files")
+        self.analyze_btn.setToolTip("Analyze attached files with AI (Ctrl+Enter)")
         self.analyze_btn.setDefault(True)
         self.analyze_btn.setStyleSheet("""
             QPushButton {
                 font-weight: bold;
             }
         """)
-        self.analyze_btn.clicked.connect(self.analyze_image)
-        self.analyze_btn.setEnabled(False)  # Disabled until image is loaded
+        self.analyze_btn.clicked.connect(self.analyze_files)
+        self.analyze_btn.setEnabled(False)  # Disabled until files are attached
         main_layout.addWidget(self.analyze_btn)
 
         # Add shortcut hint label
-        shortcut_label = QLabel("<small style='color: gray;'>Shortcuts: Ctrl+Enter to analyze, Ctrl+O to open image, Esc to close</small>")
+        shortcut_label = QLabel("<small style='color: gray;'>Shortcuts: Ctrl+Enter to analyze, Drag & drop files, Esc to close</small>")
         shortcut_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(shortcut_label)
 
@@ -607,57 +616,20 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
         """Set up keyboard shortcuts."""
         # Ctrl+Enter to analyze
         analyze_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
-        analyze_shortcut.activated.connect(lambda: self.analyze_image() if self.analyze_btn.isEnabled() else None)
+        analyze_shortcut.activated.connect(lambda: self.analyze_files() if self.analyze_btn.isEnabled() else None)
 
         # Escape to close
         escape_shortcut = QShortcut(QKeySequence("Escape"), self)
         escape_shortcut.activated.connect(self.reject)
 
-    def load_image_dialog(self):
-        """Open file dialog to load an image."""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Select Reference Image",
-            "",
-            "Image Files (*.png *.jpg *.jpeg *.gif *.bmp *.webp *.tiff *.tif *.ico *.svg);;All Files (*.*)"
-        )
+    def on_attachments_changed(self):
+        """Handle changes to the attachments list."""
+        has_attachments = self.attachment_widget.has_attachments()
+        self.analyze_btn.setEnabled(has_attachments)
 
-        if file_path:
-            self.load_image(file_path)
-
-    def load_image(self, image_path):
-        """Load and display an image."""
-        try:
-            self.image_path = image_path
-            pixmap = QPixmap(image_path)
-
-            if pixmap.isNull():
-                QMessageBox.warning(self, "Invalid Image", "Could not load the selected image.")
-                return
-
-            # Scale image to fit while maintaining aspect ratio
-            max_size = QSize(600, 400)
-            scaled_pixmap = pixmap.scaled(max_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-
-            self.image_label.setPixmap(scaled_pixmap)
-            self.image_label.setStyleSheet("")  # Remove placeholder style
-
-            # Update path label
-            path_obj = Path(image_path)
-            self.image_path_label.setText(path_obj.name)
-            self.image_path_label.setToolTip(str(path_obj))
-
-            # Enable analyze button
-            self.analyze_btn.setEnabled(True)
-
-            # Save image path for next time
-            self.settings.setValue("last_image_path", str(image_path))
-
-            self.status_console.log(f"Loaded image: {path_obj.name}", "INFO")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to load image: {str(e)}")
-            self.status_console.log(f"Error loading image: {str(e)}", "ERROR")
+        if has_attachments:
+            count = self.attachment_widget.get_attachment_count()
+            self.status_console.log(f"Attachments updated: {count} file(s)", "INFO")
 
     def load_llm_settings(self):
         """Load LLM settings from config."""
@@ -743,11 +715,11 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
             self.max_tokens_spin.setEnabled(True)
             self.max_tokens_spin.setToolTip("Maximum length of generated description")
 
-    @guard_operation("Image Analysis")
-    def analyze_image(self):
-        """Analyze the loaded image with LLM."""
-        if not self.image_path:
-            QMessageBox.warning(self, "No Image", "Please load an image first.")
+    @guard_operation("File Analysis")
+    def analyze_files(self):
+        """Analyze attached files with LLM."""
+        if not self.attachment_widget.has_attachments():
+            QMessageBox.warning(self, "No Files", "Please attach at least one file to analyze.")
             return
 
         # Get LLM settings
@@ -791,7 +763,7 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
         # Get analysis prompt
         analysis_prompt = self.analysis_prompt.toPlainText().strip()
         if not analysis_prompt:
-            analysis_prompt = "Describe this image in detail for AI image generation."
+            analysis_prompt = "Analyze the attached files and provide a detailed description."
 
         # Save settings before analysis
         self.save_dialog_settings()
@@ -803,12 +775,16 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
         # Clear previous results
         self.result_text.clear()
 
+        # Get attachments
+        attachments = self.attachment_widget.get_attachments()
+        file_count = len(attachments)
+
         # Log to status console
         self.status_console.clear()
-        self.status_console.log(f"Analyzing image with {llm_provider} {llm_model}...", "INFO")
+        self.status_console.log(f"Analyzing {file_count} file(s) with {llm_provider} {llm_model}...", "INFO")
 
         # Mark operation as started (enables input blocking)
-        self.start_operation("Image Analysis")
+        self.start_operation("File Analysis")
 
         # Get GPT-5 specific params if applicable
         is_gpt5 = self.gpt5_params_widget.isVisible()
@@ -826,16 +802,16 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
         # Create worker thread
         self.thread = QThread()
         self.worker = ImageAnalysisWorker(
-            self.image_path,
-            llm_provider,
-            llm_model,
-            api_key,
-            analysis_prompt,
-            temperature,
-            max_tokens,
-            reasoning,
-            verbosity,
-            auth_mode
+            attachments=attachments,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            api_key=api_key,
+            analysis_prompt=analysis_prompt,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            reasoning_effort=reasoning,
+            verbosity=verbosity,
+            auth_mode=auth_mode
         )
 
         self.worker.moveToThread(self.thread)
@@ -867,11 +843,11 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
         """Handle successful analysis."""
         self.generated_description = description
         self.result_text.setPlainText(description)
-        self.status_console.log("Analysis complete!", "INFO")
+        self.status_console.log("Analysis complete!", "SUCCESS")
 
         # Re-enable UI
         self.analyze_btn.setEnabled(True)
-        self.analyze_btn.setText("Analyze Image")
+        self.analyze_btn.setText("Analyze Files")
 
         # End operation (disables input blocking)
         self.end_operation()
@@ -883,7 +859,7 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
 
         # Re-enable UI
         self.analyze_btn.setEnabled(True)
-        self.analyze_btn.setText("Analyze Image")
+        self.analyze_btn.setText("Analyze Files")
 
         # End operation (disables input blocking)
         self.end_operation()
@@ -891,14 +867,19 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
     def accept(self):
         """Override accept to emit description if requested."""
         if self.generated_description:
+            # Build file list for metadata
+            attachments = self.attachment_widget.get_attachments()
+            file_names = [a.name for a in attachments]
+
             # Save to history
             self.history_widget.add_entry(
-                self.analysis_prompt.toPlainText() if hasattr(self, 'analysis_prompt') else "Image analysis",
+                self.analysis_prompt.toPlainText() if hasattr(self, 'analysis_prompt') else "File analysis",
                 self.generated_description,
                 self.llm_provider_combo.currentText() if hasattr(self, 'llm_provider_combo') else "",
                 self.llm_model_combo.currentText() if hasattr(self, 'llm_model_combo') else "",
                 {
-                    "image_path": str(self.image_path) if self.image_path else "No image"
+                    "files": file_names,
+                    "file_count": len(file_names)
                 }
             )
 
@@ -1016,14 +997,15 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
             # Show metadata if available
             if 'metadata' in item:
                 metadata = item['metadata']
-                if 'image_path' in metadata:
+                # Handle new format (files list)
+                if 'files' in metadata:
+                    files = metadata['files']
+                    self.status_console.log(f"Files: {', '.join(files)}", "INFO")
+                # Handle old format (single image_path)
+                elif 'image_path' in metadata:
                     self.status_console.log(f"Image: {metadata['image_path']}", "INFO")
             if 'provider' in item and item['provider']:
                 self.status_console.log(f"Provider: {item['provider']} ({item.get('model', 'Unknown')})", "INFO")
-
-            # Enable the Use Description button
-            if hasattr(self, 'use_description_button'):
-                self.use_description_button.setEnabled(True)
 
 
 

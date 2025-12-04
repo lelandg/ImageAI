@@ -502,44 +502,44 @@ class GoogleProvider(ImageProvider):
         # Calculate aspect ratio from dimensions if not provided
         # Note: We no longer add dimensions to the prompt text as it gets rendered as literal text
         # Instead, we rely solely on the image_config parameter below
+        # IMPORTANT: Gemini only supports these aspect ratios:
+        # '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'
         if width and height and not aspect_ratio:
-            # Calculate the actual aspect ratio for logging
             ratio = width / height
-            if abs(ratio - 1.0) < 0.01:
-                aspect_ratio = "1:1"
-            elif abs(ratio - 16/9) < 0.05:
-                aspect_ratio = "16:9"
-            elif abs(ratio - 9/16) < 0.05:
-                aspect_ratio = "9:16"
-            elif abs(ratio - 4/3) < 0.05:
-                aspect_ratio = "4:3"
-            elif abs(ratio - 3/4) < 0.05:
-                aspect_ratio = "3:4"
-            elif abs(ratio - 2/1) < 0.1:
-                aspect_ratio = "2:1"
-            elif abs(ratio - 1/2) < 0.1:
-                aspect_ratio = "1:2"
-            else:
-                # For non-standard ratios, create a descriptive string
-                aspect_ratio = f"{width}:{height}"
+            # Valid Gemini aspect ratios with their decimal values
+            valid_ratios = [
+                ("1:1", 1.0),
+                ("21:9", 21/9),    # 2.33 - ultrawide
+                ("16:9", 16/9),    # 1.78 - widescreen
+                ("3:2", 3/2),      # 1.5
+                ("4:3", 4/3),      # 1.33
+                ("5:4", 5/4),      # 1.25
+                ("4:5", 4/5),      # 0.8
+                ("3:4", 3/4),      # 0.75
+                ("2:3", 2/3),      # 0.67
+                ("9:16", 9/16),    # 0.5625 - portrait widescreen
+            ]
+            # Find the closest valid aspect ratio
+            closest_ratio = min(valid_ratios, key=lambda x: abs(ratio - x[1]))
+            aspect_ratio = closest_ratio[0]
+            logger.info(f"Mapped {width}x{height} (ratio {ratio:.3f}) to closest valid Gemini aspect ratio: {aspect_ratio} ({closest_ratio[1]:.3f})")
 
         # Calculate default dimensions if we have aspect ratio but no dimensions
+        # All valid Gemini aspect ratios with max dimension of 1024px
         if aspect_ratio and not (width and height):
-            if aspect_ratio == '16:9':
-                width, height = 1024, 576
-            elif aspect_ratio == '9:16':
-                width, height = 576, 1024
-            elif aspect_ratio == '4:3':
-                width, height = 1024, 768
-            elif aspect_ratio == '3:4':
-                width, height = 768, 1024
-            elif aspect_ratio == '21:9':
-                width, height = 1024, 439
-            elif aspect_ratio == '1:1':
-                width, height = 1024, 1024
-            else:
-                # Default fallback
-                width, height = 1024, 1024
+            aspect_ratio_dimensions = {
+                '1:1': (1024, 1024),
+                '21:9': (1024, 439),   # 1024 / (21/9) = 439
+                '16:9': (1024, 576),
+                '3:2': (1024, 683),    # 1024 / 1.5 = 683
+                '4:3': (1024, 768),
+                '5:4': (1024, 819),    # 1024 / 1.25 = 819
+                '4:5': (819, 1024),    # 1024 * 0.8 = 819
+                '3:4': (768, 1024),
+                '2:3': (683, 1024),
+                '9:16': (576, 1024),
+            }
+            width, height = aspect_ratio_dimensions.get(aspect_ratio, (1024, 1024))
 
         # Log what we're sending (but don't add dimensions to prompt)
         if aspect_ratio:
@@ -954,16 +954,14 @@ class GoogleProvider(ImageProvider):
                                                 else:
                                                     logger.info(f"Upscaled to target dimensions: {target_w}x{target_h}")
                                             else:
-                                                # Same aspect ratio - need to crop or upscale
-                                                if current_w > target_w and current_h > target_h:
-                                                    # Target is smaller - return full image for manual crop dialog
-                                                    # User can choose where to crop
-                                                    logger.info(f"Same aspect ratio, target smaller - returning full {current_w}x{current_h} image for crop dialog")
-                                                    image_modified = False
-                                                elif current_w < target_w or current_h < target_h:
-                                                    # Target is larger - need to upscale
+                                                # Same aspect ratio - scale to target dimensions
+                                                if current_w != target_w or current_h != target_h:
+                                                    # Always scale to exact target size
                                                     img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                                                    logger.info(f"Upscaled to target dimensions: {target_w}x{target_h}")
+                                                    if current_w > target_w:
+                                                        logger.info(f"Downscaled to target dimensions: {target_w}x{target_h}")
+                                                    else:
+                                                        logger.info(f"Upscaled to target dimensions: {target_w}x{target_h}")
                                                     image_modified = True
                                                 else:
                                                     # Exact match - no modification needed
@@ -1015,13 +1013,42 @@ class GoogleProvider(ImageProvider):
             logger.error(f"Primary generation failed with error: {e}")
             logger.error(f"Error type: {type(e).__name__}")
 
-            # Check if it's a specific API error
-            if hasattr(e, 'message'):
+            # Extract the best error message available
+            error_message = None
+            if hasattr(e, 'message') and e.message:
+                error_message = e.message
                 logger.error(f"Error message: {e.message}")
             if hasattr(e, 'code'):
                 logger.error(f"Error code: {e.code}")
-            if hasattr(e, 'details'):
+            if hasattr(e, 'details') and e.details:
                 logger.error(f"Error details: {e.details}")
+                if not error_message:
+                    error_message = str(e.details)
+
+            # Use the extracted message or fall back to str(e)
+            if not error_message:
+                error_message = str(e)
+
+            # Check for network/connection errors that should fail immediately (no retry)
+            # These errors indicate server-side issues that won't be fixed by retrying
+            error_type = type(e).__name__
+            error_str = str(e).lower()
+
+            # Network errors that should fail fast
+            network_errors = [
+                'RemoteProtocolError',
+                'ConnectError',
+                'ConnectTimeout',
+                'ReadTimeout',
+                'WriteTimeout',
+                'PoolTimeout',
+                'NetworkError',
+                'ConnectionError',
+            ]
+
+            if error_type in network_errors or 'disconnected' in error_str or 'connection' in error_str:
+                logger.error(f"Network error detected ({error_type}) - failing immediately without retry")
+                raise RuntimeError(f"{error_message}")
 
             logger.warning(f"Attempting fallback with config included...")
 
@@ -1136,16 +1163,14 @@ class GoogleProvider(ImageProvider):
                                                 else:
                                                     logger.info(f"Upscaled to target dimensions: {target_w}x{target_h}")
                                             else:
-                                                # Same aspect ratio - need to crop or upscale
-                                                if current_w > target_w and current_h > target_h:
-                                                    # Target is smaller - return full image for manual crop dialog
-                                                    # User can choose where to crop
-                                                    logger.info(f"Same aspect ratio, target smaller - returning full {current_w}x{current_h} image for crop dialog")
-                                                    image_modified = False
-                                                elif current_w < target_w or current_h < target_h:
-                                                    # Target is larger - need to upscale
+                                                # Same aspect ratio - scale to target dimensions
+                                                if current_w != target_w or current_h != target_h:
+                                                    # Always scale to exact target size
                                                     img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
-                                                    logger.info(f"Upscaled to target dimensions: {target_w}x{target_h}")
+                                                    if current_w > target_w:
+                                                        logger.info(f"Downscaled to target dimensions: {target_w}x{target_h}")
+                                                    else:
+                                                        logger.info(f"Upscaled to target dimensions: {target_w}x{target_h}")
                                                     image_modified = True
                                                 else:
                                                     # Exact match - no modification needed
@@ -1182,7 +1207,21 @@ class GoogleProvider(ImageProvider):
 
                                     images.append(image_bytes)
             except Exception as e2:
-                raise RuntimeError(f"Google generation failed: {e2}")
+                # Extract best error message
+                error_message = None
+                if hasattr(e2, 'message') and e2.message:
+                    error_message = e2.message
+                elif hasattr(e2, 'details') and e2.details:
+                    error_message = str(e2.details)
+                else:
+                    error_message = str(e2)
+
+                # Check if fallback also hit a network error
+                error_type = type(e2).__name__
+                error_str = str(e2).lower()
+                if error_type in ['RemoteProtocolError', 'ConnectError', 'ConnectTimeout', 'ReadTimeout'] or 'disconnected' in error_str:
+                    raise RuntimeError(f"{error_message}")
+                raise RuntimeError(f"Google generation failed: {error_message}")
 
         # Warn if no images were generated and provide detailed reason
         if not images:

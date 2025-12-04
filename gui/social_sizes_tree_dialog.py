@@ -434,30 +434,115 @@ class SocialSizesTreeDialog(QDialog):
         self.accept()
 
     def _save_expansion_state(self):
-        """Save which platforms are expanded."""
-        expanded = []
-        iterator = self.tree.invisibleRootItem()
-        for i in range(iterator.childCount()):
-            platform_item = iterator.child(i)
-            if platform_item.isExpanded():
-                expanded.append(platform_item.text(0))
+        """Save which categories and platforms are expanded, and which item is selected.
 
-        self.settings.setValue("expanded_platforms", json.dumps(expanded))
+        Tree structure: Category (level 1) → Platform (level 2) → Size Item (level 3)
+        """
+        expanded_categories = []
+        expanded_platforms = []
+
+        # Level 1: Categories
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            category_item = root.child(i)
+            if category_item.isExpanded():
+                expanded_categories.append(category_item.text(0))
+
+            # Level 2: Platforms within this category
+            for j in range(category_item.childCount()):
+                platform_item = category_item.child(j)
+                if platform_item.isExpanded():
+                    # Store as "category::platform" to uniquely identify
+                    expanded_platforms.append(f"{category_item.text(0)}::{platform_item.text(0)}")
+
+        self.settings.setValue("expanded_categories", json.dumps(expanded_categories))
+        self.settings.setValue("expanded_platforms", json.dumps(expanded_platforms))
+
+        # Save selected item path (category|platform|type)
+        items = self.tree.selectedItems()
+        if items:
+            item = items[0]
+            parent = item.parent()  # Platform
+            if parent:
+                grandparent = parent.parent()  # Category
+                if grandparent:
+                    # Full path: category|platform|type
+                    selected_path = f"{grandparent.text(0)}|{parent.text(0)}|{item.text(0)}"
+                    self.settings.setValue("selected_item", selected_path)
 
     def _restore_expansion_state(self):
-        """Restore previously expanded platforms."""
-        expanded_str = self.settings.value("expanded_platforms", "[]")
-        try:
-            expanded = json.loads(expanded_str)
-        except:
-            expanded = []
+        """Restore previously expanded categories/platforms and selected item.
 
-        if expanded:
-            iterator = self.tree.invisibleRootItem()
-            for i in range(iterator.childCount()):
-                platform_item = iterator.child(i)
-                if platform_item.text(0) in expanded:
+        Tree structure: Category (level 1) → Platform (level 2) → Size Item (level 3)
+        """
+        # Load saved expansion state
+        expanded_categories_str = self.settings.value("expanded_categories", "[]")
+        expanded_platforms_str = self.settings.value("expanded_platforms", "[]")
+        try:
+            expanded_categories = json.loads(expanded_categories_str)
+        except:
+            expanded_categories = []
+        try:
+            expanded_platforms = json.loads(expanded_platforms_str)
+        except:
+            expanded_platforms = []
+
+        # Restore expansion state
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            category_item = root.child(i)
+
+            # Expand category if it was expanded before
+            if category_item.text(0) in expanded_categories:
+                category_item.setExpanded(True)
+
+            # Check platforms within this category
+            for j in range(category_item.childCount()):
+                platform_item = category_item.child(j)
+                platform_key = f"{category_item.text(0)}::{platform_item.text(0)}"
+                if platform_key in expanded_platforms:
+                    # Also expand the parent category to make this visible
+                    category_item.setExpanded(True)
                     platform_item.setExpanded(True)
+
+        # Restore selected item
+        selected_path = self.settings.value("selected_item", "")
+        if selected_path:
+            parts = selected_path.split("|")
+            if len(parts) == 3:
+                category_name, platform_name, item_name = parts
+                # Navigate the tree to find and select the item
+                for i in range(root.childCount()):
+                    category_item = root.child(i)
+                    if category_item.text(0) == category_name:
+                        category_item.setExpanded(True)
+                        for j in range(category_item.childCount()):
+                            platform_item = category_item.child(j)
+                            if platform_item.text(0) == platform_name:
+                                platform_item.setExpanded(True)
+                                for k in range(platform_item.childCount()):
+                                    size_item = platform_item.child(k)
+                                    if size_item.text(0) == item_name:
+                                        self.tree.setCurrentItem(size_item)
+                                        self.tree.scrollToItem(size_item)
+                                        return
+            elif len(parts) == 2:
+                # Legacy format: platform|type (migrate to new format)
+                platform_name, item_name = parts
+                # Try to find in any category
+                for i in range(root.childCount()):
+                    category_item = root.child(i)
+                    for j in range(category_item.childCount()):
+                        platform_item = category_item.child(j)
+                        if platform_item.text(0) == platform_name:
+                            category_item.setExpanded(True)
+                            platform_item.setExpanded(True)
+                            for k in range(platform_item.childCount()):
+                                size_item = platform_item.child(k)
+                                if size_item.text(0) == item_name:
+                                    self.tree.setCurrentItem(size_item)
+                                    self.tree.scrollToItem(size_item)
+                                    return
 
     def closeEvent(self, event):
         """Save state when closing."""
