@@ -5,9 +5,7 @@
 **Version 0.30.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
-- **ChatMaster BBS - The Intersection of Art and AI - Support and Fun: [ChatMaster BBS Discord Server](https://discord.gg/chatmaster)**
-- **Facebook Page: [Leland Green Productions](https://www.facebook.com/LelandGreenProductions)**
-- **Facebook Group: [The Intersection of Art and AI Community](https://www.facebook.com/groups/4047864425428695)**
+- **Chameleon Labs Discord - Support, AI Art & Community: [Chameleon Labs Discord](https://discord.gg/chameleonlabs)**
  
 #### Created primarily with _Antrhopic **Claude Code**_, with PyCharm IDE and AI assistance from Junie (early-on), Codex. Extra Google auth guidance from Gemini CLI.
 #### Enterprise-ready with multiple authentication methods and provider support  

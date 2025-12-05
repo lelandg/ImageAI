@@ -1,0 +1,893 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ImageAI Beta Testers Wanted - Chameleon Labs</title>
+    <meta name="description" content="Join the ImageAI beta program! Multi-provider AI image & video generation with Sora 2, Veo 3, DALL-E, and more.">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --brand-cyan: #00D4FF;
+            --brand-navy: #0A0E27;
+            --brand-navy-light: #1a1e3f;
+            --chameleon-magenta: #FF1493;
+            --chameleon-purple: #9C27B0;
+            --chameleon-green: #4CAF50;
+            --chameleon-orange: #FF9800;
+            --chameleon-blue: #2196F3;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            background: var(--brand-navy);
+            color: #ffffff;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        h1, h2, h3, h4 {
+            font-family: 'Poppins', system-ui, sans-serif;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 1.5rem;
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 4rem 1.5rem;
+            position: relative;
+            background: linear-gradient(135deg, var(--brand-navy) 0%, var(--brand-navy-light) 100%);
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: radial-gradient(circle at 30% 20%, rgba(0, 212, 255, 0.15) 0%, transparent 50%),
+                        radial-gradient(circle at 70% 80%, rgba(255, 20, 147, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+        }
+
+        .hero-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .badge {
+            display: inline-block;
+            background: linear-gradient(90deg, var(--chameleon-magenta), var(--brand-cyan));
+            color: white;
+            padding: 0.5rem 1.5rem;
+            border-radius: 50px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-bottom: 1.5rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(0, 212, 255, 0.4); }
+            50% { box-shadow: 0 0 0 15px rgba(0, 212, 255, 0); }
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 6vw, 4rem);
+            font-weight: 800;
+            margin-bottom: 1rem;
+            line-height: 1.1;
+        }
+
+        .gradient-text {
+            background: linear-gradient(90deg, var(--chameleon-magenta), var(--brand-cyan), var(--chameleon-green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero p {
+            font-size: 1.25rem;
+            color: #a0aec0;
+            max-width: 600px;
+            margin: 0 auto 2rem;
+        }
+
+        .version-badge {
+            display: inline-block;
+            background: var(--brand-navy-light);
+            border: 1px solid var(--brand-cyan);
+            color: var(--brand-cyan);
+            padding: 0.25rem 0.75rem;
+            border-radius: 4px;
+            font-family: 'Fira Code', monospace;
+            font-size: 0.875rem;
+            margin-bottom: 2rem;
+        }
+
+        .cta-buttons {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            justify-content: center;
+            margin-top: 2rem;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 1rem;
+            text-decoration: none;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            border: none;
+        }
+
+        .btn-primary {
+            background: var(--brand-cyan);
+            color: var(--brand-navy);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.4);
+        }
+
+        .btn-secondary {
+            background: transparent;
+            color: var(--brand-cyan);
+            border: 2px solid var(--brand-cyan);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        /* Features Section */
+        .features {
+            padding: 6rem 0;
+            background: var(--brand-navy-light);
+        }
+
+        .section-header {
+            text-align: center;
+            margin-bottom: 4rem;
+        }
+
+        .section-header h2 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .section-header p {
+            color: #a0aec0;
+            font-size: 1.125rem;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feature-card {
+            background: var(--brand-navy);
+            border-radius: 12px;
+            padding: 2rem;
+            border-top: 4px solid var(--brand-cyan);
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0, 212, 255, 0.15);
+        }
+
+        .feature-card.expanded {
+            grid-column: span 2;
+        }
+
+        @media (max-width: 768px) {
+            .feature-card.expanded {
+                grid-column: span 1;
+            }
+        }
+
+        .feature-icon {
+            width: 60px;
+            height: 60px;
+            background: rgba(0, 212, 255, 0.1);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.25rem;
+            margin-bottom: 0.75rem;
+            color: #fff;
+        }
+
+        .feature-card p {
+            color: #a0aec0;
+            font-size: 0.95rem;
+        }
+
+        .feature-details {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+        }
+
+        .feature-card.expanded .feature-details {
+            max-height: 500px;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .feature-details ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .feature-details li {
+            padding: 0.5rem 0;
+            padding-left: 1.5rem;
+            position: relative;
+            color: #a0aec0;
+        }
+
+        .feature-details li::before {
+            content: '✓';
+            position: absolute;
+            left: 0;
+            color: var(--chameleon-green);
+        }
+
+        /* Providers Section */
+        .providers {
+            padding: 6rem 0;
+            background: var(--brand-navy);
+        }
+
+        .providers-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-top: 3rem;
+        }
+
+        .provider-card {
+            background: var(--brand-navy-light);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            border: 1px solid transparent;
+        }
+
+        .provider-card:hover {
+            border-color: var(--brand-cyan);
+            transform: scale(1.05);
+        }
+
+        .provider-card .icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .provider-card h4 {
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .provider-card p {
+            color: #a0aec0;
+            font-size: 0.85rem;
+        }
+
+        .provider-card .status {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 50px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            margin-top: 0.75rem;
+        }
+
+        .status-live {
+            background: rgba(76, 175, 80, 0.2);
+            color: var(--chameleon-green);
+        }
+
+        .status-new {
+            background: rgba(255, 152, 0, 0.2);
+            color: var(--chameleon-orange);
+        }
+
+        .status-preview {
+            background: rgba(156, 39, 176, 0.2);
+            color: var(--chameleon-purple);
+        }
+
+        /* Video Section */
+        .video-features {
+            padding: 6rem 0;
+            background: linear-gradient(135deg, var(--brand-navy-light) 0%, var(--brand-navy) 100%);
+        }
+
+        .video-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 3rem;
+        }
+
+        .video-card {
+            background: var(--brand-navy);
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .video-card-header {
+            padding: 2rem;
+            background: linear-gradient(135deg, rgba(0, 212, 255, 0.1) 0%, rgba(255, 20, 147, 0.1) 100%);
+        }
+
+        .video-card-header h3 {
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .video-card-body {
+            padding: 2rem;
+        }
+
+        .video-card-body ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .video-card-body li {
+            padding: 0.75rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .video-card-body li:last-child {
+            border-bottom: none;
+        }
+
+        .video-card-body li span {
+            color: var(--brand-cyan);
+        }
+
+        /* CTA Section */
+        .cta {
+            padding: 6rem 0;
+            background: var(--brand-navy);
+            text-align: center;
+        }
+
+        .cta-box {
+            background: linear-gradient(135deg, var(--brand-navy-light) 0%, rgba(0, 212, 255, 0.1) 100%);
+            border-radius: 20px;
+            padding: 4rem 2rem;
+            border: 1px solid rgba(0, 212, 255, 0.3);
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .cta h2 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .cta p {
+            color: #a0aec0;
+            font-size: 1.125rem;
+            margin-bottom: 2rem;
+        }
+
+        .requirements {
+            text-align: left;
+            background: var(--brand-navy);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .requirements h4 {
+            margin-bottom: 1rem;
+            color: var(--brand-cyan);
+        }
+
+        .requirements ul {
+            list-style: none;
+            padding: 0;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 0.5rem;
+        }
+
+        .requirements li {
+            padding: 0.5rem 0;
+            color: #a0aec0;
+        }
+
+        .requirements li::before {
+            content: '→ ';
+            color: var(--chameleon-green);
+        }
+
+        /* Footer */
+        footer {
+            padding: 3rem 0;
+            background: var(--brand-navy-light);
+            text-align: center;
+        }
+
+        .footer-links {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 2rem;
+            margin-bottom: 2rem;
+        }
+
+        .footer-links a {
+            color: #a0aec0;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .footer-links a:hover {
+            color: var(--brand-cyan);
+        }
+
+        .copyright {
+            color: #64748b;
+            font-size: 0.875rem;
+        }
+
+        /* Animations */
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .animate-in {
+            animation: fadeInUp 0.6s ease forwards;
+        }
+
+        .delay-1 { animation-delay: 0.1s; }
+        .delay-2 { animation-delay: 0.2s; }
+        .delay-3 { animation-delay: 0.3s; }
+        .delay-4 { animation-delay: 0.4s; }
+
+        /* Scroll indicator */
+        .scroll-indicator {
+            position: absolute;
+            bottom: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            animation: bounce 2s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% { transform: translateX(-50%) translateY(0); }
+            40% { transform: translateX(-50%) translateY(-10px); }
+            60% { transform: translateX(-50%) translateY(-5px); }
+        }
+
+        .scroll-indicator span {
+            display: block;
+            width: 30px;
+            height: 50px;
+            border: 2px solid var(--brand-cyan);
+            border-radius: 25px;
+            position: relative;
+        }
+
+        .scroll-indicator span::before {
+            content: '';
+            position: absolute;
+            top: 8px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 6px;
+            height: 6px;
+            background: var(--brand-cyan);
+            border-radius: 50%;
+            animation: scrollDot 2s infinite;
+        }
+
+        @keyframes scrollDot {
+            0% { opacity: 1; top: 8px; }
+            100% { opacity: 0; top: 30px; }
+        }
+
+        /* Interactive expand button */
+        .expand-hint {
+            color: var(--brand-cyan);
+            font-size: 0.8rem;
+            margin-top: 1rem;
+            opacity: 0.7;
+        }
+    </style>
+</head>
+<body>
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-content">
+            <span class="badge">🎨 Beta Testers Wanted</span>
+            <h1 class="animate-in">
+                <span class="gradient-text">ImageAI</span><br>
+                AI Image & Video Generation
+            </h1>
+            <span class="version-badge animate-in delay-1">v0.30.0</span>
+            <p class="animate-in delay-2">
+                Multi-provider AI generation with OpenAI Sora 2, Google Veo 3, DALL-E 3, Stable Diffusion, and more.
+                Desktop GUI + CLI for Windows, macOS, and Linux.
+            </p>
+            <div class="cta-buttons animate-in delay-3">
+                <a href="https://github.com/lelandg/ImageAI" class="btn btn-primary" target="_blank">
+                    ⬇️ Download from GitHub
+                </a>
+                <a href="https://discord.gg/chameleonlabs" class="btn btn-secondary" target="_blank">
+                    💬 Join Discord
+                </a>
+            </div>
+        </div>
+        <div class="scroll-indicator">
+            <span></span>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section class="features">
+        <div class="container">
+            <div class="section-header">
+                <h2>🚀 Major Features</h2>
+                <p>Click any feature to expand and learn more</p>
+            </div>
+            <div class="features-grid">
+                <div class="feature-card" onclick="toggleExpand(this)">
+                    <div class="feature-icon">🎨</div>
+                    <h3>Multi-Provider Image Generation</h3>
+                    <p>Switch between providers instantly. One app, all the AI models.</p>
+                    <div class="feature-details">
+                        <ul>
+                            <li>Google Gemini with Imagen 3</li>
+                            <li>OpenAI DALL-E 3 and DALL-E 2</li>
+                            <li>Stability AI (SDXL, SD 2.1)</li>
+                            <li>Local Stable Diffusion (GPU accelerated)</li>
+                            <li>Midjourney integration (coming)</li>
+                        </ul>
+                    </div>
+                    <p class="expand-hint">Click to expand →</p>
+                </div>
+
+                <div class="feature-card" onclick="toggleExpand(this)">
+                    <div class="feature-icon">🎬</div>
+                    <h3>AI Video Generation</h3>
+                    <p>Create stunning videos with Sora 2 and Veo 3.</p>
+                    <div class="feature-details">
+                        <ul>
+                            <li>OpenAI Sora 2 (NEW! ~7 min generation)</li>
+                            <li>Google Veo 3 with audio</li>
+                            <li>Text-to-video and image-to-video</li>
+                            <li>8-12 second clips, chain for longer</li>
+                            <li>Progress tracking and thumbnails</li>
+                        </ul>
+                    </div>
+                    <p class="expand-hint">Click to expand →</p>
+                </div>
+
+                <div class="feature-card" onclick="toggleExpand(this)">
+                    <div class="feature-icon">🎵</div>
+                    <h3>MIDI-Synced Video Projects</h3>
+                    <p>Create music videos and karaoke with perfect timing.</p>
+                    <div class="feature-details">
+                        <ul>
+                            <li>Import MIDI files for timing</li>
+                            <li>Lyric synchronization</li>
+                            <li>Scene-based storyboarding</li>
+                            <li>FFmpeg slideshow rendering</li>
+                            <li>Export to MP4 with audio</li>
+                        </ul>
+                    </div>
+                    <p class="expand-hint">Click to expand →</p>
+                </div>
+
+                <div class="feature-card" onclick="toggleExpand(this)">
+                    <div class="feature-icon">📖</div>
+                    <h3>Layout Engine</h3>
+                    <p>Professional layouts for photo books, comics, and publications.</p>
+                    <div class="feature-details">
+                        <ul>
+                            <li>Template-based design system</li>
+                            <li>Photo book generation</li>
+                            <li>Comic panel layouts</li>
+                            <li>Text overlay with fonts</li>
+                            <li>Export high-res PDFs</li>
+                        </ul>
+                    </div>
+                    <p class="expand-hint">Click to expand →</p>
+                </div>
+
+                <div class="feature-card" onclick="toggleExpand(this)">
+                    <div class="feature-icon">🖼️</div>
+                    <h3>Reference Images</h3>
+                    <p>Multi-reference support with style and subject control.</p>
+                    <div class="feature-details">
+                        <ul>
+                            <li>Flexible mode: unlimited references</li>
+                            <li>Strict mode: precise subject control</li>
+                            <li>Style transformation</li>
+                            <li>Auto-compositing for 2+ images</li>
+                            <li>Per-reference type selectors</li>
+                        </ul>
+                    </div>
+                    <p class="expand-hint">Click to expand →</p>
+                </div>
+
+                <div class="feature-card" onclick="toggleExpand(this)">
+                    <div class="feature-icon">⚡</div>
+                    <h3>AI Upscaling</h3>
+                    <p>Real-ESRGAN upscaling with GPU acceleration.</p>
+                    <div class="feature-details">
+                        <ul>
+                            <li>One-click Real-ESRGAN install</li>
+                            <li>NVIDIA GPU auto-detection</li>
+                            <li>Smart upscaling for large outputs</li>
+                            <li>Lanczos fallback option</li>
+                            <li>4K+ output support</li>
+                        </ul>
+                    </div>
+                    <p class="expand-hint">Click to expand →</p>
+                </div>
+
+                <div class="feature-card" onclick="toggleExpand(this)">
+                    <div class="feature-icon">🔐</div>
+                    <h3>Enterprise Auth</h3>
+                    <p>Flexible authentication for individuals and teams.</p>
+                    <div class="feature-details">
+                        <ul>
+                            <li>API key authentication</li>
+                            <li>Google Cloud ADC support</li>
+                            <li>Hugging Face token management</li>
+                            <li>Secure credential storage</li>
+                            <li>Per-provider key management</li>
+                        </ul>
+                    </div>
+                    <p class="expand-hint">Click to expand →</p>
+                </div>
+
+                <div class="feature-card" onclick="toggleExpand(this)">
+                    <div class="feature-icon">💻</div>
+                    <h3>Cross-Platform</h3>
+                    <p>Full GUI and CLI on Windows, macOS, and Linux.</p>
+                    <div class="feature-details">
+                        <ul>
+                            <li>Modern Qt/PySide6 GUI</li>
+                            <li>Powerful CLI for automation</li>
+                            <li>Batch generation support</li>
+                            <li>Session persistence</li>
+                            <li>Keyboard shortcuts</li>
+                        </ul>
+                    </div>
+                    <p class="expand-hint">Click to expand →</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Providers Section -->
+    <section class="providers">
+        <div class="container">
+            <div class="section-header">
+                <h2>🤖 Supported Providers</h2>
+                <p>All the major AI providers in one unified interface</p>
+            </div>
+            <div class="providers-grid">
+                <div class="provider-card">
+                    <div class="icon">🎨</div>
+                    <h4>Google Gemini</h4>
+                    <p>Imagen 3, Gemini 3 Pro (4K)</p>
+                    <span class="status status-live">✓ Live</span>
+                </div>
+                <div class="provider-card">
+                    <div class="icon">🎬</div>
+                    <h4>OpenAI Sora 2</h4>
+                    <p>Text-to-video, 4-12 sec</p>
+                    <span class="status status-new">★ New in 0.30</span>
+                </div>
+                <div class="provider-card">
+                    <div class="icon">🖼️</div>
+                    <h4>DALL-E 3</h4>
+                    <p>OpenAI's image model</p>
+                    <span class="status status-live">✓ Live</span>
+                </div>
+                <div class="provider-card">
+                    <div class="icon">🎥</div>
+                    <h4>Google Veo 3</h4>
+                    <p>Video with audio</p>
+                    <span class="status status-live">✓ Live</span>
+                </div>
+                <div class="provider-card">
+                    <div class="icon">🔥</div>
+                    <h4>Stability AI</h4>
+                    <p>SDXL, SD 2.1</p>
+                    <span class="status status-live">✓ Live</span>
+                </div>
+                <div class="provider-card">
+                    <div class="icon">🏠</div>
+                    <h4>Local SD</h4>
+                    <p>Run locally with GPU</p>
+                    <span class="status status-live">✓ Live</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Video Features Section -->
+    <section class="video-features">
+        <div class="container">
+            <div class="section-header">
+                <h2>🎬 Video Generation Deep Dive</h2>
+                <p>Create stunning AI videos with our integrated workflow</p>
+            </div>
+            <div class="video-grid">
+                <div class="video-card">
+                    <div class="video-card-header">
+                        <h3>🆕 OpenAI Sora 2</h3>
+                        <p>Just added in v0.30.0!</p>
+                    </div>
+                    <div class="video-card-body">
+                        <ul>
+                            <li><span>🎯</span> Text-to-video generation</li>
+                            <li><span>🖼️</span> Image-to-video support</li>
+                            <li><span>⏱️</span> 4, 8, or 12 second clips</li>
+                            <li><span>📺</span> 720p and 1080p (Pro)</li>
+                            <li><span>⏳</span> ~7 min generation time</li>
+                            <li><span>📊</span> Progress tracking</li>
+                            <li><span>🖼️</span> Thumbnail downloads</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="video-card">
+                    <div class="video-card-header">
+                        <h3>🎥 Google Veo 3</h3>
+                        <p>High-quality with audio</p>
+                    </div>
+                    <div class="video-card-body">
+                        <ul>
+                            <li><span>🔊</span> Built-in audio generation</li>
+                            <li><span>⏱️</span> 8 second clips</li>
+                            <li><span>🎨</span> Physics-accurate motion</li>
+                            <li><span>📺</span> Up to 1080p output</li>
+                            <li><span>⚡</span> ~90 sec generation</li>
+                            <li><span>🔗</span> Chain clips for longer videos</li>
+                            <li><span>🎵</span> MIDI sync support</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="cta">
+        <div class="container">
+            <div class="cta-box">
+                <h2>Join the <span class="gradient-text">Beta Program</span></h2>
+                <p>Help shape the future of AI-powered creative tools. Get early access to new features and direct support.</p>
+                <div class="cta-buttons">
+                    <a href="https://github.com/lelandg/ImageAI" class="btn btn-primary" target="_blank">
+                        🔗 Get ImageAI on GitHub
+                    </a>
+                    <a href="https://discord.gg/chameleonlabs" class="btn btn-secondary" target="_blank">
+                        💬 Chameleon Labs Discord
+                    </a>
+                </div>
+                <p style="color: #a0aec0; margin-top: 1.5rem; font-size: 1.1rem;">
+                    🛠️ <strong style="color: var(--brand-cyan);">Need help installing?</strong> I'll be glad to help you get set up! Join the Discord and ask.
+                </p>
+                <div class="requirements">
+                    <h4>Requirements</h4>
+                    <ul>
+                        <li>Python 3.10+</li>
+                        <li>Windows, macOS, or Linux</li>
+                        <li>At least one API key (Google, OpenAI, or Stability)</li>
+                        <li>GPU recommended for local SD</li>
+                        <li>Willingness to report bugs!</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="container">
+            <div class="footer-links">
+                <a href="https://github.com/lelandg/ImageAI" target="_blank">GitHub</a>
+                <a href="https://discord.gg/chameleonlabs" target="_blank">Discord</a>
+                <a href="https://www.lelandgreen.com" target="_blank">LelandGreen.com</a>
+                <a href="https://www.facebook.com/LelandGreenProductions" target="_blank">Facebook</a>
+                <a href="https://chameleonlabs.ai" target="_blank">Chameleon Labs</a>
+            </div>
+            <p class="copyright">
+                &copy; 2025 Leland Green / Chameleon Labs. ImageAI is open source under MIT license.
+            </p>
+        </div>
+    </footer>
+
+    <script>
+        function toggleExpand(card) {
+            // Close all other expanded cards
+            document.querySelectorAll('.feature-card.expanded').forEach(c => {
+                if (c !== card) c.classList.remove('expanded');
+            });
+            // Toggle this card
+            card.classList.toggle('expanded');
+        }
+
+        // Animate elements on scroll
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('animate-in');
+                }
+            });
+        }, { threshold: 0.1 });
+
+        document.querySelectorAll('.feature-card, .provider-card, .video-card').forEach(el => {
+            observer.observe(el);
+        });
+    </script>
+</body>
+</html>
