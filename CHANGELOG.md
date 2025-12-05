@@ -5,6 +5,30 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.31.0] - 2025-12-05
+
+### Added
+- **Gemini 3 Pro LLM**: Added `gemini-3-pro-preview` to Google LLM models for prompt enhancement and analysis
+- **Ask About Files - File Memory**: Dialog now remembers attached files between sessions
+  - Files are automatically restored when reopening the dialog
+  - Session persistence saves and restores last used files
+- **Ask About Files - History File Restore**: Double-clicking history items now restores the actual files
+  - Full file paths are saved to history metadata
+  - Files are restored if they still exist on disk
+  - Shows warnings for missing files
+
+### Fixed
+- **Anthropic Image Size Limit**: Fixed "request_too_large" error when analyzing multiple images with Anthropic/Claude
+  - Images are now automatically resized and compressed for Anthropic (max 1.15 megapixels, JPEG compression)
+  - Transparent images are composited on white background before compression
+  - Logs show compression details (e.g., "500KB → 120KB")
+
+### Changed
+- **Gemini Image Model**: Updated default from `gemini-2.5-flash-image-preview` to `gemini-2.5-flash-image` (production model)
+- **LLM Model Updates**:
+  - Added `gemini-3-pro-preview` (newest Gemini model)
+  - Added `gemini-2.0-flash-lite` to model list
+
 ## [0.28.0] - 2025-11-27
 
 ### Added

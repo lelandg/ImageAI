@@ -6,7 +6,7 @@ from pathlib import Path
 
 # Application metadata
 APP_NAME = "ImageAI"
-VERSION = "0.30.0"
+VERSION = "0.31.0"
 __version__ = VERSION
 __author__ = "Leland Green"
 __email__ = "contact@lelandgreen.com"
@@ -15,12 +15,12 @@ __copyright__ = "Copyright 2025 Leland Green"
 
 # Default provider settings
 DEFAULT_PROVIDER = "google"
-DEFAULT_MODEL = "gemini-2.5-flash-image-preview"
+DEFAULT_MODEL = "gemini-2.5-flash-image"
 
 # Provider model mappings
 PROVIDER_MODELS = {
     "google": {
-        "gemini-2.5-flash-image-preview": "Gemini 2.5 Flash (Image Preview)",
+        "gemini-2.5-flash-image": "Gemini 2.5 Flash Image",
         "gemini-2.5-flash": "Gemini 2.5 Flash",
         "gemini-2.5-pro": "Gemini 2.5 Pro",
     },

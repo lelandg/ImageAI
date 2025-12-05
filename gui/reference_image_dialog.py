@@ -32,6 +32,85 @@ from .file_attachment_widget import FileAttachmentWidget, AttachmentItem
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
 
+# Anthropic limits - max ~1.15 megapixels per image, max request size ~25MB
+ANTHROPIC_MAX_PIXELS = 1_150_000  # ~1092x1092 square or equivalent
+ANTHROPIC_MAX_DIMENSION = 1568  # Max single dimension recommended by Anthropic
+ANTHROPIC_JPEG_QUALITY = 85  # Quality for JPEG compression
+
+
+def resize_image_for_anthropic(raw_bytes: bytes, max_pixels: int = ANTHROPIC_MAX_PIXELS,
+                                max_dimension: int = ANTHROPIC_MAX_DIMENSION) -> tuple[bytes, str]:
+    """
+    Resize and compress an image to fit within Anthropic's limits.
+
+    Args:
+        raw_bytes: Original image bytes
+        max_pixels: Maximum total pixels (width * height)
+        max_dimension: Maximum single dimension
+
+    Returns:
+        Tuple of (compressed_bytes, mime_type)
+    """
+    from PIL import Image
+    import io
+
+    # Open image
+    img = Image.open(io.BytesIO(raw_bytes))
+    original_size = img.size
+    original_pixels = original_size[0] * original_size[1]
+
+    # Convert to RGB if needed (for JPEG output)
+    if img.mode in ('RGBA', 'P', 'LA'):
+        # Create white background for transparent images
+        background = Image.new('RGB', img.size, (255, 255, 255))
+        if img.mode == 'P':
+            img = img.convert('RGBA')
+        if img.mode in ('RGBA', 'LA'):
+            background.paste(img, mask=img.split()[-1])  # Use alpha as mask
+            img = background
+        else:
+            img = img.convert('RGB')
+    elif img.mode != 'RGB':
+        img = img.convert('RGB')
+
+    # Check if resizing is needed
+    needs_resize = False
+    new_width, new_height = original_size
+
+    # Check max dimension
+    if max(original_size) > max_dimension:
+        needs_resize = True
+        if original_size[0] > original_size[1]:
+            new_width = max_dimension
+            new_height = int(original_size[1] * max_dimension / original_size[0])
+        else:
+            new_height = max_dimension
+            new_width = int(original_size[0] * max_dimension / original_size[1])
+
+    # Check total pixels (after dimension resize if applied)
+    current_pixels = new_width * new_height
+    if current_pixels > max_pixels:
+        needs_resize = True
+        scale = (max_pixels / current_pixels) ** 0.5
+        new_width = int(new_width * scale)
+        new_height = int(new_height * scale)
+
+    # Apply resize if needed
+    if needs_resize:
+        img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        logger.info(f"Resized image from {original_size} to ({new_width}, {new_height}) for Anthropic")
+
+    # Compress as JPEG
+    output = io.BytesIO()
+    img.save(output, format='JPEG', quality=ANTHROPIC_JPEG_QUALITY, optimize=True)
+    compressed_bytes = output.getvalue()
+
+    original_kb = len(raw_bytes) / 1024
+    compressed_kb = len(compressed_bytes) / 1024
+    logger.info(f"Compressed image: {original_kb:.1f}KB → {compressed_kb:.1f}KB ({compressed_kb/original_kb*100:.0f}%)")
+
+    return compressed_bytes, 'image/jpeg'
+
 
 def get_image_mime_type(image_path: str) -> str:
     """
@@ -311,6 +390,9 @@ class ImageAnalysisWorker(QObject):
             # Build message content with all attachments
             content_parts = [{"type": "text", "text": full_prompt}]
 
+            # Check if using Anthropic (needs image resizing)
+            is_anthropic = provider_lower in ["claude", "anthropic"]
+
             for attachment in self.attachments:
                 if not attachment.load_content():
                     self.log_message.emit(f"Warning: Failed to load {attachment.name}", "WARNING")
@@ -318,11 +400,25 @@ class ImageAnalysisWorker(QObject):
 
                 if attachment.category == 'image':
                     # Image as base64 data URL
-                    if attachment.base64_data:
+                    if attachment.raw_bytes:
+                        # Resize images for Anthropic to avoid request_too_large error
+                        if is_anthropic:
+                            try:
+                                resized_bytes, mime_type = resize_image_for_anthropic(attachment.raw_bytes)
+                                base64_data = base64.b64encode(resized_bytes).decode('utf-8')
+                                self.log_message.emit(f"Resized image for Anthropic: {attachment.name}", "INFO")
+                            except Exception as e:
+                                self.log_message.emit(f"Warning: Failed to resize {attachment.name}: {e}", "WARNING")
+                                base64_data = attachment.base64_data
+                                mime_type = attachment.mime_type
+                        else:
+                            base64_data = attachment.base64_data
+                            mime_type = attachment.mime_type
+
                         content_parts.append({
                             'type': 'image_url',
                             'image_url': {
-                                'url': f"data:{attachment.mime_type};base64,{attachment.base64_data}"
+                                'url': f"data:{mime_type};base64,{base64_data}"
                             }
                         })
                         self.log_message.emit(f"Added image: {attachment.name}", "INFO")
@@ -867,9 +963,10 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
     def accept(self):
         """Override accept to emit description if requested."""
         if self.generated_description:
-            # Build file list for metadata
+            # Build file list for metadata (include paths for restore)
             attachments = self.attachment_widget.get_attachments()
             file_names = [a.name for a in attachments]
+            file_paths = [a.path for a in attachments]
 
             # Save to history
             self.history_widget.add_entry(
@@ -879,6 +976,7 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
                 self.llm_model_combo.currentText() if hasattr(self, 'llm_model_combo') else "",
                 {
                     "files": file_names,
+                    "file_paths": file_paths,  # Store full paths for restore
                     "file_count": len(file_names)
                 }
             )
@@ -931,6 +1029,11 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
         self.settings.setValue("reasoning_effort", self.reasoning_combo.currentText())
         self.settings.setValue("verbosity", self.verbosity_combo.currentText())
 
+        # Save attached file paths for session persistence
+        attachments = self.attachment_widget.get_attachments()
+        file_paths = [a.path for a in attachments]
+        self.settings.setValue("last_file_paths", file_paths)
+
     def restore_dialog_settings(self):
         """Restore dialog-specific settings."""
         # Restore analysis prompt
@@ -970,6 +1073,16 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
             if splitter_state:
                 splitters[0].restoreState(splitter_state)
 
+        # Restore last used files (only if no image_path was provided at init)
+        if not self.image_path:
+            last_file_paths = self.settings.value("last_file_paths", [])
+            if last_file_paths:
+                for file_path in last_file_paths:
+                    if Path(file_path).exists():
+                        self.attachment_widget.add_file(file_path)
+                if self.attachment_widget.has_attachments():
+                    self.status_console.log(f"Restored {self.attachment_widget.get_attachment_count()} file(s) from last session", "INFO")
+
     def load_history_item(self, item):
         """Load a history item when double-clicked."""
         # Switch to main tab
@@ -997,13 +1110,37 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
             # Show metadata if available
             if 'metadata' in item:
                 metadata = item['metadata']
-                # Handle new format (files list)
-                if 'files' in metadata:
+                # Try to restore files from paths
+                if 'file_paths' in metadata:
+                    file_paths = metadata['file_paths']
+                    # Clear current attachments
+                    self.attachment_widget.clear_attachments()
+                    # Add files that still exist
+                    restored_count = 0
+                    missing_files = []
+                    for file_path in file_paths:
+                        if Path(file_path).exists():
+                            self.attachment_widget.add_file(file_path)
+                            restored_count += 1
+                        else:
+                            missing_files.append(Path(file_path).name)
+                    if restored_count > 0:
+                        self.status_console.log(f"Restored {restored_count} file(s)", "SUCCESS")
+                    if missing_files:
+                        self.status_console.log(f"Missing files: {', '.join(missing_files)}", "WARNING")
+                # Handle old format (files list without paths)
+                elif 'files' in metadata:
                     files = metadata['files']
-                    self.status_console.log(f"Files: {', '.join(files)}", "INFO")
+                    self.status_console.log(f"Files (not restored - no paths): {', '.join(files)}", "INFO")
                 # Handle old format (single image_path)
                 elif 'image_path' in metadata:
-                    self.status_console.log(f"Image: {metadata['image_path']}", "INFO")
+                    image_path = metadata['image_path']
+                    if Path(image_path).exists():
+                        self.attachment_widget.clear_attachments()
+                        self.attachment_widget.add_file(image_path)
+                        self.status_console.log(f"Restored image: {image_path}", "SUCCESS")
+                    else:
+                        self.status_console.log(f"Image not found: {image_path}", "WARNING")
             if 'provider' in item and item['provider']:
                 self.status_console.log(f"Provider: {item['provider']} ({item.get('model', 'Unknown')})", "INFO")
 

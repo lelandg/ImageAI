@@ -66,11 +66,12 @@ LLM_PROVIDERS = {
         id='gemini',
         display_name='Google',
         models=[
+            'gemini-3-pro-preview',       # Gemini 3 Pro (newest)
             'gemini-2.5-pro',
             'gemini-2.5-flash',
             'gemini-2.5-flash-lite',
             'gemini-2.0-flash',
-            'gemini-2.0-pro'
+            'gemini-2.0-flash-lite'
         ],
         enabled_by_default=True,
         requires_api_key=True,

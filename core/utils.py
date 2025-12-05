@@ -377,7 +377,7 @@ def default_model_for_provider(provider: str) -> str:
     provider = (provider or "google").lower()
     if provider == "openai":
         return "dall-e-3"
-    return "gemini-2.5-flash-image-preview"
+    return "gemini-2.5-flash-image"
 
 
 def cleanup_debug_images() -> tuple[int, int]:
