@@ -1,7 +1,7 @@
 # OpenAI API Upgrade and Sora 2 Integration Plan
 
 *Created: 2025-12-04*
-*Last Updated: 2025-12-04 17:00*
+*Last Updated: 2025-12-05 14:30*
 
 ## Quick Status
 
@@ -25,7 +25,7 @@ This plan documents the integration of OpenAI's Sora 2 video generation API into
 
 | Component | Status | Location | Notes |
 |-----------|--------|----------|-------|
-| SoraClient Core | ✅ Complete | `core/video/sora_client.py` (748 lines) | Full async client with retry, progress callbacks, cancellation |
+| SoraClient Core | ✅ Complete | `core/video/sora_client.py` (1374 lines) | Full async client with retry, progress callbacks, cancellation, remix, webhooks |
 | Module Exports | ✅ Complete | `core/video/__init__.py` | Lazy import with SORA_AVAILABLE flag |
 | Shot Prompt Template | ✅ Complete | `templates/video/sora_shot_prompt.j2` | Jinja2 template optimized for Sora's strengths |
 | OpenAI Image Provider | ✅ Complete | `providers/openai.py` | DALL-E/GPT-Image generation (images only) |
@@ -57,6 +57,19 @@ The `SoraClient` class in `core/video/sora_client.py` includes:
    - Per-second pricing by model/resolution
    - Sora 2: $0.10/sec @ 720p
    - Sora 2 Pro: $0.30/sec @ 720p, $0.50/sec @ 1080p
+
+5. **Video Remix** ✅ NEW (2025-12-05)
+   - `remix_video()` - Refine existing video with new prompt
+   - `remix_video_async()` - Async version
+   - `remix_batch()` - Create multiple variations from single source
+   - Preserves visual style while adjusting mood, palette, staging
+
+6. **Webhook Support** ✅ NEW (2025-12-05)
+   - `register_webhook_handler()` - Register callback for events
+   - `process_webhook()` - Process incoming webhook payloads
+   - `verify_webhook_signature()` - HMAC-SHA256 signature verification
+   - `generate_with_webhook()` - Start generation without polling
+   - Events: `video.completed`, `video.failed`
 
 ---
 
@@ -410,3 +423,6 @@ EOF
 | 2025-12-05 | Added `download_thumbnail()`, `download_spritesheet()` methods |
 | 2025-12-05 | Updated README.md with Sora access requirements and resource links |
 | 2025-12-05 | Documented 403 error cause: API is in preview, requires ChatGPT Pro/Plus |
+| 2025-12-05 | **Added Remix feature**: `remix_video()`, `remix_video_async()`, `remix_batch()` |
+| 2025-12-05 | **Added Webhook support**: `register_webhook_handler()`, `process_webhook()`, `verify_webhook_signature()`, `generate_with_webhook()` |
+| 2025-12-05 | SoraClient now at 100% API feature coverage (1374 lines) |

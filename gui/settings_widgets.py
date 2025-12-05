@@ -1549,7 +1549,20 @@ class AdvancedSettingsPanel(QWidget):
             lambda v: self._update_setting("person_generation", v)
         )
         layout.addWidget(self.person_gen_check)
-        
+
+        # Search Grounding (Nano Banana Pro feature)
+        self.search_grounding_check = QCheckBox("Ground with Google Search")
+        self.search_grounding_check.setChecked(False)
+        self.search_grounding_check.setToolTip(
+            "Enable real-time Google Search grounding for factual accuracy.\n"
+            "Use for prompts about current events, real places, or recent data.\n"
+            "Note: Incurs additional cost ($14/1000 search queries)."
+        )
+        self.search_grounding_check.toggled.connect(
+            lambda v: self._update_setting("search_grounding", v)
+        )
+        layout.addWidget(self.search_grounding_check)
+
         # Seed
         seed_layout = QHBoxLayout()
         seed_layout.addWidget(QLabel("Seed:"))
@@ -1689,10 +1702,13 @@ class AdvancedSettingsPanel(QWidget):
         # Google settings
         if hasattr(self, 'prompt_rewrite_check'):
             current_settings['enable_prompt_rewriting'] = self.prompt_rewrite_check.isChecked()
-        
+
         if hasattr(self, 'safety_combo'):
             current_settings['safety_filter'] = self.safety_combo.currentText()
-        
+
+        if hasattr(self, 'search_grounding_check'):
+            current_settings['search_grounding'] = self.search_grounding_check.isChecked()
+
         # OpenAI settings
         if hasattr(self, 'openai_hd_check'):
             current_settings['openai_quality'] = 'hd' if self.openai_hd_check.isChecked() else 'standard'
@@ -1730,12 +1746,15 @@ class AdvancedSettingsPanel(QWidget):
         # Update Google settings
         if "enable_prompt_rewriting" in settings:
             self.prompt_rewrite_check.setChecked(settings["enable_prompt_rewriting"])
-        
+
         if "safety_filter" in settings:
             idx = self.safety_combo.findText(settings["safety_filter"])
             if idx >= 0:
                 self.safety_combo.setCurrentIndex(idx)
-        
+
+        if "search_grounding" in settings:
+            self.search_grounding_check.setChecked(settings["search_grounding"])
+
         # Update OpenAI settings
         if "openai_quality" in settings:
             if settings["openai_quality"] == "hd":

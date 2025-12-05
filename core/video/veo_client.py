@@ -45,7 +45,8 @@ DefaultCredentialsError = Exception
 class VeoModel(Enum):
     """Available Veo models"""
     VEO_3_GENERATE = "veo-3.0-generate-001"
-    VEO_3_1_GENERATE = "veo-3.1-generate-preview"  # Supports reference images
+    VEO_3_1_GENERATE = "veo-3.1-generate-preview"  # Supports reference images, 1080p, 8s fixed
+    VEO_3_1_FAST = "veo-3.1-fast-generate-preview"  # Fast generation (11-60s), 720p, 4-8s variable
     VEO_3_FAST = "veo-3.0-fast-generate-001"
     VEO_2_GENERATE = "veo-2.0-generate-001"
 
@@ -68,26 +69,27 @@ class VeoGenerationConfig:
 
     def __post_init__(self):
         """Validate configuration after initialization"""
-        # Validate duration for Veo 3 models (ALL Veo 3 models now ONLY support 8 seconds)
+        # Validate duration for Veo 3 models
+        # Veo 3.0 and 3.1 Standard: ONLY support 8 seconds
         if self.model in [VeoModel.VEO_3_GENERATE, VeoModel.VEO_3_1_GENERATE]:
             if self.duration != 8:
                 raise ValueError(
-                    f"Veo 3.0 and 3.1 now ONLY support 8-second clips, got {self.duration}. "
+                    f"Veo 3.0 and 3.1 Standard ONLY support 8-second clips, got {self.duration}. "
                     f"All scenes must be batched to exactly 8 seconds."
                 )
-        elif self.model == VeoModel.VEO_3_FAST:
-            # Veo 3 Fast still supports multiple durations
+        # Veo 3.0 Fast and 3.1 Fast: Support 4, 6, or 8 seconds
+        elif self.model in [VeoModel.VEO_3_FAST, VeoModel.VEO_3_1_FAST]:
             if self.duration not in [4, 6, 8]:
                 raise ValueError(
                     f"Veo 3 Fast duration must be 4, 6, or 8 seconds, got {self.duration}. "
                     f"Use snap_duration_to_veo() to convert float durations."
                 )
 
-        # Validate reference images (only supported by Veo 3.1 and Veo 2.0)
+        # Validate reference images (supported by Veo 3.1, 3.1 Fast, and Veo 2.0)
         if self.reference_images and len(self.reference_images) > 0:
-            if self.model not in [VeoModel.VEO_3_1_GENERATE, VeoModel.VEO_2_GENERATE]:
+            if self.model not in [VeoModel.VEO_3_1_GENERATE, VeoModel.VEO_3_1_FAST, VeoModel.VEO_2_GENERATE]:
                 raise ValueError(
-                    f"Reference images are only supported by Veo 3.1 (veo-3.1-generate-preview) and Veo 2.0, "
+                    f"Reference images are only supported by Veo 3.1, Veo 3.1 Fast, and Veo 2.0, "
                     f"but model is {self.model.value}. Please use Veo 3.1 for reference image support."
                 )
             if len(self.reference_images) > 3:
@@ -141,11 +143,11 @@ class VeoGenerationResult:
 class VeoClient:
     """Client for Google Veo API video generation"""
     
-    # Model constraints
+    # Model constraints (updated October 2025)
     MODEL_CONSTRAINTS = {
         VeoModel.VEO_3_GENERATE: {
             "max_duration": 8,
-            "fixed_duration": 8,  # Veo 3.0 now ONLY supports 8-second clips
+            "fixed_duration": 8,  # Veo 3.0 ONLY supports 8-second clips
             "resolutions": ["720p", "1080p"],
             "aspect_ratios": ["16:9", "9:16", "1:1"],
             "supports_audio": True,
@@ -154,15 +156,29 @@ class VeoClient:
         },
         VeoModel.VEO_3_1_GENERATE: {
             "max_duration": 8,
-            "fixed_duration": 8,  # Veo 3.1 ONLY supports 8-second clips
+            "fixed_duration": 8,  # Veo 3.1 Standard ONLY supports 8-second clips
             "resolutions": ["720p", "1080p"],
             "aspect_ratios": ["16:9", "9:16", "1:1"],
             "supports_audio": True,
-            "supports_reference_images": True,  # Veo 3.1 DOES support reference images (up to 3)
+            "supports_reference_images": True,  # Veo 3.1 supports reference images (up to 3)
+            "supports_scene_extension": True,  # Veo 3.1 supports scene extension
+            "supports_frame_interpolation": True,  # Veo 3.1 supports frame-to-frame interpolation
             "generation_time": (60, 360)  # 1-6 minutes
         },
+        VeoModel.VEO_3_1_FAST: {
+            "max_duration": 8,
+            "fixed_duration": None,  # Can be 4, 6, or 8 seconds (variable)
+            "resolutions": ["720p"],  # Fast variant is 720p only
+            "aspect_ratios": ["16:9", "9:16"],
+            "supports_audio": True,  # Veo 3.1 Fast supports audio
+            "supports_reference_images": True,  # Veo 3.1 Fast supports reference images (up to 3)
+            "supports_scene_extension": True,  # Veo 3.1 Fast supports scene extension
+            "supports_frame_interpolation": True,  # Veo 3.1 Fast supports frame-to-frame interpolation
+            "generation_time": (11, 60)  # 11-60 seconds (FAST!)
+        },
         VeoModel.VEO_3_FAST: {
-            "max_duration": 5,
+            "max_duration": 8,
+            "fixed_duration": None,  # Can be 4, 6, or 8 seconds
             "resolutions": ["720p"],
             "aspect_ratios": ["16:9", "9:16"],
             "supports_audio": False,
@@ -610,10 +626,10 @@ class VeoClient:
     def generate_video(self, config: VeoGenerationConfig) -> VeoGenerationResult:
         """
         Generate video synchronously (blocking).
-        
+
         Args:
             config: Generation configuration
-            
+
         Returns:
             Generation result
         """
@@ -624,7 +640,170 @@ class VeoClient:
             return loop.run_until_complete(self.generate_video_async(config))
         finally:
             loop.close()
-    
+
+    async def extend_video_async(
+        self,
+        previous_video_path: Path,
+        prompt: str,
+        config: VeoGenerationConfig
+    ) -> VeoGenerationResult:
+        """
+        Extend a previous video by generating a new clip that continues from it.
+
+        Uses the final portion of the previous video as seed for visual continuity.
+        Supports up to 20 extensions (~148 seconds total video length).
+
+        IMPORTANT: Extended segments run at 720p even if original was 1080p.
+
+        Args:
+            previous_video_path: Path to the video to extend
+            prompt: Prompt for the new segment (describe continuation)
+            config: Generation configuration
+
+        Returns:
+            VeoGenerationResult with the extended clip
+
+        Example:
+            # Generate first clip
+            result1 = await client.generate_video_async(config)
+
+            # Extend the video
+            result2 = await client.extend_video_async(
+                previous_video_path=result1.video_path,
+                prompt="The car turns off onto a dirt road",
+                config=config
+            )
+        """
+        result = VeoGenerationResult()
+
+        # Validate that model supports scene extension
+        constraints = self.MODEL_CONSTRAINTS.get(config.model, {})
+        if not constraints.get("supports_scene_extension", False):
+            result.success = False
+            result.error = (
+                f"Model {config.model.value} does not support scene extension. "
+                f"Use Veo 3.1 or Veo 3.1 Fast for scene extension."
+            )
+            return result
+
+        # Validate previous video exists
+        if not previous_video_path or not previous_video_path.exists():
+            result.success = False
+            result.error = f"Previous video not found: {previous_video_path}"
+            return result
+
+        try:
+            start_time = time.time()
+
+            if not self.client:
+                raise ValueError("No client configured. API key required for video generation.")
+
+            # Load previous video bytes
+            self.logger.info(f"Loading previous video for extension: {previous_video_path}")
+            with open(previous_video_path, 'rb') as f:
+                video_bytes = f.read()
+
+            self.logger.info(f"Loaded previous video: {len(video_bytes) / (1024*1024):.2f} MB")
+
+            # Create video dict for API (uses final 1 second as seed)
+            video_dict = {
+                'videoBytes': video_bytes,
+                'mimeType': 'video/mp4'
+            }
+
+            # Create generation config
+            video_config_params = {
+                "aspect_ratio": config.aspect_ratio,
+                "duration_seconds": config.duration,
+            }
+
+            if config.seed is not None:
+                video_config_params["seed"] = config.seed
+
+            video_config = types.GenerateVideosConfig(**video_config_params)
+
+            # Log extension request
+            self.logger.info(f"Starting scene extension with {config.model.value}")
+            self.logger.info(f"Config: {config.aspect_ratio}, duration={config.duration}s")
+            self.logger.info(f"Note: Extended clips run at 720p regardless of original resolution")
+            self.logger.info(f"Extension Prompt: {prompt}")
+
+            # Generate extension using video parameter (passes previous clip for continuity)
+            response = self.client.models.generate_videos(
+                model=config.model.value,
+                prompt=prompt,
+                config=video_config,
+                video=video_dict  # Previous video for continuity
+            )
+
+            # Store operation metadata
+            result.operation_id = response.name
+            result.metadata["model"] = config.model.value
+            result.metadata["prompt"] = prompt
+            result.metadata["started_at"] = datetime.now().isoformat()
+            result.metadata["extension_of"] = str(previous_video_path)
+            result.metadata["mode"] = "scene_extension"
+
+            # Poll for completion
+            max_wait = 480  # 8 minutes
+            video_result = await self._poll_for_completion(response, max_wait)
+
+            if video_result:
+                if isinstance(video_result, bytes):
+                    self.logger.info(f"Received extended video bytes, saving to local storage...")
+                    result.video_path = await self._save_video_bytes(video_result)
+                    result.success = True
+                    result.metadata["source"] = "raw_bytes"
+                elif isinstance(video_result, str):
+                    result.video_url = video_result
+                    result.success = True
+                    result.video_path = await self._download_video(video_result)
+                    result.metadata["retention_warning"] = "Video URLs expire after 2 days. Local copy saved."
+                    result.metadata["expires_at"] = (datetime.now() + timedelta(days=2)).isoformat()
+                    result.metadata["source"] = "url_download"
+                else:
+                    result.success = False
+                    result.error = f"Unexpected result type: {type(video_result)}"
+            else:
+                result.success = False
+                result.error = "Extension generation timed out or failed"
+
+            result.generation_time = time.time() - start_time
+            self.logger.info(f"Scene extension completed in {result.generation_time:.1f} seconds")
+
+        except Exception as e:
+            self.logger.error(f"Scene extension failed: {e}")
+            result.success = False
+            result.error = str(e)
+
+        return result
+
+    def extend_video(
+        self,
+        previous_video_path: Path,
+        prompt: str,
+        config: VeoGenerationConfig
+    ) -> VeoGenerationResult:
+        """
+        Extend a previous video synchronously (blocking).
+
+        Args:
+            previous_video_path: Path to the video to extend
+            prompt: Prompt for the new segment
+            config: Generation configuration
+
+        Returns:
+            VeoGenerationResult with the extended clip
+        """
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(
+                self.extend_video_async(previous_video_path, prompt, config)
+            )
+        finally:
+            loop.close()
+
     async def _poll_for_completion(self, operation: Any, max_wait: int) -> Optional[Union[str, bytes]]:
         """
         Poll for video generation completion using official Google API pattern.
@@ -940,23 +1119,55 @@ class VeoClient:
     
     def estimate_cost(self, config: VeoGenerationConfig) -> float:
         """
-        Estimate generation cost in USD.
-        
+        Estimate generation cost in USD based on October 2025 pricing.
+
+        Pricing is per second of video generated.
+        Audio generation doubles the cost for Veo 3.x models.
+
         Args:
             config: Generation configuration
-            
+
         Returns:
-            Estimated cost
+            Estimated cost in USD
         """
-        # Veo pricing (approximate per second of video)
-        pricing = {
-            VeoModel.VEO_3_GENERATE: 0.10,  # $0.10 per second
-            VeoModel.VEO_3_FAST: 0.05,  # $0.05 per second
-            VeoModel.VEO_2_GENERATE: 0.08,  # $0.08 per second
+        # October 2025 pricing - with audio (per second)
+        pricing_with_audio = {
+            VeoModel.VEO_3_1_GENERATE: 0.40,  # $0.40/sec with audio
+            VeoModel.VEO_3_1_FAST: 0.15,      # $0.15/sec with audio
+            VeoModel.VEO_3_GENERATE: 0.40,    # $0.40/sec with audio
+            VeoModel.VEO_3_FAST: 0.15,        # $0.15/sec with audio
+            VeoModel.VEO_2_GENERATE: 0.35,    # $0.35/sec (no audio support)
         }
-        
-        cost_per_second = pricing.get(config.model, 0.10)
+
+        # October 2025 pricing - video only (per second)
+        pricing_video_only = {
+            VeoModel.VEO_3_1_GENERATE: 0.20,  # $0.20/sec video only
+            VeoModel.VEO_3_1_FAST: 0.10,      # $0.10/sec video only
+            VeoModel.VEO_3_GENERATE: 0.20,    # $0.20/sec video only
+            VeoModel.VEO_3_FAST: 0.10,        # $0.10/sec video only
+            VeoModel.VEO_2_GENERATE: 0.35,    # $0.35/sec (same with or without audio param)
+        }
+
+        # Select pricing based on audio setting
+        if config.include_audio:
+            cost_per_second = pricing_with_audio.get(config.model, 0.40)
+        else:
+            cost_per_second = pricing_video_only.get(config.model, 0.20)
+
         return config.duration * cost_per_second
+
+    def estimate_cost_formatted(self, config: VeoGenerationConfig) -> str:
+        """
+        Get formatted cost estimate string.
+
+        Args:
+            config: Generation configuration
+
+        Returns:
+            Formatted cost string (e.g., "$3.20")
+        """
+        cost = self.estimate_cost(config)
+        return f"${cost:.2f}"
     
     def get_model_info(self, model: VeoModel) -> Dict[str, Any]:
         """Get information about a Veo model"""

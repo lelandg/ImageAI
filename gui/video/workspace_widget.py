@@ -1576,20 +1576,38 @@ class WorkspaceWidget(QWidget):
         self.video_provider_combo.currentTextChanged.connect(self.on_video_provider_changed)
         provider_layout.addWidget(self.video_provider_combo)
 
-        # Veo model selection
+        # Veo model selection (October 2025 models)
         self.veo_model_combo = QComboBox()
         self.veo_model_combo.addItems([
-            "veo-3.1-generate-001",  # Veo 3.1 - supports frames-to-video
-            "veo-3.0-generate-001",
-            "veo-3.0-fast-generate-001",
-            "veo-2.0-generate-001"
+            "veo-3.1-generate-preview",       # Veo 3.1 Standard - 1080p, 8s, ref images, audio
+            "veo-3.1-fast-generate-preview",  # Veo 3.1 Fast - 720p, 4-8s, 11-60s generation
+            "veo-3.0-generate-001",           # Veo 3.0 - 1080p, 8s fixed, audio
+            "veo-3.0-fast-generate-001",      # Veo 3.0 Fast - 720p, 4-8s
+            "veo-2.0-generate-001"            # Veo 2.0 - 720p, ref images
         ])
-        self.veo_model_combo.setCurrentIndex(0)  # Default to veo-3.1-generate-001
-        self.veo_model_combo.setVisible(True)  # Make visible by default since Veo is default
-        # Set minimum width for Veo model combo
+        self.veo_model_combo.setCurrentIndex(0)  # Default to Veo 3.1
+        self.veo_model_combo.setVisible(True)  # Visible by default since Veo is default
         self.veo_model_combo.setMinimumWidth(250)
         self.veo_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
-        self.veo_model_combo.setToolTip("Veo model version:\n- veo-3.1: Frames-to-video (start + end frames)\n- veo-3.0: Latest quality\n- veo-3.0-fast: Faster generation\n- veo-2.0: Previous generation")
+        self.veo_model_combo.setToolTip(
+            "Veo Model Selection (October 2025 Pricing):\n\n"
+            "Veo 3.1 Standard ($0.40/sec audio, $0.20/sec video):\n"
+            "  - 1080p resolution, 8 seconds fixed\n"
+            "  - Reference images (up to 3), scene extension\n"
+            "  - Frame-to-frame interpolation\n"
+            "  - Generation time: 1-6 minutes\n\n"
+            "Veo 3.1 Fast ($0.15/sec audio, $0.10/sec video):\n"
+            "  - 720p resolution, 4-8 seconds variable\n"
+            "  - Reference images, scene extension\n"
+            "  - Generation time: 11-60 seconds (FAST!)\n\n"
+            "Veo 3.0 Standard ($0.40/sec audio, $0.20/sec video):\n"
+            "  - 1080p resolution, 8 seconds fixed\n"
+            "  - NO reference images\n\n"
+            "Veo 3.0 Fast ($0.15/sec audio, $0.10/sec video):\n"
+            "  - 720p resolution, 4-8 seconds\n\n"
+            "Veo 2.0 ($0.35/sec):\n"
+            "  - 720p, 16:9 only, reference images"
+        )
         self.veo_model_combo.currentTextChanged.connect(self.on_veo_model_changed)
         provider_layout.addWidget(self.veo_model_combo)
 
@@ -1650,6 +1668,31 @@ class WorkspaceWidget(QWidget):
         )
         self.use_prev_last_frame_check.setChecked(False)
         export_layout.addWidget(self.use_prev_last_frame_check)
+
+        # Include Audio checkbox for Veo 3.x
+        self.include_audio_check = QCheckBox("Include Audio")
+        self.include_audio_check.setToolTip(
+            "Generate audio with Veo 3.x video clips\n\n"
+            "Audio Prompt Syntax:\n"
+            "  - Dialogue: \"Person says 'Hello!'\"\n"
+            "  - Sound Effects: \"sound of thunder\"\n"
+            "  - Ambient: \"busy city traffic\"\n"
+            "  - Music: \"upbeat jazz piano\"\n\n"
+            "Note: Audio doubles the cost (e.g., $0.40/sec vs $0.20/sec)\n"
+            "Veo 3.x only - Veo 2.0 does not support audio"
+        )
+        self.include_audio_check.setChecked(True)  # Default to include audio
+        self.include_audio_check.stateChanged.connect(self._update_cost_estimate)
+        export_layout.addWidget(self.include_audio_check)
+
+        # Cost estimation label
+        self.cost_estimate_label = QLabel("Est. Cost: --")
+        self.cost_estimate_label.setToolTip(
+            "Estimated cost per 8-second clip (October 2025 pricing)\n"
+            "Actual cost depends on selected model and audio option"
+        )
+        self.cost_estimate_label.setMinimumWidth(100)
+        export_layout.addWidget(self.cost_estimate_label)
 
         export_layout.addStretch()
         layout.addLayout(export_layout)
@@ -5678,7 +5721,8 @@ class WorkspaceWidget(QWidget):
     def on_video_provider_changed(self, provider: str):
         """Handle video provider change"""
         # Show/hide Veo options
-        self.veo_model_combo.setVisible(provider == "Gemini Veo")
+        is_veo = provider == "Gemini Veo"
+        self.veo_model_combo.setVisible(is_veo)
 
         # Show/hide Sora options
         is_sora = provider == "OpenAI Sora"
@@ -5695,11 +5739,26 @@ class WorkspaceWidget(QWidget):
         if hasattr(self, 'use_prev_last_frame_check'):
             supports_smooth = (
                 provider == "OpenAI Sora" or
-                (provider == "Gemini Veo" and "3.1" in self.veo_model_combo.currentText())
+                (is_veo and "3.1" in self.veo_model_combo.currentText())
             )
             self.use_prev_last_frame_check.setEnabled(supports_smooth)
             if not supports_smooth:
                 self.use_prev_last_frame_check.setChecked(False)
+
+        # Update include audio checkbox visibility (only for Veo 3.x)
+        if hasattr(self, 'include_audio_check'):
+            if is_veo:
+                model = self.veo_model_combo.currentText()
+                supports_audio = "3.0" in model or "3.1" in model
+                self.include_audio_check.setVisible(True)
+                self.include_audio_check.setEnabled(supports_audio)
+            else:
+                self.include_audio_check.setVisible(False)
+
+        # Update cost estimate display
+        if hasattr(self, 'cost_estimate_label'):
+            self.cost_estimate_label.setVisible(is_veo)
+        self._update_cost_estimate()
 
         self._auto_save_settings()
 
@@ -5711,12 +5770,66 @@ class WorkspaceWidget(QWidget):
             self.use_prev_last_frame_check.setEnabled(supports_smooth)
             if not supports_smooth:
                 self.use_prev_last_frame_check.setChecked(False)
+
+        # Update include audio checkbox based on model support
+        # Veo 2.0 does not support audio, all Veo 3.x models do
+        if hasattr(self, 'include_audio_check'):
+            supports_audio = "3.0" in model or "3.1" in model
+            self.include_audio_check.setEnabled(supports_audio)
+            if not supports_audio:
+                self.include_audio_check.setChecked(False)
+
+        # Update cost estimation
+        self._update_cost_estimate()
         self._auto_save_settings()
 
     def on_sora_model_changed(self, model: str):
         """Handle Sora model selection change"""
         self._update_sora_resolution_visibility()
         self._auto_save_settings()
+
+    def _update_cost_estimate(self):
+        """Update the cost estimation label based on current model and audio settings"""
+        if not hasattr(self, 'cost_estimate_label'):
+            return
+
+        # Only show cost for Veo models
+        video_provider = self.video_provider_combo.currentText()
+        if video_provider != "Gemini Veo":
+            self.cost_estimate_label.setText("Est. Cost: N/A")
+            return
+
+        model = self.veo_model_combo.currentText()
+        include_audio = self.include_audio_check.isChecked() if hasattr(self, 'include_audio_check') else True
+
+        # October 2025 pricing (per second)
+        if include_audio:
+            pricing = {
+                "veo-3.1-generate-preview": 0.40,
+                "veo-3.1-fast-generate-preview": 0.15,
+                "veo-3.0-generate-001": 0.40,
+                "veo-3.0-fast-generate-001": 0.15,
+                "veo-2.0-generate-001": 0.35,
+            }
+        else:
+            pricing = {
+                "veo-3.1-generate-preview": 0.20,
+                "veo-3.1-fast-generate-preview": 0.10,
+                "veo-3.0-generate-001": 0.20,
+                "veo-3.0-fast-generate-001": 0.10,
+                "veo-2.0-generate-001": 0.35,
+            }
+
+        cost_per_second = pricing.get(model, 0.40)
+        duration = 8  # Default 8-second clip
+
+        # Fast models can have variable duration
+        if "fast" in model.lower():
+            duration = 8  # Max for cost estimation
+
+        total_cost = cost_per_second * duration
+        audio_indicator = "w/audio" if include_audio else "no audio"
+        self.cost_estimate_label.setText(f"Est. Cost: ${total_cost:.2f} ({audio_indicator})")
 
     def _update_sora_resolution_visibility(self):
         """Update Sora resolution combo visibility based on selected model"""

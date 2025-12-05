@@ -176,21 +176,25 @@ DefaultCredentialsError = Exception
 
 class GoogleProvider(ImageProvider):
     """Google Gemini provider for AI image generation."""
-    
+
     def __init__(self, config: Dict[str, Any]):
         """Initialize Google provider."""
         super().__init__(config)
         self.client = None
         self.project_id = None
         self._client_mode = None  # Track how client was initialized: "api_key" or "gcloud"
-        
+
+        # Multi-turn editing support (Nano Banana Pro)
+        # Stores the last chat session for iterative refinement
+        self._last_chat_session = None
+
         # Get config manager for auth state
         try:
             from ..core.config import ConfigManager
         except ImportError:
             from core.config import ConfigManager
         self.config_manager = ConfigManager()
-        
+
         # Initialize client based on auth mode
         if self.auth_mode == "gcloud":
             # Check if we have cached auth validation
@@ -200,6 +204,70 @@ class GoogleProvider(ImageProvider):
             # This allows auth checking without failing
         elif self.api_key:
             self._init_api_key_client()
+
+    def get_last_chat_session(self):
+        """
+        Get the last chat session for multi-turn editing.
+
+        Returns:
+            The chat session object if available, None otherwise.
+        """
+        return self._last_chat_session
+
+    def create_chat_session(self, model: str, aspect_ratio: str = None,
+                            image_size: str = None, search_grounding: bool = False):
+        """
+        Create a new chat session for multi-turn image generation/editing.
+
+        This is used by Nano Banana Pro for iterative refinement.
+        The SDK handles thought signatures automatically when using chat.
+
+        Args:
+            model: Model ID (should be gemini-3-pro-image-preview for NBP)
+            aspect_ratio: Optional aspect ratio for generated images
+            image_size: Optional image size (1K, 2K, 4K)
+            search_grounding: Whether to enable Google Search grounding
+
+        Returns:
+            Chat session object
+        """
+        global genai, types
+
+        if not self.client:
+            raise ValueError("Client not initialized")
+
+        # Lazy import types
+        if types is None:
+            from google.genai import types
+
+        # Build config for chat session
+        config_kwargs = {
+            'response_modalities': ['TEXT', 'IMAGE']
+        }
+
+        # Add image config if aspect ratio specified
+        if aspect_ratio:
+            try:
+                config_kwargs['image_config'] = types.ImageConfig(aspect_ratio=aspect_ratio)
+            except AttributeError:
+                config_kwargs['image_config'] = {'aspect_ratio': aspect_ratio}
+
+        # Add search grounding tool if enabled
+        if search_grounding:
+            try:
+                grounding_tool = types.Tool(google_search=types.GoogleSearch())
+                config_kwargs['tools'] = [grounding_tool]
+            except AttributeError:
+                logger.warning("Search grounding not available in this SDK version")
+
+        # Create chat session
+        config = types.GenerateContentConfig(**config_kwargs)
+
+        chat = self.client.chats.create(model=model, config=config)
+        self._last_chat_session = chat
+
+        logger.info(f"Created chat session for multi-turn editing with model {model}")
+        return chat
     
     def _init_api_key_client(self):
         """Initialize client with API key."""
@@ -608,6 +676,17 @@ class GoogleProvider(ImageProvider):
         num_images = kwargs.get('num_images', 1)
         if num_images > 1:
             config_params['candidate_count'] = num_images
+
+        # Search Grounding - enables real-time Google Search for factual accuracy
+        # Useful for prompts about current events, real places, or recent data
+        search_grounding = kwargs.get('search_grounding', False)
+        if search_grounding:
+            try:
+                grounding_tool = types.Tool(google_search=types.GoogleSearch())
+                config_params['tools'] = [grounding_tool]
+                logger.info("Search Grounding enabled: Real-time Google Search will inform image generation")
+            except AttributeError as e:
+                logger.warning(f"Search Grounding not available in this SDK version: {e}")
 
         # For Nano Banana Pro, add media_resolution parameter for quality control
         # Maps to MediaResolution enum: LOW (1K), MEDIUM (2K), HIGH (4K)

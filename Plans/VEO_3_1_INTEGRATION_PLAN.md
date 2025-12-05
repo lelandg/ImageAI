@@ -1,7 +1,8 @@
 # Veo 3.1 Integration Plan
 
 *Created: 2025-12-02*
-*Last Updated: 2025-12-02 14:45*
+*Last Updated: 2025-12-05 17:00*
+*Implementation Status: ✅ 90% Complete*
 
 ## Executive Summary
 
@@ -111,31 +112,45 @@ Google Veo 3.1 was released October 14, 2025 as an incremental improvement over 
 | Comprehensive error handling | `veo_client.py:288-322, 783-809` | ✅ Working |
 | Region detection | `veo_client.py:270-286` | ✅ Working |
 
-### ⏳ Updates Needed
+### ✅ Updates Completed (December 2025)
 
 | Feature | Location | Status |
 |---------|----------|--------|
-| Add Veo 3.1 Fast model | `veo_client.py` VeoModel enum | ⏳ Pending |
-| Update pricing | `veo_client.py:941-959` | ⏳ Pending |
-| Add scene extension method | `veo_client.py` new method | ⏳ Pending |
-| Add Veo 3.1 Fast constraints | `veo_client.py:145-180` | ⏳ Pending |
+| Add Veo 3.1 Fast model | `veo_client.py:49` VeoModel enum | ✅ **COMPLETED** |
+| Update pricing | `veo_client.py:957-1007` | ✅ **COMPLETED** |
+| Add scene extension method | `veo_client.py:644-805` extend_video_async | ✅ **COMPLETED** |
+| Add Veo 3.1 Fast constraints | `veo_client.py:168-178` | ✅ **COMPLETED** |
+| UI: Veo 3.1 Fast dropdown | `workspace_widget.py:1579-1612` | ✅ **COMPLETED** |
+| UI: Include Audio checkbox | `workspace_widget.py:1672-1686` | ✅ **COMPLETED** |
+| UI: Cost estimation display | `workspace_widget.py:1688-1696, 5775-5816` | ✅ **COMPLETED** |
+| UI: Audio prompt syntax help | `workspace_widget.py:1674-1682` tooltip | ✅ **COMPLETED** |
+
+### ⏳ Still Pending (API Not Yet Available)
+
+| Feature | Location | Status |
+|---------|----------|--------|
+| Add Insert Object feature | `veo_client.py` new method | ⏳ Blocked (API coming) |
+| Add Remove Object feature | `veo_client.py` new method | ⏳ Blocked (API coming) |
+| UI: Extend Video button | `workspace_widget.py` | ⏳ Deferred (core API implemented) |
 
 ---
 
 ## Implementation Plan
 
-### Phase 1: Model Updates ⏳ PENDING
+### Phase 1: Model Updates ✅ COMPLETED
 
 **Goal:** Add Veo 3.1 Fast model support
 
+**Status:** ✅ **COMPLETED** - 2025-12-05
+
 **Tasks:**
 
-1. Add Veo 3.1 Fast to VeoModel enum (`veo_client.py:45-51`)
+1. ✅ Add Veo 3.1 Fast to VeoModel enum (`veo_client.py:49`)
    ```python
    VEO_3_1_FAST = "veo-3.1-fast-generate-preview"
    ```
 
-2. Add Veo 3.1 Fast constraints (`veo_client.py:145-180`)
+2. ✅ Add Veo 3.1 Fast constraints (`veo_client.py:168-178`)
    ```python
    VeoModel.VEO_3_1_FAST: {
        "max_duration": 8,
@@ -144,15 +159,19 @@ Google Veo 3.1 was released October 14, 2025 as an incremental improvement over 
        "aspect_ratios": ["16:9", "9:16"],
        "supports_audio": True,
        "supports_reference_images": True,
+       "supports_scene_extension": True,
+       "supports_frame_interpolation": True,
        "generation_time": (11, 60)  # 11-60 seconds
    }
    ```
 
-3. Update model selection in UI to include Veo 3.1 Fast option
+3. ✅ Update model selection in UI to include Veo 3.1 Fast option (`workspace_widget.py:1579-1612`)
 
-### Phase 2: Pricing Updates ⏳ PENDING
+### Phase 2: Pricing Updates ✅ COMPLETED
 
 **Goal:** Update cost estimation to reflect current pricing
+
+**Status:** ✅ **COMPLETED** - 2025-12-05
 
 **Current code (`veo_client.py:941-959`):**
 ```python
@@ -189,9 +208,11 @@ def estimate_cost(self, config: VeoGenerationConfig) -> float:
     return config.duration * cost_per_second
 ```
 
-### Phase 3: Scene Extension Feature ⏳ PENDING
+### Phase 3: Scene Extension Feature ✅ COMPLETED
 
 **Goal:** Add ability to extend videos for 60+ second sequences
+
+**Status:** ✅ **COMPLETED** - 2025-12-05 - Implemented at `veo_client.py:644-805`
 
 **New method to add:**
 ```python
@@ -239,21 +260,51 @@ async def extend_video_async(
     return await self._poll_operation_async(operation, config)
 ```
 
-### Phase 4: UI Enhancements ⏳ PENDING
+### Phase 4: UI Enhancements ✅ MOSTLY COMPLETED
 
 **Goal:** Expose new features in the GUI
 
+**Status:** ✅ **MOSTLY COMPLETED** - 2025-12-05
+
 **Tasks:**
 
-1. Add Veo 3.1 Fast to model dropdown
-2. Add cost estimation display before generation
-3. Add "Extend Video" button for scene extension
-4. Add audio prompt syntax help tooltip:
+1. ✅ Add Veo 3.1 Fast to model dropdown (`workspace_widget.py:1579-1612`)
+2. ✅ Add cost estimation display before generation (`workspace_widget.py:1688-1696, 5775-5816`)
+3. ⏳ Add "Extend Video" button for scene extension - **DEFERRED** (core API implemented, UI button pending)
+4. ✅ Add audio prompt syntax help tooltip (`workspace_widget.py:1674-1682`):
+5. ✅ Add "Include Audio" checkbox for Veo 3.x (`workspace_widget.py:1672-1686`)
    - Dialogue: `"Person says 'Hello!'"`
    - SFX: `"sound of thunder"`
    - Ambient: `"busy city traffic"`
 
-### Phase 5: Testing ⏳ PENDING
+### Phase 5: Advanced Features ⏳ PENDING (API Coming Soon)
+
+**Goal:** Implement new Veo 3.1 features when API becomes available
+
+**Tasks:**
+
+1. ⏳ **Insert Object** - Add objects to existing scenes
+   - Not yet available in Gemini API
+   - Available in Flow (consumer app)
+   - Monitor API updates for availability
+
+2. ⏳ **Remove Object** - Delete elements or characters from video
+   - Not yet available in Gemini API
+   - Available in Flow (consumer app)
+   - Monitor API updates for availability
+
+3. ⏳ **Ingredients to Video** - Generate video from multiple input sources
+   - Coming to Gemini API
+   - Combine reference images with prompts for richer output
+
+4. ⏳ **Enhanced Audio UI** - Better audio prompt assistance
+   - Dialogue syntax helper: `"Person says 'Hello!'"`
+   - SFX syntax helper: `"sound of thunder"`
+   - Ambient syntax helper: `"busy city traffic"`
+   - Multi-person conversation support
+   - Lip-sync quality indicators
+
+### Phase 6: Testing ⏳ PENDING
 
 **Test Cases:**
 
@@ -275,11 +326,40 @@ async def extend_video_async(
    - Generate first clip
    - Extend with new prompt
    - Verify visual continuity
+   - Test up to 148 seconds total (20 extensions)
 
 5. **Audio Generation**
-   - Dialogue prompt
+   - Dialogue prompt with lip-sync
    - SFX prompt
    - Ambient prompt
+   - Multi-person conversation
+
+---
+
+## Feature Implementation Summary (December 2025)
+
+### ✅ Completed Features
+
+| Feature | Priority | Complexity | Status | Location |
+|---------|----------|------------|--------|----------|
+| Veo 3.1 Fast model enum | High | Low | ✅ **DONE** | `veo_client.py:49` |
+| Pricing update (October 2025) | High | Low | ✅ **DONE** | `veo_client.py:957-1007` |
+| Scene Extension method | High | Medium | ✅ **DONE** | `veo_client.py:644-805` |
+| Veo 3.1 Fast constraints | High | Low | ✅ **DONE** | `veo_client.py:168-178` |
+| Enhanced Audio UI | Low | Low | ✅ **DONE** | `workspace_widget.py:1672-1686` |
+| Cost estimation display | Medium | Low | ✅ **DONE** | `workspace_widget.py:5775-5816` |
+| UI Model dropdown update | High | Low | ✅ **DONE** | `workspace_widget.py:1579-1612` |
+
+### ⏳ Pending Features (API Not Yet Available)
+
+| Feature | Priority | Complexity | Status | API Available |
+|---------|----------|------------|--------|---------------|
+| Insert Object | Medium | Medium | ⏳ Blocked | ❌ Not yet |
+| Remove Object | Medium | Medium | ⏳ Blocked | ❌ Not yet |
+| Ingredients to Video | Medium | Medium | ⏳ Blocked | ⏳ Coming |
+| UI: Extend Video button | Low | Medium | ⏳ Deferred | ✅ Yes (API done) |
+
+**Note:** Scene extension supports up to 20 extensions (7 seconds each) for ~148 seconds total video length.
 
 ---
 

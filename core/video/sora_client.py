@@ -929,3 +929,445 @@ class SoraClient:
         except Exception as e:
             self.logger.error(f"Failed to download spritesheet for {video_id}: {e}")
             return False
+
+    # =========================================================================
+    # Remix Feature - Create variations of existing videos
+    # =========================================================================
+
+    def remix_video(
+        self,
+        video_id: str,
+        prompt: str,
+        model: Optional[SoraModel] = None,
+        size: Optional[str] = None,
+        duration: Optional[int] = None
+    ) -> SoraGenerationResult:
+        """
+        Remix an existing video with a new prompt.
+
+        Remix allows you to refine a video without discarding what already works.
+        By constraining each remix to one clear adjustment, you keep the visual
+        style, subject consistency, and camera framing stable while exploring
+        variations in mood, palette, or staging.
+
+        Args:
+            video_id: ID of the video to remix
+            prompt: New prompt describing the changes (e.g., "Shift the color
+                    palette to teal and rust with warm backlight")
+            model: Optional model override (defaults to original video's model)
+            size: Optional size override (e.g., "1280x720")
+            duration: Optional duration override (4, 8, or 12 seconds)
+
+        Returns:
+            SoraGenerationResult with new video details
+
+        Example:
+            >>> result = client.remix_video(
+            ...     video_id="video_abc123",
+            ...     prompt="Make the lighting warmer and add golden hour glow"
+            ... )
+        """
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(
+                self.remix_video_async(video_id, prompt, model, size, duration)
+            )
+        finally:
+            loop.close()
+
+    async def remix_video_async(
+        self,
+        video_id: str,
+        prompt: str,
+        model: Optional[SoraModel] = None,
+        size: Optional[str] = None,
+        duration: Optional[int] = None
+    ) -> SoraGenerationResult:
+        """
+        Async version of remix_video.
+
+        Args:
+            video_id: ID of the video to remix
+            prompt: New prompt describing the changes
+            model: Optional model override
+            size: Optional size override
+            duration: Optional duration override
+
+        Returns:
+            SoraGenerationResult with new video details
+        """
+        self.reset_cancellation()
+        result = SoraGenerationResult()
+
+        try:
+            start_time = time.time()
+            self._report_progress(5, f"Starting remix of video {video_id[:8]}...")
+
+            # Build remix parameters
+            remix_params: Dict[str, Any] = {"prompt": prompt}
+            if model:
+                remix_params["model"] = model.value
+            if size:
+                remix_params["size"] = size
+            if duration:
+                if duration not in [4, 8, 12]:
+                    result.error = f"Duration must be 4, 8, or 12 seconds, got {duration}"
+                    result.error_type = SoraErrorType.API_ERROR
+                    return result
+                remix_params["seconds"] = str(duration)
+
+            self.logger.info(f"Remixing video {video_id} with prompt: {prompt[:100]}...")
+
+            # Create remix
+            if self._use_http:
+                new_video_id = await self._create_remix_http(video_id, remix_params)
+            else:
+                # SDK method (if available)
+                response = self.client.videos.remix(video_id, **remix_params)
+                new_video_id = response.id
+
+            if self._cancelled:
+                result.error = "Remix cancelled by user"
+                return result
+
+            result.video_id = new_video_id
+            result.metadata["remix_source"] = video_id
+            result.metadata["prompt"] = prompt
+            result.metadata["started_at"] = datetime.now().isoformat()
+
+            self.logger.info(f"Remix initiated, new video ID: {new_video_id}")
+            self._report_progress(15, f"Remix queued (ID: {new_video_id[:8]}...)")
+
+            # Poll for completion
+            max_wait = 480  # 8 minutes max
+            video_result = await self._poll_for_completion(new_video_id, max_wait)
+
+            if self._cancelled:
+                result.error = "Remix cancelled by user"
+                return result
+
+            if video_result:
+                result.success = True
+                self._report_progress(90, "Downloading remixed video...")
+                result.video_path = await self._download_video(new_video_id)
+                result.metadata["completed_at"] = datetime.now().isoformat()
+                self._report_progress(100, "Remix complete!")
+            else:
+                result.success = False
+                result.error = "Remix timed out or failed"
+                result.error_type = SoraErrorType.TIMEOUT
+
+            result.generation_time = time.time() - start_time
+            self.logger.info(f"Remix completed in {result.generation_time:.1f} seconds")
+
+        except Exception as e:
+            self.logger.error(f"Remix failed: {e}")
+            result.success = False
+            result.error = str(e)
+            result.error_type = self._classify_error(e)
+
+        return result
+
+    async def _create_remix_http(
+        self,
+        video_id: str,
+        params: Dict[str, Any]
+    ) -> str:
+        """Create remix using HTTP API"""
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.post(
+            f"{self._api_base}/videos/{video_id}/remix",
+            headers=headers,
+            json=params,
+            timeout=30
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data.get("id", "")
+
+    def remix_batch(
+        self,
+        video_id: str,
+        prompts: List[str],
+        max_concurrent: int = 2
+    ) -> List[SoraGenerationResult]:
+        """
+        Create multiple remix variations of a video.
+
+        Useful for exploring different style directions from a single source video.
+
+        Args:
+            video_id: Source video ID to remix
+            prompts: List of prompts for different variations
+            max_concurrent: Maximum concurrent remixes (default 2)
+
+        Returns:
+            List of SoraGenerationResult for each remix
+
+        Example:
+            >>> results = client.remix_batch(
+            ...     video_id="video_abc123",
+            ...     prompts=[
+            ...         "Shift to warm golden hour lighting",
+            ...         "Make it moody with blue shadows",
+            ...         "Add film grain and desaturate colors"
+            ...     ]
+            ... )
+        """
+        results = []
+
+        for i in range(0, len(prompts), max_concurrent):
+            if self._cancelled:
+                for _ in prompts[i:]:
+                    result = SoraGenerationResult()
+                    result.error = "Batch remix cancelled"
+                    results.append(result)
+                break
+
+            batch = prompts[i:i + max_concurrent]
+
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+            try:
+                tasks = [
+                    self.remix_video_async(video_id, prompt)
+                    for prompt in batch
+                ]
+                batch_results = loop.run_until_complete(asyncio.gather(*tasks))
+                results.extend(batch_results)
+            finally:
+                loop.close()
+
+        return results
+
+    # =========================================================================
+    # Webhook Support - Async notifications instead of polling
+    # =========================================================================
+
+    def register_webhook_handler(
+        self,
+        handler: Callable[[str, str, Dict[str, Any]], None]
+    ):
+        """
+        Register a handler for webhook events.
+
+        Note: Webhooks must be configured in your OpenAI dashboard at
+        https://platform.openai.com/settings/project/webhooks
+
+        The handler will be called with:
+        - event_type: "video.completed" or "video.failed"
+        - video_id: The ID of the video that triggered the event
+        - payload: Full webhook payload
+
+        Args:
+            handler: Callback function(event_type, video_id, payload)
+
+        Example:
+            >>> def on_video_event(event_type, video_id, payload):
+            ...     if event_type == "video.completed":
+            ...         print(f"Video {video_id} is ready!")
+            ...         # Download the video
+            ...         client.download_video(video_id)
+            ...     elif event_type == "video.failed":
+            ...         print(f"Video {video_id} failed: {payload.get('error')}")
+            ...
+            >>> client.register_webhook_handler(on_video_event)
+        """
+        self._webhook_handler = handler
+        self.logger.info("Webhook handler registered")
+
+    def process_webhook(self, payload: Dict[str, Any]) -> bool:
+        """
+        Process an incoming webhook payload from OpenAI.
+
+        Call this method from your webhook endpoint when you receive
+        a POST request from OpenAI. The method validates the payload
+        and dispatches to the registered handler.
+
+        Args:
+            payload: The JSON payload from the webhook POST request
+
+        Returns:
+            True if processed successfully
+
+        Example webhook payload:
+            {
+                "id": "evt_abc123",
+                "object": "event",
+                "type": "video.completed",
+                "data": {
+                    "id": "video_xyz789",
+                    "status": "completed",
+                    "model": "sora-2"
+                }
+            }
+
+        Example Flask integration:
+            >>> @app.route('/webhooks/openai', methods=['POST'])
+            ... def handle_openai_webhook():
+            ...     payload = request.json
+            ...     client.process_webhook(payload)
+            ...     return '', 200
+        """
+        try:
+            event_type = payload.get("type", "")
+            event_data = payload.get("data", {})
+            video_id = event_data.get("id", "")
+
+            self.logger.info(f"Processing webhook: {event_type} for video {video_id}")
+
+            # Validate event type
+            if event_type not in ["video.completed", "video.failed"]:
+                self.logger.warning(f"Unknown webhook event type: {event_type}")
+                return False
+
+            # Call registered handler if exists
+            if hasattr(self, '_webhook_handler') and self._webhook_handler:
+                self._webhook_handler(event_type, video_id, payload)
+                return True
+            else:
+                self.logger.warning("No webhook handler registered")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Failed to process webhook: {e}")
+            return False
+
+    def verify_webhook_signature(
+        self,
+        payload: bytes,
+        signature: str,
+        secret: str
+    ) -> bool:
+        """
+        Verify the webhook signature to ensure it came from OpenAI.
+
+        OpenAI signs webhooks using HMAC-SHA256. Always verify signatures
+        in production to prevent spoofed webhook requests.
+
+        Args:
+            payload: Raw request body bytes
+            signature: Value from 'OpenAI-Signature' header
+            secret: Your webhook secret from OpenAI dashboard
+
+        Returns:
+            True if signature is valid
+
+        Example:
+            >>> @app.route('/webhooks/openai', methods=['POST'])
+            ... def handle_webhook():
+            ...     signature = request.headers.get('OpenAI-Signature', '')
+            ...     if not client.verify_webhook_signature(
+            ...         request.data, signature, WEBHOOK_SECRET
+            ...     ):
+            ...         return 'Invalid signature', 401
+            ...     # Process webhook...
+        """
+        import hmac
+
+        try:
+            # OpenAI signature format: t=timestamp,v1=signature
+            parts = {}
+            for part in signature.split(','):
+                if '=' in part:
+                    key, value = part.split('=', 1)
+                    parts[key] = value
+
+            timestamp = parts.get('t', '')
+            provided_sig = parts.get('v1', '')
+
+            if not timestamp or not provided_sig:
+                self.logger.warning("Invalid signature format")
+                return False
+
+            # Construct signed payload
+            signed_payload = f"{timestamp}.".encode() + payload
+
+            # Compute expected signature
+            expected_sig = hmac.new(
+                secret.encode(),
+                signed_payload,
+                hashlib.sha256
+            ).hexdigest()
+
+            # Compare signatures
+            return hmac.compare_digest(expected_sig, provided_sig)
+
+        except Exception as e:
+            self.logger.error(f"Signature verification failed: {e}")
+            return False
+
+    async def generate_with_webhook(
+        self,
+        config: SoraGenerationConfig,
+        webhook_url: Optional[str] = None
+    ) -> str:
+        """
+        Start video generation and return immediately without polling.
+
+        Use this when you have webhooks configured and don't want to
+        block waiting for completion. The video ID is returned immediately
+        so you can track it when the webhook fires.
+
+        Args:
+            config: Generation configuration
+            webhook_url: Optional webhook URL override (if not using dashboard config)
+
+        Returns:
+            Video ID (use this to match incoming webhooks)
+
+        Note:
+            Configure webhooks at https://platform.openai.com/settings/project/webhooks
+            Your endpoint will receive POST requests with event payloads.
+
+        Example:
+            >>> video_id = await client.generate_with_webhook(config)
+            >>> print(f"Generation started, ID: {video_id}")
+            >>> # Later, your webhook handler will be called when complete
+        """
+        # Validate configuration
+        is_valid, error = self.validate_config(config)
+        if not is_valid:
+            raise ValueError(error)
+
+        # Build request parameters
+        create_params = config.to_dict()
+
+        self.logger.info(f"Starting generation (webhook mode) with {config.model.value}")
+
+        # Create video generation request
+        if config.image and config.image.exists():
+            video_id = await self._create_video_with_image(create_params, config.image)
+        else:
+            video_id = await self._create_video(create_params)
+
+        self.logger.info(f"Generation started, video ID: {video_id}")
+        self.logger.info("Webhook will notify when complete")
+
+        return video_id
+
+    def generate_with_webhook_sync(
+        self,
+        config: SoraGenerationConfig
+    ) -> str:
+        """
+        Synchronous version of generate_with_webhook.
+
+        Args:
+            config: Generation configuration
+
+        Returns:
+            Video ID for webhook tracking
+        """
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self.generate_with_webhook(config))
+        finally:
+            loop.close()
