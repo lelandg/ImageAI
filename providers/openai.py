@@ -72,12 +72,12 @@ class OpenAIProvider(ImageProvider):
         rate_limiter.check_rate_limit('openai', wait=True)
         
         # Handle new settings from UI
-        # Size/resolution mapping for DALL-E 3
-        if model == "dall-e-3":
-            # Map resolution or aspect ratio to DALL-E 3 sizes
+        # Size/resolution mapping for DALL-E 3 and GPT Image 1
+        if model in ["dall-e-3", "gpt-image-1"]:
+            # Map resolution or aspect ratio to supported sizes
             resolution = kwargs.get('resolution', kwargs.get('width', size))
             aspect_ratio = kwargs.get('aspect_ratio', '1:1')
-            
+
             if isinstance(resolution, str) and 'x' in resolution:
                 # Direct resolution provided
                 width, height = map(int, resolution.split('x'))
@@ -88,7 +88,7 @@ class OpenAIProvider(ImageProvider):
                 else:
                     size = "1024x1024"  # Square
             elif aspect_ratio:
-                # Map aspect ratio to DALL-E 3 sizes
+                # Map aspect ratio to supported sizes
                 if aspect_ratio in ['16:9', '4:3']:
                     size = "1792x1024"  # Landscape
                 elif aspect_ratio in ['9:16', '3:4']:
@@ -119,33 +119,74 @@ class OpenAIProvider(ImageProvider):
             response_format = 'url'
         
         try:
-            # Build generation parameters
-            gen_params = {
-                "model": model,
-                "prompt": prompt,
-                "size": size,
-                "quality": quality,
-                "n": num_images,
-                "response_format": response_format,
-            }
-            
-            # Add style parameter for DALL-E 3
-            if model == "dall-e-3":
-                gen_params["style"] = style
-
-            # Log the request being sent to OpenAI
+            # Build generation parameters based on model
             import logging
             logger = logging.getLogger(__name__)
-            logger.info("=" * 60)
-            logger.info(f"SENDING TO OPENAI API")
-            logger.info(f"Model: {model}")
-            logger.info(f"Prompt: {prompt}")
-            logger.info(f"Size: {size}")
-            logger.info(f"Quality: {quality}")
-            if model == "dall-e-3":
+
+            if model == "gpt-image-1":
+                # GPT Image 1: supports background parameter, does NOT support style/quality
+                gen_params = {
+                    "model": model,
+                    "prompt": prompt,
+                    "size": size,
+                    "n": num_images,
+                    "response_format": response_format,
+                }
+                # Add background parameter for transparency support
+                background = kwargs.get('background')
+                if background in {"transparent", "white", "black"}:
+                    gen_params["background"] = background
+
+                # Log the request
+                logger.info("=" * 60)
+                logger.info(f"SENDING TO OPENAI API (GPT Image 1)")
+                logger.info(f"Model: {model}")
+                logger.info(f"Prompt: {prompt}")
+                logger.info(f"Size: {size}")
+                if background:
+                    logger.info(f"Background: {background}")
+                logger.info(f"Number of images: {num_images}")
+                logger.info("=" * 60)
+            elif model == "dall-e-3":
+                # DALL-E 3: supports style and quality
+                gen_params = {
+                    "model": model,
+                    "prompt": prompt,
+                    "size": size,
+                    "quality": quality,
+                    "n": num_images,
+                    "response_format": response_format,
+                    "style": style,
+                }
+
+                # Log the request
+                logger.info("=" * 60)
+                logger.info(f"SENDING TO OPENAI API (DALL-E 3)")
+                logger.info(f"Model: {model}")
+                logger.info(f"Prompt: {prompt}")
+                logger.info(f"Size: {size}")
+                logger.info(f"Quality: {quality}")
                 logger.info(f"Style: {style}")
-            logger.info(f"Number of images: {n}")
-            logger.info("=" * 60)
+                logger.info(f"Number of images: {num_images}")
+                logger.info("=" * 60)
+            else:
+                # DALL-E 2 and others: basic parameters
+                gen_params = {
+                    "model": model,
+                    "prompt": prompt,
+                    "size": size,
+                    "n": num_images,
+                    "response_format": response_format,
+                }
+
+                # Log the request
+                logger.info("=" * 60)
+                logger.info(f"SENDING TO OPENAI API ({model})")
+                logger.info(f"Model: {model}")
+                logger.info(f"Prompt: {prompt}")
+                logger.info(f"Size: {size}")
+                logger.info(f"Number of images: {num_images}")
+                logger.info("=" * 60)
 
             # Generate images
             response = self.client.images.generate(**gen_params)
@@ -171,8 +212,9 @@ class OpenAIProvider(ImageProvider):
                         except (OSError, IOError, AttributeError):
                             pass
             
-            # Handle multiple images for DALL-E 3 (generate multiple times)
-            if model == "dall-e-3" and kwargs.get('num_images', 1) > 1:
+            # Handle multiple images for models with n=1 limitation (DALL-E 3, GPT Image 1)
+            # These models only support n=1, so we generate multiple times sequentially
+            if model in ["dall-e-3", "gpt-image-1"] and kwargs.get('num_images', 1) > 1:
                 for _ in range(kwargs.get('num_images', 1) - 1):
                     try:
                         response = self.client.images.generate(**gen_params)
@@ -220,13 +262,14 @@ class OpenAIProvider(ImageProvider):
     def get_models(self) -> Dict[str, str]:
         """Get available OpenAI models."""
         return {
+            "gpt-image-1": "GPT Image 1",
             "dall-e-3": "DALL·E 3",
             "dall-e-2": "DALL·E 2",
         }
     
     def get_models_with_details(self) -> Dict[str, Dict[str, str]]:
         """Get available OpenAI models with detailed display information.
-        
+
         Returns:
             Dictionary mapping model IDs to display information including:
             - name: Short display name
@@ -234,6 +277,10 @@ class OpenAIProvider(ImageProvider):
             - description: Optional brief description
         """
         return {
+            "gpt-image-1": {
+                "name": "GPT Image 1",
+                "description": "High quality, supports transparent backgrounds"
+            },
             "dall-e-3": {
                 "name": "DALL·E 3",
                 "description": "Most advanced, highest quality images"

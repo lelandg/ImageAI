@@ -1565,12 +1565,18 @@ class WorkspaceWidget(QWidget):
         provider_layout = QHBoxLayout()
         provider_layout.addWidget(QLabel("Render Method:"))
         self.video_provider_combo = QComboBox()
-        self.video_provider_combo.addItems(["FFmpeg Slideshow", "Gemini Veo"])
+        self.video_provider_combo.addItems(["FFmpeg Slideshow", "Gemini Veo", "OpenAI Sora"])
         self.video_provider_combo.setCurrentIndex(1)  # Default to Gemini Veo
-        self.video_provider_combo.setToolTip("Video rendering method:\n- FFmpeg Slideshow: Traditional slideshow with transitions\n- Gemini Veo: AI-powered video generation")
+        self.video_provider_combo.setToolTip(
+            "Video rendering method:\n"
+            "- FFmpeg Slideshow: Traditional slideshow with transitions\n"
+            "- Gemini Veo: Google AI-powered video generation\n"
+            "- OpenAI Sora: OpenAI Sora 2 video generation"
+        )
         self.video_provider_combo.currentTextChanged.connect(self.on_video_provider_changed)
         provider_layout.addWidget(self.video_provider_combo)
 
+        # Veo model selection
         self.veo_model_combo = QComboBox()
         self.veo_model_combo.addItems([
             "veo-3.1-generate-001",  # Veo 3.1 - supports frames-to-video
@@ -1586,7 +1592,35 @@ class WorkspaceWidget(QWidget):
         self.veo_model_combo.setToolTip("Veo model version:\n- veo-3.1: Frames-to-video (start + end frames)\n- veo-3.0: Latest quality\n- veo-3.0-fast: Faster generation\n- veo-2.0: Previous generation")
         self.veo_model_combo.currentTextChanged.connect(self.on_veo_model_changed)
         provider_layout.addWidget(self.veo_model_combo)
-        
+
+        # Sora model selection (hidden by default)
+        self.sora_model_combo = QComboBox()
+        self.sora_model_combo.addItems([
+            "sora-2",
+            "sora-2-pro"
+        ])
+        self.sora_model_combo.setCurrentIndex(0)
+        self.sora_model_combo.setVisible(False)  # Hidden by default
+        self.sora_model_combo.setMinimumWidth(150)
+        self.sora_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.sora_model_combo.setToolTip(
+            "Sora model:\n"
+            "- sora-2: Standard quality (720p, $0.10/sec)\n"
+            "- sora-2-pro: Pro quality (720p/1080p, $0.30-0.50/sec)"
+        )
+        self.sora_model_combo.currentTextChanged.connect(self.on_sora_model_changed)
+        provider_layout.addWidget(self.sora_model_combo)
+
+        # Sora resolution selection (only visible for Sora Pro)
+        self.sora_resolution_combo = QComboBox()
+        self.sora_resolution_combo.addItems(["720p", "1080p"])
+        self.sora_resolution_combo.setCurrentIndex(0)
+        self.sora_resolution_combo.setVisible(False)
+        self.sora_resolution_combo.setMinimumWidth(80)
+        self.sora_resolution_combo.setToolTip("Resolution (1080p only available with sora-2-pro)")
+        self.sora_resolution_combo.currentTextChanged.connect(self._auto_save_settings)
+        provider_layout.addWidget(self.sora_resolution_combo)
+
         provider_layout.addStretch()
         layout.addLayout(provider_layout)
         
@@ -5463,6 +5497,8 @@ class WorkspaceWidget(QWidget):
             'negative_prompt': self.negative_prompt.text(),
             'video_provider': self.video_provider_combo.currentText(),
             'veo_model': self.veo_model_combo.currentText(),
+            'sora_model': self.sora_model_combo.currentText() if hasattr(self, 'sora_model_combo') else 'sora-2',
+            'sora_resolution': self.sora_resolution_combo.currentText() if hasattr(self, 'sora_resolution_combo') else '720p',
             'ken_burns': self.ken_burns_check.isChecked(),
             'transitions': self.transitions_check.isChecked(),
             'captions': self.captions_check.isChecked(),
@@ -5641,11 +5677,61 @@ class WorkspaceWidget(QWidget):
     
     def on_video_provider_changed(self, provider: str):
         """Handle video provider change"""
+        # Show/hide Veo options
         self.veo_model_combo.setVisible(provider == "Gemini Veo")
+
+        # Show/hide Sora options
+        is_sora = provider == "OpenAI Sora"
+        self.sora_model_combo.setVisible(is_sora)
+
+        # Update Sora resolution visibility based on selected model
+        if is_sora:
+            self._update_sora_resolution_visibility()
+        else:
+            self.sora_resolution_combo.setVisible(False)
+
+        # Update smooth transitions checkbox visibility
+        # (Only available for Veo 3.1 or Sora)
+        if hasattr(self, 'use_prev_last_frame_check'):
+            supports_smooth = (
+                provider == "OpenAI Sora" or
+                (provider == "Gemini Veo" and "3.1" in self.veo_model_combo.currentText())
+            )
+            self.use_prev_last_frame_check.setEnabled(supports_smooth)
+            if not supports_smooth:
+                self.use_prev_last_frame_check.setChecked(False)
+
+        self._auto_save_settings()
 
     def on_veo_model_changed(self, model: str):
         """Handle Veo model selection change"""
+        # Update smooth transitions based on Veo model
+        if hasattr(self, 'use_prev_last_frame_check'):
+            supports_smooth = "3.1" in model
+            self.use_prev_last_frame_check.setEnabled(supports_smooth)
+            if not supports_smooth:
+                self.use_prev_last_frame_check.setChecked(False)
         self._auto_save_settings()
+
+    def on_sora_model_changed(self, model: str):
+        """Handle Sora model selection change"""
+        self._update_sora_resolution_visibility()
+        self._auto_save_settings()
+
+    def _update_sora_resolution_visibility(self):
+        """Update Sora resolution combo visibility based on selected model"""
+        if not hasattr(self, 'sora_model_combo') or not hasattr(self, 'sora_resolution_combo'):
+            return
+
+        sora_model = self.sora_model_combo.currentText()
+        is_pro = sora_model == "sora-2-pro"
+
+        # Show resolution selector only for Sora Pro (which supports 1080p)
+        self.sora_resolution_combo.setVisible(is_pro)
+
+        # Reset to 720p if switching from Pro to standard
+        if not is_pro:
+            self.sora_resolution_combo.setCurrentIndex(0)  # 720p
 
     def _toggle_input_options(self, checked=None):
         """Toggle the input options panel visibility."""

@@ -1,0 +1,62 @@
+{% raw %}
+{# Template for generating Sora-optimized cinematic shot descriptions #}
+{# Sora excels at: physics, continuous motion, realistic transitions, atmospheric details #}
+
+{# Shot type presets optimized for Sora's motion capabilities #}
+{% set sora_shot_types = ['tracking shot', 'drone shot', 'steady cam', 'handheld', 'dolly shot', 'crane shot'] %}
+{% set sora_movements = ['smooth tracking forward', 'slow dolly in', 'gentle pan', 'rising crane', 'orbiting'] %}
+
+{{ shot_type|default(sora_shot_types|random) }} of {{ subject }}
+
+{# Core action - Sora is strong with continuous, physics-based motion #}
+{% if action %}
+Motion: {{ action }}
+{% endif %}
+
+{# Camera work - Sora handles complex camera movements exceptionally well #}
+Camera: {{ camera_angle|default('eye level') }}
+{% if camera_movement %}Movement: {{ camera_movement }}{% else %}Movement: {{ sora_movements|random }}{% endif %}
+Lens: {{ lens|default('50mm') }}, {{ dof|default('cinematic depth of field') }}
+
+{# Environment - Sora excels at atmospheric details and natural phenomena #}
+Setting: {{ location }}
+Time: {{ time_of_day|default('golden hour') }}
+{% if weather %}Weather: {{ weather }}{% endif %}
+{% if atmosphere %}Atmosphere: {{ atmosphere }}{% else %}Atmosphere: cinematic lighting with natural shadows{% endif %}
+
+{# Style guidance for Sora #}
+Style: {{ visual_style|default('photorealistic, cinematic') }}
+Color: {{ color_grading|default('natural with subtle color grading') }}
+
+{# Physics hints - Sora's strength #}
+{% if physics_elements %}
+Physics details: {{ physics_elements }}
+{% endif %}
+
+{# Motion dynamics - helps Sora understand movement patterns #}
+{% if motion_quality %}
+Motion quality: {{ motion_quality }}
+{% else %}
+Motion quality: fluid, natural movement with realistic momentum
+{% endif %}
+
+{# Continuity notes for scene consistency #}
+{% if continuity_notes %}
+Continuity: {{ continuity_notes }}
+{% endif %}
+
+{# Light interaction - Sora handles light physics well #}
+{% if light_effects %}
+Light effects: {{ light_effects }}
+{% endif %}
+
+{# Particle/atmospheric effects - Sora excels at these #}
+{% if particles %}
+Particles: {{ particles }}
+{% endif %}
+
+{# Negative prompt for things to avoid #}
+{% if negative_prompt %}
+Avoid: {{ negative_prompt }}
+{% endif %}
+{% endraw %}

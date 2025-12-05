@@ -722,8 +722,15 @@ class VideoGenerationThread(QThread):
             self.generation_complete.emit(False, f"End frame generation failed: {e}")
 
     def _generate_video_clip(self):
-        """Generate video clip for a single scene using Veo"""
+        """Generate video clip for a single scene using Veo or Sora"""
         try:
+            # Check which video provider to use
+            video_provider = self.kwargs.get('video_provider', 'Gemini Veo')
+
+            if video_provider == 'OpenAI Sora':
+                return self._generate_video_clip_sora()
+
+            # Default to Veo
             from core.video.veo_client import VeoClient, VeoGenerationConfig, VeoModel
             from core.video.midi_processor import snap_duration_to_veo
             from core.video.reference_manager import ReferenceManager
@@ -1185,6 +1192,181 @@ class VideoGenerationThread(QThread):
         cv2.imwrite(str(frame_path), frame)
 
         return frame_path
+
+    def _generate_video_clip_sora(self):
+        """Generate video clip for a single scene using OpenAI Sora"""
+        try:
+            from core.video.sora_client import SoraClient, SoraGenerationConfig, SoraModel
+            from pathlib import Path
+            import logging
+            import shutil
+            from datetime import datetime
+
+            logger = logging.getLogger(__name__)
+
+            # Get scene indices
+            scene_indices = self.kwargs.get('scene_indices', None)
+            if not scene_indices or len(scene_indices) == 0:
+                self.generation_complete.emit(False, "No scene specified for video clip generation")
+                return
+
+            scene_index = scene_indices[0]
+            if scene_index >= len(self.project.scenes):
+                self.generation_complete.emit(False, f"Invalid scene index: {scene_index}")
+                return
+
+            scene = self.project.scenes[scene_index]
+
+            # Get generation parameters
+            seed_image_path = self.kwargs.get('start_frame') or self.kwargs.get('seed_image')
+
+            # Use video_prompt if available, otherwise fall back to regular prompt
+            prompt = self.kwargs.get('video_prompt') or scene.video_prompt or scene.prompt
+            aspect_ratio = self.kwargs.get('aspect_ratio', '16:9')
+
+            # Prepend prompt_style to the prompt
+            prompt_style = self.kwargs.get('prompt_style', 'Cinematic')
+            if prompt_style and prompt_style.lower() != 'none':
+                if not prompt.lower().startswith(prompt_style.lower()):
+                    prompt = f"{prompt_style} style: {prompt}"
+
+            logger.info(f"Using Sora for scene {scene_index}: {prompt[:100]}...")
+
+            self.progress_update.emit(5, f"Initializing Sora client...")
+
+            # Get OpenAI API key
+            openai_api_key = self.kwargs.get('openai_api_key')
+            if not openai_api_key:
+                self.generation_complete.emit(False, "OpenAI API key required for Sora video generation")
+                return
+
+            # Create progress callback for GUI updates
+            def progress_callback(percent, message):
+                # Scale Sora's 0-100% to our 10-90% range
+                scaled_percent = 10 + int(percent * 0.8)
+                self.progress_update.emit(scaled_percent, message)
+
+            # Initialize Sora client with progress callback
+            sora_client = SoraClient(
+                api_key=openai_api_key,
+                progress_callback=progress_callback
+            )
+
+            # Get Sora model and resolution settings
+            sora_model_name = self.kwargs.get('sora_model', 'sora-2')
+            sora_resolution = self.kwargs.get('sora_resolution', '720p')
+
+            # Map model name to enum
+            if sora_model_name == 'sora-2-pro':
+                sora_model = SoraModel.SORA_2_PRO
+            else:
+                sora_model = SoraModel.SORA_2
+                # Standard model only supports 720p
+                sora_resolution = '720p'
+
+            # Determine duration (Sora supports 4, 8, or 12 seconds)
+            scene_duration = scene.duration_sec
+            if scene_duration <= 4:
+                sora_duration = 4
+            elif scene_duration <= 8:
+                sora_duration = 8
+            else:
+                sora_duration = 12
+
+            # Store intended vs generated duration for trimming
+            scene.metadata['intended_duration_sec'] = scene_duration
+            scene.metadata['generated_duration_sec'] = sora_duration
+
+            # Map aspect ratio for Sora (only supports 16:9 and 9:16)
+            if aspect_ratio in ['9:16', '3:4']:
+                sora_aspect = '9:16'
+            else:
+                sora_aspect = '16:9'
+
+            logger.info(f"🎬 Sora Configuration:")
+            logger.info(f"   Model: {sora_model.value}")
+            logger.info(f"   Resolution: {sora_resolution}")
+            logger.info(f"   Duration: {sora_duration}s (scene: {scene_duration}s)")
+            logger.info(f"   Aspect Ratio: {sora_aspect}")
+
+            self.progress_update.emit(10, f"Starting Sora generation ({sora_model.value})...")
+
+            # Create Sora configuration
+            config = SoraGenerationConfig(
+                model=sora_model,
+                prompt=prompt,
+                aspect_ratio=sora_aspect,
+                resolution=sora_resolution,
+                duration=sora_duration,
+                image=Path(seed_image_path) if seed_image_path and Path(seed_image_path).exists() else None
+            )
+
+            # Estimate cost
+            estimated_cost = sora_client.estimate_cost(config)
+            logger.info(f"   Estimated cost: ${estimated_cost:.2f}")
+
+            # Generate video
+            result = sora_client.generate_video(config)
+
+            if not result.success:
+                error_msg = f"Sora generation failed: {result.error}"
+                if result.error_type:
+                    error_msg += f" (type: {result.error_type.value})"
+                raise Exception(error_msg)
+
+            cached_video_path = result.video_path
+            if not cached_video_path or not cached_video_path.exists():
+                raise Exception("Video generation succeeded but no video file was created")
+
+            self.progress_update.emit(92, "Copying video to project folder...")
+
+            # Copy video from cache to project directory
+            clips_dir = self.project.project_dir / "clips"
+            clips_dir.mkdir(parents=True, exist_ok=True)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            video_filename = f"scene_{scene_index}_{timestamp}.mp4"
+            video_path = clips_dir / video_filename
+
+            shutil.copy2(cached_video_path, video_path)
+            logger.info(f"Copied Sora video from cache to project: {video_path}")
+
+            self.progress_update.emit(94, "Extracting last frame...")
+
+            # Extract last frame
+            last_frame_path = self._extract_last_frame(video_path, scene_index)
+
+            self.progress_update.emit(97, "Extracting first frame...")
+
+            # Extract first frame
+            first_frame_path = self._extract_first_frame(video_path, scene_index)
+
+            # Update scene with video clip and frames
+            scene.video_clip = video_path
+            scene.first_frame = first_frame_path
+            scene.last_frame = last_frame_path
+
+            self.progress_update.emit(100, f"Sora video generated for scene {scene_index + 1}")
+
+            # Emit scene complete with results
+            result_data = {
+                "scene_id": scene.id,
+                "video_clip": str(video_path),
+                "first_frame": str(first_frame_path),
+                "last_frame": str(last_frame_path),
+                "status": "completed",
+                "provider": "sora",
+                "model": sora_model.value,
+                "cost": estimated_cost
+            }
+            self.scene_complete.emit(scene.id, result_data)
+            self.generation_complete.emit(True, f"Sora video generated for scene {scene_index + 1}")
+
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Sora video generation failed: {e}", exc_info=True)
+            self.generation_complete.emit(False, f"Sora video generation failed: {e}")
 
     def _render_video(self):
         """Render the final video"""

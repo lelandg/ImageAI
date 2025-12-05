@@ -1025,6 +1025,35 @@ class MainWindow(QMainWindow):
         else:
             self.quality_selector = None
 
+        # Background Selector (for GPT Image 1 - supports transparent backgrounds)
+        background_group = QWidget()
+        background_v_layout = QVBoxLayout(background_group)
+        background_v_layout.setContentsMargins(0, 0, 0, 0)
+        background_v_layout.setSpacing(3)
+
+        background_label = QLabel("Background:")
+        background_label.setMaximumHeight(20)
+        background_v_layout.addWidget(background_label)
+
+        self.background_combo = QComboBox()
+        self.background_combo.addItems(["Default", "Transparent", "White", "Black"])
+        self.background_combo.setCurrentIndex(0)
+        self.background_combo.setToolTip(
+            "Background option for GPT Image 1:\n"
+            "- Default: Model decides\n"
+            "- Transparent: PNG with alpha channel\n"
+            "- White: Solid white background\n"
+            "- Black: Solid black background"
+        )
+        self.background_combo.setMinimumWidth(100)
+        background_v_layout.addWidget(self.background_combo)
+
+        aspect_quality_layout.addWidget(background_group)
+
+        # Initially hide - will be shown when gpt-image-1 is selected
+        background_group.setVisible(False)
+        self.background_group = background_group
+
         # Social Sizes Button (right)
         social_group = QWidget()
         social_v_layout = QVBoxLayout(social_group)
@@ -3728,6 +3757,13 @@ For more detailed information, please refer to the full documentation.
         # Show/hide Imagen reference widget based on provider and model
         self._update_imagen_reference_visibility()
 
+        # Show/hide Background selector for GPT Image 1 (OpenAI)
+        if hasattr(self, 'background_group') and self.background_group:
+            is_gpt_image_1 = model_id == "gpt-image-1" or (model_name and "gpt-image-1" in model_name.lower())
+            self.background_group.setVisible(is_gpt_image_1)
+            if is_gpt_image_1:
+                self.logger.info("GPT Image 1 selected - showing background selector")
+
     def _check_nano_banana_pro_requirements(self, model_id: str):
         """Check if Nano Banana Pro model has proper API key auth configured.
 
@@ -5042,7 +5078,16 @@ For more detailed information, please refer to the full documentation.
                 kwargs['steps'] = self.steps_spin.value()
             if hasattr(self, 'guidance_spin'):
                 kwargs['cfg_scale'] = self.guidance_spin.value()
-        
+
+        # Get background setting for GPT Image 1 (OpenAI)
+        if (self.current_provider.lower() == "openai" and
+            model == "gpt-image-1" and
+            hasattr(self, 'background_combo') and self.background_combo):
+            background_text = self.background_combo.currentText().lower()
+            if background_text != "default":
+                kwargs['background'] = background_text
+                self._append_to_console(f"GPT Image 1 Background: {background_text}", "#66ccff")
+
         # Add reference image if enabled and available (Google Gemini only)
         if (self.current_provider.lower() == "google" and
             hasattr(self, 'reference_image_data') and
