@@ -11,7 +11,7 @@ from datetime import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTabWidget, QMessageBox, QTableWidgetItem
 )
-from PySide6.QtCore import QThread, Signal, Slot, Qt
+from PySide6.QtCore import QThread, Signal, Slot, Qt, QSettings
 from PySide6.QtGui import QPixmap
 
 from gui.common.dialog_manager import get_dialog_manager
@@ -25,6 +25,7 @@ from core.video.config import VideoConfig
 from .workspace_widget import WorkspaceWidget
 from .history_tab import HistoryTab
 from .reference_selector_dialog import ReferenceSelectorDialog
+from .lipsync_widget import LipSyncWidget
 
 
 class VideoGenerationThread(QThread):
@@ -1597,10 +1598,35 @@ class VideoProjectTab(QWidget):
         else:
             self.logger.info("UI STEP 11: No project to sync with reference library")
 
+        # Create lip-sync tab
+        self.logger.info("UI STEP 12: Creating LipSyncWidget...")
+        try:
+            self.lipsync_widget = LipSyncWidget()
+            self.logger.info("UI STEP 12: LipSyncWidget created successfully")
+        except Exception as e:
+            self.logger.error(f"UI STEP 12: ERROR creating LipSyncWidget: {e}", exc_info=True)
+            raise
+
+        self.logger.info("UI STEP 13: Connecting lip-sync signals...")
+        self.lipsync_widget.generation_finished.connect(self.on_lipsync_finished)
+        self.lipsync_widget.generation_failed.connect(self.on_lipsync_failed)
+        self.tab_widget.addTab(self.lipsync_widget, "Lip-Sync")
+        self.logger.info("UI STEP 13: Lip-sync tab added")
+
         # Add tabs to layout
-        self.logger.info("UI STEP 12: Adding tab widget to layout...")
+        self.logger.info("UI STEP 14: Adding tab widget to layout...")
         layout.addWidget(self.tab_widget)
-        self.logger.info("UI STEP 12: Tab widget added to layout - init_ui COMPLETE")
+        self.logger.info("UI STEP 14: Tab widget added to layout")
+
+        # Connect sub-tab change signal to save state
+        self.logger.info("UI STEP 15: Connecting sub-tab change signal...")
+        self.tab_widget.currentChanged.connect(self._on_sub_tab_changed)
+        self.logger.info("UI STEP 15: Sub-tab change signal connected")
+
+        # Restore last active sub-tab
+        self.logger.info("UI STEP 16: Restoring last active sub-tab...")
+        self._restore_sub_tab_index()
+        self.logger.info("UI STEP 16: Sub-tab restoration complete - init_ui COMPLETE")
     
     def set_provider(self, provider_name: str):
         """Set the image provider and sync with workspace widget."""
@@ -1621,6 +1647,30 @@ class VideoProjectTab(QWidget):
         """Handle LLM provider change from workspace widget."""
         # Forward the signal to the main window
         self.llm_provider_changed.emit(provider_name, model_name)
+
+    def _on_sub_tab_changed(self, index: int):
+        """Handle sub-tab change and save the current index."""
+        self._save_sub_tab_index(index)
+
+    def _save_sub_tab_index(self, index: int):
+        """Save the current sub-tab index to QSettings."""
+        settings = QSettings("ImageAI", "VideoProjects")
+        settings.setValue("last_sub_tab_index", index)
+        tab_name = self.tab_widget.tabText(index) if index < self.tab_widget.count() else "unknown"
+        self.logger.debug(f"Saved video sub-tab index: {index} ({tab_name})")
+
+    def _restore_sub_tab_index(self):
+        """Restore the last active sub-tab index from QSettings."""
+        settings = QSettings("ImageAI", "VideoProjects")
+        last_index = settings.value("last_sub_tab_index", 0, type=int)
+
+        # Validate the index is within bounds
+        if 0 <= last_index < self.tab_widget.count():
+            self.tab_widget.setCurrentIndex(last_index)
+            tab_name = self.tab_widget.tabText(last_index)
+            self.logger.info(f"Restored video sub-tab index: {last_index} ({tab_name})")
+        else:
+            self.logger.debug(f"Skipped invalid sub-tab index {last_index}, staying on default")
 
     def on_project_changed(self, project: VideoProject):
         """Handle project change from workspace"""
@@ -1895,6 +1945,39 @@ class VideoProjectTab(QWidget):
         if hasattr(self.workspace_widget, 'refresh_references'):
             self.workspace_widget.refresh_references()
         self.logger.info("Reference library updated")
+
+    def on_lipsync_finished(self, output_path: str):
+        """Handle lip-sync generation completion"""
+        self.logger.info(f"Lip-sync generation complete: {output_path}")
+        QMessageBox.information(
+            self,
+            "Lip-Sync Complete",
+            f"Lip-synced video has been generated:\n{output_path}"
+        )
+
+    def on_lipsync_failed(self, error_message: str):
+        """Handle lip-sync generation failure"""
+        self.logger.error(f"Lip-sync generation failed: {error_message}")
+        QMessageBox.warning(
+            self,
+            "Lip-Sync Failed",
+            f"Failed to generate lip-synced video:\n{error_message}"
+        )
+
+    def send_video_to_lipsync(self, video_path: Path):
+        """
+        Send a video clip to the lip-sync tab for processing.
+
+        This allows generated video clips to be easily sent for lip-sync.
+        """
+        if hasattr(self, 'lipsync_widget') and video_path.exists():
+            self.lipsync_widget.set_video_from_project(video_path)
+            # Switch to lip-sync tab
+            for i in range(self.tab_widget.count()):
+                if self.tab_widget.tabText(i) == "Lip-Sync":
+                    self.tab_widget.setCurrentIndex(i)
+                    break
+            self.logger.info(f"Sent video to lip-sync tab: {video_path}")
 
     def generate_reference_image_sync(self, prompt: str, output_dir: Path, filename_prefix: str, reference_image: Optional[Path] = None) -> Optional[Path]:
         """

@@ -264,7 +264,8 @@ class MainWindow(QMainWindow):
         self.current_image_data: Optional[bytes] = None
         self._last_template_context: Optional[dict] = None
         self._video_tab_loaded = False  # Track lazy loading of video tab
-        self.upscaling_settings = {}  # Initialize upscaling settings
+        # Default upscaling settings - Lanczos enabled by default for auto-upscale
+        self.upscaling_settings = {'method': 'lanczos', 'enabled': True}
 
         # Initialize Midjourney watcher
         self.midjourney_watcher = None
@@ -4672,9 +4673,13 @@ For more detailed information, please refer to the full documentation.
         return None, None
 
     def _get_provider_max_resolution(self) -> int:
-        """Get maximum resolution for current provider."""
+        """Get maximum resolution for current provider and model."""
         if self.current_provider.lower() == "google":
-            return 1024
+            # Check if using Nano Banana Pro (NBP / Gemini 3 Pro) which supports up to 4K
+            if hasattr(self, 'current_model') and self.current_model:
+                if "gemini-3" in self.current_model:
+                    return 4096  # NBP supports up to 4K
+            return 1024  # Standard Gemini models
         elif self.current_provider.lower() == "openai":
             return 1792
         elif self.current_provider.lower() == "stability":

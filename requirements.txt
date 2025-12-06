@@ -1,6 +1,6 @@
 protobuf>=3.20.3  # GetPrototype compatibility handled by runtime patch in main.py
 pillow
-google-genai
+google-genai>=1.49.0  # v1.49.0+ required for image_size parameter (NBP 1K/2K/4K output)
 google-cloud-aiplatform
 PySide6
 openai

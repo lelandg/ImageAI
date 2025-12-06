@@ -62,7 +62,11 @@
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline --since=\"2025-11-01\")",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI show f01821b --stat)",
       "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI show df40bf2 --stat)",
-      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI show 80e3544 --stat)"
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI show 80e3544 --stat)",
+      "Bash(/mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/pip install:*)",
+      "Bash(.venv_linux/bin/pip list:*)",
+      "Bash(gcloud config get-value:*)",
+      "Bash(.venv_linux/bin/python3:*)"
     ],
     "deny": [],
     "ask": []

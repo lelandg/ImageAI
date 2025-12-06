@@ -430,12 +430,15 @@ class ResolutionSelector(QWidget):
         size_layout = QHBoxLayout()
         size_layout.setSpacing(5)
 
+        # Maximum resolution for upscaling (Real-ESRGAN 4x from 4096 = 16384)
+        self.UPSCALE_MAX = 16384
+
         self.width_label = QLabel("Width:")
         self.width_spin = QSpinBox()
-        self.width_spin.setRange(64, 4096)  # Min 64 for small presets (Discord icons)
+        self.width_spin.setRange(64, self.UPSCALE_MAX)  # Always allow up to upscale max
         self.width_spin.setSingleStep(128)
         self.width_spin.setValue(1024)
-        self.width_spin.setToolTip("Width - height will be calculated from aspect ratio")
+        self.width_spin.setToolTip("Width - height will be calculated from aspect ratio\nValues > model max will be auto-upscaled")
         self.width_spin.setSuffix(" px")
         # Connect BOTH valueChanged and editing events
         self.width_spin.valueChanged.connect(lambda v: self._on_width_value_changed(v))
@@ -443,10 +446,10 @@ class ResolutionSelector(QWidget):
 
         self.height_label = QLabel("Height:")
         self.height_spin = QSpinBox()
-        self.height_spin.setRange(64, 4096)  # Min 64 for small presets (Discord Bot Banner 680x240)
+        self.height_spin.setRange(64, self.UPSCALE_MAX)  # Always allow up to upscale max
         self.height_spin.setSingleStep(128)
         self.height_spin.setValue(576)  # Will be calculated
-        self.height_spin.setToolTip("Height - width will be calculated from aspect ratio")
+        self.height_spin.setToolTip("Height - width will be calculated from aspect ratio\nValues > model max will be auto-upscaled")
         self.height_spin.setSuffix(" px")
         # Connect BOTH valueChanged and editing events
         self.height_spin.valueChanged.connect(lambda v: self._on_height_value_changed(v))
@@ -550,15 +553,16 @@ class ResolutionSelector(QWidget):
                 else:
                     info = f"Free resolution: {self._custom_width}×{self._custom_height}"
 
-                # Add upscaling notice only if dimensions exceed model's native max
-                current_max = max(self._custom_width, self._custom_height)
-                if current_max > max_native:
-                    info += f" • Will upscale (model max: {max_native}px)"
+                # Add upscaling notice if EITHER dimension exceeds model's native max
+                max_dim = max(self._custom_width, self._custom_height)
+                if self._custom_width > max_native or self._custom_height > max_native:
+                    # Always show upscaling info - spinboxes allow beyond model max
+                    info += f" • Auto-upscale from {max_native}px"
                 elif self.model and "gemini-3" in self.model:
                     # Show which quality tier for Nano Banana Pro
-                    if current_max <= 1024:
+                    if max_dim <= 1024:
                         info += " • 1K quality"
-                    elif current_max <= 2048:
+                    elif max_dim <= 2048:
                         info += " • 2K quality"
                     else:
                         info += " • 4K quality"
@@ -872,12 +876,11 @@ class ResolutionSelector(QWidget):
 
         new_max = self._get_provider_max()
 
-        # Update spinbox maximum values for this model
-        self.width_spin.setMaximum(new_max)
-        self.height_spin.setMaximum(new_max)
+        # Note: Spinbox max is always UPSCALE_MAX (16384) to allow auto-upscaling
+        # Model max is only used for info display and default calculations
 
         if old_max != new_max:
-            logger.info(f"Model changed: {old_model} → {model} (max resolution: {old_max} → {new_max}px)")
+            logger.info(f"Model changed: {old_model} → {model} (native max: {old_max} → {new_max}px)")
 
             # Auto-adjust resolution to new model's max for current aspect ratio
             # This ensures users get optimal quality when selecting high-res models
@@ -887,22 +890,19 @@ class ResolutionSelector(QWidget):
             self._update_info_text()
 
     def update_max_resolution(self, max_resolution: int):
-        """Update the maximum resolution dynamically (e.g., for NBP quality tiers).
+        """Update the model's native max resolution (e.g., for NBP quality tiers).
 
-        When NBP quality tier changes (1K/2K/4K), this sets the resolution
-        to the max for the current aspect ratio.
+        When NBP quality tier changes (1K/2K/4K), this updates the native max
+        for info display. Spinbox max remains at UPSCALE_MAX to allow auto-upscaling.
 
         Args:
-            max_resolution: New maximum resolution in pixels (1024, 2048, 4096)
+            max_resolution: Model's native max resolution in pixels (1024, 2048, 4096)
         """
         self._nbp_max_override = max_resolution
-        logger.info(f"NBP quality tier changed - setting max resolution to {max_resolution}px")
+        logger.info(f"NBP quality tier changed - native max now {max_resolution}px (upscale max: {self.UPSCALE_MAX}px)")
 
-        # Update spinbox maximum first
-        self.width_spin.setMaximum(max_resolution)
-        self.height_spin.setMaximum(max_resolution)
-
-        # Set resolution to max for current aspect ratio
+        # Note: Spinbox max stays at UPSCALE_MAX - we don't cap it
+        # Set resolution to the model's native max for optimal quality
         self._set_to_max_for_aspect_ratio()
 
         # Store the new values
@@ -911,6 +911,15 @@ class ResolutionSelector(QWidget):
 
         self._update_info_text()
         self.resolutionChanged.emit("auto")
+
+    def set_upscale_mode(self, enabled: bool, upscale_max: int = 16384):
+        """Deprecated: Spinboxes always allow up to UPSCALE_MAX now.
+
+        This method is kept for backward compatibility but does nothing.
+        Resolution spinboxes always allow values up to 16384px, and the
+        info text automatically shows upscaling info when target > model max.
+        """
+        pass  # No-op - spinboxes always at max, info text auto-updates
 
     def _get_model_max(self, model: str) -> int:
         """Get max resolution for a specific model."""

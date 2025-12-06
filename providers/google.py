@@ -688,21 +688,14 @@ class GoogleProvider(ImageProvider):
             except AttributeError as e:
                 logger.warning(f"Search Grounding not available in this SDK version: {e}")
 
-        # For Nano Banana Pro, add media_resolution parameter for quality control
-        # Maps to MediaResolution enum: LOW (1K), MEDIUM (2K), HIGH (4K)
-        # NOTE: media_resolution is only supported on Vertex AI, not Google AI Studio API
-        if is_nano_banana_pro and self.auth_mode == "gcloud":
-            # Map our internal quality tier to MediaResolution enum values
-            media_res_map = {
-                '1k': types.MediaResolution.MEDIA_RESOLUTION_LOW,
-                '2k': types.MediaResolution.MEDIA_RESOLUTION_MEDIUM,
-                '4k': types.MediaResolution.MEDIA_RESOLUTION_HIGH
-            }
-            media_res = media_res_map.get(output_quality, types.MediaResolution.MEDIA_RESOLUTION_MEDIUM)
-            config_params['media_resolution'] = media_res
-            logger.info(f"Nano Banana Pro: Setting media_resolution={media_res} for {output_quality.upper()} quality (Vertex AI)")
-        elif is_nano_banana_pro:
-            logger.info(f"Nano Banana Pro: media_resolution not supported on AI Studio API, using default quality")
+        # Store NBP image_size for use in ImageConfig below
+        # NOTE: image_size controls OUTPUT resolution (1K, 2K, 4K) and works with both API key and gcloud
+        # This is different from media_resolution which controls INPUT image processing tokens
+        nbp_image_size = None
+        if is_nano_banana_pro:
+            # Map our internal quality tier to API image_size values (must be uppercase)
+            nbp_image_size = output_quality.upper()  # '1K', '2K', or '4K'
+            logger.info(f"Nano Banana Pro: Will set image_size={nbp_image_size} for {output_quality.upper()} quality output")
 
         # Create the proper config object using types
         # This is required for aspect_ratio to work with the new SDK
@@ -719,15 +712,18 @@ class GoogleProvider(ImageProvider):
             if hasattr(types, 'ImageConfig'):
                 try:
                     logger.info("Attempting to use types.ImageConfig class")
-                    # ImageConfig only accepts aspect_ratio (not image_size)
-                    # Quality control for NBP is handled via media_resolution in config_params
+                    # Build ImageConfig with aspect_ratio and optional image_size for NBP
+                    image_config_kwargs = {'aspect_ratio': aspect_ratio}
+                    if nbp_image_size:
+                        image_config_kwargs['image_size'] = nbp_image_size
+                        logger.info(f"Adding image_size={nbp_image_size} to ImageConfig for NBP output resolution")
                     config = types.GenerateContentConfig(
                         response_modalities=["IMAGE"],
-                        image_config=types.ImageConfig(aspect_ratio=aspect_ratio),
+                        image_config=types.ImageConfig(**image_config_kwargs),
                         **config_params
                     )
                     config_created = True
-                    logger.info("Successfully created config with ImageConfig")
+                    logger.info(f"Successfully created config with ImageConfig (image_size={nbp_image_size})")
                 except Exception as e:
                     logger.warning(f"Failed to use ImageConfig class: {e}")
 
@@ -735,15 +731,18 @@ class GoogleProvider(ImageProvider):
             if not config_created:
                 try:
                     logger.info("Attempting dict format for image_config")
-                    # image_config dict only accepts aspect_ratio
-                    # Quality control for NBP is handled via media_resolution in config_params
+                    # Build image_config dict with aspect_ratio and optional image_size for NBP
+                    image_config_dict = {"aspect_ratio": aspect_ratio}
+                    if nbp_image_size:
+                        image_config_dict["image_size"] = nbp_image_size
+                        logger.info(f"Adding image_size={nbp_image_size} to dict config for NBP output resolution")
                     config = types.GenerateContentConfig(
                         response_modalities=["IMAGE"],
-                        image_config={"aspect_ratio": aspect_ratio},
+                        image_config=image_config_dict,
                         **config_params
                     )
                     config_created = True
-                    logger.info("Successfully created config with dict format")
+                    logger.info(f"Successfully created config with dict format (image_size={nbp_image_size})")
                 except Exception as e:
                     logger.warning(f"Failed to use dict format: {e}")
 
@@ -761,10 +760,27 @@ class GoogleProvider(ImageProvider):
         else:
             # No aspect ratio specified, use basic config
             logger.info(f"No aspect ratio specified, using default")
-            config = types.GenerateContentConfig(
-                response_modalities=["IMAGE"],
-                **config_params
-            ) if config_params else None
+            # Still add image_size for NBP if available
+            if nbp_image_size:
+                try:
+                    image_config_dict = {"image_size": nbp_image_size}
+                    logger.info(f"Adding image_size={nbp_image_size} for NBP (no aspect ratio)")
+                    config = types.GenerateContentConfig(
+                        response_modalities=["IMAGE"],
+                        image_config=image_config_dict,
+                        **config_params
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to set image_size without aspect_ratio: {e}")
+                    config = types.GenerateContentConfig(
+                        response_modalities=["IMAGE"],
+                        **config_params
+                    ) if config_params else None
+            else:
+                config = types.GenerateContentConfig(
+                    response_modalities=["IMAGE"],
+                    **config_params
+                ) if config_params else None
 
         # Handle reference image(s) if provided
         reference_image = kwargs.get('reference_image')  # Single image (existing)
