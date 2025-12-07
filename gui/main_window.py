@@ -5789,6 +5789,15 @@ For more detailed information, please refer to the full documentation.
         if images:
             self._append_to_console(f"Received {len(images)} image(s)", "#66ccff")
 
+            # Show resolution of received image(s)
+            try:
+                from PIL import Image
+                import io
+                first_img = Image.open(io.BytesIO(images[0]))
+                self._append_to_console(f"  Resolution: {first_img.width} × {first_img.height}", "#66ccff")
+            except Exception as e:
+                logger.warning(f"Could not get image resolution: {e}")
+
             # Process images for scaling/cropping if needed (non-Gemini providers only)
             processed_images = []
             original_paths = []
@@ -5826,22 +5835,30 @@ For more detailed information, please refer to the full documentation.
                         # Check if upscaling is needed
                         from PIL import Image
                         import io
+                        import time
                         from core.upscaling import needs_upscaling, upscale_image
 
                         img = Image.open(io.BytesIO(image_data))
                         # Only upscale if target exceeds provider limits AND image is smaller than target
                         if should_enable_upscaling and needs_upscaling(img.width, img.height, target_width, target_height):
+                            method_name = self.upscaling_settings.get('method', 'lanczos')
                             self._append_to_console(
-                                f"Upscaling from {img.width}x{img.height} to {target_width}x{target_height}...",
+                                f"Upscaling {img.width} × {img.height} → {target_width} × {target_height} ({method_name})...",
                                 "#66ccff"
                             )
+                            upscale_start = time.time()
                             upscaled = upscale_image(
                                 image_data,
                                 target_width,
                                 target_height,
-                                method=self.upscaling_settings.get('method', 'lanczos'),
+                                method=method_name,
                                 model_name=self.upscaling_settings.get('model_name'),
-                                api_key=self.config.get_api_key('stability') if self.upscaling_settings.get('method') == 'stability_api' else None
+                                api_key=self.config.get_api_key('stability') if method_name == 'stability_api' else None
+                            )
+                            upscale_elapsed = time.time() - upscale_start
+                            self._append_to_console(
+                                f"  Upscaling complete ({upscale_elapsed:.1f}s)",
+                                "#00ff00"
                             )
                             upscaled_images.append(upscaled)
                         else:
@@ -5887,7 +5904,9 @@ For more detailed information, please refer to the full documentation.
             # Calculate the cost if estimator is available
             if CostEstimator:
                 try:
-                    generation_cost = CostEstimator.calculate(self.current_provider, settings)
+                    generation_cost = CostEstimator.calculate(
+                        self.current_provider, settings, model=self.current_model
+                    )
                 except:
                     generation_cost = 0.0
             
