@@ -21,7 +21,8 @@ from PySide6.QtWidgets import (
     QSpinBox, QDoubleSpinBox, QTableWidget, QTableWidgetItem,
     QFileDialog, QMessageBox, QSplitter, QProgressBar,
     QCheckBox, QSlider, QHeaderView, QSizePolicy, QDialog,
-    QDialogButtonBox, QListWidget, QListWidgetItem, QInputDialog
+    QDialogButtonBox, QListWidget, QListWidgetItem, QInputDialog,
+    QMenu
 )
 from PySide6.QtCore import Qt, Signal, Slot, QEvent, QPoint, QTimer, QUrl
 from PySide6.QtGui import QPixmap, QImage, QTextOption, QColor, QCursor, QKeySequence
@@ -920,25 +921,57 @@ class WorkspaceWidget(QWidget):
         input_options_layout.setSpacing(5)
         input_options_layout.setContentsMargins(10, 0, 0, 0)  # Indent for hierarchy
 
-        # Scene marker controls
+        # Tag insertion controls
         marker_layout = QHBoxLayout()
-        marker_layout.addWidget(QLabel("Scene Markers:"))
+        marker_layout.addWidget(QLabel("Tags:"))
 
-        self.new_scene_btn = QPushButton("&Insert Scene Marker")  # Alt+I
-        self.new_scene_btn.setToolTip("Insert '=== NEW SCENE: <environment> ===' at cursor position (Alt+I)")
-        self.new_scene_btn.clicked.connect(self._insert_scene_marker)
-        marker_layout.addWidget(self.new_scene_btn)
+        # Insert Tag dropdown button with menu
+        self.insert_tag_btn = QPushButton("&Insert Tag")  # Alt+I
+        self.insert_tag_btn.setToolTip("Insert a tag at cursor position (Alt+I)")
+        self._setup_insert_tag_menu()
+        marker_layout.addWidget(self.insert_tag_btn)
 
-        self.scene_env_input = QLineEdit()
-        self.scene_env_input.setPlaceholderText("Environment (e.g., bedroom, forest...)")
-        self.scene_env_input.setMaximumWidth(250)
-        self.scene_env_input.setToolTip("Environment description for the new scene")
-        marker_layout.addWidget(self.scene_env_input)
+        # Value input for tags that need values
+        self.tag_value_input = QLineEdit()
+        self.tag_value_input.setPlaceholderText("Tag value (e.g., bedroom, slow pan, 0:30...)")
+        self.tag_value_input.setMaximumWidth(250)
+        self.tag_value_input.setToolTip("Value for the tag (optional for some tags)")
+        marker_layout.addWidget(self.tag_value_input)
 
-        self.delete_scene_btn = QPushButton("&Delete Marker at Cursor")  # Alt+D
-        self.delete_scene_btn.setToolTip("Delete scene marker line at cursor position (Alt+D)")
+        self.delete_scene_btn = QPushButton("&Delete Tag at Cursor")  # Alt+D
+        self.delete_scene_btn.setToolTip("Delete tag or scene marker line at cursor position (Alt+D)")
         self.delete_scene_btn.clicked.connect(self._delete_scene_marker)
         marker_layout.addWidget(self.delete_scene_btn)
+
+        # LLM Scene Suggestion button
+        self.suggest_scenes_btn = QPushButton("Suggest Scenes")
+        self.suggest_scenes_btn.setToolTip(
+            "Use LLM to analyze lyrics and suggest scene breaks, camera movements, moods, etc.\n"
+            "Tags are inserted on new lines using {tag: value} format."
+        )
+        self.suggest_scenes_btn.clicked.connect(self._suggest_scenes)
+        marker_layout.addWidget(self.suggest_scenes_btn)
+
+        # Show Time Hints checkbox
+        self.show_time_hints_check = QCheckBox("Show Time Hints")
+        self.show_time_hints_check.setChecked(False)
+        self.show_time_hints_check.setToolTip(
+            "Show time markers from Whisper analysis.\n"
+            "When Whisper data is available, timestamps are read-only.\n"
+            "Otherwise, you can manually add {time: MM:SS} tags."
+        )
+        self.show_time_hints_check.toggled.connect(self._toggle_time_hints)
+        marker_layout.addWidget(self.show_time_hints_check)
+
+        # Inject Whisper Timestamps button
+        self.inject_timestamps_btn = QPushButton("Inject Timestamps")
+        self.inject_timestamps_btn.setToolTip(
+            "Add time tags from Whisper audio analysis.\n"
+            "Requires Whisper extraction to be run first."
+        )
+        self.inject_timestamps_btn.clicked.connect(self._inject_whisper_timestamps)
+        self.inject_timestamps_btn.setEnabled(False)  # Enabled when Whisper data available
+        marker_layout.addWidget(self.inject_timestamps_btn)
 
         marker_layout.addStretch()
         input_options_layout.addLayout(marker_layout)
@@ -1319,9 +1352,9 @@ class WorkspaceWidget(QWidget):
         sync_layout = QHBoxLayout()
         sync_layout.addWidget(QLabel("Sync:"))
         self.sync_mode_combo = QComboBox()
-        self.sync_mode_combo.addItems(["None", "Beat", "Measure", "Section"])
+        self.sync_mode_combo.addItems(["None", "Beat", "Measure", "Section", "Lyrics"])
         self.sync_mode_combo.setEnabled(False)
-        self.sync_mode_combo.setToolTip("Audio sync mode (requires MIDI analysis):\n• None: No sync, manual timing\n• Beat: Sync to individual beats\n• Measure: Sync to musical measures (bars)\n• Section: Sync to song sections (verse, chorus, etc.)")
+        self.sync_mode_combo.setToolTip("Audio sync mode:\n• None: No sync, manual timing\n• Beat: Sync to individual beats (requires MIDI)\n• Measure: Sync to musical measures (requires MIDI)\n• Section: Sync to song sections (requires MIDI)\n• Lyrics: Sync to word timestamps (requires Whisper)")
         sync_layout.addWidget(self.sync_mode_combo)
         
         sync_layout.addWidget(QLabel("Snap:"))
@@ -1337,11 +1370,34 @@ class WorkspaceWidget(QWidget):
         self.snap_strength_slider.valueChanged.connect(lambda v: self.snap_label.setText(f"{v}%"))
         sync_layout.addWidget(self.snap_label)
         
-        self.extract_lyrics_btn = QPushButton("Extract Lyrics")
+        self.extract_lyrics_btn = QPushButton("From MIDI")
+        self.extract_lyrics_btn.setToolTip("Extract lyrics from MIDI file (requires MIDI with lyrics track)")
         self.extract_lyrics_btn.clicked.connect(self.extract_midi_lyrics)
         self.extract_lyrics_btn.setEnabled(False)
         sync_layout.addWidget(self.extract_lyrics_btn)
-        
+
+        self.extract_audio_btn = QPushButton("From Audio (Whisper)")
+        self.extract_audio_btn.setToolTip("Extract lyrics and timing from audio using Whisper AI\n"
+                                          "This provides word-level timestamps for precise scene timing")
+        self.extract_audio_btn.clicked.connect(self.extract_audio_lyrics)
+        self.extract_audio_btn.setEnabled(False)
+        sync_layout.addWidget(self.extract_audio_btn)
+
+        # Auto-suggest scenes checkbox
+        self.auto_suggest_scenes_check = QCheckBox("Auto-suggest")
+        self.auto_suggest_scenes_check.setChecked(False)
+        self.auto_suggest_scenes_check.setToolTip(
+            "Automatically run 'Suggest Scenes' after Whisper extraction\n"
+            "Uses LLM to add scene tags ({scene:}, {camera:}, etc.) to extracted lyrics"
+        )
+        self.auto_suggest_scenes_check.stateChanged.connect(self._on_auto_suggest_changed)
+        sync_layout.addWidget(self.auto_suggest_scenes_check)
+
+        # Timestamp status indicator
+        self.timestamp_status_label = QLabel("")
+        self.timestamp_status_label.setStyleSheet("color: #666; font-size: 9pt;")
+        sync_layout.addWidget(self.timestamp_status_label)
+
         sync_layout.addStretch()
         layout.addLayout(sync_layout)
         
@@ -1475,11 +1531,11 @@ class WorkspaceWidget(QWidget):
 
         layout.addLayout(controls_layout)
         
-        # Scene table (11 columns - optimized for Veo 3.1)
+        # Scene table (13 columns - optimized for Veo 3.1 with lip-sync)
         self.scene_table = QTableWidget()
-        self.scene_table.setColumnCount(12)
+        self.scene_table.setColumnCount(13)
         self.scene_table.setHorizontalHeaderLabels([
-            "#", "Start Frame", "End Frame", "Ref Images", "🎬", "Time", "⤵️",
+            "#", "Start Frame", "End Frame", "Ref Images", "🎬", "🎤", "Time", "⤵️",
             "Source", "Environment", "Video Prompt", "Start Prompt", "End Prompt (Optional)"
         ])
         # Set size policy to expand vertically to show more rows
@@ -1497,19 +1553,20 @@ class WorkspaceWidget(QWidget):
         self.scene_table.setTextElideMode(Qt.ElideRight)
         # Install event filter to detect context menus
         self.scene_table.installEventFilter(self)
-        # Set tooltips for headers (12 columns: 0-11)
+        # Set tooltips for headers (13 columns: 0-12)
         self.scene_table.horizontalHeaderItem(0).setToolTip("Scene number")
         self.scene_table.horizontalHeaderItem(1).setToolTip("Start Frame\nFirst frame of video (hover for preview, click to view, right-click for options)")
         self.scene_table.horizontalHeaderItem(2).setToolTip("End Frame\nLast frame of video (hover for preview, click to view, right-click for options)\nLeave empty for Veo 3 single-frame video")
         self.scene_table.horizontalHeaderItem(3).setToolTip("Reference Images (Veo 3)\nUp to 3 images for visual continuity (style/character/environment)\nAuto-links previous scene's last frame when enabled")
         self.scene_table.horizontalHeaderItem(4).setToolTip("Generate Video\nClick to view first frame when video exists, double-click to regenerate")
-        # Column 5 (Time): No tooltip
-        self.scene_table.horizontalHeaderItem(6).setToolTip("Wrap\nToggle prompt text wrapping for this row")
-        self.scene_table.horizontalHeaderItem(7).setToolTip("Source\nOriginal lyrics or text (hover for full text)")
-        self.scene_table.horizontalHeaderItem(8).setToolTip("Environment\nLocation/setting for this scene (e.g., 'bedroom', 'abstract', 'forest')\nPassed to LLM for consistent environment across scenes")
-        self.scene_table.horizontalHeaderItem(9).setToolTip("Video Prompt\nAI-enhanced prompt with camera movement for video generation (✨ LLM + ↶↷ undo/redo)")
-        self.scene_table.horizontalHeaderItem(10).setToolTip("Start Prompt\nAI-enhanced prompt for start frame generation (✨ LLM + ↶↷ undo/redo)")
-        self.scene_table.horizontalHeaderItem(11).setToolTip("End Prompt\nOptional: describe the ending frame for Veo 3.1 transition (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(5).setToolTip("Lip-Sync\nEnable MuseTalk lip-sync for this scene\nSyncs character lips to audio using word timestamps")
+        # Column 6 (Time): No tooltip
+        self.scene_table.horizontalHeaderItem(7).setToolTip("Wrap\nToggle prompt text wrapping for this row")
+        self.scene_table.horizontalHeaderItem(8).setToolTip("Source\nOriginal lyrics or text (hover for full text)")
+        self.scene_table.horizontalHeaderItem(9).setToolTip("Environment\nLocation/setting for this scene (e.g., 'bedroom', 'abstract', 'forest')\nPassed to LLM for consistent environment across scenes")
+        self.scene_table.horizontalHeaderItem(10).setToolTip("Video Prompt\nAI-enhanced prompt with camera movement for video generation (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(11).setToolTip("Start Prompt\nAI-enhanced prompt for start frame generation (✨ LLM + ↶↷ undo/redo)")
+        self.scene_table.horizontalHeaderItem(12).setToolTip("End Prompt\nOptional: describe the ending frame for Veo 3.1 transition (✨ LLM + ↶↷ undo/redo)")
         # Configure columns - all resizable by user
         header = self.scene_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Interactive)  # All columns user-resizable
@@ -1517,19 +1574,20 @@ class WorkspaceWidget(QWidget):
         # Set fixed row height to match PromptFieldWidget button height
         self.scene_table.verticalHeader().setDefaultSectionSize(30)  # Match LLM button height
         self.scene_table.verticalHeader().setSectionResizeMode(QHeaderView.Fixed)
-        # Set initial widths for 12-column layout (with Environment column)
+        # Set initial widths for 13-column layout (with lip-sync and Environment)
         header.resizeSection(0, 35)   # Scene # - minimized
         header.resizeSection(1, 70)   # Start Frame - FrameButton widget
         header.resizeSection(2, 70)   # End Frame - FrameButton widget
         header.resizeSection(3, 160)  # Ref Images - ReferenceImagesWidget (3 buttons)
         header.resizeSection(4, 40)   # Video button (🎬)
-        header.resizeSection(5, 45)   # Time - narrow
-        header.resizeSection(6, 40)   # Wrap button (⤵️) - minimized
-        header.resizeSection(7, 120)  # Source - compact
-        header.resizeSection(8, 120)  # Environment - compact (editable text field)
-        header.resizeSection(9, 360)  # Video Prompt - wide (text + ✨ + ↶↷)
-        header.resizeSection(10, 360) # Start Prompt - wide (text + ✨ + ↶↷)
-        header.resizeSection(11, 360) # End Prompt - wide (text + ✨ + ↶↷)
+        header.resizeSection(5, 35)   # Lip-sync checkbox (🎤) - minimized
+        header.resizeSection(6, 45)   # Time - narrow
+        header.resizeSection(7, 40)   # Wrap button (⤵️) - minimized
+        header.resizeSection(8, 120)  # Source - compact
+        header.resizeSection(9, 120)  # Environment - compact (editable text field)
+        header.resizeSection(10, 360) # Video Prompt - wide (text + ✨ + ↶↷)
+        header.resizeSection(11, 360) # Start Prompt - wide (text + ✨ + ↶↷)
+        header.resizeSection(12, 360) # End Prompt - wide (text + ✨ + ↶↷)
         # Enforce minimum width for Ref Images column (col 3) - must fit 3 buttons
         # 3 buttons × 50px (min) + 2 spacings × 2px + margins 4px = 158px minimum
         header.sectionResized.connect(self._on_column_resized)
@@ -1615,15 +1673,17 @@ class WorkspaceWidget(QWidget):
         self.sora_model_combo = QComboBox()
         self.sora_model_combo.addItems([
             "sora-2",
+            "sora-2-2025-12-08",
             "sora-2-pro"
         ])
         self.sora_model_combo.setCurrentIndex(0)
         self.sora_model_combo.setVisible(False)  # Hidden by default
-        self.sora_model_combo.setMinimumWidth(150)
+        self.sora_model_combo.setMinimumWidth(180)
         self.sora_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.sora_model_combo.setToolTip(
             "Sora model:\n"
-            "- sora-2: Standard quality (720p, $0.10/sec)\n"
+            "- sora-2: Standard quality, latest (720p, $0.10/sec)\n"
+            "- sora-2-2025-12-08: Dec 2025 snapshot (720p, $0.10/sec)\n"
             "- sora-2-pro: Pro quality (720p/1080p, $0.30-0.50/sec)"
         )
         self.sora_model_combo.currentTextChanged.connect(self.on_sora_model_changed)
@@ -2028,37 +2088,366 @@ class WorkspaceWidget(QWidget):
         except Exception as e:
             self.logger.error(f"Error updating recent projects: {e}")
 
-    def _insert_scene_marker(self):
-        """Insert scene marker at cursor position"""
-        environment = self.scene_env_input.text().strip() or "untitled"
-        marker_text = f"=== NEW SCENE: {environment} ==="
+    def _on_auto_suggest_changed(self, state):
+        """Handle auto-suggest checkbox state change"""
+        if self.current_project and not self._loading_project:
+            self.current_project.auto_suggest_scenes = bool(state)
+            self.save_project()
+            self.logger.info(f"Auto-suggest scenes: {bool(state)}")
+
+    def _setup_insert_tag_menu(self):
+        """Set up the dropdown menu for tag insertion"""
+        menu = QMenu(self)
+
+        # Define all tag types with their descriptions
+        tag_types = [
+            ("scene", "Scene/Environment", "Set scene environment (e.g., bedroom, forest)"),
+            ("camera", "Camera Movement", "Camera instruction (e.g., slow pan, zoom in)"),
+            ("mood", "Mood/Atmosphere", "Emotional atmosphere (e.g., melancholy, joyful)"),
+            ("focus", "Visual Focus", "What to focus on (e.g., singer, hands)"),
+            ("transition", "Transition", "Scene transition (e.g., fade, cut, dissolve)"),
+            ("style", "Visual Style", "Style hint (e.g., noir, vintage)"),
+            ("tempo", "Tempo/Energy", "Energy level (e.g., building, calm)"),
+            ("time", "Time Marker", "Timestamp (e.g., 0:30, 1:15.5)"),
+            ("lipsync", "Lip-Sync", "Enable lip-sync for this scene (no value needed)"),
+        ]
+
+        for tag_name, display_name, tooltip in tag_types:
+            action = menu.addAction(f"{display_name} {{{tag_name}:}}")
+            action.setToolTip(tooltip)
+            action.setData(tag_name)
+            action.triggered.connect(lambda checked, t=tag_name: self._insert_tag(t))
+
+        self.insert_tag_btn.setMenu(menu)
+
+    def _insert_tag(self, tag_type: str):
+        """Insert a tag at cursor position"""
+        value = self.tag_value_input.text().strip()
+
+        # Some tags don't need values
+        boolean_tags = {'lipsync'}
+
+        if tag_type in boolean_tags:
+            tag_text = f"{{{tag_type}}}"
+        elif value:
+            tag_text = f"{{{tag_type}: {value}}}"
+        else:
+            # Prompt for value if not provided
+            if tag_type == 'scene':
+                value = "untitled"
+            elif tag_type == 'time':
+                value = "0:00"
+            else:
+                value = ""
+
+            if value:
+                tag_text = f"{{{tag_type}: {value}}}"
+            else:
+                tag_text = f"{{{tag_type}: }}"
 
         cursor = self.input_text.textCursor()
-        cursor.insertText(f"\n{marker_text}\n")
+        # Insert just the tag, no extra whitespace
+        cursor.insertText(tag_text)
 
-        # Clear the environment input
-        self.scene_env_input.clear()
+        # Clear the value input
+        self.tag_value_input.clear()
 
-        self.logger.info(f"Inserted scene marker: {marker_text}")
+        self.logger.info(f"Inserted tag: {tag_text}")
+
+    def _insert_scene_marker(self):
+        """Insert scene marker at cursor position - legacy method for compatibility"""
+        self._insert_tag('scene')
 
     def _delete_scene_marker(self):
-        """Delete scene marker line at cursor position"""
+        """Delete tag at cursor position (any tag type or legacy scene marker)"""
         cursor = self.input_text.textCursor()
         cursor.select(cursor.LineUnderCursor)
         line_text = cursor.selectedText().strip()
 
-        # Check if this line is a scene marker
+        # Check if this line contains any tag
         import re
-        if re.match(r'^===\s*NEW SCENE:.*===$', line_text, re.IGNORECASE):
+        # Match any tag format {tag: value} or {tag}
+        tag_pattern = re.compile(r'\{([a-zA-Z_-]+)(?:\s*:\s*[^}]*)?\}', re.IGNORECASE)
+        # Legacy === NEW SCENE: ... ===
+        is_legacy_format = re.match(r'^===\s*NEW SCENE:.*===$', line_text, re.IGNORECASE)
+
+        tag_match = tag_pattern.search(line_text)
+
+        if tag_match:
+            # Remove just the tag, not the whole line (unless line is only the tag)
+            tag_text = tag_match.group(0)
+            remaining = tag_pattern.sub('', line_text).strip()
+
+            if remaining:
+                # Replace line with remaining text (tag removed)
+                cursor.removeSelectedText()
+                cursor.insertText(remaining)
+                self.logger.info(f"Removed tag '{tag_text}' from line")
+            else:
+                # Line was only the tag, remove the whole line
+                cursor.removeSelectedText()
+                cursor.deletePreviousChar()  # Remove the newline
+                self.logger.info(f"Deleted tag line: {tag_text}")
+        elif is_legacy_format:
             cursor.removeSelectedText()
             cursor.deletePreviousChar()  # Remove the newline
-            self.logger.info(f"Deleted scene marker: {line_text}")
+            self.logger.info(f"Deleted legacy scene marker: {line_text}")
         else:
             from gui.utils.dialog_manager import get_dialog_manager
             dialog_manager = get_dialog_manager(self)
-            dialog_manager.show_error("Not a Scene Marker",
-                                     "Cursor is not on a scene marker line.\n\n"
-                                     "Scene markers have the format: === NEW SCENE: <environment> ===")
+            dialog_manager.show_error("No Tag Found",
+                                     "Cursor is not on a line with a tag.\n\n"
+                                     "Tags have the format: {tag: value} or {tag}")
+
+    def _toggle_time_hints(self, checked: bool):
+        """Toggle display of time hints in the input text"""
+        if checked and self.current_project and self.current_project.word_timestamps:
+            # Whisper data available - offer to inject timestamps
+            dialog_manager = get_dialog_manager(self)
+            result = dialog_manager.show_question(
+                "Whisper Timestamps Available",
+                "Whisper timing data is available. Would you like to inject "
+                "time tags into the lyrics?\n\n"
+                "This will add {time: MM:SS} tags at appropriate intervals.",
+                buttons=["Yes", "No"]
+            )
+            if result == "Yes":
+                self._inject_whisper_timestamps()
+        elif checked:
+            self._log_to_console("Time hints enabled. Add {time: MM:SS} tags manually or run Whisper extraction.", "INFO")
+
+    def _inject_whisper_timestamps(self):
+        """Inject time tags from Whisper word timestamps"""
+        if not self.current_project:
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Project", "Please load or create a project first.")
+            return
+
+        if not self.current_project.word_timestamps:
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning(
+                "No Whisper Data",
+                "No Whisper timing data available.\n\n"
+                "Please run 'Extract Lyrics' from the audio panel first to analyze the audio."
+            )
+            return
+
+        # Get current text
+        text = self.input_text.toPlainText()
+        if not text.strip():
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Text", "Please enter lyrics or text first.")
+            return
+
+        # Check if time tags already exist
+        from core.video.tag_parser import TagParser, inject_whisper_timestamps
+        parser = TagParser()
+        existing_times = parser.count_tags(text).get('time', 0)
+
+        if existing_times > 0:
+            dialog_manager = get_dialog_manager(self)
+            result = dialog_manager.show_question(
+                "Time Tags Exist",
+                f"Found {existing_times} existing time tags.\n\n"
+                "What would you like to do?",
+                buttons=["Replace All", "Keep Existing", "Cancel"]
+            )
+            if result == "Cancel" or result is None:
+                return
+            elif result == "Replace All":
+                # Remove existing time tags
+                result_parsed = parser.parse(text)
+                # Filter out time tags and rebuild
+                clean_lines = []
+                for line in text.split('\n'):
+                    # Remove {time: ...} from this line
+                    import re
+                    cleaned = re.sub(r'\{time:\s*[^}]*\}\s*', '', line)
+                    clean_lines.append(cleaned)
+                text = '\n'.join(clean_lines)
+
+        # Inject timestamps
+        annotated_text = inject_whisper_timestamps(
+            text,
+            self.current_project.word_timestamps,
+            interval_seconds=5.0,  # Add timestamp every ~5 seconds
+            at_line_starts=True
+        )
+
+        # Update the text
+        self.input_text.setPlainText(annotated_text)
+        self.show_time_hints_check.setChecked(True)
+
+        # Count how many were added
+        new_times = parser.count_tags(annotated_text).get('time', 0)
+        self._log_to_console(f"Injected {new_times} time tags from Whisper data", "INFO")
+        self.logger.info(f"Injected {new_times} time tags from Whisper word timestamps")
+
+    def _update_whisper_ui_state(self):
+        """Update UI elements based on Whisper data availability"""
+        has_whisper = (
+            self.current_project is not None and
+            bool(self.current_project.word_timestamps)
+        )
+        self.inject_timestamps_btn.setEnabled(has_whisper)
+
+        if has_whisper:
+            count = len(self.current_project.word_timestamps)
+            self.inject_timestamps_btn.setToolTip(
+                f"Add time tags from Whisper audio analysis.\n"
+                f"{count} word timestamps available."
+            )
+        else:
+            self.inject_timestamps_btn.setToolTip(
+                "Add time tags from Whisper audio analysis.\n"
+                "Requires Whisper extraction to be run first."
+            )
+
+    def _suggest_scenes(self):
+        """Use LLM to suggest scene tags based on lyrics"""
+        text = self.input_text.toPlainText()
+        if not text.strip():
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Text", "Please enter lyrics or text first.")
+            return
+
+        # Check for existing tags
+        from core.video.tag_parser import TagParser
+        tag_parser = TagParser()
+
+        if tag_parser.has_tags(text):
+            tag_counts = tag_parser.count_tags(text)
+            total_tags = sum(tag_counts.values())
+            tag_summary = ", ".join(f"{k}: {v}" for k, v in tag_counts.items())
+
+            dialog_manager = get_dialog_manager(self)
+            result = dialog_manager.show_question(
+                "Tags Already Exist",
+                f"Found {total_tags} existing tags ({tag_summary}).\n\n"
+                "What would you like to do?",
+                buttons=["Replace All", "Keep + Add New", "Cancel"]
+            )
+
+            if result == "Cancel" or result is None:
+                return
+            elif result == "Replace All":
+                # Remove existing tags before suggesting
+                text = tag_parser.remove_all_tags(text)
+                self.input_text.setPlainText(text)
+                self._log_to_console("Removed existing tags", "INFO")
+
+        # Get LLM settings
+        llm_provider = self.llm_provider_combo.currentText().lower()
+        llm_model = self.llm_model_combo.currentText()
+
+        if llm_provider == 'none' or not llm_model:
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning(
+                "LLM Required",
+                "Please select an LLM provider and model in the settings above."
+            )
+            return
+
+        # Get style preference
+        style = self._get_current_style() or "cinematic"
+
+        # Get tempo if MIDI is loaded
+        tempo_bpm = None
+        audio_duration = None
+        if self.current_project:
+            if self.current_project.midi_timing_data:
+                tempo_bpm = getattr(self.current_project.midi_timing_data, 'tempo', None)
+            if self.current_project.audio_tracks:
+                audio_track = self.current_project.audio_tracks[0]
+                audio_duration = getattr(audio_track, 'duration', None)
+
+        # Disable button and show progress
+        self.suggest_scenes_btn.setEnabled(False)
+        self.suggest_scenes_btn.setText("Analyzing...")
+        self._log_to_console(f"Suggesting scenes using {llm_provider}/{llm_model}...", "INFO")
+
+        # Run in thread to avoid blocking UI
+        from PySide6.QtCore import QThread, Signal as QtSignal
+
+        class SceneSuggesterWorker(QThread):
+            finished = QtSignal(object)  # SuggestionResult or Exception
+            progress = QtSignal(str, str)  # message, level
+
+            def __init__(self, suggester, text, provider, model, style, tempo, duration):
+                super().__init__()
+                self.suggester = suggester
+                self.text = text
+                self.provider = provider
+                self.model = model
+                self.style = style
+                self.tempo = tempo
+                self.duration = duration
+
+            def run(self):
+                try:
+                    result = self.suggester.suggest_scenes(
+                        lyrics=self.text,
+                        provider=self.provider,
+                        model=self.model,
+                        style=self.style,
+                        tempo_bpm=self.tempo,
+                        audio_duration=self.duration,
+                        console_callback=lambda msg, lvl: self.progress.emit(msg, lvl)
+                    )
+                    self.finished.emit(result)
+                except Exception as e:
+                    self.finished.emit(e)
+
+        # Build LLM config
+        llm_config = {
+            'openai_api_key': self.config.get_api_key('openai'),
+            'anthropic_api_key': self.config.get_api_key('anthropic'),
+            'google_api_key': self.config.get_api_key('google'),
+        }
+
+        from core.video.scene_suggester import SceneSuggester
+        suggester = SceneSuggester(llm_config)
+
+        self._scene_worker = SceneSuggesterWorker(
+            suggester, text, llm_provider, llm_model, style, tempo_bpm, audio_duration
+        )
+        self._scene_worker.progress.connect(lambda msg, lvl: self._log_to_console(msg, lvl))
+        self._scene_worker.finished.connect(self._on_scene_suggestion_finished)
+        self._scene_worker.start()
+
+    def _on_scene_suggestion_finished(self, result):
+        """Handle scene suggestion completion"""
+        self.suggest_scenes_btn.setEnabled(True)
+        self.suggest_scenes_btn.setText("Suggest Scenes")
+
+        if isinstance(result, Exception):
+            self.logger.error(f"Scene suggestion failed: {result}", exc_info=True)
+            self._log_to_console(f"Scene suggestion failed: {result}", "ERROR")
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_error("Suggestion Failed", str(result))
+            return
+
+        # Update text with tagged lyrics
+        self.input_text.setPlainText(result.tagged_text)
+
+        # Log results
+        self._log_to_console(
+            f"Added {result.tags_added} tags ({result.scenes_detected} scene breaks)",
+            "SUCCESS"
+        )
+
+        if result.warnings:
+            for warning in result.warnings:
+                self._log_to_console(f"Warning: {warning}", "WARNING")
+
+        if not result.original_preserved:
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning(
+                "Lyrics Modified",
+                "The LLM may have modified some lyrics. Please review the text."
+            )
+
+        self.logger.info(f"Scene suggestion complete: {result.tags_added} tags added")
 
     def generate_storyboard(self):
         """Generate storyboard from input text"""
@@ -2622,6 +3011,17 @@ class WorkspaceWidget(QWidget):
             if render_method:
                 self.logger.info(f"Render method: {render_method} - will generate batched prompts for Veo 3.1")
 
+            # Get tempo from MIDI if available
+            tempo_bpm = None
+            if self.current_project and self.current_project.midi_timing_data:
+                tempo_bpm = getattr(self.current_project.midi_timing_data, 'tempo', None)
+
+            # Get Whisper word timestamps if available
+            word_timestamps = None
+            if self.current_project and self.current_project.word_timestamps:
+                word_timestamps = self.current_project.word_timestamps
+                self.logger.info(f"Using {len(word_timestamps)} Whisper word timestamps for scene timing")
+
             style_guide, scenes, veo_batches = generator.generate_storyboard(
                 lyrics=text,
                 title=project_name,
@@ -2630,7 +3030,9 @@ class WorkspaceWidget(QWidget):
                 model=llm_model,
                 style=prompt_style,
                 negatives=self.negative_prompt.text() or "low quality, blurry",
-                render_method=render_method
+                render_method=render_method,
+                tempo=tempo_bpm,
+                word_timestamps=word_timestamps
             )
 
             if not scenes:
@@ -3256,10 +3658,22 @@ class WorkspaceWidget(QWidget):
             video_btn.clear_requested.connect(lambda idx=i: self._clear_video(idx))
             video_btn.play_requested.connect(lambda idx=i: self._play_video_in_panel(idx))
             video_btn.select_existing_requested.connect(lambda idx=i: self._select_existing_video(idx))
+            video_btn.extend_requested.connect(lambda idx=i: self._extend_video_clip(idx))
 
             self.scene_table.setCellWidget(i, 4, self._create_top_aligned_widget(video_btn))
 
-            # Column 5: Time (editable QLineEdit)
+            # Column 5: Lip-sync checkbox (🎤)
+            lipsync_cb = QCheckBox()
+            lipsync_cb.setToolTip("Enable lip-sync for this scene\n(applies MuseTalk to sync character lips to audio)")
+            lipsync_cb.setStyleSheet("margin-left: 5px;")
+            # Load existing lip-sync setting from scene
+            is_lipsync = scene.metadata.get('lip_sync_enabled', False) if hasattr(scene, 'metadata') else False
+            lipsync_cb.setChecked(is_lipsync)
+            # Connect to handler
+            lipsync_cb.stateChanged.connect(lambda state, idx=i: self._on_lipsync_changed(idx, state == Qt.Checked))
+            self.scene_table.setCellWidget(i, 5, self._create_top_aligned_widget(lipsync_cb))
+
+            # Column 6: Time (editable QLineEdit)
             from PySide6.QtWidgets import QLineEdit
             from PySide6.QtGui import QDoubleValidator
             time_edit = QLineEdit(f"{scene.duration_sec:.1f}")
@@ -3280,9 +3694,9 @@ class WorkspaceWidget(QWidget):
             # Connect to handler for when editing is finished
             time_edit.editingFinished.connect(lambda idx=i, edit=time_edit: self._on_duration_changed(idx, edit))
 
-            self.scene_table.setCellWidget(i, 5, self._create_top_aligned_widget(time_edit))
+            self.scene_table.setCellWidget(i, 6, self._create_top_aligned_widget(time_edit))
 
-            # Column 6: Wrap button (⤵️)
+            # Column 7: Wrap button (⤵️)
             wrap_btn = QPushButton("⤵️")
             wrap_btn.setToolTip("Toggle text wrapping for this row")
             wrap_btn.setFixedHeight(30)  # Match LLM button height
@@ -3316,9 +3730,9 @@ class WorkspaceWidget(QWidget):
 
             # Connect to toggle handler
             wrap_btn.clicked.connect(lambda checked, idx=i: self._toggle_row_wrap(idx, checked))
-            self.scene_table.setCellWidget(i, 6, self._create_top_aligned_widget(wrap_btn))
+            self.scene_table.setCellWidget(i, 7, self._create_top_aligned_widget(wrap_btn))
 
-            # Column 7: Source text (use label widget for proper top alignment)
+            # Column 8: Source text (use label widget for proper top alignment)
             # Show full text without truncation
             source_label = QLabel(scene.source if scene.source else "")
             source_label.setAlignment(Qt.AlignTop | Qt.AlignLeft)
@@ -3330,9 +3744,9 @@ class WorkspaceWidget(QWidget):
                 source_label.setToolTip(wrapped_tooltip)
             else:
                 source_label.setToolTip("")
-            self.scene_table.setCellWidget(i, 7, self._create_top_aligned_widget(source_label))
+            self.scene_table.setCellWidget(i, 8, self._create_top_aligned_widget(source_label))
 
-            # Column 8: Environment (editable text field)
+            # Column 9: Environment (editable text field)
             environment_edit = QLineEdit()
             environment_edit.setPlaceholderText("e.g., bedroom, abstract, forest...")
             environment_edit.setText(scene.environment if hasattr(scene, 'environment') and scene.environment else "")
@@ -3341,9 +3755,9 @@ class WorkspaceWidget(QWidget):
             environment_edit.textChanged.connect(
                 lambda text, idx=i: self._on_environment_changed(idx, text)
             )
-            self.scene_table.setCellWidget(i, 8, self._create_top_aligned_widget(environment_edit))
+            self.scene_table.setCellWidget(i, 9, self._create_top_aligned_widget(environment_edit))
 
-            # Column 9: Video Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
+            # Column 10: Video Prompt (PromptFieldWidget with LLM + undo/redo)
             video_prompt_widget = PromptFieldWidget(
                 placeholder="Click ✨ to generate video motion prompt",
                 parent=self
@@ -3360,9 +3774,9 @@ class WorkspaceWidget(QWidget):
                 lambda idx=i: self._show_video_prompt_llm_dialog(idx)
             )
 
-            self.scene_table.setCellWidget(i, 9, self._create_top_aligned_widget(video_prompt_widget))
+            self.scene_table.setCellWidget(i, 10, self._create_top_aligned_widget(video_prompt_widget))
 
-            # Column 10: Start Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
+            # Column 11: Start Prompt (PromptFieldWidget with LLM + undo/redo)
             start_prompt_widget = PromptFieldWidget(
                 placeholder="Click ✨ to generate start frame prompt",
                 parent=self
@@ -3379,9 +3793,9 @@ class WorkspaceWidget(QWidget):
                 lambda idx=i: self._show_start_prompt_llm_dialog(idx)
             )
 
-            self.scene_table.setCellWidget(i, 10, self._create_top_aligned_widget(start_prompt_widget))
+            self.scene_table.setCellWidget(i, 11, self._create_top_aligned_widget(start_prompt_widget))
 
-            # Column 11: End Prompt (PromptFieldWidget with LLM + undo/redo) - MOVED
+            # Column 12: End Prompt (PromptFieldWidget with LLM + undo/redo)
             end_prompt_widget = PromptFieldWidget(
                 placeholder="Optional: click ✨ for end frame prompt",
                 parent=self
@@ -3398,7 +3812,7 @@ class WorkspaceWidget(QWidget):
                 lambda idx=i: self._show_end_prompt_llm_dialog(idx)
             )
 
-            self.scene_table.setCellWidget(i, 11, self._create_top_aligned_widget(end_prompt_widget))
+            self.scene_table.setCellWidget(i, 12, self._create_top_aligned_widget(end_prompt_widget))
 
             # Apply initial wrap state
             if is_wrapped:
@@ -4196,6 +4610,90 @@ class WorkspaceWidget(QWidget):
         params['use_prev_last_frame'] = False
 
         self.generation_requested.emit("generate_video_clip", params)
+
+    def _extend_video_clip(self, scene_index: int):
+        """
+        Extend an existing video clip using Veo 3.1 scene extension.
+
+        This adds ~7 seconds to the video by generating a continuation
+        from the final second of the existing video.
+
+        Args:
+            scene_index: Index of the scene with video to extend
+        """
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        # Check if video exists
+        if not scene.video_clip or not scene.video_clip.exists():
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Video", "No video clip exists to extend.")
+            return
+
+        # Check if using Veo 3.1 (required for scene extension)
+        veo_model = self.veo_model_combo.currentText() if hasattr(self, 'veo_model_combo') else ""
+        if "3.1" not in veo_model:
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning(
+                "Veo 3.1 Required",
+                "Video extension is only available with Veo 3.1 models.\n\n"
+                "Please select a Veo 3.1 model (veo-3.1-generate-001 or veo-3.1-fast-generate-001) "
+                "in the video provider settings."
+            )
+            return
+
+        # Get video duration to check max length
+        import subprocess
+        try:
+            result = subprocess.run(
+                ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                 '-of', 'default=noprint_wrappers=1:nokey=1', str(scene.video_clip)],
+                capture_output=True, text=True
+            )
+            current_duration = float(result.stdout.strip())
+
+            if current_duration >= 140:  # ~148 max, warn at 140
+                dialog_manager = get_dialog_manager(self)
+                dialog_manager.show_warning(
+                    "Near Maximum Length",
+                    f"Video is already {current_duration:.1f}s (max ~148s).\n\n"
+                    "Cannot extend further."
+                )
+                return
+        except Exception as e:
+            self.logger.warning(f"Could not get video duration: {e}")
+            current_duration = None
+
+        # Ask user for extension prompt
+        from PySide6.QtWidgets import QInputDialog
+
+        prompt, ok = QInputDialog.getText(
+            self,
+            "Extend Video",
+            "Enter a prompt for the video continuation:\n"
+            "(Describe what should happen next)",
+            text=scene.video_prompt if hasattr(scene, 'video_prompt') else ""
+        )
+
+        if not ok or not prompt.strip():
+            return
+
+        # Log the extension request
+        duration_str = f" (current: {current_duration:.1f}s)" if current_duration else ""
+        self.logger.info(f"Extending video for scene {scene_index + 1}{duration_str}")
+        self._log_to_console(f"Extending video for scene {scene_index + 1}...", "INFO")
+
+        # Emit extension request
+        params = self.gather_generation_params()
+        params['scene_indices'] = [scene_index]
+        params['extend_video'] = True
+        params['extend_video_path'] = str(scene.video_clip)
+        params['extend_prompt'] = prompt.strip()
+        params['veo_model'] = veo_model
+
+        self.generation_requested.emit("extend_video_clip", params)
 
     # Veo 3.1 Frame Interaction Methods
 
@@ -5117,6 +5615,23 @@ class WorkspaceWidget(QWidget):
             line_edit.setText(f"{scene.duration_sec:.1f}")
             self.logger.warning(f"Invalid duration input for scene {scene_index}")
 
+    def _on_lipsync_changed(self, scene_index: int, enabled: bool):
+        """Handle lip-sync toggle for a scene."""
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        # Store in scene metadata
+        if not hasattr(scene, 'metadata') or scene.metadata is None:
+            scene.metadata = {}
+        scene.metadata['lip_sync_enabled'] = enabled
+
+        self.save_project()
+        status = "enabled" if enabled else "disabled"
+        self.logger.info(f"Lip-sync {status} for scene {scene_index + 1}")
+        self._log_to_console(f"Lip-sync {status} for scene {scene_index + 1}", "INFO")
+
     def _select_reference_from_scenes(self, scene_index: int, slot_idx: int):
         """Select reference image from any scene's images"""
         if not self.current_project or scene_index >= len(self.current_project.scenes):
@@ -5377,8 +5892,8 @@ class WorkspaceWidget(QWidget):
             # Make row much taller when wrapped to show full prompts
             self.scene_table.setRowHeight(row_index, 200)
 
-            # Update PromptFieldWidget heights for columns 8, 9, 10 (Start, End, Video prompts)
-            for col in [9, 10, 11]:  # Video, Start, End prompts
+            # Update PromptFieldWidget heights for columns 10, 11, 12 (Video, Start, End prompts)
+            for col in [10, 11, 12]:  # Video, Start, End prompts
                 container = self.scene_table.cellWidget(row_index, col)
                 if container:
                     # Find the PromptFieldWidget inside the container
@@ -5393,8 +5908,8 @@ class WorkspaceWidget(QWidget):
             # Return to default height
             self.scene_table.setRowHeight(row_index, 30)
 
-            # Reset PromptFieldWidget heights for columns 8, 9, 10
-            for col in [9, 10, 11]:  # Video, Start, End prompts
+            # Reset PromptFieldWidget heights for columns 10, 11, 12
+            for col in [10, 11, 12]:  # Video, Start, End prompts
                 container = self.scene_table.cellWidget(row_index, col)
                 if container:
                     # Find the PromptFieldWidget inside the container
@@ -6024,16 +6539,26 @@ class WorkspaceWidget(QWidget):
                 # Regular audio file
                 self.audio_file_label.setText(file_path.name)
                 self.clear_audio_btn.setEnabled(True)
+                self.extract_audio_btn.setEnabled(True)  # Enable Whisper extraction
                 if self.current_project:
                     from core.video.project import AudioTrack
                     # Clear existing tracks and add new one
                     self.current_project.audio_tracks = []
-                    self.current_project.audio_tracks.append(AudioTrack(
+                    audio_track = AudioTrack(
                         file_path=file_path,
                         volume=self.volume_slider.value() / 100.0,
                         fade_in_duration=self.fade_in_spin.value(),
                         fade_out_duration=self.fade_out_spin.value()
-                    ))
+                    )
+                    self.current_project.audio_tracks.append(audio_track)
+                    self.logger.info(f"Added audio track: {file_path}")
+                    self.logger.info(f"Audio tracks count: {len(self.current_project.audio_tracks)}")
+
+                    # Save project to persist audio track
+                    self.save_project()
+
+                    # Verify after save
+                    self.logger.info(f"After save, audio tracks: {len(self.current_project.audio_tracks)}")
 
                     # Refresh wizard after audio file is loaded
                     self._refresh_wizard()
@@ -6042,8 +6567,15 @@ class WorkspaceWidget(QWidget):
         """Clear audio selection"""
         self.audio_file_label.setText("No file")
         self.clear_audio_btn.setEnabled(False)
+        self.extract_audio_btn.setEnabled(False)  # Disable Whisper extraction
+        self.timestamp_status_label.setText("")  # Clear timestamp status
         if self.current_project:
             self.current_project.audio_tracks = []
+            # Clear extracted timestamps
+            if hasattr(self.current_project, 'word_timestamps'):
+                self.current_project.word_timestamps = []
+            # Save project to persist change
+            self.save_project()
     
     def browse_midi_file(self):
         """Browse for MIDI file or Suno package"""
@@ -6283,7 +6815,172 @@ class WorkspaceWidget(QWidget):
                 dialog_manager = get_dialog_manager(self)
                 dialog_manager.show_info("No Lyrics",
                                       "No lyrics found in MIDI. Enter lyrics manually to align to beats.")
-    
+
+    def extract_audio_lyrics(self):
+        """Extract lyrics and timestamps from audio using Whisper AI."""
+        if not self.current_project:
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Project", "Please create or load a project first.")
+            return
+
+        # Get audio file path
+        audio_path = None
+        if self.current_project.audio_tracks:
+            audio_path = self.current_project.audio_tracks[0].file_path
+
+        if not audio_path or not Path(audio_path).exists():
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_warning("No Audio", "Please load an audio file first.")
+            return
+
+        # Check if Whisper is installed
+        try:
+            from core.whisper_installer import check_whisper_installed
+            is_installed, status = check_whisper_installed()
+            if not is_installed:
+                dialog_manager = get_dialog_manager(self)
+                # Offer to install Whisper
+                result = dialog_manager.show_question(
+                    "Whisper Not Installed",
+                    f"Whisper is required for audio transcription.\n\n"
+                    f"Status: {status}\n\n"
+                    "Would you like to install Whisper now?"
+                )
+                if result:
+                    # Show install dialog
+                    from gui.video.whisper_install_dialog import show_whisper_install_dialog
+                    show_whisper_install_dialog(self)
+                return
+        except ImportError as e:
+            self.logger.error(f"Failed to import whisper_installer: {e}")
+            dialog_manager = get_dialog_manager(self)
+            dialog_manager.show_error("Import Error", f"Failed to load Whisper installer: {e}")
+            return
+
+        # Show progress dialog
+        self._log_to_console("Starting Whisper audio analysis...", "INFO")
+        self.extract_audio_btn.setEnabled(False)
+        self.extract_audio_btn.setText("Extracting...")
+
+        # Run Whisper in a thread to avoid blocking UI
+        from PySide6.QtCore import QThread, Signal as QtSignal
+
+        class WhisperWorker(QThread):
+            finished = QtSignal(object)  # TranscriptionResult or Exception
+            progress = QtSignal(str, float)
+
+            def __init__(self, audio_path, parent=None):
+                super().__init__(parent)
+                self.audio_path = audio_path
+
+            def run(self):
+                try:
+                    from core.video.whisper_analyzer import WhisperAnalyzer, get_recommended_model
+                    model_size = get_recommended_model()
+                    analyzer = WhisperAnalyzer(model_size=model_size)
+                    result = analyzer.extract_lyrics(
+                        self.audio_path,
+                        progress_callback=lambda msg, pct: self.progress.emit(msg, pct)
+                    )
+                    self.finished.emit(result)
+                except Exception as e:
+                    self.finished.emit(e)
+
+        def on_whisper_progress(message: str, progress: float):
+            self.timestamp_status_label.setText(f"{message} ({int(progress * 100)}%)")
+
+        def on_whisper_finished(result):
+            self.extract_audio_btn.setEnabled(True)
+            self.extract_audio_btn.setText("From Audio (Whisper)")
+
+            if isinstance(result, Exception):
+                self.logger.error(f"Whisper extraction failed: {result}", exc_info=True)
+                self._log_to_console(f"Whisper extraction failed: {result}", "ERROR")
+                dialog_manager = get_dialog_manager(self)
+                dialog_manager.show_error("Extraction Failed", str(result))
+                self.timestamp_status_label.setText("Extraction failed")
+                return
+
+            # Store timestamps in project
+            from core.video.timing_models import TranscriptionResult
+            if isinstance(result, TranscriptionResult):
+                # Store word timestamps for scene timing
+                if not hasattr(self.current_project, 'word_timestamps'):
+                    self.current_project.word_timestamps = []
+                self.current_project.word_timestamps = [w.to_dict() for w in result.words]
+                self.current_project.whisper_model_used = result.model_used
+                self.current_project.lyrics_extracted = True
+
+                # Auto-select Lyrics sync mode and enable the combo
+                self.sync_mode_combo.setEnabled(True)
+                lyrics_index = self.sync_mode_combo.findText("Lyrics")
+                if lyrics_index >= 0:
+                    self.sync_mode_combo.setCurrentIndex(lyrics_index)
+                self.snap_strength_slider.setEnabled(True)
+                self.current_project.sync_mode = "lyrics"
+
+                # Update status
+                self.timestamp_status_label.setText(
+                    f"✓ {result.word_count} words, {result.duration:.1f}s"
+                )
+
+                # Check if we should populate the lyrics field
+                current_text = self.input_text.toPlainText().strip()
+                if not current_text:
+                    # No existing lyrics - use extracted text formatted as lyrics
+                    formatted_lyrics = result.format_as_lyrics()
+                    self.input_text.setPlainText(formatted_lyrics)
+                    self._log_to_console(
+                        f"✓ Extracted {result.word_count} words from audio "
+                        f"(duration: {result.duration:.1f}s, model: {result.model_used})",
+                        "INFO"
+                    )
+                    dialog_manager = get_dialog_manager(self)
+                    dialog_manager.show_info(
+                        "Lyrics Extracted",
+                        f"Extracted {result.word_count} words with timestamps.\n\n"
+                        f"Duration: {result.duration:.1f} seconds\n"
+                        f"Model: Whisper {result.model_used}\n\n"
+                        "The lyrics have been added to the input field.\n"
+                        "Word-level timestamps will be used for precise scene timing."
+                    )
+                else:
+                    # Existing lyrics - offer to align or replace
+                    self._log_to_console(
+                        f"✓ Extracted timestamps for {result.word_count} words "
+                        f"(existing lyrics preserved)",
+                        "INFO"
+                    )
+                    dialog_manager = get_dialog_manager(self)
+                    result_choice = dialog_manager.show_question(
+                        "Lyrics Already Present",
+                        f"Extracted {result.word_count} words from audio.\n\n"
+                        "You already have lyrics in the input field.\n\n"
+                        "Replace with extracted lyrics?\n"
+                        "(Timestamps are stored either way)",
+                        buttons=QMessageBox.Yes | QMessageBox.No
+                    )
+                    if result_choice:
+                        formatted_lyrics = result.format_as_lyrics()
+                        self.input_text.setPlainText(formatted_lyrics)
+
+                # Save project to persist Whisper data
+                self.save_project()
+                self._log_to_console("Whisper data saved to project", "INFO")
+
+                # Auto-suggest scenes if checkbox is checked
+                if self.auto_suggest_scenes_check.isChecked():
+                    self._log_to_console("Auto-suggesting scenes...", "INFO")
+                    # Use QTimer to run after dialog closes
+                    from PySide6.QtCore import QTimer
+                    QTimer.singleShot(100, self._suggest_scenes)
+
+        # Create and start worker
+        self._whisper_worker = WhisperWorker(audio_path, self)
+        self._whisper_worker.progress.connect(on_whisper_progress)
+        self._whisper_worker.finished.connect(on_whisper_finished)
+        self._whisper_worker.start()
+
     def _recalculate_scene_timing(self):
         """Recalculate scene timing using LLM or MIDI sync."""
         if not self.current_project or not self.current_project.scenes:
@@ -6981,6 +7678,7 @@ class WorkspaceWidget(QWidget):
                 if audio_track.file_path:
                     self.audio_file_label.setText(Path(audio_track.file_path).name)
                     self.clear_audio_btn.setEnabled(True)
+                    self.extract_audio_btn.setEnabled(True)  # Enable Whisper extraction
                     # Set audio controls
                     self.volume_slider.setValue(int(audio_track.volume * 100))
                     self.fade_in_spin.setValue(audio_track.fade_in_duration)
@@ -6988,6 +7686,7 @@ class WorkspaceWidget(QWidget):
             else:
                 self.audio_file_label.setText("No file")
                 self.clear_audio_btn.setEnabled(False)
+                self.extract_audio_btn.setEnabled(False)
             
             # Load MIDI file if present
             if self.current_project.midi_file_path:
@@ -7018,11 +7717,36 @@ class WorkspaceWidget(QWidget):
                 self.midi_file_label.setText("No file")
                 self.midi_info_label.setText("")
                 self.clear_midi_btn.setEnabled(False)
-                self.sync_mode_combo.setEnabled(False)
-                self.snap_strength_slider.setEnabled(False)
                 self.extract_lyrics_btn.setEnabled(False)
                 self.karaoke_group.setVisible(False)
-            
+
+                # Check if lyrics were extracted (enables Lyrics sync mode without MIDI)
+                if getattr(self.current_project, 'lyrics_extracted', False):
+                    self.sync_mode_combo.setEnabled(True)
+                    self.snap_strength_slider.setEnabled(True)
+                    # Restore sync mode
+                    if hasattr(self.current_project, 'sync_mode'):
+                        index = self.sync_mode_combo.findText(self.current_project.sync_mode.title())
+                        if index >= 0:
+                            self.sync_mode_combo.setCurrentIndex(index)
+                    if hasattr(self.current_project, 'snap_strength'):
+                        self.snap_strength_slider.setValue(int(self.current_project.snap_strength * 100))
+                    # Update timestamp status
+                    word_count = len(getattr(self.current_project, 'word_timestamps', []))
+                    if word_count > 0:
+                        self.timestamp_status_label.setText(f"✓ {word_count} words")
+                        # Also show Whisper model if available
+                        model_used = getattr(self.current_project, 'whisper_model_used', None)
+                        if model_used:
+                            self.timestamp_status_label.setText(f"✓ {word_count} words ({model_used})")
+                else:
+                    self.sync_mode_combo.setEnabled(False)
+                    self.snap_strength_slider.setEnabled(False)
+
+                # Restore auto-suggest scenes checkbox
+                auto_suggest = getattr(self.current_project, 'auto_suggest_scenes', False)
+                self.auto_suggest_scenes_check.setChecked(auto_suggest)
+
             # Load scene table
             num_scenes = len(self.current_project.scenes) if self.current_project.scenes else 0
             self.logger.info(f"Loaded project with {num_scenes} scenes")
@@ -7061,11 +7785,15 @@ class WorkspaceWidget(QWidget):
             # Clear loading flag to enable auto-save
             self._loading_project = False
 
+            # Update Whisper-dependent UI elements
+            self._update_whisper_ui_state()
+
             # Log final state
             self.logger.info("=== LOAD_PROJECT_TO_UI COMPLETE ===")
             self.logger.info(f"Style combo: '{self.prompt_style_input.currentText()}' (index {self.prompt_style_input.currentIndex()})")
             self.logger.info(f"Custom input: visible={self.custom_style_input.isVisible()}, text='{self.custom_style_input.text()}'")
             self.logger.info(f"Final style value: '{self._get_current_style()}'")
+
     def _save_splitter_positions(self):
         """Save current splitter positions to config"""
         try:

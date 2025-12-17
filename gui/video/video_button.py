@@ -37,6 +37,7 @@ class VideoButton(QPushButton):
     clear_requested = Signal()  # Emitted when user wants to clear video
     play_requested = Signal()  # Emitted when user wants to play video
     select_existing_requested = Signal()  # Emitted when user wants to select existing video clip
+    extend_requested = Signal()  # Emitted when user wants to extend video (Veo 3.1 only)
 
     def __init__(self, parent=None):
         """
@@ -187,6 +188,18 @@ class VideoButton(QPushButton):
             menu.addAction(play_action)
 
             menu.addSeparator()
+
+            # Add Extend Video option for Veo 3.1 videos
+            if self.uses_veo_31:
+                extend_action = QAction("⏩ Extend Video (+7s)", self)
+                extend_action.setToolTip(
+                    "Extend this video by 7 seconds (Veo 3.1 only).\n"
+                    "Creates a continuation from the final second.\n"
+                    "Max total length: ~148 seconds."
+                )
+                extend_action.triggered.connect(self.extend_requested.emit)
+                menu.addAction(extend_action)
+                menu.addSeparator()
 
             regenerate_action = QAction("🔄 Regenerate Video", self)
             regenerate_action.triggered.connect(self.regenerate_requested.emit)

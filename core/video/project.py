@@ -500,9 +500,15 @@ class VideoProject:
     # MIDI configuration (optional)
     midi_file_path: Optional[Path] = None
     midi_timing_data: Optional[MidiTimingData] = None
-    sync_mode: str = "none"  # 'none', 'beat', 'measure', 'section'
+    sync_mode: str = "none"  # 'none', 'beat', 'measure', 'section', 'lyrics'
     snap_strength: float = 0.8  # 0.0-1.0
-    
+
+    # Whisper audio analysis (optional)
+    word_timestamps: List[Dict[str, Any]] = field(default_factory=list)  # Word-level timing from Whisper
+    whisper_model_used: Optional[str] = None  # Model used for extraction (tiny, base, small, medium)
+    lyrics_extracted: bool = False  # True if lyrics were extracted from audio
+    auto_suggest_scenes: bool = False  # Auto-suggest scenes after Whisper extraction
+
     # Karaoke configuration (optional)
     karaoke_config: Optional[KaraokeConfig] = None
     karaoke_export_formats: List[str] = field(default_factory=list)  # ['lrc', 'srt', 'ass']
@@ -591,6 +597,12 @@ class VideoProject:
                 "snap_strength": self.snap_strength,
                 "timing_data": self.midi_timing_data.to_dict() if self.midi_timing_data else None
             } if self.midi_file_path else None,
+            "whisper": {
+                "word_timestamps": self.word_timestamps,
+                "model_used": self.whisper_model_used,
+                "lyrics_extracted": self.lyrics_extracted,
+                "auto_suggest_scenes": self.auto_suggest_scenes
+            } if self.lyrics_extracted or self.word_timestamps else None,
             "karaoke": {
                 "config": self.karaoke_config.to_dict() if self.karaoke_config else None,
                 "export_formats": self.karaoke_export_formats,
@@ -695,7 +707,15 @@ class VideoProject:
             project.snap_strength = midi_data.get("snap_strength", 0.8)
             if midi_data.get("timing_data") and MidiTimingData:
                 project.midi_timing_data = MidiTimingData.from_dict(midi_data["timing_data"])
-        
+
+        # Load Whisper audio analysis data
+        if "whisper" in data and data["whisper"]:
+            whisper_data = data["whisper"]
+            project.word_timestamps = whisper_data.get("word_timestamps", [])
+            project.whisper_model_used = whisper_data.get("model_used")
+            project.lyrics_extracted = whisper_data.get("lyrics_extracted", False)
+            project.auto_suggest_scenes = whisper_data.get("auto_suggest_scenes", False)
+
         # Load karaoke configuration
         if "karaoke" in data and data["karaoke"]:
             karaoke_data = data["karaoke"]

@@ -42,6 +42,31 @@ except ImportError:
         crop_to_aspect_ratio = None
 
 
+# =============================================================================
+# MODEL-SPECIFIC AUTHENTICATION REQUIREMENTS
+# =============================================================================
+# This is the SINGLE SOURCE OF TRUTH for which models require specific auth.
+# Used by check_model_auth() to enforce requirements in generate() and GUI.
+#
+# Key: model ID
+# Value: dict with requires_api_key, requires_gcloud, display_name, error_message
+# =============================================================================
+MODEL_AUTH_REQUIREMENTS = {
+    'gemini-3-pro-image-preview': {
+        'requires_api_key': True,
+        'requires_gcloud': False,
+        'display_name': 'Nano Banana Pro (Gemini 3 Pro Image)',
+        'error_message': (
+            'Nano Banana Pro (Gemini 3 Pro Image) requires API key authentication.\n'
+            'Google Cloud (gcloud/ADC) authentication is not supported for this model.\n\n'
+            'Get an API key from: https://aistudio.google.com/apikey'
+        )
+    },
+    # Other image models support both auth methods:
+    # - gemini-2.5-flash-image (Nano Banana): works with API key or gcloud
+}
+
+
 def apply_transparent_canvas_fix(image_bytes: bytes, target_aspect_ratio: str, logger_instance=None, console_logger=None) -> bytes:
     """
     Apply transparent canvas fix to an image that doesn't match the target aspect ratio.
@@ -408,7 +433,27 @@ class GoogleProvider(ImageProvider):
             # Broader exception handling for various subprocess issues
             pass
         return None
-    
+
+    def get_model_auth_requirements(self, model: str) -> Dict[str, Any]:
+        """
+        Get authentication requirements for a Google model.
+
+        Uses MODEL_AUTH_REQUIREMENTS constant as the single source of truth.
+        This ensures consistent behavior across GUI and CLI.
+
+        Args:
+            model: Model ID to check
+
+        Returns:
+            Dict with requires_api_key, requires_gcloud, display_name, error_message
+        """
+        return MODEL_AUTH_REQUIREMENTS.get(model, {
+            'requires_api_key': False,
+            'requires_gcloud': False,
+            'display_name': model,
+            'error_message': ''
+        })
+
     def generate(
         self,
         prompt: str,
@@ -435,6 +480,13 @@ class GoogleProvider(ImageProvider):
                 self._init_api_key_client()
 
         model = model or self.get_default_model()
+
+        # Check model-specific auth requirements BEFORE proceeding
+        # This enforces requirements consistently across GUI and CLI
+        auth_valid, auth_error = self.check_model_auth(model)
+        if not auth_valid:
+            logger.error(f"Model auth check failed: {auth_error}")
+            raise ValueError(auth_error)
 
         # Log authentication method being used
         if self.auth_mode == "gcloud":

@@ -98,12 +98,64 @@ class ImageProvider(ABC):
     def get_api_key_url(self) -> str:
         """
         Get URL for obtaining API keys for this provider.
-        
+
         Returns:
             URL string
         """
         return ""
-    
+
+    def get_model_auth_requirements(self, model: str) -> Dict[str, Any]:
+        """
+        Get authentication requirements for a specific model.
+
+        Override in subclasses to specify model-specific auth requirements.
+        This is the SINGLE SOURCE OF TRUTH for model auth requirements.
+
+        Args:
+            model: Model ID to check
+
+        Returns:
+            Dict with:
+            - requires_api_key: bool - True if model ONLY works with API key (not gcloud)
+            - requires_gcloud: bool - True if model ONLY works with gcloud (not API key)
+            - display_name: str - Human-readable model name for error messages
+            - error_message: str - Message to show if requirements not met
+        """
+        # Default: models support both auth methods
+        return {
+            'requires_api_key': False,
+            'requires_gcloud': False,
+            'display_name': model,
+            'error_message': ''
+        }
+
+    def check_model_auth(self, model: str) -> Tuple[bool, str]:
+        """
+        Check if current auth mode supports the given model.
+
+        This method should be called at the start of generate() to enforce
+        model-specific auth requirements consistently across GUI and CLI.
+
+        Args:
+            model: Model ID to check
+
+        Returns:
+            Tuple of (is_valid, error_message)
+            - is_valid: True if current auth mode supports the model
+            - error_message: Empty string if valid, otherwise describes the issue
+        """
+        requirements = self.get_model_auth_requirements(model)
+
+        # If model requires API key but we're in gcloud mode
+        if requirements.get('requires_api_key') and self.auth_mode == "gcloud":
+            return False, requirements.get('error_message', f"Model {model} requires API key authentication")
+
+        # If model requires gcloud but we're in api-key mode
+        if requirements.get('requires_gcloud') and self.auth_mode != "gcloud":
+            return False, requirements.get('error_message', f"Model {model} requires Google Cloud authentication")
+
+        return True, ""
+
     def edit_image(
         self,
         image: bytes,

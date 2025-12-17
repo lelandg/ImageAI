@@ -176,6 +176,7 @@ from core import (
 from core.constants import DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT
 from core.video.reference_manager import ReferenceImageType
 from providers import get_provider, preload_provider, list_providers
+from providers.google import MODEL_AUTH_REQUIREMENTS
 from gui.dialogs import ExamplesDialog
 from gui.shortcut_hint_widget import create_shortcut_hint
 # Defer video tab import to improve startup speed
@@ -3766,25 +3767,33 @@ For more detailed information, please refer to the full documentation.
                 self.logger.info("GPT Image 1 selected - showing background selector")
 
     def _check_nano_banana_pro_requirements(self, model_id: str):
-        """Check if Nano Banana Pro model has proper API key auth configured.
+        """Check if model has specific auth requirements and warn user.
 
-        Nano Banana Pro (gemini-3-pro-image-preview) requires API key authentication
-        and does not work with Google Cloud (gcloud/ADC) authentication.
+        Uses MODEL_AUTH_REQUIREMENTS from providers/google.py as the single
+        source of truth for model-specific authentication needs.
         """
-        if model_id != "gemini-3-pro-image-preview":
-            return
+        # Check if this model has special auth requirements
+        requirements = MODEL_AUTH_REQUIREMENTS.get(model_id)
+        if not requirements:
+            return  # No special requirements for this model
 
         # Guard against re-entry (dialog can trigger signal processing)
-        if getattr(self, '_checking_nbp_requirements', False):
+        if getattr(self, '_checking_model_auth_requirements', False):
             return
-        self._checking_nbp_requirements = True
+        self._checking_model_auth_requirements = True
         try:
-            self._show_nbp_auth_dialog()
+            self._show_model_auth_dialog(model_id, requirements)
         finally:
-            self._checking_nbp_requirements = False
+            self._checking_model_auth_requirements = False
 
-    def _show_nbp_auth_dialog(self):
-        """Show the appropriate dialog for Nano Banana Pro auth requirements."""
+    def _show_model_auth_dialog(self, model_id: str, requirements: dict):
+        """Show the appropriate dialog for model auth requirements.
+
+        Args:
+            model_id: The model identifier
+            requirements: Dict from MODEL_AUTH_REQUIREMENTS with requires_api_key,
+                         requires_gcloud, display_name, error_message
+        """
         # Get current auth mode
         auth_mode = self.config.get("auth_mode", "api-key")
         # Normalize legacy values
@@ -3797,14 +3806,18 @@ For more detailed information, please refer to the full documentation.
         api_key = self.config.get_api_key("google")
         has_api_key = bool(api_key and api_key.strip())
 
-        if auth_mode == "gcloud":
-            # User is using gcloud auth, but Nano Banana Pro requires API key
+        display_name = requirements.get('display_name', model_id)
+        requires_api_key = requirements.get('requires_api_key', False)
+
+        # Only show dialog if there's an auth mismatch
+        if requires_api_key and auth_mode == "gcloud":
+            # User is using gcloud auth, but model requires API key
             if has_api_key:
                 # API key exists, offer to switch
                 msg = QMessageBox(self)
-                msg.setWindowTitle("Nano Banana Pro - API Key Required")
+                msg.setWindowTitle(f"{display_name} - API Key Required")
                 msg.setText(
-                    "Nano Banana Pro (Gemini 3 Pro Image) requires API key authentication.\n\n"
+                    f"{display_name} requires API key authentication.\n\n"
                     "Google Cloud authentication is not supported for this model.\n\n"
                     "You have a Google API key configured. Would you like to switch to API key mode?"
                 )
@@ -3819,13 +3832,13 @@ For more detailed information, please refer to the full documentation.
                     self.auth_mode_combo.setCurrentText("API Key")
                     self.auth_mode_combo.blockSignals(False)
                     self._on_auth_mode_changed("API Key")
-                    logger.info("Switched to API key mode for Nano Banana Pro")
+                    logger.info(f"Switched to API key mode for {display_name}")
             else:
                 # No API key configured
                 msg = QMessageBox(self)
-                msg.setWindowTitle("Nano Banana Pro - API Key Required")
+                msg.setWindowTitle(f"{display_name} - API Key Required")
                 msg.setText(
-                    "Nano Banana Pro (Gemini 3 Pro Image) requires API key authentication.\n\n"
+                    f"{display_name} requires API key authentication.\n\n"
                     "Google Cloud authentication is not supported for this model.\n\n"
                     "You'll need to configure a Google API key in Settings."
                 )
@@ -3839,12 +3852,12 @@ For more detailed information, please refer to the full documentation.
                     # Switch to settings tab
                     self.tabs.setCurrentWidget(self.tab_settings)
 
-        elif auth_mode == "api-key" and not has_api_key:
+        elif requires_api_key and auth_mode == "api-key" and not has_api_key:
             # API key mode but no key configured
             msg = QMessageBox(self)
-            msg.setWindowTitle("Nano Banana Pro - API Key Required")
+            msg.setWindowTitle(f"{display_name} - API Key Required")
             msg.setText(
-                "Nano Banana Pro (Gemini 3 Pro Image) requires a Google API key.\n\n"
+                f"{display_name} requires a Google API key.\n\n"
                 "No API key is currently configured."
             )
             msg.setInformativeText("Get an API key from Google AI Studio: https://aistudio.google.com/apikey")

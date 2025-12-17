@@ -69,6 +69,22 @@ logging.getLogger('tensorflow').setLevel(logging.ERROR)
 # Global flag to track initialization phase
 _initialization_complete = False
 
+# Module-level print wrapper for numba compatibility
+# (numba introspects print and needs to find _logged_print at module level)
+_orig_print = builtins.print
+
+def _logged_print(*args, **kwargs):
+    """Wrapped print that logs to console logger."""
+    try:
+        msg = " ".join(str(a) for a in args)
+        # Suppress protobuf GetPrototype errors during initialization
+        if not _initialization_complete and "GetPrototype" in msg:
+            return  # Don't print or log this error
+        logging.getLogger("console").info(msg)
+    except Exception:
+        pass
+    return _orig_print(*args, **kwargs)
+
 
 def main():
     """Main entry point for ImageAI."""
@@ -142,18 +158,7 @@ def main():
         except Exception:
             pass
 
-        # Wrap print for logging
-        def _logged_print(*args, **kwargs):
-            try:
-                msg = " ".join(str(a) for a in args)
-                # Suppress protobuf GetPrototype errors during initialization
-                if not _initialization_complete and "GetPrototype" in msg:
-                    return  # Don't print or log this error
-                logging.getLogger("console").info(msg)
-            except Exception:
-                pass
-            return _orig_print(*args, **kwargs)
-
+        # Use module-level _logged_print for numba compatibility
         builtins.print = _logged_print
 
     except Exception as e:

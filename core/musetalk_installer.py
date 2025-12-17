@@ -86,7 +86,8 @@ def check_musetalk_installed() -> Tuple[bool, str]:
     """
     # Check pip packages
     required_packages = [
-        "torch", "torchvision", "mmengine", "mmcv", "mmdet", "mmpose",
+        "torch", "torchvision", "torchaudio", "soundfile",
+        "mmengine", "mmcv", "mmdet", "mmpose",
         "diffusers", "transformers", "accelerate", "av"
     ]
 
@@ -153,6 +154,8 @@ def get_musetalk_packages() -> Tuple[List[str], str]:
     packages.extend([
         "torch==2.4.1",
         "torchvision==0.19.1",
+        "torchaudio==2.4.1",  # For audio loading in lip-sync
+        "soundfile",  # Backend for torchaudio on Windows
     ])
 
     # MMLab stack - required for pose detection
@@ -644,16 +647,23 @@ class MuseTalkModelDownloader(QThread):
         model_dir = self.model_path / "face-parse-bisent"
         model_dir.mkdir(parents=True, exist_ok=True)
 
-        # Main face parsing model
+        # Main face parsing model - from HuggingFace (GitHub releases URL is broken)
         model_file = model_dir / "79999_iter.pth"
         if not model_file.exists():
-            url = "https://github.com/zllrunning/face-parsing.PyTorch/releases/download/79999_iter.pth/79999_iter.pth"
+            # Primary: HuggingFace CDN
+            url = "https://huggingface.co/vivym/face-parsing-bisenet/resolve/main/79999_iter.pth"
+            self.progress.emit("  Downloading 79999_iter.pth...")
             if not self._download_file(url, model_file):
-                return False
+                # Fallback: Try huggingface_hub
+                self.progress.emit("  Direct download failed, trying HuggingFace Hub...")
+                if not self._download_via_hf_hub("vivym/face-parsing-bisenet", "79999_iter.pth", model_file):
+                    logger.error("Failed to download face parsing model")
+                    return False
 
         # ResNet18 backbone
         resnet_file = model_dir / "resnet18-5c106cde.pth"
         if not resnet_file.exists():
+            self.progress.emit("  Downloading resnet18-5c106cde.pth...")
             url = "https://download.pytorch.org/models/resnet18-5c106cde.pth"
             if not self._download_file(url, resnet_file):
                 return False

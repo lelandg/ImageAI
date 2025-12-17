@@ -37,9 +37,16 @@ OpenAIClient = None
 
 
 class SoraModel(Enum):
-    """Available Sora models"""
+    """Available Sora models
+
+    Model naming convention:
+    - sora-2: Alias pointing to latest sora-2 version
+    - sora-2-pro: Pro tier with 1080p support
+    - sora-2-YYYY-MM-DD: Dated snapshots for reproducibility
+    """
     SORA_2 = "sora-2"
     SORA_2_PRO = "sora-2-pro"
+    SORA_2_20251208 = "sora-2-2025-12-08"  # December 2025 snapshot
 
 
 class SoraErrorType(Enum):
@@ -158,7 +165,19 @@ class SoraClient:
                 "720p": 0.30,
                 "1080p": 0.50,
             }
-        }
+        },
+        # Dated snapshots - same constraints as base model
+        SoraModel.SORA_2_20251208: {
+            "max_duration": 12,
+            "durations": [4, 8, 12],
+            "resolutions": ["720p"],
+            "aspect_ratios": ["16:9", "9:16"],
+            "supports_image_input": True,
+            "generation_time": (60, 120),  # 1-2 minutes typical
+            "cost_per_second": {
+                "720p": 0.10,
+            }
+        },
     }
 
     # Retry configuration

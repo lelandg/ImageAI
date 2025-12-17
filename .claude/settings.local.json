@@ -66,7 +66,8 @@
       "Bash(/mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/pip install:*)",
       "Bash(.venv_linux/bin/pip list:*)",
       "Bash(gcloud config get-value:*)",
-      "Bash(.venv_linux/bin/python3:*)"
+      "Bash(.venv_linux/bin/python3:*)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline -20 -- gui/video/video_project_tab.py core/video/veo_client.py)"
     ],
     "deny": [],
     "ask": []

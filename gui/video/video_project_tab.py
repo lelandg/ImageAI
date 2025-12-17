@@ -4,7 +4,7 @@ Main interface for video project management in ImageAI.
 """
 
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 from datetime import datetime
 
@@ -1109,6 +1109,9 @@ class VideoGenerationThread(QThread):
             shutil.copy2(cached_video_path, video_path)
             logger.info(f"Copied video from cache to project: {video_path}")
 
+            # Apply lip-sync if enabled for this scene
+            video_path = self._apply_lipsync_to_scene(video_path, scene_index)
+
             self.progress_update.emit(80, "Extracting last frame...")
 
             # Extract last frame and assign to scene
@@ -1194,6 +1197,101 @@ class VideoGenerationThread(QThread):
 
         return frame_path
 
+    def _apply_lipsync_to_scene(self, video_path: Path, scene_index: int) -> Optional[Path]:
+        """
+        Apply lip-sync to a video if the scene has lip_sync_enabled.
+
+        Args:
+            video_path: Path to the generated video
+            scene_index: Index of the scene
+
+        Returns:
+            Path to lip-synced video, or original video_path if lip-sync not applied
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        if scene_index >= len(self.project.scenes):
+            return video_path
+
+        scene = self.project.scenes[scene_index]
+
+        # Check if lip-sync is enabled for this scene
+        lip_sync_enabled = scene.metadata.get('lip_sync_enabled', False) if hasattr(scene, 'metadata') else False
+
+        if not lip_sync_enabled:
+            logger.info(f"Scene {scene_index + 1}: Lip-sync not enabled, skipping")
+            return video_path
+
+        logger.info(f"Scene {scene_index + 1}: Lip-sync ENABLED, processing...")
+        self.progress_update.emit(75, f"Applying lip-sync to scene {scene_index + 1}...")
+
+        try:
+            # Get audio path from project
+            if not self.project.audio_tracks:
+                logger.warning("No audio track available for lip-sync")
+                return video_path
+
+            audio_path = Path(self.project.audio_tracks[0].file_path)
+            if not audio_path.exists():
+                logger.warning(f"Audio file not found: {audio_path}")
+                return video_path
+
+            # Get scene timing
+            start_time = scene.start_time if hasattr(scene, 'start_time') else 0
+            end_time = scene.end_time if hasattr(scene, 'end_time') else scene.duration_sec
+
+            # Extract audio segment for this scene
+            from core.video.audio_segmenter import extract_scene_audio_for_lipsync
+            segment_path = extract_scene_audio_for_lipsync(
+                self.project.project_dir,
+                audio_path,
+                scene_index,
+                start_time,
+                end_time
+            )
+
+            if not segment_path or not segment_path.exists():
+                logger.warning(f"Failed to extract audio segment for scene {scene_index + 1}")
+                return video_path
+
+            logger.info(f"Extracted audio segment: {segment_path}")
+
+            # Apply MuseTalk lip-sync
+            from providers.video.musetalk_provider import MuseTalkProvider
+
+            provider = MuseTalkProvider()
+            if not provider.is_available():
+                logger.warning("MuseTalk not available for lip-sync")
+                return video_path
+
+            # Output path for lip-synced video
+            lipsync_dir = self.project.project_dir / "lipsync_clips"
+            lipsync_dir.mkdir(parents=True, exist_ok=True)
+            output_path = lipsync_dir / f"scene_{scene_index}_lipsync.mp4"
+
+            self.progress_update.emit(78, f"Running MuseTalk on scene {scene_index + 1}...")
+
+            result_path = provider.generate(
+                video_path=video_path,
+                audio_path=segment_path,
+                output_path=output_path
+            )
+
+            if result_path and result_path.exists():
+                logger.info(f"Lip-sync applied successfully: {result_path}")
+                return result_path
+            else:
+                logger.warning("MuseTalk generation returned no output")
+                return video_path
+
+        except ImportError as e:
+            logger.warning(f"Lip-sync dependencies not available: {e}")
+            return video_path
+        except Exception as e:
+            logger.error(f"Lip-sync processing failed: {e}", exc_info=True)
+            return video_path
+
     def _generate_video_clip_sora(self):
         """Generate video clip for a single scene using OpenAI Sora"""
         try:
@@ -1260,6 +1358,10 @@ class VideoGenerationThread(QThread):
             # Map model name to enum
             if sora_model_name == 'sora-2-pro':
                 sora_model = SoraModel.SORA_2_PRO
+            elif sora_model_name == 'sora-2-2025-12-08':
+                sora_model = SoraModel.SORA_2_20251208
+                # Snapshot model only supports 720p (same as sora-2)
+                sora_resolution = '720p'
             else:
                 sora_model = SoraModel.SORA_2
                 # Standard model only supports 720p
@@ -1331,6 +1433,9 @@ class VideoGenerationThread(QThread):
 
             shutil.copy2(cached_video_path, video_path)
             logger.info(f"Copied Sora video from cache to project: {video_path}")
+
+            # Apply lip-sync if enabled for this scene
+            video_path = self._apply_lipsync_to_scene(video_path, scene_index)
 
             self.progress_update.emit(94, "Extracting last frame...")
 
@@ -1598,8 +1703,11 @@ class VideoProjectTab(QWidget):
         else:
             self.logger.info("UI STEP 11: No project to sync with reference library")
 
-        # Create lip-sync tab
-        self.logger.info("UI STEP 12: Creating LipSyncWidget...")
+        # Create lip-sync widget (integrated into main workflow now)
+        # The separate Lip-Sync tab is deprecated - lip-sync is now enabled per-scene
+        # via the 🎤 column in the storyboard and applied automatically during video generation.
+        # Keeping widget available for advanced standalone use if needed.
+        self.logger.info("UI STEP 12: Creating LipSyncWidget (integrated mode)...")
         try:
             self.lipsync_widget = LipSyncWidget()
             self.logger.info("UI STEP 12: LipSyncWidget created successfully")
@@ -1610,8 +1718,15 @@ class VideoProjectTab(QWidget):
         self.logger.info("UI STEP 13: Connecting lip-sync signals...")
         self.lipsync_widget.generation_finished.connect(self.on_lipsync_finished)
         self.lipsync_widget.generation_failed.connect(self.on_lipsync_failed)
-        self.tab_widget.addTab(self.lipsync_widget, "Lip-Sync")
-        self.logger.info("UI STEP 13: Lip-sync tab added")
+
+        # Lip-Sync tab hidden by default - lip-sync is now integrated into storyboard workflow
+        # To re-enable: set show_lipsync_tab = True
+        show_lipsync_tab = False  # Deprecated: use per-scene 🎤 toggle instead
+        if show_lipsync_tab:
+            self.tab_widget.addTab(self.lipsync_widget, "Lip-Sync")
+            self.logger.info("UI STEP 13: Lip-sync tab added (standalone mode)")
+        else:
+            self.logger.info("UI STEP 13: Lip-sync tab hidden (integrated into storyboard workflow)")
 
         # Add tabs to layout
         self.logger.info("UI STEP 14: Adding tab widget to layout...")

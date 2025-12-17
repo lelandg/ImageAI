@@ -21,60 +21,87 @@ def parse_scene_markers(lyrics: str) -> Tuple[str, List[Dict[str, str]]]:
     """
     Parse scene markers from lyrics text.
 
-    Syntax: === NEW SCENE: <environment> ===
-    Example: === NEW SCENE: bedroom ===
+    Supports two formats:
+    - New format: {scene: bedroom}, {camera: slow pan}, etc.
+    - Legacy format: === NEW SCENE: bedroom === (deprecated, converted to new format)
 
     Returns:
         Tuple of (cleaned_lyrics, list of scene_markers)
         where scene_markers contains {'line_index': int, 'environment': str, 'group_id': str}
+        plus any additional metadata from other tag types
     """
-    lines = lyrics.split('\n')
+    from core.video.tag_parser import TagParser, TagType, extract_scene_metadata
+
+    logger = logging.getLogger(__name__)
+    tag_parser = TagParser()
+
+    # Parse all tags (handles both new {scene:} and legacy === formats)
+    parse_result = tag_parser.parse(lyrics, convert_legacy=True)
+
+    if parse_result.legacy_markers_found:
+        logger.warning(
+            "Legacy '=== NEW SCENE ===' format detected. "
+            "Consider using {scene: environment} format instead."
+        )
+
+    # Build scene markers list from parsed tags
     scene_markers = []
-    cleaned_lines = []
-    current_environment = None
     current_group_id = None
+    lines = parse_result.clean_text.split('\n')
 
-    # Pattern: === NEW SCENE: <environment> ===
-    scene_marker_pattern = re.compile(r'^===\s*NEW SCENE:\s*(.+?)\s*===$', re.IGNORECASE)
-
-    for i, line in enumerate(lines):
-        marker_match = scene_marker_pattern.match(line.strip())
-
-        if marker_match:
-            # Found a scene marker
-            environment = marker_match.group(1).strip()
-            current_environment = environment
+    # Track which lines have scene tags applied
+    scene_tag_lines = {}
+    for tag in parse_result.tags:
+        if tag.tag_type == TagType.SCENE:
+            # Create a new group for each scene tag
             current_group_id = f"group-{uuid.uuid4().hex[:8]}"
-
-            # Add marker info for this line index
-            scene_markers.append({
-                'line_index': len(cleaned_lines),  # Next line will start new scene
-                'environment': environment,
+            scene_tag_lines[tag.line_number] = {
+                'environment': tag.value,
                 'group_id': current_group_id
-            })
+            }
 
-            # Don't include the marker line in cleaned lyrics
-            continue
-        else:
-            # Regular lyric line - add environment info if we're in a marked scene
-            if current_environment:
-                cleaned_lines.append(line)
-                # Store environment for this line
+    # Convert parsed tags to scene markers format
+    current_environment = None
+    current_group = None
+    clean_line_index = 0
+
+    for orig_line_num, line_tags in sorted(parse_result.tags_by_line.items()):
+        for tag in line_tags:
+            if tag.tag_type == TagType.SCENE:
+                current_environment = tag.value
+                current_group = f"group-{uuid.uuid4().hex[:8]}"
+
+                # Add marker at this position
                 scene_markers.append({
-                    'line_index': len(cleaned_lines) - 1,
+                    'line_index': clean_line_index,
                     'environment': current_environment,
-                    'group_id': current_group_id,
-                    'is_marker': False
+                    'group_id': current_group,
+                    'is_marker': True,
+                    # Include other metadata from tags on this line
+                    'metadata': extract_scene_metadata(line_tags)
                 })
-            else:
-                cleaned_lines.append(line)
 
-    cleaned_lyrics = '\n'.join(cleaned_lines)
+    # Also track lines that fall under each scene's scope
+    # (lines between scene markers inherit the environment)
+    if scene_markers:
+        for i, marker in enumerate(scene_markers):
+            # Lines from this marker to the next (or end) belong to this scene
+            start_idx = marker['line_index']
+            end_idx = scene_markers[i + 1]['line_index'] if i + 1 < len(scene_markers) else len(lines)
 
-    # Filter to only keep actual scene break markers
+            for line_idx in range(start_idx, end_idx):
+                if line_idx != marker['line_index']:  # Don't duplicate the marker line
+                    scene_markers.append({
+                        'line_index': line_idx,
+                        'environment': marker['environment'],
+                        'group_id': marker['group_id'],
+                        'is_marker': False
+                    })
+
+    # Filter to only keep actual scene break markers for return
     scene_break_markers = [m for m in scene_markers if m.get('is_marker', True)]
 
-    return cleaned_lyrics, scene_break_markers
+    return parse_result.clean_text, scene_break_markers
 
 
 class StoryboardApproach(Enum):
@@ -400,13 +427,24 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                           style: str = "cinematic, high quality",
                           negatives: str = "low quality, blurry",
                           render_method: Optional[str] = None,
-                          tempo: Optional[float] = None) -> Tuple[Optional[StyleGuide], List[Scene], Optional[List[Dict]]]:
+                          tempo: Optional[float] = None,
+                          word_timestamps: Optional[List[Dict[str, Any]]] = None) -> Tuple[Optional[StyleGuide], List[Scene], Optional[List[Dict]]]:
         """
         Generate storyboard using provider-specific approach.
 
         Args:
+            lyrics: Input text/lyrics to generate scenes from
+            title: Video title
+            duration: Target duration in seconds
+            provider: LLM provider to use (gemini, openai, claude, etc.)
+            model: LLM model name
+            style: Visual style description
+            negatives: Elements to avoid
             render_method: If set to "veo_3.1" or similar, also generates batched prompts for 8s clips
             tempo: Song tempo in BPM (beats per minute) for matching video energy to music
+            word_timestamps: Optional Whisper word timestamps for precise scene timing.
+                             List of dicts with 'text', 'start_time', 'end_time'.
+                             When provided, scene durations are calculated from actual audio timing.
 
         Returns:
             Tuple of (StyleGuide, List[Scene], Optional[List[VeoBatch]])
@@ -452,6 +490,14 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
 
         # Apply environment and scene_group_id from markers to generated scenes
         scenes = self._apply_scene_markers(scenes, scene_markers)
+
+        # Apply Whisper timing if available
+        if word_timestamps:
+            scenes = self._apply_whisper_timing(scenes, lyrics, word_timestamps)
+            self.logger.info(f"Applied Whisper timing to {len(scenes)} scenes")
+        else:
+            # Also check for time tags in lyrics and use those
+            scenes = self._apply_time_tags(scenes, lyrics)
 
         # Generate batched prompts if render_method requires it
         veo_batches = None
@@ -843,6 +889,153 @@ Format as JSON with 'scenes' array containing objects with 'lyrics', 'descriptio
 
                 self.logger.info(f"Scene {i}: Applied environment '{current_environment}' (group: {current_group_id})")
 
+        return scenes
+
+    def _apply_whisper_timing(self,
+                              scenes: List[Scene],
+                              lyrics: str,
+                              word_timestamps: List[Dict[str, Any]]) -> List[Scene]:
+        """
+        Apply precise timing from Whisper word timestamps to scenes.
+
+        This method matches scene source text to Whisper word timings to determine
+        accurate start/end times for each scene based on actual audio.
+
+        Args:
+            scenes: Generated scenes
+            lyrics: Original lyrics text
+            word_timestamps: Whisper word timestamps with 'text', 'start_time', 'end_time'
+
+        Returns:
+            Scenes with updated duration_sec and start_sec in metadata
+        """
+        if not word_timestamps or not scenes:
+            return scenes
+
+        # Build word timing map from Whisper data
+        # Use sequential word matching to find scene boundaries
+        words = [wt.get('text', '').strip().lower() for wt in word_timestamps]
+        word_times = [(wt.get('start_time', 0.0), wt.get('end_time', 0.0)) for wt in word_timestamps]
+
+        # Total audio duration
+        total_duration = max(wt.get('end_time', 0.0) for wt in word_timestamps) if word_timestamps else 0
+
+        # For each scene, find the words it contains and determine timing
+        word_index = 0
+        for scene in scenes:
+            scene_text = scene.source.lower() if scene.source else ""
+            scene_words = [w.strip() for w in scene_text.split() if w.strip()]
+
+            if not scene_words:
+                continue
+
+            # Find start word
+            start_time = None
+            end_time = None
+
+            # Try to find the first word of this scene in the remaining word sequence
+            for i in range(word_index, len(words)):
+                # Check if this word matches the start of our scene
+                first_scene_word = ''.join(c for c in scene_words[0] if c.isalnum())
+                word_clean = ''.join(c for c in words[i] if c.isalnum())
+
+                if first_scene_word == word_clean:
+                    start_time = word_times[i][0]
+
+                    # Find the last word of this scene
+                    last_scene_word = ''.join(c for c in scene_words[-1] if c.isalnum())
+
+                    # Search forward for the last word
+                    for j in range(i, min(i + len(scene_words) + 10, len(words))):
+                        word_j_clean = ''.join(c for c in words[j] if c.isalnum())
+                        if last_scene_word == word_j_clean:
+                            end_time = word_times[j][1]
+                            word_index = j + 1
+                            break
+
+                    if end_time is None and start_time is not None:
+                        # Estimate end time based on scene word count
+                        estimated_words = min(i + len(scene_words), len(words) - 1)
+                        end_time = word_times[estimated_words][1]
+                        word_index = estimated_words + 1
+
+                    break
+
+            # Apply timing to scene
+            if start_time is not None and end_time is not None:
+                scene.duration_sec = end_time - start_time
+                if not scene.metadata:
+                    scene.metadata = {}
+                scene.metadata['start_sec'] = start_time
+                scene.metadata['end_sec'] = end_time
+                scene.metadata['timing_source'] = 'whisper'
+
+                self.logger.debug(f"Scene timing: {start_time:.2f}s - {end_time:.2f}s ({scene.duration_sec:.2f}s)")
+
+        return scenes
+
+    def _apply_time_tags(self, scenes: List[Scene], lyrics: str) -> List[Scene]:
+        """
+        Apply timing from {time: MM:SS} tags in lyrics to scenes.
+
+        This method extracts time tags from the input text and uses them
+        to set scene start/end times when Whisper data is not available.
+
+        Args:
+            scenes: Generated scenes
+            lyrics: Original lyrics text with potential time tags
+
+        Returns:
+            Scenes with updated timing based on time tags
+        """
+        from core.video.tag_parser import TagParser, TagType, parse_time_value
+
+        parser = TagParser()
+        result = parser.parse(lyrics)
+
+        # Get time tags sorted by line number
+        time_tags = [(t.line_number, t.value) for t in result.tags if t.tag_type == TagType.TIME]
+        time_tags.sort(key=lambda x: x[0])
+
+        if not time_tags:
+            return scenes
+
+        # Parse time values
+        parsed_times = []
+        for line_num, time_str in time_tags:
+            seconds = parse_time_value(time_str)
+            if seconds is not None:
+                parsed_times.append((line_num, seconds))
+
+        if not parsed_times:
+            return scenes
+
+        # Apply times to scenes
+        # Simple approach: distribute time tags across scenes based on position
+        for i, scene in enumerate(scenes):
+            # Find the time tag closest to this scene's position
+            scene_position = i / max(len(scenes) - 1, 1)  # 0.0 to 1.0
+
+            # Find corresponding time tag
+            tag_index = min(int(scene_position * len(parsed_times)), len(parsed_times) - 1)
+
+            start_time = parsed_times[tag_index][1]
+
+            # End time is the next tag's time, or estimated
+            if tag_index + 1 < len(parsed_times):
+                end_time = parsed_times[tag_index + 1][1]
+            else:
+                # Last scene - estimate duration
+                end_time = start_time + scene.duration_sec
+
+            scene.duration_sec = end_time - start_time
+            if not scene.metadata:
+                scene.metadata = {}
+            scene.metadata['start_sec'] = start_time
+            scene.metadata['end_sec'] = end_time
+            scene.metadata['timing_source'] = 'time_tags'
+
+        self.logger.info(f"Applied {len(parsed_times)} time tags to {len(scenes)} scenes")
         return scenes
 
     def apply_reference_image_auto_linking(self, scenes: List[Scene]) -> List[Scene]:
