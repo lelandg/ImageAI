@@ -451,6 +451,12 @@ class ImageAnalysisWorker(QObject):
             self.log_message.emit("Sending request to LLM...", "INFO")
             self.progress.emit("Waiting for LLM response...")
 
+            # Create callback for retry status messages
+            def retry_callback(message, level):
+                self.log_message.emit(message, level)
+                if level == "WARNING":
+                    self.progress.emit(message)
+
             # Generate description using appropriate parameters
             if is_gpt5:
                 # GPT-5 has fixed parameters (temperature=1.0)
@@ -459,14 +465,16 @@ class ImageAnalysisWorker(QObject):
                     model=self.llm_model,
                     temperature=1.0,  # GPT-5 requires temperature=1
                     max_tokens=1000,  # Fixed for GPT-5
-                    response_format={"type": "text"}
+                    response_format={"type": "text"},
+                    console_callback=retry_callback
                 )
             else:
                 description = llm.generate(
                     messages,
                     model=self.llm_model,
                     temperature=temperature,
-                    max_tokens=max_tokens
+                    max_tokens=max_tokens,
+                    console_callback=retry_callback
                 )
 
             if self._stopped:

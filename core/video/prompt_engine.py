@@ -5,8 +5,11 @@ Uses LLMs to transform simple text into cinematic image prompts.
 
 import json
 import logging
+import time
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Callable, TypeVar
+
+T = TypeVar('T')
 from dataclasses import dataclass
 from enum import Enum
 from jinja2 import Template, Environment, FileSystemLoader
@@ -147,6 +150,102 @@ class UnifiedLLMProvider:
             List of model names
         """
         return get_provider_models(provider)
+
+    def _is_retryable_error(self, error: Exception) -> bool:
+        """
+        Check if an error is transient and should be retried.
+
+        Args:
+            error: The exception that was raised
+
+        Returns:
+            True if the error is transient and retryable
+        """
+        error_str = str(error).lower()
+
+        # Anthropic-specific transient errors
+        if 'overloaded' in error_str:
+            return True
+        if 'rate_limit' in error_str or 'rate limit' in error_str:
+            return True
+        if 'timeout' in error_str:
+            return True
+        if '529' in error_str:  # Anthropic overloaded status code
+            return True
+        if '503' in error_str:  # Service unavailable
+            return True
+        if '502' in error_str:  # Bad gateway
+            return True
+        if 'temporarily unavailable' in error_str:
+            return True
+        if 'server error' in error_str:
+            return True
+        if 'internal server error' in error_str:
+            return True
+
+        # Check exception type name
+        error_type = type(error).__name__.lower()
+        if 'timeout' in error_type:
+            return True
+        if 'connection' in error_type:
+            return True
+
+        return False
+
+    def _retry_with_backoff(self,
+                           func: Callable,
+                           max_retries: int = 3,
+                           initial_delay: float = 1.0,
+                           backoff_factor: float = 2.0,
+                           console_callback: Callable = None) -> Any:
+        """
+        Retry a function with exponential backoff for transient errors.
+
+        Args:
+            func: Function to call (should take no arguments)
+            max_retries: Maximum number of retry attempts
+            initial_delay: Initial delay in seconds before first retry
+            backoff_factor: Multiplier for delay after each retry
+            console_callback: Optional callback for status messages
+
+        Returns:
+            Result from the function
+
+        Raises:
+            The last exception if all retries fail
+        """
+        last_exception = None
+        delay = initial_delay
+
+        for attempt in range(max_retries + 1):
+            try:
+                return func()
+            except Exception as e:
+                last_exception = e
+
+                # Check if this is a retryable error
+                if not self._is_retryable_error(e):
+                    self.logger.error(f"Non-retryable error: {e}")
+                    raise
+
+                # If we've exhausted retries, raise the exception
+                if attempt >= max_retries:
+                    self.logger.error(f"All {max_retries} retries exhausted. Last error: {e}")
+                    raise
+
+                # Log retry attempt
+                self.logger.warning(f"Retryable error (attempt {attempt + 1}/{max_retries + 1}): {e}")
+                self.logger.info(f"Waiting {delay:.1f}s before retry...")
+
+                if console_callback:
+                    console_callback(f"API temporarily unavailable, retrying in {delay:.0f}s... (attempt {attempt + 1}/{max_retries + 1})", "WARNING")
+
+                # Wait before retrying
+                time.sleep(delay)
+                delay *= backoff_factor
+
+        # Should never reach here, but just in case
+        raise last_exception
 
     def _strip_markdown_headers(self, text: str) -> str:
         """
@@ -321,8 +420,17 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
                 console_callback(f"System: {system_prompt[:200]}..." if len(system_prompt) > 200 else f"System: {system_prompt}", "INFO")
                 console_callback(f"User: {user_prompt}", "INFO")
 
-            # Call LiteLLM
-            response = self.litellm.completion(**kwargs)
+            # Call LiteLLM with retry for transient errors
+            def make_enhance_call():
+                return self.litellm.completion(**kwargs)
+
+            response = self._retry_with_backoff(
+                func=make_enhance_call,
+                max_retries=3,
+                initial_delay=2.0,
+                backoff_factor=2.0,
+                console_callback=console_callback
+            )
 
             # Log LLM response if enabled
             if log_llm:
@@ -834,9 +942,11 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
                      temperature: float = 0.7,
                      max_tokens: int = 1000,
                      reasoning_effort: str = None,
-                     response_format: Dict[str, str] = None) -> str:
+                     response_format: Dict[str, str] = None,
+                     console_callback: Callable = None) -> str:
         """
         Analyze an image using vision-capable models.
+        Includes automatic retry with exponential backoff for transient errors.
 
         Args:
             messages: List of message dicts with text and image content
@@ -845,45 +955,46 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
             max_tokens: Maximum tokens to generate
             reasoning_effort: For GPT-5 models
             response_format: Response format specification
+            console_callback: Optional callback for status messages during retries
 
         Returns:
             Generated text description
         """
-        try:
-            # Set up the model if not specified
-            if not model:
-                model = 'gpt-4o'  # Default vision-capable model
+        # Set up the model if not specified
+        if not model:
+            model = 'gpt-4o'  # Default vision-capable model
 
-            # Prepare kwargs for litellm
-            kwargs = {
-                'model': model,
-                'messages': messages,
-                'temperature': temperature,
-                'max_tokens': max_tokens
-            }
+        # Prepare kwargs for litellm
+        kwargs = {
+            'model': model,
+            'messages': messages,
+            'temperature': temperature,
+            'max_tokens': max_tokens
+        }
 
-            # Handle GPT-5 specific parameters
-            if 'gpt-5' in model.lower():
-                # GPT-5 requires temperature=1
-                kwargs['temperature'] = 1.0
-                # Note: reasoning_effort is not yet supported by the API
-                # It's a UI-only parameter for now
+        # Handle GPT-5 specific parameters
+        if 'gpt-5' in model.lower():
+            # GPT-5 requires temperature=1
+            kwargs['temperature'] = 1.0
+            # Note: reasoning_effort is not yet supported by the API
+            # It's a UI-only parameter for now
 
-            if response_format:
-                kwargs['response_format'] = response_format
+        if response_format:
+            kwargs['response_format'] = response_format
 
-            # Get appropriate API configuration
-            if 'gpt' in model.lower() or 'openai' in model.lower():
-                if 'openai_api_key' in self.config:
-                    kwargs['api_key'] = self.config['openai_api_key']
-            elif 'claude' in model.lower():
-                if 'anthropic_api_key' in self.config:
-                    kwargs['api_key'] = self.config['anthropic_api_key']
-            elif 'gemini' in model.lower():
-                if 'google_api_key' in self.config:
-                    kwargs['api_key'] = self.config['google_api_key']
+        # Get appropriate API configuration
+        if 'gpt' in model.lower() or 'openai' in model.lower():
+            if 'openai_api_key' in self.config:
+                kwargs['api_key'] = self.config['openai_api_key']
+        elif 'claude' in model.lower():
+            if 'anthropic_api_key' in self.config:
+                kwargs['api_key'] = self.config['anthropic_api_key']
+        elif 'gemini' in model.lower():
+            if 'google_api_key' in self.config:
+                kwargs['api_key'] = self.config['google_api_key']
 
-            # Call litellm for vision analysis
+        def make_llm_call():
+            """Inner function for the actual LLM call (used by retry wrapper)."""
             response = self.litellm.completion(**kwargs)
 
             # Extract and return the response
@@ -892,6 +1003,15 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
             else:
                 raise ValueError("No response from LLM")
 
+        try:
+            # Use retry with backoff for transient errors (overloaded, rate limits, etc.)
+            return self._retry_with_backoff(
+                func=make_llm_call,
+                max_retries=3,
+                initial_delay=2.0,  # Start with 2 second delay
+                backoff_factor=2.0,  # Double delay each retry (2s, 4s, 8s)
+                console_callback=console_callback
+            )
         except Exception as e:
             self.logger.error(f"Image analysis failed: {str(e)}")
             raise

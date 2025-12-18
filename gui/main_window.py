@@ -3892,21 +3892,21 @@ For more detailed information, please refer to the full documentation.
         if not hasattr(self, 'ref_image_toggle'):
             return
 
-        # Show Reference Images section only for Google provider
+        # Show Reference Images section for Google and OpenAI (GPT Image models)
         current_provider = self.image_provider_combo.currentText().lower()
-        show_toggle = current_provider == "google"
+        show_toggle = current_provider in ["google", "openai"]
 
         self.ref_image_toggle.setVisible(show_toggle)
 
-        # If switching away from Google and section is expanded, collapse it
+        # If switching away from supported provider and section is expanded, collapse it
         if not show_toggle and self.ref_image_toggle.isChecked():
             self.ref_image_toggle.setChecked(False)
             self.ref_image_container.setVisible(False)
 
-        # If switching TO Google, show a helpful message if there are references
+        # If switching TO a supported provider, show a helpful message if there are references
         if show_toggle and hasattr(self, 'imagen_reference_widget'):
             if self.imagen_reference_widget.has_references():
-                logger.info(f"Google provider selected with {len(self.imagen_reference_widget.get_references())} reference images ready")
+                logger.info(f"{current_provider.title()} provider selected with {len(self.imagen_reference_widget.get_references())} reference images ready")
 
         logger.debug(f"Reference images toggle visibility: {show_toggle} (provider: {current_provider})")
 
@@ -5220,16 +5220,16 @@ For more detailed information, please refer to the full documentation.
         # Check for Imagen 3 multi-reference generation
         use_imagen_customization = False
 
-        # First, check if user has references but is NOT using Google
+        # First, check if user has references but is NOT using a supported provider (Google or OpenAI)
         if (hasattr(self, 'imagen_reference_widget') and
             self.imagen_reference_widget.has_references() and
-            self.current_provider.lower() != "google"):
+            self.current_provider.lower() not in ["google", "openai"]):
 
-            # User has reference images but is using a non-Google provider
-            error_msg = (f"Reference images are only supported with Google Imagen 3.\n\n"
+            # User has reference images but is using an unsupported provider
+            error_msg = (f"Reference images are only supported with Google and OpenAI.\n\n"
                         f"Current provider: {self.current_provider}\n\n"
                         f"Please either:\n"
-                        f"• Switch to Google provider in Settings, or\n"
+                        f"• Switch to Google or OpenAI provider in Settings, or\n"
                         f"• Remove the reference images to use {self.current_provider}")
             self._append_to_console(f"ERROR: {error_msg}", "#ff6666")
             QMessageBox.warning(self, APP_NAME, error_msg)
@@ -5378,6 +5378,69 @@ For more detailed information, please refer to the full documentation.
                         f"  [{i}] {ref.reference_type.value.upper()}: {ref.path.name}",
                         "#66ccff"
                     )
+
+        # Check if using OpenAI with reference images
+        if (hasattr(self, 'imagen_reference_widget') and
+            self.imagen_reference_widget.has_references() and
+            self.current_provider.lower() == "openai"):
+
+            # Get references from widget
+            references = self.imagen_reference_widget.get_references()
+
+            # Validate references
+            is_valid, errors = self.imagen_reference_widget.validate_references()
+            if not is_valid:
+                error_msg = "Invalid reference images:\n" + "\n".join(errors)
+                self._append_to_console(f"ERROR: {error_msg}", "#ff6666")
+                QMessageBox.warning(self, APP_NAME, error_msg)
+                self.btn_generate.setEnabled(True)
+                return
+
+            # Check model supports reference images (GPT Image models only)
+            if model not in ["gpt-image-1", "gpt-image-1.5"]:
+                error_msg = (f"Reference images are only supported with GPT Image models.\n\n"
+                            f"Current model: {model}\n\n"
+                            f"Please switch to 'GPT Image 1' or 'GPT Image 1.5' to use reference images.")
+                self._append_to_console(f"ERROR: {error_msg}", "#ff6666")
+                QMessageBox.warning(self, APP_NAME, error_msg)
+                self.btn_generate.setEnabled(True)
+                return
+
+            # OpenAI supports up to 10 reference images
+            if len(references) > 10:
+                self._append_to_console(
+                    f"Warning: OpenAI supports max 10 reference images. Using first 10 of {len(references)}.",
+                    "#ffcc00"
+                )
+                references = references[:10]
+
+            # Prepare reference images as bytes
+            reference_images = []
+            for ref in references:
+                try:
+                    with open(ref.path, 'rb') as f:
+                        reference_images.append(f.read())
+                    self._append_to_console(
+                        f"  Added reference: {ref.path.name}",
+                        "#66ccff"
+                    )
+                except Exception as e:
+                    self._append_to_console(
+                        f"  Warning: Could not load {ref.path.name}: {e}",
+                        "#ffcc00"
+                    )
+
+            if reference_images:
+                kwargs['reference_images'] = reference_images
+                self._append_to_console(
+                    f"Using {len(reference_images)} reference image(s) with OpenAI {model}",
+                    "#00ff00"
+                )
+            else:
+                self._append_to_console(
+                    "Warning: No valid reference images could be loaded",
+                    "#ffcc00"
+                )
 
         # Show status for provider loading
         self.status_bar.showMessage(f"Connecting to {self.current_provider}...")
