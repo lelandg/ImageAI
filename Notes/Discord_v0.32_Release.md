@@ -31,6 +31,11 @@ Create custom fonts from alphabet images!
 ### Documentation
 Full user guides added for both features in `Docs/`
 
+### Downlod or clone the repo:
+https://github.com/lelandg/imageai/
+
+### DM me for help configuring your API keys or cloud authentication.
+
 ---
 
 Download: `git pull` or grab the latest from GitHub
