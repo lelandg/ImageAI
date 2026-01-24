@@ -16,6 +16,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from core.config import ConfigManager
 from core.layout.models import TextBlock, DocumentSpec
 from core.llm_models import get_provider_models, get_provider_prefix
+from core.discord_rpc import discord_rpc, ActivityState
 from gui.llm_utils import DialogStatusConsole, LiteLLMHandler, LLMResponseParser
 
 logger = logging.getLogger(__name__)
@@ -609,8 +610,19 @@ class TextGenerationDialog(QDialog):
         text = self.preview_edit.toPlainText().strip()
         return text if text else None
 
+    def showEvent(self, event):
+        """Handle show event - update Discord presence."""
+        super().showEvent(event)
+        discord_rpc.update_presence(
+            ActivityState.CHATTING_WITH_AI,
+            details="Generate Text"
+        )
+
     def closeEvent(self, event):
         """Handle close event - ensure worker thread is stopped."""
+        # Reset Discord presence to IDLE
+        discord_rpc.update_presence(ActivityState.IDLE)
+
         if self.worker and self.worker.isRunning():
             # Disconnect signals to prevent crashes during cleanup
             try:

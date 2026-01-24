@@ -33,11 +33,28 @@ LLM_PROVIDERS = {
         id='openai',
         display_name='OpenAI',
         models=[
-            'gpt-5-chat-latest',
-            'gpt-4o',
-            'gpt-4.1',
-            'gpt-4.1-mini',
-            'gpt-4.1-nano'
+            # GPT-5 Series (Latest - December 2025)
+            'gpt-5.2-pro',                     # GPT 5.2 Pro (newest flagship)
+            'gpt-5.2',                         # GPT 5.2 (latest stable)
+            'gpt-5.1',                         # GPT 5.1
+            'gpt-5-pro',                       # GPT 5 Pro
+            'gpt-5',                           # GPT 5
+            'gpt-5-mini',                      # GPT 5 Mini (balanced)
+            'gpt-5-nano',                      # GPT 5 Nano (fastest)
+            # Reasoning Models (o-series)
+            'o4-mini',                         # O4 Mini (fast reasoning)
+            'o3-pro',                          # O3 Pro (advanced reasoning)
+            'o3',                              # O3 (reasoning)
+            'o3-mini',                         # O3 Mini (fast reasoning)
+            'o1-pro',                          # O1 Pro (original reasoning)
+            'o1',                              # O1 (original reasoning)
+            # GPT-4 Series (Previous Generation)
+            'gpt-4.1',                         # GPT 4.1 (stable)
+            'gpt-4.1-mini',                    # GPT 4.1 Mini
+            'gpt-4.1-nano',                    # GPT 4.1 Nano
+            'gpt-4o',                          # GPT-4o (multimodal)
+            'gpt-4o-mini',                     # GPT-4o Mini
+            'gpt-4-turbo',                     # GPT-4 Turbo
         ],
         enabled_by_default=True,
         requires_api_key=True,
@@ -48,14 +65,17 @@ LLM_PROVIDERS = {
         id='anthropic',
         display_name='Anthropic',
         models=[
-            'claude-opus-4-5-20251101',  # NEWEST: Opus 4.5 (released Nov 2025)
-            'claude-sonnet-4-5',  # Sonnet 4.5 (released Sept 2025)
-            'claude-opus-4-1',
-            'claude-opus-4',
-            'claude-sonnet-4',
-            'claude-3-7-sonnet',
-            'claude-3-5-sonnet',
-            'claude-3-5-haiku'
+            # Claude 4.5 Series (Latest - November 2025)
+            'claude-opus-4-5-20251101',      # Opus 4.5: Most intelligent, $5/$25 per 1M
+            'claude-sonnet-4-5-20250514',    # Sonnet 4.5: Best for agents, $3/$15 per 1M
+            # Claude 4 Series (May 2025)
+            'claude-opus-4-20250514',        # Opus 4: Best coding model, $15/$75 per 1M
+            'claude-sonnet-4-20250514',      # Sonnet 4: Balanced coding, $3/$15 per 1M
+            # Claude 3.7 Series
+            'claude-3-7-sonnet-20250219',    # Extended thinking, $3/$15 per 1M
+            # Claude 3.5 Series
+            'claude-3-5-sonnet-20241022',    # Best speed/intelligence balance
+            'claude-3-5-haiku-20241022',     # Fastest, $0.80/$4 per 1M
         ],
         enabled_by_default=True,
         requires_api_key=True,
@@ -66,11 +86,15 @@ LLM_PROVIDERS = {
         id='gemini',
         display_name='Google',
         models=[
-            'gemini-3-pro-preview',            # Gemini 3 Pro (newest, reasoning-first)
-            'gemini-2.5-pro',                  # Gemini 2.5 Pro (stable)
-            'gemini-2.5-flash',                # Gemini 2.5 Flash (stable)
-            'gemini-2.5-flash-lite',           # Gemini 2.5 Flash Lite (fast/cheap)
-            'gemini-2.0-flash',                # Gemini 2.0 Flash (stable)
+            # Gemini 3 Series (Latest - December 2025)
+            'gemini-3-pro-preview',            # Gemini 3 Pro (state-of-the-art reasoning, 1M context)
+            'gemini-3-flash-preview',          # Gemini 3 Flash (frontier intelligence, fast, 1M context)
+            # Gemini 2.5 Series (Stable - June 2025)
+            'gemini-2.5-pro',                  # Gemini 2.5 Pro (complex reasoning, 1M context)
+            'gemini-2.5-flash',                # Gemini 2.5 Flash (price-performance, 1M context)
+            'gemini-2.5-flash-lite',           # Gemini 2.5 Flash Lite (cost-efficient, 1M context)
+            # Gemini 2.0 Series (Previous Generation)
+            'gemini-2.0-flash',                # Gemini 2.0 Flash (1M context, 8K output)
             'gemini-2.0-flash-lite',           # Gemini 2.0 Flash Lite
         ],
         enabled_by_default=True,

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QPixmap
 
+from core.discord_rpc import discord_rpc, ActivityState
 from core.video.project import ReferenceImage, VideoProject
 from core.video.reference_manager import ReferenceImageType, ReferenceImageValidator
 from core.config import ConfigManager
@@ -917,8 +918,19 @@ class ReferenceGenerationDialog(QDialog):
             self.status_label.setText(f"✗ Failed to add: {str(e)}")
             self.status_label.setStyleSheet("color: red;")
 
+    def showEvent(self, event):
+        """Handle show event - update Discord presence."""
+        super().showEvent(event)
+        discord_rpc.update_presence(
+            ActivityState.CHATTING_WITH_AI,
+            details="Generate References"
+        )
+
     def closeEvent(self, event):
         """Handle close event - ensure worker thread is stopped and settings are saved."""
+        # Reset Discord presence to IDLE
+        discord_rpc.update_presence(ActivityState.IDLE)
+
         # Save settings before closing
         self.save_settings()
 

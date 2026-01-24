@@ -141,6 +141,21 @@ cython_debug/
 config.json
 generated/
 
+# Generated fonts (Font Generator output)
+Fonts/
+
+# Generated characters (Character Animator output)
+Characters/
+
+# Cache directories (visemes, puppets, etc.)
+cache/
+
+# ML model weights (large files, downloaded on demand)
+weights/
+
+# Generated model capabilities (fetched by scripts/fetch_model_capabilities.py)
+data/model_capabilities.json
+
 # Backup files from refactoring
 main_original.py
 
@@ -221,3 +236,11 @@ _Research
 _transfer
 SampleData/Ice*
 Images/
+Notes/PostPrism.ai/
+Notes/Claude Addons.md
+Notes/Discord_Logo_Prompts.md
+Notes/Vibe_Lab_Animated_Emoji_Ideas.md
+Notes/WSL-Migration-to-G-Drive.md
+Plans/CharacterAnimator_LayerExport_v3.md
+Notes/CharacterAnimator_BugFixes_20260112.md
+Notes/CharacterAnimator_BugFixes_Round2_20260112.md

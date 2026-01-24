@@ -13,6 +13,7 @@ import sys
 import time
 import logging
 
+from core.constants import get_user_data_dir
 from core.package_installer import (
     PackageInstaller, ModelDownloader,
     check_disk_space, get_realesrgan_packages,
@@ -312,8 +313,9 @@ class InstallProgressDialog(QDialog):
         default_model = "RealESRGAN_x4plus"
         model_info = models[default_model]
 
-        # Set up paths
-        weights_dir = Path("weights")
+        # Set up paths in user data directory
+        weights_dir = get_user_data_dir() / "weights"
+        weights_dir.mkdir(parents=True, exist_ok=True)
         model_path = weights_dir / f"{default_model}.pth"
 
         # Create downloader

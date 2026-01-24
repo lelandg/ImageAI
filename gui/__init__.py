@@ -56,6 +56,7 @@ def launch_gui():
     from .main_window import MainWindow
 
     app = QApplication.instance() or QApplication(sys.argv)
+    app.setOrganizationName("LelandGreenProductions")
     app.setApplicationName("ImageAI")
 
     # Always show keyboard shortcut underlines (not just when Alt is pressed)

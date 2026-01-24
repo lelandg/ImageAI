@@ -41,6 +41,7 @@ class PackageInstaller(QThread):
             # Calculate steps for progress
             total_steps = len(self.packages) + (2 if self.update_requirements else 1)
             current_step = 0
+            failed_packages = []  # Track packages that failed to install
 
             # Install each package
             for i, package in enumerate(self.packages):
@@ -58,14 +59,22 @@ class PackageInstaller(QThread):
                 package_duration = time.time() - package_start
                 duration_str = self._format_duration(package_duration)
 
-                if not success:
-                    logger.error(f"Failed to install {package} after {duration_str}: {output}")
-                    self.finished.emit(False, f"Failed to install {package} after {duration_str}: {output}")
-                    return
-
                 current_step += 1
                 percentage = int((current_step / total_steps) * 100)
                 self.percentage.emit(percentage)
+
+                if not success:
+                    # Check if it's a file locking error - continue with remaining packages
+                    if "File is locked" in output or "WinError 5" in output or "Access is denied" in output:
+                        logger.warning(f"Skipping {package} due to file lock, will continue with remaining packages")
+                        self.progress.emit(f"[{datetime.now().strftime('%H:%M:%S')}] ⚠️ Skipped {package} (file locked) - install manually after restart")
+                        failed_packages.append((package, "file locked"))
+                        continue
+                    else:
+                        # Other errors are fatal
+                        logger.error(f"Failed to install {package} after {duration_str}: {output}")
+                        self.finished.emit(False, f"Failed to install {package} after {duration_str}: {output}")
+                        return
 
                 self.progress.emit(f"[{datetime.now().strftime('%H:%M:%S')}] Installed {package} successfully ({duration_str})")
                 logger.info(f"Installed {package} in {duration_str}")
@@ -87,13 +96,32 @@ class PackageInstaller(QThread):
 
             # Final success with timing
             self.percentage.emit(100)
-            self.progress.emit(f"[{end_time_str}] All packages installed successfully!")
-            self.progress.emit(f"Total installation time: {duration_str}")
 
-            logger.info(f"Installation completed at {end_time_str}")
-            logger.info(f"Total installation duration: {duration_str}")
+            if failed_packages:
+                # Partial success
+                failed_names = [pkg for pkg, reason in failed_packages]
+                self.progress.emit(f"[{end_time_str}] Installation completed with {len(failed_packages)} skipped package(s)")
+                self.progress.emit(f"⚠️ Skipped (install manually after closing app): {', '.join(failed_names)}")
+                self.progress.emit(f"Total installation time: {duration_str}")
 
-            self.finished.emit(True, f"Installation complete in {duration_str}. Please restart the application.")
+                logger.warning(f"Installation completed with skipped packages: {failed_names}")
+                logger.info(f"Total installation duration: {duration_str}")
+
+                self.finished.emit(
+                    True,
+                    f"Partial install complete in {duration_str}. "
+                    f"Skipped: {', '.join(failed_names)} (close app and install manually). "
+                    f"Please restart the application."
+                )
+            else:
+                # Full success
+                self.progress.emit(f"[{end_time_str}] All packages installed successfully!")
+                self.progress.emit(f"Total installation time: {duration_str}")
+
+                logger.info(f"Installation completed at {end_time_str}")
+                logger.info(f"Total installation duration: {duration_str}")
+
+                self.finished.emit(True, f"Installation complete in {duration_str}. Please restart the application.")
 
         except Exception as e:
             logger.error(f"Installation failed: {e}")
@@ -135,6 +163,35 @@ class PackageInstaller(QThread):
                 return True, "Success"
             else:
                 error_msg = result.stderr if result.stderr else "Unknown error"
+
+                # Check for Windows file locking error (Access denied on .pyd files)
+                if "WinError 5" in error_msg or "Access is denied" in error_msg:
+                    logger.warning(f"File locked during {package} install, retrying with --ignore-installed")
+                    self.progress.emit(f"  File locked, retrying with --ignore-installed...")
+
+                    # Retry with --ignore-installed to skip locked dependencies
+                    retry_cmd = [sys.executable, "-m", "pip", "install", "--ignore-installed"]
+                    if self.index_url and package.startswith(("torch==", "torchvision==")):
+                        retry_cmd.extend(["--index-url", self.index_url])
+                    retry_cmd.append(package)
+
+                    retry_result = subprocess.run(
+                        retry_cmd,
+                        capture_output=True,
+                        text=True,
+                        check=False
+                    )
+
+                    if retry_result.returncode == 0:
+                        return True, "Success (with --ignore-installed)"
+                    else:
+                        # Still failed - provide helpful message
+                        error_msg = (
+                            f"File is locked by running application. "
+                            f"Please restart ImageAI and try again, or install manually:\n"
+                            f"  pip install {package}"
+                        )
+
                 logger.error(f"Failed to install {package}: {error_msg}")
                 return False, error_msg
 
@@ -469,3 +526,99 @@ def get_model_info() -> dict:
             "description": "2x upscaling model"
         }
     }
+
+
+# =============================================================================
+# Character Animator Puppet Automation
+# =============================================================================
+
+def get_puppet_ai_packages() -> Tuple[List[str], str]:
+    """
+    Get the list of packages needed for Character Animator puppet automation.
+
+    Similar to get_realesrgan_packages() but for puppet generation:
+    - SAM 2 (Segment Anything Model)
+    - MediaPipe (Pose and Face detection)
+    - Depth-Anything (Depth estimation)
+    - Diffusers (Stable Diffusion inpainting)
+
+    Returns:
+        Tuple of (packages_list, index_url_for_torch)
+    """
+    has_gpu, gpu_name = detect_nvidia_gpu()
+
+    packages = []
+    index_url = ""
+
+    if has_gpu:
+        # CUDA 12.1 version for NVIDIA GPUs
+        index_url = "https://download.pytorch.org/whl/cu121"
+        logger.info(f"Will install CUDA-accelerated PyTorch for {gpu_name}")
+    else:
+        # CPU-only version (smaller download)
+        index_url = "https://download.pytorch.org/whl/cpu"
+        logger.info("Will install CPU-only PyTorch")
+
+    # PyTorch and torchvision with compatible versions
+    packages.extend([
+        "torch>=2.5.1",  # Required by sam2
+        "torchvision>=0.20.1",  # Required by sam2
+    ])
+
+    # Segmentation
+    packages.append("sam2")  # Official Meta SAM 2 package from PyPI
+
+    # Pose/Face detection
+    packages.append("mediapipe>=0.10.0")
+
+    # Note: Depth estimation and local inpainting removed in favor of cloud AI editing
+    # See Plans/AICharacterGenerator.md for details
+
+    # Export tools
+    packages.extend([
+        "psd-tools>=1.9.0",
+        "svgwrite>=1.4.0",
+    ])
+
+    return packages, index_url
+
+
+def get_puppet_model_info() -> dict:
+    """
+    Get information about Character Animator puppet models.
+
+    Returns:
+        Dictionary with model information including URLs and sizes
+    """
+    return {
+        "sam2_hiera_large": {
+            "url": "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_large.pt",
+            "size_mb": 897,
+            "description": "SAM 2 Large model for precise segmentation",
+            "required": True,
+        },
+        "sam2_hiera_base": {
+            "url": "https://dl.fbaipublicfiles.com/segment_anything_2/072824/sam2_hiera_base_plus.pt",
+            "size_mb": 323,
+            "description": "SAM 2 Base model (faster, smaller)",
+            "required": False,
+        },
+        # Note: SD Inpainting and ControlNet removed in favor of cloud AI editing
+        # Viseme generation now uses Gemini/OpenAI image editing APIs
+    }
+
+
+def check_puppet_disk_space() -> Tuple[bool, str]:
+    """
+    Check if there's enough disk space for puppet automation installation.
+
+    Puppet automation requires approximately:
+    - PyTorch: ~3GB
+    - SAM 2: ~900MB
+    - MediaPipe + export tools: ~500MB
+    Total: ~5GB minimum (reduced after removing local SD inpainting)
+
+    Returns:
+        Tuple of (has_space, message)
+    """
+    return check_disk_space(5.0)  # 5GB recommended (cloud AI for visemes)

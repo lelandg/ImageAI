@@ -82,7 +82,7 @@ class OpenAIProvider(ImageProvider):
         target_height = kwargs.get('height')
         aspect_ratio = kwargs.get('aspect_ratio', '1:1')
 
-        if model in ["dall-e-3", "gpt-image-1", "gpt-image-1.5"]:
+        if model in ["dall-e-3", "gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"]:
             # Map resolution or aspect ratio to supported sizes
             resolution = kwargs.get('resolution', kwargs.get('width', size))
 
@@ -127,7 +127,7 @@ class OpenAIProvider(ImageProvider):
         # For GPT Image models: Add target dimensions to prompt as composition hint
         # This helps the model compose the image for the target aspect ratio
         # The output will still be a fixed size, but post-processing will crop/scale
-        if model in ["gpt-image-1", "gpt-image-1.5"] and target_width and target_height:
+        if model in ["gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"] and target_width and target_height:
             # Only add hint if target differs from API output size
             api_width, api_height = map(int, size.split('x'))
             target_ratio = target_width / target_height
@@ -167,7 +167,7 @@ class OpenAIProvider(ImageProvider):
         prepared_images = []
 
         # GPT Image models support reference images via images.edit()
-        if model in ["gpt-image-1", "gpt-image-1.5"] and (reference_image or reference_images):
+        if model in ["gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"] and (reference_image or reference_images):
             use_edit_api = True
 
             # Prepare reference images as file-like objects
@@ -251,8 +251,8 @@ class OpenAIProvider(ImageProvider):
                 logger.info(f"Moderation: {gen_params.get('moderation', 'auto')}")
                 logger.info(f"Number of images: {num_images}")
                 logger.info("=" * 60)
-            elif model == "gpt-image-1":
-                # GPT Image 1: supports background parameter, does NOT support style/quality
+            elif model in ["gpt-image-1", "gpt-image-1-mini"]:
+                # GPT Image 1 / 1-Mini: supports background parameter, does NOT support style/quality
                 gen_params = {
                     "model": model,
                     "prompt": prompt,
@@ -266,8 +266,9 @@ class OpenAIProvider(ImageProvider):
                     gen_params["background"] = background
 
                 # Log the request
+                model_name = "GPT Image 1 Mini" if model == "gpt-image-1-mini" else "GPT Image 1"
                 logger.info("=" * 60)
-                logger.info(f"SENDING TO OPENAI API (GPT Image 1)")
+                logger.info(f"SENDING TO OPENAI API ({model_name})")
                 logger.info(f"Model: {model}")
                 logger.info(f"Prompt: {prompt}")
                 logger.info(f"Size: {size}")
@@ -382,7 +383,7 @@ class OpenAIProvider(ImageProvider):
             
             # Handle multiple images for models with n=1 limitation (DALL-E 3, GPT Image 1)
             # These models only support n=1, so we generate multiple times sequentially
-            if model in ["dall-e-3", "gpt-image-1"] and kwargs.get('num_images', 1) > 1:
+            if model in ["dall-e-3", "gpt-image-1", "gpt-image-1-mini"] and kwargs.get('num_images', 1) > 1:
                 for _ in range(kwargs.get('num_images', 1) - 1):
                     try:
                         response = self.client.images.generate(**gen_params)
@@ -409,7 +410,7 @@ class OpenAIProvider(ImageProvider):
                 )
 
             # Post-processing: crop/scale to target dimensions if specified
-            if target_width and target_height and model in ["gpt-image-1", "gpt-image-1.5"]:
+            if target_width and target_height and model in ["gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"]:
                 try:
                     from PIL import Image
                     import io
@@ -472,16 +473,19 @@ class OpenAIProvider(ImageProvider):
             return False, f"API key validation failed: {e}"
     
     def get_models(self) -> Dict[str, str]:
-        """Get available OpenAI models."""
+        """Get available OpenAI image generation models."""
         return {
-            "gpt-image-1.5": "GPT Image 1.5",
+            # GPT Image Series (Latest - December 2025)
+            "gpt-image-1.5": "GPT Image 1.5 (Latest)",
             "gpt-image-1": "GPT Image 1",
+            "gpt-image-1-mini": "GPT Image 1 Mini (Fast)",
+            # DALL-E Series
             "dall-e-3": "DALL·E 3",
             "dall-e-2": "DALL·E 2",
         }
     
     def get_models_with_details(self) -> Dict[str, Dict[str, str]]:
-        """Get available OpenAI models with detailed display information.
+        """Get available OpenAI image generation models with detailed display information.
 
         Returns:
             Dictionary mapping model IDs to display information including:
@@ -490,21 +494,27 @@ class OpenAIProvider(ImageProvider):
             - description: Optional brief description
         """
         return {
+            # GPT Image Series (December 2025)
             "gpt-image-1.5": {
                 "name": "GPT Image 1.5",
-                "description": "Latest model, 4x faster, better instruction following"
+                "description": "Latest model, 4x faster, better instruction following, up to 10 images"
             },
             "gpt-image-1": {
                 "name": "GPT Image 1",
-                "description": "High quality, supports transparent backgrounds"
+                "description": "High quality, transparent backgrounds, reference images"
             },
+            "gpt-image-1-mini": {
+                "name": "GPT Image 1 Mini",
+                "description": "Fast generation, lower cost, good quality"
+            },
+            # DALL-E Series
             "dall-e-3": {
                 "name": "DALL·E 3",
                 "description": "Most advanced, highest quality images"
             },
             "dall-e-2": {
                 "name": "DALL·E 2",
-                "description": "Previous generation, lower cost"
+                "description": "Previous generation, lower cost, supports editing"
             },
         }
     
@@ -589,26 +599,26 @@ class OpenAIProvider(ImageProvider):
     ) -> Tuple[List[str], List[bytes]]:
         """Create variations of an image."""
         self._ensure_client()
-        
+
         model = "dall-e-2"  # Only DALL-E 2 supports variations
         texts: List[str] = []
         images: List[bytes] = []
-        
+
         # Apply rate limiting
         rate_limiter.check_rate_limit('openai', wait=True)
-        
+
         try:
             from io import BytesIO
             image_file = BytesIO(image)
             image_file.name = "image.png"
-            
+
             response = self.client.images.create_variation(
                 image=image_file,
                 n=n,
                 size=size,
                 response_format="b64_json",
             )
-            
+
             data_items = getattr(response, "data", []) or []
             for item in data_items:
                 b64 = getattr(item, "b64_json", None)
@@ -617,11 +627,270 @@ class OpenAIProvider(ImageProvider):
                         images.append(b64decode(b64))
                     except (ValueError, TypeError):
                         pass
-            
+
             if not images:
                 raise RuntimeError("OpenAI returned no image variations.")
-                
+
         except (ValueError, RuntimeError, AttributeError) as e:
             raise RuntimeError(f"OpenAI variations failed: {e}")
-        
+
         return texts, images
+
+    def _create_alpha_mask(
+        self,
+        image_size: Tuple[int, int],
+        region_bbox: Tuple[int, int, int, int],
+        feather: int = 5,
+    ) -> bytes:
+        """
+        Create a PNG mask with alpha channel for region-based editing.
+
+        The mask has:
+        - Transparent area (alpha=0) where editing should occur
+        - Opaque area (alpha=255) where the original should be preserved
+
+        Args:
+            image_size: (width, height) of the image
+            region_bbox: (x, y, width, height) of region to edit
+            feather: Pixels to feather the mask edge for smoother blending
+
+        Returns:
+            PNG bytes with alpha mask
+        """
+        from PIL import Image
+        import numpy as np
+
+        # Create mask image (RGBA)
+        mask = Image.new("RGBA", image_size, (0, 0, 0, 255))  # Fully opaque
+        mask_array = np.array(mask)
+
+        x, y, w, h = region_bbox
+
+        # Make the edit region transparent (alpha=0)
+        # Apply feathering for smoother edges
+        for fy in range(max(0, y - feather), min(image_size[1], y + h + feather)):
+            for fx in range(max(0, x - feather), min(image_size[0], x + w + feather)):
+                # Calculate distance from region
+                dx = max(0, x - fx, fx - (x + w - 1))
+                dy = max(0, y - fy, fy - (y + h - 1))
+
+                if dx == 0 and dy == 0:
+                    # Inside region - fully transparent
+                    mask_array[fy, fx, 3] = 0
+                elif dx <= feather and dy <= feather:
+                    # Feather zone - gradient
+                    dist = np.sqrt(dx**2 + dy**2)
+                    alpha = int(min(255, (dist / feather) * 255))
+                    mask_array[fy, fx, 3] = alpha
+
+        mask = Image.fromarray(mask_array)
+
+        # Convert to bytes
+        buffer = BytesIO()
+        mask.save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    def edit_image_region(
+        self,
+        image: bytes,
+        region_bbox: Tuple[int, int, int, int],
+        prompt: str,
+        model: Optional[str] = None,
+        style_context: Optional[str] = None,
+        feather: int = 5,
+        **kwargs
+    ) -> Tuple[List[str], List[bytes]]:
+        """
+        Edit a specific region of an image using mask-based editing.
+
+        Uses GPT-Image models with alpha mask to edit only the specified region
+        while preserving the rest of the image.
+
+        Args:
+            image: Image bytes (PNG format)
+            region_bbox: (x, y, width, height) of region to edit
+            prompt: Editing prompt describing desired change
+            model: Model to use (defaults to gpt-image-1)
+            style_context: Optional style hint (e.g., "cartoon", "anime")
+            feather: Pixels to feather mask edge (default 5)
+            **kwargs: Additional parameters
+
+        Returns:
+            Tuple of (texts, image_bytes_list)
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        self._ensure_client()
+
+        model = model or "gpt-image-1"
+        texts: List[str] = []
+        images: List[bytes] = []
+
+        # Apply rate limiting
+        rate_limiter.check_rate_limit('openai', wait=True)
+
+        # Get image dimensions
+        from PIL import Image as PILImage
+        import io
+
+        img = PILImage.open(io.BytesIO(image))
+        img_width, img_height = img.size
+
+        # Create alpha mask for the region
+        mask_bytes = self._create_alpha_mask(
+            image_size=(img_width, img_height),
+            region_bbox=region_bbox,
+            feather=feather,
+        )
+
+        # Build the full editing prompt
+        full_prompt_parts = [
+            prompt,
+            "Keep the rest of the image exactly the same.",
+            "Maintain the original art style and character appearance."
+        ]
+
+        if style_context:
+            full_prompt_parts.insert(1, f"Style: {style_context}")
+
+        full_prompt = " ".join(full_prompt_parts)
+
+        x, y, w, h = region_bbox
+        logger.info(f"Editing region ({x},{y},{w}x{h}) with prompt: {prompt[:50]}...")
+
+        try:
+            # Prepare file-like objects
+            image_file = BytesIO(image)
+            image_file.name = "image.png"
+            mask_file = BytesIO(mask_bytes)
+            mask_file.name = "mask.png"
+
+            # Determine appropriate size for API
+            # OpenAI only supports specific sizes
+            valid_sizes = {
+                "gpt-image-1.5": ["1024x1024", "1536x1024", "1024x1536"],
+                "gpt-image-1": ["1024x1024", "1792x1024", "1024x1792"],
+                "dall-e-2": ["1024x1024", "512x512", "256x256"],
+            }
+
+            # Find best matching size
+            model_sizes = valid_sizes.get(model, ["1024x1024"])
+            size = "1024x1024"
+
+            # Match aspect ratio
+            if img_width > img_height:
+                if "1792x1024" in model_sizes:
+                    size = "1792x1024"
+                elif "1536x1024" in model_sizes:
+                    size = "1536x1024"
+            elif img_height > img_width:
+                if "1024x1792" in model_sizes:
+                    size = "1024x1792"
+                elif "1024x1536" in model_sizes:
+                    size = "1024x1536"
+
+            # Build edit parameters
+            edit_params = {
+                "model": model,
+                "image": image_file,
+                "mask": mask_file,
+                "prompt": full_prompt,
+                "size": size,
+                "n": 1,
+                "response_format": "b64_json",
+            }
+
+            logger.info(f"Calling OpenAI images.edit with model={model}, size={size}")
+            response = self.client.images.edit(**edit_params)
+
+            # Extract image from response
+            data_items = getattr(response, "data", []) or []
+            for item in data_items:
+                b64 = getattr(item, "b64_json", None)
+                if b64:
+                    try:
+                        result_bytes = b64decode(b64)
+                        result_img = PILImage.open(io.BytesIO(result_bytes))
+
+                        # Resize back to original dimensions if needed
+                        if result_img.size != (img_width, img_height):
+                            result_img = result_img.resize(
+                                (img_width, img_height),
+                                PILImage.Resampling.LANCZOS
+                            )
+                            # Convert back to bytes
+                            output = io.BytesIO()
+                            result_img.save(output, format="PNG")
+                            result_bytes = output.getvalue()
+                            logger.info(f"Resized from {result_img.size} to ({img_width}, {img_height})")
+
+                        images.append(result_bytes)
+                        logger.info(f"Region edit returned {len(result_bytes)} bytes")
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Failed to decode image: {e}")
+
+            if not images:
+                logger.warning("No image returned from region edit")
+
+        except Exception as e:
+            logger.error(f"Region edit failed: {e}")
+            raise RuntimeError(f"OpenAI region editing failed: {e}")
+
+        return texts, images
+
+    def generate_viseme_batch(
+        self,
+        image: bytes,
+        mouth_bbox: Tuple[int, int, int, int],
+        viseme_prompts: Dict[str, str],
+        model: Optional[str] = None,
+        style_context: Optional[str] = None,
+        progress_callback: Optional[callable] = None,
+        **kwargs
+    ) -> Dict[str, Tuple[List[str], List[bytes]]]:
+        """
+        Generate all visemes for a character in batch.
+
+        Args:
+            image: Base character image bytes (PNG)
+            mouth_bbox: (x, y, width, height) of mouth region
+            viseme_prompts: Dictionary mapping viseme names to prompts
+            model: Model to use (defaults to gpt-image-1)
+            style_context: Optional style description
+            progress_callback: Optional callback(viseme_name, index, total)
+            **kwargs: Additional parameters
+
+        Returns:
+            Dictionary mapping viseme names to (texts, images) tuples
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        results = {}
+        total = len(viseme_prompts)
+
+        for i, (viseme_name, prompt) in enumerate(viseme_prompts.items()):
+            if progress_callback:
+                progress_callback(viseme_name, i, total)
+
+            logger.info(f"Generating viseme {i+1}/{total}: {viseme_name}")
+
+            try:
+                texts, images = self.edit_image_region(
+                    image=image,
+                    region_bbox=mouth_bbox,
+                    prompt=prompt,
+                    model=model,
+                    style_context=style_context,
+                    **kwargs
+                )
+                results[viseme_name] = (texts, images)
+
+                if not images:
+                    logger.warning(f"Failed to generate viseme {viseme_name}: no image returned")
+            except Exception as e:
+                logger.error(f"Failed to generate viseme {viseme_name}: {e}")
+                results[viseme_name] = ([], [])
+
+        return results

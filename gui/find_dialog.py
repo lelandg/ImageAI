@@ -7,9 +7,19 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QTextDocument
 
+# Try to import QWebEngineView for type checking
+try:
+    from PySide6.QtWebEngineWidgets import QWebEngineView
+    from PySide6.QtWebEngineCore import QWebEnginePage
+    HAS_WEBENGINE = True
+except ImportError:
+    HAS_WEBENGINE = False
+    QWebEngineView = None
+    QWebEnginePage = None
+
 
 class FindDialog(QDialog):
-    """Find dialog for searching text in QTextEdit widgets."""
+    """Find dialog for searching text in QTextEdit or QWebEngineView widgets."""
 
     def __init__(self, parent=None, text_widget=None):
         super().__init__(parent)
@@ -18,6 +28,9 @@ class FindDialog(QDialog):
         self.matches = []
         self.match_length = 0  # Store the length of matched text
         self.settings = QSettings("ImageAI", "FindDialog")
+
+        # Detect widget type
+        self._is_webview = HAS_WEBENGINE and QWebEngineView is not None and isinstance(text_widget, QWebEngineView)
 
         self.setWindowTitle("Find")
         self.setWindowFlags(Qt.Tool | Qt.WindowStaysOnTopHint)
@@ -117,6 +130,11 @@ class FindDialog(QDialog):
         if not search_text:
             return
 
+        # Handle QWebEngineView differently
+        if self._is_webview:
+            self._find_in_webview(search_text)
+            return
+
         # Clear previous highlights BEFORE clearing matches array
         # (clear_highlights needs the matches array to find positions)
         self.clear_highlights()
@@ -169,6 +187,47 @@ class FindDialog(QDialog):
             self.next_btn.setEnabled(True)
             self.highlight_current_match()
 
+    def _find_in_webview(self, search_text: str):
+        """Find text in QWebEngineView using its native findText method."""
+        if not HAS_WEBENGINE:
+            return
+
+        # Build flags for QWebEngineView
+        flags = QWebEnginePage.FindFlag(0)
+        if self.case_sensitive_check.isChecked():
+            flags |= QWebEnginePage.FindFlag.FindCaseSensitively
+
+        # QWebEngineView doesn't support whole words directly, but we search anyway
+        # Note: whole_words_check is ignored for web views
+
+        # Use findText with callback to update UI
+        def on_find_result(result):
+            # result is a QWebEngineFindTextResult in newer Qt versions
+            # or just a bool in older versions
+            try:
+                # Try newer API first (Qt 6.2+)
+                num_matches = result.numberOfMatches() if hasattr(result, 'numberOfMatches') else (1 if result else 0)
+                active_match = result.activeMatch() if hasattr(result, 'activeMatch') else 0
+            except (AttributeError, TypeError):
+                # Fallback for older Qt or bool result
+                num_matches = 1 if result else 0
+                active_match = 0
+
+            if num_matches == 0:
+                self.results_label.setText("No results")
+                self.prev_btn.setEnabled(False)
+                self.next_btn.setEnabled(False)
+            else:
+                if hasattr(result, 'numberOfMatches'):
+                    self.results_label.setText(f"{active_match} of {num_matches}")
+                else:
+                    self.results_label.setText("Found")
+                self.prev_btn.setEnabled(num_matches > 1)
+                self.next_btn.setEnabled(num_matches > 1)
+
+        # Perform the search
+        self.text_widget.findText(search_text, flags, on_find_result)
+
     def highlight_current_match(self):
         """Highlight the current match with a different color."""
         if not self.matches or not self.text_widget:
@@ -202,6 +261,16 @@ class FindDialog(QDialog):
 
     def find_next(self):
         """Find next match."""
+        if self._is_webview:
+            # For web views, just call findText again (it advances automatically)
+            search_text = self.search_input.text()
+            if search_text and self.text_widget:
+                flags = QWebEnginePage.FindFlag(0)
+                if self.case_sensitive_check.isChecked():
+                    flags |= QWebEnginePage.FindFlag.FindCaseSensitively
+                self.text_widget.findText(search_text, flags)
+            return
+
         if not self.matches:
             self.on_search_text_changed()
             return
@@ -215,6 +284,16 @@ class FindDialog(QDialog):
 
     def find_previous(self):
         """Find previous match."""
+        if self._is_webview:
+            # For web views, use FindBackward flag
+            search_text = self.search_input.text()
+            if search_text and self.text_widget:
+                flags = QWebEnginePage.FindFlag.FindBackward
+                if self.case_sensitive_check.isChecked():
+                    flags |= QWebEnginePage.FindFlag.FindCaseSensitively
+                self.text_widget.findText(search_text, flags)
+            return
+
         if not self.matches:
             return
 
@@ -256,6 +335,11 @@ class FindDialog(QDialog):
         if not self.text_widget:
             return
 
+        # For web views, clear by searching for empty string
+        if self._is_webview:
+            self.text_widget.findText("")  # Clears highlighting in QWebEngineView
+            return
+
         # Use stored match length if available
         search_len = self.match_length if self.match_length > 0 else len(self.search_input.text())
 
@@ -276,13 +360,6 @@ class FindDialog(QDialog):
         cursor.clearSelection()
         self.text_widget.setTextCursor(cursor)
 
-    def closeEvent(self, event):
-        """Handle close event."""
-        # Clear search text for fresh start next time
-        self.search_input.clear()
-        # Don't clear highlights - keep them visible after closing
-        super().closeEvent(event)
-
     def showEvent(self, event):
         """Handle show event - restore state when dialog is shown."""
         super().showEvent(event)
@@ -293,7 +370,7 @@ class FindDialog(QDialog):
         self.match_length = 0
 
         # Clear any existing highlights first
-        if self.text_widget:
+        if self.text_widget and not self._is_webview:
             cursor = self.text_widget.textCursor()
             cursor.clearSelection()
             self.text_widget.setTextCursor(cursor)
@@ -341,5 +418,8 @@ class FindDialog(QDialog):
 
     def closeEvent(self, event):
         """Handle close event."""
+        # Clear highlights for web views
+        if self._is_webview and self.text_widget:
+            self.text_widget.findText("")  # Clears highlighting
         self.save_settings()
         super().closeEvent(event)

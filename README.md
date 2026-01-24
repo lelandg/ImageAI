@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.31.0**
+**Version 0.32.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **Chameleon Labs Discord - Support, AI Art & Community: [Chameleon Labs Discord](https://discord.gg/chameleonlabs)**
@@ -81,6 +81,15 @@
 - **Powerful CLI** - Full-featured command-line interface for automation
 - Cross-platform support (Windows, macOS, Linux)
 - Responsive layout with resizable panels
+
+### 🎮 Discord Rich Presence
+- **Show your activity** in Discord status (like Steam games do)
+- **Privacy controls** - Choose what to share:
+  - Full: Provider, model, and activity
+  - Activity Only: Just "Generating an image"
+  - Minimal: Only show ImageAI is running
+- **Optional features**: Elapsed time, GitHub link button
+- Graceful handling when Discord isn't running
 
 ### 🎯 Advanced Generation Controls
 
@@ -229,6 +238,26 @@
   - FFmpeg-based audio merging with stem selection
   - Multi-track MIDI merging preserving track names
   - Project-level storage in `suno_imports/` directory
+
+### 🎭 Character Animator Puppet Creation (NEW!)
+- **Single Image to Puppet** - Convert any character image into an animatable puppet
+- **Cloud AI Viseme Generation** - Use Google Gemini or OpenAI to create facial variations
+- **14 Mouth Visemes** - Generate all required lip-sync shapes for realistic speech animation
+- **Eye Blink States** - Create left/right blink layers for natural blinking animation
+- **Real-Time Cost Estimation** - See costs before generation ($0.50-$2.00 typical)
+- **Multi-Format Export** - PSD (Photoshop) and SVG formats supported
+- **Adobe-Compatible Naming** - Uses proper layer naming for auto-rigging in Character Animator
+- **Caching** - Avoid redundant API calls with local result caching
+
+### 🔤 Font Generator (NEW!)
+- **Alphabet to Font** - Create custom fonts from alphabet images
+- **Auto Segmentation** - Contour-based or grid-based character detection
+- **Character Set Detection** - Auto-detect uppercase, lowercase, digits, or custom sets
+- **Vector Tracing** - Convert bitmap characters to smooth vector outlines
+- **Configurable Smoothing** - None to Maximum smoothing levels
+- **Real-Time Preview** - Preview sample text with generated font
+- **Multiple Formats** - Export to TTF and/or OTF
+- **Settings Persistence** - All settings saved between sessions
 
 ### 🔧 Developer Features
 - Modular architecture with provider abstraction
@@ -1061,6 +1090,11 @@ Comic Strip: "Monday Morning"
   - Hugging Face authentication
   - Cache directory management
   - GPU/CPU device selection
+- **Discord Integration**:
+  - Show your ImageAI activity in Discord status (like Steam games)
+  - Privacy levels: Full (provider/model), Activity Only, or Minimal
+  - Optional elapsed time, model name, and GitHub link button
+  - Requires Discord desktop app running
 
 #### Templates Tab
 - Predefined prompt templates with placeholders
@@ -1284,6 +1318,176 @@ dynamic pose, for character concept art, with cel shading, Energetic mood"
 - Save multiple variations in history for A/B testing
 - Export your best prompts for sharing or backup
 - Import community prompt collections
+
+##### Character Animator Puppet Creator
+
+Create Adobe Character Animator-ready puppets from a single image using a guided wizard workflow. The tool uses cloud AI (Google Gemini or OpenAI) to generate facial variations for lip-sync and expression animation.
+
+**Wizard Steps:**
+
+1. **Dependency Check** - Verifies required components and offers one-click installation
+2. **Image Selection** - Choose source image with preview and requirements guidance
+3. **Body Part Detection** - AI-powered segmentation displays detected regions with bounding boxes
+4. **Viseme Generation** - Cloud AI creates mouth shapes and eye blinks with progress tracking
+5. **Export** - Save as PSD or SVG with Adobe-compatible layer naming
+
+**Cloud AI Provider Selection:**
+
+| Provider | Model | Cost/Image | Speed |
+|----------|-------|------------|-------|
+| Google Gemini | gemini-2.5-flash-image | $0.039 | Fast |
+| Google Gemini | gemini-3-pro-image-preview | $0.10 | Quality |
+| OpenAI | gpt-image-1 | $0.08 | Standard |
+| OpenAI | gpt-image-1.5 | $0.12 | Quality |
+
+The wizard shows real-time cost estimates before generation starts. Typical cost for 14 visemes + 2 blinks is $0.50-$2.00.
+
+**The 14 Visemes:**
+
+| Viseme | Phonemes | Description |
+|--------|----------|-------------|
+| Neutral | Rest | Resting/closed mouth |
+| Ah | A, AI, AU | Open mouth |
+| D | D, T, N, TH | Tongue behind teeth |
+| Ee | E, EE | Wide smile |
+| F | F, V | Lower lip under teeth |
+| L | L | Tongue up |
+| M | M, B, P | Closed lips |
+| Oh | O, OO | Rounded open |
+| R | R | Slightly rounded |
+| S | S, Z, SH, CH | Teeth together |
+| Uh | U, UH | Slightly open |
+| W-Oo | W, OO, Q | Pursed lips |
+| Smile | Expression | Camera-driven |
+| Surprised | Expression | Camera-driven |
+
+**Layer Structure Created:**
+```
++[CharacterName]
+├── Body
+│   ├── Torso
+│   ├── Left Arm
+│   └── Right Arm
+└── Head
+    ├── +Left Eyebrow, +Right Eyebrow
+    ├── Left Eye (Left Pupil Range, +Left Pupil)
+    ├── Right Eye (Right Pupil Range, +Right Pupil)
+    ├── Left Blink, Right Blink
+    └── Mouth (Neutral, Ah, D, Ee, F, L, M, Oh, R, S, Uh, W-Oo, Smile, Surprised)
+```
+
+**Generation Options:**
+- **14 Mouth Visemes** - Required for lip-sync (enabled by default)
+- **Eye Blink States** - 2 images for each eye (enabled by default)
+- **Eyebrow Variants** - 6 optional expression images
+- **Force Regenerate** - Bypass cache for fresh AI-generated results
+
+**Requirements:**
+- Front-facing character image with visible face
+- Valid API key for Google Gemini or OpenAI
+- 8-12GB disk space for AI models (first-time installation)
+- GPU recommended for local segmentation
+
+**Usage:**
+1. Open **Tools → Character Animator Puppet Creator**
+2. First-time: Click **Install AI Components** (downloads ~8-12GB)
+3. Select your source image (PNG, JPG, WebP, BMP)
+4. Review detected body parts and facial regions
+5. Choose AI provider and model, review cost estimate
+6. Click **Start Generation** and monitor progress
+7. Select export format (PSD or SVG) and save location
+8. Import into Adobe Character Animator for auto-rigging
+
+**Caching:**
+Generated visemes are cached locally using a hash of the source image and settings. Use the **Force Regenerate** checkbox to bypass cache and generate fresh results.
+
+**Tips:**
+- Use images at least 1024×1024 pixels for best quality
+- Front-facing poses with clear facial features work best
+- Gemini Flash is fastest and most cost-effective for testing
+- The console shows detailed progress and any API errors
+- Exported files can be refined in Photoshop/Illustrator before import
+
+##### Font Generator
+
+Create custom fonts from alphabet images with automatic character segmentation and vector tracing. The wizard guides you through uploading an alphabet image, detecting characters, and exporting to installable font files.
+
+**Wizard Steps:**
+
+1. **Image Upload** - Select alphabet image and expected character set
+2. **Segmentation** - Auto-detect characters with manual adjustment options
+3. **Character Mapping** - Verify and correct character labels
+4. **Font Settings** - Configure name, style, version, and smoothing
+5. **Preview & Export** - Real-time font preview and TTF/OTF export
+
+**Segmentation Methods:**
+
+| Method | Best For | Description |
+|--------|----------|-------------|
+| Contour-based | Irregular spacing | Detects character outlines automatically |
+| Grid-based | Uniform grids | Divides image into specified rows and columns |
+| Auto Detect | Unknown layouts | Tries both methods and selects best result |
+
+**Character Set Options:**
+- Uppercase (A-Z) - 26 characters
+- Lowercase (a-z) - 26 characters
+- Uppercase + Lowercase - 52 characters
+- Uppercase + Digits - 36 characters
+- Full (A-Z, a-z, 0-9) - 62 characters
+- Custom - Enter your own character sequence
+
+**Smoothing Levels:**
+
+| Level | Effect | Best For |
+|-------|--------|----------|
+| None | Maximum detail | Already smooth source images |
+| Low | Slight cleanup | Clean source with minor noise |
+| Medium | Balanced | General purpose |
+| High | Heavy smoothing | Rough or hand-drawn sources |
+| Maximum | Aggressive | Very rough sources |
+
+**Font Metadata:**
+- **Font Family** - Display name (e.g., "MyCustomFont")
+- **Style** - Regular, Bold, Italic, or Light
+- **Version** - Semantic version (e.g., "1.0")
+- **Designer** - Your name (optional)
+- **Copyright** - Copyright notice (optional)
+
+**Export Formats:**
+- **TrueType (.ttf)** - Most compatible across systems
+- **OpenType (.otf)** - Advanced typography features
+
+**Requirements:**
+- Alphabet image with clear character spacing
+- fonttools Python package (`pip install fonttools`)
+
+**Image Preparation Tips:**
+- Use dark characters on light background (or enable Invert)
+- Maintain consistent character sizing
+- Leave clear spacing between characters
+- Higher resolution (300+ DPI) produces better fonts
+- Characters should not touch each other
+
+**Usage:**
+1. Open **Tools → Font Generator**
+2. Click **Browse** to select your alphabet image
+3. Choose the character set that matches your image
+4. Review segmentation - adjust method or settings if needed
+5. Verify character labels and correct any misidentifications
+6. Set font family name and style preferences
+7. Adjust smoothing based on your source image quality
+8. Preview sample text with generated font
+9. Click **Export Font** to save TTF and/or OTF files
+
+**Settings Persistence:**
+All wizard settings are saved and restored between sessions, including last image path, segmentation method, font metadata, and export preferences.
+
+**Tips:**
+- Use **Invert** for light text on dark background
+- Increase **Padding** if characters are merging
+- Start with **Low** smoothing to preserve detail
+- The preview uses your actual generated font
+- Exported fonts can be installed system-wide or used in applications
 
 #### Semantic Search & Tag System
 

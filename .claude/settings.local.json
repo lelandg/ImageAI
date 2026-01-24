@@ -67,7 +67,16 @@
       "Bash(.venv_linux/bin/pip list:*)",
       "Bash(gcloud config get-value:*)",
       "Bash(.venv_linux/bin/python3:*)",
-      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline -20 -- gui/video/video_project_tab.py core/video/veo_client.py)"
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline -20 -- gui/video/video_project_tab.py core/video/veo_client.py)",
+      "Bash(pip show:*)",
+      "Bash(nvidia-smi:*)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI log --oneline -5 -- core/character_animator/inpainter.py)",
+      "Bash(git -C /mnt/d/Documents/Code/GitHub/ImageAI diff HEAD~5 HEAD -- core/character_animator/inpainter.py)",
+      "Bash(.venv_linux/bin/pip show:*)",
+      "Bash(xxd:*)",
+      "Skill(skill-creator)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue comment:*)"
     ],
     "deny": [],
     "ask": []

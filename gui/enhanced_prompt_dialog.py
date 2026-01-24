@@ -15,6 +15,7 @@ from .llm_utils import DialogStatusConsole
 from .history_widget import DialogHistoryWidget
 from .dialog_utils import OperationGuardMixin, guard_operation
 from core.prompt_enhancer import EnhancementLevel
+from core.discord_rpc import discord_rpc, ActivityState
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -822,8 +823,19 @@ class EnhancedPromptDialog(QDialog, OperationGuardMixin):
             if splitter_state:
                 splitters[0].restoreState(splitter_state)
 
+    def showEvent(self, event):
+        """Handle show event - update Discord presence."""
+        super().showEvent(event)
+        discord_rpc.update_presence(
+            ActivityState.CHATTING_WITH_AI,
+            details="Enhance Prompt"
+        )
+
     def closeEvent(self, event):
         """Handle close event."""
+        # Reset Discord presence to IDLE
+        discord_rpc.update_presence(ActivityState.IDLE)
+
         # Stop any running worker
         if self.worker and self.thread and self.thread.isRunning():
             # Tell worker to stop

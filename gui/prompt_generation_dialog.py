@@ -17,6 +17,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 
 from .dialog_utils import OperationGuardMixin, guard_operation
 from .history_widget import DialogHistoryWidget
+from core.discord_rpc import discord_rpc, ActivityState
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -1490,8 +1491,19 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         self.save_settings()
         super().reject()
 
+    def showEvent(self, event):
+        """Handle show event - update Discord presence."""
+        super().showEvent(event)
+        discord_rpc.update_presence(
+            ActivityState.CHATTING_WITH_AI,
+            details="Prompt Generator"
+        )
+
     def closeEvent(self, event):
         """Handle close event."""
+        # Reset Discord presence to IDLE
+        discord_rpc.update_presence(ActivityState.IDLE)
+
         # Stop any running worker
         if self.worker and self.thread and self.thread.isRunning():
             # Tell worker to stop

@@ -5,6 +5,31 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.32.0] - 2026-01-24
+
+### Added
+- **Character Animator Puppet Creator**: Complete wizard for converting images into Adobe Character Animator puppets
+  - AI body segmentation using MediaPipe and SAM 2
+  - Cloud AI-powered viseme generation (14 mouth shapes) via Google Gemini or OpenAI
+  - Eye blink state generation for natural animation
+  - Export to PSD or SVG with Adobe-compatible naming conventions
+  - Multi-provider support with real-time cost estimation
+  - Cached generation to avoid redundant API calls
+  - Step-by-step wizard: Dependency check → Image selection → Body part detection → Viseme generation → Export
+
+- **Font Generator**: Wizard for creating custom fonts from alphabet images
+  - Automatic character segmentation (contour-based or grid-based)
+  - Auto-detection of character sets (uppercase, lowercase, digits)
+  - Vector tracing with configurable smoothing levels
+  - Font metrics calculation with proper baseline and spacing
+  - Export to TTF and OTF formats via fonttools
+  - Real-time preview using generated font
+  - Settings persistence across sessions
+
+### Documentation
+- Added comprehensive user documentation for Character Animator Puppet Creator
+- Added comprehensive user documentation for Font Generator
+
 ## [0.31.0] - 2025-12-05
 
 ### Added

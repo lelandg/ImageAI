@@ -28,6 +28,7 @@ from .llm_utils import DialogStatusConsole
 from .history_widget import DialogHistoryWidget
 from .dialog_utils import OperationGuardMixin, guard_operation
 from .file_attachment_widget import FileAttachmentWidget, AttachmentItem
+from core.discord_rpc import discord_rpc, ActivityState
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -1153,9 +1154,19 @@ class ReferenceImageDialog(QDialog, OperationGuardMixin):
                 self.status_console.log(f"Provider: {item['provider']} ({item.get('model', 'Unknown')})", "INFO")
 
 
+    def showEvent(self, event):
+        """Handle show event - update Discord presence."""
+        super().showEvent(event)
+        discord_rpc.update_presence(
+            ActivityState.CHATTING_WITH_AI,
+            details="Ask About Files"
+        )
 
     def closeEvent(self, event):
         """Handle close event."""
+        # Reset Discord presence to IDLE
+        discord_rpc.update_presence(ActivityState.IDLE)
+
         # Stop any running worker
         try:
             if self.worker:

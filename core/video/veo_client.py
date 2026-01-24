@@ -43,12 +43,29 @@ DefaultCredentialsError = Exception
 
 
 class VeoModel(Enum):
-    """Available Veo models"""
-    VEO_3_GENERATE = "veo-3.0-generate-001"
-    VEO_3_1_GENERATE = "veo-3.1-generate-preview"  # Supports reference images, 1080p, 8s fixed
-    VEO_3_1_FAST = "veo-3.1-fast-generate-preview"  # Fast generation (11-60s), 720p, 4-8s variable
-    VEO_3_FAST = "veo-3.0-fast-generate-001"
-    VEO_2_GENERATE = "veo-2.0-generate-001"
+    """
+    Available Veo video generation models (December 2025).
+
+    Production models (recommended):
+    - veo-3.1-generate-001: Full quality, 1080p, 8s clips, reference images, frame interpolation
+    - veo-3.1-fast-generate-001: Fast (11-60s), 720p, 4-8s variable duration
+    - veo-3.0-generate-001: Standard, 720p/1080p, 8s clips, audio generation
+    - veo-3.0-fast-generate-001: Fast, 720p, 4-8s variable duration
+    - veo-2.0-generate-001: Legacy, 720p, 5-8s clips, reference images
+
+    Preview models (for testing new features):
+    - veo-3.1-generate-preview, veo-3.1-fast-generate-preview
+    - veo-3.0-generate-preview, veo-3.0-fast-generate-preview
+    - veo-2.0-generate-preview, veo-2.0-generate-exp
+    """
+    # Veo 3.1 (Latest - production)
+    VEO_3_1_GENERATE = "veo-3.1-generate-001"       # 1080p, 8s fixed, reference images, frame interpolation
+    VEO_3_1_FAST = "veo-3.1-fast-generate-001"      # 720p, 4-8s variable, fast (11-60s generation)
+    # Veo 3.0 (production)
+    VEO_3_GENERATE = "veo-3.0-generate-001"         # 720p/1080p, 8s fixed, audio generation
+    VEO_3_FAST = "veo-3.0-fast-generate-001"        # 720p, 4-8s variable, fast generation
+    # Veo 2.0 (legacy - stable)
+    VEO_2_GENERATE = "veo-2.0-generate-001"         # 720p, 5-8s, reference images supported
 
 
 @dataclass

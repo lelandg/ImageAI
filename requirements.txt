@@ -1,4 +1,4 @@
-protobuf>=3.20.3  # GetPrototype compatibility handled by runtime patch in main.py
+protobuf>=4.25.3,<5  # Pinned for mediapipe compatibility; GetPrototype patch in main.py
 pillow
 google-genai>=1.49.0  # v1.49.0+ required for image_size parameter (NBP 1K/2K/4K output)
 google-cloud-aiplatform
@@ -35,6 +35,12 @@ mido>=1.3.2  # Low-level MIDI manipulation for detailed control
 
 # Video creation dependencies (required for video projects)
 opencv-python>=4.8.0  # Required for video frame processing and assembly
+
+# Discord Rich Presence (optional - for showing activity in Discord status)
+pypresence>=4.6.0  # Discord RPC wrapper library
+
+# Font Generator Dependencies
+fonttools>=4.60.0  # Font file creation (TTF/OTF) from vectorized glyphs
 
 # AI Upscaling (installed at runtime via GUI if needed)
 # Installed on 2025-09-14 17:39:20

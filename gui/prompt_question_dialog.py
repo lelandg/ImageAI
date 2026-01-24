@@ -14,6 +14,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from .llm_utils import DialogStatusConsole
 from .history_widget import DialogHistoryWidget
 from .dialog_utils import OperationGuardMixin, guard_operation
+from core.discord_rpc import discord_rpc, ActivityState
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -897,8 +898,19 @@ class PromptQuestionDialog(QDialog, OperationGuardMixin):
         self.save_settings()
         super().reject()
 
+    def showEvent(self, event):
+        """Handle show event - update Discord presence."""
+        super().showEvent(event)
+        discord_rpc.update_presence(
+            ActivityState.CHATTING_WITH_AI,
+            details="Ask Anything"
+        )
+
     def closeEvent(self, event):
         """Handle close event."""
+        # Reset Discord presence to IDLE
+        discord_rpc.update_presence(ActivityState.IDLE)
+
         if self.worker and self.thread and self.thread.isRunning():
             # Tell worker to stop
             self.worker.stop()

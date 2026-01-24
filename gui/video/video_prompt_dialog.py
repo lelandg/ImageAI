@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtGui import QFont
 
+from core.discord_rpc import discord_rpc, ActivityState
 from core.video.video_prompt_generator import VideoPromptGenerator, VideoPromptContext
 
 
@@ -219,3 +220,17 @@ class VideoPromptDialog(QDialog):
     def get_prompt(self) -> str:
         """Get the final prompt (edited or generated)"""
         return self.generated_prompt_edit.toPlainText().strip()
+
+    def showEvent(self, event):
+        """Handle show event - update Discord presence."""
+        super().showEvent(event)
+        discord_rpc.update_presence(
+            ActivityState.CHATTING_WITH_AI,
+            details="Video Prompt"
+        )
+
+    def closeEvent(self, event):
+        """Handle close event."""
+        # Reset Discord presence to IDLE
+        discord_rpc.update_presence(ActivityState.IDLE)
+        super().closeEvent(event)

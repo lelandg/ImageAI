@@ -174,6 +174,7 @@ from core import (
     detect_image_extension, find_cached_demo, default_model_for_provider
 )
 from core.constants import DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT
+from core.discord_rpc import discord_rpc, ActivityState, PYPRESENCE_AVAILABLE
 from core.video.reference_manager import ReferenceImageType
 from providers import get_provider, preload_provider, list_providers
 from providers.google import MODEL_AUTH_REQUIREMENTS
@@ -224,6 +225,9 @@ class MainWindow(QMainWindow):
         self.config = ConfigManager()
         self.setWindowTitle(f"{APP_NAME} v{VERSION}")
 
+        # Set application icon
+        self._set_app_icon()
+
         # Initialize thumbnail cache
         self.thumbnail_cache = ThumbnailCache(max_size=50)
         self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
@@ -240,6 +244,12 @@ class MainWindow(QMainWindow):
         self.current_api_key = self.config.get_api_key(self.current_provider)
         self.current_model = DEFAULT_MODEL
         self.auto_copy_filename = self.config.get("auto_copy_filename", False)
+
+        # Track selected model per provider for persistence when switching
+        # This is restored from ui_state in _restore_ui_state()
+        self._selected_models_per_provider = {}  # {"google": "gemini-3-pro-image-preview", "openai": "gpt-image-1.5", ...}
+        self._selected_llm_models_per_provider = {}  # {"OpenAI": "gpt-5.2", "Google": "gemini-3-pro-preview", ...}
+        self._current_llm_provider = "None"  # Track current LLM provider for model persistence
 
         # Session state
         print("Cleaning up debug images...")
@@ -323,6 +333,9 @@ class MainWindow(QMainWindow):
 
         # Initialize Midjourney watcher if enabled
         self._init_midjourney_watcher()
+
+        # Initialize Discord Rich Presence if enabled
+        self._init_discord_rpc()
 
         # Ensure UI reflects the restored provider (including Midjourney)
         try:
@@ -756,6 +769,17 @@ class MainWindow(QMainWindow):
         act_char_prompt.triggered.connect(self._open_character_prompt_builder)
         tools_menu.addAction(act_char_prompt)
 
+        tools_menu.addSeparator()
+
+        act_puppet = QAction("Character Animator Puppet (In Development)...", self)
+        act_puppet.triggered.connect(self._open_puppet_wizard)
+        act_puppet.setToolTip("Create animated puppets for Character Animator - Feature in development")
+        tools_menu.addAction(act_puppet)
+
+        act_font_gen = QAction("Font Generator...", self)
+        act_font_gen.triggered.connect(self._open_font_generator)
+        tools_menu.addAction(act_font_gen)
+
         # Help menu
         help_menu = mb.addMenu("Help")
         
@@ -1163,8 +1187,8 @@ class MainWindow(QMainWindow):
 
         bottom_layout.addWidget(self.image_settings_container)
 
-        # Reference Image Settings (collapsible flyout) - Multi-reference for Google
-        self.ref_image_toggle = QPushButton("▶ Reference Images (Google Only)")
+        # Reference Image Settings (collapsible flyout) - Multi-reference support
+        self.ref_image_toggle = QPushButton("▶ Reference Images")
         self.ref_image_toggle.setCheckable(True)
         self.ref_image_toggle.setChecked(False)
         self.ref_image_toggle.clicked.connect(lambda checked: self._toggle_ref_image_settings(checked))
@@ -1508,7 +1532,7 @@ class MainWindow(QMainWindow):
             expanded = self.config.get('reference_images_expanded', False)
             self.ref_image_toggle.setChecked(expanded)
             self.ref_image_container.setVisible(expanded)
-            self.ref_image_toggle.setText("▼ Reference Images (Google Only)" if expanded else "▶ Reference Images (Google Only)")
+            self._update_ref_toggle_text()
 
         # Check provider support for reference images
         if hasattr(self, 'btn_select_ref_image'):
@@ -1923,6 +1947,84 @@ class MainWindow(QMainWindow):
 
         # Midjourney now has its own dedicated tab, no settings needed here
 
+        # === DISCORD RICH PRESENCE SECTION ===
+        discord_group = QGroupBox("Discord Integration")
+        discord_layout = QVBoxLayout(discord_group)
+
+        # Enable Discord presence
+        self.chk_discord_enabled = QCheckBox("Show activity in Discord status")
+        self.chk_discord_enabled.setToolTip(
+            "Display your ImageAI activity in your Discord profile (like Steam games)"
+        )
+        discord_config = self.config.get_discord_config()
+        self.chk_discord_enabled.setChecked(discord_config.get("enabled", False))
+        discord_layout.addWidget(self.chk_discord_enabled)
+
+        # Privacy level
+        privacy_layout = QHBoxLayout()
+        privacy_layout.addWidget(QLabel("Privacy Level:"))
+        self.discord_privacy_combo = QComboBox()
+        self.discord_privacy_combo.addItems(["Full Details", "Activity Only", "Minimal"])
+        privacy_level = discord_config.get("privacy_level", "full")
+        privacy_map = {"full": "Full Details", "activity_only": "Activity Only", "minimal": "Minimal"}
+        self.discord_privacy_combo.setCurrentText(privacy_map.get(privacy_level, "Full Details"))
+        self.discord_privacy_combo.setToolTip(
+            "Full: Provider, model, and activity\n"
+            "Activity Only: Just what you're doing\n"
+            "Minimal: Only show ImageAI is running"
+        )
+        privacy_layout.addWidget(self.discord_privacy_combo)
+        privacy_layout.addStretch()
+        discord_layout.addLayout(privacy_layout)
+
+        # Additional options in a horizontal layout
+        discord_options = QHBoxLayout()
+
+        self.chk_discord_elapsed = QCheckBox("Show elapsed time")
+        self.chk_discord_elapsed.setChecked(discord_config.get("show_elapsed_time", True))
+        discord_options.addWidget(self.chk_discord_elapsed)
+
+        self.chk_discord_model = QCheckBox("Show model name")
+        self.chk_discord_model.setChecked(discord_config.get("show_model", True))
+        discord_options.addWidget(self.chk_discord_model)
+
+        self.chk_discord_buttons = QCheckBox("Show GitHub link")
+        self.chk_discord_buttons.setChecked(discord_config.get("show_buttons", True))
+        discord_options.addWidget(self.chk_discord_buttons)
+
+        discord_options.addStretch()
+        discord_layout.addLayout(discord_options)
+
+        # Status and test button
+        discord_status_layout = QHBoxLayout()
+        self.discord_status_label = QLabel("Status: Not connected")
+        self.discord_status_label.setStyleSheet("color: gray;")
+        discord_status_layout.addWidget(self.discord_status_label)
+        discord_status_layout.addStretch()
+
+        self.btn_discord_test = QPushButton("Test Connection")
+        self.btn_discord_test.clicked.connect(self._test_discord_connection)
+        discord_status_layout.addWidget(self.btn_discord_test)
+        discord_layout.addLayout(discord_status_layout)
+
+        # Setup hint
+        discord_hint = QLabel(
+            '<small>Requires <a href="https://discord.com/developers/applications">Discord Application</a> '
+            'setup. See Plans/DiscordRichPresence.md for details.</small>'
+        )
+        discord_hint.setOpenExternalLinks(True)
+        discord_hint.setStyleSheet("color: gray;")
+        discord_layout.addWidget(discord_hint)
+
+        v.addWidget(discord_group)
+
+        # Connect Discord settings signals
+        self.chk_discord_enabled.toggled.connect(self._on_discord_enabled_changed)
+        self.discord_privacy_combo.currentTextChanged.connect(self._on_discord_settings_changed)
+        self.chk_discord_elapsed.toggled.connect(self._on_discord_settings_changed)
+        self.chk_discord_model.toggled.connect(self._on_discord_settings_changed)
+        self.chk_discord_buttons.toggled.connect(self._on_discord_settings_changed)
+
         v.addStretch(1)
 
         # Set scroll widget
@@ -2111,9 +2213,20 @@ class MainWindow(QMainWindow):
             self.btn_help_search_next.clicked.connect(self._search_help_webengine)
             self.btn_help_search_next.setMaximumWidth(25)
             nav_layout.addWidget(self.btn_help_search_next)
-            
+
+            # Search options
+            self.help_search_case = QCheckBox("Aa")
+            self.help_search_case.setToolTip("Case sensitive")
+            self.help_search_case.setMaximumWidth(35)
+            nav_layout.addWidget(self.help_search_case)
+
+            self.help_search_words = QCheckBox("W")
+            self.help_search_words.setToolTip("Whole words")
+            self.help_search_words.setMaximumWidth(35)
+            nav_layout.addWidget(self.help_search_words)
+
             self.help_search_results = QLabel("")
-            self.help_search_results.setMinimumWidth(80)
+            self.help_search_results.setMinimumWidth(70)
             self.help_search_results.setStyleSheet("color: #666;")
             nav_layout.addWidget(self.help_search_results)
             
@@ -2465,9 +2578,20 @@ class MainWindow(QMainWindow):
         self.btn_help_search_next.clicked.connect(self._search_help_textbrowser)
         self.btn_help_search_next.setMaximumWidth(25)
         nav_layout.addWidget(self.btn_help_search_next)
-        
+
+        # Search options
+        self.help_search_case = QCheckBox("Aa")
+        self.help_search_case.setToolTip("Case sensitive")
+        self.help_search_case.setMaximumWidth(35)
+        nav_layout.addWidget(self.help_search_case)
+
+        self.help_search_words = QCheckBox("W")
+        self.help_search_words.setToolTip("Whole words")
+        self.help_search_words.setMaximumWidth(35)
+        nav_layout.addWidget(self.help_search_words)
+
         self.help_search_results = QLabel("")
-        self.help_search_results.setMinimumWidth(80)
+        self.help_search_results.setMinimumWidth(60)
         self.help_search_results.setStyleSheet("color: #666;")
         nav_layout.addWidget(self.help_search_results)
         
@@ -3357,12 +3481,13 @@ For more detailed information, please refer to the full documentation.
                     
         except Exception as e:
             # Fallback to some basic models if provider fails to load
+            # Models are ordered newest to oldest
             print(f"Error loading models for {self.current_provider}: {e}")
             if self.current_provider.lower() == "google":
-                self.model_combo.addItem("Gemini 2.5 Flash Image (gemini-2.5-flash-image)",
-                                        "gemini-2.5-flash-image")
                 self.model_combo.addItem("Gemini 3 Pro Image - 4K (gemini-3-pro-image-preview)",
                                         "gemini-3-pro-image-preview")
+                self.model_combo.addItem("Gemini 2.5 Flash Image (gemini-2.5-flash-image)",
+                                        "gemini-2.5-flash-image")
             elif self.current_provider.lower() == "openai":
                 self.model_combo.addItem("DALL·E 3 (dall-e-3)", "dall-e-3")
             elif self.current_provider.lower() == "stability":
@@ -3458,6 +3583,15 @@ For more detailed information, please refer to the full documentation.
         if getattr(self, '_updating_llm_provider', False):
             return
 
+        # Save the currently selected model for the OLD provider before switching
+        old_provider = getattr(self, '_current_llm_provider', 'None')
+        if old_provider != "None" and hasattr(self, 'llm_model_combo') and self.llm_model_combo.currentText():
+            self._selected_llm_models_per_provider[old_provider] = self.llm_model_combo.currentText()
+            self.logger.debug(f"Saved LLM model '{self.llm_model_combo.currentText()}' for provider '{old_provider}'")
+
+        # Update current LLM provider tracking
+        self._current_llm_provider = provider
+
         # Use centralized function to populate models
         self.llm_model_combo.blockSignals(True)
         self.llm_model_combo.clear()
@@ -3468,6 +3602,14 @@ For more detailed information, please refer to the full documentation.
             self.llm_model_combo.setEnabled(True)
             models = self.get_llm_models_for_provider(provider)
             self.llm_model_combo.addItems(models)
+
+            # Restore previously selected model for the NEW provider (if any)
+            if provider in self._selected_llm_models_per_provider:
+                saved_model = self._selected_llm_models_per_provider[provider]
+                model_index = self.llm_model_combo.findText(saved_model)
+                if model_index >= 0:
+                    self.llm_model_combo.setCurrentIndex(model_index)
+                    self.logger.debug(f"Restored LLM model '{saved_model}' for provider '{provider}'")
 
         self.llm_model_combo.blockSignals(False)
 
@@ -3581,6 +3723,12 @@ For more detailed information, please refer to the full documentation.
     def _on_image_provider_changed(self, provider_name: str):
         """Handle provider selection change on Image tab."""
         if provider_name and provider_name != self.current_provider:
+            # Save the currently selected model for the OLD provider before switching
+            old_provider = self.current_provider
+            if hasattr(self, 'model_combo') and self.model_combo.currentData():
+                self._selected_models_per_provider[old_provider] = self.model_combo.currentData()
+                self.logger.debug(f"Saved model '{self.model_combo.currentData()}' for provider '{old_provider}'")
+
             self.current_provider = provider_name
             # Update the config
             self.config.set("provider", provider_name)
@@ -3591,6 +3739,15 @@ For more detailed information, please refer to the full documentation.
 
             # Update model list for new provider
             self._update_model_list()
+
+            # Restore previously selected model for the NEW provider (if any)
+            if provider_name in self._selected_models_per_provider:
+                saved_model = self._selected_models_per_provider[provider_name]
+                for i in range(self.model_combo.count()):
+                    if self.model_combo.itemData(i) == saved_model:
+                        self.model_combo.setCurrentIndex(i)
+                        self.logger.debug(f"Restored model '{saved_model}' for provider '{provider_name}'")
+                        break
 
             # Update advanced/Midjourney visibility
             self._update_advanced_visibility()
@@ -3920,6 +4077,9 @@ For more detailed information, please refer to the full documentation.
 
         # Auto-save to config
         self._save_imagen_references_to_config()
+
+        # Update toggle button text with count
+        self._update_ref_toggle_text()
 
         # Update reference hint label (shown next to Prompt: label)
         self._update_reference_hint_label()
@@ -4636,14 +4796,18 @@ For more detailed information, please refer to the full documentation.
         """Open find dialog for searchable text widgets based on current tab."""
         # Determine which text widget to search based on the current tab
         current_tab = self.tabs.currentWidget()
+
+        # Help tab has its own inline search bar - just focus it
+        if current_tab == self.tab_help:
+            if hasattr(self, 'help_search_input'):
+                self.help_search_input.setFocus()
+                self.help_search_input.selectAll()
+            return
+
         text_widget = None
 
         if current_tab == self.tab_generate:
             text_widget = self.prompt_edit
-        elif current_tab == self.tab_help:
-            # Help tab uses QTextBrowser or QWebEngineView
-            if hasattr(self, 'help_browser'):
-                text_widget = self.help_browser
         elif hasattr(current_tab, 'findChild'):
             # Try to find a QTextEdit or QPlainTextEdit in the current tab
             from PySide6.QtWidgets import QTextEdit, QPlainTextEdit
@@ -4839,6 +5003,9 @@ For more detailed information, please refer to the full documentation.
         # Add separator for new generation
         self._append_to_console("", is_separator=True)
         self._append_to_console("Starting image generation...", "#00ff00")  # Green
+
+        # Update Discord presence to "Generating"
+        self._update_discord_presence(ActivityState.GENERATING)
 
         prompt = self.prompt_edit.toPlainText().strip()
         if not prompt:
@@ -5780,6 +5947,9 @@ For more detailed information, please refer to the full documentation.
 
     def _on_error(self, error: str):
         """Handle generation error."""
+        # Reset Discord presence to IDLE
+        self._update_discord_presence(ActivityState.IDLE)
+
         # Restore original provider if we used Imagen customization
         if hasattr(self, '_imagen_original_provider'):
             self.current_provider = self._imagen_original_provider
@@ -5794,6 +5964,9 @@ For more detailed information, please refer to the full documentation.
 
     def _on_generation_finished(self, texts: List[str], images: List[bytes]):
         """Handle successful generation."""
+        # Reset Discord presence to IDLE
+        self._update_discord_presence(ActivityState.IDLE)
+
         # Restore original provider if we used Imagen customization
         if hasattr(self, '_imagen_original_provider'):
             self.current_provider = self._imagen_original_provider
@@ -6396,6 +6569,152 @@ For more detailed information, please refer to the full documentation.
                 logger.error(f"Failed to initialize Midjourney watcher: {e}")
                 self._append_to_console(f"Failed to start download watcher: {e}", "#ff6666")
 
+    def _set_app_icon(self):
+        """Set the application window icon."""
+        from PySide6.QtGui import QIcon
+
+        # Try multiple locations for the icon
+        icon_paths = [
+            Path(__file__).parent.parent / "assets" / "icon.png",  # Project assets
+            self.config.config_dir / "generated" / "ImageAI Logo 01.png",  # Generated
+        ]
+
+        for icon_path in icon_paths:
+            if icon_path.exists():
+                icon = QIcon(str(icon_path))
+                if not icon.isNull():
+                    self.setWindowIcon(icon)
+                    # Also set as application icon for taskbar
+                    QApplication.setWindowIcon(icon)
+                    logger.debug(f"Set app icon from: {icon_path}")
+                    return
+
+        logger.debug("No app icon found")
+
+    # === DISCORD RICH PRESENCE METHODS ===
+
+    def _init_discord_rpc(self):
+        """Initialize Discord Rich Presence if enabled."""
+        if not PYPRESENCE_AVAILABLE:
+            logger.info("pypresence not available - Discord RPC disabled")
+            return
+
+        # Add status callback for UI updates
+        discord_rpc.add_status_callback(self._on_discord_status_changed)
+
+        # Load settings from config
+        discord_config = self.config.get_discord_config()
+
+        # Configure the RPC manager
+        privacy_level = discord_config.get("privacy_level", "full")
+        discord_rpc.configure(
+            privacy_level=privacy_level,
+            show_elapsed_time=discord_config.get("show_elapsed_time", True),
+            show_model=discord_config.get("show_model", True),
+            show_buttons=discord_config.get("show_buttons", True)
+        )
+
+        # Enable if user has it enabled
+        if discord_config.get("enabled", False):
+            discord_rpc.set_enabled(True)
+            # Set initial presence
+            discord_rpc.update_presence(
+                ActivityState.IDLE,
+                provider=self.current_provider,
+                model=self.current_model
+            )
+            logger.info("Discord Rich Presence initialized and enabled")
+
+    def _on_discord_status_changed(self, connected: bool, message: str):
+        """Handle Discord connection status changes."""
+        if hasattr(self, 'discord_status_label'):
+            if connected:
+                self.discord_status_label.setText(f"Status: Connected")
+                self.discord_status_label.setStyleSheet("color: green;")
+            else:
+                self.discord_status_label.setText(f"Status: {message}")
+                self.discord_status_label.setStyleSheet("color: gray;")
+
+    def _on_discord_enabled_changed(self, enabled: bool):
+        """Handle Discord presence enable/disable toggle."""
+        # Save to config
+        config = self.config.get_discord_config()
+        config["enabled"] = enabled
+        self.config.set_discord_config(config)
+        self.config.save()
+
+        # Enable/disable the RPC manager
+        discord_rpc.set_enabled(enabled)
+
+        if enabled:
+            # Set initial presence with current state
+            discord_rpc.update_presence(
+                ActivityState.IDLE,
+                provider=self.current_provider,
+                model=self.current_model
+            )
+
+    def _on_discord_settings_changed(self, *args):
+        """Handle changes to Discord settings (privacy, checkboxes, etc.)."""
+        # Map combo text to internal value
+        privacy_map = {
+            "Full Details": "full",
+            "Activity Only": "activity_only",
+            "Minimal": "minimal"
+        }
+
+        privacy_text = self.discord_privacy_combo.currentText()
+        privacy_level = privacy_map.get(privacy_text, "full")
+
+        # Build new config
+        config = {
+            "enabled": self.chk_discord_enabled.isChecked(),
+            "privacy_level": privacy_level,
+            "show_elapsed_time": self.chk_discord_elapsed.isChecked(),
+            "show_model": self.chk_discord_model.isChecked(),
+            "show_buttons": self.chk_discord_buttons.isChecked(),
+        }
+
+        # Save to config
+        self.config.set_discord_config(config)
+        self.config.save()
+
+        # Update RPC manager configuration
+        discord_rpc.configure(
+            privacy_level=privacy_level,
+            show_elapsed_time=config["show_elapsed_time"],
+            show_model=config["show_model"],
+            show_buttons=config["show_buttons"]
+        )
+
+    def _test_discord_connection(self):
+        """Test Discord Rich Presence connection and print diagnostics."""
+        # Print diagnostics to console first
+        discord_rpc.print_diagnostics()
+
+        success, message = discord_rpc.test_connection()
+
+        if success:
+            self.discord_status_label.setText(f"Status: {message}")
+            self.discord_status_label.setStyleSheet("color: green;")
+            self._append_to_console(f"Discord: {message}", "#66ccff")
+            self._append_to_console("Diagnostics printed to console - check for troubleshooting info", "#aaaaaa")
+        else:
+            self.discord_status_label.setText(f"Status: {message}")
+            self.discord_status_label.setStyleSheet("color: #cc6600;")
+            self._append_to_console(f"Discord: {message}", "#ffaa00")
+            self._append_to_console("Diagnostics printed to console - check for troubleshooting info", "#aaaaaa")
+
+    def _update_discord_presence(self, state: ActivityState, details: str = ""):
+        """Update Discord presence with current activity."""
+        if discord_rpc.is_enabled:
+            discord_rpc.update_presence(
+                state,
+                provider=self.current_provider,
+                model=self.current_model,
+                details=details
+            )
+
     def _on_midjourney_session_started(self, prompt: str, command: str):
         """Handle Midjourney session start."""
         if self.midjourney_watcher:
@@ -6894,7 +7213,13 @@ For more detailed information, please refer to the full documentation.
         
         # Clean up thread if running
         self._cleanup_thread()
-    
+
+        # Disconnect Discord Rich Presence
+        try:
+            discord_rpc.disconnect()
+        except Exception as e:
+            logger.debug(f"Error disconnecting Discord RPC: {e}")
+
     def _get_template_data(self):
         """Get template data with placeholders."""
         return {
@@ -7323,28 +7648,30 @@ For more detailed information, please refer to the full documentation.
         
         try:
             from PySide6.QtWebEngineCore import QWebEnginePage
-            
+
             # Create search flags
             flags = QWebEnginePage.FindFlag(0)
             if backward:
                 flags |= QWebEnginePage.FindBackward
-            
+            if hasattr(self, 'help_search_case') and self.help_search_case.isChecked():
+                flags |= QWebEnginePage.FindCaseSensitively
+
             # Perform search with callback for result count
             def handle_result(result):
                 if hasattr(result, 'numberOfMatches'):
                     total = result.numberOfMatches()
                     current = result.activeMatch()
                     if total > 0:
-                        self.help_search_results.setText(f"{current}/{total} matches")
+                        self.help_search_results.setText(f"{current}/{total}")
                     else:
                         self.help_search_results.setText("No matches")
                 else:
                     # Fallback for older Qt versions
                     self.help_search_results.setText("Searching...")
-            
+
             # Search with callback
             self.help_browser.findText(search_text, flags, handle_result)
-            
+
         except Exception as e:
             print(f"Search error: {e}")
             # Fallback to simple search without match count
@@ -7353,6 +7680,8 @@ For more detailed information, please refer to the full documentation.
                 flags = QWebEnginePage.FindFlag(0)
                 if backward:
                     flags |= QWebEnginePage.FindBackward
+                if hasattr(self, 'help_search_case') and self.help_search_case.isChecked():
+                    flags |= QWebEnginePage.FindCaseSensitively
                 self.help_browser.findText(search_text, flags)
                 self.help_search_results.setText("Searching...")
             except:
@@ -7374,16 +7703,19 @@ For more detailed information, please refer to the full documentation.
         
         try:
             from PySide6.QtGui import QTextDocument
-            from PySide6.QtCore import Qt
-            
+
             # Set up search flags
             flags = QTextDocument.FindFlag(0)
             if backward:
                 flags |= QTextDocument.FindBackward
-            
+            if hasattr(self, 'help_search_case') and self.help_search_case.isChecked():
+                flags |= QTextDocument.FindCaseSensitively
+            if hasattr(self, 'help_search_words') and self.help_search_words.isChecked():
+                flags |= QTextDocument.FindWholeWords
+
             # Search from current position
             found = self.help_browser.find(search_text, flags)
-            
+
             if not found:
                 # If not found and we're going forward, try from beginning
                 if not backward:
@@ -7397,17 +7729,22 @@ For more detailed information, please refer to the full documentation.
                     cursor.movePosition(cursor.End)
                     self.help_browser.setTextCursor(cursor)
                     found = self.help_browser.find(search_text, flags)
-            
+
             # Update search results label
             if found:
-                # Count total matches (simple approach)
+                # Count total matches using same flags
                 doc = self.help_browser.document()
-                cursor = doc.find(search_text)
+                count_flags = QTextDocument.FindFlag(0)
+                if hasattr(self, 'help_search_case') and self.help_search_case.isChecked():
+                    count_flags |= QTextDocument.FindCaseSensitively
+                if hasattr(self, 'help_search_words') and self.help_search_words.isChecked():
+                    count_flags |= QTextDocument.FindWholeWords
+                cursor = doc.find(search_text, 0, count_flags)
                 count = 0
                 while not cursor.isNull():
                     count += 1
-                    cursor = doc.find(search_text, cursor)
-                
+                    cursor = doc.find(search_text, cursor, count_flags)
+
                 if count > 0:
                     self.help_search_results.setText(f"{count} matches")
                 else:
@@ -7439,7 +7776,7 @@ For more detailed information, please refer to the full documentation.
     def _toggle_ref_image_settings(self, checked):
         """Toggle the reference image settings panel visibility."""
         self.ref_image_container.setVisible(checked)
-        self.ref_image_toggle.setText("▼ Reference Images (Google Only)" if checked else "▶ Reference Images (Google Only)")
+        self._update_ref_toggle_text()
 
         # Save the expansion state
         self.config.set('reference_images_expanded', checked)
@@ -7448,6 +7785,51 @@ For more detailed information, please refer to the full documentation.
         # Trigger image resize after layout change
         from PySide6.QtCore import QTimer
         QTimer.singleShot(50, self._perform_image_resize)
+
+    def _update_ref_toggle_text(self):
+        """Update reference images toggle button text with count badge."""
+        if not hasattr(self, 'ref_image_toggle'):
+            return
+
+        expanded = self.ref_image_toggle.isChecked()
+        arrow = "▼" if expanded else "▶"
+
+        # Get reference count from imagen widget
+        count = 0
+        if hasattr(self, 'imagen_reference_widget'):
+            references = self.imagen_reference_widget.get_references()
+            count = len(references)
+
+        if count > 0:
+            # Show count badge styled similar to reference slot badges
+            self.ref_image_toggle.setText(f"{arrow} Reference Images [{count}]")
+            # Add blue badge styling for the count
+            self.ref_image_toggle.setStyleSheet("""
+                QPushButton {
+                    text-align: left;
+                    padding: 5px;
+                    background: transparent;
+                    border: none;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background: rgba(0, 0, 0, 0.05);
+                }
+            """)
+        else:
+            self.ref_image_toggle.setText(f"{arrow} Reference Images")
+            # Normal styling without bold
+            self.ref_image_toggle.setStyleSheet("""
+                QPushButton {
+                    text-align: left;
+                    padding: 5px;
+                    background: transparent;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background: rgba(0, 0, 0, 0.05);
+                }
+            """)
 
     def _select_reference_image(self):
         """Open dialog to select a reference image."""
@@ -7853,6 +8235,16 @@ For more detailed information, please refer to the full documentation.
                 ui_state['llm_provider'] = self.llm_provider_combo.currentText()
                 ui_state['llm_model'] = self.llm_model_combo.currentText() if self.llm_model_combo.isEnabled() else None
 
+            # Save model selections per provider for persistence across sessions
+            # First, update the dictionaries with current selections
+            if hasattr(self, 'model_combo') and self.model_combo.currentData():
+                self._selected_models_per_provider[self.current_provider] = self.model_combo.currentData()
+            if hasattr(self, 'llm_model_combo') and self.llm_model_combo.currentText() and self._current_llm_provider != "None":
+                self._selected_llm_models_per_provider[self._current_llm_provider] = self.llm_model_combo.currentText()
+
+            ui_state['selected_models_per_provider'] = self._selected_models_per_provider.copy()
+            ui_state['selected_llm_models_per_provider'] = self._selected_llm_models_per_provider.copy()
+
             # Image settings expansion state
             ui_state['image_settings_expanded'] = self.image_settings_container.isVisible()
             
@@ -7930,6 +8322,14 @@ For more detailed information, please refer to the full documentation.
             return
 
         try:
+            # Restore model selections per provider (before restoring current model)
+            if 'selected_models_per_provider' in ui_state:
+                self._selected_models_per_provider = ui_state['selected_models_per_provider'].copy()
+                self.logger.debug(f"Restored image model selections: {self._selected_models_per_provider}")
+            if 'selected_llm_models_per_provider' in ui_state:
+                self._selected_llm_models_per_provider = ui_state['selected_llm_models_per_provider'].copy()
+                self.logger.debug(f"Restored LLM model selections: {self._selected_llm_models_per_provider}")
+
             # Restore prompt
             if 'prompt' in ui_state:
                 self.prompt_edit.setPlainText(ui_state['prompt'])
@@ -7959,6 +8359,8 @@ For more detailed information, please refer to the full documentation.
                     self.llm_model_combo.clear()
 
                     provider = ui_state['llm_provider']
+                    # Update the current LLM provider tracking
+                    self._current_llm_provider = provider
                     if provider != "None":
                         self.llm_model_combo.setEnabled(True)
                         # Use centralized model lists
@@ -8469,6 +8871,20 @@ For more detailed information, please refer to the full documentation.
 
         dialog.prompt_generated.connect(on_prompt_generated)
         dialog.exec()
+
+    def _open_puppet_wizard(self):
+        """Open Character Animator Puppet creation wizard."""
+        from gui.character_animator import PuppetWizard
+
+        wizard = PuppetWizard(self)
+        wizard.exec()
+
+    def _open_font_generator(self):
+        """Open Font Generator wizard."""
+        from gui.font_generator import FontGeneratorWizard
+
+        wizard = FontGeneratorWizard(self)
+        wizard.exec()
 
     def _show_log_location(self):
         """Show the location of log files to the user."""

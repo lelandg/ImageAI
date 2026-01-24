@@ -303,6 +303,44 @@ class ConfigManager:
         layout_config["llm_provider"] = provider
         self.set_layout_config(layout_config)
 
+    # Discord Rich Presence Configuration
+
+    def get_discord_config(self) -> Dict[str, Any]:
+        """Get Discord Rich Presence configuration.
+
+        Returns:
+            Dictionary with Discord settings:
+            - enabled: bool (default False - opt-in)
+            - privacy_level: str ("full", "activity_only", "minimal")
+            - show_elapsed_time: bool
+            - show_model: bool
+            - show_buttons: bool (GitHub link)
+        """
+        defaults = {
+            "enabled": False,
+            "privacy_level": "full",
+            "show_elapsed_time": True,
+            "show_model": True,
+            "show_buttons": True,
+        }
+        config = self.config.get("discord", {})
+        # Merge with defaults
+        return {**defaults, **config}
+
+    def set_discord_config(self, discord_config: Dict[str, Any]) -> None:
+        """Set Discord Rich Presence configuration."""
+        self.config["discord"] = discord_config
+
+    def get_discord_enabled(self) -> bool:
+        """Check if Discord Rich Presence is enabled."""
+        return self.get_discord_config().get("enabled", False)
+
+    def set_discord_enabled(self, enabled: bool) -> None:
+        """Enable or disable Discord Rich Presence."""
+        config = self.get_discord_config()
+        config["enabled"] = enabled
+        self.set_discord_config(config)
+
 
 def get_api_key_url(provider: str) -> str:
     """Get the API key documentation URL for a provider."""

@@ -1262,9 +1262,10 @@ class WorkspaceWidget(QWidget):
 
         # Instead, populate the image model combo with default Gemini models
         # since Gemini is the first item in the provider combo
+        # Models are ordered newest to oldest
         self.img_model_combo.addItems([
+            "gemini-3-pro-image-preview",  # Nano Banana Pro - 4K support (newest)
             "gemini-2.5-flash-image",
-            "gemini-3-pro-image-preview",  # Nano Banana Pro - 4K support
             "gemini-2.5-flash",
             "gemini-2.5-pro",
             "gemini-1.5-flash",
@@ -6200,10 +6201,11 @@ class WorkspaceWidget(QWidget):
         self.img_model_combo.clear()
 
         # Populate with models based on provider
+        # Models are ordered newest to oldest
         if provider in ["Google", "Gemini"]:  # Support both new and old naming
             self.img_model_combo.addItems([
+                "gemini-3-pro-image-preview",  # Nano Banana Pro - 4K support (newest)
                 "gemini-2.5-flash-image",
-                "gemini-3-pro-image-preview",  # Nano Banana Pro - 4K support
                 "gemini-2.5-flash",
                 "gemini-2.5-pro",
                 "gemini-1.5-flash",
@@ -6211,6 +6213,9 @@ class WorkspaceWidget(QWidget):
             ])
         elif provider == "OpenAI":
             self.img_model_combo.addItems([
+                "gpt-image-1.5",  # GPT Image 1.5 (newest)
+                "gpt-image-1",
+                "gpt-image-1-mini",
                 "dall-e-3",
                 "dall-e-2"
             ])
@@ -7548,15 +7553,16 @@ class WorkspaceWidget(QWidget):
                         self.img_provider_combo.setCurrentIndex(index)
 
                         # Populate the model combo based on provider without clearing
+                        # Models are ordered newest to oldest
                         self.img_model_combo.clear()
                         if provider_text in ["Google", "Gemini"]:  # Support both new and old naming
-                            self.img_model_combo.addItems(["gemini-2.5-flash-image", "gemini-3-pro-image-preview", "gemini-2.5-flash", "gemini-2.5-pro"])
+                            self.img_model_combo.addItems(["gemini-3-pro-image-preview", "gemini-2.5-flash-image", "gemini-2.5-flash", "gemini-2.5-pro"])
                         elif provider_text == "OpenAI":
-                            self.img_model_combo.addItems(["dall-e-3", "dall-e-2"])
+                            self.img_model_combo.addItems(["gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini", "dall-e-3", "dall-e-2"])
                         elif provider_text == "Stability":
                             self.img_model_combo.addItems(["stable-diffusion-xl-1024-v1-0", "stable-diffusion-v1-6"])
                         elif provider_text == "Local SD":
-                            self.img_model_combo.addItems(["stabilityai/stable-diffusion-2-1", "runwayml/stable-diffusion-v1-5"])
+                            self.img_model_combo.addItems(["stabilityai/stable-diffusion-xl-base-1.0", "stabilityai/stable-diffusion-2-1", "runwayml/stable-diffusion-v1-5"])
                         
                         # Now set the model
                         if self.current_project.image_model:

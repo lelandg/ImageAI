@@ -52,6 +52,7 @@ except ImportError:
 # Value: dict with requires_api_key, requires_gcloud, display_name, error_message
 # =============================================================================
 MODEL_AUTH_REQUIREMENTS = {
+    # Gemini Image Models
     'gemini-3-pro-image-preview': {
         'requires_api_key': True,
         'requires_gcloud': False,
@@ -62,8 +63,31 @@ MODEL_AUTH_REQUIREMENTS = {
             'Get an API key from: https://aistudio.google.com/apikey'
         )
     },
-    # Other image models support both auth methods:
-    # - gemini-2.5-flash-image (Nano Banana): works with API key or gcloud
+    # gemini-2.5-flash-image (Nano Banana): works with API key or gcloud (no entry needed)
+
+    # Imagen Models (Vertex AI only - require gcloud auth)
+    'imagen-4.0-generate-001': {
+        'requires_api_key': False,
+        'requires_gcloud': True,
+        'display_name': 'Imagen 4',
+        'error_message': (
+            'Imagen 4 requires Google Cloud (gcloud) authentication.\n'
+            'API key authentication is not supported for Imagen models.\n\n'
+            'Setup: gcloud auth application-default login\n'
+            'Then: gcloud config set project YOUR_PROJECT_ID'
+        )
+    },
+    'imagen-3.0-generate-002': {
+        'requires_api_key': False,
+        'requires_gcloud': True,
+        'display_name': 'Imagen 3',
+        'error_message': (
+            'Imagen 3 requires Google Cloud (gcloud) authentication.\n'
+            'API key authentication is not supported for Imagen models.\n\n'
+            'Setup: gcloud auth application-default login\n'
+            'Then: gcloud config set project YOUR_PROJECT_ID'
+        )
+    },
 }
 
 
@@ -1583,10 +1607,16 @@ class GoogleProvider(ImageProvider):
         """Get available Google image generation models.
 
         Note: This only includes image generation models, not text/chat LLM models.
+        For LLM models, see core/llm_models.py.
+        Models are ordered newest to oldest for UI display.
         """
         return {
-            "gemini-2.5-flash-image": "Gemini 2.5 Flash Image (Nano Banana)",
+            # Gemini Image Generation Models - newest first
             "gemini-3-pro-image-preview": "Gemini 3 Pro Image (Nano Banana Pro) - 4K",
+            "gemini-2.5-flash-image": "Gemini 2.5 Flash Image (Nano Banana)",
+            # Imagen Models (Vertex AI - requires gcloud auth) - newest first
+            "imagen-4.0-generate-001": "Imagen 4 (Best Quality, Low Latency)",
+            "imagen-3.0-generate-002": "Imagen 3 (General Purpose)",
         }
     
     def get_models_with_details(self) -> Dict[str, Dict[str, str]]:
@@ -1597,26 +1627,132 @@ class GoogleProvider(ImageProvider):
             - name: Short display name
             - nickname: Optional nickname/codename
             - description: Optional brief description
+            - requires_gcloud: Whether model requires Google Cloud auth (vs API key)
+            - max_resolution: Maximum output resolution
 
         Note: This only includes image generation models, not text/chat LLM models.
+        For LLM models, see core/llm_models.py.
+        Models are ordered newest to oldest for UI display.
         """
         return {
-            "gemini-2.5-flash-image": {
-                "name": "Gemini 2.5 Flash Image",
-                "nickname": "Nano Banana",
-                "description": "Production image generation with aspect ratio support"
-            },
+            # Gemini Image Generation Models - newest first
             "gemini-3-pro-image-preview": {
                 "name": "Gemini 3 Pro Image",
                 "nickname": "Nano Banana Pro",
-                "description": "4K output, superior text rendering, up to 14 reference images"
+                "description": "4K output, superior text rendering, up to 14 reference images",
+                "requires_gcloud": False,
+                "max_resolution": "4K",
+            },
+            "gemini-2.5-flash-image": {
+                "name": "Gemini 2.5 Flash Image",
+                "nickname": "Nano Banana",
+                "description": "Production image generation with aspect ratio support",
+                "requires_gcloud": False,
+                "max_resolution": "1K",
+            },
+            # Imagen Models (Vertex AI) - newest first
+            "imagen-4.0-generate-001": {
+                "name": "Imagen 4",
+                "nickname": None,
+                "description": "Best quality, low latency, near-real-time performance",
+                "requires_gcloud": True,
+                "max_resolution": "2K",
+            },
+            "imagen-3.0-generate-002": {
+                "name": "Imagen 3",
+                "nickname": None,
+                "description": "General purpose generation, inpainting, outpainting",
+                "requires_gcloud": True,
+                "max_resolution": "2K",
             },
         }
     
     def get_default_model(self) -> str:
         """Get default Google model."""
         return "gemini-2.5-flash-image"
-    
+
+    def get_models_for_auth(self, auth_mode: str = "api-key") -> Dict[str, str]:
+        """Get available models filtered by authentication method.
+
+        Args:
+            auth_mode: "api-key" for API key auth, "gcloud" for Google Cloud auth
+
+        Returns:
+            Dictionary of model IDs to display names that work with the given auth method.
+        """
+        all_models = self.get_models_with_details()
+        filtered = {}
+
+        for model_id, details in all_models.items():
+            requires_gcloud = details.get("requires_gcloud", False)
+
+            if auth_mode == "gcloud":
+                # gcloud auth can use all models
+                filtered[model_id] = self._format_model_display(model_id, details)
+            elif auth_mode == "api-key":
+                # API key can only use models that don't require gcloud
+                if not requires_gcloud:
+                    filtered[model_id] = self._format_model_display(model_id, details)
+
+        return filtered
+
+    def _format_model_display(self, model_id: str, details: Dict[str, str]) -> str:
+        """Format a model for display in combo boxes.
+
+        Args:
+            model_id: The model identifier
+            details: Model details dictionary
+
+        Returns:
+            Formatted display string
+        """
+        name = details.get("name", model_id)
+        nickname = details.get("nickname")
+        max_res = details.get("max_resolution", "")
+
+        if nickname:
+            display = f"{name} ({nickname})"
+        else:
+            display = name
+
+        if max_res and max_res != "1K":
+            display += f" - {max_res}"
+
+        return display
+
+    def is_model_available(self, model_id: str, has_api_key: bool = True, has_gcloud: bool = False) -> Tuple[bool, Optional[str]]:
+        """Check if a model is available with the current authentication.
+
+        Args:
+            model_id: The model to check
+            has_api_key: Whether an API key is configured
+            has_gcloud: Whether gcloud authentication is available
+
+        Returns:
+            Tuple of (is_available, error_message if not available)
+        """
+        auth_req = MODEL_AUTH_REQUIREMENTS.get(model_id)
+
+        if not auth_req:
+            # Model has no special requirements, works with API key
+            if has_api_key:
+                return True, None
+            elif has_gcloud:
+                return True, None
+            else:
+                return False, "No authentication configured. Please set up an API key or gcloud."
+
+        requires_api_key = auth_req.get("requires_api_key", False)
+        requires_gcloud = auth_req.get("requires_gcloud", False)
+
+        if requires_gcloud and not has_gcloud:
+            return False, auth_req.get("error_message", f"{model_id} requires gcloud authentication")
+
+        if requires_api_key and not has_api_key:
+            return False, auth_req.get("error_message", f"{model_id} requires an API key")
+
+        return True, None
+
     def get_api_key_url(self) -> str:
         """Get Google API key URL."""
         return "https://aistudio.google.com/apikey"
@@ -1635,18 +1771,18 @@ class GoogleProvider(ImageProvider):
         """Edit image with Google Gemini."""
         if not self.client:
             raise ValueError("No client configured")
-        
+
         model = model or self.get_default_model()
         texts: List[str] = []
         images: List[bytes] = []
-        
+
         try:
             # Gemini can process images as input
             response = self.client.models.generate_content(
                 model=model,
                 contents=[prompt, {"inline_data": {"data": image, "mime_type": "image/png"}}],
             )
-            
+
             if response and response.candidates:
                 cand = response.candidates[0]
                 if getattr(cand, "content", None) and getattr(cand.content, "parts", None):
@@ -1661,6 +1797,196 @@ class GoogleProvider(ImageProvider):
             raise RuntimeError(f"Google image editing failed: {e}")
 
         return texts, images
+
+    def edit_image_region(
+        self,
+        image: bytes,
+        region_bbox: Tuple[int, int, int, int],
+        prompt: str,
+        model: Optional[str] = None,
+        use_conversation: bool = False,
+        style_context: Optional[str] = None,
+        **kwargs
+    ) -> Tuple[List[str], List[bytes]]:
+        """
+        Edit a specific region of an image using Gemini.
+
+        Uses conversational editing for style consistency when editing multiple
+        regions (e.g., generating visemes for Character Animator).
+
+        Args:
+            image: Image bytes (PNG format)
+            region_bbox: (x, y, width, height) of region to edit
+            prompt: Editing prompt describing desired change
+            model: Model to use (defaults to gemini-2.5-flash-image)
+            use_conversation: Use existing conversation session for consistency
+            style_context: Optional style hint (e.g., "cartoon", "anime")
+            **kwargs: Additional parameters
+
+        Returns:
+            Tuple of (texts, image_bytes_list)
+        """
+        global genai, types
+
+        if not self.client:
+            if self.auth_mode == "gcloud":
+                self._init_gcloud_client(raise_on_error=True)
+            elif self.api_key:
+                self._init_api_key_client()
+            else:
+                raise ValueError("No client configured")
+
+        if types is None:
+            from google.genai import types
+
+        model = model or self.get_default_model()
+        texts: List[str] = []
+        images: List[bytes] = []
+
+        x, y, w, h = region_bbox
+
+        # Build the full editing prompt with region context
+        full_prompt_parts = [
+            f"Edit only the region at position ({x}, {y}) with size {w}x{h} pixels.",
+            prompt,
+            "Keep the rest of the image exactly the same.",
+            "Maintain the original art style and character appearance."
+        ]
+
+        if style_context:
+            full_prompt_parts.insert(2, f"Style: {style_context}")
+
+        full_prompt = " ".join(full_prompt_parts)
+
+        logger.info(f"Editing region ({x},{y},{w}x{h}) with prompt: {prompt[:50]}...")
+
+        try:
+            # Create generation config for image output
+            config = types.GenerateContentConfig(
+                response_modalities=["IMAGE", "TEXT"],
+            )
+
+            # Use conversation session if available and requested
+            if use_conversation and self._last_chat_session:
+                logger.info("Using existing conversation session for style consistency")
+                response = self._last_chat_session.send_message(full_prompt)
+            else:
+                # Standard single-shot editing
+                from PIL import Image
+                import io
+
+                # Prepare image as Part
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=[
+                        types.Part.from_bytes(data=image, mime_type="image/png"),
+                        full_prompt,
+                    ],
+                    config=config,
+                )
+
+            # Extract image from response
+            if response and response.candidates:
+                for candidate in response.candidates:
+                    if candidate.content and candidate.content.parts:
+                        for part in candidate.content.parts:
+                            if hasattr(part, 'text') and part.text:
+                                texts.append(part.text)
+                            elif hasattr(part, 'inline_data') and part.inline_data:
+                                data = part.inline_data.data
+                                if isinstance(data, (bytes, bytearray)):
+                                    images.append(bytes(data))
+                                    logger.info(f"Region edit returned {len(data)} bytes")
+
+            if not images:
+                logger.warning("No image returned from region edit")
+
+        except Exception as e:
+            logger.error(f"Region edit failed: {e}")
+            raise RuntimeError(f"Google region editing failed: {e}")
+
+        return texts, images
+
+    def start_edit_session(
+        self,
+        character_image: bytes,
+        style_context: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> bool:
+        """
+        Start a conversational editing session for batch viseme generation.
+
+        This establishes context with the character image so subsequent
+        edits maintain style consistency.
+
+        Args:
+            character_image: The base character image bytes
+            style_context: Optional style description (e.g., "cartoon with thick outlines")
+            model: Model to use (defaults to gemini-2.5-flash-image)
+
+        Returns:
+            True if session started successfully
+        """
+        global genai, types
+
+        if not self.client:
+            if self.auth_mode == "gcloud":
+                self._init_gcloud_client(raise_on_error=True)
+            elif self.api_key:
+                self._init_api_key_client()
+            else:
+                raise ValueError("No client configured")
+
+        if types is None:
+            from google.genai import types
+
+        model = model or self.get_default_model()
+
+        try:
+            # Build style context message
+            context_parts = [
+                "This is my character. I'll ask you to edit facial expressions.",
+                "Keep the exact same art style, colors, and character appearance for all edits.",
+                "Only modify the specific region I describe in each request."
+            ]
+
+            if style_context:
+                context_parts.insert(1, f"Style notes: {style_context}")
+
+            context_message = " ".join(context_parts)
+
+            # Create chat session with image output enabled
+            config = types.GenerateContentConfig(
+                response_modalities=["IMAGE", "TEXT"],
+            )
+
+            self._last_chat_session = self.client.chats.create(
+                model=model,
+                config=config,
+            )
+
+            # Upload character image and establish context
+            self._last_chat_session.send_message([
+                types.Part.from_bytes(data=character_image, mime_type="image/png"),
+                context_message,
+            ])
+
+            logger.info(f"Started edit session with model {model}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to start edit session: {e}")
+            return False
+
+    def reset_edit_session(self):
+        """
+        Reset the conversational editing session.
+
+        Call this when switching to a new character to ensure
+        the new character's style is properly established.
+        """
+        self._last_chat_session = None
+        logger.info("Edit session reset - ready for new character")
 
     def generate_video(
         self,
