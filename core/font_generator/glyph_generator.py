@@ -1,0 +1,530 @@
+"""
+AI-powered glyph generation for missing font characters.
+
+This module generates missing glyphs using AI image models, matching
+the style of existing detected characters from the font.
+"""
+
+import logging
+import io
+from dataclasses import dataclass
+from typing import List, Optional, Callable, Any, Dict
+
+import numpy as np
+from PIL import Image
+
+from .segmentation import CharacterCell
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GlyphGenerationResult:
+    """Result of a glyph generation attempt."""
+    success: bool
+    character: str
+    cell: Optional[CharacterCell] = None
+    error: Optional[str] = None
+
+
+class GlyphGenerator:
+    """Generates missing glyphs using AI image models."""
+
+    # Characters grouped by visual similarity for reference selection
+    SIMILAR_CHARS = {
+        # Curved characters
+        'curves': set('SsCcOoQqGg369@'),
+        # Diagonal characters
+        'diagonal': set('AaVvWwXxYyZzKk147/\\'),
+        # Vertical/straight characters
+        'vertical': set('IilLtTfH1|[]{}'),
+        # Dot/small characters
+        'small': set('.,:;\'"`~^'),
+        # Round characters
+        'round': set('OoQq0@'),
+        # Characters with descenders
+        'descenders': set('gjpqy'),
+        # Characters with ascenders
+        'ascenders': set('bdfhklt'),
+    }
+
+    def __init__(self, provider: str, model: str, api_key: str, auth_mode: str = "api-key"):
+        """
+        Initialize the glyph generator.
+
+        Args:
+            provider: Provider name (e.g., 'google', 'openai')
+            model: Model ID to use for generation
+            api_key: API key for the provider
+            auth_mode: Authentication mode ('api-key' or 'gcloud')
+        """
+        self.provider_name = provider
+        self.model = model
+        self.api_key = api_key
+        self.auth_mode = auth_mode
+        self._provider = None
+
+        logger.info(f"GlyphGenerator initialized: provider={provider}, model={model}, auth_mode={auth_mode}")
+
+    def _get_provider(self):
+        """Lazy-load the provider instance."""
+        if self._provider is None:
+            from providers import get_provider
+            config = {
+                'api_key': self.api_key,
+                'auth_mode': self.auth_mode,
+            }
+            self._provider = get_provider(self.provider_name, config, use_cache=False)
+            logger.debug(f"Loaded provider: {self.provider_name}")
+        return self._provider
+
+    def generate_glyph(
+        self,
+        char: str,
+        reference_glyphs: List[CharacterCell],
+        target_height: int,
+    ) -> GlyphGenerationResult:
+        """
+        Generate a single glyph matching the reference style.
+
+        Args:
+            char: The character to generate
+            reference_glyphs: Existing glyphs to use as style reference
+            target_height: Target height in pixels for the generated glyph
+
+        Returns:
+            GlyphGenerationResult with the generated CharacterCell or error
+        """
+        logger.info(f"=" * 60)
+        logger.info(f"Generating glyph for character: '{char}'")
+        logger.info(f"=" * 60)
+
+        try:
+            # Check if we can create this character by mirroring an existing one
+            mirror_result = self._try_mirror_glyph(char, reference_glyphs, target_height)
+            if mirror_result is not None:
+                return mirror_result
+
+            # Select reference glyphs for style matching
+            references = self._select_references(char, reference_glyphs)
+            ref_labels = [r.label for r in references]
+            logger.info(f"Selected {len(references)} reference glyphs: {ref_labels}")
+
+            # Build the prompt
+            prompt = self._build_prompt(char, references)
+            logger.info(f"Prompt:\n{'-' * 40}\n{prompt}\n{'-' * 40}")
+
+            # Prepare reference images for the prompt
+            reference_images = self._prepare_reference_images(references)
+
+            # Generate the image
+            logger.info(f"Calling {self.provider_name} with model {self.model}...")
+            provider = self._get_provider()
+
+            # Build generation kwargs
+            gen_kwargs: Dict[str, Any] = {
+                'aspect_ratio': '1:1',  # Square for glyphs
+            }
+
+            # For Gemini, we can include reference images in the prompt
+            if self.provider_name == 'google' and reference_images:
+                gen_kwargs['reference_images'] = reference_images
+
+            text_outputs, image_bytes_list = provider.generate(
+                prompt=prompt,
+                model=self.model,
+                **gen_kwargs,
+            )
+
+            if text_outputs:
+                logger.info(f"Text response: {text_outputs[0][:200]}...")
+
+            if not image_bytes_list:
+                error_msg = "No image generated by AI"
+                logger.error(error_msg)
+                return GlyphGenerationResult(success=False, character=char, error=error_msg)
+
+            logger.info(f"Received {len(image_bytes_list)} image(s), size: {len(image_bytes_list[0])} bytes")
+
+            # Process the generated image
+            processed_image = self._process_image(image_bytes_list[0], target_height)
+
+            if processed_image is None:
+                error_msg = "Failed to process generated image"
+                logger.error(error_msg)
+                return GlyphGenerationResult(success=False, character=char, error=error_msg)
+
+            # Create the CharacterCell
+            h, w = processed_image.shape[:2]
+            cell = CharacterCell(
+                label=char,
+                bbox=(0, 0, w, h),
+                image=processed_image,
+                confidence=0.8,  # AI-generated confidence
+                row=-1,  # Mark as generated (not from segmentation)
+                col=-1,
+            )
+
+            logger.info(f"Successfully generated glyph for '{char}': {w}x{h} pixels")
+            return GlyphGenerationResult(success=True, character=char, cell=cell)
+
+        except Exception as e:
+            error_msg = f"Generation failed: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return GlyphGenerationResult(success=False, character=char, error=error_msg)
+
+    def _try_mirror_glyph(
+        self,
+        char: str,
+        available_glyphs: List[CharacterCell],
+        target_height: int,
+    ) -> Optional[GlyphGenerationResult]:
+        """
+        Try to create a glyph by mirroring an existing one.
+
+        Some characters can be created by simply mirroring another character,
+        which is faster and guarantees style consistency.
+
+        Args:
+            char: Character to create
+            available_glyphs: Existing glyphs to check for mirror source
+            target_height: Target height (unused here, but kept for consistency)
+
+        Returns:
+            GlyphGenerationResult if mirroring was successful, None otherwise
+        """
+        if char not in self.MIRROR_PAIRS:
+            return None
+
+        source_char, mirror_type = self.MIRROR_PAIRS[char]
+
+        # Find the source glyph
+        source_glyph = None
+        for glyph in available_glyphs:
+            if glyph.label == source_char:
+                source_glyph = glyph
+                break
+
+        if source_glyph is None or source_glyph.image is None:
+            logger.info(f"Mirror source '{source_char}' not found for '{char}', will use AI generation")
+            return None
+
+        logger.info(f"Creating '{char}' by mirroring '{source_char}' ({mirror_type})")
+
+        try:
+            # Mirror the image
+            from PIL import Image as PILImage
+
+            # Convert numpy array to PIL Image
+            if len(source_glyph.image.shape) == 2:
+                pil_img = PILImage.fromarray(source_glyph.image, mode='L')
+            else:
+                pil_img = PILImage.fromarray(source_glyph.image)
+
+            # Apply the mirror transformation
+            if mirror_type == 'horizontal':
+                mirrored = pil_img.transpose(PILImage.Transpose.FLIP_LEFT_RIGHT)
+            elif mirror_type == 'vertical':
+                mirrored = pil_img.transpose(PILImage.Transpose.FLIP_TOP_BOTTOM)
+            else:
+                logger.warning(f"Unknown mirror type: {mirror_type}")
+                return None
+
+            # Convert back to numpy array
+            mirrored_array = np.array(mirrored)
+
+            # Create the CharacterCell
+            h, w = mirrored_array.shape[:2]
+            cell = CharacterCell(
+                label=char,
+                bbox=(0, 0, w, h),
+                image=mirrored_array,
+                confidence=1.0,  # Perfect confidence - it's an exact mirror
+                row=-1,  # Mark as generated
+                col=-1,
+            )
+
+            logger.info(f"Successfully created '{char}' by mirroring '{source_char}': {w}x{h} pixels")
+            return GlyphGenerationResult(success=True, character=char, cell=cell)
+
+        except Exception as e:
+            logger.error(f"Failed to mirror '{source_char}' to create '{char}': {e}")
+            return None
+
+    def _select_references(
+        self,
+        char: str,
+        available: List[CharacterCell],
+        count: int = 5,
+    ) -> List[CharacterCell]:
+        """
+        Select the best reference glyphs for style matching.
+
+        Args:
+            char: Character to generate
+            available: Available glyphs to choose from
+            count: Number of references to select
+
+        Returns:
+            List of reference CharacterCells
+        """
+        if not available:
+            return []
+
+        if len(available) <= count:
+            return list(available)
+
+        selected = []
+        available_set = {c.label: c for c in available}
+
+        # First, try to find visually similar characters
+        for group_name, group_chars in self.SIMILAR_CHARS.items():
+            if char in group_chars:
+                # Find references from the same visual group
+                for ref_char in group_chars:
+                    if ref_char in available_set and ref_char != char:
+                        selected.append(available_set[ref_char])
+                        if len(selected) >= count:
+                            break
+                if selected:
+                    logger.debug(f"Found {len(selected)} similar chars from '{group_name}' group")
+                break
+
+        # Fill remaining slots with diverse samples
+        diverse_chars = ['A', 'a', 'm', 'M', '0', 'g', 'W', 'e', 'O', 'n']
+        for dc in diverse_chars:
+            if len(selected) >= count:
+                break
+            if dc in available_set and dc != char and available_set[dc] not in selected:
+                selected.append(available_set[dc])
+
+        # If still not enough, add any remaining
+        for cell in available:
+            if len(selected) >= count:
+                break
+            if cell not in selected and cell.label != char:
+                selected.append(cell)
+
+        return selected[:count]
+
+    # Special character names for unambiguous prompts
+    # Use typographic terminology as recommended for Gemini image generation
+    CHAR_NAMES = {
+        '\\': 'backslash symbol',
+        '/': 'forward slash symbol',
+        '|': 'vertical bar symbol',
+        '~': 'tilde symbol',
+        '`': 'backtick symbol',
+        "'": 'apostrophe symbol',
+        '"': 'double quote symbol',
+        '^': 'caret symbol',
+        '<': 'less-than symbol',
+        '>': 'greater-than symbol',
+        '_': 'underscore symbol',
+        '-': 'hyphen symbol',
+        '+': 'plus symbol',
+        '=': 'equals symbol',
+        '*': 'asterisk symbol',
+        '&': 'ampersand symbol',
+        '%': 'percent symbol',
+        '$': 'dollar sign symbol',
+        '#': 'hash symbol',
+        '@': 'at symbol',
+        '!': 'exclamation mark symbol',
+        '?': 'question mark symbol',
+    }
+
+    # Characters that can be created by mirroring another character
+    # Maps: target_char -> (source_char, mirror_type)
+    # mirror_type: 'horizontal' (flip left-right), 'vertical' (flip top-bottom)
+    MIRROR_PAIRS = {
+        '\\': ('/', 'horizontal'),  # backslash is horizontally mirrored forward slash
+        # Add more pairs as needed, e.g.:
+        # 'd': ('b', 'horizontal'),  # if we wanted to mirror letters
+    }
+
+    def _build_prompt(self, char: str, references: List[CharacterCell]) -> str:
+        """
+        Build the generation prompt.
+
+        Note: For Gemini, we do NOT include dimensions in the prompt text
+        as they get rendered as literal text in the image.
+
+        Uses typographic framing as recommended for Gemini/Nano Banana models.
+
+        Args:
+            char: Character to generate
+            references: Reference glyphs for style context
+
+        Returns:
+            Prompt string
+        """
+        ref_labels = ', '.join(f"'{r.label}'" for r in references)
+
+        # Get character name - use typographic name for special chars
+        char_name = self.CHAR_NAMES.get(char, f"'{char}'")
+
+        # Use typographic framing for better results with Gemini
+        prompt = f"""A high-contrast, black and white typographic render of the {char_name}.
+The glyph should match the handwritten style of these reference characters: {ref_labels}.
+
+Requirements:
+- Solid black on pure white background
+- Handwritten style matching the reference characters
+- Similar stroke width and weight to the references
+- Centered with padding
+- Clean lines, no borders, no labels, no other text"""
+
+        return prompt
+
+    def _prepare_reference_images(self, references: List[CharacterCell]) -> List[bytes]:
+        """
+        Convert reference glyphs to image bytes for the AI.
+
+        Args:
+            references: Reference CharacterCells
+
+        Returns:
+            List of PNG image bytes
+        """
+        images = []
+        for ref in references:
+            try:
+                pil_img = ref.to_pil()
+                buf = io.BytesIO()
+                pil_img.save(buf, format='PNG')
+                images.append(buf.getvalue())
+                logger.debug(f"Prepared reference image for '{ref.label}': {pil_img.size}")
+            except Exception as e:
+                logger.warning(f"Failed to prepare reference '{ref.label}': {e}")
+
+        return images
+
+    def _process_image(
+        self,
+        raw_bytes: bytes,
+        target_height: int,
+    ) -> Optional[np.ndarray]:
+        """
+        Process the AI-generated image: convert, threshold, crop, and scale.
+
+        Args:
+            raw_bytes: Raw image bytes from AI
+            target_height: Target height to match existing glyphs
+
+        Returns:
+            Processed numpy array (grayscale) or None on failure
+        """
+        try:
+            # Load image
+            img = Image.open(io.BytesIO(raw_bytes))
+            original_size = img.size
+            logger.info(f"Processing image: original size {original_size}, mode {img.mode}")
+
+            # Convert to grayscale
+            if img.mode != 'L':
+                img = img.convert('L')
+            logger.debug(f"Converted to grayscale")
+
+            # Convert to numpy
+            arr = np.array(img)
+
+            # Apply threshold for clean black/white
+            # Assume dark pixels are the glyph (< 128)
+            threshold = 180  # Slightly generous to capture anti-aliased edges
+            binary = (arr < threshold).astype(np.uint8) * 255
+            logger.debug(f"Applied threshold at {threshold}")
+
+            # Find bounding box of non-white pixels
+            coords = np.argwhere(binary > 0)
+            if len(coords) == 0:
+                logger.warning("No glyph content found after thresholding")
+                # Try inverting if image might be white-on-black
+                binary = 255 - binary
+                coords = np.argwhere(binary > 0)
+                if len(coords) == 0:
+                    return None
+                logger.info("Inverted image (was white-on-black)")
+
+            y_min, x_min = coords.min(axis=0)
+            y_max, x_max = coords.max(axis=0)
+
+            # Add small padding
+            padding = 4
+            y_min = max(0, y_min - padding)
+            x_min = max(0, x_min - padding)
+            y_max = min(binary.shape[0], y_max + padding)
+            x_max = min(binary.shape[1], x_max + padding)
+
+            # Crop
+            cropped = binary[y_min:y_max, x_min:x_max]
+            crop_h, crop_w = cropped.shape
+            logger.info(f"Cropped from {original_size} to {crop_w}x{crop_h}")
+
+            # Scale to target height
+            if crop_h > 0:
+                scale = target_height / crop_h
+                new_w = max(1, int(crop_w * scale))
+                new_h = target_height
+
+                pil_cropped = Image.fromarray(cropped)
+                pil_scaled = pil_cropped.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                final = np.array(pil_scaled)
+                logger.info(f"Scaled to {new_w}x{new_h} (target_height={target_height})")
+
+                # Invert back to black-on-white (white background, black glyph)
+                # Our binary has white=glyph, so invert for standard representation
+                final = 255 - final
+
+                return final
+            else:
+                logger.warning("Cropped height is 0")
+                return None
+
+        except Exception as e:
+            logger.error(f"Image processing failed: {e}", exc_info=True)
+            return None
+
+    def generate_multiple(
+        self,
+        chars: List[str],
+        reference_glyphs: List[CharacterCell],
+        target_height: int,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ) -> List[GlyphGenerationResult]:
+        """
+        Generate multiple missing glyphs.
+
+        Args:
+            chars: List of characters to generate
+            reference_glyphs: Existing glyphs for style reference
+            target_height: Target height for generated glyphs
+            progress_callback: Optional callback(current, total, char) for progress
+
+        Returns:
+            List of GlyphGenerationResults
+        """
+        results = []
+        total = len(chars)
+
+        logger.info(f"Generating {total} missing glyphs: {chars}")
+
+        for i, char in enumerate(chars):
+            if progress_callback:
+                progress_callback(i, total, char)
+
+            result = self.generate_glyph(char, reference_glyphs, target_height)
+            results.append(result)
+
+            if result.success:
+                logger.info(f"[{i+1}/{total}] Generated '{char}' successfully")
+            else:
+                logger.warning(f"[{i+1}/{total}] Failed to generate '{char}': {result.error}")
+
+        if progress_callback:
+            progress_callback(total, total, "")
+
+        success_count = sum(1 for r in results if r.success)
+        logger.info(f"Generation complete: {success_count}/{total} successful")
+
+        return results
