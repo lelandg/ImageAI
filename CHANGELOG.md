@@ -5,6 +5,23 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.33.0] - 2026-01-28
+
+### Added
+- **Font Generator - AI Glyph Identification**: Multi-provider AI (Anthropic Claude, Google Gemini) identifies ambiguous characters
+- **Font Generator - AI Glyph Generation**: Generate missing glyphs matching your font style
+- **Font Generator - Row-Column Segmentation**: New method detects rows first, then characters within each row
+- **Font Generator - Position Hints**: AI considers vertical position (baseline, x-height, ascender) for better accuracy
+
+### Fixed
+- **Font Generator - Character Cropping**: Full-image contour detection prevents tall/slanted characters (/\()) from being chopped at row boundaries
+- **Font Generator - Semicolon Positioning**: New partial-descender category positions semicolon with upper dot at x-height
+- **Font Generator - Small Glyph Detection**: Reduced minimum area filter to detect small punctuation like periods
+
+### Improved
+- **Font Generator - Preview**: Multi-line sample text with each character category on its own line
+- **Font Generator - Punctuation Metrics**: Proper baseline and vertical positioning for all punctuation types
+
 ## [0.32.0] - 2026-01-24
 
 ### Added

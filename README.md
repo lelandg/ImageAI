@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.32.0**
+**Version 0.33.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **Chameleon Labs Discord - Support, AI Art & Community: [Chameleon Labs Discord](https://discord.gg/chameleonlabs)**
@@ -251,11 +251,14 @@
 
 ### 🔤 Font Generator (NEW!)
 - **Alphabet to Font** - Create custom fonts from alphabet images
-- **Auto Segmentation** - Contour-based or grid-based character detection
-- **Character Set Detection** - Auto-detect uppercase, lowercase, digits, or custom sets
+- **Auto Segmentation** - Contour-based, grid-based, or row-column detection
+- **AI Glyph Identification** - Multi-provider AI (Claude, Gemini) identifies characters
+- **AI Glyph Generation** - Generate missing glyphs matching your font style
+- **Full Contour Detection** - Preserves tall/slanted characters like /\()
+- **Smart Punctuation** - Proper baseline and positioning for all punctuation
 - **Vector Tracing** - Convert bitmap characters to smooth vector outlines
 - **Configurable Smoothing** - None to Maximum smoothing levels
-- **Real-Time Preview** - Preview sample text with generated font
+- **Real-Time Preview** - Multi-line preview with all character categories
 - **Multiple Formats** - Export to TTF and/or OTF
 - **Settings Persistence** - All settings saved between sessions
 
@@ -1426,7 +1429,15 @@ Create custom fonts from alphabet images with automatic character segmentation a
 |--------|----------|-------------|
 | Contour-based | Irregular spacing | Detects character outlines automatically |
 | Grid-based | Uniform grids | Divides image into specified rows and columns |
-| Auto Detect | Unknown layouts | Tries both methods and selects best result |
+| Row-Column | Multi-row layouts | Detects rows first, then characters within each row |
+| Auto Detect | Unknown layouts | Tries methods and selects best result |
+
+**AI Features:**
+
+- **AI Glyph Identification** - Uses Claude or Gemini vision to identify ambiguous characters
+- **AI Glyph Generation** - Generate missing glyphs (punctuation, special chars) matching your font style
+- **Multi-Provider Support** - Anthropic Claude (recommended) or Google Gemini
+- **Position Hints** - AI considers vertical position (baseline, x-height, ascender) for accuracy
 
 **Character Set Options:**
 - Uppercase (A-Z) - 26 characters
