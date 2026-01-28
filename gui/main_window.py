@@ -728,66 +728,66 @@ class MainWindow(QMainWindow):
     def _init_menu(self):
         """Initialize menu bar."""
         mb = self.menuBar()
-        file_menu = mb.addMenu("File")
+        file_menu = mb.addMenu("&File")
         
         # Project actions (video tab)
-        act_save_project = QAction("Save Project", self)
+        act_save_project = QAction("&Save Project", self)
         act_save_project.setShortcut("Ctrl+S")
         act_save_project.triggered.connect(self._save_project)
         file_menu.addAction(act_save_project)
 
-        act_save_project_as = QAction("Save Project As...", self)
+        act_save_project_as = QAction("Save Project &As...", self)
         act_save_project_as.setShortcut("Ctrl+Shift+S")
         act_save_project_as.triggered.connect(self._save_project_as)
         file_menu.addAction(act_save_project_as)
 
-        act_open_project = QAction("Open Project...", self)
+        act_open_project = QAction("&Open Project...", self)
         act_open_project.setShortcut("Ctrl+O")
         act_open_project.triggered.connect(self._open_project)
         file_menu.addAction(act_open_project)
         
         file_menu.addSeparator()
         
-        act_save = QAction("Save Image As...", self)
+        act_save = QAction("Save &Image As...", self)
         act_save.triggered.connect(self._save_image_as)
         file_menu.addAction(act_save)
 
         file_menu.addSeparator()
 
-        act_quit = QAction("Quit", self)
+        act_quit = QAction("&Quit", self)
         act_quit.triggered.connect(self.close)
         file_menu.addAction(act_quit)
 
         # Tools menu
-        tools_menu = mb.addMenu("Tools")
+        tools_menu = mb.addMenu("T&ools")
 
-        act_wikimedia = QAction("Search Wikimedia Commons...", self)
+        act_wikimedia = QAction("Search &Wikimedia Commons...", self)
         act_wikimedia.triggered.connect(self._open_wikimedia_search)
         tools_menu.addAction(act_wikimedia)
 
-        act_char_prompt = QAction("Prompt Builder...", self)
+        act_char_prompt = QAction("&Prompt Builder...", self)
         act_char_prompt.triggered.connect(self._open_character_prompt_builder)
         tools_menu.addAction(act_char_prompt)
 
         tools_menu.addSeparator()
 
-        act_puppet = QAction("Character Animator Puppet (In Development)...", self)
+        act_puppet = QAction("&Character Animator Puppet (In Development)...", self)
         act_puppet.triggered.connect(self._open_puppet_wizard)
         act_puppet.setToolTip("Create animated puppets for Character Animator - Feature in development")
         tools_menu.addAction(act_puppet)
 
-        act_font_gen = QAction("Font Generator...", self)
+        act_font_gen = QAction("&Font Generator...", self)
         act_font_gen.triggered.connect(self._open_font_generator)
         tools_menu.addAction(act_font_gen)
 
         # Help menu
-        help_menu = mb.addMenu("Help")
+        help_menu = mb.addMenu("&Help")
         
-        act_show_logs = QAction("Show Log Location", self)
+        act_show_logs = QAction("Show &Log Location", self)
         act_show_logs.triggered.connect(self._show_log_location)
         help_menu.addAction(act_show_logs)
         
-        act_report_error = QAction("How to Report Errors", self)
+        act_report_error = QAction("How to &Report Errors", self)
         act_report_error.triggered.connect(self._show_error_reporting)
         help_menu.addAction(act_report_error)
     

@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QPushButton, QFileDialog, QProgressBar, QGroupBox,
     QComboBox, QLineEdit, QFrame, QScrollArea, QWidget,
     QSplitter, QCheckBox, QSpinBox, QMessageBox,
-    QGridLayout, QSlider, QSizePolicy,
+    QGridLayout, QSlider, QSizePolicy, QTextEdit,
 )
 from PySide6.QtCore import Qt, Signal, QThread, QSize, QSettings, QTimer
 from PySide6.QtGui import QPixmap, QImage, QFont, QPainter, QPen, QColor, QPainterPath, QFontDatabase, QFontMetrics
@@ -40,6 +40,7 @@ from core.font_generator import (
     UPPERCASE,
     LOWERCASE,
     DIGITS,
+    PUNCTUATION,
     FONTTOOLS_AVAILABLE,
 )
 from core.constants import get_user_data_dir
@@ -117,13 +118,14 @@ class ImageUploadPage(QWizardPage):
         charset_layout.addWidget(QLabel("Character Set:"))
 
         self.charset_combo = QComboBox()
+        # Order: most comprehensive first (default=0 detects most characters)
         self.charset_combo.addItems([
-            "Uppercase (A-Z)",
-            "Lowercase (a-z)",
-            "Uppercase + Lowercase",
-            "Uppercase + Digits",
-            "Full (A-Z, a-z, 0-9)",
-            "Custom...",
+            "Full (A-Z, a-z, 0-9)",      # 0 - most comprehensive
+            "Uppercase + Lowercase",     # 1
+            "Uppercase + Digits",        # 2
+            "Uppercase (A-Z)",           # 3
+            "Lowercase (a-z)",           # 4
+            "Custom...",                 # 5
         ])
         self.charset_combo.currentIndexChanged.connect(self.on_charset_changed)
         charset_layout.addWidget(self.charset_combo)
@@ -208,18 +210,27 @@ class ImageUploadPage(QWizardPage):
         self.custom_chars_edit.setVisible(index == 5)  # "Custom..."
 
     def get_expected_chars(self) -> str:
-        """Get the expected character set based on selection."""
+        """Get the expected character set based on selection.
+
+        Indices match combo order (most comprehensive first):
+        0: Full (A-Z, a-z, 0-9)
+        1: Uppercase + Lowercase
+        2: Uppercase + Digits
+        3: Uppercase (A-Z)
+        4: Lowercase (a-z)
+        5: Custom...
+        """
         index = self.charset_combo.currentIndex()
         if index == 0:
-            return UPPERCASE
+            return UPPERCASE + LOWERCASE + DIGITS  # Full
         elif index == 1:
-            return LOWERCASE
-        elif index == 2:
             return UPPERCASE + LOWERCASE
-        elif index == 3:
+        elif index == 2:
             return UPPERCASE + DIGITS
+        elif index == 3:
+            return UPPERCASE
         elif index == 4:
-            return UPPERCASE + LOWERCASE + DIGITS
+            return LOWERCASE
         else:
             return self.custom_chars_edit.text() or UPPERCASE
 
@@ -253,6 +264,11 @@ class ImageUploadPage(QWizardPage):
         settings.setValue(f"{SETTINGS_PREFIX}/charset_index", self.charset_combo.currentIndex())
         settings.setValue(f"{SETTINGS_PREFIX}/custom_chars", self.custom_chars_edit.text())
 
+    def validatePage(self) -> bool:
+        """Called when user clicks Next. Save settings before leaving."""
+        self.save_settings()
+        return super().validatePage()
+
 
 class SegmentationPage(QWizardPage):
     """
@@ -283,7 +299,7 @@ class SegmentationPage(QWizardPage):
         # Method selection
         controls_layout.addWidget(QLabel("Method:"))
         self.method_combo = QComboBox()
-        self.method_combo.addItems(["Contour-based", "Grid-based", "Auto Detect"])
+        self.method_combo.addItems(["Row-Column", "Contour-based", "Grid-based", "Auto Detect"])
         self.method_combo.currentIndexChanged.connect(self.on_settings_changed)
         self.method_combo.setMinimumWidth(120)
         controls_layout.addWidget(self.method_combo)
@@ -316,6 +332,26 @@ class SegmentationPage(QWizardPage):
         self.invert_check.stateChanged.connect(self.on_settings_changed)
         controls_layout.addWidget(self.invert_check)
 
+        # Small glyphs checkbox (for punctuation detection)
+        self.small_glyphs_check = QCheckBox("+ Punctuation")
+        self.small_glyphs_check.setToolTip(
+            "Add punctuation marks to the character set.\n"
+            "When enabled, adds: !@#$%^&*()_+-=[]{}|;':\",./<>?`~\\\n"
+            "Enable this if your handwriting sample includes punctuation."
+        )
+        self.small_glyphs_check.stateChanged.connect(self.on_settings_changed)
+        controls_layout.addWidget(self.small_glyphs_check)
+
+        # AI-assisted segmentation checkbox
+        self.use_ai_check = QCheckBox("AI Assist")
+        self.use_ai_check.setToolTip(
+            "Use Gemini AI to help with ambiguous character detection.\n"
+            "Helps split touching characters and identify small glyphs.\n"
+            "Requires Google API key."
+        )
+        self.use_ai_check.stateChanged.connect(self.on_settings_changed)
+        controls_layout.addWidget(self.use_ai_check)
+
         # Padding
         controls_layout.addWidget(QLabel("Pad:"))
         self.padding_spin = QSpinBox()
@@ -331,21 +367,25 @@ class SegmentationPage(QWizardPage):
         controls_layout.addWidget(self.run_btn)
 
         controls_layout.addStretch()
-
-        # Status label
-        self.status_label = QLabel("")
-        self.status_label.setStyleSheet("color: #666;")
-        controls_layout.addWidget(self.status_label)
-
         layout.addWidget(controls_widget)
 
-        # Preview image - takes all remaining space
+        # Preview image - takes most of remaining space, scales to fit without stretching
         self.preview_image = QLabel()
         self.preview_image.setAlignment(Qt.AlignCenter)
         self.preview_image.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.preview_image.setMinimumSize(300, 200)
-        self.preview_image.setStyleSheet("border: 1px solid #ccc;")
-        layout.addWidget(self.preview_image, 1)  # stretch factor 1 to take all space
+        self.preview_image.setStyleSheet("border: 1px solid #ccc; background: #f8f8f8;")
+        self.preview_image.setScaledContents(False)  # Don't stretch - we scale manually
+        layout.addWidget(self.preview_image, 3)  # stretch factor 3 for image
+
+        # Status textbox below image - shows detection results and missing characters
+        self.status_text = QTextEdit()
+        self.status_text.setReadOnly(True)
+        self.status_text.setMaximumHeight(120)
+        self.status_text.setMinimumHeight(60)
+        self.status_text.setStyleSheet("background: #f5f5f5; border: 1px solid #ddd;")
+        self.status_text.setPlaceholderText("Segmentation results will appear here...")
+        layout.addWidget(self.status_text, 1)  # stretch factor 1 for status
 
     def initializePage(self):
         """Called when page becomes visible."""
@@ -363,6 +403,14 @@ class SegmentationPage(QWizardPage):
 
         padding = settings.value(f"{SETTINGS_PREFIX}/padding", 2, type=int)
         self.padding_spin.setValue(padding)
+
+        # Load small glyphs (punctuation) setting
+        include_small_glyphs = settings.value(f"{SETTINGS_PREFIX}/include_small_glyphs", False, type=bool)
+        self.small_glyphs_check.setChecked(include_small_glyphs)
+
+        # Load AI assist setting
+        use_ai = settings.value(f"{SETTINGS_PREFIX}/use_ai", False, type=bool)
+        self.use_ai_check.setChecked(use_ai)
 
         # Auto-detect inversion for this image
         wizard = self.wizard()
@@ -394,13 +442,15 @@ class SegmentationPage(QWizardPage):
         settings.setValue(f"{SETTINGS_PREFIX}/grid_cols", self.cols_spin.value())
         settings.setValue(f"{SETTINGS_PREFIX}/invert", self.invert_check.isChecked())
         settings.setValue(f"{SETTINGS_PREFIX}/padding", self.padding_spin.value())
+        settings.setValue(f"{SETTINGS_PREFIX}/include_small_glyphs", self.small_glyphs_check.isChecked())
+        settings.setValue(f"{SETTINGS_PREFIX}/use_ai", self.use_ai_check.isChecked())
 
     def on_settings_changed(self):
         """Handle settings changes."""
         # Show/hide grid settings based on method
-        # Order: 0=Contour-based, 1=Grid-based, 2=Auto Detect
+        # Order: 0=Row-Column, 1=Contour-based, 2=Grid-based, 3=Auto Detect
         method_idx = self.method_combo.currentIndex()
-        self.grid_frame.setVisible(method_idx == 1)  # Grid-based
+        self.grid_frame.setVisible(method_idx == 2)  # Grid-based
 
     def run_segmentation_auto(self):
         """Run segmentation with auto character set detection."""
@@ -412,9 +462,9 @@ class SegmentationPage(QWizardPage):
 
         try:
             # Get settings
-            # Order: 0=Contour-based, 1=Grid-based, 2=Auto Detect
+            # Order: 0=Row-Column, 1=Contour-based, 2=Grid-based, 3=Auto Detect
             method_idx = self.method_combo.currentIndex()
-            methods = [SegmentationMethod.CONTOUR, SegmentationMethod.GRID, SegmentationMethod.AUTO]
+            methods = [SegmentationMethod.ROW_COLUMN, SegmentationMethod.CONTOUR, SegmentationMethod.GRID, SegmentationMethod.AUTO]
             method = methods[method_idx]
 
             # Get user's charset selection from page 1
@@ -430,12 +480,24 @@ class SegmentationPage(QWizardPage):
 
             if use_user_charset and user_charset:
                 # User selected a specific charset - respect it
-                logger.info(f"Using user-selected charset: {len(user_charset)} characters")
+                # If punctuation checkbox is enabled, add punctuation to charset
+                actual_charset = user_charset
+                if self.small_glyphs_check.isChecked():
+                    # Add punctuation characters that aren't already in the charset
+                    for char in PUNCTUATION:
+                        if char not in actual_charset:
+                            actual_charset += char
+                    if len(actual_charset) != len(user_charset):
+                        logger.info(f"Added punctuation to charset: {len(user_charset)} -> {len(actual_charset)} characters")
+
+                logger.info(f"Using user-selected charset: {len(actual_charset)} characters")
                 segmenter = AlphabetSegmenter(
                     method=method,
-                    expected_chars=user_charset,
+                    expected_chars=actual_charset,
                     padding=self.padding_spin.value(),
                     invert=self.invert_check.isChecked(),
+                    include_small_glyphs=self.small_glyphs_check.isChecked(),
+                    use_ai=self.use_ai_check.isChecked(),
                 )
 
                 self.result = segmenter.segment(
@@ -443,8 +505,10 @@ class SegmentationPage(QWizardPage):
                     grid_rows=grid_rows,
                     grid_cols=grid_cols,
                 )
-                detected_charset = user_charset
+                detected_charset = actual_charset
                 charset_desc = page1.charset_combo.currentText()
+                if self.small_glyphs_check.isChecked() and len(actual_charset) != len(user_charset):
+                    charset_desc += " + Punctuation"
             else:
                 # Auto-detect charset based on detected character count
                 segmenter = AlphabetSegmenter(
@@ -452,6 +516,8 @@ class SegmentationPage(QWizardPage):
                     expected_chars="",  # Will be set by auto-detection
                     padding=self.padding_spin.value(),
                     invert=self.invert_check.isChecked(),
+                    include_small_glyphs=self.small_glyphs_check.isChecked(),
+                    use_ai=self.use_ai_check.isChecked(),
                 )
 
                 self.result, detected_charset, charset_desc = segmenter.segment_auto_detect(
@@ -467,13 +533,21 @@ class SegmentationPage(QWizardPage):
             preview = segmenter.preview_segmentation(page1.image_path, self.result)
             self.display_preview(preview)
 
-            # Update status
+            # Update status with missing character info
             found = len(self.result.characters)
             expected = len(detected_charset)
+            found_labels = {c.label for c in self.result.characters}
+            missing_chars = [c for c in detected_charset if c not in found_labels]
+
             if use_user_charset and user_charset:
                 status = f"Found {found} of {expected} characters.\nUsing selected set: {charset_desc}"
             else:
                 status = f"Found {found} characters.\nAuto-detected set: {charset_desc}"
+
+            # Show missing characters if any
+            if missing_chars:
+                missing_display = ' '.join(missing_chars)
+                status += f"\n\n❌ Missing characters ({len(missing_chars)}): {missing_display}"
 
             # Check for character count warnings (these are critical)
             has_count_warning = any("EXTRA" in w or "MISSING" in w for w in self.result.warnings)
@@ -481,14 +555,14 @@ class SegmentationPage(QWizardPage):
             if self.result.warnings:
                 status += "\n\n⚠️ WARNINGS:\n" + "\n".join(self.result.warnings)
 
-            self.status_label.setText(status)
+            self.status_text.setPlainText(status)
 
             # Style warnings in red if there's a count mismatch
-            if has_count_warning:
-                self.status_label.setStyleSheet("color: #cc0000; font-weight: bold;")
+            if has_count_warning or missing_chars:
+                self.status_text.setStyleSheet("background: #fff0f0; border: 1px solid #ffcccc;")
                 logger.warning(f"Character count mismatch detected - user should verify mappings")
             else:
-                self.status_label.setStyleSheet("")
+                self.status_text.setStyleSheet("background: #f0fff0; border: 1px solid #ccffcc;")
             self.completeChanged.emit()
 
             mode = "user-selected" if (use_user_charset and user_charset) else "auto-detected"
@@ -496,35 +570,37 @@ class SegmentationPage(QWizardPage):
 
         except Exception as e:
             logger.error(f"Auto-segmentation failed: {e}")
-            self.status_label.setText(f"Error: {e}")
+            self.status_text.setPlainText(f"Error: {e}")
+            self.status_text.setStyleSheet("background: #fff0f0; border: 1px solid #ffcccc;")
             # Fall back to manual segmentation
             self.run_segmentation()
 
     def _update_charset_selection(self, charset: str, description: str):
-        """Update the charset selection in ImageUploadPage based on detection."""
+        """Update the charset selection in ImageUploadPage based on detection.
+
+        Indices match combo order (most comprehensive first):
+        0: Full (A-Z, a-z, 0-9)
+        1: Uppercase + Lowercase
+        2: Uppercase + Digits
+        3: Uppercase (A-Z)
+        4: Lowercase (a-z)
+        5: Custom...
+        """
         wizard = self.wizard()
         page1: ImageUploadPage = wizard.page(0)
-
-        # Map charset to combo index
-        # 0: "Uppercase (A-Z)"
-        # 1: "Lowercase (a-z)"
-        # 2: "Uppercase + Lowercase"
-        # 3: "Uppercase + Digits"
-        # 4: "Full (A-Z, a-z, 0-9)"
-        # 5: "Custom..."
 
         charset_len = len(charset)
         if charset_len == 26:
             if charset == UPPERCASE:
-                page1.charset_combo.setCurrentIndex(0)
+                page1.charset_combo.setCurrentIndex(3)  # Uppercase
             else:
-                page1.charset_combo.setCurrentIndex(1)
+                page1.charset_combo.setCurrentIndex(4)  # Lowercase
         elif charset_len == 36:
-            page1.charset_combo.setCurrentIndex(3)  # Uppercase + Digits
+            page1.charset_combo.setCurrentIndex(2)  # Uppercase + Digits
         elif charset_len == 52:
-            page1.charset_combo.setCurrentIndex(2)  # Uppercase + Lowercase
+            page1.charset_combo.setCurrentIndex(1)  # Uppercase + Lowercase
         elif charset_len >= 62:
-            page1.charset_combo.setCurrentIndex(4)  # Full
+            page1.charset_combo.setCurrentIndex(0)  # Full
         else:
             # Use custom
             page1.charset_combo.setCurrentIndex(5)
@@ -540,12 +616,18 @@ class SegmentationPage(QWizardPage):
 
         try:
             # Get settings
-            # Order: 0=Contour-based, 1=Grid-based, 2=Auto Detect
+            # Order: 0=Row-Column, 1=Contour-based, 2=Grid-based, 3=Auto Detect
             method_idx = self.method_combo.currentIndex()
-            methods = [SegmentationMethod.CONTOUR, SegmentationMethod.GRID, SegmentationMethod.AUTO]
+            methods = [SegmentationMethod.ROW_COLUMN, SegmentationMethod.CONTOUR, SegmentationMethod.GRID, SegmentationMethod.AUTO]
             method = methods[method_idx]
 
             expected_chars = page1.get_expected_chars()
+
+            # If punctuation checkbox is enabled, add punctuation to charset
+            if self.small_glyphs_check.isChecked():
+                for char in PUNCTUATION:
+                    if char not in expected_chars:
+                        expected_chars += char
 
             # Create segmenter
             segmenter = AlphabetSegmenter(
@@ -553,6 +635,8 @@ class SegmentationPage(QWizardPage):
                 expected_chars=expected_chars,
                 padding=self.padding_spin.value(),
                 invert=self.invert_check.isChecked(),
+                include_small_glyphs=self.small_glyphs_check.isChecked(),
+                use_ai=self.use_ai_check.isChecked(),
             )
 
             # Run segmentation
@@ -569,10 +653,18 @@ class SegmentationPage(QWizardPage):
             preview = segmenter.preview_segmentation(page1.image_path, self.result)
             self.display_preview(preview)
 
-            # Update status
+            # Update status with missing character info
             found = len(self.result.characters)
             expected = len(expected_chars)
+            found_labels = {c.label for c in self.result.characters}
+            missing_chars = [c for c in expected_chars if c not in found_labels]
+
             status = f"Found {found} of {expected} characters."
+
+            # Show missing characters if any
+            if missing_chars:
+                missing_display = ' '.join(missing_chars)
+                status += f"\n\n❌ Missing characters ({len(missing_chars)}): {missing_display}"
 
             # Check for character count warnings (these are critical)
             has_count_warning = any("EXTRA" in w or "MISSING" in w for w in self.result.warnings)
@@ -580,14 +672,14 @@ class SegmentationPage(QWizardPage):
             if self.result.warnings:
                 status += "\n\n⚠️ WARNINGS:\n" + "\n".join(self.result.warnings)
 
-            self.status_label.setText(status)
+            self.status_text.setPlainText(status)
 
             # Style warnings in red if there's a count mismatch
-            if has_count_warning:
-                self.status_label.setStyleSheet("color: #cc0000; font-weight: bold;")
+            if has_count_warning or missing_chars:
+                self.status_text.setStyleSheet("background: #fff0f0; border: 1px solid #ffcccc;")
                 logger.warning(f"Character count mismatch detected - user should verify mappings")
             else:
-                self.status_label.setStyleSheet("")
+                self.status_text.setStyleSheet("background: #f0fff0; border: 1px solid #ccffcc;")
 
             self.completeChanged.emit()
 
@@ -595,7 +687,8 @@ class SegmentationPage(QWizardPage):
 
         except Exception as e:
             logger.error(f"Segmentation failed: {e}")
-            self.status_label.setText(f"Error: {e}")
+            self.status_text.setPlainText(f"Error: {e}")
+            self.status_text.setStyleSheet("background: #fff0f0; border: 1px solid #ffcccc;")
 
     def display_preview(self, preview: np.ndarray):
         """Display the preview image scaled to fit available space."""
@@ -650,12 +743,27 @@ class CharacterMappingPage(QWizardPage):
     def init_ui(self):
         layout = QVBoxLayout(self)
 
+        # Top bar with instructions and AI button
+        top_bar = QHBoxLayout()
+
         instructions = QLabel(
             "Each detected character is shown with its assigned label. "
             "Click on a character to change its label if the detection was incorrect."
         )
         instructions.setWordWrap(True)
-        layout.addWidget(instructions)
+        top_bar.addWidget(instructions, 1)
+
+        # AI identification button
+        self.ai_identify_btn = QPushButton("Identify with AI")
+        self.ai_identify_btn.setToolTip(
+            "Use Gemini AI to identify small or ambiguous characters.\n"
+            "Useful for punctuation marks that were detected but not recognized."
+        )
+        self.ai_identify_btn.clicked.connect(self.identify_with_ai)
+        self.ai_identify_btn.setMaximumWidth(120)
+        top_bar.addWidget(self.ai_identify_btn)
+
+        layout.addLayout(top_bar)
 
         # Scrollable character grid
         scroll = QScrollArea()
@@ -759,6 +867,98 @@ class CharacterMappingPage(QWizardPage):
             old_label = char.label
             char.label = new_label
             logger.debug(f"Changed label: '{old_label}' -> '{new_label}'")
+
+    def identify_with_ai(self):
+        """Use AI to identify small or ambiguous glyphs."""
+        wizard = self.wizard()
+        page2: SegmentationPage = wizard.page(1)
+
+        if not page2.result or not page2.result.characters:
+            QMessageBox.warning(
+                self, "No Characters",
+                "No characters detected to identify."
+            )
+            return
+
+        # Find characters that might benefit from AI identification
+        # (small characters that could be punctuation)
+        from core.font_generator import AIGlyphIdentifier, PUNCTUATION
+
+        try:
+            identifier = AIGlyphIdentifier()
+        except Exception as e:
+            QMessageBox.warning(
+                self, "AI Not Available",
+                f"Could not initialize AI identifier: {e}\n\n"
+                "Make sure you have a Google API key configured."
+            )
+            return
+
+        # Get all characters and let AI identify them
+        chars_to_identify = []
+        for char in page2.result.characters:
+            if char.image is not None:
+                # Include small characters or any with ambiguous labels
+                w, h = char.image.shape[1], char.image.shape[0] if len(char.image.shape) > 1 else 1
+                if max(w, h) < 30 or char.label in PUNCTUATION:
+                    chars_to_identify.append(char)
+
+        if not chars_to_identify:
+            # If no small chars, offer to identify all
+            reply = QMessageBox.question(
+                self, "Identify All?",
+                "No small characters found. Would you like to identify all characters with AI?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                chars_to_identify = list(page2.result.characters)
+            else:
+                return
+
+        # Show progress
+        self.ai_identify_btn.setEnabled(False)
+        self.ai_identify_btn.setText("Identifying...")
+
+        try:
+            # Identify each character
+            updated_count = 0
+            for char in chars_to_identify:
+                result = identifier.identify_glyph(char.image)
+                if result.identified_char and result.confidence > 0.5:
+                    if result.identified_char != char.label:
+                        logger.info(
+                            f"AI identified '{char.label}' as '{result.identified_char}' "
+                            f"(confidence: {result.confidence:.0%})"
+                        )
+                        char.label = result.identified_char
+                        updated_count += 1
+
+            # Refresh the display
+            self.initializePage()
+
+            # Show summary
+            if updated_count > 0:
+                QMessageBox.information(
+                    self, "AI Identification Complete",
+                    f"Updated {updated_count} character labels.\n\n"
+                    "Please review the changes and correct any errors."
+                )
+            else:
+                QMessageBox.information(
+                    self, "AI Identification Complete",
+                    "AI confirmed all character labels. No changes needed."
+                )
+
+        except Exception as e:
+            logger.error(f"AI identification failed: {e}")
+            QMessageBox.warning(
+                self, "Identification Failed",
+                f"AI identification encountered an error:\n{e}"
+            )
+        finally:
+            self.ai_identify_btn.setEnabled(True)
+            self.ai_identify_btn.setText("Identify with AI")
 
     def isComplete(self) -> bool:
         wizard = self.wizard()
@@ -1506,6 +1706,11 @@ class FontGeneratorWizard(QWizard):
         page1 = self.page(1)
         if hasattr(page1, 'save_settings'):
             page1.save_settings()
+
+        # Page 2: Character Mapping
+        page2 = self.page(2)
+        if hasattr(page2, 'save_settings'):
+            page2.save_settings()
 
         # Page 3: Font Settings
         page3 = self.page(3)

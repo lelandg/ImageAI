@@ -43,6 +43,19 @@ from .font_builder import (
     create_font_from_glyphs,
     FONTTOOLS_AVAILABLE,
 )
+from .glyph_identifier import (
+    AIGlyphIdentifier,
+    GlyphIdentificationResult,
+    BatchIdentificationResult,
+)
+from .row_detector import (
+    RowDetector,
+    TextRow,
+    CharacterColumn,
+)
+from .row_column_segmenter import (
+    RowColumnSegmenter,
+)
 
 __all__ = [
     # Segmentation
@@ -72,4 +85,13 @@ __all__ = [
     "FontInfo",
     "create_font_from_glyphs",
     "FONTTOOLS_AVAILABLE",
+    # AI Glyph Identification
+    "AIGlyphIdentifier",
+    "GlyphIdentificationResult",
+    "BatchIdentificationResult",
+    # Row-Column Segmentation
+    "RowDetector",
+    "TextRow",
+    "CharacterColumn",
+    "RowColumnSegmenter",
 ]

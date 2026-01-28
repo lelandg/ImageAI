@@ -386,12 +386,21 @@ class FontBuilder:
         pen = TTGlyphPen(None)
 
         if not glyph.paths:
+            logger.debug(f"Glyph has no paths, returning empty")
             return pen.glyph()
 
         for path in glyph.paths:
-            self._draw_path_to_pen_tt(path, pen)
+            try:
+                self._draw_path_to_pen_tt(path, pen)
+            except Exception as e:
+                logger.warning(f"Error drawing path to TT pen: {e}")
+                continue
 
-        return pen.glyph()
+        try:
+            return pen.glyph()
+        except Exception as e:
+            logger.warning(f"Error finalizing TT glyph: {e}")
+            return TTGlyphPen(None).glyph()
 
     def _cubic_to_quadratic(self, p0: Tuple[float, float], p1: Tuple[float, float],
                             p2: Tuple[float, float], p3: Tuple[float, float],
@@ -412,24 +421,28 @@ class FontBuilder:
             # Use fonttools cu2qu for accurate conversion
             try:
                 quadratics = curve_to_quadratic((p0, p1, p2, p3), max_err)
-                # curve_to_quadratic returns list of points, convert to qcurve segments
+                # curve_to_quadratic returns flat list: [start, ctrl1, end1, ctrl2, end2, ...]
+                # First point is start (same as p0), then pairs of (ctrl, end)
                 result = []
-                for i in range(1, len(quadratics) - 1, 2):
-                    ctrl = quadratics[i]
-                    end = quadratics[i + 1] if i + 1 < len(quadratics) else quadratics[-1]
-                    result.append((ctrl, end))
-                if not result:
-                    # Fallback: just return endpoint as line
-                    result = [(p3, p3)]
-                return result
+                if len(quadratics) >= 3:
+                    # Skip the start point (index 0), process pairs
+                    i = 1
+                    while i < len(quadratics) - 1:
+                        ctrl = quadratics[i]
+                        end = quadratics[i + 1]
+                        result.append((ctrl, end))
+                        i += 2
+
+                if result:
+                    return result
             except Exception as e:
                 logger.debug(f"cu2qu conversion failed, using approximation: {e}")
 
         # Simple approximation: convert cubic to single quadratic
-        # Use midpoint of control points as single control point
+        # Use weighted average of control points (closer to cubic shape)
         qp1 = (
-            (p1[0] + p2[0]) / 2,
-            (p1[1] + p2[1]) / 2
+            0.5 * p1[0] + 0.5 * p2[0],
+            0.5 * p1[1] + 0.5 * p2[1]
         )
         return [(qp1, p3)]
 
