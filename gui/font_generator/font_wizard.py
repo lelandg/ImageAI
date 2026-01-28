@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QPushButton, QFileDialog, QProgressBar, QGroupBox,
     QComboBox, QLineEdit, QFrame, QScrollArea, QWidget,
     QSplitter, QCheckBox, QSpinBox, QMessageBox,
-    QGridLayout, QSlider, QSizePolicy, QTextEdit,
+    QGridLayout, QSlider, QSizePolicy, QTextEdit, QApplication,
 )
 from PySide6.QtCore import Qt, Signal, QThread, QSize, QSettings, QTimer
 from PySide6.QtGui import QPixmap, QImage, QFont, QPainter, QPen, QColor, QPainterPath, QFontDatabase, QFontMetrics
@@ -61,6 +61,7 @@ class ImageUploadPage(QWizardPage):
         self.setTitle("Upload Alphabet Image")
         self.setSubTitle("Select an image containing your alphabet characters")
         self.image_path: Optional[Path] = None
+        self._original_pixmap: Optional[QPixmap] = None  # Store original for resize scaling
         self.init_ui()
 
     def init_ui(self):
@@ -176,14 +177,10 @@ class ImageUploadPage(QWizardPage):
                 qimg = QImage(data, img.width, img.height, QImage.Format_RGB888)
 
             pixmap = QPixmap.fromImage(qimg)
+            self._original_pixmap = pixmap  # Store for resize scaling
 
-            # Scale to fit preview
-            scaled = pixmap.scaled(
-                self.preview_label.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation,
-            )
-            self.preview_label.setPixmap(scaled)
+            # Scale to fit preview (use delayed scaling for proper sizing)
+            self._scale_preview_to_fit()
 
             self.image_path = path
             self.path_label.setText(str(path))
@@ -196,9 +193,35 @@ class ImageUploadPage(QWizardPage):
             logger.error(f"Failed to load image: {e}")
             QMessageBox.warning(self, "Error", f"Failed to load image:\n{e}")
 
+    def _scale_preview_to_fit(self):
+        """Scale the preview image to fit the available space."""
+        if self._original_pixmap is None:
+            return
+
+        # Get available size (with some margin)
+        available_size = self.preview_label.size()
+        if available_size.width() < 50 or available_size.height() < 50:
+            # Widget not yet laid out, try again later
+            QTimer.singleShot(100, self._scale_preview_to_fit)
+            return
+
+        scaled = self._original_pixmap.scaled(
+            available_size,
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation,
+        )
+        self.preview_label.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        """Handle resize to scale image appropriately."""
+        super().resizeEvent(event)
+        if self._original_pixmap is not None:
+            self._scale_preview_to_fit()
+
     def clear_image(self):
         """Clear the selected image."""
         self.image_path = None
+        self._original_pixmap = None
         self.preview_label.setPixmap(QPixmap())
         self.preview_label.setText("No image selected")
         self.path_label.setText("")
@@ -342,15 +365,15 @@ class SegmentationPage(QWizardPage):
         self.small_glyphs_check.stateChanged.connect(self.on_settings_changed)
         controls_layout.addWidget(self.small_glyphs_check)
 
-        # AI-assisted segmentation checkbox
-        self.use_ai_check = QCheckBox("AI Assist")
-        self.use_ai_check.setToolTip(
+        # AI-assisted segmentation button
+        self.ai_assist_btn = QPushButton("AI Assist")
+        self.ai_assist_btn.setToolTip(
             "Use Gemini AI to help with ambiguous character detection.\n"
             "Helps split touching characters and identify small glyphs.\n"
             "Requires Google API key."
         )
-        self.use_ai_check.stateChanged.connect(self.on_settings_changed)
-        controls_layout.addWidget(self.use_ai_check)
+        self.ai_assist_btn.clicked.connect(self.run_segmentation_with_ai)
+        controls_layout.addWidget(self.ai_assist_btn)
 
         # Padding
         controls_layout.addWidget(QLabel("Pad:"))
@@ -408,9 +431,6 @@ class SegmentationPage(QWizardPage):
         include_small_glyphs = settings.value(f"{SETTINGS_PREFIX}/include_small_glyphs", False, type=bool)
         self.small_glyphs_check.setChecked(include_small_glyphs)
 
-        # Load AI assist setting
-        use_ai = settings.value(f"{SETTINGS_PREFIX}/use_ai", False, type=bool)
-        self.use_ai_check.setChecked(use_ai)
 
         # Auto-detect inversion for this image
         wizard = self.wizard()
@@ -443,7 +463,6 @@ class SegmentationPage(QWizardPage):
         settings.setValue(f"{SETTINGS_PREFIX}/invert", self.invert_check.isChecked())
         settings.setValue(f"{SETTINGS_PREFIX}/padding", self.padding_spin.value())
         settings.setValue(f"{SETTINGS_PREFIX}/include_small_glyphs", self.small_glyphs_check.isChecked())
-        settings.setValue(f"{SETTINGS_PREFIX}/use_ai", self.use_ai_check.isChecked())
 
     def on_settings_changed(self):
         """Handle settings changes."""
@@ -452,7 +471,7 @@ class SegmentationPage(QWizardPage):
         method_idx = self.method_combo.currentIndex()
         self.grid_frame.setVisible(method_idx == 2)  # Grid-based
 
-    def run_segmentation_auto(self):
+    def run_segmentation_auto(self, use_ai: bool = False):
         """Run segmentation with auto character set detection."""
         wizard = self.wizard()
         page1: ImageUploadPage = wizard.page(0)
@@ -497,7 +516,7 @@ class SegmentationPage(QWizardPage):
                     padding=self.padding_spin.value(),
                     invert=self.invert_check.isChecked(),
                     include_small_glyphs=self.small_glyphs_check.isChecked(),
-                    use_ai=self.use_ai_check.isChecked(),
+                    use_ai=use_ai,
                 )
 
                 self.result = segmenter.segment(
@@ -517,7 +536,7 @@ class SegmentationPage(QWizardPage):
                     padding=self.padding_spin.value(),
                     invert=self.invert_check.isChecked(),
                     include_small_glyphs=self.small_glyphs_check.isChecked(),
-                    use_ai=self.use_ai_check.isChecked(),
+                    use_ai=use_ai,
                 )
 
                 self.result, detected_charset, charset_desc = segmenter.segment_auto_detect(
@@ -606,7 +625,7 @@ class SegmentationPage(QWizardPage):
             page1.charset_combo.setCurrentIndex(5)
             page1.custom_chars_edit.setText(charset)
 
-    def run_segmentation(self):
+    def run_segmentation(self, use_ai: bool = False):
         """Run segmentation with current settings (manual mode)."""
         wizard = self.wizard()
         page1: ImageUploadPage = wizard.page(0)
@@ -636,7 +655,7 @@ class SegmentationPage(QWizardPage):
                 padding=self.padding_spin.value(),
                 invert=self.invert_check.isChecked(),
                 include_small_glyphs=self.small_glyphs_check.isChecked(),
-                use_ai=self.use_ai_check.isChecked(),
+                use_ai=use_ai,
             )
 
             # Run segmentation
@@ -690,6 +709,10 @@ class SegmentationPage(QWizardPage):
             self.status_text.setPlainText(f"Error: {e}")
             self.status_text.setStyleSheet("background: #fff0f0; border: 1px solid #ffcccc;")
 
+    def run_segmentation_with_ai(self):
+        """Run segmentation with AI assistance enabled."""
+        self.run_segmentation(use_ai=True)
+
     def display_preview(self, preview: np.ndarray):
         """Display the preview image scaled to fit available space."""
         h, w = preview.shape[:2]
@@ -728,6 +751,41 @@ class SegmentationPage(QWizardPage):
         return self.result is not None and len(self.result.characters) > 0
 
 
+class GlyphGenerationWorker(QThread):
+    """Worker thread for generating missing glyphs."""
+
+    progress = Signal(int, int, str)  # current, total, char
+    finished = Signal(list)  # List of GlyphGenerationResult
+    error = Signal(str)
+
+    def __init__(
+        self,
+        generator,
+        chars: List[str],
+        reference_glyphs: List,
+        target_height: int,
+        parent=None
+    ):
+        super().__init__(parent)
+        self.generator = generator
+        self.chars = chars
+        self.reference_glyphs = reference_glyphs
+        self.target_height = target_height
+
+    def run(self):
+        try:
+            results = self.generator.generate_multiple(
+                self.chars,
+                self.reference_glyphs,
+                self.target_height,
+                progress_callback=lambda cur, tot, ch: self.progress.emit(cur, tot, ch),
+            )
+            self.finished.emit(results)
+        except Exception as e:
+            logger.error(f"Glyph generation worker error: {e}", exc_info=True)
+            self.error.emit(str(e))
+
+
 class CharacterMappingPage(QWizardPage):
     """
     Step 3: Verify and edit character mappings.
@@ -738,6 +796,10 @@ class CharacterMappingPage(QWizardPage):
         self.setTitle("Verify Character Mapping")
         self.setSubTitle("Review and correct character labels if needed")
         self.char_widgets: Dict[str, QWidget] = {}
+        self.missing_chars: List[str] = []
+        self.missing_widgets: Dict[str, QWidget] = {}
+        self.selected_chars: set = set()  # Characters selected for AI identification
+        self._generation_worker: Optional[GlyphGenerationWorker] = None
         self.init_ui()
 
     def init_ui(self):
@@ -753,17 +815,64 @@ class CharacterMappingPage(QWizardPage):
         instructions.setWordWrap(True)
         top_bar.addWidget(instructions, 1)
 
+        # AI provider selection
+        self.ai_provider_combo = QComboBox()
+        self.ai_provider_combo.addItem("Claude (Opus 4.5)", "anthropic")
+        self.ai_provider_combo.addItem("Gemini (Pro)", "gemini")
+        self.ai_provider_combo.setToolTip("Select AI provider for character identification")
+        self.ai_provider_combo.setMaximumWidth(130)
+        top_bar.addWidget(self.ai_provider_combo)
+
         # AI identification button
         self.ai_identify_btn = QPushButton("Identify with AI")
         self.ai_identify_btn.setToolTip(
-            "Use Gemini AI to identify small or ambiguous characters.\n"
-            "Useful for punctuation marks that were detected but not recognized."
+            "Use AI to identify selected characters.\n"
+            "Click characters to select them first, then click this button.\n"
+            "Claude Opus 4.5 recommended for best accuracy."
         )
         self.ai_identify_btn.clicked.connect(self.identify_with_ai)
         self.ai_identify_btn.setMaximumWidth(120)
         top_bar.addWidget(self.ai_identify_btn)
 
+        # Select all/none buttons for AI identification
+        self.select_all_btn = QPushButton("Select All")
+        self.select_all_btn.setToolTip("Select all characters for AI identification")
+        self.select_all_btn.clicked.connect(self.select_all_chars)
+        self.select_all_btn.setMaximumWidth(80)
+        top_bar.addWidget(self.select_all_btn)
+
+        self.select_none_btn = QPushButton("Select None")
+        self.select_none_btn.setToolTip("Clear character selection")
+        self.select_none_btn.clicked.connect(self.select_no_chars)
+        self.select_none_btn.setMaximumWidth(80)
+        top_bar.addWidget(self.select_none_btn)
+
+        # Generate missing glyphs button
+        self.generate_missing_btn = QPushButton("Generate Missing")
+        self.generate_missing_btn.setToolTip(
+            "Generate missing characters using AI image generation.\n"
+            "Uses the image model selected in the main window."
+        )
+        self.generate_missing_btn.clicked.connect(self.generate_missing_glyphs)
+        self.generate_missing_btn.setMaximumWidth(120)
+        self.generate_missing_btn.setEnabled(False)  # Disabled until missing chars detected
+        top_bar.addWidget(self.generate_missing_btn)
+
         layout.addLayout(top_bar)
+
+        # Missing characters section (shown only when there are missing chars)
+        self.missing_section = QGroupBox("Missing Characters")
+        self.missing_section.setStyleSheet(
+            "QGroupBox { border: 2px dashed #ff9900; border-radius: 6px; margin-top: 6px; padding-top: 10px; }"
+            "QGroupBox::title { color: #ff9900; }"
+        )
+        self.missing_section.setVisible(False)
+        missing_layout = QHBoxLayout(self.missing_section)
+        missing_layout.setSpacing(10)
+        self.missing_grid = QHBoxLayout()
+        missing_layout.addLayout(self.missing_grid)
+        missing_layout.addStretch()
+        layout.addWidget(self.missing_section)
 
         # Scrollable character grid
         scroll = QScrollArea()
@@ -789,8 +898,21 @@ class CharacterMappingPage(QWizardPage):
             widget.deleteLater()
         self.char_widgets.clear()
 
+        # Clear missing widgets
+        for widget in self.missing_widgets.values():
+            widget.deleteLater()
+        self.missing_widgets.clear()
+        self.missing_chars.clear()
+
+        # Clear missing grid layout
+        while self.missing_grid.count():
+            item = self.missing_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
         # Get segmentation result from previous page
         wizard = self.wizard()
+        page1: ImageUploadPage = wizard.page(0)
         page2: SegmentationPage = wizard.page(1)
 
         if not page2.result:
@@ -807,18 +929,163 @@ class CharacterMappingPage(QWizardPage):
             self.grid_layout.addWidget(widget, row, col)
             self.char_widgets[char.label] = widget
 
+        # Detect missing characters
+        expected_chars = page1.get_expected_chars()
+        # Add punctuation if enabled on segmentation page
+        if page2.small_glyphs_check.isChecked():
+            for char in PUNCTUATION:
+                if char not in expected_chars:
+                    expected_chars += char
+
+        found_labels = {c.label for c in chars}
+        self.missing_chars = [c for c in expected_chars if c not in found_labels]
+
+        # Auto-mirror characters that can be created from existing glyphs
+        self._auto_mirror_glyphs(page2.result, found_labels)
+
+        # Show missing characters section if any are missing
+        if self.missing_chars:
+            self.missing_section.setVisible(True)
+            self.generate_missing_btn.setEnabled(True)
+
+            # Create placeholder widgets for missing chars
+            for char in self.missing_chars:
+                widget = self._create_missing_char_widget(char)
+                self.missing_grid.addWidget(widget)
+                self.missing_widgets[char] = widget
+
+            self.missing_section.setTitle(f"Missing Characters ({len(self.missing_chars)})")
+            logger.info(f"Missing characters detected: {self.missing_chars}")
+        else:
+            self.missing_section.setVisible(False)
+            self.generate_missing_btn.setEnabled(False)
+
         # Update summary
-        self.summary_label.setText(f"Total characters: {len(chars)}")
+        total = len(chars)
+        missing = len(self.missing_chars)
+        if missing > 0:
+            self.summary_label.setText(f"Detected: {total} | Missing: {missing}")
+        else:
+            self.summary_label.setText(f"Total characters: {total}")
         self.completeChanged.emit()
 
-    def create_char_widget(self, char) -> QWidget:
-        """Create a widget for a single character."""
+    def _create_missing_char_widget(self, char: str) -> QWidget:
+        """Create a placeholder widget for a missing character."""
         widget = QFrame()
         widget.setFrameStyle(QFrame.Box)
         widget.setStyleSheet(
-            "QFrame { border: 1px solid #666; border-radius: 4px; padding: 4px; }"
-            "QFrame:hover { border-color: #00aaff; }"
+            "QFrame { border: 2px dashed #ff9900; border-radius: 4px; padding: 4px; background: #fff8f0; }"
+            "QFrame:hover { border-color: #ff6600; background: #fff0e0; }"
         )
+        widget.setFixedSize(80, 90)
+
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
+
+        # Placeholder area
+        placeholder = QLabel("?")
+        placeholder.setAlignment(Qt.AlignCenter)
+        placeholder.setFixedSize(60, 50)
+        placeholder.setStyleSheet(
+            "font-size: 24px; color: #999; border: 1px dashed #ccc; border-radius: 4px;"
+        )
+        layout.addWidget(placeholder, alignment=Qt.AlignCenter)
+
+        # Character label
+        label = QLabel(char)
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("font-weight: bold; font-size: 14px; color: #ff6600;")
+        layout.addWidget(label, alignment=Qt.AlignCenter)
+
+        return widget
+
+    def _auto_mirror_glyphs(self, segmentation_result, found_labels: set):
+        """
+        Automatically create missing glyphs by mirroring existing ones.
+
+        For example, if backslash is missing but forward slash exists,
+        create backslash by mirroring the forward slash.
+        """
+        # Mirror pairs: (missing_char, source_char, mirror_type)
+        mirror_pairs = [
+            ('\\', '/', 'horizontal'),  # backslash from forward slash
+        ]
+
+        for missing_char, source_char, mirror_type in mirror_pairs:
+            # Check if we need this character and have the source
+            if missing_char not in self.missing_chars:
+                continue
+            if source_char not in found_labels:
+                continue
+
+            # Find the source glyph
+            source_glyph = None
+            for glyph in segmentation_result.characters:
+                if glyph.label == source_char:
+                    source_glyph = glyph
+                    break
+
+            if source_glyph is None or source_glyph.image is None:
+                continue
+
+            logger.info(f"Auto-mirroring '{source_char}' to create '{missing_char}'")
+
+            try:
+                # Mirror the image
+                pil_img = source_glyph.to_pil()
+
+                if mirror_type == 'horizontal':
+                    mirrored = pil_img.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+                elif mirror_type == 'vertical':
+                    mirrored = pil_img.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
+                else:
+                    continue
+
+                # Convert back to numpy array
+                mirrored_array = np.array(mirrored)
+
+                # Handle grayscale conversion if needed
+                if len(mirrored_array.shape) == 3 and mirrored_array.shape[2] == 4:
+                    # RGBA - convert to grayscale
+                    from PIL import ImageOps
+                    mirrored_gray = mirrored.convert('L')
+                    mirrored_array = np.array(mirrored_gray)
+
+                # Create the CharacterCell
+                from core.font_generator import CharacterCell
+                h, w = mirrored_array.shape[:2]
+                new_cell = CharacterCell(
+                    label=missing_char,
+                    bbox=(0, 0, w, h),
+                    image=mirrored_array,
+                    confidence=1.0,  # Perfect match - exact mirror
+                    row=-1,
+                    col=-1,
+                )
+
+                # Add to segmentation result
+                segmentation_result.characters.append(new_cell)
+
+                # Remove from missing list
+                self.missing_chars.remove(missing_char)
+
+                logger.info(f"Successfully created '{missing_char}' by mirroring '{source_char}'")
+
+            except Exception as e:
+                logger.error(f"Failed to auto-mirror '{source_char}' to '{missing_char}': {e}")
+
+    def create_char_widget(self, char) -> QWidget:
+        """Create a widget for a single character with selection support."""
+        widget = QFrame()
+        widget.setFrameStyle(QFrame.Box)
+        widget.setProperty("char_label", char.label)  # Store label for selection lookup
+        widget.setProperty("char_obj", char)  # Store char object for AI identification
+        self._update_widget_style(widget, char.label in self.selected_chars)
+        widget.setCursor(Qt.PointingHandCursor)
+
+        # Make widget clickable for selection
+        widget.mousePressEvent = lambda event, c=char, w=widget: self.toggle_char_selection(c, w)
 
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -861,6 +1128,56 @@ class CharacterMappingPage(QWizardPage):
 
         return widget
 
+    def _update_widget_style(self, widget: QFrame, selected: bool):
+        """Update widget style based on selection state."""
+        if selected:
+            widget.setStyleSheet(
+                "QFrame { border: 3px solid #00aa00; border-radius: 4px; padding: 4px; background: #e0ffe0; }"
+                "QFrame:hover { border-color: #00cc00; }"
+            )
+        else:
+            widget.setStyleSheet(
+                "QFrame { border: 1px solid #666; border-radius: 4px; padding: 4px; }"
+                "QFrame:hover { border-color: #00aaff; }"
+            )
+
+    def toggle_char_selection(self, char, widget: QFrame):
+        """Toggle selection state of a character for AI identification."""
+        label = char.label
+        if label in self.selected_chars:
+            self.selected_chars.discard(label)
+            self._update_widget_style(widget, False)
+        else:
+            self.selected_chars.add(label)
+            self._update_widget_style(widget, True)
+        # Update button text to show selection count
+        count = len(self.selected_chars)
+        if count > 0:
+            self.ai_identify_btn.setText(f"Identify ({count})")
+        else:
+            self.ai_identify_btn.setText("Identify with AI")
+
+    def select_all_chars(self):
+        """Select all characters for AI identification."""
+        wizard = self.wizard()
+        page2: SegmentationPage = wizard.page(1)
+        if not page2.result:
+            return
+        for char in page2.result.characters:
+            self.selected_chars.add(char.label)
+            if char.label in self.char_widgets:
+                self._update_widget_style(self.char_widgets[char.label], True)
+        count = len(self.selected_chars)
+        self.ai_identify_btn.setText(f"Identify ({count})")
+
+    def select_no_chars(self):
+        """Clear all character selections."""
+        for label in list(self.selected_chars):
+            if label in self.char_widgets:
+                self._update_widget_style(self.char_widgets[label], False)
+        self.selected_chars.clear()
+        self.ai_identify_btn.setText("Identify with AI")
+
     def on_label_changed(self, char, new_label: str):
         """Handle character label change."""
         if new_label:
@@ -868,8 +1185,244 @@ class CharacterMappingPage(QWizardPage):
             char.label = new_label
             logger.debug(f"Changed label: '{old_label}' -> '{new_label}'")
 
+            # Update char_widgets dict key if changed
+            if old_label != new_label and old_label in self.char_widgets:
+                widget = self.char_widgets.pop(old_label)
+                widget.setProperty("char_label", new_label)
+                self.char_widgets[new_label] = widget
+
+                # Update selection tracking
+                if old_label in self.selected_chars:
+                    self.selected_chars.discard(old_label)
+                    self.selected_chars.add(new_label)
+
+            # Refresh missing characters list
+            self._refresh_missing_chars()
+
+    def _refresh_missing_chars(self):
+        """Recalculate and update the missing characters display."""
+        wizard = self.wizard()
+        page1: ImageUploadPage = wizard.page(0)
+        page2: SegmentationPage = wizard.page(1)
+
+        if not page2.result:
+            return
+
+        # Get expected characters
+        expected_chars = page1.get_expected_chars()
+        if page2.small_glyphs_check.isChecked():
+            for char in PUNCTUATION:
+                if char not in expected_chars:
+                    expected_chars += char
+
+        # Find which characters are now present
+        found_labels = {c.label for c in page2.result.characters}
+
+        # Calculate new missing chars
+        new_missing = [c for c in expected_chars if c not in found_labels]
+
+        # Check if missing chars changed
+        if set(new_missing) == set(self.missing_chars):
+            return  # No change
+
+        self.missing_chars = new_missing
+
+        # Clear existing missing widgets
+        for widget in self.missing_widgets.values():
+            widget.deleteLater()
+        self.missing_widgets.clear()
+
+        # Clear missing grid layout
+        while self.missing_grid.count():
+            item = self.missing_grid.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+        # Rebuild missing section
+        if self.missing_chars:
+            self.missing_section.setVisible(True)
+            self.generate_missing_btn.setEnabled(True)
+
+            for char in self.missing_chars:
+                widget = self._create_missing_char_widget(char)
+                self.missing_grid.addWidget(widget)
+                self.missing_widgets[char] = widget
+
+            self.missing_section.setTitle(f"Missing Characters ({len(self.missing_chars)})")
+            logger.info(f"Refreshed missing characters: {self.missing_chars}")
+        else:
+            self.missing_section.setVisible(False)
+            self.generate_missing_btn.setEnabled(False)
+            logger.info("All expected characters now present")
+
+        # Update summary
+        total = len(page2.result.characters)
+        missing = len(self.missing_chars)
+        if missing > 0:
+            self.summary_label.setText(f"Detected: {total} | Missing: {missing}")
+        else:
+            self.summary_label.setText(f"Total characters: {total}")
+
+        self.completeChanged.emit()
+
+    def generate_missing_glyphs(self):
+        """Generate missing glyphs using AI image generation."""
+        if not self.missing_chars:
+            QMessageBox.information(
+                self, "No Missing Characters",
+                "All expected characters have been detected."
+            )
+            return
+
+        # Get main window to access provider/model settings
+        wizard = self.wizard()
+        main_window = wizard.parent()
+
+        if main_window is None:
+            QMessageBox.warning(
+                self, "Error",
+                "Could not access main window settings."
+            )
+            return
+
+        # Get provider and model from main window
+        provider = getattr(main_window, 'current_provider', None)
+        model = getattr(main_window, 'current_model', None)
+        config = getattr(main_window, 'config', None)
+
+        if not provider or not model:
+            QMessageBox.warning(
+                self, "No Image Model Selected",
+                "Please select an image generation provider and model in the main window."
+            )
+            return
+
+        # Get API key
+        api_key = None
+        auth_mode = "api-key"
+        if config:
+            api_key = config.get_api_key(provider)
+            auth_mode = getattr(main_window, 'current_auth_mode', 'api-key') or 'api-key'
+
+        if not api_key and auth_mode != "gcloud":
+            QMessageBox.warning(
+                self, "No API Key",
+                f"No API key configured for {provider}.\n"
+                "Please configure an API key in the Settings tab."
+            )
+            return
+
+        logger.info(f"Starting glyph generation: provider={provider}, model={model}, auth_mode={auth_mode}")
+        logger.info(f"Missing characters to generate: {self.missing_chars}")
+
+        # Get reference glyphs from segmentation
+        page2: SegmentationPage = wizard.page(1)
+        if not page2.result or not page2.result.characters:
+            QMessageBox.warning(
+                self, "No Reference Characters",
+                "No detected characters available as style reference."
+            )
+            return
+
+        reference_glyphs = list(page2.result.characters)
+
+        # Calculate target height from existing glyphs
+        heights = [c.image.shape[0] for c in reference_glyphs if c.image is not None and len(c.image.shape) >= 1]
+        target_height = int(np.median(heights)) if heights else 64
+        logger.info(f"Target glyph height: {target_height}px (median of {len(heights)} glyphs)")
+
+        # Create generator
+        from core.font_generator import GlyphGenerator
+        generator = GlyphGenerator(
+            provider=provider,
+            model=model,
+            api_key=api_key or "",
+            auth_mode=auth_mode,
+        )
+
+        # Disable button during generation
+        self.generate_missing_btn.setEnabled(False)
+        self.generate_missing_btn.setText("Generating...")
+
+        # Start worker thread
+        self._generation_worker = GlyphGenerationWorker(
+            generator=generator,
+            chars=list(self.missing_chars),
+            reference_glyphs=reference_glyphs,
+            target_height=target_height,
+            parent=self,
+        )
+        self._generation_worker.progress.connect(self._on_generation_progress)
+        self._generation_worker.finished.connect(self._on_generation_finished)
+        self._generation_worker.error.connect(self._on_generation_error)
+        self._generation_worker.start()
+
+    def _on_generation_progress(self, current: int, total: int, char: str):
+        """Handle generation progress updates."""
+        if total > 0:
+            self.generate_missing_btn.setText(f"Generating {current+1}/{total}...")
+
+            # Update the placeholder widget for the current character
+            if char and char in self.missing_widgets:
+                widget = self.missing_widgets[char]
+                # Find the placeholder label and update it
+                for child in widget.findChildren(QLabel):
+                    if child.text() == "?":
+                        child.setText("...")
+                        child.setStyleSheet(
+                            "font-size: 18px; color: #ff9900; border: 1px dashed #ff9900; border-radius: 4px;"
+                        )
+                        break
+
+    def _on_generation_finished(self, results):
+        """Handle generation completion."""
+        self.generate_missing_btn.setEnabled(True)
+        self.generate_missing_btn.setText("Generate Missing")
+
+        wizard = self.wizard()
+        page2: SegmentationPage = wizard.page(1)
+
+        success_count = 0
+        failed_chars = []
+
+        for result in results:
+            if result.success and result.cell:
+                # Add the generated character to the segmentation result
+                page2.result.characters.append(result.cell)
+                success_count += 1
+                logger.info(f"Added generated glyph '{result.character}' to character set")
+            else:
+                failed_chars.append(result.character)
+                logger.warning(f"Failed to generate '{result.character}': {result.error}")
+
+        # Refresh the page to show new characters
+        self.initializePage()
+
+        # Show summary
+        if success_count > 0:
+            msg = f"Successfully generated {success_count} character(s)."
+            if failed_chars:
+                msg += f"\n\nFailed to generate: {', '.join(failed_chars)}"
+            QMessageBox.information(self, "Generation Complete", msg)
+        else:
+            QMessageBox.warning(
+                self, "Generation Failed",
+                f"Failed to generate any characters.\n\nFailed: {', '.join(failed_chars)}"
+            )
+
+    def _on_generation_error(self, error_msg: str):
+        """Handle generation error."""
+        self.generate_missing_btn.setEnabled(True)
+        self.generate_missing_btn.setText("Generate Missing")
+
+        logger.error(f"Glyph generation error: {error_msg}")
+        QMessageBox.warning(
+            self, "Generation Error",
+            f"An error occurred during glyph generation:\n\n{error_msg}"
+        )
+
     def identify_with_ai(self):
-        """Use AI to identify small or ambiguous glyphs."""
+        """Use AI to identify selected or small/ambiguous glyphs."""
         wizard = self.wizard()
         page2: SegmentationPage = wizard.page(1)
 
@@ -880,51 +1433,98 @@ class CharacterMappingPage(QWizardPage):
             )
             return
 
-        # Find characters that might benefit from AI identification
-        # (small characters that could be punctuation)
-        from core.font_generator import AIGlyphIdentifier, PUNCTUATION
+        from core.font_generator import AIGlyphIdentifier, PUNCTUATION, get_position_hint
+
+        # Get selected provider from dropdown
+        provider = self.ai_provider_combo.currentData()
+        provider_name = self.ai_provider_combo.currentText()
 
         try:
-            identifier = AIGlyphIdentifier()
+            identifier = AIGlyphIdentifier(provider=provider)
+            logger.info(f"AI identifier initialized with provider: {provider}")
         except Exception as e:
+            if provider == "anthropic":
+                key_msg = "Make sure you have an Anthropic API key configured in Settings."
+            else:
+                key_msg = "Make sure you have a Google API key configured in Settings."
             QMessageBox.warning(
                 self, "AI Not Available",
-                f"Could not initialize AI identifier: {e}\n\n"
-                "Make sure you have a Google API key configured."
+                f"Could not initialize AI identifier: {e}\n\n{key_msg}"
             )
             return
 
-        # Get all characters and let AI identify them
-        chars_to_identify = []
+        # Calculate row heights for position hints
+        # Group characters by row and find max height per row
+        row_heights = {}
         for char in page2.result.characters:
-            if char.image is not None:
-                # Include small characters or any with ambiguous labels
-                w, h = char.image.shape[1], char.image.shape[0] if len(char.image.shape) > 1 else 1
-                if max(w, h) < 30 or char.label in PUNCTUATION:
+            if char.row is not None and char.row >= 0:
+                _, _, _, h = char.bbox
+                if char.row not in row_heights:
+                    row_heights[char.row] = h
+                else:
+                    row_heights[char.row] = max(row_heights[char.row], h)
+
+        # Determine which characters to identify
+        chars_to_identify = []
+
+        if self.selected_chars:
+            # Use selected characters
+            for char in page2.result.characters:
+                if char.label in self.selected_chars and char.image is not None:
                     chars_to_identify.append(char)
+            logger.info(f"Identifying {len(chars_to_identify)} selected characters with {provider_name}")
+        else:
+            # No selection - fall back to small/punctuation characters
+            for char in page2.result.characters:
+                if char.image is not None:
+                    w, h = char.image.shape[1], char.image.shape[0] if len(char.image.shape) > 1 else 1
+                    if max(w, h) < 30 or char.label in PUNCTUATION:
+                        chars_to_identify.append(char)
+
+            if not chars_to_identify:
+                # If no small chars, offer to identify all
+                reply = QMessageBox.question(
+                    self, "No Characters Selected",
+                    "No characters selected and no small characters found.\n\n"
+                    "Click on characters to select them, or click Yes to identify ALL characters.",
+                    QMessageBox.Yes | QMessageBox.No,
+                    QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    chars_to_identify = [c for c in page2.result.characters if c.image is not None]
+                else:
+                    return
 
         if not chars_to_identify:
-            # If no small chars, offer to identify all
-            reply = QMessageBox.question(
-                self, "Identify All?",
-                "No small characters found. Would you like to identify all characters with AI?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No
-            )
-            if reply == QMessageBox.Yes:
-                chars_to_identify = list(page2.result.characters)
-            else:
-                return
+            QMessageBox.information(self, "Nothing to Identify", "No characters selected for identification.")
+            return
 
         # Show progress
         self.ai_identify_btn.setEnabled(False)
         self.ai_identify_btn.setText("Identifying...")
+        self.select_all_btn.setEnabled(False)
+        self.select_none_btn.setEnabled(False)
 
         try:
             # Identify each character
             updated_count = 0
-            for char in chars_to_identify:
-                result = identifier.identify_glyph(char.image)
+            total = len(chars_to_identify)
+            for i, char in enumerate(chars_to_identify):
+                self.ai_identify_btn.setText(f"Identifying {i+1}/{total}...")
+                QApplication.processEvents()  # Update UI
+
+                # Calculate position hint for baseline disambiguation
+                position_hint = None
+                if char.row is not None and char.row >= 0 and char.row in row_heights:
+                    row_height = row_heights[char.row]
+                    # Get glyph's relative position within its row
+                    _, glyph_y, _, glyph_h = char.bbox
+                    # For small glyphs, position hint helps distinguish ' vs , etc.
+                    if glyph_h < row_height * 0.5:
+                        position_hint = get_position_hint(0, glyph_h, row_height)
+                        logger.debug(f"Position hint for '{char.label}': {position_hint}")
+
+                result = identifier.identify_glyph(char.image, position_hint=position_hint)
                 if result.identified_char and result.confidence > 0.5:
                     if result.identified_char != char.label:
                         logger.info(
@@ -934,20 +1534,21 @@ class CharacterMappingPage(QWizardPage):
                         char.label = result.identified_char
                         updated_count += 1
 
-            # Refresh the display
+            # Clear selections and refresh the display
+            self.selected_chars.clear()
             self.initializePage()
 
             # Show summary
             if updated_count > 0:
                 QMessageBox.information(
                     self, "AI Identification Complete",
-                    f"Updated {updated_count} character labels.\n\n"
+                    f"Updated {updated_count} of {total} character labels using {provider_name}.\n\n"
                     "Please review the changes and correct any errors."
                 )
             else:
                 QMessageBox.information(
                     self, "AI Identification Complete",
-                    "AI confirmed all character labels. No changes needed."
+                    f"AI ({provider_name}) confirmed all {total} character labels. No changes needed."
                 )
 
         except Exception as e:
@@ -959,6 +1560,8 @@ class CharacterMappingPage(QWizardPage):
         finally:
             self.ai_identify_btn.setEnabled(True)
             self.ai_identify_btn.setText("Identify with AI")
+            self.select_all_btn.setEnabled(True)
+            self.select_none_btn.setEnabled(True)
 
     def isComplete(self) -> bool:
         wizard = self.wizard()
@@ -1164,13 +1767,14 @@ class ExportPage(QWizardPage):
         preview_group.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         preview_layout = QVBoxLayout(preview_group)
 
-        # Sample text input
-        text_layout = QHBoxLayout()
-        text_layout.addWidget(QLabel("Sample Text:"))
-        self.sample_edit = QLineEdit("The quick brown fox jumps over the lazy dog")
+        # Sample text input - multi-line
+        preview_layout.addWidget(QLabel("Sample Text:"))
+        self.sample_edit = QTextEdit()
+        self.sample_edit.setPlaceholderText("Enter text to preview...")
+        self.sample_edit.setMaximumHeight(80)
+        self.sample_edit.setLineWrapMode(QTextEdit.WidgetWidth)
         self.sample_edit.textChanged.connect(self.update_preview)
-        text_layout.addWidget(self.sample_edit)
-        preview_layout.addLayout(text_layout)
+        preview_layout.addWidget(self.sample_edit)
 
         # Preview display in a scroll area for long/wrapped text
         self.preview_scroll = QScrollArea()
@@ -1220,12 +1824,36 @@ class ExportPage(QWizardPage):
 
     def initializePage(self):
         """Called when page becomes visible."""
-        # Load saved settings
-        settings = QSettings()
-        sample = settings.value(f"{SETTINGS_PREFIX}/sample_text", "The quick brown fox jumps")
-        self.sample_edit.setText(sample)
-
+        # Process glyphs first to get available characters
         self.process_glyphs()
+
+        # Build sample text showing all available characters
+        wizard = self.wizard()
+        page2: SegmentationPage = wizard.page(1)
+        if page2.result and page2.result.characters:
+            # Get all character labels sorted
+            chars = [c.label for c in page2.result.characters if c.label]
+            # Sort: uppercase, lowercase, digits, then punctuation
+            upper = sorted([c for c in chars if c.isupper()])
+            lower = sorted([c for c in chars if c.islower()])
+            digits = sorted([c for c in chars if c.isdigit()])
+            punct = [c for c in chars if not c.isalnum()]
+            # Build display text with each category on its own line
+            lines = []
+            if upper:
+                lines.append(''.join(upper))
+            if lower:
+                lines.append(''.join(lower))
+            if digits:
+                lines.append(''.join(digits))
+            if punct:
+                lines.append(''.join(punct))
+            lines.append("The quick brown fox jumps over the lazy dog.")
+            sample_text = '\n'.join(lines)
+        else:
+            sample_text = "The quick brown fox jumps over the lazy dog."
+
+        self.sample_edit.setPlainText(sample_text)
         self.update_preview()
 
     def process_glyphs(self):
@@ -1325,7 +1953,7 @@ class ExportPage(QWizardPage):
 
     def update_preview(self):
         """Update the font preview using the loaded font or fallback to bitmaps."""
-        sample = self.sample_edit.text()
+        sample = self.sample_edit.toPlainText()
         if not sample:
             self.preview_label.setText("No preview available")
             return
@@ -1354,22 +1982,30 @@ class ExportPage(QWizardPage):
         font = QFont(self._preview_font_family, font_size)
         metrics = QFontMetrics(font)
 
-        # Word wrap the text
-        words = sample.split(' ')
+        # Handle explicit newlines first, then word wrap each paragraph
         lines = []
-        current_line = ""
+        paragraphs = sample.split('\n')
 
-        for word in words:
-            test_line = f"{current_line} {word}".strip() if current_line else word
-            if metrics.horizontalAdvance(test_line) <= available_width:
-                current_line = test_line
-            else:
-                if current_line:
-                    lines.append(current_line)
-                current_line = word
+        for paragraph in paragraphs:
+            if not paragraph:
+                lines.append("")  # Preserve blank lines
+                continue
 
-        if current_line:
-            lines.append(current_line)
+            # Word wrap within each paragraph
+            words = paragraph.split(' ')
+            current_line = ""
+
+            for word in words:
+                test_line = f"{current_line} {word}".strip() if current_line else word
+                if metrics.horizontalAdvance(test_line) <= available_width:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        lines.append(current_line)
+                    current_line = word
+
+            if current_line:
+                lines.append(current_line)
 
         if not lines:
             lines = [sample]  # Fallback if no wrapping possible
@@ -1401,33 +2037,61 @@ class ExportPage(QWizardPage):
         self.preview_label.setPixmap(pixmap)
 
     def _render_with_bitmaps(self, sample: str):
-        """Fallback: render preview using original bitmap images."""
+        """Fallback: render preview using original bitmap images with wrapping."""
         # Build lookup from label to character cell
         cell_map = {cell.label: cell for cell in self.char_cells}
 
-        target_height = 80
+        target_height = 60
         padding = 10
         space_width = target_height // 3
         char_spacing = 2
+        line_spacing = 8
 
-        # Calculate total width
-        total_width = padding
-        for char in sample:
-            if char == " ":
-                total_width += space_width
+        # Get available width from scroll area viewport
+        available_width = self.preview_scroll.viewport().width() - 2 * padding
+        if available_width < 100:
+            available_width = 400  # Fallback
+
+        # Helper to get character width
+        def get_char_width(char):
+            if char == " " or char == "\n":
+                return space_width
             elif char in cell_map:
                 cell = cell_map[char]
-                h, w = cell.image.shape[:2]
+                h, w = cell.image.shape[:2] if len(cell.image.shape) >= 2 else (0, 0)
                 if h > 0:
-                    scale = target_height / h
-                    total_width += int(w * scale) + char_spacing
-            else:
-                total_width += space_width
-        total_width += padding
+                    return int(w * (target_height / h)) + char_spacing
+            return space_width
 
-        # Create canvas
-        canvas_height = target_height + 2 * padding
-        canvas_width = max(100, total_width)
+        # Split into lines, respecting newlines and wrapping
+        lines = []
+        for paragraph in sample.split('\n'):
+            if not paragraph:
+                lines.append([])  # Preserve blank lines
+                continue
+
+            current_line = []
+            current_width = 0
+
+            for char in paragraph:
+                char_width = get_char_width(char)
+                if current_width + char_width > available_width and current_line:
+                    lines.append(current_line)
+                    current_line = []
+                    current_width = 0
+                current_line.append(char)
+                current_width += char_width
+
+            if current_line:
+                lines.append(current_line)
+
+        if not lines:
+            lines = [[c for c in sample]]
+
+        # Calculate canvas size
+        line_height = target_height + line_spacing
+        canvas_height = max(100, len(lines) * line_height + 2 * padding)
+        canvas_width = available_width + 2 * padding
 
         image = QImage(canvas_width, canvas_height, QImage.Format_ARGB32)
         image.fill(QColor(255, 255, 255))
@@ -1435,40 +2099,44 @@ class ExportPage(QWizardPage):
         painter = QPainter(image)
         painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
 
-        x_pos = padding
-        for char in sample:
-            if char == " ":
-                x_pos += space_width
-                continue
+        y_pos = padding
+        for line_chars in lines:
+            x_pos = padding
+            for char in line_chars:
+                if char == " ":
+                    x_pos += space_width
+                    continue
 
-            if char not in cell_map:
-                painter.setPen(QPen(QColor(200, 200, 200), 1))
-                painter.setBrush(Qt.NoBrush)
-                painter.drawRect(x_pos, padding, space_width - 2, target_height)
-                x_pos += space_width
-                continue
+                if char not in cell_map:
+                    painter.setPen(QPen(QColor(200, 200, 200), 1))
+                    painter.setBrush(Qt.NoBrush)
+                    painter.drawRect(x_pos, y_pos, space_width - 2, target_height)
+                    x_pos += space_width
+                    continue
 
-            cell = cell_map[char]
-            char_img = cell.image
-            h, w = char_img.shape[:2] if len(char_img.shape) >= 2 else (0, 0)
+                cell = cell_map[char]
+                char_img = cell.image
+                h, w = char_img.shape[:2] if len(char_img.shape) >= 2 else (0, 0)
 
-            if h == 0:
-                continue
+                if h == 0:
+                    continue
 
-            scale = target_height / h
-            scaled_w = int(w * scale)
+                scale = target_height / h
+                scaled_w = int(w * scale)
 
-            qimg = self._numpy_to_qimage(char_img)
-            if qimg is None:
-                x_pos += space_width
-                continue
+                qimg = self._numpy_to_qimage(char_img)
+                if qimg is None:
+                    x_pos += space_width
+                    continue
 
-            scaled_pixmap = QPixmap.fromImage(qimg).scaled(
-                scaled_w, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            y_offset = padding + (target_height - scaled_pixmap.height()) // 2
-            painter.drawPixmap(x_pos, y_offset, scaled_pixmap)
-            x_pos += scaled_pixmap.width() + char_spacing
+                scaled_pixmap = QPixmap.fromImage(qimg).scaled(
+                    scaled_w, target_height, Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                y_offset = y_pos + (target_height - scaled_pixmap.height()) // 2
+                painter.drawPixmap(x_pos, y_offset, scaled_pixmap)
+                x_pos += scaled_pixmap.width() + char_spacing
+
+            y_pos += line_height
 
         painter.end()
         self.preview_label.setPixmap(QPixmap.fromImage(image))
@@ -1651,7 +2319,7 @@ class ExportPage(QWizardPage):
     def save_settings(self):
         """Save current settings."""
         settings = QSettings()
-        settings.setValue(f"{SETTINGS_PREFIX}/sample_text", self.sample_edit.text())
+        settings.setValue(f"{SETTINGS_PREFIX}/sample_text", self.sample_edit.toPlainText())
         if self.exported_path:
             settings.setValue(f"{SETTINGS_PREFIX}/last_export_dir", str(self.exported_path.parent))
 

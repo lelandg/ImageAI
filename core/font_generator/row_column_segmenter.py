@@ -70,38 +70,65 @@ class RowColumnSegmenter:
         # Prepare binary for contour detection (white glyphs on black)
         binary_inv = cv2.bitwise_not(binary)
 
-        # Step 2: For each row, find contours and merge aligned ones
-        # Store (x, y, w, h, row_idx) to preserve row information
+        # Step 2: Find ALL contours in the full image (not per-row)
+        # This ensures tall/slanted characters like /\() aren't chopped at row boundaries
+        all_contours, _ = cv2.findContours(
+            binary_inv, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+
+        # Get bounding boxes for all contours
+        all_boxes = []
+        for contour in all_contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            # Filter tiny noise but keep dots
+            if w * h >= 9:  # Reduced from 16 to allow small punctuation
+                all_boxes.append((x, y, w, h))
+
+        logger.info(f"Found {len(all_boxes)} contours in full image")
+
+        # Assign each box to a row based on vertical center position
         all_glyph_boxes = []
+        for box in all_boxes:
+            x, y, w, h = box
+            center_y = y + h / 2
 
-        for row_idx, row in enumerate(rows):
-            # Extract row region
-            row_y1 = row.y
-            row_y2 = row.y + row.height
-            row_binary = binary_inv[row_y1:row_y2, :]
+            # Find which row this glyph belongs to
+            assigned_row = -1
+            for row_idx, row in enumerate(rows):
+                row_y1 = row.y
+                row_y2 = row.y + row.height
+                # Assign to row if center is within row bounds (with margin)
+                if row_y1 - h/4 <= center_y <= row_y2 + h/4:
+                    assigned_row = row_idx
+                    break
 
-            # Find contours in this row
-            contours, _ = cv2.findContours(
-                row_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-            )
+            if assigned_row >= 0:
+                all_glyph_boxes.append((x, y, w, h, assigned_row))
+            else:
+                # Try to assign based on overlap
+                best_overlap = 0
+                best_row = 0
+                for row_idx, row in enumerate(rows):
+                    row_y1 = row.y
+                    row_y2 = row.y + row.height
+                    overlap = max(0, min(y + h, row_y2) - max(y, row_y1))
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_row = row_idx
+                all_glyph_boxes.append((x, y, w, h, best_row))
 
-            # Get bounding boxes (in image coordinates)
-            row_boxes = []
-            for contour in contours:
-                x, y, w, h = cv2.boundingRect(contour)
-                # Convert y to image coordinates
-                abs_y = row_y1 + y
-                # Filter tiny noise but keep dots
-                if w * h >= 16:
-                    row_boxes.append((x, abs_y, w, h))
+        # Group by row and merge aligned contours (i, j dots)
+        rows_boxes = {}
+        for x, y, w, h, row_idx in all_glyph_boxes:
+            if row_idx not in rows_boxes:
+                rows_boxes[row_idx] = []
+            rows_boxes[row_idx].append((x, y, w, h))
 
-            # Merge horizontally-aligned contours within this row (i, j dots)
-            row_boxes = self._merge_aligned_in_row(row_boxes)
-
-            # Sort left-to-right
+        # Rebuild with merged boxes
+        all_glyph_boxes = []
+        for row_idx in sorted(rows_boxes.keys()):
+            row_boxes = self._merge_aligned_in_row(rows_boxes[row_idx])
             row_boxes.sort(key=lambda b: b[0])
-
-            # Add row_idx to each box
             for box in row_boxes:
                 all_glyph_boxes.append((*box, row_idx))
             logger.debug(f"Row {row_idx}: {len(row_boxes)} glyphs")
@@ -280,8 +307,14 @@ class RowColumnSegmenter:
 
         # First pass: merge adjacent narrow boxes (for ", :, ;, etc.)
         # Only merge if BOTH boxes are narrow and gap is small
+        # But NOT if they look like separate characters (e.g., parentheses)
         merged_narrow = []
         i = 0
+
+        # Calculate median height for baseline detection
+        heights = [h for _, _, _, h in boxes]
+        median_height = sorted(heights)[len(heights) // 2] if heights else median_width
+
         while i < len(boxes_sorted):
             x1, y1, w1, h1 = boxes_sorted[i]
 
@@ -292,22 +325,51 @@ class RowColumnSegmenter:
                 group_x_max = x1 + w1
                 group_y_max = y1 + h1
                 group_width = w1
+                group_height = h1
 
                 j = i + 1
                 while j < len(boxes_sorted):
                     x2, y2, w2, h2 = boxes_sorted[j]
                     if is_narrow(w2):
                         gap = x2 - group_x_max
-                        # Use conservative gap threshold: smaller of the two widths
-                        # This prevents merging when gap is large relative to box size
-                        max_gap = min(group_width, w2) * 0.6
+
+                        # Check vertical alignment - are boxes at similar y-positions?
+                        # This helps merge " and : while keeping () separate
+                        y_overlap = not (y1 + h1 < y2 or y2 + h2 < y1)
+                        y_centers_close = abs((y1 + h1/2) - (y2 + h2/2)) < median_height * 0.3
+
+                        # Both boxes are SHORT (not spanning full row) - likely punctuation parts
+                        both_short = h1 < median_height * 0.6 and h2 < median_height * 0.6
+
+                        # Both boxes are TALL (spanning most of row) - likely separate chars like ()
+                        both_tall = h1 > median_height * 0.7 and h2 > median_height * 0.7
+
+                        # Combined width check
+                        combined_width = (x2 + w2) - group_x_min
+                        would_be_too_wide = combined_width > median_width * 1.3
+
+                        # Gap thresholds differ based on box characteristics
+                        if both_short and y_centers_close:
+                            # Short marks at same height (like ") - allow larger gap
+                            max_gap = min(w1, w2) * 1.5
+                            logger.debug(f"Short marks at same y: allowing gap up to {max_gap:.0f}")
+                        else:
+                            # Normal case - conservative gap
+                            max_gap = min(group_width, w2) * 0.6
+
+                        # Don't merge if boxes look like separate tall characters
+                        if both_tall and would_be_too_wide:
+                            logger.debug(f"NOT merging: both tall ({h1}, {h2}), combined_w={combined_width}, median_h={median_height}")
+                            break
+
                         if 0 <= gap <= max_gap:
-                            logger.debug(f"Merging narrow boxes: gap={gap}, max_gap={max_gap:.0f}, w1={group_width}, w2={w2}")
+                            logger.debug(f"Merging narrow boxes: gap={gap}, max_gap={max_gap:.0f}, w1={group_width}, w2={w2}, both_short={both_short}")
                             group_x_min = min(group_x_min, x2)
                             group_y_min = min(group_y_min, y2)
                             group_x_max = max(group_x_max, x2 + w2)
                             group_y_max = max(group_y_max, y2 + h2)
-                            group_width = group_x_max - group_x_min  # Update group width
+                            group_width = group_x_max - group_x_min
+                            group_height = group_y_max - group_y_min
                             j += 1
                             continue
                     break
@@ -355,10 +417,16 @@ class RowColumnSegmenter:
                     max_height = max(h1, h2)
                     height_ratio = min_height / max_height if max_height > 0 else 1
 
+                    # Check for horizontal overlap to prevent merging side-by-side chars like ()
+                    x1_end = x1 + w1
+                    x2_end = x2 + w2
+                    has_x_overlap = not (x1_end <= x2 or x2_end <= x1)
+
                     # Merge if:
                     # 1. Height ratio < 0.40 (dot + stem relationship), OR
-                    # 2. x-centers are nearly identical (< 10px) - same column regardless of height
-                    should_merge = height_ratio < 0.40 or abs(cx1 - cx2) < 10
+                    # 2. x-centers are nearly identical (< 10px) AND boxes have horizontal overlap
+                    #    (this prevents merging side-by-side characters like parentheses)
+                    should_merge = height_ratio < 0.40 or (abs(cx1 - cx2) < 10 and has_x_overlap)
 
                     if should_merge:
                         logger.debug(f"Merging x-aligned boxes: cx_diff={abs(cx1-cx2)}, h_ratio={height_ratio:.2f}, w1={w1}, w2={w2}")

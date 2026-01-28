@@ -47,6 +47,11 @@ from .glyph_identifier import (
     AIGlyphIdentifier,
     GlyphIdentificationResult,
     BatchIdentificationResult,
+    get_position_hint,
+)
+from .glyph_generator import (
+    GlyphGenerator,
+    GlyphGenerationResult,
 )
 from .row_detector import (
     RowDetector,
@@ -89,6 +94,10 @@ __all__ = [
     "AIGlyphIdentifier",
     "GlyphIdentificationResult",
     "BatchIdentificationResult",
+    "get_position_hint",
+    # AI Glyph Generation
+    "GlyphGenerator",
+    "GlyphGenerationResult",
     # Row-Column Segmentation
     "RowDetector",
     "TextRow",

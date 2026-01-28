@@ -23,6 +23,22 @@ LOWERCASE_ASCENDER = set("bdfhklt")  # Lowercase with ascenders
 LOWERCASE_DESCENDER = set("gjpqy")  # Lowercase with descenders
 DIGITS = set("0123456789")
 
+# Punctuation positioning categories
+# TOP: Characters that sit near cap-height/ascender line
+PUNCT_TOP = set("'\"`^")
+# MIDDLE: Characters centered vertically (around x-height/2)
+PUNCT_MIDDLE = set("-~*")
+# BASELINE: Characters that sit on the baseline
+PUNCT_BASELINE = set("._")
+# DESCENDER: Characters that hang below the baseline (comma only)
+PUNCT_DESCENDER = set(",")
+# PARTIAL DESCENDER: Characters with parts above and below baseline (semicolon)
+PUNCT_PARTIAL_DESCENDER = set(";")
+# FULL HEIGHT: Characters that span from baseline to cap-height
+PUNCT_FULL = set("!?|/\\()[]{}@#$%&+<>=:")
+# SUPERSCRIPT-like: Small marks at top (degree, etc.)
+PUNCT_SUPER = set("°")
+
 # Common kerning pairs (characters that often need spacing adjustment)
 KERNING_PAIRS = [
     # Capital + lowercase
@@ -294,9 +310,40 @@ class FontMetricsCalculator:
             elif glyph.label.isupper() or glyph.label in DIGITS:
                 # Uppercase and digits: bottom at baseline
                 y_offset = bbox[1]
+            elif glyph.label in PUNCT_TOP:
+                # Top punctuation (', ", `, ^): position near cap-height
+                # Align TOP of glyph with cap-height (in original coordinates)
+                # After scaling, it should be at target_cap_height
+                y_offset = bbox[3] - max_cap_height
+                logger.debug(f"Top punct '{glyph.label}': aligning top to cap_height={max_cap_height:.0f}")
+            elif glyph.label in PUNCT_MIDDLE:
+                # Middle punctuation (-, ~, *): center vertically at x-height/2
+                glyph_center = (bbox[1] + bbox[3]) / 2
+                target_center = avg_xheight / 2
+                y_offset = glyph_center - target_center
+                logger.debug(f"Middle punct '{glyph.label}': centering at x-height/2={target_center:.0f}")
+            elif glyph.label in PUNCT_DESCENDER:
+                # Descender punctuation (comma): hang below baseline
+                # Align TOP of glyph with baseline (so it hangs below)
+                y_offset = bbox[3]
+                logger.debug(f"Descender punct '{glyph.label}': hanging below baseline")
+            elif glyph.label in PUNCT_PARTIAL_DESCENDER:
+                # Partial descender punctuation (semicolon): upper part at x-height, lower hangs
+                # Align TOP at x-height level so upper dot is visible and comma part hangs below
+                y_offset = bbox[3] - avg_xheight
+                logger.debug(f"Partial descender punct '{glyph.label}': top at x-height, bottom hangs")
+            elif glyph.label in PUNCT_BASELINE:
+                # Baseline punctuation (., _): bottom at baseline
+                y_offset = bbox[1]
+                logger.debug(f"Baseline punct '{glyph.label}': bottom at baseline")
+            elif glyph.label in PUNCT_FULL:
+                # Full-height punctuation (!, ?, |, etc.): bottom at baseline
+                y_offset = bbox[1]
+                logger.debug(f"Full punct '{glyph.label}': bottom at baseline")
             else:
                 # Default: bottom at baseline
                 y_offset = bbox[1]
+                logger.debug(f"Unknown '{glyph.label}': default bottom at baseline")
 
             new_paths = []
             for path in glyph.paths:

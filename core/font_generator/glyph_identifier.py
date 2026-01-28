@@ -1,13 +1,19 @@
 """
 AI-based glyph identification for font generator.
 
-Uses Google Gemini's vision capabilities to identify small glyphs
+Uses AI vision capabilities to identify small glyphs
 (punctuation, special characters) that are difficult to detect
 with traditional contour-based methods.
+
+Supports multiple providers:
+- Anthropic Claude (recommended for accuracy)
+- Google Gemini (fallback)
 """
 
 import logging
 import io
+import base64
+import os
 from typing import List, Optional, Tuple
 from dataclasses import dataclass
 
@@ -15,6 +21,7 @@ import numpy as np
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+console = logging.getLogger("console")
 
 
 @dataclass
@@ -35,12 +42,44 @@ class BatchIdentificationResult:
     error: Optional[str] = None
 
 
+def get_position_hint(glyph_y: int, glyph_height: int, row_height: int) -> str:
+    """
+    Determine vertical position hint for a glyph within its row.
+
+    Args:
+        glyph_y: Y position of glyph within the row (0 = top of row)
+        glyph_height: Height of the glyph
+        row_height: Total height of the text row
+
+    Returns:
+        Position hint: "top", "middle", "bottom", or "full"
+    """
+    if row_height <= 0:
+        return "middle"
+
+    # Calculate where the glyph sits in the row
+    glyph_center = glyph_y + glyph_height / 2
+    glyph_top_ratio = glyph_y / row_height
+    glyph_bottom_ratio = (glyph_y + glyph_height) / row_height
+
+    # Determine position based on where glyph sits
+    if glyph_height > row_height * 0.7:
+        return "full"  # Spans most of the row (like |, !, l)
+    elif glyph_bottom_ratio < 0.5:
+        return "top"  # Upper half only (like ', ")
+    elif glyph_top_ratio > 0.5:
+        return "bottom"  # Lower half only (like ,, .)
+    else:
+        return "middle"  # Center area (like -, ~)
+
+
 class AIGlyphIdentifier:
     """
     Uses AI vision models to identify individual glyph images.
 
-    Supports Google Gemini for character recognition of small
-    or ambiguous glyphs like punctuation marks.
+    Supports:
+    - Anthropic Claude (claude-opus-4-5-20251101) - Best accuracy for character recognition
+    - Google Gemini (gemini-2.5-flash/pro) - Fast fallback option
     """
 
     # Characters that are commonly confused
@@ -68,27 +107,90 @@ class AIGlyphIdentifier:
         '>': [')', ']', '»'],
     }
 
+    # Provider constants
+    PROVIDER_ANTHROPIC = "anthropic"
+    PROVIDER_GEMINI = "gemini"
+
+    # Default models by provider
+    DEFAULT_MODELS = {
+        PROVIDER_ANTHROPIC: "claude-opus-4-5-20251101",
+        PROVIDER_GEMINI: "gemini-2.5-pro",  # Pro for better accuracy than flash
+    }
+
     def __init__(
         self,
+        provider: str = "anthropic",
         api_key: Optional[str] = None,
-        model: str = "gemini-2.5-flash",
+        model: Optional[str] = None,
         use_cloud_auth: bool = True,
     ):
         """
         Initialize the glyph identifier.
 
         Args:
-            api_key: Google API key (optional, will try cloud auth or config)
-            model: Gemini model to use for identification
-            use_cloud_auth: If True, try Application Default Credentials first
+            provider: AI provider - "anthropic" (recommended) or "gemini"
+            api_key: API key (optional, will try config/environment)
+            model: Model to use (optional, uses provider default if not specified)
+            use_cloud_auth: If True, try Application Default Credentials for Gemini
         """
+        self.provider = provider.lower()
         self.api_key = api_key
-        self.model = model
+        self.model = model or self.DEFAULT_MODELS.get(self.provider, self.DEFAULT_MODELS[self.PROVIDER_ANTHROPIC])
         self.use_cloud_auth = use_cloud_auth
         self._client = None
+        self._anthropic_client = None
         self._auth_method = None  # Track which auth method was used
 
     def _ensure_client(self) -> bool:
+        """Ensure the AI client is initialized for the configured provider."""
+        if self.provider == self.PROVIDER_ANTHROPIC:
+            return self._ensure_anthropic_client()
+        else:
+            return self._ensure_gemini_client()
+
+    def _ensure_anthropic_client(self) -> bool:
+        """Ensure the Anthropic client is initialized."""
+        if self._anthropic_client is not None:
+            return True
+
+        try:
+            import anthropic
+
+            # Get API key
+            api_key = self.api_key
+            if not api_key:
+                # Try environment variable first
+                api_key = os.environ.get("ANTHROPIC_API_KEY")
+
+            if not api_key:
+                # Try config manager
+                try:
+                    from core.config import ConfigManager
+                    config = ConfigManager()
+                    api_key = config.get_api_key("anthropic")
+                except Exception as e:
+                    logger.debug(f"Could not get API key from config: {e}")
+
+            if not api_key:
+                logger.error("No Anthropic API key available for glyph identification")
+                console.error("No Anthropic API key found. Configure in Settings or set ANTHROPIC_API_KEY environment variable.")
+                return False
+
+            self._anthropic_client = anthropic.Anthropic(api_key=api_key)
+            self._auth_method = "Anthropic API Key"
+            logger.info(f"Initialized Anthropic client (model: {self.model})")
+            console.info(f"Using Claude {self.model} for glyph identification")
+            return True
+
+        except ImportError as e:
+            logger.error(f"Failed to import anthropic: {e}")
+            console.error("Anthropic SDK not installed. Run: pip install anthropic")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to initialize Anthropic client: {e}")
+            return False
+
+    def _ensure_gemini_client(self) -> bool:
         """Ensure the Gemini client is initialized."""
         if self._client is not None:
             return True
@@ -135,7 +237,7 @@ class AIGlyphIdentifier:
                 return False
 
             self._client = genai.Client(api_key=api_key)
-            self._auth_method = "API Key"
+            self._auth_method = "Gemini API Key"
             logger.info(f"Initialized Gemini client with API Key (model: {self.model})")
             return True
 
@@ -150,6 +252,7 @@ class AIGlyphIdentifier:
         self,
         glyph_image: np.ndarray | Image.Image,
         context_chars: Optional[str] = None,
+        position_hint: Optional[str] = None,
     ) -> GlyphIdentificationResult:
         """
         Identify a single glyph image using AI vision.
@@ -157,6 +260,8 @@ class AIGlyphIdentifier:
         Args:
             glyph_image: The glyph image (numpy array or PIL Image)
             context_chars: Characters expected in the font (helps AI narrow down)
+            position_hint: Vertical position hint ("top", "middle", "bottom", "baseline")
+                          to help distinguish similar chars like ' vs ,
 
         Returns:
             GlyphIdentificationResult with identified character
@@ -166,24 +271,110 @@ class AIGlyphIdentifier:
                 identified_char=None,
                 confidence=0.0,
                 alternatives=[],
-                error="Gemini client not available"
+                error=f"{self.provider.title()} client not available"
             )
 
+        # Convert to PIL Image if needed
+        if isinstance(glyph_image, np.ndarray):
+            pil_image = Image.fromarray(glyph_image)
+        else:
+            pil_image = glyph_image
+
+        # Ensure RGB mode
+        if pil_image.mode != 'RGB':
+            pil_image = pil_image.convert('RGB')
+
+        # Build prompt with position hint
+        prompt = self._build_identification_prompt(context_chars, position_hint)
+
+        # Dispatch to appropriate provider
+        if self.provider == self.PROVIDER_ANTHROPIC:
+            return self._identify_glyph_anthropic(pil_image, prompt)
+        else:
+            return self._identify_glyph_gemini(pil_image, prompt)
+
+    def _identify_glyph_anthropic(
+        self,
+        pil_image: Image.Image,
+        prompt: str,
+    ) -> GlyphIdentificationResult:
+        """Identify a glyph using Anthropic Claude."""
+        try:
+            # Convert image to base64
+            buffer = io.BytesIO()
+            pil_image.save(buffer, format='PNG')
+            image_data = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+            # Log the AI request
+            logger.info("=" * 60)
+            logger.info("AI GLYPH IDENTIFICATION REQUEST (Claude)")
+            logger.info(f"  Auth: {self._auth_method}")
+            logger.info(f"  Model: {self.model}")
+            logger.info(f"  Image size: {pil_image.size}")
+            logger.info(f"  Prompt: {prompt[:100]}..." if len(prompt) > 100 else f"  Prompt: {prompt}")
+            logger.info("=" * 60)
+
+            # Send to Claude
+            response = self._anthropic_client.messages.create(
+                model=self.model,
+                max_tokens=50,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": image_data,
+                                },
+                            },
+                            {
+                                "type": "text",
+                                "text": prompt,
+                            }
+                        ],
+                    }
+                ],
+            )
+
+            # Log the response
+            logger.info("AI GLYPH IDENTIFICATION RESPONSE (Claude)")
+            if response and response.content:
+                response_text = response.content[0].text
+                logger.info(f"  Response: {response_text.strip()}")
+                result = self._parse_response(response_text)
+                logger.info(f"  Identified: '{result.identified_char}' (confidence: {result.confidence:.0%})")
+                logger.info("=" * 60)
+                return result
+            else:
+                logger.warning("  Response: EMPTY")
+                logger.info("=" * 60)
+                return GlyphIdentificationResult(
+                    identified_char=None,
+                    confidence=0.0,
+                    alternatives=[],
+                    error="Empty response from Claude"
+                )
+
+        except Exception as e:
+            logger.error(f"Claude glyph identification failed: {e}")
+            return GlyphIdentificationResult(
+                identified_char=None,
+                confidence=0.0,
+                alternatives=[],
+                error=str(e)
+            )
+
+    def _identify_glyph_gemini(
+        self,
+        pil_image: Image.Image,
+        prompt: str,
+    ) -> GlyphIdentificationResult:
+        """Identify a glyph using Google Gemini."""
         try:
             from google.genai import types
-
-            # Convert to PIL Image if needed
-            if isinstance(glyph_image, np.ndarray):
-                pil_image = Image.fromarray(glyph_image)
-            else:
-                pil_image = glyph_image
-
-            # Ensure RGB mode
-            if pil_image.mode != 'RGB':
-                pil_image = pil_image.convert('RGB')
-
-            # Build prompt
-            prompt = self._build_identification_prompt(context_chars)
 
             # Log the AI request
             logger.info("=" * 60)
@@ -233,22 +424,32 @@ class AIGlyphIdentifier:
 
     def identify_multiple_glyphs(
         self,
-        glyph_images: List[Tuple[np.ndarray | Image.Image, str]],
+        glyph_images: List,
         context_chars: Optional[str] = None,
     ) -> List[Tuple[str, GlyphIdentificationResult]]:
         """
         Identify multiple glyph images.
 
         Args:
-            glyph_images: List of (image, current_label) tuples
+            glyph_images: List of tuples. Each tuple can be:
+                          - (image, current_label) - 2-tuple without position hint
+                          - (image, current_label, position_hint) - 3-tuple with position hint
+                          position_hint can be "top", "middle", "bottom", "full".
             context_chars: Characters expected in the font
 
         Returns:
             List of (current_label, result) tuples
         """
         results = []
-        for glyph_img, current_label in glyph_images:
-            result = self.identify_glyph(glyph_img, context_chars)
+        for item in glyph_images:
+            # Handle both (image, label) and (image, label, position_hint) tuples
+            if len(item) >= 3:
+                glyph_img, current_label, position_hint = item[0], item[1], item[2]
+            else:
+                glyph_img, current_label = item[0], item[1]
+                position_hint = None
+
+            result = self.identify_glyph(glyph_img, context_chars, position_hint)
             results.append((current_label, result))
             logger.info(
                 f"Glyph '{current_label}' identified as '{result.identified_char}' "
@@ -256,8 +457,17 @@ class AIGlyphIdentifier:
             )
         return results
 
-    def _build_identification_prompt(self, context_chars: Optional[str]) -> str:
-        """Build the prompt for glyph identification."""
+    def _build_identification_prompt(
+        self,
+        context_chars: Optional[str],
+        position_hint: Optional[str] = None,
+    ) -> str:
+        """Build the prompt for glyph identification.
+
+        Args:
+            context_chars: Characters expected in the font
+            position_hint: Vertical position hint like "top", "middle", "bottom", "baseline"
+        """
         base_prompt = """You are analyzing a handwritten or typed character for font creation.
 Look at this image of a single character glyph and identify what character it is.
 
@@ -265,7 +475,21 @@ IMPORTANT:
 - Look carefully at the shape, considering it might be a punctuation mark or symbol
 - Common small characters include: . , ; : ! ? ' " - _ ( ) [ ] { } < > / \\ @ # $ % ^ & * + = ~ `
 - The image may be small or low-resolution
-- Consider the context of handwriting samples
+- Consider the context of handwriting samples"""
+
+        # Add position-based disambiguation hints
+        if position_hint:
+            base_prompt += f"""
+
+POSITION HINT: This character was found at the {position_hint} of the text line.
+Use this to help distinguish similar characters:
+- Apostrophe (') and comma (,) look similar but: apostrophe is at TOP, comma is at BOTTOM/baseline
+- Period (.) is at the BOTTOM/baseline
+- Quote marks (" ') are at the TOP
+- Hyphen (-) and underscore (_): hyphen is MIDDLE, underscore is BOTTOM
+- Colon (:) spans from TOP to BOTTOM, semicolon (;) has dot at BOTTOM"""
+
+        base_prompt += """
 
 Respond with ONLY the character you see, nothing else.
 If you cannot identify it, respond with "?"."""
