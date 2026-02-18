@@ -5,6 +5,23 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.34.0] - 2026-02-18
+
+### Added
+- **History Tab - Search & Filter**: Search bar filters history by filename, prompt text, provider, and model name
+- **History Tab - Date Range Filter**: From/To date pickers to narrow history by date range
+- **History Tab - Unlimited Images**: Removed 500-image cap — history now loads all images from disk
+- **History Tab - Correct Count**: Dynamic "Showing X of Y images" label reflects filtered vs. total count
+- **History Tab - Tablet Support**: Kinetic scrolling via `QScroller` for Wacom pen input; single-selection mode eliminates drag-select conflicts
+- **History Tab - Scroll Preservation**: Scroll position saved when leaving the history tab and restored on return; external image detection no longer resets scroll
+
+### Improved
+- **History Tab - Architecture**: Replaced `QTableWidget` with `QAbstractTableModel` + `QSortFilterProxyModel` + `QTableView` for virtual rendering and efficient large-dataset handling
+- **History Tab - Thumbnail Cache**: Increased from 50 to 200 entries
+
+### Fixed
+- History count always showing "500" even when fewer or more images existed
+
 ## [0.33.0] - 2026-01-28
 
 ### Added

@@ -285,22 +285,19 @@ def auto_save_images(images: list, base_stub: str = "gen") -> list:
     return saved
 
 
-def scan_disk_history(max_items: int = 500, project_only: bool = False) -> list[Path]:
+def scan_disk_history(max_items: int = 0, project_only: bool = False) -> list[Path]:
     """Scan generated dir for images and return sorted list by mtime desc.
 
-    Optimized to collect mtime in single pass and exit early when enough files found.
-
     Args:
-        max_items: Maximum number of items to return
+        max_items: Maximum number of items to return (0 = unlimited)
         project_only: If True, only return images with metadata sidecar files
     """
     try:
         out_dir = images_output_dir()
         exts = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 
-        # Collect files with mtime in single pass (avoid double stat calls)
+        # Collect files with mtime in single pass
         items_with_time = []
-        scan_limit = max_items * 3  # Scan up to 3x max_items for early exit
 
         for p in out_dir.iterdir():
             # Skip DEBUG images entirely for performance
@@ -324,13 +321,11 @@ def scan_disk_history(max_items: int = 500, project_only: bool = False) -> list[
             except (OSError, AttributeError):
                 continue
 
-            # Early exit if we have enough files
-            if len(items_with_time) >= scan_limit:
-                break
-
-        # Sort by mtime (descending) and return top max_items
+        # Sort by mtime (descending) and return
         items_with_time.sort(reverse=True, key=lambda x: x[0])
-        return [p for _, p in items_with_time[:max_items]]
+        if max_items > 0:
+            return [p for _, p in items_with_time[:max_items]]
+        return [p for _, p in items_with_time]
 
     except (OSError, IOError, AttributeError):
         return []

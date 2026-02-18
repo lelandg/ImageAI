@@ -10,123 +10,6 @@ from core.llm_models import get_provider_models, get_all_provider_ids, get_provi
 
 logger = logging.getLogger(__name__)
 
-# Import additional Qt classes needed for thumbnail delegate
-try:
-    from PySide6.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem, QTableWidget, QTableWidgetItem, QStyle
-except ImportError:
-    QStyledItemDelegate = None
-    QStyleOptionViewItem = None
-    QStyle = None
-
-
-class ThumbnailCache:
-    """Cache for thumbnail images to improve performance."""
-
-    def __init__(self, max_size=50):
-        self.cache = {}  # path -> QPixmap
-        self.max_size = max_size
-        self.access_order = []  # LRU tracking
-        self.hits = 0
-        self.misses = 0
-
-    def get(self, path):
-        """Get thumbnail from cache or create and cache it."""
-        path_str = str(path)
-        if path_str in self.cache:
-            # Cache hit
-            self.hits += 1
-            # Move to end for LRU
-            self.access_order.remove(path_str)
-            self.access_order.append(path_str)
-            return self.cache[path_str]
-
-        # Cache miss
-        self.misses += 1
-
-        # Create thumbnail
-        if Path(path_str).exists():
-            pixmap = QPixmap(path_str)
-            if not pixmap.isNull():
-                # Scale to thumbnail size - use faster scaling for performance
-                thumbnail = pixmap.scaled(
-                    64, 64,
-                    Qt.KeepAspectRatio,
-                    Qt.FastTransformation  # Faster scaling
-                )
-
-                # Add to cache
-                self.cache[path_str] = thumbnail
-                self.access_order.append(path_str)
-
-                # Evict oldest if cache is full
-                if len(self.cache) > self.max_size:
-                    oldest = self.access_order.pop(0)
-                    del self.cache[oldest]
-
-                return thumbnail
-
-        return None
-
-    def get_stats(self):
-        """Get cache statistics."""
-        total = self.hits + self.misses
-        hit_rate = (self.hits / total * 100) if total > 0 else 0
-        return {
-            'size': len(self.cache),
-            'hits': self.hits,
-            'misses': self.misses,
-            'hit_rate': hit_rate
-        }
-
-    def clear(self):
-        """Clear the cache."""
-        self.cache.clear()
-        self.access_order.clear()
-
-
-# Only define delegate if imports succeeded
-if QStyledItemDelegate and QStyle:
-    class ThumbnailDelegate(QStyledItemDelegate):
-        """Custom delegate for rendering thumbnails in the history table."""
-
-        def __init__(self, thumbnail_cache, parent=None):
-            super().__init__(parent)
-            self.thumbnail_cache = thumbnail_cache
-
-        def paint(self, painter, option, index):
-            """Custom painting for thumbnail column."""
-            if index.column() == 0:  # Thumbnail column
-                # Get the path directly from this item's UserRole
-                path_str = index.data(Qt.UserRole)
-
-                if path_str and Path(path_str).exists():
-                    # Get thumbnail from cache
-                    thumbnail = self.thumbnail_cache.get(path_str)
-                    if thumbnail:
-                        # Calculate centered position
-                        x = option.rect.center().x() - thumbnail.width() // 2
-                        y = option.rect.center().y() - thumbnail.height() // 2
-
-                        # Draw background if selected
-                        if option.state & QStyle.State_Selected:
-                            painter.fillRect(option.rect, option.palette.highlight())
-
-                        # Draw thumbnail
-                        painter.drawPixmap(x, y, thumbnail)
-                        return
-
-            # Default painting for other columns
-            super().paint(painter, option, index)
-
-        def sizeHint(self, option, index):
-            """Provide size hint for thumbnail column."""
-            if index.column() == 0:  # Thumbnail column
-                return QSize(80, 80)  # Fixed size for thumbnails
-            return super().sizeHint(option, index)
-else:
-    # Fallback when QStyledItemDelegate is not available
-    ThumbnailDelegate = None
-
 try:
     from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSize, QRect, QStandardPaths
     from PySide6.QtGui import QPixmap, QAction, QPainter
@@ -180,6 +63,11 @@ from providers import get_provider, preload_provider, list_providers
 from providers.google import MODEL_AUTH_REQUIREMENTS
 from gui.dialogs import ExamplesDialog
 from gui.shortcut_hint_widget import create_shortcut_hint
+from gui.history_model import (
+    HistoryTableModel, HistoryFilterProxyModel, ThumbnailDelegate,
+    ThumbnailCache, COL_THUMBNAIL, COL_DATETIME, ROLE_ENTRY_DICT,
+    ROLE_THUMBNAIL_PATH, ROLE_SORT_VALUE, NUM_COLUMNS
+)
 # Defer video tab import to improve startup speed
 # from gui.video.video_project_tab import VideoProjectTab
 from gui.workers import GenWorker, HistoryLoaderWorker, OllamaDetectionWorker
@@ -229,7 +117,7 @@ class MainWindow(QMainWindow):
         self._set_app_icon()
 
         # Initialize thumbnail cache
-        self.thumbnail_cache = ThumbnailCache(max_size=50)
+        self.thumbnail_cache = ThumbnailCache(max_size=200)
         self.resize(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT)
         
         # Initialize provider (respect last selection, including Midjourney)
@@ -371,14 +259,18 @@ class MainWindow(QMainWindow):
         self.history = []
         self.history_loaded_count = 0
 
-        # Load initial batch only
+        # Clear the model
+        if hasattr(self, 'history_model'):
+            self.history_model.clear()
+
+        # Load initial batch
         print(f"Loading initial metadata for {min(self.history_initial_load_size, len(self.history_paths))} of {len(self.history_paths)} images...")
         self._load_history_from_disk()
         print(f"Loaded metadata for {len(self.history)} images")
 
-        # Refresh the history table
-        if hasattr(self, 'history_table'):
-            self._refresh_history_table()
+        # Update model with loaded data
+        if hasattr(self, 'history_model'):
+            self.history_model.set_data(self.history)
 
         # Start background loading of remaining items
         if self.history_loaded_count < len(self.history_paths):
@@ -556,9 +448,8 @@ class MainWindow(QMainWindow):
         """Handle a batch of history items loaded in background."""
         self.history.extend(batch_items)
         self.history_loaded_count = len(self.history)
-        # Refresh history display if on history tab
-        if hasattr(self, 'history_table'):
-            self._refresh_history_table()
+        if hasattr(self, 'history_model'):
+            self.history_model.add_entries(batch_items)
 
     def _on_history_load_progress(self, loaded: int, total: int):
         """Update status bar with loading progress."""
@@ -3203,215 +3094,195 @@ For more detailed information, please refer to the full documentation.
         self.btn_insert_prompt.clicked.connect(self._apply_template)
     
     def _init_history_tab(self):
-        """Initialize history tab with enhanced table display."""
-        from PySide6.QtWidgets import QHeaderView, QCheckBox, QHBoxLayout
-        # QTableWidget should already be imported at the top, but fallback if needed
+        """Initialize history tab with model/view table and search."""
+        from PySide6.QtWidgets import (
+            QHeaderView, QCheckBox, QHBoxLayout, QTableView,
+            QAbstractItemView, QLineEdit, QDateEdit
+        )
+        from PySide6.QtCore import QTimer, QDate
+
+        # Safe QScroller import for tablet support
+        QScroller = None
         try:
-            _ = QTableWidget
-        except NameError:
-            from PySide6.QtWidgets import QTableWidget, QTableWidgetItem
+            from PySide6.QtScroller import QScroller as _QS
+            QScroller = _QS
+        except ImportError:
+            try:
+                from PySide6.QtWidgets import QScroller as _QS
+                QScroller = _QS
+            except ImportError:
+                pass
 
         v = QVBoxLayout(self.tab_history)
 
-        # Add checkbox for showing non-project images
+        # --- Search / filter bar ---
+        search_layout = QHBoxLayout()
+
+        self.history_search_edit = QLineEdit()
+        self.history_search_edit.setPlaceholderText("Search by name, prompt, provider...")
+        self.history_search_edit.setClearButtonEnabled(True)
+        search_layout.addWidget(self.history_search_edit, stretch=3)
+
+        search_layout.addWidget(QLabel("From:"))
+        self.history_date_from = QDateEdit()
+        self.history_date_from.setCalendarPopup(True)
+        self.history_date_from.setSpecialValueText("Any")
+        self.history_date_from.setDate(self.history_date_from.minimumDate())
+        search_layout.addWidget(self.history_date_from)
+
+        search_layout.addWidget(QLabel("To:"))
+        self.history_date_to = QDateEdit()
+        self.history_date_to.setCalendarPopup(True)
+        self.history_date_to.setSpecialValueText("Any")
+        self.history_date_to.setDate(self.history_date_to.minimumDate())
+        search_layout.addWidget(self.history_date_to)
+
+        self.btn_clear_search = QPushButton("Clear")
+        self.btn_clear_search.clicked.connect(self._clear_history_search)
+        search_layout.addWidget(self.btn_clear_search)
+
+        v.addLayout(search_layout)
+
+        # --- Controls row ---
         controls_layout = QHBoxLayout()
         self.chk_show_all_images = QCheckBox("Show non-project images")
         self.chk_show_all_images.setChecked(False)
         self.chk_show_all_images.toggled.connect(self._on_show_all_images_toggled)
         controls_layout.addWidget(self.chk_show_all_images)
         controls_layout.addStretch()
+
+        self.history_count_label = QLabel("0 images")
+        controls_layout.addWidget(self.history_count_label)
         v.addLayout(controls_layout)
 
-        # Create table widget for better organization
-        self.history_table = QTableWidget()
-        self.history_table.setColumnCount(8)
-        self.history_table.setHorizontalHeaderLabels([
-            "Thumbnail", "Date & Time", "Provider", "Model", "Prompt", "Resolution", "Cost", "Refs"
-        ])
+        # --- Model setup ---
+        self.history_model = HistoryTableModel(self)
+        self.history_model.set_data(self.history)
 
-        # Configure table
-        self.history_table.setAlternatingRowColors(True)
-        self.history_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.history_table.setSortingEnabled(True)
+        self.history_proxy = HistoryFilterProxyModel(self)
+        self.history_proxy.setSourceModel(self.history_model)
+        self.history_proxy.setDynamicSortFilter(True)
 
-        # Enable mouse tracking for hover preview
-        self.history_table.setMouseTracking(True)
-        self.history_table.viewport().setMouseTracking(True)
+        # --- Table view ---
+        self.history_view = QTableView()
+        self.history_view.setModel(self.history_proxy)
+        self.history_view.setAlternatingRowColors(True)
+        self.history_view.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.history_view.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.history_view.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        self.history_view.setSortingEnabled(True)
+        self.history_view.setMouseTracking(True)
+        self.history_view.viewport().setMouseTracking(True)
+        self.history_view.verticalHeader().setVisible(False)
+        self.history_view.verticalHeader().setDefaultSectionSize(80)
 
-        # Set custom delegate for thumbnail column (owner draw) if available
-        if ThumbnailDelegate:
-            thumbnail_delegate = ThumbnailDelegate(self.thumbnail_cache, self.history_table)
-            self.history_table.setItemDelegateForColumn(0, thumbnail_delegate)
+        # Tablet / pen support - kinetic scrolling
+        self.history_view.setDragEnabled(False)
+        if QScroller is not None:
+            try:
+                QScroller.grabGesture(self.history_view.viewport(), QScroller.LeftMouseButtonGesture)
+            except Exception:
+                pass
 
-        # Initialize hover preview popup
+        # Thumbnail delegate
+        thumbnail_delegate = ThumbnailDelegate(self.thumbnail_cache, self.history_view)
+        self.history_view.setItemDelegateForColumn(COL_THUMBNAIL, thumbnail_delegate)
+
+        # Hover preview popup
         from gui.image_preview_popup import ImagePreviewPopup
         self.preview_popup = ImagePreviewPopup(self, max_width=600, max_height=600)
-        
-        # Set column widths
-        header = self.history_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # Thumbnail
-        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # Date & Time
-        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)  # Provider
-        header.setSectionResizeMode(3, QHeaderView.Interactive)  # Model
-        header.setSectionResizeMode(4, QHeaderView.Stretch)  # Prompt - takes remaining space
-        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)  # Resolution
-        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Cost
-        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # Refs
-        
-        # Populate table with history
-        self.history_table.setRowCount(len(self.history))
 
-        # Preload thumbnails for first visible rows
-        first_visible = 0
-        last_visible = min(20, len(self.history))  # Preload first 20 thumbnails
+        # Column widths
+        header = self.history_view.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)   # Thumbnail
+        header.setSectionResizeMode(1, QHeaderView.ResizeToContents)   # Date & Time
+        header.setSectionResizeMode(2, QHeaderView.ResizeToContents)   # Provider
+        header.setSectionResizeMode(3, QHeaderView.Interactive)         # Model
+        header.setSectionResizeMode(4, QHeaderView.Stretch)            # Prompt
+        header.setSectionResizeMode(5, QHeaderView.ResizeToContents)   # Resolution
+        header.setSectionResizeMode(6, QHeaderView.ResizeToContents)   # Cost
+        header.setSectionResizeMode(7, QHeaderView.ResizeToContents)   # Refs
 
-        for row, item in enumerate(self.history):
-            if isinstance(item, dict):
-                # Thumbnail column - handled by custom delegate
-                # Store the path in the item so delegate can access it
-                thumbnail_item = QTableWidgetItem()
-                file_path = item.get('path', item.get('file_path', ''))
-                if file_path:
-                    path_str = str(file_path)
-                    thumbnail_item.setData(Qt.UserRole, path_str)
+        # Sort by date descending
+        self.history_view.sortByColumn(COL_DATETIME, Qt.DescendingOrder)
 
-                    # Preload thumbnail for visible rows
-                    if first_visible <= row <= last_visible:
-                        self.thumbnail_cache.get(path_str)  # Load into cache
+        v.addWidget(self.history_view)
 
-                self.history_table.setItem(row, 0, thumbnail_item)
-                # Set row height to accommodate thumbnail
-                self.history_table.setRowHeight(row, 80)
-
-                # Parse timestamp and combine date & time
-                timestamp = item.get('timestamp', '')
-                datetime_str = ''
-                sortable_datetime = None
-                if isinstance(timestamp, float):
-                    from datetime import datetime
-                    dt = datetime.fromtimestamp(timestamp)
-                    datetime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                    sortable_datetime = dt
-                elif isinstance(timestamp, str) and 'T' in timestamp:
-                    # ISO format
-                    from datetime import datetime
-                    try:
-                        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                        datetime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                        sortable_datetime = dt
-                    except:
-                        parts = timestamp.split('T')
-                        date_str = parts[0]
-                        time_str = parts[1].split('.')[0] if len(parts) > 1 else ''
-                        datetime_str = f"{date_str} {time_str}"
-                
-                # Date & Time column (combined)
-                datetime_item = QTableWidgetItem(datetime_str)
-                # Store sortable datetime for proper chronological sorting
-                if sortable_datetime:
-                    datetime_item.setData(Qt.UserRole + 1, sortable_datetime)
-                self.history_table.setItem(row, 1, datetime_item)
-                
-                # Provider column (now column 1)
-                provider = item.get('provider', '')
-                provider_item = QTableWidgetItem(provider.title() if provider else 'Unknown')
-                self.history_table.setItem(row, 2, provider_item)
-                
-                # Model column (now column 2)
-                model = item.get('model', '')
-                model_display = model.split('/')[-1] if '/' in model else model  # Simplify model names
-                model_item = QTableWidgetItem(model_display)
-                model_item.setToolTip(model)  # Full model name in tooltip
-                self.history_table.setItem(row, 3, model_item)
-                
-                # Prompt column (now column 3)
-                prompt = item.get('prompt', 'No prompt')
-                prompt_item = QTableWidgetItem(prompt)  # Show full prompt, not truncated
-                prompt_item.setToolTip(f"Full prompt:\n{prompt}")
-                self.history_table.setItem(row, 4, prompt_item)
-                
-                # Resolution column (now column 4)
-                width = item.get('width', '')
-                height = item.get('height', '')
-                resolution = f"{width}x{height}" if width and height else ''
-                resolution_item = QTableWidgetItem(resolution)
-                self.history_table.setItem(row, 5, resolution_item)
-
-                # Cost column (now column 5)
-                cost = item.get('cost', 0.0)
-                cost_str = f"${cost:.2f}" if cost > 0 else '-'
-                cost_item = QTableWidgetItem(cost_str)
-                self.history_table.setItem(row, 6, cost_item)
-
-                # References column (column 7)
-                ref_count = 0
-                ref_tooltip = ""
-
-                # Check for new multi-reference format
-                if 'imagen_references' in item:
-                    refs_data = item['imagen_references']
-                    if isinstance(refs_data, dict) and 'references' in refs_data:
-                        ref_count = len(refs_data['references'])
-                        # Build tooltip with reference details
-                        ref_names = []
-                        for ref in refs_data['references']:
-                            ref_path = ref.get('path', '')
-                            ref_name = Path(ref_path).name if ref_path else 'Unknown'
-                            ref_type = ref.get('type', '').upper()
-                            ref_names.append(f"{ref_name} ({ref_type})" if ref_type else ref_name)
-                        ref_tooltip = "Reference Images:\n" + "\n".join(ref_names)
-                # Check for legacy single reference format
-                elif 'reference_image' in item:
-                    ref_count = 1
-                    ref_path = item['reference_image']
-                    ref_name = Path(ref_path).name if ref_path else 'Unknown'
-                    ref_tooltip = f"Reference Image:\n{ref_name}"
-
-                # Display reference indicator
-                if ref_count > 0:
-                    ref_str = f"📎 {ref_count}" if ref_count > 1 else "📎"
-                    ref_item = QTableWidgetItem(ref_str)
-                    ref_item.setToolTip(ref_tooltip)
-                    # Center align the indicator
-                    ref_item.setTextAlignment(Qt.AlignCenter)
-                else:
-                    ref_item = QTableWidgetItem("")
-
-                self.history_table.setItem(row, 7, ref_item)
-
-                # Store the history item data in the first column for easy retrieval
-                datetime_item.setData(Qt.UserRole, item)
-
-        # Sort by date/time column (1) in descending order (newest first)
-        self.history_table.sortByColumn(1, Qt.DescendingOrder)
-
-        v.addWidget(QLabel(f"History ({len(self.history)} items):"))
-        v.addWidget(self.history_table)
-        
-        # Buttons
+        # --- Buttons ---
         h = QHBoxLayout()
-        self.btn_load_history = QPushButton("&Load Selected")  # Alt+L
-        self.btn_clear_history = QPushButton("C&lear History")  # Alt+L
+        self.btn_load_history = QPushButton("&Load Selected")
+        self.btn_clear_history = QPushButton("C&lear History")
         h.addWidget(self.btn_load_history)
         h.addStretch()
         h.addWidget(self.btn_clear_history)
         v.addLayout(h)
 
-        # Add shortcuts hint with enhanced visibility
-        history_shortcuts_label = create_shortcut_hint("Alt+L to load, Alt+C to clear, Double-click to load item")
+        # Shortcuts hint
+        history_shortcuts_label = create_shortcut_hint(
+            "Alt+L to load, Alt+C to clear, Double-click to load item"
+        )
         v.addWidget(history_shortcuts_label)
 
-        # Connect signals
-        # Only load on double-click, not single-click or selection change
-        self.history_table.itemDoubleClicked.connect(self._on_history_item_double_clicked)
+        # --- Connect signals ---
+        self.history_view.doubleClicked.connect(self._on_history_item_double_clicked)
         self.btn_load_history.clicked.connect(self._load_selected_history)
         self.btn_clear_history.clicked.connect(self._clear_history)
 
-        # Install event filter for hover preview and keyboard navigation
-        self.history_table.viewport().installEventFilter(self)
-        self.history_table.installEventFilter(self)
-    
+        # Search debounce timer
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(300)
+        self._search_timer.timeout.connect(self._apply_history_search)
+        self.history_search_edit.textChanged.connect(lambda: self._search_timer.start())
+        self.history_date_from.dateChanged.connect(lambda: self._search_timer.start())
+        self.history_date_to.dateChanged.connect(lambda: self._search_timer.start())
+
+        # Update count when model changes
+        self.history_proxy.rowsInserted.connect(self._update_history_count)
+        self.history_proxy.rowsRemoved.connect(self._update_history_count)
+        self.history_proxy.layoutChanged.connect(self._update_history_count)
+        self.history_proxy.modelReset.connect(self._update_history_count)
+        self.history_model.rowsInserted.connect(self._update_history_count)
+
+        # Install event filter for hover preview and keyboard nav
+        self.history_view.viewport().installEventFilter(self)
+        self.history_view.installEventFilter(self)
+
+        # Initial count
+        self._update_history_count()
+
+    def _apply_history_search(self):
+        """Apply current search/date filters to the history proxy model."""
+        self.history_proxy.setFilterText(self.history_search_edit.text())
+
+        date_from = self.history_date_from.date()
+        date_to = self.history_date_to.date()
+
+        # Only apply date filter if not at minimum (the "Any" value)
+        from_valid = date_from > self.history_date_from.minimumDate()
+        to_valid = date_to > self.history_date_to.minimumDate()
+
+        self.history_proxy.setDateRange(
+            date_from if from_valid else None,
+            date_to if to_valid else None
+        )
+
+    def _clear_history_search(self):
+        """Clear all search/filter fields."""
+        self.history_search_edit.clear()
+        self.history_date_from.setDate(self.history_date_from.minimumDate())
+        self.history_date_to.setDate(self.history_date_to.minimumDate())
+
+    def _update_history_count(self):
+        """Update the history count label."""
+        if hasattr(self, 'history_count_label') and hasattr(self, 'history_model'):
+            filtered = self.history_proxy.rowCount()
+            total = self.history_model.total_count()
+            if filtered == total:
+                self.history_count_label.setText(f"{total} images")
+            else:
+                self.history_count_label.setText(f"Showing {filtered} of {total} images")
+
     def _find_model_in_combo(self, model_id: str) -> int:
         """Find a model by its ID in the combo box.
         
@@ -6239,7 +6110,7 @@ For more detailed information, please refer to the full documentation.
                 self.history.append(history_entry)
 
             # Add new entries to history table without refreshing everything
-            if hasattr(self, 'history_table'):
+            if hasattr(self, 'history_model'):
                 self._add_to_history_table(history_entry)
             
             # Copy filename if enabled
@@ -6807,7 +6678,7 @@ For more detailed information, please refer to the full documentation.
                 self.history.append(history_entry)
 
                 # Update UI
-                if hasattr(self, 'history_table'):
+                if hasattr(self, 'history_model'):
                     self._add_to_history_table(history_entry)
 
                 # Load the image
@@ -7311,104 +7182,85 @@ For more detailed information, please refer to the full documentation.
         self.prompt_edit.setPlainText(template_text)
         self.tabs.setCurrentWidget(self.tab_generate)
     
-    def _on_history_item_double_clicked(self, item):
+    def _on_history_item_double_clicked(self, proxy_index):
         """Handle double-click on history item - load into image/video tab."""
-        row = self.history_table.row(item)
-        if row >= 0:
-            # Get the history data from the DateTime column (column 1) where it's stored
-            datetime_item = self.history_table.item(row, 1)
-            if datetime_item:
-                history_item = datetime_item.data(Qt.UserRole)
-                if isinstance(history_item, dict):
-                    # Check which tab the image came from
-                    source_tab = history_item.get('source_tab', 'image')
+        if not proxy_index.isValid():
+            return
 
-                    if source_tab == 'video':
-                        # Switch to video tab and display image there
-                        if hasattr(self, 'tab_video'):
-                            self.tabs.setCurrentWidget(self.tab_video)
-                            # Display image in video tab's image view
-                            path = history_item.get('path')
-                            if path and path.exists():
-                                from PySide6.QtGui import QPixmap
-                                pixmap = QPixmap(str(path))
-                                if not pixmap.isNull() and hasattr(self.tab_video, 'workspace_widget'):
-                                    scaled = pixmap.scaled(
-                                        self.tab_video.workspace_widget.output_image_label.size(),
-                                        Qt.KeepAspectRatio,
-                                        Qt.SmoothTransformation
-                                    )
-                                    self.tab_video.workspace_widget.output_image_label.setPixmap(scaled)
-                                    self.tab_video.workspace_widget._log_to_console(f"Loaded from history: {path.name}", "INFO")
-                    else:
-                        # Load into image tab
-                        path = history_item.get('path')
-                        if path and path.exists():
-                            try:
-                                # Switch to Generate tab
-                                self.tabs.setCurrentWidget(self.tab_generate)
+        # Map proxy index to source model to get the entry dict
+        source_index = self.history_proxy.mapToSource(proxy_index)
+        history_item = self.history_model.get_entry(source_index.row())
+        if not isinstance(history_item, dict):
+            return
 
-                                # Read and display the image
-                                image_data = path.read_bytes()
-                                self._last_displayed_image_path = path  # Track last displayed image
-                                self.current_image_data = image_data
+        source_tab = history_item.get('source_tab', 'image')
 
-                                # Use _display_image which handles all edge cases and resize logic
-                                self._display_image(image_data)
+        if source_tab == 'video':
+            if hasattr(self, 'tab_video'):
+                self.tabs.setCurrentWidget(self.tab_video)
+                path = history_item.get('path')
+                if path and path.exists():
+                    from PySide6.QtGui import QPixmap
+                    pixmap = QPixmap(str(path))
+                    if not pixmap.isNull() and hasattr(self.tab_video, 'workspace_widget'):
+                        scaled = pixmap.scaled(
+                            self.tab_video.workspace_widget.output_image_label.size(),
+                            Qt.KeepAspectRatio,
+                            Qt.SmoothTransformation
+                        )
+                        self.tab_video.workspace_widget.output_image_label.setPixmap(scaled)
+                        self.tab_video.workspace_widget._log_to_console(
+                            f"Loaded from history: {path.name}", "INFO"
+                        )
+        else:
+            path = history_item.get('path')
+            if path and path.exists():
+                try:
+                    self.tabs.setCurrentWidget(self.tab_generate)
+                    image_data = path.read_bytes()
+                    self._last_displayed_image_path = path
+                    self.current_image_data = image_data
+                    self._display_image(image_data)
+                    self.btn_save_image.setEnabled(True)
+                    self.btn_copy_image.setEnabled(True)
 
-                                # Enable save and copy buttons since we have an image
-                                self.btn_save_image.setEnabled(True)
-                                self.btn_copy_image.setEnabled(True)
+                    prompt = history_item.get('prompt', '')
+                    self.prompt_edit.setPlainText(prompt)
 
-                                # Load metadata
-                                prompt = history_item.get('prompt', '')
-                                self.prompt_edit.setPlainText(prompt)
+                    model = history_item.get('model', '')
+                    if model:
+                        idx = self._find_model_in_combo(model)
+                        if idx >= 0:
+                            self.model_combo.setCurrentIndex(idx)
 
-                                # Load model if available
-                                model = history_item.get('model', '')
-                                if model:
-                                    idx = self._find_model_in_combo(model)
-                                    if idx >= 0:
-                                        self.model_combo.setCurrentIndex(idx)
+                    provider = history_item.get('provider', '')
+                    if provider and provider != self.current_provider:
+                        idx = self.provider_combo.findText(provider)
+                        if idx >= 0:
+                            self.provider_combo.setCurrentIndex(idx)
 
-                                # Load provider if available and different
-                                provider = history_item.get('provider', '')
-                                if provider and provider != self.current_provider:
-                                    idx = self.provider_combo.findText(provider)
-                                    if idx >= 0:
-                                        self.provider_combo.setCurrentIndex(idx)
+                    if hasattr(self, 'imagen_reference_widget'):
+                        if 'imagen_references' in history_item:
+                            self.imagen_reference_widget.from_dict(history_item['imagen_references'])
+                        elif 'reference_image' in history_item:
+                            legacy_data = {
+                                "mode": "strict",
+                                "references": [{
+                                    "reference_id": 1,
+                                    "path": history_item['reference_image'],
+                                    "reference_type": "subject"
+                                }]
+                            }
+                            self.imagen_reference_widget.from_dict(legacy_data)
+                        else:
+                            self.imagen_reference_widget.clear_all()
 
-                                # Load reference images if available
-                                if hasattr(self, 'imagen_reference_widget'):
-                                    # Try new multi-reference format first
-                                    if 'imagen_references' in history_item:
-                                        self.imagen_reference_widget.from_dict(history_item['imagen_references'])
-                                    # Fall back to legacy single reference
-                                    elif 'reference_image' in history_item:
-                                        ref_path_str = history_item['reference_image']
-                                        # Convert legacy format to new dict format and load
-                                        legacy_data = {
-                                            "mode": "strict",
-                                            "references": [{
-                                                "reference_id": 1,
-                                                "path": ref_path_str,  # Correct key name for ImagenReference
-                                                "reference_type": "subject"
-                                            }]
-                                        }
-                                        self.imagen_reference_widget.from_dict(legacy_data)
-                                    else:
-                                        # No reference images in history - clear any existing ones
-                                        self.imagen_reference_widget.clear_all()
+                    self.status_label.setText("Loaded from history")
+                    self.status_bar.showMessage("Loaded from history", 3000)
+                    self._update_use_current_button_state()
 
-                                # Update status
-                                self.status_label.setText("Loaded from history")
-                                self.status_bar.showMessage(f"Loaded from history", 3000)
-
-                                # Update use current button state after loading history
-                                self._update_use_current_button_state()
-
-                            except Exception as e:
-                                self.output_image_label.setText(f"Error loading image: {e}")
+                except Exception as e:
+                    self.output_image_label.setText(f"Error loading image: {e}")
     
     def _load_history_item(self, item):
         """Load a history item and switch to Generate tab."""
@@ -7417,12 +7269,9 @@ For more detailed information, please refer to the full documentation.
     
     def _load_selected_history(self):
         """Load the selected history item."""
-        indexes = self.history_table.selectionModel().selectedRows()
+        indexes = self.history_view.selectionModel().selectedRows()
         if indexes:
-            row = indexes[0].row()
-            date_item = self.history_table.item(row, 0)
-            if date_item:
-                self._load_history_item(date_item)
+            self._on_history_item_double_clicked(indexes[0])
     
     def _clear_history(self):
         """Clear history."""
@@ -7433,66 +7282,50 @@ For more detailed information, please refer to the full documentation.
         )
         if reply == QMessageBox.Yes:
             self.history.clear()
-            self.history_table.setRowCount(0)
+            if hasattr(self, 'history_model'):
+                self.history_model.clear()
 
     def eventFilter(self, obj, event):
         """Handle events for history table - hover preview and keyboard navigation."""
         from PySide6.QtCore import QEvent
 
-        # Guard: Only process events if history_table exists
-        if not hasattr(self, 'history_table'):
+        if not hasattr(self, 'history_view'):
             return super().eventFilter(obj, event)
 
-        # Handle hover preview on history table viewport
-        if obj == self.history_table.viewport() and hasattr(self, 'preview_popup'):
+        # Handle hover preview on history view viewport
+        if obj == self.history_view.viewport() and hasattr(self, 'preview_popup'):
             if event.type() == QEvent.MouseMove:
-                # Get item at cursor position
                 pos = event.pos()
-                item = self.history_table.itemAt(pos)
-                if item:
-                    # Only show preview if hovering over thumbnail column (column 0)
-                    col = item.column()
-                    if col == 0:
-                        row = item.row()
-                        # Get image path from the datetime column (column 1) where history data is stored
-                        datetime_item = self.history_table.item(row, 1)
-                        if datetime_item:
-                            history_data = datetime_item.data(Qt.UserRole)
-                            if isinstance(history_data, dict):
-                                image_path = history_data.get('path')
-                                if image_path:
-                                    # Show preview at cursor position
-                                    global_pos = self.history_table.viewport().mapToGlobal(pos)
-                                    self.preview_popup.show_preview(image_path, global_pos)
-                                    return False
-                # Hide preview if not over thumbnail column
+                index = self.history_view.indexAt(pos)
+                if index.isValid() and index.column() == COL_THUMBNAIL:
+                    source_index = self.history_proxy.mapToSource(index)
+                    entry = self.history_model.get_entry(source_index.row())
+                    if isinstance(entry, dict):
+                        image_path = entry.get('path')
+                        if image_path:
+                            global_pos = self.history_view.viewport().mapToGlobal(pos)
+                            self.preview_popup.show_preview(image_path, global_pos)
+                            return False
                 if hasattr(self, 'preview_popup'):
                     self.preview_popup.schedule_hide(100)
             elif event.type() == QEvent.Leave:
-                # Hide preview when mouse leaves table
                 if hasattr(self, 'preview_popup'):
                     self.preview_popup.schedule_hide(100)
 
-        # Handle keyboard navigation on history table
-        if obj == self.history_table and event.type() == QEvent.KeyPress:
+        # Handle keyboard navigation on history view
+        if obj == self.history_view and event.type() == QEvent.KeyPress:
             key = event.key()
-
-            # Home - go to first row
             if key == Qt.Key_Home:
-                if self.history_table.rowCount() > 0:
-                    self.history_table.selectRow(0)
-                    self.history_table.scrollToTop()
+                if self.history_proxy.rowCount() > 0:
+                    self.history_view.selectRow(0)
+                    self.history_view.scrollToTop()
                 return True
-
-            # End - go to last row
             elif key == Qt.Key_End:
-                if self.history_table.rowCount() > 0:
-                    last_row = self.history_table.rowCount() - 1
-                    self.history_table.selectRow(last_row)
-                    self.history_table.scrollToBottom()
+                if self.history_proxy.rowCount() > 0:
+                    last_row = self.history_proxy.rowCount() - 1
+                    self.history_view.selectRow(last_row)
+                    self.history_view.scrollToBottom()
                 return True
-
-            # Enter/Return - load selected image
             elif key in (Qt.Key_Return, Qt.Key_Enter):
                 self._load_selected_history()
                 return True
@@ -7508,6 +7341,10 @@ For more detailed information, please refer to the full documentation.
         self.logger.info(f"Is video tab: {current_widget == self.tab_video}")
         self.logger.info(f"Video tab loaded: {self._video_tab_loaded}")
 
+        # Save history scroll position when leaving (not when switching to it)
+        if hasattr(self, 'history_view') and current_widget != self.tab_history:
+            self._history_scroll_pos = self.history_view.verticalScrollBar().value()
+
         # Lazy load video tab on first access
         if current_widget == self.tab_video and not self._video_tab_loaded:
             self.logger.info("Triggering video tab lazy load...")
@@ -7519,8 +7356,13 @@ For more detailed information, please refer to the full documentation.
 
         # If switching to history tab, check for new images not created by us
         if current_widget == self.tab_history:
-            # Check if there are new images in the folder that we didn't generate
             self._check_for_external_images()
+            # Restore scroll position if saved
+            if hasattr(self, '_history_scroll_pos') and hasattr(self, 'history_view'):
+                from PySide6.QtCore import QTimer
+                QTimer.singleShot(0, lambda: self.history_view.verticalScrollBar().setValue(
+                    self._history_scroll_pos
+                ))
 
     def _load_video_tab(self):
         """Lazy load the video tab when first accessed."""
@@ -8295,15 +8137,13 @@ For more detailed information, please refer to the full documentation.
             # Settings tab - provider is saved in config, not UI state
             
             # History tab - column widths
-            if hasattr(self, 'history_table'):
-                header = self.history_table.horizontalHeader()
+            if hasattr(self, 'history_view'):
+                header = self.history_view.horizontalHeader()
                 column_widths = []
-                for i in range(self.history_table.columnCount()):
+                for i in range(NUM_COLUMNS):
                     column_widths.append(header.sectionSize(i))
                 ui_state['history_column_widths'] = column_widths
                 ui_state['history_sort_column'] = header.sortIndicatorSection()
-                # Convert Qt.SortOrder enum to int
-                from PySide6.QtCore import Qt
                 sort_order = header.sortIndicatorOrder()
                 ui_state['history_sort_order'] = 0 if sort_order == Qt.AscendingOrder else 1
             
@@ -8470,18 +8310,16 @@ For more detailed information, please refer to the full documentation.
             # (UI state is for session state, config is for persistent settings)
             
             # Restore history table column widths
-            if hasattr(self, 'history_table'):
+            if hasattr(self, 'history_view'):
                 if 'history_column_widths' in ui_state:
-                    header = self.history_table.horizontalHeader()
+                    header = self.history_view.horizontalHeader()
                     widths = ui_state['history_column_widths']
-                    for i, width in enumerate(widths):
-                        if i < self.history_table.columnCount():
-                            header.resizeSection(i, width)
-                
+                    for i, w in enumerate(widths):
+                        if i < NUM_COLUMNS:
+                            header.resizeSection(i, w)
                 if 'history_sort_column' in ui_state and 'history_sort_order' in ui_state:
-                    from PySide6.QtCore import Qt
                     sort_order = Qt.AscendingOrder if ui_state['history_sort_order'] == 0 else Qt.DescendingOrder
-                    self.history_table.sortItems(ui_state['history_sort_column'], sort_order)
+                    self.history_view.sortByColumn(ui_state['history_sort_column'], sort_order)
             
             # Output console height is auto-managed; nothing to restore
 
@@ -8534,95 +8372,9 @@ For more detailed information, please refer to the full documentation.
             logger.error(f"Error restoring UI state: {e}")
 
     def _add_to_history_table(self, history_entry):
-        """Add a single new entry to the history table without refreshing everything."""
-        if not hasattr(self, 'history_table'):
-            return
-
-        from PySide6.QtWidgets import QTableWidgetItem
-
-        # Block selection signals to prevent triggering image display while inserting
-        self.history_table.selectionModel().blockSignals(True)
-
-        try:
-            # Add a new row at the top (newest first)
-            row_count = self.history_table.rowCount()
-            self.history_table.insertRow(0)  # Insert at top
-
-            # Thumbnail column
-            thumbnail_item = QTableWidgetItem()
-            file_path = history_entry.get('path', '')
-            if file_path:
-                path_str = str(file_path)
-                thumbnail_item.setData(Qt.UserRole, path_str)
-                # Preload thumbnail
-                self.thumbnail_cache.get(path_str)
-            self.history_table.setItem(0, 0, thumbnail_item)
-            self.history_table.setRowHeight(0, 80)
-
-            # Parse timestamp
-            timestamp = history_entry.get('timestamp', '')
-            datetime_str = ''
-            sortable_datetime = None
-            if timestamp:
-                try:
-                    if isinstance(timestamp, (int, float)):
-                        dt = datetime.fromtimestamp(timestamp)
-                        datetime_str = dt.strftime('%Y-%m-%d %H:%M')
-                        sortable_datetime = dt.isoformat()
-                    elif 'T' in str(timestamp):
-                        parts = str(timestamp).split('T')
-                        date_str = parts[0]
-                        time_str = parts[1].split('.')[0] if len(parts) > 1 else ''
-                        datetime_str = f"{date_str} {time_str}"
-                except:
-                    datetime_str = str(timestamp)
-
-            # Date & Time column
-            datetime_item = QTableWidgetItem(datetime_str)
-            if sortable_datetime:
-                datetime_item.setData(Qt.UserRole + 1, sortable_datetime)
-            self.history_table.setItem(0, 1, datetime_item)
-
-            # Provider column
-            provider = history_entry.get('provider', '')
-            provider_item = QTableWidgetItem(provider.title() if provider else 'Unknown')
-            self.history_table.setItem(0, 2, provider_item)
-
-            # Model column
-            model = history_entry.get('model', '')
-            model_display = model.split('/')[-1] if '/' in model else model
-            model_item = QTableWidgetItem(model_display)
-            model_item.setToolTip(model)
-            self.history_table.setItem(0, 3, model_item)
-
-            # Prompt column
-            prompt = history_entry.get('prompt', 'No prompt')
-            prompt_item = QTableWidgetItem(prompt)
-            prompt_item.setToolTip(f"Full prompt:\n{prompt}")
-            self.history_table.setItem(0, 4, prompt_item)
-
-            # Resolution column
-            width = history_entry.get('width', '')
-            height = history_entry.get('height', '')
-            resolution = f"{width}x{height}" if width and height else ''
-            resolution_item = QTableWidgetItem(resolution)
-            self.history_table.setItem(0, 5, resolution_item)
-
-            # Cost column
-            cost = history_entry.get('cost', 0.0)
-            cost_str = f"${cost:.2f}" if cost > 0 else '-'
-            cost_item = QTableWidgetItem(cost_str)
-            self.history_table.setItem(0, 6, cost_item)
-
-            # Store the history item data for retrieval
-            datetime_item.setData(Qt.UserRole, history_entry)
-
-            # Clear any existing selection to prevent old images from overriding the new one
-            self.history_table.clearSelection()
-
-        finally:
-            # Always unblock signals, even if an error occurred
-            self.history_table.selectionModel().blockSignals(False)
+        """Add a single new entry to the history table."""
+        if hasattr(self, 'history_model'):
+            self.history_model.add_entry(history_entry)
 
     def add_to_history(self, history_entry):
         """Public method to add an entry to history from other tabs."""
@@ -8631,26 +8383,20 @@ For more detailed information, please refer to the full documentation.
 
     def _check_for_external_images(self):
         """Check if there are new images in the folder that we didn't generate."""
-        # Get current paths in our history
-        current_paths = {str(item.get('path', '')) for item in self.history if item.get('path')}
+        if hasattr(self, 'history_model'):
+            current_paths = self.history_model.entry_paths()
+        else:
+            current_paths = {str(item.get('path', '')) for item in self.history if item.get('path')}
 
-        # Scan disk for all images
         show_all = hasattr(self, 'chk_show_all_images') and self.chk_show_all_images.isChecked()
         disk_paths = scan_disk_history(project_only=not show_all)
 
-        # Find new images
-        new_images = []
-        for path in disk_paths[:100]:  # Limit scan
+        new_entries = []
+        for path in disk_paths:
             if str(path) not in current_paths:
-                new_images.append(path)
-
-        # If we found new images, add them
-        if new_images:
-            for path in new_images:
-                # Try to read metadata
                 sidecar = read_image_sidecar(path)
                 if sidecar:
-                    history_entry = {
+                    entry = {
                         'path': path,
                         'prompt': sidecar.get('prompt', ''),
                         'timestamp': sidecar.get('timestamp', path.stat().st_mtime),
@@ -8661,7 +8407,7 @@ For more detailed information, please refer to the full documentation.
                         'cost': sidecar.get('cost', 0.0)
                     }
                 else:
-                    history_entry = {
+                    entry = {
                         'path': path,
                         'prompt': path.stem.replace('_', ' '),
                         'timestamp': path.stat().st_mtime,
@@ -8669,142 +8415,17 @@ For more detailed information, please refer to the full documentation.
                         'provider': '',
                         'cost': 0.0
                     }
+                new_entries.append(entry)
 
-                self.history.append(history_entry)
-                self._add_to_history_table(history_entry)
+        if new_entries:
+            self.history.extend(new_entries)
+            if hasattr(self, 'history_model'):
+                self.history_model.add_entries(new_entries)
 
     def _refresh_history_table(self):
         """Refresh the history table with current history data."""
-        if not hasattr(self, 'history_table'):
-            return
-
-        # Import QTableWidgetItem if needed
-        from PySide6.QtWidgets import QTableWidgetItem
-
-        # Clear and repopulate the table
-        self.history_table.setRowCount(len(self.history))
-
-        # Preload thumbnails for visible rows to improve performance
-        # Get visible range
-        first_visible = 0
-        last_visible = min(20, len(self.history))  # Preload first 20
-
-        for row, item in enumerate(self.history):
-            if isinstance(item, dict):
-                # Thumbnail column - handled by custom delegate
-                # Store the path in the item so delegate can access it
-                thumbnail_item = QTableWidgetItem()
-                file_path = item.get('path', item.get('file_path', ''))
-                if file_path:
-                    path_str = str(file_path)
-                    thumbnail_item.setData(Qt.UserRole, path_str)
-
-                    # Preload thumbnail for visible rows
-                    if first_visible <= row <= last_visible:
-                        self.thumbnail_cache.get(path_str)  # Load into cache
-
-                self.history_table.setItem(row, 0, thumbnail_item)
-                # Set row height to accommodate thumbnail
-                self.history_table.setRowHeight(row, 80)
-
-                # Parse timestamp and combine date & time
-                timestamp = item.get('timestamp', '')
-                datetime_str = ''
-                sortable_datetime = None
-                if isinstance(timestamp, float):
-                    from datetime import datetime
-                    dt = datetime.fromtimestamp(timestamp)
-                    datetime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                    sortable_datetime = dt
-                elif isinstance(timestamp, str) and 'T' in timestamp:
-                    # ISO format
-                    from datetime import datetime
-                    try:
-                        dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
-                        datetime_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-                        sortable_datetime = dt
-                    except:
-                        parts = timestamp.split('T')
-                        date_str = parts[0]
-                        time_str = parts[1].split('.')[0] if len(parts) > 1 else ''
-                        datetime_str = f"{date_str} {time_str}"
-                
-                # Date & Time column (combined)
-                datetime_item = QTableWidgetItem(datetime_str)
-                # Store sortable datetime for proper chronological sorting
-                if sortable_datetime:
-                    datetime_item.setData(Qt.UserRole + 1, sortable_datetime)
-                self.history_table.setItem(row, 1, datetime_item)
-                
-                # Provider column (now column 1)
-                provider = item.get('provider', '')
-                provider_item = QTableWidgetItem(provider.title() if provider else 'Unknown')
-                self.history_table.setItem(row, 2, provider_item)
-                
-                # Model column (now column 2)
-                model = item.get('model', '')
-                model_display = model.split('/')[-1] if '/' in model else model
-                model_item = QTableWidgetItem(model_display)
-                model_item.setToolTip(model)
-                self.history_table.setItem(row, 3, model_item)
-                
-                # Prompt column (now column 3)
-                prompt = item.get('prompt', 'No prompt')
-                prompt_item = QTableWidgetItem(prompt)  # Show full prompt, not truncated
-                prompt_item.setToolTip(f"Full prompt:\n{prompt}")
-                self.history_table.setItem(row, 4, prompt_item)
-                
-                # Resolution column (now column 4)
-                width = item.get('width', '')
-                height = item.get('height', '')
-                resolution = f"{width}x{height}" if width and height else ''
-                resolution_item = QTableWidgetItem(resolution)
-                self.history_table.setItem(row, 5, resolution_item)
-
-                # Cost column (now column 5)
-                cost = item.get('cost', 0.0)
-                cost_str = f"${cost:.2f}" if cost > 0 else '-'
-                cost_item = QTableWidgetItem(cost_str)
-                self.history_table.setItem(row, 6, cost_item)
-
-                # References column (column 7)
-                ref_count = 0
-                ref_tooltip = ""
-
-                # Check for new multi-reference format
-                if 'imagen_references' in item:
-                    refs_data = item['imagen_references']
-                    if isinstance(refs_data, dict) and 'references' in refs_data:
-                        ref_count = len(refs_data['references'])
-                        # Build tooltip with reference details
-                        ref_names = []
-                        for ref in refs_data['references']:
-                            ref_path = ref.get('path', '')
-                            ref_name = Path(ref_path).name if ref_path else 'Unknown'
-                            ref_type = ref.get('type', '').upper()
-                            ref_names.append(f"{ref_name} ({ref_type})" if ref_type else ref_name)
-                        ref_tooltip = "Reference Images:\n" + "\n".join(ref_names)
-                # Check for legacy single reference format
-                elif 'reference_image' in item:
-                    ref_count = 1
-                    ref_path = item['reference_image']
-                    ref_name = Path(ref_path).name if ref_path else 'Unknown'
-                    ref_tooltip = f"Reference Image:\n{ref_name}"
-
-                # Display reference indicator
-                if ref_count > 0:
-                    ref_str = f"📎 {ref_count}" if ref_count > 1 else "📎"
-                    ref_item = QTableWidgetItem(ref_str)
-                    ref_item.setToolTip(ref_tooltip)
-                    # Center align the indicator
-                    ref_item.setTextAlignment(Qt.AlignCenter)
-                else:
-                    ref_item = QTableWidgetItem("")
-
-                self.history_table.setItem(row, 7, ref_item)
-
-                # Store the history item data in the first column for easy retrieval
-                datetime_item.setData(Qt.UserRole, item)
+        if hasattr(self, 'history_model'):
+            self.history_model.set_data(self.history)
 
     def _open_wikimedia_search(self):
         """Open Wikimedia Commons image search dialog."""
