@@ -84,6 +84,11 @@ try:
     from gui.local_sd_widget import LocalSDWidget
 except ImportError:
     LocalSDWidget = None
+from gui.theme import (
+    CYAN, CYAN_DARK, NAVY, NAVY_LIGHT, NAVY_INPUT, NAVY_DARK,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
+    BORDER_CYAN, GREEN, RED, AMBER
+)
 
 # Midjourney has its own dedicated tab now, no longer needs panel import
 try:
@@ -310,14 +315,14 @@ class MainWindow(QMainWindow):
         except Exception as e:
             logger.error(f"Error toggling image: {e}")
 
-    def _append_to_console(self, message: str, color: str = "#cccccc", is_separator: bool = False):
+    def _append_to_console(self, message: str, color: str = TEXT_SECONDARY, is_separator: bool = False):
         """Append a message to the console with optional color and log it."""
         from PySide6.QtGui import QTextCursor
 
         # Log the message (skip separators)
         if not is_separator and message:
             # Determine log level based on color
-            if color == "#ff6666":  # Red - Error
+            if color in ("#ff6666", RED):  # Red - Error
                 logger.error(f"Console: {message}")
             elif color == "#ffaa00":  # Orange - Warning
                 logger.warning(f"Console: {message}")
@@ -332,11 +337,11 @@ class MainWindow(QMainWindow):
             # Add a horizontal separator
             cursor = self.output_text.textCursor()
             cursor.movePosition(QTextCursor.End)
-            cursor.insertHtml('<hr style="border: none; border-top: 1px solid #666; margin: 2px 0; padding: 0;">')
+            cursor.insertHtml(f'<hr style="border: none; border-top: 1px solid {TEXT_MUTED}; margin: 2px 0; padding: 0;">')
 
         # Format the message with color
         timestamp = datetime.now().strftime("%H:%M:%S")
-        formatted = f'<span style="color: #888;">[{timestamp}]</span> <span style="color: {color};">{message}</span>'
+        formatted = f'<span style="color: {TEXT_MUTED};">[{timestamp}]</span> <span style="color: {color};">{message}</span>'
 
         # Append to console without extra spacing
         cursor = self.output_text.textCursor()
@@ -769,7 +774,7 @@ class MainWindow(QMainWindow):
 
         # Dynamic reference hint (shown when NBP has multiple references)
         self.ref_hint_label = QLabel("")
-        self.ref_hint_label.setStyleSheet("color: #2196F3; font-size: 9pt;")
+        self.ref_hint_label.setStyleSheet(f"color: {CYAN}; font-size: 9pt;")
         self.ref_hint_label.setVisible(False)
         prompt_header_layout.addWidget(self.ref_hint_label)
 
@@ -777,7 +782,7 @@ class MainWindow(QMainWindow):
 
         # Add find tip (right side)
         find_tip = QLabel("(Ctrl+F to search)")
-        find_tip.setStyleSheet("color: #888; font-size: 9pt;")
+        find_tip.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 9pt;")
         prompt_header_layout.addWidget(find_tip)
 
         prompt_layout.addLayout(prompt_header_layout)
@@ -874,16 +879,21 @@ class MainWindow(QMainWindow):
         self.image_settings_toggle = QPushButton("▶ &Image Settings")
         self.image_settings_toggle.setCheckable(True)
         self.image_settings_toggle.clicked.connect(self._toggle_image_settings)
-        self.image_settings_toggle.setStyleSheet("""
-            QPushButton {
+        self.image_settings_toggle.setStyleSheet(f"""
+            QPushButton {{
                 text-align: left;
                 padding: 5px;
                 border: none;
                 background: transparent;
-            }
-            QPushButton:hover {
-                background: rgba(0, 0, 0, 0.05);
-            }
+                color: {TEXT_PRIMARY};
+            }}
+            QPushButton:hover {{
+                background: {NAVY};
+            }}
+            QPushButton:checked {{
+                background-color: rgba(0, 212, 255, 0.12);
+                border-left: 2px solid {CYAN};
+            }}
         """)
         bottom_layout.addWidget(self.image_settings_toggle)
         
@@ -988,15 +998,15 @@ class MainWindow(QMainWindow):
 
         # Label to show selected social media size
         self.social_size_label = QLabel("")
-        self.social_size_label.setStyleSheet("""
-            QLabel {
-                color: #2c5aa0;
+        self.social_size_label.setStyleSheet(f"""
+            QLabel {{
+                color: {CYAN};
                 font-weight: bold;
                 padding: 2px 5px;
-                background-color: #e8f4ff;
-                border: 1px solid #b3d9ff;
+                background-color: {NAVY_INPUT};
+                border: 1px solid {BORDER_CYAN};
                 border-radius: 3px;
-            }
+            }}
         """)
         self.social_size_label.setVisible(False)
         social_v_layout.addWidget(self.social_size_label)
@@ -1083,16 +1093,21 @@ class MainWindow(QMainWindow):
         self.ref_image_toggle.setCheckable(True)
         self.ref_image_toggle.setChecked(False)
         self.ref_image_toggle.clicked.connect(lambda checked: self._toggle_ref_image_settings(checked))
-        self.ref_image_toggle.setStyleSheet("""
-            QPushButton {
+        self.ref_image_toggle.setStyleSheet(f"""
+            QPushButton {{
                 text-align: left;
                 padding: 5px;
                 background: transparent;
                 border: none;
-            }
-            QPushButton:hover {
-                background: rgba(0, 0, 0, 0.05);
-            }
+                color: {TEXT_PRIMARY};
+            }}
+            QPushButton:hover {{
+                background: {NAVY};
+            }}
+            QPushButton:checked {{
+                background-color: rgba(0, 212, 255, 0.12);
+                border-left: 2px solid {CYAN};
+            }}
         """)
         bottom_layout.addWidget(self.ref_image_toggle)
 
@@ -1272,7 +1287,9 @@ class MainWindow(QMainWindow):
         # Output image widget
         self.output_image_label = QLabel()
         self.output_image_label.setAlignment(Qt.AlignCenter)
-        self.output_image_label.setStyleSheet("border: 1px solid #ccc; background-color: #f5f5f5;")
+        self.output_image_label.setStyleSheet(
+            f"border: 1px solid {BORDER_CYAN}; background-color: {NAVY_LIGHT};"
+        )
         self.output_image_label.setScaledContents(False)  # We handle scaling manually
 
         # Midjourney command display widget
@@ -1286,21 +1303,21 @@ class MainWindow(QMainWindow):
         self.midjourney_command_display.setMaximumHeight(120)
         from PySide6.QtGui import QFont
         self.midjourney_command_display.setFont(QFont("Consolas", 11))
-        self.midjourney_command_display.setStyleSheet("""
-            QTextEdit {
-                background-color: #40444B;
-                color: #7289DA;
-                border: 2px solid #7289DA;
+        self.midjourney_command_display.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {NAVY_INPUT};
+                color: {TEXT_PRIMARY};
+                border: 2px solid {BORDER_CYAN};
                 border-radius: 4px;
                 padding: 10px;
-            }
+            }}
         """)
         mj_layout.addWidget(QLabel("Discord Command:"))
         mj_layout.addWidget(self.midjourney_command_display)
 
         # Info label
         mj_info = QLabel("✅ Command will be copied when you click Generate\n📋 Paste in Discord and press Enter")
-        mj_info.setStyleSheet("color: #666; padding: 10px;")
+        mj_info.setStyleSheet(f"color: {TEXT_MUTED}; padding: 10px;")
         mj_info.setAlignment(Qt.AlignCenter)
         mj_layout.addWidget(mj_info)
 
@@ -1320,7 +1337,7 @@ class MainWindow(QMainWindow):
 
         # Minimal console header label
         console_header = QLabel("Status Console")
-        console_header.setStyleSheet("color: #666; font-size: 9pt; padding: 0px; margin: 0px;")
+        console_header.setStyleSheet(f"color: {TEXT_MUTED}; font-size: 9pt; padding: 0px; margin: 0px;")
         console_header.setMaximumHeight(16)
         console_layout.addWidget(console_header)
 
@@ -1331,17 +1348,15 @@ class MainWindow(QMainWindow):
         self.output_text.setMinimumHeight(50)  # Minimum height to prevent collapse
         self.output_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         # Terminal-like styling - remove paragraph spacing
-        self.output_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #1e1e1e;
-                color: #cccccc;
-                font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
-                font-size: 10pt;
-                border: 1px solid #444;
-                padding: 4px;
-                line-height: 1.0;
-            }
-        """)
+        self.output_text.setStyleSheet(
+            f"QTextEdit {{"
+            f"  background-color: {NAVY_DARK}; color: {TEXT_SECONDARY};"
+            f"  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;"
+            f"  font-size: 10pt;"
+            f"  border: 1px solid {BORDER_CYAN}; border-radius: 4px;"
+            f"  padding: 4px; line-height: 1.0;"
+            f"}}"
+        )
         # Set document margins to reduce spacing between lines
         doc = self.output_text.document()
         doc.setDocumentMargin(0)
@@ -1640,7 +1655,7 @@ class MainWindow(QMainWindow):
 2. Run: <code>gcloud auth application-default login</code>
 3. Click 'Check Status' below""")
         quick_setup.setWordWrap(True)
-        quick_setup.setStyleSheet("QLabel { padding: 10px; background-color: #f5f5f5; }")
+        quick_setup.setStyleSheet(f"QLabel {{ padding: 10px; background-color: {NAVY_LIGHT}; }}")
         gcloud_help_layout.addWidget(quick_setup)
         
         # Google Cloud buttons
@@ -1770,7 +1785,7 @@ class MainWindow(QMainWindow):
             "and automatically associate them with your prompts based on timing and confidence scoring.</i>"
         )
         info_label.setWordWrap(True)
-        info_label.setStyleSheet("color: gray; font-size: 9pt; padding: 10px;")
+        info_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 9pt; padding: 10px;")
         midjourney_layout.addWidget(info_label)
 
         v.addWidget(midjourney_group)
@@ -1798,7 +1813,7 @@ class MainWindow(QMainWindow):
         config_path = str(self.config.config_path)
         config_label = QLabel(f"Config stored at: {config_path}")
         config_label.setWordWrap(True)
-        config_label.setStyleSheet("color: gray; font-size: 10pt;")
+        config_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10pt;")
         options_layout.addWidget(config_label)
 
         v.addWidget(options_group)
@@ -1820,8 +1835,8 @@ class MainWindow(QMainWindow):
                 else:
                     self.gcloud_status_label.setText("✓ Authenticated [cached]")
                     self.project_id_edit.setText("")
-                self.gcloud_status_label.setStyleSheet("color: green;")
-        
+                self.gcloud_status_label.setStyleSheet(f"color: {GREEN};")
+
         # Local SD model management widget
         if LocalSDWidget:
             self.local_sd_group = QGroupBox("Local Stable Diffusion")
@@ -1889,7 +1904,7 @@ class MainWindow(QMainWindow):
         # Status and test button
         discord_status_layout = QHBoxLayout()
         self.discord_status_label = QLabel("Status: Not connected")
-        self.discord_status_label.setStyleSheet("color: gray;")
+        self.discord_status_label.setStyleSheet(f"color: {TEXT_SECONDARY};")
         discord_status_layout.addWidget(self.discord_status_label)
         discord_status_layout.addStretch()
 
@@ -1904,7 +1919,7 @@ class MainWindow(QMainWindow):
             'setup. See Plans/DiscordRichPresence.md for details.</small>'
         )
         discord_hint.setOpenExternalLinks(True)
-        discord_hint.setStyleSheet("color: gray;")
+        discord_hint.setStyleSheet(f"color: {TEXT_SECONDARY};")
         discord_layout.addWidget(discord_hint)
 
         v.addWidget(discord_group)
@@ -2118,7 +2133,7 @@ class MainWindow(QMainWindow):
 
             self.help_search_results = QLabel("")
             self.help_search_results.setMinimumWidth(70)
-            self.help_search_results.setStyleSheet("color: #666;")
+            self.help_search_results.setStyleSheet(f"color: {TEXT_MUTED};")
             nav_layout.addWidget(self.help_search_results)
             
             # Add the navigation widget (not layout) to the main layout
@@ -2483,7 +2498,7 @@ class MainWindow(QMainWindow):
 
         self.help_search_results = QLabel("")
         self.help_search_results.setMinimumWidth(60)
-        self.help_search_results.setStyleSheet("color: #666;")
+        self.help_search_results.setStyleSheet(f"color: {TEXT_MUTED};")
         nav_layout.addWidget(self.help_search_results)
         
         # Add the navigation widget (not layout) to the main layout
@@ -2629,48 +2644,50 @@ class MainWindow(QMainWindow):
     <meta charset="UTF-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <style>
-        body {{ 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Color Emoji", 
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Color Emoji",
                          "Apple Color Emoji", "Segoe UI Emoji", Roboto, Helvetica, Arial, sans-serif;
             font-size: 13pt;
             line-height: 1.4;
             margin: 10px;
+            background-color: {NAVY};
+            color: {TEXT_PRIMARY};
         }}
-        h1 {{ font-size: 20pt; color: #2c3e50; }}
-        h2 {{ font-size: 16pt; color: #2c3e50; }}
-        h3 {{ font-size: 14pt; color: #2c3e50; }}
-        code {{ 
-            background-color: #f8f9fa; 
-            padding: 2px 4px; 
-            border-radius: 3px; 
+        h1 {{ font-size: 20pt; color: {CYAN}; }}
+        h2 {{ font-size: 16pt; color: {CYAN}; }}
+        h3 {{ font-size: 14pt; color: {CYAN}; }}
+        code {{
+            background-color: {NAVY_INPUT};
+            padding: 2px 4px;
+            border-radius: 3px;
         }}
-        pre {{ 
-            background-color: #f8f9fa; 
-            padding: 10px; 
-            border-radius: 5px; 
-            overflow-x: auto; 
+        pre {{
+            background-color: {NAVY_INPUT};
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
         }}
-        a {{ color: #0366d6; text-decoration: none; }}
+        a {{ color: {CYAN}; text-decoration: none; }}
         a:hover {{ text-decoration: underline; }}
-        table {{ 
-            border-collapse: collapse; 
-            width: 100%; 
+        table {{
+            border-collapse: collapse;
+            width: 100%;
             margin: 15px 0;
         }}
-        th, td {{ 
-            border: 1px solid #ddd; 
-            padding: 8px; 
+        th, td {{
+            border: 1px solid {BORDER_CYAN};
+            padding: 8px;
             text-align: left;
         }}
-        th {{ 
-            background-color: #f0f0f0; 
+        th {{
+            background-color: {NAVY_LIGHT};
             font-weight: bold;
         }}
-        tr:nth-child(even) {{ 
-            background-color: #f9f9f9;
+        tr:nth-child(even) {{
+            background-color: {NAVY_LIGHT};
         }}
         td:first-child {{
-            background-color: #f5f5f5;
+            background-color: {NAVY_LIGHT};
             font-weight: 500;
         }}
         img {{
@@ -2678,18 +2695,18 @@ class MainWindow(QMainWindow):
             height: auto;
             display: block;
             margin: 20px auto;
-            border: 1px solid #ddd;
+            border: 1px solid {BORDER_CYAN};
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         }}
         hr {{
             border: 0;
             height: 1px;
-            background: #e1e4e8;
+            background: {BORDER_CYAN};
             margin: 30px 0;
         }}
         em {{
-            color: #666;
+            color: {TEXT_MUTED};
             font-style: italic;
             display: block;
             text-align: center;
@@ -2711,46 +2728,48 @@ class MainWindow(QMainWindow):
     <meta charset="UTF-8">
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
     <style>
-        body {{ 
+        body {{
             font-size: 13pt;
             line-height: 1.4;
             margin: 10px;
+            background-color: {NAVY};
+            color: {TEXT_PRIMARY};
         }}
-        h1 {{ font-size: 20pt; color: #2c3e50; }}
-        h2 {{ font-size: 16pt; color: #2c3e50; }}
-        h3 {{ font-size: 14pt; color: #2c3e50; }}
-        code {{ 
-            background-color: #f8f9fa; 
-            padding: 2px 4px; 
-            border-radius: 3px; 
+        h1 {{ font-size: 20pt; color: {CYAN}; }}
+        h2 {{ font-size: 16pt; color: {CYAN}; }}
+        h3 {{ font-size: 14pt; color: {CYAN}; }}
+        code {{
+            background-color: {NAVY_INPUT};
+            padding: 2px 4px;
+            border-radius: 3px;
         }}
-        pre {{ 
-            background-color: #f8f9fa; 
-            padding: 10px; 
-            border-radius: 5px; 
-            overflow-x: auto; 
+        pre {{
+            background-color: {NAVY_INPUT};
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
         }}
-        a {{ color: #0366d6; text-decoration: none; }}
+        a {{ color: {CYAN}; text-decoration: none; }}
         a:hover {{ text-decoration: underline; }}
-        table {{ 
-            border-collapse: collapse; 
-            width: 100%; 
+        table {{
+            border-collapse: collapse;
+            width: 100%;
             margin: 15px 0;
         }}
-        th, td {{ 
-            border: 1px solid #ddd; 
-            padding: 8px; 
+        th, td {{
+            border: 1px solid {BORDER_CYAN};
+            padding: 8px;
             text-align: left;
         }}
-        th {{ 
-            background-color: #f0f0f0; 
+        th {{
+            background-color: {NAVY_LIGHT};
             font-weight: bold;
         }}
-        tr:nth-child(even) {{ 
-            background-color: #f9f9f9;
+        tr:nth-child(even) {{
+            background-color: {NAVY_LIGHT};
         }}
         td:first-child {{
-            background-color: #f5f5f5;
+            background-color: {NAVY_LIGHT};
             font-weight: 500;
         }}
         img {{
@@ -2758,18 +2777,18 @@ class MainWindow(QMainWindow):
             height: auto;
             display: block;
             margin: 20px auto;
-            border: 1px solid #ddd;
+            border: 1px solid {BORDER_CYAN};
             border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         }}
         hr {{
             border: 0;
             height: 1px;
-            background: #e1e4e8;
+            background: {BORDER_CYAN};
             margin: 30px 0;
         }}
         em {{
-            color: #666;
+            color: {TEXT_MUTED};
             font-style: italic;
             display: block;
             text-align: center;
@@ -2835,19 +2854,19 @@ class MainWindow(QMainWindow):
             '<meta charset="UTF-8">',
             '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">',
             '<style>',
-            'body { font-size: 13pt; line-height: 1.4; margin: 10px; }',
-            'h1 { font-size: 20pt; color: #2c3e50; }',
-            'h2 { font-size: 16pt; color: #2c3e50; }',
-            'h3 { font-size: 14pt; color: #2c3e50; }',
-            'code { background-color: #f8f9fa; padding: 2px 4px; border-radius: 3px; }',
-            'pre { background-color: #f8f9fa; padding: 10px; border-radius: 5px; overflow-x: auto; }',
-            'a { color: #0366d6; text-decoration: none; }',
+            f'body {{ font-size: 13pt; line-height: 1.4; margin: 10px; background-color: {NAVY}; color: {TEXT_PRIMARY}; }}',
+            f'h1 {{ font-size: 20pt; color: {CYAN}; }}',
+            f'h2 {{ font-size: 16pt; color: {CYAN}; }}',
+            f'h3 {{ font-size: 14pt; color: {CYAN}; }}',
+            f'code {{ background-color: {NAVY_INPUT}; padding: 2px 4px; border-radius: 3px; }}',
+            f'pre {{ background-color: {NAVY_INPUT}; padding: 10px; border-radius: 5px; overflow-x: auto; }}',
+            f'a {{ color: {CYAN}; text-decoration: none; }}',
             'a:hover { text-decoration: underline; }',
             'table { border-collapse: collapse; width: 100%; margin: 15px 0; }',
-            'th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }',
-            'th { background-color: #f0f0f0; font-weight: bold; }',
-            'tr:nth-child(even) { background-color: #f9f9f9; }',
-            'td:first-child { background-color: #f5f5f5; font-weight: 500; }',
+            f'th, td {{ border: 1px solid {BORDER_CYAN}; padding: 8px; text-align: left; }}',
+            f'th {{ background-color: {NAVY_LIGHT}; font-weight: bold; }}',
+            f'tr:nth-child(even) {{ background-color: {NAVY_LIGHT}; }}',
+            f'td:first-child {{ background-color: {NAVY_LIGHT}; font-weight: 500; }}',
             '</style>',
             '</head>',
             '<body>'
@@ -4472,7 +4491,7 @@ For more detailed information, please refer to the full documentation.
         """Check Google Cloud CLI status asynchronously using background thread."""
         # Show "checking" status immediately (non-blocking)
         self.gcloud_status_label.setText("⟳ Checking...")
-        self.gcloud_status_label.setStyleSheet("color: blue;")
+        self.gcloud_status_label.setStyleSheet(f"color: {CYAN_DARK};")
         self.btn_check_status.setEnabled(False)  # Prevent multiple simultaneous checks
 
         # Start background thread (non-blocking)
@@ -4486,7 +4505,7 @@ For more detailed information, please refer to the full documentation.
         """Handle gcloud status check results (runs on main thread via signal)."""
         if is_auth:
             self.gcloud_status_label.setText("✓ Authenticated")
-            self.gcloud_status_label.setStyleSheet("color: green;")
+            self.gcloud_status_label.setStyleSheet(f"color: {GREEN};")
             self.config.set("gcloud_auth_validated", True)
         else:
             self.project_id_edit.setText("")
@@ -4496,7 +4515,7 @@ For more detailed information, please refer to the full documentation.
                 self.gcloud_status_label.setText("✗ Not authenticated")
             else:
                 self.gcloud_status_label.setText(f"✗ {status_msg}")
-            self.gcloud_status_label.setStyleSheet("color: red;")
+            self.gcloud_status_label.setStyleSheet(f"color: {RED};")
 
             # Clear cached auth validation
             self.config.set("gcloud_auth_validated", False)
@@ -4567,7 +4586,7 @@ For more detailed information, please refer to the full documentation.
         # Update status if we have a project ID
         if project_id:
             self.gcloud_status_label.setText(f"Project: {project_id}")
-            self.gcloud_status_label.setStyleSheet("color: blue;")
+            self.gcloud_status_label.setStyleSheet(f"color: {CYAN_DARK};")
     
     def _open_gcloud_cli_page(self):
         """Open Google Cloud CLI download page."""
@@ -6501,10 +6520,10 @@ For more detailed information, please refer to the full documentation.
         if hasattr(self, 'discord_status_label'):
             if connected:
                 self.discord_status_label.setText(f"Status: Connected")
-                self.discord_status_label.setStyleSheet("color: green;")
+                self.discord_status_label.setStyleSheet(f"color: {GREEN};")
             else:
                 self.discord_status_label.setText(f"Status: {message}")
-                self.discord_status_label.setStyleSheet("color: gray;")
+                self.discord_status_label.setStyleSheet(f"color: {TEXT_SECONDARY};")
 
     def _on_discord_enabled_changed(self, enabled: bool):
         """Handle Discord presence enable/disable toggle."""
@@ -6567,12 +6586,12 @@ For more detailed information, please refer to the full documentation.
 
         if success:
             self.discord_status_label.setText(f"Status: {message}")
-            self.discord_status_label.setStyleSheet("color: green;")
+            self.discord_status_label.setStyleSheet(f"color: {GREEN};")
             self._append_to_console(f"Discord: {message}", "#66ccff")
             self._append_to_console("Diagnostics printed to console - check for troubleshooting info", "#aaaaaa")
         else:
             self.discord_status_label.setText(f"Status: {message}")
-            self.discord_status_label.setStyleSheet("color: #cc6600;")
+            self.discord_status_label.setStyleSheet(f"color: {AMBER};")
             self._append_to_console(f"Discord: {message}", "#ffaa00")
             self._append_to_console("Diagnostics printed to console - check for troubleshooting info", "#aaaaaa")
 
@@ -7646,31 +7665,41 @@ For more detailed information, please refer to the full documentation.
             # Show count badge styled similar to reference slot badges
             self.ref_image_toggle.setText(f"{arrow} Reference Images [{count}]")
             # Add blue badge styling for the count
-            self.ref_image_toggle.setStyleSheet("""
-                QPushButton {
+            self.ref_image_toggle.setStyleSheet(f"""
+                QPushButton {{
                     text-align: left;
                     padding: 5px;
                     background: transparent;
                     border: none;
                     font-weight: bold;
-                }
-                QPushButton:hover {
-                    background: rgba(0, 0, 0, 0.05);
-                }
+                    color: {TEXT_PRIMARY};
+                }}
+                QPushButton:hover {{
+                    background: {NAVY};
+                }}
+                QPushButton:checked {{
+                    background-color: rgba(0, 212, 255, 0.12);
+                    border-left: 2px solid {CYAN};
+                }}
             """)
         else:
             self.ref_image_toggle.setText(f"{arrow} Reference Images")
             # Normal styling without bold
-            self.ref_image_toggle.setStyleSheet("""
-                QPushButton {
+            self.ref_image_toggle.setStyleSheet(f"""
+                QPushButton {{
                     text-align: left;
                     padding: 5px;
                     background: transparent;
                     border: none;
-                }
-                QPushButton:hover {
-                    background: rgba(0, 0, 0, 0.05);
-                }
+                    color: {TEXT_PRIMARY};
+                }}
+                QPushButton:hover {{
+                    background: {NAVY};
+                }}
+                QPushButton:checked {{
+                    background-color: rgba(0, 212, 255, 0.12);
+                    border-left: 2px solid {CYAN};
+                }}
             """)
 
     def _select_reference_image(self):

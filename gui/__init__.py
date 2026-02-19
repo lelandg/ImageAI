@@ -59,21 +59,28 @@ def launch_gui():
     app.setOrganizationName("LelandGreenProductions")
     app.setApplicationName("ImageAI")
 
-    # Always show keyboard shortcut underlines (not just when Alt is pressed)
-    # This makes the mnemonics always visible like in your screenshot
-    from PySide6.QtWidgets import QStyleFactory
+    # Load Maestro fonts (Roboto body, Limelight headings)
+    from PySide6.QtGui import QFontDatabase
+    _fonts_dir = Path(__file__).parent / "resources" / "fonts"
+    for _font_file in ["Roboto-Regular.ttf", "Roboto-Bold.ttf", "Limelight-Regular.ttf"]:
+        _font_path = _fonts_dir / _font_file
+        if _font_path.exists():
+            _font_id = QFontDatabase.addApplicationFont(str(_font_path))
+            if _font_id == -1:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(f"Failed to load font: {_font_file}")
 
-    # Set style that shows underlines properly
-    # Windows style shows underlines only when Alt is pressed by default
-    # Fusion style can show them always
+    # Apply Maestro dark theme (brand-navy + brand-cyan)
+    from .theme import apply_maestro_theme
+    apply_maestro_theme(app)
+
+    # Fusion style for proper mnemonic underline rendering
+    from PySide6.QtWidgets import QStyleFactory
     available_styles = QStyleFactory.keys()
     if "Fusion" in available_styles:
         app.setStyle("Fusion")
-
-    # Note: The & character in button text automatically creates underlines for mnemonics
-    # The visibility of these underlines depends on the OS and Qt style settings
-    # On Windows, underlines typically show when Alt is pressed
-    # The Fusion style helps make them more visible
+    # Re-apply theme after Fusion style change (Fusion resets the stylesheet)
+    apply_maestro_theme(app)
 
     # Log GUI environment details
     try:
