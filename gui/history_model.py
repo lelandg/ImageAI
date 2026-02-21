@@ -377,12 +377,34 @@ class HistoryFilterProxyModel(QSortFilterProxyModel):
                 return QDate(dt.year, dt.month, dt.day)
             except (OSError, ValueError):
                 return None
-        elif isinstance(timestamp, str) and 'T' in timestamp:
+        elif isinstance(timestamp, str):
+            # Try ISO format with 'T' separator
+            if 'T' in timestamp:
+                try:
+                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    return QDate(dt.year, dt.month, dt.day)
+                except (ValueError, TypeError):
+                    pass
+            # Try space-separated datetime (e.g. "2025-01-15 10:30:00")
             try:
-                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                dt = datetime.fromisoformat(timestamp)
                 return QDate(dt.year, dt.month, dt.day)
             except (ValueError, TypeError):
-                return None
+                pass
+            # Try date-only string (e.g. "2025-01-15")
+            try:
+                parts = timestamp.split('-')
+                if len(parts) == 3:
+                    return QDate(int(parts[0]), int(parts[1]), int(parts[2].split()[0]))
+            except (ValueError, IndexError):
+                pass
+            # Try numeric string (timestamp as string)
+            try:
+                ts_float = float(timestamp)
+                dt = datetime.fromtimestamp(ts_float)
+                return QDate(dt.year, dt.month, dt.day)
+            except (ValueError, OSError):
+                pass
         return None
 
     def filtered_count(self) -> int:

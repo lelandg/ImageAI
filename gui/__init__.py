@@ -59,6 +59,11 @@ def launch_gui():
     app.setOrganizationName("LelandGreenProductions")
     app.setApplicationName("ImageAI")
 
+    # Read UI appearance preferences from config
+    from core.config import ConfigManager as _ConfigManager
+    _cfg = _ConfigManager()
+    _use_maestro_theme = _cfg.get("ui_maestro_theme", True)
+
     # Load Maestro fonts (Roboto body, Limelight headings)
     from PySide6.QtGui import QFontDatabase
     _fonts_dir = Path(__file__).parent / "resources" / "fonts"
@@ -70,17 +75,15 @@ def launch_gui():
                 import logging as _logging
                 _logging.getLogger(__name__).warning(f"Failed to load font: {_font_file}")
 
-    # Apply Maestro dark theme (brand-navy + brand-cyan)
-    from .theme import apply_maestro_theme
-    apply_maestro_theme(app)
-
     # Fusion style for proper mnemonic underline rendering
     from PySide6.QtWidgets import QStyleFactory
     available_styles = QStyleFactory.keys()
     if "Fusion" in available_styles:
         app.setStyle("Fusion")
-    # Re-apply theme after Fusion style change (Fusion resets the stylesheet)
-    apply_maestro_theme(app)
+    # Apply Maestro theme after Fusion (Fusion resets the stylesheet)
+    if _use_maestro_theme:
+        from .theme import apply_maestro_theme
+        apply_maestro_theme(app)
 
     # Log GUI environment details
     try:

@@ -1505,8 +1505,10 @@ class MainWindow(QMainWindow):
         # Create scroll area for settings
         scroll = QScrollArea(self.tab_settings)
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.NoFrame)
         scroll_widget = QWidget(scroll)
         scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setContentsMargins(12, 16, 12, 6)
 
         # Main settings layout
         v = scroll_layout
@@ -1801,7 +1803,7 @@ class MainWindow(QMainWindow):
         # LLM logging option
         self.chk_log_llm = QCheckBox("Log LLM prompts and responses (for debugging)")
         self.chk_log_llm.setChecked(self.config.get("log_llm_interactions", False))
-        self.chk_log_llm.toggled.connect(lambda checked: self.config.set("log_llm_interactions", checked))
+        self.chk_log_llm.toggled.connect(lambda checked: (self.config.set("log_llm_interactions", checked), self.config.save()))
         options_layout.addWidget(self.chk_log_llm)
 
         # Auto-copy filename option
@@ -1816,7 +1818,20 @@ class MainWindow(QMainWindow):
         config_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 10pt;")
         options_layout.addWidget(config_label)
 
-        v.addWidget(options_group)
+        # Appearance group (2nd column next to Options)
+        appearance_group = QGroupBox("Appearance")
+        appearance_layout = QVBoxLayout(appearance_group)
+
+        self.chk_maestro_theme = QCheckBox("Maestro dark theme")
+        self.chk_maestro_theme.setChecked(self.config.get("ui_maestro_theme", True))
+        appearance_layout.addWidget(self.chk_maestro_theme)
+
+        appearance_layout.addStretch()
+
+        options_row = QHBoxLayout()
+        options_row.addWidget(options_group)
+        options_row.addWidget(appearance_group)
+        v.addLayout(options_row)
 
         # Create placeholder for backward compatibility
         self.config_location_widget = QWidget(self.tab_settings)
@@ -1947,6 +1962,7 @@ class MainWindow(QMainWindow):
         self.btn_get_key.clicked.connect(self._open_api_key_page)
         self.btn_save_test.clicked.connect(self._save_and_test)
         self.chk_auto_copy.toggled.connect(self._toggle_auto_copy)
+        self.chk_maestro_theme.toggled.connect(self._apply_appearance)
         
         # Google Cloud buttons
         self.btn_authenticate.clicked.connect(self._authenticate_gcloud)
@@ -3116,9 +3132,9 @@ For more detailed information, please refer to the full documentation.
         """Initialize history tab with model/view table and search."""
         from PySide6.QtWidgets import (
             QHeaderView, QCheckBox, QHBoxLayout, QTableView,
-            QAbstractItemView, QLineEdit, QDateEdit
+            QAbstractItemView, QLineEdit
         )
-        from PySide6.QtCore import QTimer, QDate
+        from PySide6.QtCore import QTimer
 
         # Safe QScroller import for tablet support
         QScroller = None
@@ -3143,18 +3159,34 @@ For more detailed information, please refer to the full documentation.
         search_layout.addWidget(self.history_search_edit, stretch=3)
 
         search_layout.addWidget(QLabel("From:"))
-        self.history_date_from = QDateEdit()
-        self.history_date_from.setCalendarPopup(True)
-        self.history_date_from.setSpecialValueText("Any")
-        self.history_date_from.setDate(self.history_date_from.minimumDate())
-        search_layout.addWidget(self.history_date_from)
+        self.history_date_from_edit = QLineEdit()
+        self.history_date_from_edit.setPlaceholderText("yyyy-mm-dd")
+        self.history_date_from_edit.setMaximumWidth(100)
+        search_layout.addWidget(self.history_date_from_edit)
+        self.btn_date_from_cal = QPushButton("\U0001f4c5")
+        self.btn_date_from_cal.setFixedWidth(30)
+        self.btn_date_from_cal.setToolTip("Open calendar")
+        self.btn_date_from_cal.clicked.connect(lambda: self._show_calendar_popup("from"))
+        search_layout.addWidget(self.btn_date_from_cal)
+        btn_today_from = QPushButton("Today")
+        btn_today_from.setFixedWidth(50)
+        btn_today_from.clicked.connect(lambda: self._set_date_today("from"))
+        search_layout.addWidget(btn_today_from)
 
         search_layout.addWidget(QLabel("To:"))
-        self.history_date_to = QDateEdit()
-        self.history_date_to.setCalendarPopup(True)
-        self.history_date_to.setSpecialValueText("Any")
-        self.history_date_to.setDate(self.history_date_to.minimumDate())
-        search_layout.addWidget(self.history_date_to)
+        self.history_date_to_edit = QLineEdit()
+        self.history_date_to_edit.setPlaceholderText("yyyy-mm-dd")
+        self.history_date_to_edit.setMaximumWidth(100)
+        search_layout.addWidget(self.history_date_to_edit)
+        self.btn_date_to_cal = QPushButton("\U0001f4c5")
+        self.btn_date_to_cal.setFixedWidth(30)
+        self.btn_date_to_cal.setToolTip("Open calendar")
+        self.btn_date_to_cal.clicked.connect(lambda: self._show_calendar_popup("to"))
+        search_layout.addWidget(self.btn_date_to_cal)
+        btn_today_to = QPushButton("Today")
+        btn_today_to.setFixedWidth(50)
+        btn_today_to.clicked.connect(lambda: self._set_date_today("to"))
+        search_layout.addWidget(btn_today_to)
 
         self.btn_clear_search = QPushButton("Clear")
         self.btn_clear_search.clicked.connect(self._clear_history_search)
@@ -3253,8 +3285,8 @@ For more detailed information, please refer to the full documentation.
         self._search_timer.setInterval(300)
         self._search_timer.timeout.connect(self._apply_history_search)
         self.history_search_edit.textChanged.connect(lambda: self._search_timer.start())
-        self.history_date_from.dateChanged.connect(lambda: self._search_timer.start())
-        self.history_date_to.dateChanged.connect(lambda: self._search_timer.start())
+        self.history_date_from_edit.textChanged.connect(lambda: self._search_timer.start())
+        self.history_date_to_edit.textChanged.connect(lambda: self._search_timer.start())
 
         # Update count when model changes
         self.history_proxy.rowsInserted.connect(self._update_history_count)
@@ -3267,30 +3299,109 @@ For more detailed information, please refer to the full documentation.
         self.history_view.viewport().installEventFilter(self)
         self.history_view.installEventFilter(self)
 
-        # Initial count
+        # Initial count and date defaults
         self._update_history_count()
+        self._init_history_date_defaults()
+
+    @staticmethod
+    def _parse_partial_date(text: str) -> 'Optional[QDate]':
+        """Parse a partial or full date string into a QDate.
+
+        Supports: 'yyyy' -> Jan 1, 'yyyy-mm' -> 1st of month, 'yyyy-mm-dd' -> exact.
+        """
+        from PySide6.QtCore import QDate
+        text = text.strip()
+        if not text:
+            return None
+        parts = text.split('-')
+        try:
+            year = int(parts[0])
+            month = int(parts[1]) if len(parts) >= 2 else 1
+            day = int(parts[2]) if len(parts) >= 3 else 1
+            d = QDate(year, month, day)
+            return d if d.isValid() else None
+        except (ValueError, IndexError):
+            return None
 
     def _apply_history_search(self):
         """Apply current search/date filters to the history proxy model."""
         self.history_proxy.setFilterText(self.history_search_edit.text())
 
-        date_from = self.history_date_from.date()
-        date_to = self.history_date_to.date()
+        date_from = self._parse_partial_date(self.history_date_from_edit.text())
+        date_to = self._parse_partial_date(self.history_date_to_edit.text())
 
-        # Only apply date filter if not at minimum (the "Any" value)
-        from_valid = date_from > self.history_date_from.minimumDate()
-        to_valid = date_to > self.history_date_to.minimumDate()
-
-        self.history_proxy.setDateRange(
-            date_from if from_valid else None,
-            date_to if to_valid else None
-        )
+        self.history_proxy.setDateRange(date_from, date_to)
 
     def _clear_history_search(self):
-        """Clear all search/filter fields."""
+        """Clear all search/filter fields and reset dates to full range."""
         self.history_search_edit.clear()
-        self.history_date_from.setDate(self.history_date_from.minimumDate())
-        self.history_date_to.setDate(self.history_date_to.minimumDate())
+        self._init_history_date_defaults()
+
+    def _init_history_date_defaults(self):
+        """Set date fields to earliest history entry and today."""
+        from PySide6.QtCore import QDate
+        today = QDate.currentDate()
+        earliest = today
+        for entry in self.history:
+            ts = entry.get('timestamp', '')
+            d = self._parse_ts_to_qdate(ts)
+            if d and d.isValid() and d < earliest:
+                earliest = d
+        self.history_date_from_edit.setText(earliest.toString("yyyy-MM-dd"))
+        self.history_date_to_edit.setText(today.toString("yyyy-MM-dd"))
+
+    @staticmethod
+    def _parse_ts_to_qdate(timestamp) -> 'Optional[QDate]':
+        """Convert a history timestamp (float or ISO string) to QDate."""
+        from PySide6.QtCore import QDate
+        from datetime import datetime as _dt
+        if isinstance(timestamp, (int, float)):
+            try:
+                dt = _dt.fromtimestamp(timestamp)
+                return QDate(dt.year, dt.month, dt.day)
+            except (OSError, ValueError):
+                return None
+        elif isinstance(timestamp, str):
+            try:
+                dt = _dt.fromisoformat(timestamp.replace('Z', '+00:00'))
+                return QDate(dt.year, dt.month, dt.day)
+            except (ValueError, TypeError):
+                pass
+        return None
+
+    def _show_calendar_popup(self, which: str):
+        """Show a calendar popup for picking a date."""
+        from PySide6.QtWidgets import QDialog, QVBoxLayout, QCalendarWidget
+        from PySide6.QtCore import QDate
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Select Date")
+        lay = QVBoxLayout(dlg)
+        cal = QCalendarWidget(dlg)
+
+        edit = self.history_date_from_edit if which == "from" else self.history_date_to_edit
+        current = self._parse_partial_date(edit.text())
+        if current and current.isValid():
+            cal.setSelectedDate(current)
+        else:
+            cal.setSelectedDate(QDate.currentDate())
+
+        cal.activated.connect(lambda date: self._on_calendar_picked(date, which, dlg))
+        lay.addWidget(cal)
+        dlg.resize(350, 250)
+        dlg.exec()
+
+    def _on_calendar_picked(self, date, which: str, dlg):
+        """Handle calendar date selection."""
+        edit = self.history_date_from_edit if which == "from" else self.history_date_to_edit
+        edit.setText(date.toString("yyyy-MM-dd"))
+        dlg.accept()
+
+    def _set_date_today(self, which: str):
+        """Set a date field to today."""
+        from PySide6.QtCore import QDate
+        edit = self.history_date_from_edit if which == "from" else self.history_date_to_edit
+        edit.setText(QDate.currentDate().toString("yyyy-MM-dd"))
 
     def _update_history_count(self):
         """Update the history count label."""
@@ -4416,6 +4527,20 @@ For more detailed information, please refer to the full documentation.
         self.auto_copy_filename = checked
         self.config.set("auto_copy_filename", checked)
         self.config.save()
+
+    def _apply_appearance(self):
+        """Apply theme setting immediately and persist."""
+        use_theme = self.chk_maestro_theme.isChecked()
+        self.config.set("ui_maestro_theme", use_theme)
+        self.config.save()
+        from PySide6.QtWidgets import QApplication
+        _app = QApplication.instance()
+        if _app:
+            if use_theme:
+                from gui.theme import apply_maestro_theme
+                apply_maestro_theme(_app)
+            else:
+                _app.setStyleSheet("")
     
     def _update_auth_visibility(self):
         """Update visibility of auth-related widgets based on provider and auth mode."""
