@@ -3487,6 +3487,8 @@ For more detailed information, please refer to the full documentation.
             if self.current_provider.lower() == "google":
                 self.model_combo.addItem("Gemini 3 Pro Image - 4K (gemini-3-pro-image-preview)",
                                         "gemini-3-pro-image-preview")
+                self.model_combo.addItem("Gemini 3.1 Flash Image - 2K (gemini-3.1-flash-image-preview)",
+                                        "gemini-3.1-flash-image-preview")
                 self.model_combo.addItem("Gemini 2.5 Flash Image (gemini-2.5-flash-image)",
                                         "gemini-2.5-flash-image")
             elif self.current_provider.lower() == "openai":

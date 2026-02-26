@@ -1264,7 +1264,8 @@ class WorkspaceWidget(QWidget):
         # since Gemini is the first item in the provider combo
         # Models are ordered newest to oldest
         self.img_model_combo.addItems([
-            "gemini-3-pro-image-preview",  # Nano Banana Pro - 4K support (newest)
+            "gemini-3-pro-image-preview",         # Nano Banana Pro - 4K support (newest)
+            "gemini-3.1-flash-image-preview",     # Nano Banana 2 - 2K support
             "gemini-2.5-flash-image",
             "gemini-2.5-flash",
             "gemini-2.5-pro",
@@ -6204,7 +6205,8 @@ class WorkspaceWidget(QWidget):
         # Models are ordered newest to oldest
         if provider in ["Google", "Gemini"]:  # Support both new and old naming
             self.img_model_combo.addItems([
-                "gemini-3-pro-image-preview",  # Nano Banana Pro - 4K support (newest)
+                "gemini-3-pro-image-preview",         # Nano Banana Pro - 4K support (newest)
+                "gemini-3.1-flash-image-preview",     # Nano Banana 2 - 2K support
                 "gemini-2.5-flash-image",
                 "gemini-2.5-flash",
                 "gemini-2.5-pro",
@@ -7556,7 +7558,7 @@ class WorkspaceWidget(QWidget):
                         # Models are ordered newest to oldest
                         self.img_model_combo.clear()
                         if provider_text in ["Google", "Gemini"]:  # Support both new and old naming
-                            self.img_model_combo.addItems(["gemini-3-pro-image-preview", "gemini-2.5-flash-image", "gemini-2.5-flash", "gemini-2.5-pro"])
+                            self.img_model_combo.addItems(["gemini-3-pro-image-preview", "gemini-3.1-flash-image-preview", "gemini-2.5-flash-image", "gemini-2.5-flash", "gemini-2.5-pro"])
                         elif provider_text == "OpenAI":
                             self.img_model_combo.addItems(["gpt-image-1.5", "gpt-image-1", "gpt-image-1-mini", "dall-e-3", "dall-e-2"])
                         elif provider_text == "Stability":

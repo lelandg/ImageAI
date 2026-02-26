@@ -511,8 +511,9 @@ class ReferenceGenerationDialog(QDialog):
 
         if provider_lower in ["google", "gemini"]:
             self.model_combo.addItems([
+                "gemini-3-pro-image-preview",       # Nano Banana Pro - 4K support (newest)
+                "gemini-3.1-flash-image-preview",   # Nano Banana 2 - 2K support
                 "gemini-2.5-flash-image",
-                "gemini-3-pro-image-preview",  # Nano Banana Pro - 4K support
                 "gemini-2.5-flash",
                 "gemini-2.5-pro",
                 "gemini-1.5-flash",

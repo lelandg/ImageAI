@@ -340,8 +340,9 @@ class ResolutionSelector(QWidget):
     # Used by Reset button and aspect ratio changes to set optimal size
     MODEL_MAX_RESOLUTIONS = {
         # Google models
-        "gemini-3-pro-image-preview": 4096,  # Nano Banana Pro - 4K
-        "gemini-2.5-flash-image": 1024,      # Standard Nano Banana
+        "gemini-3-pro-image-preview": 4096,          # Nano Banana Pro - 4K
+        "gemini-3.1-flash-image-preview": 2048,      # Nano Banana 2 - 2K
+        "gemini-2.5-flash-image": 1024,              # Standard Nano Banana
         "gemini-2.5-flash": 1024,
         "gemini-2.5-pro": 1024,
         # OpenAI models

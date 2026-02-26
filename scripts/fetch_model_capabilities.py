@@ -692,6 +692,17 @@ class GoogleModelFetcher:
             'requires_gcloud': False,
             'tags': ['fast', 'production'],
         },
+        'gemini-3.1-flash-image-preview': {
+            'category': ModelCategory.IMAGE_GEN,
+            'display_name': 'Gemini 3.1 Flash Image',
+            'nickname': 'Nano Banana 2',
+            'description': '2K output, next-gen flash image generation',
+            'aspects': ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+            'max_resolution': '2K',
+            'requires_gcloud': False,
+            'status': ModelStatus.PREVIEW,
+            'tags': ['fast', 'preview'],
+        },
         'gemini-3-pro-image-preview': {
             'category': ModelCategory.IMAGE_GEN,
             'display_name': 'Gemini 3 Pro Image',

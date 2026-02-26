@@ -506,6 +506,7 @@ class VisemeGenerationPage(QWizardPage):
     # Cost per image by model (estimated USD)
     MODEL_COSTS = {
         "gemini-2.5-flash-image": 0.039,
+        "gemini-3.1-flash-image-preview": 0.05,
         "gemini-3-pro-image-preview": 0.10,
         "gpt-image-1": 0.08,
         "gpt-image-1.5": 0.12,
@@ -514,6 +515,7 @@ class VisemeGenerationPage(QWizardPage):
     # Model display names
     MODEL_NAMES = {
         "gemini-2.5-flash-image": "Gemini 2.5 Flash Image (Fast, $0.039/img)",
+        "gemini-3.1-flash-image-preview": "Gemini 3.1 Flash Image (Nano Banana 2, ~$0.05/img)",
         "gemini-3-pro-image-preview": "Gemini 3 Pro (Quality, $0.10/img)",
         "gpt-image-1": "GPT Image 1 (Standard, $0.08/img)",
         "gpt-image-1.5": "GPT Image 1.5 (Quality, $0.12/img)",

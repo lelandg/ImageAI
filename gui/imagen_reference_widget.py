@@ -447,9 +447,10 @@ class ImagenReferenceWidget(QWidget):
 
     # Model-specific reference image limits
     MODEL_REF_LIMITS = {
-        'gemini-2.5-flash-image': 5,       # Standard Nano Banana
-        'gemini-3-pro-image-preview': 14,  # Nano Banana Pro - up to 14 reference images
-        'default': 3                        # Default for other models
+        'gemini-2.5-flash-image': 5,            # Standard Nano Banana
+        'gemini-3.1-flash-image-preview': 8,    # Nano Banana 2
+        'gemini-3-pro-image-preview': 14,       # Nano Banana Pro - up to 14 reference images
+        'default': 3                             # Default for other models
     }
 
     # Signals

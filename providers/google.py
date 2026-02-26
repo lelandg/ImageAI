@@ -584,8 +584,10 @@ class GoogleProvider(ImageProvider):
 
         # Determine max resolution based on model
         # Nano Banana Pro (gemini-3-pro-image-preview) supports up to 4K output
+        # Nano Banana 2 (gemini-3.1-flash-image-preview) supports up to 2K output
         # Regular Nano Banana (gemini-2.5-flash-image) is capped at 1024px
-        is_nano_banana_pro = model and "gemini-3" in model
+        is_nano_banana_pro = model and "gemini-3-pro" in model
+        is_nano_banana_2 = model and "gemini-3.1-flash" in model
 
         if is_nano_banana_pro:
             # Auto-determine output_quality from requested dimensions
@@ -609,6 +611,11 @@ class GoogleProvider(ImageProvider):
                 max_output_dim = quality_max_dims.get(output_quality, max_output_dim)
 
             logger.info(f"Nano Banana Pro: {output_quality.upper()} quality tier (max {max_output_dim}px) for {width}x{height}")
+        elif is_nano_banana_2:
+            # Nano Banana 2 (gemini-3.1-flash-image-preview) supports up to 2K natively
+            max_output_dim = 2048
+            output_quality = '1k'  # No output_quality API param for flash models
+            logger.info(f"Nano Banana 2: max {max_output_dim}px for {width}x{height}")
         else:
             # Standard Nano Banana is capped at 1024
             max_output_dim = 1024
@@ -1613,6 +1620,7 @@ class GoogleProvider(ImageProvider):
         return {
             # Gemini Image Generation Models - newest first
             "gemini-3-pro-image-preview": "Gemini 3 Pro Image (Nano Banana Pro) - 4K",
+            "gemini-3.1-flash-image-preview": "Gemini 3.1 Flash Image (Nano Banana 2) - 2K",
             "gemini-2.5-flash-image": "Gemini 2.5 Flash Image (Nano Banana)",
             # Imagen Models (Vertex AI - requires gcloud auth) - newest first
             "imagen-4.0-generate-001": "Imagen 4 (Best Quality, Low Latency)",
@@ -1642,6 +1650,13 @@ class GoogleProvider(ImageProvider):
                 "description": "4K output, superior text rendering, up to 14 reference images",
                 "requires_gcloud": False,
                 "max_resolution": "4K",
+            },
+            "gemini-3.1-flash-image-preview": {
+                "name": "Gemini 3.1 Flash Image",
+                "nickname": "Nano Banana 2",
+                "description": "2K output, next-gen flash image generation",
+                "requires_gcloud": False,
+                "max_resolution": "2K",
             },
             "gemini-2.5-flash-image": {
                 "name": "Gemini 2.5 Flash Image",
