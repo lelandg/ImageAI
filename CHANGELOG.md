@@ -5,6 +5,15 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.35.0] - 2026-02-26
+
+### Added
+- **Nano Banana 2 (gemini-3.1-flash-image-preview)**: New Google Gemini flash-tier image model with 2K max resolution and up to 8 reference images
+- Model appears in all provider selectors: main Generate tab, Video workspace, Reference Generation dialog, and Character Animator
+
+### Fixed
+- `is_nano_banana_pro` model detection now correctly checks for `gemini-3-pro` instead of `gemini-3`, preventing the new flash model from being misidentified as the Pro tier
+
 ## [0.34.0] - 2026-02-18
 
 ### Added
