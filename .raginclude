@@ -1,71 +1,21 @@
 # ImageAI — .raginclude for RAG knowledge base
 # Generated: 2026-02-27
-# Stack: Python desktop application (AI image/video generation)
+# Stack: Python desktop application (open-source AI image/video generation)
 #
-# Glob patterns are resolved at index time.
-# Include files that document how the app works for users.
-# Exclude secrets, build artifacts, and proprietary implementation details.
+# ImageAI is open-source. All committed documentation is intentionally public
+# and meant to educate developers about workflows, architecture decisions,
+# code reviews, and implementation patterns.
 #
-# EXCLUDED (never index):
-#   CLAUDE.md / GEMINI.md — may contain infrastructure details
-#   Docs/LLM-Contracts.md — internal implementation pattern (trade secret)
-#   Docs/Operation-Guard-System.md — internal concurrency mechanism
-#   Docs/Claude Desktop Instructions.md — CLAUDE.md for Claude Desktop, not user docs
-#   Docs/LLM-Logging-Full-Content.md — internal logging details
-#   Docs/CodeMap.md / Docs/CodeMap_Generator.md — developer tools
-#   Docs/CodeReview-*.md / Docs/GeminiCodeReview_*.md — internal code reviews
-#   Docs/ProjectReview.md — internal review
-#   Docs/Linux-VM-Setup.md — developer/ops setup
-#   Docs/*Implementation*.md, Docs/*-Steps.md — implementation internals
-#   Docs/UI-Improvements-TODO.md — internal todo
-#   Docs/Video-Prompt-Lyrics-Context-Fix.md — internal bug fix notes
-#   Docs/Veo3-Duration-Update-Summary.md — internal update notes
-#   BUGFIX_*.md, LINUX_*FIX.md, REFACTORING_NOTES.md — internal dev notes
-#   VIDEO_TAB_LOGGING.md — internal logging docs
-#   _Research/** — internal research
-#   Notes/**, Plans/** — internal
-#   secure_keys.py — security management
-#   *.log — log files
+# Rule: if it's not in .gitignore, it's fair game for RAG indexing.
+# *.log files are gitignored and excluded; all other markdown is included.
 
-# Primary documentation
-README.md
-AGENTS.md
-CHANGELOG.md
+# All root-level markdown docs (README, CHANGELOG, CLAUDE.md, GEMINI.md,
+# AGENTS.md, MIDI_KARAOKE_FEATURES, OLLAMA_SETUP, HF guides, prompt libs, etc.)
+*.md
 
-# Feature documentation
-Docs/Features.md
-Docs/ImageAI_Features.md
-Docs/FAQ.md
-
-# User guides — core workflows
-Docs/Character-Animator-Guide.md
-Docs/Font-Generator-Guide.md
-Docs/Video-Tab-Guide.md
-Docs/Frame-Accurate-Video-Prompt-Transitions.md
-Docs/Veo3-Frame-Continuity-Guide.md
-Docs/Veo-Wizard-Integration-Guide.md
-
-# User guides — reference images
-Docs/Reference-Image-Usage.md
-Docs/Reference-Image-System.md
-Docs/Reference-Image-Composite-Feature.md
-
-# User guides — setup and integrations
-Docs/ImageAI-Installation-Guide.md
-Docs/gcloud-install-guide.md
-Docs/Suno-Package-Support.md
-
-# User guides — community and marketing context
-Docs/discord-beta-announcement.md
-
-# Root-level user guides and feature docs
-EXTRACT_FRAMES_README.md
-MIDI_KARAOKE_FEATURES.md
-OLLAMA_SETUP.md
-HF_Auth_UI_Guide.md
-HuggingFace_Auth_Guide.md
-Popular_Image_Prompts.md
-"Reference Image Prompts.md"
+# All documentation (features, FAQ, user guides, code reviews,
+# implementation notes, LLM contracts, reference image docs, etc.)
+Docs/**/*.md
 
 # Stack context
 requirements.txt
