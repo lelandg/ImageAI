@@ -1639,8 +1639,8 @@ class WorkspaceWidget(QWidget):
         # Veo model selection (October 2025 models)
         self.veo_model_combo = QComboBox()
         self.veo_model_combo.addItems([
-            "veo-3.1-generate-preview",       # Veo 3.1 Standard - 1080p, 8s, ref images, audio
-            "veo-3.1-fast-generate-preview",  # Veo 3.1 Fast - 720p, 4-8s, 11-60s generation
+            "veo-3.1-generate-001",            # Veo 3.1 Standard - 1080p, 8s, ref images, audio
+            "veo-3.1-fast-generate-001",       # Veo 3.1 Fast - 720p, 4-8s, 11-60s generation
             "veo-3.0-generate-001",           # Veo 3.0 - 1080p, 8s fixed, audio
             "veo-3.0-fast-generate-001",      # Veo 3.0 Fast - 720p, 4-8s
             "veo-2.0-generate-001"            # Veo 2.0 - 720p, ref images
@@ -6327,16 +6327,16 @@ class WorkspaceWidget(QWidget):
         # October 2025 pricing (per second)
         if include_audio:
             pricing = {
-                "veo-3.1-generate-preview": 0.40,
-                "veo-3.1-fast-generate-preview": 0.15,
+                "veo-3.1-generate-001": 0.40,
+                "veo-3.1-fast-generate-001": 0.15,
                 "veo-3.0-generate-001": 0.40,
                 "veo-3.0-fast-generate-001": 0.15,
                 "veo-2.0-generate-001": 0.35,
             }
         else:
             pricing = {
-                "veo-3.1-generate-preview": 0.20,
-                "veo-3.1-fast-generate-preview": 0.10,
+                "veo-3.1-generate-001": 0.20,
+                "veo-3.1-fast-generate-001": 0.10,
                 "veo-3.0-generate-001": 0.20,
                 "veo-3.0-fast-generate-001": 0.10,
                 "veo-2.0-generate-001": 0.35,

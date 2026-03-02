@@ -53,10 +53,11 @@ class VeoModel(Enum):
     - veo-3.0-fast-generate-001: Fast, 720p, 4-8s variable duration
     - veo-2.0-generate-001: Legacy, 720p, 5-8s clips, reference images
 
-    Preview models (for testing new features):
-    - veo-3.1-generate-preview, veo-3.1-fast-generate-preview
-    - veo-3.0-generate-preview, veo-3.0-fast-generate-preview
-    - veo-2.0-generate-preview, veo-2.0-generate-exp
+    Deprecated preview models (discontinued April 2, 2026):
+    - veo-3.1-generate-preview → veo-3.1-generate-001
+    - veo-3.1-fast-generate-preview → veo-3.1-fast-generate-001
+    - veo-3.0-generate-preview, veo-3.0-fast-generate-preview → use 3.1 GA
+    - veo-2.0-generate-preview, veo-2.0-generate-exp → use 3.1 GA
     """
     # Veo 3.1 (Latest - production)
     VEO_3_1_GENERATE = "veo-3.1-generate-001"       # 1080p, 8s fixed, reference images, frame interpolation
