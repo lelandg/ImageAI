@@ -1034,13 +1034,21 @@ class MainWindow(QMainWindow):
                 saved_aspect = self.config.config.get('last_aspect_ratio')
                 if saved_aspect:
                     self.aspect_selector.set_ratio(saved_aspect)
+                    # Sync resolution selector's internal AR (set_ratio doesn't emit ratioChanged)
+                    self.resolution_selector._aspect_ratio = saved_aspect
 
-                # Restore saved resolution dimensions
+                # Restore saved resolution dimensions (both width AND height)
                 saved_width = self.config.config.get('last_resolution_width')
-                if saved_width:
-                    self.resolution_selector._last_edited = "width"
+                saved_height = self.config.config.get('last_resolution_height')
+                if saved_width and saved_height:
+                    self.resolution_selector.width_spin.blockSignals(True)
+                    self.resolution_selector.height_spin.blockSignals(True)
                     self.resolution_selector.width_spin.setValue(saved_width)
-                    # Height will be calculated automatically from aspect ratio
+                    self.resolution_selector.height_spin.setValue(saved_height)
+                    self.resolution_selector._custom_width = saved_width
+                    self.resolution_selector._custom_height = saved_height
+                    self.resolution_selector.width_spin.blockSignals(False)
+                    self.resolution_selector.height_spin.blockSignals(False)
             settings_form.addRow("Resolution:", self.resolution_selector)
         else:
             # Fallback to old resolution combo
@@ -8252,6 +8260,12 @@ For more detailed information, please refer to the full documentation.
             
             if hasattr(self, 'resolution_selector') and self.resolution_selector:
                 ui_state['resolution'] = self.resolution_selector.get_resolution()
+                # Save explicit width/height for reliable restoration
+                # (get_resolution() may return calculated values that get lost during restore)
+                w, h = self.resolution_selector.get_width_height()
+                if w and h:
+                    ui_state['resolution_width'] = w
+                    ui_state['resolution_height'] = h
             elif hasattr(self, 'resolution_combo'):
                 ui_state['resolution_combo_index'] = self.resolution_combo.currentIndex()
             
@@ -8394,26 +8408,49 @@ For more detailed information, please refer to the full documentation.
             if 'aspect_ratio' in ui_state and hasattr(self, 'aspect_selector') and self.aspect_selector:
                 try:
                     self.aspect_selector.set_ratio(ui_state['aspect_ratio'])
+                    # Also sync the resolution selector's internal aspect ratio
+                    # (set_ratio doesn't emit ratioChanged, so update_aspect_ratio is never called)
+                    if hasattr(self, 'resolution_selector') and self.resolution_selector:
+                        self.resolution_selector._aspect_ratio = ui_state['aspect_ratio']
                 except Exception as e:
                     logger.debug(f"Error restoring aspect ratio: {e}")
 
-            # Restore resolution
-            if 'resolution' in ui_state and hasattr(self, 'resolution_selector') and self.resolution_selector:
-                try:
-                    # Use skip_mode_change=True to avoid unchecking aspect ratio during restoration
-                    self.resolution_selector.set_resolution(ui_state['resolution'], skip_mode_change=True)
-                except Exception as e:
-                    logger.debug(f"Error restoring resolution: {e}")
-            elif 'resolution_combo_index' in ui_state and hasattr(self, 'resolution_combo'):
-                if ui_state['resolution_combo_index'] < self.resolution_combo.count():
-                    self.resolution_combo.setCurrentIndex(ui_state['resolution_combo_index'])
-            
-            # Restore quality settings
+            # Restore quality settings BEFORE resolution, because set_settings() emits
+            # nbpQualityChanged which calls _set_to_max_for_aspect_ratio() and would
+            # overwrite any previously restored custom resolution
             if 'quality_settings' in ui_state and hasattr(self, 'quality_selector') and self.quality_selector:
                 try:
                     self.quality_selector.set_settings(ui_state['quality_settings'])
                 except Exception as e:
                     logger.debug(f"Error restoring quality settings: {e}")
+
+            # Restore resolution AFTER quality settings (quality restore resets to model max)
+            if hasattr(self, 'resolution_selector') and self.resolution_selector:
+                try:
+                    # Prefer explicit width/height (more reliable than resolution string)
+                    if 'resolution_width' in ui_state and 'resolution_height' in ui_state:
+                        w = ui_state['resolution_width']
+                        h = ui_state['resolution_height']
+                        self.resolution_selector.width_spin.blockSignals(True)
+                        self.resolution_selector.height_spin.blockSignals(True)
+                        self.resolution_selector.width_spin.setValue(w)
+                        self.resolution_selector.height_spin.setValue(h)
+                        self.resolution_selector._custom_width = w
+                        self.resolution_selector._custom_height = h
+                        self.resolution_selector.width_spin.blockSignals(False)
+                        self.resolution_selector.height_spin.blockSignals(False)
+                        self.resolution_selector._update_info_text()
+                        # Update config so last_resolution_* stays in sync
+                        self.config.config['last_resolution_width'] = w
+                        self.config.config['last_resolution_height'] = h
+                        logger.info(f"Restored custom resolution: {w}x{h}")
+                    elif 'resolution' in ui_state:
+                        self.resolution_selector.set_resolution(ui_state['resolution'], skip_mode_change=True)
+                except Exception as e:
+                    logger.debug(f"Error restoring resolution: {e}")
+            elif 'resolution_combo_index' in ui_state and hasattr(self, 'resolution_combo'):
+                if ui_state['resolution_combo_index'] < self.resolution_combo.count():
+                    self.resolution_combo.setCurrentIndex(ui_state['resolution_combo_index'])
             
             # Restore batch number
             if 'batch_num' in ui_state and hasattr(self, 'batch_selector') and self.batch_selector:

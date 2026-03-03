@@ -5,6 +5,11 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.37.0] - 2026-03-02
+
+### Fixed
+- **Custom resolution not restored on startup**: Fixed resolution always reverting to square model-max (1K/2K/4K) on restart. Root cause was quality settings restoration emitting `nbpQualityChanged` which called `_set_to_max_for_aspect_ratio()` after resolution was already restored. Fix reorders restore sequence (quality before resolution), saves explicit width/height in UI state, and syncs the resolution selector's internal aspect ratio during restore.
+
 ## [0.36.1] - 2026-03-02
 
 ### Fixed
