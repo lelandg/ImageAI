@@ -5,6 +5,12 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.36.1] - 2026-03-02
+
+### Fixed
+- **Reference images not working**: Fix content order to match Google API docs — prompt now comes first in contents list, followed by reference images. Previously images were sent before the prompt, which newer Gemini models no longer handle correctly.
+- **response_modalities**: Updated from `["IMAGE"]` to `["TEXT", "IMAGE"]` per [Google documentation](https://ai.google.dev/gemini-api/docs/image-generation) for all image generation config paths.
+
 ## [0.36.0] - 2026-03-02
 
 ### Fixed

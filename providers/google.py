@@ -801,7 +801,7 @@ class GoogleProvider(ImageProvider):
                         image_config_kwargs['image_size'] = nbp_image_size
                         logger.info(f"Adding image_size={nbp_image_size} to ImageConfig for NBP output resolution")
                     config = types.GenerateContentConfig(
-                        response_modalities=["IMAGE"],
+                        response_modalities=["TEXT", "IMAGE"],
                         image_config=types.ImageConfig(**image_config_kwargs),
                         **config_params
                     )
@@ -820,7 +820,7 @@ class GoogleProvider(ImageProvider):
                         image_config_dict["image_size"] = nbp_image_size
                         logger.info(f"Adding image_size={nbp_image_size} to dict config for NBP output resolution")
                     config = types.GenerateContentConfig(
-                        response_modalities=["IMAGE"],
+                        response_modalities=["TEXT", "IMAGE"],
                         image_config=image_config_dict,
                         **config_params
                     )
@@ -833,7 +833,7 @@ class GoogleProvider(ImageProvider):
             if not config_created:
                 logger.warning(f"Could not configure aspect ratio in config. Will add dimensions to prompt as fallback.")
                 config = types.GenerateContentConfig(
-                    response_modalities=["IMAGE"],
+                    response_modalities=["TEXT", "IMAGE"],
                     **config_params
                 )
                 # Add dimensions to prompt for models that don't support image_config
@@ -849,19 +849,19 @@ class GoogleProvider(ImageProvider):
                     image_config_dict = {"image_size": nbp_image_size}
                     logger.info(f"Adding image_size={nbp_image_size} for NBP (no aspect ratio)")
                     config = types.GenerateContentConfig(
-                        response_modalities=["IMAGE"],
+                        response_modalities=["TEXT", "IMAGE"],
                         image_config=image_config_dict,
                         **config_params
                     )
                 except Exception as e:
                     logger.warning(f"Failed to set image_size without aspect_ratio: {e}")
                     config = types.GenerateContentConfig(
-                        response_modalities=["IMAGE"],
+                        response_modalities=["TEXT", "IMAGE"],
                         **config_params
                     ) if config_params else None
             else:
                 config = types.GenerateContentConfig(
-                    response_modalities=["IMAGE"],
+                    response_modalities=["TEXT", "IMAGE"],
                     **config_params
                 ) if config_params else None
 
@@ -872,11 +872,13 @@ class GoogleProvider(ImageProvider):
 
         if reference_images:
             # Multiple reference images - add each to contents list
+            # Per Google docs: prompt FIRST, then images
+            # See: https://ai.google.dev/gemini-api/docs/image-generation
             try:
                 from PIL import Image
                 import io
 
-                contents = []
+                contents = [prompt]  # Prompt first per Google docs
                 for i, ref_bytes in enumerate(reference_images):
                     if isinstance(ref_bytes, bytes):
                         img = Image.open(io.BytesIO(ref_bytes))
@@ -885,7 +887,6 @@ class GoogleProvider(ImageProvider):
                     contents.append(img)
                     logger.info(f"Added reference image {i + 1}/{len(reference_images)}: {img.size if hasattr(img, 'size') else 'unknown size'}")
 
-                contents.append(prompt)  # Prompt at the end
                 logger.info(f"Using {len(reference_images)} reference images for generation (direct mode)")
             except Exception as e:
                 logger.warning(f"Failed to process reference images: {e}")
@@ -966,8 +967,8 @@ class GoogleProvider(ImageProvider):
                         img = canvas
                         logger.info(f"Using composed canvas ({canvas_width}x{canvas_height}) instead of original reference image")
 
-                # Create content list with image and prompt
-                contents = [img, prompt]
+                # Create content list: prompt first, then image (per Google docs)
+                contents = [prompt, img]
                 logger.info("Using reference image for generation")
             except Exception as e:
                 logger.warning(f"Failed to process reference image: {e}")
