@@ -64,30 +64,6 @@ MODEL_AUTH_REQUIREMENTS = {
         )
     },
     # gemini-2.5-flash-image (Nano Banana): works with API key or gcloud (no entry needed)
-
-    # Imagen Models (Vertex AI only - require gcloud auth)
-    'imagen-4.0-generate-001': {
-        'requires_api_key': False,
-        'requires_gcloud': True,
-        'display_name': 'Imagen 4',
-        'error_message': (
-            'Imagen 4 requires Google Cloud (gcloud) authentication.\n'
-            'API key authentication is not supported for Imagen models.\n\n'
-            'Setup: gcloud auth application-default login\n'
-            'Then: gcloud config set project YOUR_PROJECT_ID'
-        )
-    },
-    'imagen-3.0-generate-002': {
-        'requires_api_key': False,
-        'requires_gcloud': True,
-        'display_name': 'Imagen 3',
-        'error_message': (
-            'Imagen 3 requires Google Cloud (gcloud) authentication.\n'
-            'API key authentication is not supported for Imagen models.\n\n'
-            'Setup: gcloud auth application-default login\n'
-            'Then: gcloud config set project YOUR_PROJECT_ID'
-        )
-    },
 }
 
 
@@ -504,6 +480,13 @@ class GoogleProvider(ImageProvider):
                 self._init_api_key_client()
 
         model = model or self.get_default_model()
+        resolved_model = self.resolve_model_alias(model)
+        if resolved_model != model:
+            logger.info(
+                f"Legacy image model '{model}' aliased to '{resolved_model}' "
+                f"(Google Cloud deprecation effective 2026-06-30)"
+            )
+        model = resolved_model
 
         # Check model-specific auth requirements BEFORE proceeding
         # This enforces requirements consistently across GUI and CLI
@@ -1623,9 +1606,6 @@ class GoogleProvider(ImageProvider):
             "gemini-3-pro-image-preview": "Gemini 3 Pro Image (Nano Banana Pro) - 4K",
             "gemini-3.1-flash-image-preview": "Gemini 3.1 Flash Image (Nano Banana 2) - 2K",
             "gemini-2.5-flash-image": "Gemini 2.5 Flash Image (Nano Banana)",
-            # Imagen Models (Vertex AI - requires gcloud auth) - newest first
-            "imagen-4.0-generate-001": "Imagen 4 (Best Quality, Low Latency)",
-            "imagen-3.0-generate-002": "Imagen 3 (General Purpose)",
         }
     
     def get_models_with_details(self) -> Dict[str, Dict[str, str]]:
@@ -1666,23 +1646,37 @@ class GoogleProvider(ImageProvider):
                 "requires_gcloud": False,
                 "max_resolution": "1K",
             },
-            # Imagen Models (Vertex AI) - newest first
-            "imagen-4.0-generate-001": {
-                "name": "Imagen 4",
-                "nickname": None,
-                "description": "Best quality, low latency, near-real-time performance",
-                "requires_gcloud": True,
-                "max_resolution": "2K",
-            },
-            "imagen-3.0-generate-002": {
-                "name": "Imagen 3",
-                "nickname": None,
-                "description": "General purpose generation, inpainting, outpainting",
-                "requires_gcloud": True,
-                "max_resolution": "2K",
-            },
         }
     
+    # Discontinued Vertex Image endpoints that Google Cloud is retiring on
+    # 2026-06-30. All of them are aliased to gemini-2.5-flash-image so saved
+    # projects, CLI arguments, and templates carrying a legacy ID continue to
+    # work after the deprecation date.
+    LEGACY_IMAGE_MODEL_ALIASES = {
+        "imagen-3.0-generate-001": "gemini-2.5-flash-image",
+        "imagen-3.0-generate-002": "gemini-2.5-flash-image",
+        "imagen-3.0-fast-generate-001": "gemini-2.5-flash-image",
+        "imagen-3.0-capability-001": "gemini-2.5-flash-image",
+        "imagen-3.0-capability-002": "gemini-2.5-flash-image",
+        "imagen-4.0-generate-001": "gemini-2.5-flash-image",
+        "imagen-4.0-fast-generate-001": "gemini-2.5-flash-image",
+        "imagen-4.0-ultra-generate-001": "gemini-2.5-flash-image",
+        "imagegeneration@002": "gemini-2.5-flash-image",
+        "imagegeneration@003": "gemini-2.5-flash-image",
+        "imagegeneration@004": "gemini-2.5-flash-image",
+        "imagegeneration@005": "gemini-2.5-flash-image",
+        "imagegeneration@006": "gemini-2.5-flash-image",
+        "imagetext@001": "gemini-2.5-flash-image",
+    }
+
+    def resolve_model_alias(self, model: str) -> str:
+        """Map a possibly-legacy image model ID to the current GA equivalent.
+
+        Returns the input unchanged if it is not a known legacy ID. Called
+        from generate() so the rest of the pipeline only ever sees GA IDs.
+        """
+        return self.LEGACY_IMAGE_MODEL_ALIASES.get(model, model)
+
     def get_default_model(self) -> str:
         """Get default Google model."""
         return "gemini-2.5-flash-image"

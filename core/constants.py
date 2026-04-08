@@ -27,9 +27,6 @@ PROVIDER_MODELS = {
         "gemini-3-pro-image-preview": "Gemini 3 Pro Image (Nano Banana Pro) - 4K",
         "gemini-3.1-flash-image-preview": "Gemini 3.1 Flash Image (Nano Banana 2) - 2K",
         "gemini-2.5-flash-image": "Gemini 2.5 Flash Image (Nano Banana)",
-        # Imagen Models (Vertex AI - gcloud only) - newest first
-        "imagen-4.0-generate-001": "Imagen 4 (Best Quality)",
-        "imagen-3.0-generate-002": "Imagen 3 (General Purpose)",
     },
     "openai": {
         # GPT Image Series (December 2025) - newest first
