@@ -453,7 +453,7 @@ class VideoProject:
     image_provider: str = "gemini"
     image_model: str = "gemini-2.5-flash-image"
     video_provider: str = "slideshow"  # 'veo' or 'slideshow'
-    video_model: Optional[str] = None  # For Veo: 'veo-3.0-generate-001', etc.
+    video_model: Optional[str] = None  # For Veo: 'veo-3.1-generate-001', etc.
     
     # Template and style
     prompt_template: str = "templates/video/lyric_prompt.j2"
