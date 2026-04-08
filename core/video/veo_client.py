@@ -49,30 +49,23 @@ class VeoModel(Enum):
     Production models (recommended):
     - veo-3.1-generate-001: Full quality, 1080p, 8s clips, reference images, frame interpolation
     - veo-3.1-fast-generate-001: Fast (11-60s), 720p, 4-8s variable duration
-    - veo-3.0-generate-001: Standard, 720p/1080p, 8s clips, audio generation
-    - veo-3.0-fast-generate-001: Fast, 720p, 4-8s variable duration
-    - veo-2.0-generate-001: Legacy, 720p, 5-8s clips, reference images
 
     Deprecated preview models (discontinued April 2, 2026):
     - veo-3.1-generate-preview → veo-3.1-generate-001
     - veo-3.1-fast-generate-preview → veo-3.1-fast-generate-001
     - veo-3.0-generate-preview, veo-3.0-fast-generate-preview → use 3.1 GA
     - veo-2.0-generate-preview, veo-2.0-generate-exp → use 3.1 GA
+    - veo-3.0-*, veo-2.0-* → discontinued June 30 2026, use 3.1 GA
     """
-    # Veo 3.1 (Latest - production)
+    # Veo 3.1 (Latest - production GA)
     VEO_3_1_GENERATE = "veo-3.1-generate-001"       # 1080p, 8s fixed, reference images, frame interpolation
     VEO_3_1_FAST = "veo-3.1-fast-generate-001"      # 720p, 4-8s variable, fast (11-60s generation)
-    # Veo 3.0 (production)
-    VEO_3_GENERATE = "veo-3.0-generate-001"         # 720p/1080p, 8s fixed, audio generation
-    VEO_3_FAST = "veo-3.0-fast-generate-001"        # 720p, 4-8s variable, fast generation
-    # Veo 2.0 (legacy - stable)
-    VEO_2_GENERATE = "veo-2.0-generate-001"         # 720p, 5-8s, reference images supported
 
 
 @dataclass
 class VeoGenerationConfig:
     """Configuration for Veo video generation"""
-    model: VeoModel = VeoModel.VEO_3_GENERATE
+    model: VeoModel = VeoModel.VEO_3_1_GENERATE
     prompt: str = ""
     aspect_ratio: str = "16:9"  # 16:9, 9:16, 1:1
     resolution: str = "1080p"  # 720p, 1080p
@@ -87,27 +80,27 @@ class VeoGenerationConfig:
 
     def __post_init__(self):
         """Validate configuration after initialization"""
-        # Validate duration for Veo 3 models
-        # Veo 3.0 and 3.1 Standard: ONLY support 8 seconds
-        if self.model in [VeoModel.VEO_3_GENERATE, VeoModel.VEO_3_1_GENERATE]:
+        # Validate duration for Veo 3.1 models
+        # Veo 3.1 Standard: ONLY supports 8-second clips
+        if self.model == VeoModel.VEO_3_1_GENERATE:
             if self.duration != 8:
                 raise ValueError(
-                    f"Veo 3.0 and 3.1 Standard ONLY support 8-second clips, got {self.duration}. "
+                    f"Veo 3.1 Standard ONLY supports 8-second clips, got {self.duration}. "
                     f"All scenes must be batched to exactly 8 seconds."
                 )
-        # Veo 3.0 Fast and 3.1 Fast: Support 4, 6, or 8 seconds
-        elif self.model in [VeoModel.VEO_3_FAST, VeoModel.VEO_3_1_FAST]:
+        # Veo 3.1 Fast: Supports 4, 6, or 8 seconds
+        elif self.model == VeoModel.VEO_3_1_FAST:
             if self.duration not in [4, 6, 8]:
                 raise ValueError(
-                    f"Veo 3 Fast duration must be 4, 6, or 8 seconds, got {self.duration}. "
+                    f"Veo 3.1 Fast duration must be 4, 6, or 8 seconds, got {self.duration}. "
                     f"Use snap_duration_to_veo() to convert float durations."
                 )
 
-        # Validate reference images (supported by Veo 3.1, 3.1 Fast, and Veo 2.0)
+        # Validate reference images (supported by Veo 3.1 and Veo 3.1 Fast)
         if self.reference_images and len(self.reference_images) > 0:
-            if self.model not in [VeoModel.VEO_3_1_GENERATE, VeoModel.VEO_3_1_FAST, VeoModel.VEO_2_GENERATE]:
+            if self.model not in [VeoModel.VEO_3_1_GENERATE, VeoModel.VEO_3_1_FAST]:
                 raise ValueError(
-                    f"Reference images are only supported by Veo 3.1, Veo 3.1 Fast, and Veo 2.0, "
+                    f"Reference images are only supported by Veo 3.1 and Veo 3.1 Fast, "
                     f"but model is {self.model.value}. Please use Veo 3.1 for reference image support."
                 )
             if len(self.reference_images) > 3:
@@ -126,7 +119,7 @@ class VeoGenerationConfig:
             "fps": self.fps,
         }
 
-        if self.model == VeoModel.VEO_3_GENERATE:
+        if self.model in (VeoModel.VEO_3_1_GENERATE, VeoModel.VEO_3_1_FAST):
             config["include_audio"] = self.include_audio
 
         if self.person_generation:
@@ -163,15 +156,6 @@ class VeoClient:
     
     # Model constraints (updated October 2025)
     MODEL_CONSTRAINTS = {
-        VeoModel.VEO_3_GENERATE: {
-            "max_duration": 8,
-            "fixed_duration": 8,  # Veo 3.0 ONLY supports 8-second clips
-            "resolutions": ["720p", "1080p"],
-            "aspect_ratios": ["16:9", "9:16", "1:1"],
-            "supports_audio": True,
-            "supports_reference_images": False,  # Veo 3.0 does NOT support reference images
-            "generation_time": (60, 360)  # 1-6 minutes
-        },
         VeoModel.VEO_3_1_GENERATE: {
             "max_duration": 8,
             "fixed_duration": 8,  # Veo 3.1 Standard ONLY supports 8-second clips
@@ -193,23 +177,6 @@ class VeoClient:
             "supports_scene_extension": True,  # Veo 3.1 Fast supports scene extension
             "supports_frame_interpolation": True,  # Veo 3.1 Fast supports frame-to-frame interpolation
             "generation_time": (11, 60)  # 11-60 seconds (FAST!)
-        },
-        VeoModel.VEO_3_FAST: {
-            "max_duration": 8,
-            "fixed_duration": None,  # Can be 4, 6, or 8 seconds
-            "resolutions": ["720p"],
-            "aspect_ratios": ["16:9", "9:16"],
-            "supports_audio": False,
-            "supports_reference_images": False,
-            "generation_time": (11, 60)  # 11-60 seconds
-        },
-        VeoModel.VEO_2_GENERATE: {
-            "max_duration": 8,
-            "resolutions": ["720p"],
-            "aspect_ratios": ["16:9"],
-            "supports_audio": False,
-            "supports_reference_images": True,  # Veo 2.0 supports reference images
-            "generation_time": (60, 180)  # 1-3 minutes
         }
     }
     
@@ -1152,18 +1119,12 @@ class VeoClient:
         pricing_with_audio = {
             VeoModel.VEO_3_1_GENERATE: 0.40,  # $0.40/sec with audio
             VeoModel.VEO_3_1_FAST: 0.15,      # $0.15/sec with audio
-            VeoModel.VEO_3_GENERATE: 0.40,    # $0.40/sec with audio
-            VeoModel.VEO_3_FAST: 0.15,        # $0.15/sec with audio
-            VeoModel.VEO_2_GENERATE: 0.35,    # $0.35/sec (no audio support)
         }
 
         # October 2025 pricing - video only (per second)
         pricing_video_only = {
             VeoModel.VEO_3_1_GENERATE: 0.20,  # $0.20/sec video only
             VeoModel.VEO_3_1_FAST: 0.10,      # $0.10/sec video only
-            VeoModel.VEO_3_GENERATE: 0.20,    # $0.20/sec video only
-            VeoModel.VEO_3_FAST: 0.10,        # $0.10/sec video only
-            VeoModel.VEO_2_GENERATE: 0.35,    # $0.35/sec (same with or without audio param)
         }
 
         # Select pricing based on audio setting
