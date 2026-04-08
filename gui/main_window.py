@@ -585,8 +585,6 @@ class MainWindow(QMainWindow):
         # Get available providers dynamically
         try:
             available_providers = list_providers()
-            # Filter out internal providers
-            available_providers = [p for p in available_providers if p != "imagen_customization"]
             if not available_providers:
                 available_providers = ["google", "openai", "midjourney"]
         except Exception as e:
@@ -735,8 +733,6 @@ class MainWindow(QMainWindow):
             _logging.getLogger(__name__).debug(f"Provider discovery failed: {e}")
             available_providers = ["google", "openai", "midjourney"]
 
-        # Filter out imagen_customization - it's used internally by google provider
-        available_providers = [p for p in available_providers if p != "imagen_customization"]
         self.image_provider_combo.addItems(available_providers)
         if self.current_provider in available_providers:
             self.image_provider_combo.setCurrentText(self.current_provider)
@@ -1539,8 +1535,6 @@ class MainWindow(QMainWindow):
             _logging.getLogger(__name__).debug(f"Provider discovery failed (settings tab): {e}")
             available_providers = ["google", "openai", "midjourney"]
 
-        # Filter out imagen_customization - it's used internally by google provider
-        available_providers = [p for p in available_providers if p != "imagen_customization"]
         self.provider_combo.addItems(available_providers)
         if self.current_provider in available_providers:
             self.provider_combo.setCurrentText(self.current_provider)
@@ -5110,7 +5104,7 @@ For more detailed information, please refer to the full documentation.
 
         # Check if using Google Cloud auth mode (no API key needed)
         is_using_gcloud = False
-        if self.current_provider.lower() in ["google", "imagen_customization"]:
+        if self.current_provider.lower() == "google":
             auth_mode_text = self.auth_mode_combo.currentText()
             is_using_gcloud = auth_mode_text == "Google Cloud Account"
 
@@ -5221,9 +5215,7 @@ For more detailed information, please refer to the full documentation.
                         width, height = map(int, resolution.split('x'))
 
                 if width and height:
-                    # Google providers (google and imagen_customization) support exact aspect ratios
-                    google_providers = ["google", "imagen_customization"]
-                    if self.current_provider.lower() not in google_providers:
+                    if self.current_provider.lower() != "google":
                         # Non-Google providers: use closest aspect ratio and store target for scaling
                         self.target_resolution = (width, height)
                         closest_ar = self._find_closest_aspect_ratio(width, height, self.current_provider)
@@ -5409,9 +5401,6 @@ For more detailed information, please refer to the full documentation.
 
             # The provider will handle command building and mode selection
 
-        # Check for Imagen 3 multi-reference generation
-        use_imagen_customization = False
-
         # First, check if user has references but is NOT using a supported provider (Google or OpenAI)
         if (hasattr(self, 'imagen_reference_widget') and
             self.imagen_reference_widget.has_references() and
@@ -5539,8 +5528,10 @@ For more detailed information, please refer to the full documentation.
                         kwargs['reference_images'] = reference_images
 
             else:
-                # Strict mode: Use Imagen 3 Customization (subject preservation)
-                # Validate prompt has reference tags [N]
+                # Strict mode: Gemini multi-reference (post June 30 2026 GA).
+                # imagen-3.0-capability-001 was discontinued; strict-mode now
+                # routes through gemini-2.5-flash-image with references passed
+                # as a list and [N] tags rewritten into natural-language labels.
                 import re
                 ref_tags = re.findall(r'\[(\d+)\]', prompt)
                 if not ref_tags:
@@ -5552,24 +5543,32 @@ For more detailed information, please refer to the full documentation.
                     self.btn_generate.setEnabled(True)
                     return
 
-                # Switch to ImagenCustomizationProvider
-                use_imagen_customization = True
-                # Store original provider to restore after generation
-                self._imagen_original_provider = self.current_provider
-                self.current_provider = "imagen_customization"
+                # Rewrite [N] tags into natural-language references so the model
+                # can ground them against the corresponding reference image.
+                rewritten_prompt = prompt
+                for idx, ref in enumerate(references, start=1):
+                    label = ref.subject_description or f"reference image {idx}"
+                    rewritten_prompt = rewritten_prompt.replace(f"[{idx}]", label)
+                prompt = rewritten_prompt
 
-                # Pass references in kwargs
-                kwargs['references'] = references
-
-                self._append_to_console(
-                    f"Using Strict mode (Imagen 3 Customization) with {len(references)} reference image(s)",
-                    "#00ff00"
-                )
-                for i, ref in enumerate(references, start=1):
+                reference_images = []
+                for ref in references:
+                    with open(ref.path, 'rb') as f:
+                        reference_images.append(f.read())
                     self._append_to_console(
-                        f"  [{i}] {ref.reference_type.value.upper()}: {ref.path.name}",
+                        f"  Strict-mode reference [{ref.reference_id}]: {ref.path.name}",
                         "#66ccff"
                     )
+                kwargs['reference_images'] = reference_images
+
+                self._append_to_console(
+                    f"Using Strict mode (Gemini multi-reference) with {len(references)} reference image(s)",
+                    "#00ff00"
+                )
+                self._append_to_console(
+                    f"Rewritten prompt: {prompt}",
+                    "#888888"
+                )
 
         # Check if using OpenAI with reference images
         if (hasattr(self, 'imagen_reference_widget') and
@@ -5643,7 +5642,7 @@ For more detailed information, please refer to the full documentation.
         self.gen_thread = QThread()
         # Get the actual auth mode from config
         auth_mode = "api-key"  # default
-        if self.current_provider.lower() == "google" or use_imagen_customization:
+        if self.current_provider.lower() == "google":
             auth_mode_text = self.auth_mode_combo.currentText()
             if auth_mode_text == "Google Cloud Account":
                 auth_mode = "gcloud"
@@ -5975,11 +5974,6 @@ For more detailed information, please refer to the full documentation.
         # Reset Discord presence to IDLE
         self._update_discord_presence(ActivityState.IDLE)
 
-        # Restore original provider if we used Imagen customization
-        if hasattr(self, '_imagen_original_provider'):
-            self.current_provider = self._imagen_original_provider
-            delattr(self, '_imagen_original_provider')
-
         self.status_label.setText("Error occurred.")
         self.status_bar.showMessage(f"Error: {error[:50]}...")  # Show truncated error in status
         self._append_to_console(f"ERROR: {error}", "#ff6666")  # Red
@@ -5991,11 +5985,6 @@ For more detailed information, please refer to the full documentation.
         """Handle successful generation."""
         # Reset Discord presence to IDLE
         self._update_discord_presence(ActivityState.IDLE)
-
-        # Restore original provider if we used Imagen customization
-        if hasattr(self, '_imagen_original_provider'):
-            self.current_provider = self._imagen_original_provider
-            delattr(self, '_imagen_original_provider')
 
         # Check if this is a Midjourney mode response
         if texts:
@@ -7532,7 +7521,7 @@ For more detailed information, please refer to the full documentation.
 
             # Step 2: Prepare providers
             self.logger.info("STEP 2: Preparing providers dictionary...")
-            available_providers = [p for p in list_providers() if p != "imagen_customization"]
+            available_providers = list_providers()
             self.logger.info(f"STEP 2: Available providers: {available_providers}")
             providers_dict = {
                 'available': available_providers,

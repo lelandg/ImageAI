@@ -255,7 +255,6 @@ class ReferenceGenerationDialog(QDialog):
         # Get available providers
         try:
             available_providers = list_providers()
-            available_providers = [p for p in available_providers if p != "imagen_customization"]
         except Exception as e:
             logger.error(f"Failed to list providers: {e}")
             available_providers = ["google", "openai", "stability"]
