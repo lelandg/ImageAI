@@ -12,7 +12,7 @@
 
 ## Overview
 
-**ImageAI** is a powerful desktop application and CLI tool for AI image generation, video creation, and professional layout design. It supports multiple providers including Google's Gemini API (with Imagen 3 and Veo 3), OpenAI's DALL·E models, Stability AI's Stable Diffusion, and local Stable Diffusion models. Beyond image generation, ImageAI provides a complete workflow for creating AI-powered videos with MIDI synchronization, karaoke overlays, and a professional layout engine for photo books, comics, and publications. It features enterprise-grade authentication options, secure credential management, and works seamlessly across Windows, macOS, and Linux.
+**ImageAI** is a powerful desktop application and CLI tool for AI image generation, video creation, and professional layout design. It supports multiple providers including Google's Gemini API (Gemini 2.5/3 Flash/Pro Image and Veo 3.1), OpenAI's GPT Image and DALL·E models, Stability AI's Stable Diffusion, and local Stable Diffusion models. Beyond image generation, ImageAI provides a complete workflow for creating AI-powered videos with MIDI synchronization, karaoke overlays, and a professional layout engine for photo books, comics, and publications. It features enterprise-grade authentication options, secure credential management, and works seamlessly across Windows, macOS, and Linux.
 
 ## Table of Contents
 - [Project Review & Recommendations](Docs/ProjectReview.md)
@@ -656,7 +656,7 @@ python main.py video --in lyrics.txt --midi song.mid --audio song.mp3 \
   --out karaoke_video.mp4
 
 # Using Veo AI for video generation (when available)
-python main.py video --in script.txt --veo-model veo-3.0-generate-001 \
+python main.py video --in script.txt --veo-model veo-3.1-generate-001 \
   --audio soundtrack.mp3 --out ai_video.mp4
 ```
 
@@ -2464,13 +2464,14 @@ A: Check each provider's terms:
 
 Since ImageAI's Video Project feature is designed to work with Google Veo for AI video generation, here's the current pricing:
 
-#### AI Video Generation Models (January 2025)
+#### AI Video Generation Models (April 2026 GA)
 
 | Model | Model ID | Duration | Audio | Gemini API Price | Features |
 |-------|----------|----------|-------|-----------------|----------|
-| **Veo 3** | `veo-3.0-generate-001` | 8 sec | ✅ Yes | $0.75/second<br>($6.00/video) | Best quality, physics-accurate |
-| **Veo 3 Fast** | `veo-3.0-fast-generate-001` | 8 sec | ✅ Yes | $0.40/second<br>($3.20/video) | Optimized for speed |
-| **Veo 2** | `veo-2.0-generate-001` | 5-8 sec | ❌ No | $0.35/second<br>($2.10-2.80/video) | 4K support, no audio |
+| **Veo 3.1** | `veo-3.1-generate-001` | 8 sec | ✅ Yes | $0.40/second<br>($3.20/video) | 1080p, reference images, frame interpolation |
+| **Veo 3.1 Fast** | `veo-3.1-fast-generate-001` | 4-8 sec | ✅ Yes | $0.15/second<br>($0.60-1.20/video) | 720p, 11-60s generation, reference images |
+
+> **Note:** Veo 2.0, Veo 3.0, and Veo 3.0 Fast were discontinued by Google Cloud on 2026-06-30. Legacy model IDs in saved configs are automatically migrated on load.
 
 #### Subscription Options
 

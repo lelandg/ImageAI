@@ -6,9 +6,8 @@ This script scans all log files to find image generations that used reference im
 then updates the corresponding PNG.json metadata files with the reference information.
 
 Based on actual log patterns found in:
-- providers/imagen_customization.py (lines 202-206): Multi-reference format
-- providers/google.py: Single reference format
-- gui/main_window.py (line 5414+): Metadata saving
+- providers/google.py: Single + multi-reference formats (post-2026-06-30 migration)
+- gui/main_window.py: Metadata saving
 """
 
 import json

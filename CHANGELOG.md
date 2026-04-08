@@ -5,6 +5,23 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+- **Imagen 3 / Imagen 4 models** from the Google provider (Google Cloud discontinues all `imagen-3.0-*`, `imagen-4.0-*`, `imagegeneration@*`, and `imagetext@*` Vertex endpoints on **2026-06-30**). No longer appear in the model dropdown.
+- **Veo 3.0, Veo 3.0 Fast, Veo 2.0** video models (same 2026-06-30 deprecation). No longer appear in the video workspace Veo combobox.
+- `providers/imagen_customization.py` — the entire `ImagenCustomizationProvider` module (its only endpoint, `imagen-3.0-capability-001`, is in the discontinuation list).
+- `gui/video/video_project_tab_old.py` — unreferenced dead-code file.
+
+### Changed
+- **Strict-mode multi-reference image generation** now routes through `gemini-2.5-flash-image` with inline `[N]` tag rewriting instead of the discontinued Imagen 3 Customization API. User-facing `[1] [2] [3] [4]` prompt syntax is preserved — tags are rewritten into natural-language labels (using each reference's `subject_description` when available) before the prompt is sent to Gemini.
+- Default Veo model is now `veo-3.1-generate-001`.
+- **Automatic config migration:** `video_config.json` files carrying legacy Veo IDs are transparently rewritten on load.
+- **Automatic model aliasing:** Saved projects, CLI arguments, and templates referencing any of 14 discontinued Imagen/imagegeneration/imagetext IDs are transparently routed to `gemini-2.5-flash-image` inside `GoogleProvider.generate()`. Resolution is logged at info level when it fires.
+
+### Migration test coverage
+- 5 pytest cases in `tests/migration/test_legacy_model_migration.py` cover the Veo config migration (3) and the Imagen model aliasing (2).
+
 ## [0.37.0] - 2026-03-02
 
 ### Fixed
