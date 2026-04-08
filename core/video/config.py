@@ -4,6 +4,7 @@ Video feature configuration management.
 
 from pathlib import Path
 from typing import Dict, Any, Optional
+import copy
 import json
 import logging
 from core.llm_models import format_provider_dict
@@ -97,7 +98,7 @@ class VideoConfig:
             config_file = config_dir / 'video_config.json'
         
         self.config_file = config_file
-        self.config = self.DEFAULT_CONFIG.copy()
+        self.config = copy.deepcopy(self.DEFAULT_CONFIG)
         
         # Set dynamic defaults
         if self.config["video_projects_dir"] is None:
