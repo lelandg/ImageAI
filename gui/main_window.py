@@ -3967,9 +3967,16 @@ For more detailed information, please refer to the full documentation.
         # Show/hide Imagen reference widget based on provider and model
         self._update_imagen_reference_visibility()
 
-        # Show/hide Background selector for GPT Image 1 (OpenAI)
+        # Show/hide Background selector for GPT Image 1 (OpenAI). Python's
+        # `and`/`or` return operands, not bools — force to bool so setVisible
+        # doesn't receive a stray empty string when model_name is "".
         if hasattr(self, 'background_group') and self.background_group:
-            is_gpt_image_1 = model_id == "gpt-image-1" or (model_name and "gpt-image-1" in model_name.lower())
+            _mid = model_id or ""
+            _mname = (model_name or "").lower()
+            is_gpt_image_1 = bool(
+                _mid == "gpt-image-1"
+                or (_mname and "gpt-image-1" in _mname and "gpt-image-1.5" not in _mname)
+            )
             self.background_group.setVisible(is_gpt_image_1)
             if is_gpt_image_1:
                 self.logger.info("GPT Image 1 selected - showing background selector")
@@ -5657,10 +5664,10 @@ For more detailed information, please refer to the full documentation.
                 return
 
             # Check model supports reference images (GPT Image models only)
-            if model not in ["gpt-image-1", "gpt-image-1.5"]:
+            if model not in ["gpt-image-1", "gpt-image-1.5", "gpt-image-2"]:
                 error_msg = (f"Reference images are only supported with GPT Image models.\n\n"
                             f"Current model: {model}\n\n"
-                            f"Please switch to 'GPT Image 1' or 'GPT Image 1.5' to use reference images.")
+                            f"Please switch to 'GPT Image 2', 'GPT Image 1.5', or 'GPT Image 1' to use reference images.")
                 self._append_to_console(f"ERROR: {error_msg}", "#ff6666")
                 QMessageBox.warning(self, APP_NAME, error_msg)
                 self.btn_generate.setEnabled(True)
