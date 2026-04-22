@@ -333,6 +333,7 @@ def run_cli(args) -> int:
                 kwargs["num_images"] = args.num_images
 
             references = getattr(args, "reference", None) or []
+            ref_paths = []  # bound when `references` is non-empty; pre-init for narrowing
             mask_path = getattr(args, "mask", None)
             stream_partials = bool(getattr(args, "stream_partials", False))
             submit_batch = bool(getattr(args, "batch", False))
