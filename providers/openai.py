@@ -1308,14 +1308,19 @@ class OpenAIProvider(ImageProvider):
         self._ensure_client()
         logger = logging.getLogger(__name__)
 
-        # Build the JSONL payload in memory.
+        if not requests:
+            raise ValueError("submit_batch_job requires at least one request")
+
+        # Build the JSONL payload in memory. Copy each request so we never
+        # mutate the caller's dicts — important for retry scenarios.
         lines = []
         for i, req in enumerate(requests):
+            body = {k: v for k, v in req.items() if k != "custom_id"}
             line = {
-                "custom_id": req.pop("custom_id", f"req-{i}-{uuid.uuid4().hex[:8]}"),
+                "custom_id": req.get("custom_id", f"req-{i}-{uuid.uuid4().hex[:8]}"),
                 "method": "POST",
                 "url": endpoint,
-                "body": req,
+                "body": body,
             }
             lines.append(json.dumps(line))
         payload_bytes = ("\n".join(lines) + "\n").encode("utf-8")
