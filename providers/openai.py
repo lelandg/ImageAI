@@ -260,12 +260,33 @@ class OpenAIProvider(ImageProvider):
         target_height = kwargs.get('height')
         aspect_ratio = kwargs.get('aspect_ratio', '1:1')
 
-        if model in ["dall-e-3", "gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"]:
+        # Skip the legacy size-mapping when the caller already supplied a
+        # validated custom_size — that path set size = "{cw}x{ch}" above and
+        # the gpt-image-2 valid_sizes presets must be preserved verbatim.
+        if model in ["dall-e-3", "gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini", "gpt-image-2"] and not kwargs.get("custom_size"):
             # Map resolution or aspect ratio to supported sizes
             resolution = kwargs.get('resolution', kwargs.get('width', size))
 
+            # gpt-image-2: aspect-driven mapping into the safe 1024 / 1536 presets.
+            # (Use --custom-size for 2K/4K; this branch is the no-custom-size default.)
+            if model == "gpt-image-2":
+                if isinstance(resolution, str) and 'x' in resolution:
+                    width, height = map(int, resolution.split('x'))
+                    if width > height:
+                        size = "1536x1024"  # Landscape
+                    elif height > width:
+                        size = "1024x1536"  # Portrait
+                    else:
+                        size = "1024x1024"  # Square
+                elif aspect_ratio:
+                    if aspect_ratio in ['16:9', '4:3']:
+                        size = "1536x1024"
+                    elif aspect_ratio in ['9:16', '3:4']:
+                        size = "1024x1536"
+                    else:
+                        size = "1024x1024"
             # GPT Image 1.5 has different supported sizes than DALL-E 3
-            if model == "gpt-image-1.5":
+            elif model == "gpt-image-1.5":
                 # GPT Image 1.5: 1024x1024, 1536x1024 (landscape), 1024x1536 (portrait), or auto
                 if isinstance(resolution, str) and 'x' in resolution:
                     width, height = map(int, resolution.split('x'))
@@ -305,7 +326,7 @@ class OpenAIProvider(ImageProvider):
         # For GPT Image models: Add target dimensions to prompt as composition hint
         # This helps the model compose the image for the target aspect ratio
         # The output will still be a fixed size, but post-processing will crop/scale
-        if model in ["gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"] and target_width and target_height:
+        if model in ["gpt-image-2", "gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"] and target_width and target_height:
             # Only add hint if target differs from API output size
             api_width, api_height = map(int, size.split('x'))
             target_ratio = target_width / target_height
@@ -348,7 +369,7 @@ class OpenAIProvider(ImageProvider):
         prepared_images = []
 
         # GPT Image models support reference images via images.edit()
-        if model in ["gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"] and (reference_image or reference_images):
+        if model in ["gpt-image-2", "gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"] and (reference_image or reference_images):
             use_edit_api = True
 
             # Prepare reference images as file-like objects
@@ -551,14 +572,21 @@ class OpenAIProvider(ImageProvider):
                     edit_params["image"] = prepared_images
 
                 # Add model-specific parameters
-                if model == "gpt-image-1.5":
+                if model in ("gpt-image-2", "gpt-image-1.5"):
                     output_format = kwargs.get('output_format', 'png')
                     if output_format in {'png', 'jpeg', 'webp'}:
                         edit_params["output_format"] = output_format
                     if output_format in {'jpeg', 'webp'}:
-                        compression = kwargs.get('compression', 100)
+                        compression = kwargs.get('output_compression', kwargs.get('compression', 100))
                         if isinstance(compression, (int, float)) and 0 <= compression <= 100:
                             edit_params["output_compression"] = int(compression)
+                if model == "gpt-image-2":
+                    # Pass through the new gpt-image-2 knobs to the edit endpoint too.
+                    if quality in caps["quality_values"]:
+                        edit_params["quality"] = quality
+                    moderation = kwargs.get('moderation', 'auto')
+                    if moderation in {"auto", "low"}:
+                        edit_params["moderation"] = moderation
 
                 response = self.client.images.edit(**edit_params)
             else:
