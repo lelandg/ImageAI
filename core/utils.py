@@ -192,7 +192,28 @@ def sidecar_path(image_path: Path) -> Path:
 
 
 def write_image_sidecar(image_path: Path, meta: dict) -> None:
-    """Write human-readable JSON beside the image."""
+    """Write human-readable JSON beside the image.
+
+    Sidecar fields are open-ended. Known optional keys (all nullable, all
+    forward-compatible — readers must tolerate missing keys):
+
+      Always present (existing): prompt, provider, model, timestamp.
+
+      Added 2026-04-22 for gpt-image-2 support:
+        quality              str   "auto"|"low"|"medium"|"high" (gpt-image-2)
+                                   or "standard"|"hd" (dall-e-3)
+        output_format        str   "png"|"jpeg"|"webp"
+        output_compression   int|None   0-100, only when format is jpeg/webp
+        moderation           str   "auto"|"low"
+        partial_images_count int|None   number of partials streamed (0-3)
+        custom_size          str|None   "WxH" if a non-preset size was used
+        reference_images     list[str]  paths or names of inputs to /edits
+        mask                 str|None   path to alpha mask PNG
+        model_snapshot       str   e.g. "gpt-image-2-2026-04-21"
+        batch_job_id         str|None   non-null when produced by Batch API
+        usage                dict|None  {input_tokens_text, input_tokens_image,
+                                         output_tokens, cost_usd}
+    """
     try:
         p = sidecar_path(image_path)
         p.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")

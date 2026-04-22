@@ -29,7 +29,8 @@ PROVIDER_MODELS = {
         "gemini-2.5-flash-image": "Gemini 2.5 Flash Image (Nano Banana)",
     },
     "openai": {
-        # GPT Image Series (December 2025) - newest first
+        # GPT Image Series — newest first
+        "gpt-image-2": "GPT Image 2 (Thinking, Best)",
         "gpt-image-1.5": "GPT Image 1.5 (Latest)",
         "gpt-image-1": "GPT Image 1",
         "gpt-image-1-mini": "GPT Image 1 Mini (Fast)",
@@ -53,6 +54,10 @@ PROVIDER_MODELS = {
         "CompVis/stable-diffusion-v1-4": "Stable Diffusion 1.4",
     },
 }
+
+# OpenAI gpt-image-2 reproducibility pin. Use this snapshot when sidecar
+# metadata needs the exact model snapshot, not the alias.
+GPT_IMAGE_2_SNAPSHOT = "gpt-image-2-2026-04-21"
 
 # Provider API key URLs
 PROVIDER_KEY_URLS = {
