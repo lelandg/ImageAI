@@ -24,6 +24,143 @@ except ImportError:
 OpenAIClient = None
 
 
+# Capability table for every OpenAI image model. The provider, GUI, and CLI
+# all consult this; never add per-model `if model == ...` branches outside
+# this dict — extend the dict instead.
+MODEL_CAPS = {
+    "gpt-image-2": {
+        "display_name": "GPT Image 2 (Thinking, Best)",
+        "snapshot": "gpt-image-2-2026-04-21",
+        "endpoint": "images.generate",
+        "quality_values": ("auto", "low", "medium", "high"),
+        "default_quality": "auto",
+        "valid_sizes": ("auto", "1024x1024", "1536x1024", "1024x1536",
+                        "2048x2048", "2048x1152", "3840x2160", "2160x3840"),
+        "supports_custom_size": True,
+        "custom_size_edge_multiple": 16,
+        "custom_size_max_edge": 3840,
+        "custom_size_max_aspect": 3.0,
+        "custom_size_min_pixels": 655_360,
+        "custom_size_max_pixels": 8_294_400,
+        "supports_transparent_bg": False,
+        "supports_input_fidelity": False,
+        "supports_variations": False,
+        "supports_streaming": True,
+        "supports_mask": True,
+        "supports_multi_reference": True,
+        "supports_output_format": True,
+        "supports_moderation": True,
+        "supports_batch": True,
+        "supports_style": False,
+        "max_n": 10,
+    },
+    "gpt-image-1.5": {
+        "display_name": "GPT Image 1.5 (Latest)",
+        "endpoint": "images.generate",
+        "quality_values": ("auto",),
+        "default_quality": "auto",
+        "valid_sizes": ("auto", "1024x1024", "1536x1024", "1024x1536"),
+        "supports_custom_size": False,
+        "supports_transparent_bg": True,
+        "supports_input_fidelity": False,
+        "supports_variations": False,
+        "supports_streaming": False,
+        "supports_mask": True,
+        "supports_multi_reference": True,
+        "supports_output_format": True,
+        "supports_moderation": True,
+        "supports_batch": True,
+        "supports_style": False,
+        "max_n": 10,
+    },
+    "gpt-image-1": {
+        "display_name": "GPT Image 1",
+        "endpoint": "images.generate",
+        "quality_values": ("auto",),
+        "default_quality": "auto",
+        "valid_sizes": ("auto", "1024x1024", "1792x1024", "1024x1792"),
+        "supports_custom_size": False,
+        "supports_transparent_bg": True,
+        "supports_input_fidelity": False,
+        "supports_variations": False,
+        "supports_streaming": False,
+        "supports_mask": True,
+        "supports_multi_reference": True,
+        "supports_output_format": False,
+        "supports_moderation": False,
+        "supports_batch": False,
+        "supports_style": False,
+        "max_n": 1,
+    },
+    "gpt-image-1-mini": {
+        "display_name": "GPT Image 1 Mini (Fast)",
+        "endpoint": "images.generate",
+        "quality_values": ("auto",),
+        "default_quality": "auto",
+        "valid_sizes": ("auto", "1024x1024", "1792x1024", "1024x1792"),
+        "supports_custom_size": False,
+        "supports_transparent_bg": False,
+        "supports_input_fidelity": False,
+        "supports_variations": False,
+        "supports_streaming": False,
+        "supports_mask": False,
+        "supports_multi_reference": False,
+        "supports_output_format": False,
+        "supports_moderation": False,
+        "supports_batch": False,
+        "supports_style": False,
+        "max_n": 1,
+    },
+    "dall-e-3": {
+        "display_name": "DALL·E 3",
+        "endpoint": "images.generate",
+        "quality_values": ("standard", "hd"),
+        "default_quality": "standard",
+        "valid_sizes": ("1024x1024", "1792x1024", "1024x1792"),
+        "supports_custom_size": False,
+        "supports_transparent_bg": False,
+        "supports_input_fidelity": False,
+        "supports_variations": False,
+        "supports_streaming": False,
+        "supports_mask": False,
+        "supports_multi_reference": False,
+        "supports_output_format": False,
+        "supports_moderation": False,
+        "supports_batch": False,
+        "supports_style": True,
+        "max_n": 1,
+    },
+    "dall-e-2": {
+        "display_name": "DALL·E 2",
+        "endpoint": "images.generate",
+        "quality_values": ("standard",),
+        "default_quality": "standard",
+        "valid_sizes": ("256x256", "512x512", "1024x1024"),
+        "supports_custom_size": False,
+        "supports_transparent_bg": False,
+        "supports_input_fidelity": False,
+        "supports_variations": True,
+        "supports_streaming": False,
+        "supports_mask": True,
+        "supports_multi_reference": False,
+        "supports_output_format": False,
+        "supports_moderation": False,
+        "supports_batch": False,
+        "supports_style": False,
+        "max_n": 10,
+    },
+}
+
+
+def _caps_for(model: str) -> dict:
+    """Return MODEL_CAPS row, falling back to gpt-image-1 for unknown models."""
+    return MODEL_CAPS.get(model) or MODEL_CAPS["gpt-image-1"]
+
+
+class _UnsupportedParam(ValueError):
+    """Raised when a request includes a parameter the model does not support."""
+
+
 class OpenAIProvider(ImageProvider):
     """OpenAI DALL-E provider for AI image generation."""
     
@@ -67,6 +204,47 @@ class OpenAIProvider(ImageProvider):
         self._ensure_client()
 
         model = model or self.get_default_model()
+        caps = _caps_for(model)
+
+        # Validate quality against capability table. Caller may pass legacy
+        # values; map any string outside caps['quality_values'] to default.
+        requested_quality = kwargs.get("quality", quality)
+        if requested_quality not in caps["quality_values"]:
+            quality = caps["default_quality"]
+        else:
+            quality = requested_quality
+        kwargs["quality"] = quality  # keep kwargs and local in sync
+
+        # Reject unsupported parameter combinations with actionable messages.
+        if kwargs.get("background") in {"transparent"} and not caps["supports_transparent_bg"]:
+            raise _UnsupportedParam(
+                f"Transparent background is not supported on {model}. "
+                f"Use gpt-image-1.5 or gpt-image-1 for alpha PNG output."
+            )
+        if kwargs.get("input_fidelity") and not caps["supports_input_fidelity"]:
+            raise _UnsupportedParam(
+                f"input_fidelity is not supported on {model}."
+            )
+        n_requested = int(kwargs.get("num_images", n) or 1)
+        if n_requested > caps["max_n"]:
+            raise _UnsupportedParam(
+                f"{model} supports n=1..{caps['max_n']}, got n={n_requested}."
+            )
+
+        # Custom size pre-flight (gpt-image-2 only). custom_size beats `size`.
+        custom_size = kwargs.get("custom_size")
+        if custom_size:
+            if not caps["supports_custom_size"]:
+                raise _UnsupportedParam(f"Custom size is not supported on {model}.")
+            from core.image_size import validate_custom_size, parse_size_string
+            try:
+                cw, ch = parse_size_string(custom_size)
+            except ValueError as e:
+                raise _UnsupportedParam(str(e))
+            ok, why = validate_custom_size(cw, ch, caps)
+            if not ok:
+                raise _UnsupportedParam(f"Invalid custom_size {custom_size}: {why}")
+            size = f"{cw}x{ch}"
         texts: List[str] = []
         images: List[bytes] = []
 
@@ -205,7 +383,40 @@ class OpenAIProvider(ImageProvider):
 
         try:
             # Build generation parameters based on model
-            if model == "gpt-image-1.5":
+            if model == "gpt-image-2":
+                gen_params = {
+                    "model": model,
+                    "prompt": prompt,
+                    "size": size,
+                    "n": min(num_images, caps["max_n"]),
+                    "quality": quality,  # auto|low|medium|high — drives reasoning
+                }
+
+                output_format = kwargs.get("output_format", "png")
+                if output_format in {"png", "jpeg", "webp"}:
+                    gen_params["output_format"] = output_format
+                if output_format in {"jpeg", "webp"}:
+                    compression = kwargs.get("output_compression", kwargs.get("compression", 90))
+                    if isinstance(compression, (int, float)) and 0 <= compression <= 100:
+                        gen_params["output_compression"] = int(compression)
+
+                moderation = kwargs.get("moderation", "auto")
+                if moderation in {"auto", "low"}:
+                    gen_params["moderation"] = moderation
+
+                logger.info("=" * 60)
+                logger.info("SENDING TO OPENAI API (GPT Image 2)")
+                logger.info(f"Model: {model}  (snapshot: {caps.get('snapshot')})")
+                logger.info(f"Prompt: {prompt}")
+                logger.info(f"Size: {size}")
+                logger.info(f"Quality (thinking): {quality}")
+                logger.info(f"Output format: {gen_params.get('output_format', 'png')}")
+                if "output_compression" in gen_params:
+                    logger.info(f"Compression: {gen_params['output_compression']}")
+                logger.info(f"Moderation: {gen_params.get('moderation', 'auto')}")
+                logger.info(f"Number of images: {gen_params['n']}")
+                logger.info("=" * 60)
+            elif model == "gpt-image-1.5":
                 # GPT Image 1.5: New parameters - output_format, compression, moderation
                 # Supports n=1-10 (unlike DALL-E 3 which only supports n=1)
                 gen_params = {
@@ -354,7 +565,7 @@ class OpenAIProvider(ImageProvider):
             data_items = getattr(response, "data", []) or []
             for item in data_items:
                 # GPT Image 1.5 uses output_format, returns b64_json
-                if model == "gpt-image-1.5":
+                if model in ("gpt-image-2", "gpt-image-1.5"):
                     b64 = getattr(item, "b64_json", None)
                     if b64:
                         try:
@@ -383,6 +594,7 @@ class OpenAIProvider(ImageProvider):
             
             # Handle multiple images for models with n=1 limitation (DALL-E 3, GPT Image 1)
             # These models only support n=1, so we generate multiple times sequentially
+            # gpt-image-2 and gpt-image-1.5 handle n>1 in a single call; only legacy single-image models need this loop.
             if model in ["dall-e-3", "gpt-image-1", "gpt-image-1-mini"] and kwargs.get('num_images', 1) > 1:
                 for _ in range(kwargs.get('num_images', 1) - 1):
                     try:
@@ -410,7 +622,7 @@ class OpenAIProvider(ImageProvider):
                 )
 
             # Post-processing: crop/scale to target dimensions if specified
-            if target_width and target_height and model in ["gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"]:
+            if target_width and target_height and model in ["gpt-image-2", "gpt-image-1", "gpt-image-1.5", "gpt-image-1-mini"]:
                 try:
                     from PIL import Image
                     import io
@@ -459,68 +671,47 @@ class OpenAIProvider(ImageProvider):
         return texts, images
     
     def validate_auth(self) -> Tuple[bool, str]:
-        """Validate OpenAI API key."""
+        """Validate OpenAI API key. Detects the gpt-image-2 org-verification gate."""
         if not self.api_key:
             return False, "No API key configured"
-        
+
         try:
             self._ensure_client()
-            
-            # Try to list models as a validation check
-            models = self.client.models.list()
+            self.client.models.list()
             return True, "API key is valid"
-        except (ValueError, RuntimeError, AttributeError) as e:
+        except Exception as e:  # noqa: BLE001 — surface every backend failure to the user
+            msg = str(e)
+            lower = msg.lower()
+            if "verification" in lower or "must be verified" in lower or "403" in msg:
+                return False, (
+                    "OpenAI Organization Verification required for gpt-image-2 / "
+                    "newest models. Visit https://platform.openai.com/settings/organization/general "
+                    "to verify your org, then retry."
+                )
             return False, f"API key validation failed: {e}"
     
     def get_models(self) -> Dict[str, str]:
-        """Get available OpenAI image generation models."""
-        return {
-            # GPT Image Series (Latest - December 2025)
-            "gpt-image-1.5": "GPT Image 1.5 (Latest)",
-            "gpt-image-1": "GPT Image 1",
-            "gpt-image-1-mini": "GPT Image 1 Mini (Fast)",
-            # DALL-E Series
-            "dall-e-3": "DALL·E 3",
-            "dall-e-2": "DALL·E 2",
-        }
-    
-    def get_models_with_details(self) -> Dict[str, Dict[str, str]]:
-        """Get available OpenAI image generation models with detailed display information.
+        """Get available OpenAI image generation models (id -> display name)."""
+        return {model_id: caps["display_name"] for model_id, caps in MODEL_CAPS.items()}
 
-        Returns:
-            Dictionary mapping model IDs to display information including:
-            - name: Short display name
-            - nickname: Optional nickname/codename (None for OpenAI models)
-            - description: Optional brief description
-        """
-        return {
-            # GPT Image Series (December 2025)
-            "gpt-image-1.5": {
-                "name": "GPT Image 1.5",
-                "description": "Latest model, 4x faster, better instruction following, up to 10 images"
-            },
-            "gpt-image-1": {
-                "name": "GPT Image 1",
-                "description": "High quality, transparent backgrounds, reference images"
-            },
-            "gpt-image-1-mini": {
-                "name": "GPT Image 1 Mini",
-                "description": "Fast generation, lower cost, good quality"
-            },
-            # DALL-E Series
-            "dall-e-3": {
-                "name": "DALL·E 3",
-                "description": "Most advanced, highest quality images"
-            },
-            "dall-e-2": {
-                "name": "DALL·E 2",
-                "description": "Previous generation, lower cost, supports editing"
-            },
+    def get_models_with_details(self) -> Dict[str, Dict[str, str]]:
+        """Get available OpenAI image generation models with details for the UI."""
+        descriptions = {
+            "gpt-image-2": "Reasoning model — best quality, custom sizes up to 3840x2160, multi-reference, mask, streaming",
+            "gpt-image-1.5": "Latest 1.x — 4x faster, transparent bg, up to 10 images",
+            "gpt-image-1": "High quality, transparent backgrounds, reference images",
+            "gpt-image-1-mini": "Fast generation, lower cost, good quality",
+            "dall-e-3": "Most advanced legacy model, vivid/natural style, n=1 only",
+            "dall-e-2": "Previous generation, lower cost, supports edits and variations",
         }
-    
+        return {
+            model_id: {"name": caps["display_name"], "description": descriptions.get(model_id, "")}
+            for model_id, caps in MODEL_CAPS.items()
+        }
+
     def get_default_model(self) -> str:
-        """Get default OpenAI model."""
-        return "dall-e-3"
+        """Default OpenAI model — gpt-image-2 since 2026-04-22."""
+        return "gpt-image-2"
     
     def get_api_key_url(self) -> str:
         """Get OpenAI API key URL."""
@@ -532,7 +723,7 @@ class OpenAIProvider(ImageProvider):
     
     def edit_image(
         self,
-        image: bytes,
+        image,  # bytes | path | list of bytes | list of paths
         prompt: str,
         model: Optional[str] = None,
         mask: Optional[bytes] = None,
@@ -540,53 +731,115 @@ class OpenAIProvider(ImageProvider):
         n: int = 1,
         **kwargs
     ) -> Tuple[List[str], List[bytes]]:
-        """Edit image with OpenAI DALL-E."""
+        """Edit an image (or compose from multiple references) via OpenAI /v1/images/edits.
+
+        ``image`` may be:
+          * bytes (single PNG)
+          * a str/Path to a single PNG
+          * a list of either, for multi-reference composition (gpt-image-1.x and gpt-image-2)
+
+        ``mask`` is an optional alpha PNG for inpainting; only sent when the model
+        supports it (``MODEL_CAPS[model]['supports_mask']``).
+        """
         self._ensure_client()
-        
-        # Note: DALL-E 2 supports editing, DALL-E 3 does not yet
-        model = "dall-e-2"  # Force DALL-E 2 for editing
+
+        # Default to the best edit-capable model, not gpt-image-2's snapshot,
+        # so callers that forget to pass `model` get sensible behavior.
+        model = model or "gpt-image-2"
+        caps = _caps_for(model)
         texts: List[str] = []
         images: List[bytes] = []
-        
-        # Apply rate limiting
+
         rate_limiter.check_rate_limit('openai', wait=True)
-        
+
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Normalize image input into a list of file-like objects.
+        items = image if isinstance(image, list) else [image]
+        if len(items) > 1 and not caps["supports_multi_reference"]:
+            raise _UnsupportedParam(
+                f"{model} does not support multi-reference edits. "
+                f"Use gpt-image-2, gpt-image-1.5, or gpt-image-1."
+            )
+
+        prepared = []
+        for i, item in enumerate(items):
+            if isinstance(item, (bytes, bytearray)):
+                buf = BytesIO(bytes(item))
+                buf.name = f"image_{i}.png"
+                prepared.append(buf)
+            elif isinstance(item, (str, Path)):
+                p = Path(item)
+                if not p.exists():
+                    raise FileNotFoundError(f"Reference image not found: {p}")
+                buf = BytesIO(p.read_bytes())
+                buf.name = p.name
+                prepared.append(buf)
+            else:
+                raise TypeError(f"Unsupported image input type: {type(item).__name__}")
+
+        if not prepared:
+            raise ValueError("edit_image requires at least one input image")
+
+        edit_kwargs = {
+            "model": model,
+            "prompt": prompt,
+            "size": size,
+            "n": min(int(n), caps["max_n"]),
+            "image": prepared if len(prepared) > 1 else prepared[0],
+        }
+
+        # Mask
+        if mask is not None:
+            if not caps["supports_mask"]:
+                raise _UnsupportedParam(f"{model} does not support mask inpainting.")
+            mask_buf = BytesIO(mask if isinstance(mask, (bytes, bytearray)) else Path(mask).read_bytes())
+            mask_buf.name = "mask.png"
+            edit_kwargs["mask"] = mask_buf
+
+        # Output format / compression for models that support it
+        if caps["supports_output_format"]:
+            output_format = kwargs.get("output_format", "png")
+            if output_format in {"png", "jpeg", "webp"}:
+                edit_kwargs["output_format"] = output_format
+            if output_format in {"jpeg", "webp"}:
+                compression = kwargs.get("output_compression", kwargs.get("compression", 90))
+                if isinstance(compression, (int, float)) and 0 <= compression <= 100:
+                    edit_kwargs["output_compression"] = int(compression)
+
+        # Quality (gpt-image-2 reasoning knob)
+        quality = kwargs.get("quality")
+        if quality and quality in caps["quality_values"]:
+            edit_kwargs["quality"] = quality
+
+        # Moderation
+        moderation = kwargs.get("moderation")
+        if moderation and caps["supports_moderation"] and moderation in {"auto", "low"}:
+            edit_kwargs["moderation"] = moderation
+
+        # gpt-image-2 / gpt-image-1.5 return b64; dall-e-2 used to take response_format.
+        if model == "dall-e-2":
+            edit_kwargs["response_format"] = "b64_json"
+
+        logger.info(
+            "OpenAI images.edit model=%s images=%d mask=%s size=%s n=%d",
+            model, len(prepared), bool(mask), size, edit_kwargs["n"],
+        )
+
         try:
-            # OpenAI expects file-like objects
-            from io import BytesIO
-            image_file = BytesIO(image)
-            image_file.name = "image.png"
-            
-            edit_kwargs = {
-                "image": image_file,
-                "prompt": prompt,
-                "size": size,
-                "n": n,
-                "response_format": "b64_json",
-            }
-            
-            if mask:
-                mask_file = BytesIO(mask)
-                mask_file.name = "mask.png"
-                edit_kwargs["mask"] = mask_file
-            
             response = self.client.images.edit(**edit_kwargs)
-            
-            data_items = getattr(response, "data", []) or []
-            for item in data_items:
+            for item in (getattr(response, "data", []) or []):
                 b64 = getattr(item, "b64_json", None)
                 if b64:
-                    try:
-                        images.append(b64decode(b64))
-                    except (ValueError, TypeError):
-                        pass
-            
+                    images.append(b64decode(b64))
             if not images:
                 raise RuntimeError("OpenAI returned no edited images.")
-                
+        except _UnsupportedParam:
+            raise
         except (ValueError, RuntimeError, AttributeError) as e:
             raise RuntimeError(f"OpenAI image editing failed: {e}")
-        
+
         return texts, images
     
     def create_variations(
