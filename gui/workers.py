@@ -73,6 +73,85 @@ class GenWorker(QObject):
             self.error.emit(str(e))
 
 
+class StreamingGenWorker(QObject):
+    """Worker that streams partial frames via the provider's on_partial callback.
+
+    Constructor matches GenWorker's keyword-only style:
+      StreamingGenWorker(provider, model, prompt, auth_mode, **kwargs)
+
+    The worker constructs its own provider instance via providers.get_provider
+    inside run(), exactly like GenWorker does — so MainWindow can swap workers
+    without changing the dispatch shape.
+
+    Emits:
+        partial(int index, bytes png_bytes)
+        finished(list texts, list image_bytes) — matches GenWorker.finished shape
+        error(str message)
+    """
+    partial = Signal(int, bytes)
+    finished = Signal(list, list)
+    error = Signal(str)
+
+    def __init__(self, provider: str, model: str, prompt: str, auth_mode: str = "api-key", **kwargs):
+        super().__init__()
+        self.provider = provider
+        self.model = model
+        self.prompt = prompt
+        self.auth_mode = auth_mode
+        self.kwargs = dict(kwargs)
+
+    def run(self):
+        try:
+            from providers import get_provider
+            from core.config import ConfigManager
+            cfg = ConfigManager()
+            provider_instance = get_provider(
+                self.provider,
+                {"api_key": cfg.get_api_key(self.provider), "auth_mode": self.auth_mode},
+            )
+
+            def on_partial(idx, png):
+                self.partial.emit(int(idx), bytes(png))
+
+            self.kwargs["on_partial"] = on_partial
+            self.kwargs.setdefault("stream", True)
+            self.kwargs.setdefault("partial_images", 2)
+
+            texts, images = provider_instance.generate(
+                prompt=self.prompt,
+                model=self.model,
+                **self.kwargs,
+            )
+            self.finished.emit(list(texts), list(images))
+        except Exception as e:  # noqa: BLE001 — surface to UI
+            self.error.emit(str(e))
+
+
+class BatchJobsLoaderWorker(QObject):
+    """Loads BATCH_JOBS_PATH and emits the entries as a list."""
+    loaded = Signal(list)
+    error = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+
+    def run(self):
+        import json
+        try:
+            from core.constants import BATCH_JOBS_PATH
+            entries = []
+            if BATCH_JOBS_PATH.exists():
+                try:
+                    entries = json.loads(BATCH_JOBS_PATH.read_text(encoding="utf-8"))
+                    if not isinstance(entries, list):
+                        entries = []
+                except (OSError, IOError, ValueError):
+                    entries = []
+            self.loaded.emit(entries)
+        except Exception as e:  # noqa: BLE001
+            self.error.emit(str(e))
+
+
 class HistoryLoaderWorker(QObject):
     """Worker thread for progressive history loading."""
 

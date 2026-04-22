@@ -566,6 +566,24 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_help, "❓ Help")
         self.tabs.addTab(self.tab_history, "📜 History")  # Always add history tab
 
+        # Batch Jobs tab — lists OpenAI Batch API submissions from BATCH_JOBS_PATH.
+        from PySide6.QtWidgets import QTableWidget, QPushButton as _PB, QVBoxLayout as _VBL, QWidget as _W, QHBoxLayout as _HBL
+        self.tab_batch_jobs = _W()
+        _bjl = _VBL(self.tab_batch_jobs)
+        self.batch_jobs_table = QTableWidget(0, 6)
+        self.batch_jobs_table.setHorizontalHeaderLabels([
+            "Job ID", "Model", "Submitted", "Requests", "Status", "Actions",
+        ])
+        self.batch_jobs_table.horizontalHeader().setStretchLastSection(True)
+        _bjl.addWidget(self.batch_jobs_table)
+        _ctrls = _HBL()
+        self.btn_batch_refresh = _PB("Refresh")
+        self.btn_batch_refresh.clicked.connect(self._refresh_batch_jobs_subtab)
+        _ctrls.addWidget(self.btn_batch_refresh)
+        _ctrls.addStretch()
+        _bjl.addLayout(_ctrls)
+        self.tabs.addTab(self.tab_batch_jobs, "🗂️ Batch Jobs")
+
         self._init_generate_tab()
         self._init_templates_tab()
         self._init_settings_tab()
@@ -684,7 +702,17 @@ class MainWindow(QMainWindow):
         act_report_error = QAction("How to &Report Errors", self)
         act_report_error.triggered.connect(self._show_error_reporting)
         help_menu.addAction(act_report_error)
-    
+
+        # --- Generate menu ---
+        gen_menu = mb.addMenu("&Generate")
+        self.action_submit_batch = QAction("Submit as Batch Job…", self)
+        self.action_submit_batch.setToolTip(
+            "Send the current prompt to the OpenAI Batch API "
+            "(50% discount, async — results in up to 24h)."
+        )
+        self.action_submit_batch.triggered.connect(self._submit_current_as_batch)
+        gen_menu.addAction(self.action_submit_batch)
+
     def _init_generate_tab(self):
         """Initialize the Generate tab."""
         v = QVBoxLayout(self.tab_generate)
@@ -943,6 +971,24 @@ class MainWindow(QMainWindow):
             # Connect NBP quality signal to update resolution limits
             self.quality_selector.nbpQualityChanged.connect(self._on_nbp_quality_changed)
             quality_v_layout.addWidget(self.quality_selector)
+
+            # gpt-image-2 widgets — show/hide via update_model() based on MODEL_CAPS.
+            try:
+                from .settings_widgets import OutputFormatRow, ModerationCheckbox, ThinkingProgressToggle
+                self.output_format_row = OutputFormatRow(self)
+                self.moderation_checkbox = ModerationCheckbox(self)
+                self.thinking_progress_toggle = ThinkingProgressToggle(self)
+                quality_v_layout.addWidget(self.output_format_row)
+                quality_v_layout.addWidget(self.moderation_checkbox)
+                quality_v_layout.addWidget(self.thinking_progress_toggle)
+                # Default-hidden until a supported model is selected.
+                self.output_format_row.setVisible(False)
+                self.moderation_checkbox.setVisible(False)
+                self.thinking_progress_toggle.setVisible(False)
+            except ImportError:
+                self.output_format_row = None
+                self.moderation_checkbox = None
+                self.thinking_progress_toggle = None
 
             aspect_quality_layout.addWidget(quality_group)
         else:
@@ -3928,6 +3974,14 @@ For more detailed information, please refer to the full documentation.
             if is_gpt_image_1:
                 self.logger.info("GPT Image 1 selected - showing background selector")
 
+        # Cap-driven dispatch for new gpt-image-2 widgets. Each widget knows
+        # how to read MODEL_CAPS and show/hide itself — keep this loop
+        # capability-driven so adding a new model never requires a new branch.
+        for _w_attr in ("output_format_row", "moderation_checkbox", "thinking_progress_toggle"):
+            _w = getattr(self, _w_attr, None)
+            if _w is not None:
+                _w.update_model(model_id)
+
     def _check_nano_banana_pro_requirements(self, model_id: str):
         """Check if model has specific auth requirements and warn user.
 
@@ -5290,6 +5344,21 @@ For more detailed information, please refer to the full documentation.
                 kwargs['background'] = background_text
                 self._append_to_console(f"GPT Image 1 Background: {background_text}", "#66ccff")
 
+        # gpt-image-2 widgets (no-op if widget hidden / not instantiated).
+        if getattr(self, 'output_format_row', None) is not None and self.output_format_row.isVisible():
+            kwargs.update(self.output_format_row.get_settings())
+        if getattr(self, 'moderation_checkbox', None) is not None and self.moderation_checkbox.isVisible():
+            kwargs.update(self.moderation_checkbox.get_settings())
+        if hasattr(self, 'quality_selector') and self.quality_selector:
+            qs = self.quality_selector.get_settings()
+            if qs.get("quality") in {"low", "medium", "high", "auto"}:
+                kwargs["quality"] = qs["quality"]
+        # Custom size from ResolutionSelector popup, if set
+        if hasattr(self, 'resolution_selector') and self.resolution_selector:
+            cs = getattr(self.resolution_selector, "get_custom_size", lambda: None)()
+            if cs:
+                kwargs["custom_size"] = cs
+
         # Add reference image if enabled and available (Google Gemini only)
         if (self.current_provider.lower() == "google" and
             hasattr(self, 'reference_image_data') and
@@ -5647,21 +5716,43 @@ For more detailed information, please refer to the full documentation.
             if auth_mode_text == "Google Cloud Account":
                 auth_mode = "gcloud"
 
-        self.gen_worker = GenWorker(
-            provider=self.current_provider,
-            model=model,
-            prompt=prompt,
-            auth_mode=auth_mode,
-            **kwargs
+        # Choose worker based on the thinking-progress toggle. StreamingGenWorker
+        # has the same constructor shape as GenWorker, so signal wiring is the
+        # only divergence (StreamingGenWorker also exposes a `partial` signal).
+        use_streaming = bool(
+            getattr(self, 'thinking_progress_toggle', None)
+            and self.thinking_progress_toggle.is_enabled()
         )
+        if use_streaming:
+            from .workers import StreamingGenWorker
+            kwargs["stream"] = True
+            kwargs["partial_images"] = 2
+            self.gen_worker = StreamingGenWorker(
+                provider=self.current_provider,
+                model=model,
+                prompt=prompt,
+                auth_mode=auth_mode,
+                **kwargs,
+            )
+        else:
+            self.gen_worker = GenWorker(
+                provider=self.current_provider,
+                model=model,
+                prompt=prompt,
+                auth_mode=auth_mode,
+                **kwargs,
+            )
 
         self.gen_worker.moveToThread(self.gen_thread)
 
         # Connect signals
         self.gen_thread.started.connect(self.gen_worker.run)
-        self.gen_worker.progress.connect(self._on_progress)
+        if hasattr(self.gen_worker, 'progress'):
+            self.gen_worker.progress.connect(self._on_progress)
         self.gen_worker.error.connect(self._on_error)
         self.gen_worker.finished.connect(self._on_generation_finished)
+        if use_streaming and hasattr(self.gen_worker, 'partial'):
+            self.gen_worker.partial.connect(self._on_streaming_partial)
 
         # Start generation
         self.gen_thread.start()
@@ -5980,6 +6071,26 @@ For more detailed information, please refer to the full documentation.
         QMessageBox.critical(self, APP_NAME, f"Generation failed:\n{error}")
         self.btn_generate.setEnabled(True)
         self._cleanup_thread()
+
+    def _on_streaming_partial(self, idx: int, png_bytes: bytes):
+        """Update preview pane with a streamed partial frame."""
+        try:
+            from PySide6.QtGui import QPixmap
+            from PySide6.QtCore import Qt
+            pix = QPixmap()
+            pix.loadFromData(png_bytes, "PNG")
+            if hasattr(self, 'preview_label') and pix and not pix.isNull():
+                self.preview_label.setPixmap(pix.scaled(
+                    self.preview_label.size(),
+                    Qt.KeepAspectRatio, Qt.SmoothTransformation,
+                ))
+            if hasattr(self, 'status_label'):
+                self.status_label.setText(f"Thinking… (frame {idx + 1}/2)")
+            if hasattr(self, '_append_to_console'):
+                self._append_to_console(f"Streaming partial {idx + 1}/2 ({len(png_bytes):,} bytes)", "#aaaaff")
+        except Exception as e:  # noqa: BLE001
+            if hasattr(self, 'logger'):
+                self.logger.warning(f"Failed to render streaming partial: {e}")
 
     def _on_generation_finished(self, texts: List[str], images: List[bytes]):
         """Handle successful generation."""
@@ -6406,7 +6517,92 @@ For more detailed information, please refer to the full documentation.
             except Exception as e:
                 logger.error(f"Error saving image: {e}")
                 QMessageBox.critical(self, APP_NAME, f"Error saving image:\n{e}")
-    
+
+    def _submit_current_as_batch(self):
+        """Spawn a small dialog confirming Batch submission, then submit."""
+        from PySide6.QtWidgets import QMessageBox
+        if self.current_provider.lower() != "openai":
+            QMessageBox.information(self, "Batch", "Batch API is only available for the OpenAI provider.")
+            return
+        prompt = self.prompt_text.toPlainText().strip() if hasattr(self, 'prompt_text') else ""
+        if not prompt:
+            QMessageBox.information(self, "Batch", "Enter a prompt first.")
+            return
+        model = self.model_combo.currentData() or self.model_combo.currentText()
+        n = int(getattr(self, 'num_images_spin', None).value()) if hasattr(self, 'num_images_spin') else 1
+        confirm = QMessageBox.question(
+            self,
+            "Submit Batch Job",
+            f"Submit 1 batch request:\n  model: {model}\n  prompt: {prompt[:120]}…\n  n: {n}\n\n"
+            "Batch jobs return within 24 hours at 50% discount. Continue?",
+            QMessageBox.Ok | QMessageBox.Cancel,
+        )
+        if confirm != QMessageBox.Ok:
+            return
+        try:
+            from providers import get_provider
+            provider_instance = get_provider("openai", {"api_key": self.config.get_api_key("openai")})
+            req_body = {"model": model, "prompt": prompt, "n": n}
+            if getattr(self, 'output_format_row', None) is not None and self.output_format_row.isVisible():
+                req_body.update(self.output_format_row.get_settings())
+            if getattr(self, 'moderation_checkbox', None) is not None and self.moderation_checkbox.isVisible():
+                req_body.update(self.moderation_checkbox.get_settings())
+            if hasattr(self, 'quality_selector') and self.quality_selector:
+                qs = self.quality_selector.get_settings()
+                if qs.get("quality") in {"low", "medium", "high", "auto"}:
+                    req_body["quality"] = qs["quality"]
+            if hasattr(self, 'resolution_selector') and self.resolution_selector:
+                cs = getattr(self.resolution_selector, "get_custom_size", lambda: None)()
+                if cs:
+                    req_body["size"] = cs
+            job_id = provider_instance.submit_batch_job([req_body])
+            QMessageBox.information(self, "Batch", f"Submitted job:\n{job_id}\n\nView under the Batch Jobs tab.")
+            if hasattr(self, '_refresh_batch_jobs_subtab'):
+                self._refresh_batch_jobs_subtab()
+        except Exception as e:
+            QMessageBox.warning(self, "Batch", f"Submission failed:\n{e}")
+
+    def _refresh_batch_jobs_subtab(self):
+        """Populate the Batch Jobs table from BATCH_JOBS_PATH."""
+        from PySide6.QtWidgets import QTableWidgetItem, QPushButton
+        from core.constants import BATCH_JOBS_PATH
+        import json
+
+        entries = []
+        if BATCH_JOBS_PATH.exists():
+            try:
+                entries = json.loads(BATCH_JOBS_PATH.read_text(encoding="utf-8"))
+                if not isinstance(entries, list):
+                    entries = []
+            except (OSError, IOError, ValueError):
+                entries = []
+
+        self.batch_jobs_table.setRowCount(len(entries))
+        for row, entry in enumerate(entries):
+            self.batch_jobs_table.setItem(row, 0, QTableWidgetItem(entry.get("job_id", "")))
+            self.batch_jobs_table.setItem(row, 1, QTableWidgetItem(entry.get("model", "")))
+            self.batch_jobs_table.setItem(row, 2, QTableWidgetItem(entry.get("created_at", "")))
+            self.batch_jobs_table.setItem(row, 3, QTableWidgetItem(str(entry.get("request_count", ""))))
+            self.batch_jobs_table.setItem(row, 4, QTableWidgetItem(entry.get("status", "submitted")))
+
+            btn = QPushButton("Check / Download")
+            jid = entry.get("job_id", "")
+            btn.clicked.connect(lambda _checked=False, j=jid: self._check_batch_job_action(j))
+            self.batch_jobs_table.setCellWidget(row, 5, btn)
+
+    def _check_batch_job_action(self, job_id: str):
+        from PySide6.QtWidgets import QMessageBox
+        from providers import get_provider
+        try:
+            provider_instance = get_provider("openai", {"api_key": self.config.get_api_key("openai")})
+            images_dir = self.config.get_images_dir()
+            info = provider_instance.check_batch_job(job_id, output_dir=images_dir)
+            msg = f"Job: {info['job_id']}\nStatus: {info['status']}\nDownloaded: {len(info.get('downloaded', []))} file(s)"
+            QMessageBox.information(self, "Batch Job", msg)
+            self._refresh_batch_jobs_subtab()
+        except Exception as e:
+            QMessageBox.warning(self, "Batch Job", f"Check failed:\n{e}")
+
     def _copy_image_to_clipboard(self):
         """Copy current image to clipboard."""
         if not self.current_image_data:
