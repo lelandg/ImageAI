@@ -871,6 +871,15 @@ class ResolutionSelector(QWidget):
         When switching to a model with different max resolution, automatically
         adjusts dimensions to the new model's max for the current aspect ratio.
         """
+        # Custom… button visibility runs unconditionally so re-entrant calls
+        # with the same model still set the right state on first paint.
+        try:
+            from providers.openai import MODEL_CAPS as _OAI_CAPS
+            _caps = _OAI_CAPS.get(model) if model else None
+            self.custom_size_btn.setVisible(bool(_caps and _caps.get("supports_custom_size")))
+        except ImportError:
+            self.custom_size_btn.setVisible(False)
+
         if model == self.model:
             return  # No change
 
@@ -900,14 +909,6 @@ class ResolutionSelector(QWidget):
         else:
             # Just update info text if max didn't change
             self._update_info_text()
-
-        # Show "Custom…" only for OpenAI models that support it.
-        try:
-            from providers.openai import MODEL_CAPS as _OAI_CAPS
-            caps = _OAI_CAPS.get(model) if model else None
-            self.custom_size_btn.setVisible(bool(caps and caps.get("supports_custom_size")))
-        except ImportError:
-            self.custom_size_btn.setVisible(False)
 
     def update_max_resolution(self, max_resolution: int):
         """Update the model's native max resolution (e.g., for NBP quality tiers).
@@ -1518,18 +1519,18 @@ class QualitySelector(QWidget):
             if self.is_nbp_mode:
                 # NBP mode - return output_quality for API
                 settings["output_quality"] = self.nbp_quality
+            elif getattr(self, 'is_gi2_mode', False):
+                for value, btn in (
+                    ("low", self.gi2_low_radio),
+                    ("medium", self.gi2_medium_radio),
+                    ("high", self.gi2_high_radio),
+                    ("auto", self.gi2_auto_radio),
+                ):
+                    if btn.isChecked():
+                        settings["quality"] = value
+                        break
             else:
                 settings["quality"] = "hd" if self.hd_radio.isChecked() else "standard"
-        if getattr(self, 'is_gi2_mode', False):
-            for value, btn in (
-                ("low", self.gi2_low_radio),
-                ("medium", self.gi2_medium_radio),
-                ("high", self.gi2_high_radio),
-                ("auto", self.gi2_auto_radio),
-            ):
-                if btn.isChecked():
-                    settings["quality"] = value
-                    break
         # Always save style setting if the group exists
         if hasattr(self, 'style_group'):
             settings["style"] = "natural" if self.natural_radio.isChecked() else "vivid"
@@ -1538,19 +1539,20 @@ class QualitySelector(QWidget):
     def set_settings(self, settings: dict):
         """Restore settings."""
         if "quality" in settings:
-            if settings["quality"] == "hd":
+            q = settings["quality"]
+            if q in {"low", "medium", "high", "auto"}:
+                # gpt-image-2 reasoning quality
+                mapping = {
+                    "low": self.gi2_low_radio,
+                    "medium": self.gi2_medium_radio,
+                    "high": self.gi2_high_radio,
+                    "auto": self.gi2_auto_radio,
+                }
+                mapping[q].setChecked(True)
+            elif q == "hd":
                 self.hd_radio.setChecked(True)
             else:
                 self.standard_radio.setChecked(True)
-
-        if "quality" in settings and settings["quality"] in {"low", "medium", "high", "auto"}:
-            mapping = {
-                "low": self.gi2_low_radio,
-                "medium": self.gi2_medium_radio,
-                "high": self.gi2_high_radio,
-                "auto": self.gi2_auto_radio,
-            }
-            mapping[settings["quality"]].setChecked(True)
 
         if "style" in settings:
             if settings["style"] == "vivid":
