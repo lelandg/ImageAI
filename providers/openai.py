@@ -245,14 +245,38 @@ class OpenAIProvider(ImageProvider):
             if not ok:
                 raise _UnsupportedParam(f"Invalid custom_size {custom_size}: {why}")
             size = f"{cw}x{ch}"
+
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Streaming path (gpt-image-2 only). Routes through Responses API and
+        # invokes the on_partial callback for each partial frame. Falls back
+        # to sync if the SDK lacks Responses-API streaming support.
+        if kwargs.get("stream") and caps["supports_streaming"]:
+            partial_count = max(0, min(int(kwargs.get("partial_images", 0)), 3))
+            on_partial = kwargs.get("on_partial")
+            if partial_count > 0 and callable(on_partial):
+                streamed = self._generate_streaming(
+                    model=model,
+                    prompt=prompt,
+                    size=size,
+                    quality=quality,
+                    n=int(kwargs.get("num_images", n) or 1),
+                    partial_images=partial_count,
+                    on_partial=on_partial,
+                    output_format=kwargs.get("output_format", "png"),
+                    moderation=kwargs.get("moderation", "auto"),
+                )
+                if streamed is not None:
+                    return [], streamed
+                # else: SDK doesn't support Responses streaming — fall through to sync
+                logger.warning("Responses-API streaming unavailable; falling back to sync generation")
+
         texts: List[str] = []
         images: List[bytes] = []
 
         # Apply rate limiting
         rate_limiter.check_rate_limit('openai', wait=True)
-
-        import logging
-        logger = logging.getLogger(__name__)
 
         # Handle new settings from UI
         # Size/resolution mapping for DALL-E 3 and GPT Image models
@@ -920,6 +944,85 @@ class OpenAIProvider(ImageProvider):
 
         return texts, images
 
+    def _generate_streaming(
+        self,
+        model: str,
+        prompt: str,
+        size: str,
+        quality: str,
+        n: int,
+        partial_images: int,
+        on_partial,
+        output_format: str = "png",
+        moderation: str = "auto",
+    ) -> Optional[List[bytes]]:
+        """Stream image generation via the Responses API.
+
+        Invokes ``on_partial(index: int, png_bytes: bytes)`` for each partial
+        frame as it arrives. Returns the final image bytes list, or None if
+        the installed openai SDK does not expose a streaming Responses API.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        if not hasattr(self.client, "responses") or not hasattr(self.client.responses, "stream"):
+            return None
+
+        tool = {
+            "type": "image_generation",
+            "size": size,
+            "quality": quality,
+            "moderation": moderation,
+            "output_format": output_format,
+            "partial_images": partial_images,
+        }
+
+        partials_seen = 0
+        final_b64s: List[str] = []
+
+        try:
+            with self.client.responses.stream(
+                model=model,
+                input=prompt,
+                tools=[tool],
+                tool_choice={"type": "image_generation"},
+            ) as stream:
+                for event in stream:
+                    etype = getattr(event, "type", "")
+                    if etype.endswith("partial_image"):
+                        b64 = (
+                            getattr(event, "partial_image_b64", None)
+                            or getattr(getattr(event, "partial_image", None), "b64_json", None)
+                        )
+                        if b64:
+                            partials_seen += 1
+                            try:
+                                on_partial(partials_seen - 1, b64decode(b64))
+                            except Exception as cb_err:  # noqa: BLE001
+                                logger.warning(f"on_partial callback raised: {cb_err}")
+                    elif etype.endswith("image_generation_call.completed"):
+                        b64 = getattr(event, "b64_json", None) or getattr(
+                            getattr(event, "result", None), "b64_json", None
+                        )
+                        if b64:
+                            final_b64s.append(b64)
+                response = stream.get_final_response()
+                # If the event loop didn't yield a completed b64, dig it out of the response.
+                if not final_b64s and response is not None:
+                    for output in (getattr(response, "output", []) or []):
+                        b64 = getattr(output, "b64_json", None) or getattr(
+                            getattr(output, "result", None), "b64_json", None
+                        )
+                        if b64:
+                            final_b64s.append(b64)
+        except (AttributeError, TypeError) as e:
+            logger.warning(f"Responses-API streaming failed structurally: {e}")
+            return None
+
+        if not final_b64s:
+            return None
+        return [b64decode(b) for b in final_b64s[:n]]
+
     def _create_alpha_mask(
         self,
         image_size: Tuple[int, int],
@@ -1178,3 +1281,148 @@ class OpenAIProvider(ImageProvider):
                 results[viseme_name] = ([], [])
 
         return results
+
+    def submit_batch_job(
+        self,
+        requests: List[dict],
+        endpoint: str = "/v1/images/generations",
+        completion_window: str = "24h",
+        metadata: Optional[Dict[str, str]] = None,
+    ) -> str:
+        """Submit a Batch API job and persist a record to BATCH_JOBS_PATH.
+
+        Args:
+            requests: List of request bodies, each conforming to the chosen endpoint.
+                      Each entry must include "model" and the body keys for that endpoint.
+            endpoint: Batch endpoint, default ``/v1/images/generations``.
+            completion_window: OpenAI completion window string ("24h" supported).
+            metadata: Optional metadata to attach to the batch job.
+
+        Returns:
+            The OpenAI batch job ID (e.g. "batch_abc123...").
+        """
+        import json, time, uuid, logging
+        from datetime import datetime, timezone
+        from core.constants import BATCH_JOBS_PATH
+
+        self._ensure_client()
+        logger = logging.getLogger(__name__)
+
+        # Build the JSONL payload in memory.
+        lines = []
+        for i, req in enumerate(requests):
+            line = {
+                "custom_id": req.pop("custom_id", f"req-{i}-{uuid.uuid4().hex[:8]}"),
+                "method": "POST",
+                "url": endpoint,
+                "body": req,
+            }
+            lines.append(json.dumps(line))
+        payload_bytes = ("\n".join(lines) + "\n").encode("utf-8")
+
+        # Upload as a Files object with purpose=batch.
+        from io import BytesIO
+        upload = BytesIO(payload_bytes)
+        upload.name = f"imageai_batch_{int(time.time())}.jsonl"
+        file_obj = self.client.files.create(file=upload, purpose="batch")
+
+        batch = self.client.batches.create(
+            input_file_id=file_obj.id,
+            endpoint=endpoint,
+            completion_window=completion_window,
+            metadata=metadata or {"source": "imageai"},
+        )
+
+        job_id = getattr(batch, "id", None) or batch["id"]
+
+        # Persist a small record so the GUI/CLI can list and resume jobs.
+        record = {
+            "job_id": job_id,
+            "input_file_id": file_obj.id,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "endpoint": endpoint,
+            "request_count": len(requests),
+            "model": (requests[0].get("model") if requests else None),
+            "prompt_preview": (
+                str(requests[0].get("prompt", ""))[:120] if requests else ""
+            ),
+            "status": "submitted",
+        }
+        try:
+            BATCH_JOBS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            existing = []
+            if BATCH_JOBS_PATH.exists():
+                try:
+                    existing = json.loads(BATCH_JOBS_PATH.read_text(encoding="utf-8"))
+                    if not isinstance(existing, list):
+                        existing = []
+                except (OSError, IOError, ValueError):
+                    existing = []
+            existing.append(record)
+            BATCH_JOBS_PATH.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+        except (OSError, IOError) as e:
+            logger.warning(f"Could not persist batch record to {BATCH_JOBS_PATH}: {e}")
+
+        logger.info(f"Submitted batch job {job_id} ({len(requests)} requests, endpoint={endpoint})")
+        return job_id
+
+    def check_batch_job(self, job_id: str, output_dir: Optional[Path] = None) -> dict:
+        """Poll a batch job; if complete, download images + sidecars to ``output_dir``.
+
+        Returns a dict: {job_id, status, request_counts, output_files, downloaded}.
+        ``downloaded`` lists the absolute paths of any files written.
+        """
+        import json, logging
+        logger = logging.getLogger(__name__)
+
+        self._ensure_client()
+        batch = self.client.batches.retrieve(job_id)
+        status = getattr(batch, "status", None) or batch.get("status")
+
+        result = {
+            "job_id": job_id,
+            "status": status,
+            "request_counts": getattr(batch, "request_counts", None),
+            "output_files": [],
+            "downloaded": [],
+        }
+
+        if status == "completed":
+            output_file_id = getattr(batch, "output_file_id", None) or batch.get("output_file_id")
+            if output_file_id:
+                result["output_files"].append(output_file_id)
+                content = self.client.files.content(output_file_id)
+                # SDK returns a streaming-friendly object; read() yields bytes.
+                raw = content.read() if hasattr(content, "read") else bytes(content)
+                if output_dir is not None:
+                    output_dir = Path(output_dir)
+                    output_dir.mkdir(parents=True, exist_ok=True)
+                    # Each line of the output file is a JSON object with "response.body.data[*].b64_json".
+                    for i, line in enumerate(raw.decode("utf-8").splitlines()):
+                        if not line.strip():
+                            continue
+                        try:
+                            entry = json.loads(line)
+                        except ValueError:
+                            continue
+                        body = ((entry.get("response") or {}).get("body") or {})
+                        for j, item in enumerate(body.get("data", [])):
+                            b64 = item.get("b64_json")
+                            if not b64:
+                                continue
+                            out_path = output_dir / f"{job_id}_{i}_{j}.png"
+                            out_path.write_bytes(b64decode(b64))
+                            result["downloaded"].append(str(out_path))
+                            sidecar = out_path.with_suffix(".png.json")
+                            sidecar.write_text(
+                                json.dumps({
+                                    "batch_job_id": job_id,
+                                    "custom_id": entry.get("custom_id"),
+                                    "model": body.get("model"),
+                                }, indent=2),
+                                encoding="utf-8",
+                            )
+        elif status == "failed":
+            logger.warning(f"Batch job {job_id} failed: {getattr(batch, 'errors', None)}")
+
+        return result

@@ -155,3 +155,7 @@ def get_user_data_dir() -> Path:
     else:  # Linux/Unix
         base = Path(os.getenv("XDG_CONFIG_HOME", home / ".config"))
         return base / APP_NAME
+
+
+# Persistent ledger for OpenAI Batch API jobs (one entry per submission).
+BATCH_JOBS_PATH = get_user_data_dir() / "batch_jobs.json"
