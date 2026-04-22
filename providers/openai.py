@@ -316,10 +316,13 @@ class OpenAIProvider(ImageProvider):
                 prompt = f"{prompt} (compose for {target_width}x{target_height} aspect ratio)"
                 logger.info(f"Added composition hint for {target_width}x{target_height} (API size: {size})")
         
-        # Quality setting (standard or hd)
-        quality = kwargs.get('quality', quality)
-        if quality not in ['standard', 'hd']:
-            quality = 'standard'
+        # Legacy quality coercion: only applies to models that use standard/hd
+        # (dall-e-3 / dall-e-2). gpt-image-* models keep the value validated by
+        # the capability block above (auto | low | medium | high).
+        if "standard" in caps["quality_values"] or "hd" in caps["quality_values"]:
+            quality = kwargs.get('quality', quality)
+            if quality not in ['standard', 'hd']:
+                quality = 'standard'
         
         # Style setting (vivid or natural) - DALL-E 3 only
         style = kwargs.get('style', 'vivid')
