@@ -86,15 +86,75 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     gen_group.add_argument(
         "--quality",
-        choices=["standard", "hd"],
-        default="standard",
-        help="Image quality (OpenAI only)"
+        choices=["auto", "low", "medium", "high", "standard", "hd"],
+        default=None,
+        help="Image quality / reasoning level (gpt-image-2: auto|low|medium|high; "
+             "dall-e-3: standard|hd). Defaults to model's default.",
+    )
+    gen_group.add_argument(
+        "--output-format",
+        choices=["png", "jpeg", "webp"],
+        help="Output image format (gpt-image-2 / gpt-image-1.5 only)",
+    )
+    gen_group.add_argument(
+        "--output-compression",
+        type=int,
+        metavar="N",
+        help="Output compression 0-100 (jpeg/webp only)",
+    )
+    gen_group.add_argument(
+        "--moderation",
+        choices=["auto", "low"],
+        help="Content moderation level (gpt-image-2 only; 'low' is permissive)",
+    )
+    gen_group.add_argument(
+        "--custom-size",
+        metavar="WxH",
+        help="Custom image size; mutually exclusive with --size. "
+             "gpt-image-2 only — both edges multiples of 16, max edge 3840, "
+             "aspect ≤3:1, total pixels 655K-8.3M.",
+    )
+    gen_group.add_argument(
+        "--stream-partials",
+        action="store_true",
+        help="Stream up to 2 partial images during generation (gpt-image-2 only). "
+             "Saves out.p0.png, out.p1.png, then final out.png.",
+    )
+    gen_group.add_argument(
+        "--reference",
+        action="append",
+        metavar="IMG",
+        help="Reference image path (repeatable, up to 10). Routes to /v1/images/edits.",
+    )
+    gen_group.add_argument(
+        "--mask",
+        metavar="PNG",
+        help="Alpha mask PNG for inpainting (used with --reference). "
+             "Transparent pixels = edit zone; opaque = preserve.",
     )
     gen_group.add_argument(
         "-n", "--num-images",
         type=int,
         default=1,
         help="Number of images to generate"
+    )
+
+    # Batch API
+    batch_group = parser.add_argument_group("batch API")
+    batch_group.add_argument(
+        "--batch",
+        action="store_true",
+        help="Submit as a Batch API job instead of a sync request. Prints job ID.",
+    )
+    batch_group.add_argument(
+        "--batch-status",
+        metavar="JOB_ID",
+        help="Print the status of a previously submitted batch job",
+    )
+    batch_group.add_argument(
+        "--batch-fetch",
+        metavar="JOB_ID",
+        help="Download completed batch outputs to the current images dir",
     )
 
     # Lyrics-to-prompts options
