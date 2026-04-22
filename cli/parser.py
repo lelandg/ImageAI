@@ -81,8 +81,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     gen_group.add_argument(
         "--size",
-        default="1024x1024",
-        help="Image size (default: 1024x1024)"
+        default=None,
+        help="Image size (default: 1024x1024). Mutually exclusive with --custom-size."
     )
     gen_group.add_argument(
         "--quality",

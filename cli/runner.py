@@ -194,13 +194,14 @@ def run_cli(args) -> int:
     provider = (getattr(args, "provider", None) or "google").strip().lower()
     auth_mode = getattr(args, "auth_mode", "api-key")
 
-    # Mutual exclusion: --size vs --custom-size
+    # Mutual exclusion: --size vs --custom-size. parser.py uses default=None
+    # for --size so any non-None value is an explicit user choice.
     custom_size = getattr(args, "custom_size", None)
-    if custom_size and getattr(args, "size", "1024x1024") != "1024x1024":
-        # Only flag a real conflict; --size has a default of 1024x1024 that's
-        # always present, so don't false-positive on the default.
+    if custom_size and getattr(args, "size", None) is not None:
         print("Error: --custom-size and --size are mutually exclusive (drop --size).")
         return 2
+    # Resolve effective size for the rest of the run.
+    effective_size = custom_size or getattr(args, "size", None) or "1024x1024"
 
     # Handle help for API key setup
     if getattr(args, "help_api_key", False):
@@ -301,8 +302,10 @@ def run_cli(args) -> int:
                 print(f"Job: {info['job_id']}  status: {info['status']}")
                 for f in info.get("downloaded", []):
                     print(f"Downloaded: {f}")
-                if info["status"] != "completed":
-                    print("(Job is not yet complete; nothing downloaded.)")
+                if info["status"] in {"failed", "expired", "cancelled"}:
+                    print(f"(Job ended in terminal state '{info['status']}'; no outputs downloaded.)")
+                elif info["status"] != "completed":
+                    print(f"(Job is still in '{info['status']}'; nothing downloaded yet — try again later.)")
             return 0
         except Exception as e:
             print(f"Batch op failed: {e}")
@@ -358,7 +361,7 @@ def run_cli(args) -> int:
                 req_body = {
                     "model": model,
                     "prompt": args.prompt,
-                    "size": (custom_size or getattr(args, "size", "1024x1024")),
+                    "size": effective_size,
                     "n": int(getattr(args, "num_images", 1) or 1),
                 }
                 for k in ("quality", "output_format", "output_compression", "moderation"):
@@ -382,7 +385,7 @@ def run_cli(args) -> int:
                     prompt=args.prompt,
                     model=model,
                     mask=mask_bytes,
-                    size=(custom_size or getattr(args, "size", "1024x1024")),
+                    size=effective_size,
                     n=int(getattr(args, "num_images", 1) or 1),
                     **kwargs,
                 )
@@ -395,28 +398,36 @@ def run_cli(args) -> int:
                 out_path = Path(out_arg).expanduser().resolve()
                 out_path.parent.mkdir(parents=True, exist_ok=True)
                 stem = out_path.with_suffix("")
+                # Match partial extension to the requested --output-format if set
+                # (else fall back to the user's --out suffix, then .png).
+                _fmt = getattr(args, "output_format", None)
+                _ext = ("." + _fmt) if _fmt else (out_path.suffix or ".png")
 
                 def on_partial(idx, png_bytes):
-                    p = Path(f"{stem}.p{idx}{out_path.suffix or '.png'}")
+                    p = Path(f"{stem}.p{idx}{_ext}")
                     p.write_bytes(png_bytes)
                     print(f"  partial {idx} -> {p}", file=sys.stderr)
 
                 kwargs.update({"stream": True, "partial_images": 2, "on_partial": on_partial})
+                # Pop quality before splat to avoid duplicate-kwarg TypeError when
+                # --quality was supplied (it's already in kwargs).
+                quality_kw = kwargs.pop("quality", "auto")
                 texts, images = provider_instance.generate(
                     prompt=args.prompt,
                     model=model,
-                    size=(custom_size or getattr(args, "size", "1024x1024")),
-                    quality=kwargs.get("quality", "auto"),
+                    size=effective_size,
+                    quality=quality_kw,
                     n=1,
                     **kwargs,
                 )
             else:
-                # Standard sync path
+                # Standard sync path. Same kwargs-pop trick to avoid duplicate quality.
+                quality_kw = kwargs.pop("quality", "standard")
                 texts, images = provider_instance.generate(
                     prompt=args.prompt,
                     model=model,
-                    size=(custom_size or getattr(args, "size", "1024x1024")),
-                    quality=kwargs.get("quality", "standard"),
+                    size=effective_size,
+                    quality=quality_kw,
                     n=int(getattr(args, "num_images", 1) or 1),
                     **kwargs,
                 )
