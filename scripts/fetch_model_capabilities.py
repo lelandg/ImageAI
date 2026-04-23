@@ -717,24 +717,9 @@ class GoogleModelFetcher:
             'tags': ['high-quality', 'text-rendering', 'reference-images'],
         },
 
-        # Imagen Models (Vertex AI)
-        'imagen-4.0-generate-001': {
-            'category': ModelCategory.IMAGE_GEN,
-            'display_name': 'Imagen 4',
-            'description': 'Best quality, low latency, near-real-time performance',
-            'max_resolution': '2K',
-            'requires_gcloud': True,
-            'tags': ['best-quality', 'fast'],
-        },
-        'imagen-3.0-generate-002': {
-            'category': ModelCategory.IMAGE_GEN,
-            'display_name': 'Imagen 3',
-            'description': 'General purpose generation, inpainting, outpainting',
-            'max_resolution': '2K',
-            'requires_gcloud': True,
-            'inpainting': True, 'outpainting': True,
-            'tags': ['versatile', 'editing'],
-        },
+        # Imagen 3/4 models were discontinued by Google Cloud on 2026-06-30.
+        # All legacy Imagen endpoints now route to gemini-2.5-flash-image via
+        # GoogleProvider.resolve_model_alias (see providers/google.py).
 
         # Veo Video Models
         'veo-3.1-generate-001': {
@@ -763,41 +748,9 @@ class GoogleModelFetcher:
             'requires_gcloud': False,
             'tags': ['fast', 'reference-images'],
         },
-        'veo-3.0-generate-001': {
-            'category': ModelCategory.VIDEO_GEN,
-            'display_name': 'Veo 3',
-            'description': 'Standard quality with audio generation',
-            'resolutions': ['720p', '1080p'],
-            'aspects': ['16:9', '9:16', '1:1'],
-            'duration': 8,
-            'fps': 24,
-            'audio_generation': True,
-            'requires_gcloud': False,
-            'tags': ['audio', 'standard'],
-        },
-        'veo-3.0-fast-generate-001': {
-            'category': ModelCategory.VIDEO_GEN,
-            'display_name': 'Veo 3 Fast',
-            'description': 'Fast generation, 720p, variable duration',
-            'resolutions': ['720p'],
-            'aspects': ['16:9', '9:16'],
-            'durations': [4, 6, 8],
-            'fps': 24,
-            'requires_gcloud': False,
-            'tags': ['fast'],
-        },
-        'veo-2.0-generate-001': {
-            'category': ModelCategory.VIDEO_GEN,
-            'display_name': 'Veo 2',
-            'description': 'Legacy model, reference images supported',
-            'resolutions': ['720p'],
-            'aspects': ['16:9'],
-            'durations': [5, 6, 7, 8],
-            'fps': 24,
-            'reference_images': True,
-            'requires_gcloud': False,
-            'tags': ['legacy', 'reference-images'],
-        },
+        # veo-3.0-* and veo-2.0-* were discontinued by Google Cloud on 2026-06-30.
+        # Legacy IDs in saved video configs are migrated to veo-3.1-generate-001
+        # at load time (see core/video/config.py::_migrate_legacy_models).
     }
 
     def get_model_info(self, model_id: str, data: dict) -> ModelInfo:

@@ -193,7 +193,16 @@ def run_cli(args) -> int:
     # Get provider and auth mode
     provider = (getattr(args, "provider", None) or "google").strip().lower()
     auth_mode = getattr(args, "auth_mode", "api-key")
-    
+
+    # Mutual exclusion: --size vs --custom-size. parser.py uses default=None
+    # for --size so any non-None value is an explicit user choice.
+    custom_size = getattr(args, "custom_size", None)
+    if custom_size and getattr(args, "size", None) is not None:
+        print("Error: --custom-size and --size are mutually exclusive (drop --size).")
+        return 2
+    # Resolve effective size for the rest of the run.
+    effective_size = custom_size or getattr(args, "size", None) or "1024x1024"
+
     # Handle help for API key setup
     if getattr(args, "help_api_key", False):
         md = read_readme_text()
@@ -268,45 +277,171 @@ def run_cli(args) -> int:
         except Exception as e:
             print(f"Test failed for provider '{provider}': {e}")
             return 3
-    
+
+    # Batch status / fetch — both require the OpenAI provider.
+    batch_status = getattr(args, "batch_status", None)
+    batch_fetch = getattr(args, "batch_fetch", None)
+    if batch_status or batch_fetch:
+        if provider != "openai":
+            print(f"--batch-status / --batch-fetch require --provider openai (got {provider}).")
+            return 2
+        if not key:
+            print("No API key. Use --api-key/--api-key-file or --set-key.")
+            return 2
+        try:
+            provider_instance = get_provider(provider, provider_config)
+            if batch_status:
+                info = provider_instance.check_batch_job(batch_status)
+                print(f"Job: {info['job_id']}")
+                print(f"Status: {info['status']}")
+                if info.get("request_counts") is not None:
+                    print(f"Counts: {info['request_counts']}")
+            if batch_fetch:
+                images_dir = ConfigManager().get_images_dir()
+                info = provider_instance.check_batch_job(batch_fetch, output_dir=images_dir)
+                print(f"Job: {info['job_id']}  status: {info['status']}")
+                for f in info.get("downloaded", []):
+                    print(f"Downloaded: {f}")
+                if info["status"] in {"failed", "expired", "cancelled"}:
+                    print(f"(Job ended in terminal state '{info['status']}'; no outputs downloaded.)")
+                elif info["status"] != "completed":
+                    print(f"(Job is still in '{info['status']}'; nothing downloaded yet — try again later.)")
+            return 0
+        except Exception as e:
+            print(f"Batch op failed: {e}")
+            return 4
+
     # Handle --prompt
     if args.prompt:
         if auth_mode == "api-key" and not key and provider != "local_sd":
             print("No API key. Use --api-key/--api-key-file or --set-key.")
             return 2
-        
+
         try:
             provider_instance = get_provider(provider, provider_config)
-            
-            # Get model or use default
             model = args.model or provider_instance.get_default_model()
-            
-            # Generate
+
+            # Build kwargs from new flags. None values are skipped so the
+            # provider's per-model defaults take over.
+            kwargs = {}
+            for flag in (
+                "quality", "output_format", "output_compression", "moderation",
+            ):
+                v = getattr(args, flag, None)
+                if v is not None:
+                    kwargs[flag] = v
+            if custom_size:
+                kwargs["custom_size"] = custom_size
+            if getattr(args, "num_images", 1) > 1:
+                kwargs["num_images"] = args.num_images
+
+            references = getattr(args, "reference", None) or []
+            ref_paths = []  # bound when `references` is non-empty; pre-init for narrowing
+            mask_path = getattr(args, "mask", None)
+            stream_partials = bool(getattr(args, "stream_partials", False))
+            submit_batch = bool(getattr(args, "batch", False))
+
+            # Resolve mask bytes once.
+            mask_bytes = None
+            if mask_path:
+                mp = Path(mask_path).expanduser()
+                if not mp.exists():
+                    print(f"Mask file not found: {mp}")
+                    return 2
+                mask_bytes = mp.read_bytes()
+
             print(f"Generating with {provider} ({model})...")
-            texts, images = provider_instance.generate(
-                prompt=args.prompt,
-                model=model,
-                size=getattr(args, "size", "1024x1024"),
-                quality=getattr(args, "quality", "standard"),
-                n=getattr(args, "num_images", 1),
-            )
-            
-            # Print any text output
+
+            # --- Dispatch ---
+            if submit_batch:
+                if provider != "openai":
+                    print("--batch only supported for --provider openai")
+                    return 2
+                # Build a single-request batch from this prompt.
+                req_body = {
+                    "model": model,
+                    "prompt": args.prompt,
+                    "size": effective_size,
+                    "n": int(getattr(args, "num_images", 1) or 1),
+                }
+                for k in ("quality", "output_format", "output_compression", "moderation"):
+                    if k in kwargs:
+                        req_body[k] = kwargs[k]
+                job_id = provider_instance.submit_batch_job([req_body])
+                print(f"Submitted batch job: {job_id}")
+                print(f"Check with: --batch-status {job_id}")
+                print(f"Fetch with: --batch-fetch {job_id}")
+                return 0
+
+            if references:
+                # Edit / multi-reference compose path
+                ref_paths = [Path(r).expanduser() for r in references]
+                missing = [p for p in ref_paths if not p.exists()]
+                if missing:
+                    print(f"Reference image(s) not found: {', '.join(str(p) for p in missing)}")
+                    return 2
+                texts, images = provider_instance.edit_image(
+                    image=ref_paths,
+                    prompt=args.prompt,
+                    model=model,
+                    mask=mask_bytes,
+                    size=effective_size,
+                    n=int(getattr(args, "num_images", 1) or 1),
+                    **kwargs,
+                )
+            elif stream_partials:
+                # Streaming generation. Save partials beside the output path.
+                out_arg = args.out
+                if not out_arg:
+                    print("--stream-partials requires -o/--out (e.g. -o ./gen.png)")
+                    return 2
+                out_path = Path(out_arg).expanduser().resolve()
+                out_path.parent.mkdir(parents=True, exist_ok=True)
+                stem = out_path.with_suffix("")
+                # Match partial extension to the requested --output-format if set
+                # (else fall back to the user's --out suffix, then .png).
+                _fmt = getattr(args, "output_format", None)
+                _ext = ("." + _fmt) if _fmt else (out_path.suffix or ".png")
+
+                def on_partial(idx, png_bytes):
+                    p = Path(f"{stem}.p{idx}{_ext}")
+                    p.write_bytes(png_bytes)
+                    print(f"  partial {idx} -> {p}", file=sys.stderr)
+
+                kwargs.update({"stream": True, "partial_images": 2, "on_partial": on_partial})
+                # Pop quality before splat to avoid duplicate-kwarg TypeError when
+                # --quality was supplied (it's already in kwargs).
+                quality_kw = kwargs.pop("quality", "auto")
+                texts, images = provider_instance.generate(
+                    prompt=args.prompt,
+                    model=model,
+                    size=effective_size,
+                    quality=quality_kw,
+                    n=1,
+                    **kwargs,
+                )
+            else:
+                # Standard sync path. Same kwargs-pop trick to avoid duplicate quality.
+                quality_kw = kwargs.pop("quality", "standard")
+                texts, images = provider_instance.generate(
+                    prompt=args.prompt,
+                    model=model,
+                    size=effective_size,
+                    quality=quality_kw,
+                    n=int(getattr(args, "num_images", 1) or 1),
+                    **kwargs,
+                )
+
             for text in texts:
                 print(text)
-            
+
             # Save images
             if images:
                 if args.out:
-                    # Save to specified path
                     out_path = Path(args.out).expanduser().resolve()
                     out_path.parent.mkdir(parents=True, exist_ok=True)
-                    
-                    # Save first image
                     out_path.write_bytes(images[0])
                     print(f"Saved image to {out_path}")
-                    
-                    # Save additional images with suffixes
                     if len(images) > 1:
                         stem = out_path.stem
                         ext = out_path.suffix or ".png"
@@ -315,34 +450,36 @@ def run_cli(args) -> int:
                             numbered_path.write_bytes(img_data)
                             print(f"Saved image to {numbered_path}")
                 else:
-                    # Auto-save to default directory
                     config = ConfigManager()
                     images_dir = config.get_images_dir()
-                    
-                    # Create filename from prompt
                     from datetime import datetime
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     stub = sanitize_filename(args.prompt, max_len=60)
-                    
                     for i, img_data in enumerate(images, start=1):
                         filename = f"{stub}_{timestamp}_{i}.png"
                         img_path = images_dir / filename
                         img_path.write_bytes(img_data)
                         print(f"Saved image to {img_path}")
-                        
-                        # Save metadata sidecar
                         meta = {
                             "prompt": args.prompt,
                             "provider": provider,
                             "model": model,
                             "timestamp": timestamp,
+                            **{k: kwargs[k] for k in (
+                                "quality", "output_format", "output_compression",
+                                "moderation", "custom_size",
+                            ) if k in kwargs},
                         }
+                        if references:
+                            meta["reference_images"] = [str(p) for p in ref_paths]
+                        if mask_path:
+                            meta["mask"] = str(mask_path)
                         sidecar_path = img_path.with_suffix(".png.json")
                         import json
                         sidecar_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-            
+
             return 0
-            
+
         except Exception as e:
             print(f"Generation failed for provider '{provider}': {e}")
             return 4

@@ -1641,16 +1641,13 @@ class WorkspaceWidget(QWidget):
         self.veo_model_combo.addItems([
             "veo-3.1-generate-001",            # Veo 3.1 Standard - 1080p, 8s, ref images, audio
             "veo-3.1-fast-generate-001",       # Veo 3.1 Fast - 720p, 4-8s, 11-60s generation
-            "veo-3.0-generate-001",           # Veo 3.0 - 1080p, 8s fixed, audio
-            "veo-3.0-fast-generate-001",      # Veo 3.0 Fast - 720p, 4-8s
-            "veo-2.0-generate-001"            # Veo 2.0 - 720p, ref images
         ])
         self.veo_model_combo.setCurrentIndex(0)  # Default to Veo 3.1
         self.veo_model_combo.setVisible(True)  # Visible by default since Veo is default
         self.veo_model_combo.setMinimumWidth(250)
         self.veo_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.veo_model_combo.setToolTip(
-            "Veo Model Selection (October 2025 Pricing):\n\n"
+            "Veo Model Selection (post June 30 2026 GA):\n\n"
             "Veo 3.1 Standard ($0.40/sec audio, $0.20/sec video):\n"
             "  - 1080p resolution, 8 seconds fixed\n"
             "  - Reference images (up to 3), scene extension\n"
@@ -1659,14 +1656,7 @@ class WorkspaceWidget(QWidget):
             "Veo 3.1 Fast ($0.15/sec audio, $0.10/sec video):\n"
             "  - 720p resolution, 4-8 seconds variable\n"
             "  - Reference images, scene extension\n"
-            "  - Generation time: 11-60 seconds (FAST!)\n\n"
-            "Veo 3.0 Standard ($0.40/sec audio, $0.20/sec video):\n"
-            "  - 1080p resolution, 8 seconds fixed\n"
-            "  - NO reference images\n\n"
-            "Veo 3.0 Fast ($0.15/sec audio, $0.10/sec video):\n"
-            "  - 720p resolution, 4-8 seconds\n\n"
-            "Veo 2.0 ($0.35/sec):\n"
-            "  - 720p, 16:9 only, reference images"
+            "  - Generation time: 11-60 seconds (FAST!)"
         )
         self.veo_model_combo.currentTextChanged.connect(self.on_veo_model_changed)
         provider_layout.addWidget(self.veo_model_combo)
@@ -6329,17 +6319,11 @@ class WorkspaceWidget(QWidget):
             pricing = {
                 "veo-3.1-generate-001": 0.40,
                 "veo-3.1-fast-generate-001": 0.15,
-                "veo-3.0-generate-001": 0.40,
-                "veo-3.0-fast-generate-001": 0.15,
-                "veo-2.0-generate-001": 0.35,
             }
         else:
             pricing = {
                 "veo-3.1-generate-001": 0.20,
                 "veo-3.1-fast-generate-001": 0.10,
-                "veo-3.0-generate-001": 0.20,
-                "veo-3.0-fast-generate-001": 0.10,
-                "veo-2.0-generate-001": 0.35,
             }
 
         cost_per_second = pricing.get(model, 0.40)

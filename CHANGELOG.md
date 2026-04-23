@@ -5,6 +5,49 @@ All notable changes to ImageAI will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.38.0] - 2026-04-22
+
+### Added
+- **OpenAI `gpt-image-2` support** (released 2026-04-21) as the default OpenAI image model and top entry in every OpenAI model list.
+  - Reasoning via `quality` (`auto`/`low`/`medium`/`high`) — higher quality spends more thinking compute.
+  - Custom resolutions up to 3840×2160 via `--custom-size WxH` (edges multiple of 16, aspect ≤ 3:1, pixels 655K–8.3M). Live validator in GUI.
+  - Multi-reference compositing via `--reference IMG` (repeatable, up to 10) routed through `/v1/images/edits`.
+  - Mask inpainting via `--mask PNG` (alpha PNG, transparent = edit zone).
+  - Streaming partial images via `--stream-partials` (uses Responses API + `image_generation` tool with `partial_images=2`). GUI shows live progress in the preview pane when "Show thinking progress" is enabled.
+  - Output format control: `--output-format {png,jpeg,webp}`, `--output-compression 0..100`.
+  - Moderation knob: `--moderation {auto,low}`.
+  - **Batch API**: `--batch` submits jobs asynchronously at 50% discount (24h SLA); `--batch-status JOB`, `--batch-fetch JOB`. GUI exposes submit via `Generate → Submit as Batch Job…` and a "Batch Jobs" top-level tab with per-job check/download.
+- `core/image_size.py` — shared `validate_custom_size()` used by both provider (pre-flight) and GUI (live), preventing drift.
+- `MODEL_CAPS` capability table in `providers/openai.py` drives every per-model branch in provider, GUI, and CLI from one source of truth.
+- `.claude/skills/imageai-gpt-image-2/SKILL.md` — in-repo Claude Code skill so future sessions route gpt-image-2 work through the right CLI flags.
+- `GPT_IMAGE_2_SNAPSHOT = "gpt-image-2-2026-04-21"` constant for reproducibility pins.
+- Sidecar schema extended (all nullable, forward-compatible): `quality`, `output_format`, `output_compression`, `moderation`, `partial_images_count`, `custom_size`, `reference_images`, `mask`, `model_snapshot`, `batch_job_id`, `usage`.
+
+### Changed
+- `QualitySelector` now driven by `MODEL_CAPS[model]["quality_values"]` — for gpt-image-2 shows `Low | Medium | High | Auto`; for dall-e-3 keeps Standard/HD + Vivid/Natural; hides for dall-e-2 / gpt-image-1-mini.
+- `ResolutionSelector` gains "Custom…" option with live W/H validator.
+
+### Notes
+- gpt-image-2 does NOT support `background=transparent`, `input_fidelity`, the variations endpoint, or `style`. Provider raises actionable errors when any are passed.
+- gpt-image-2 requires OpenAI Organization Verification. `validate_auth()` surfaces a clear message when the gate blocks.
+
+### Removed
+- **Imagen 3 / Imagen 4 models** from the Google provider (Google Cloud discontinues all `imagen-3.0-*`, `imagen-4.0-*`, `imagegeneration@*`, and `imagetext@*` Vertex endpoints on **2026-06-30**). No longer appear in the model dropdown.
+- **Veo 3.0, Veo 3.0 Fast, Veo 2.0** video models (same 2026-06-30 deprecation). No longer appear in the video workspace Veo combobox.
+- `providers/imagen_customization.py` — the entire `ImagenCustomizationProvider` module (its only endpoint, `imagen-3.0-capability-001`, is in the discontinuation list).
+- `gui/video/video_project_tab_old.py` — unreferenced dead-code file.
+
+### Changed
+- **Strict-mode multi-reference image generation** now routes through `gemini-2.5-flash-image` with inline `[N]` tag rewriting instead of the discontinued Imagen 3 Customization API. User-facing `[1] [2] [3] [4]` prompt syntax is preserved — tags are rewritten into natural-language labels (using each reference's `subject_description` when available) before the prompt is sent to Gemini.
+- Default Veo model is now `veo-3.1-generate-001`.
+- **Automatic config migration:** `video_config.json` files carrying legacy Veo IDs are transparently rewritten on load.
+- **Automatic model aliasing:** Saved projects, CLI arguments, and templates referencing any of 14 discontinued Imagen/imagegeneration/imagetext IDs are transparently routed to `gemini-2.5-flash-image` inside `GoogleProvider.generate()`. Resolution is logged at info level when it fires.
+
+### Migration test coverage
+- 5 pytest cases in `tests/migration/test_legacy_model_migration.py` cover the Veo config migration (3) and the Imagen model aliasing (2).
+
 ## [0.37.0] - 2026-03-02
 
 ### Fixed

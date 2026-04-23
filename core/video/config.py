@@ -4,6 +4,7 @@ Video feature configuration management.
 
 from pathlib import Path
 from typing import Dict, Any, Optional
+import copy
 import json
 import logging
 from core.llm_models import format_provider_dict
@@ -16,7 +17,7 @@ class VideoConfig:
         "enabled": True,
         "video_projects_dir": None,  # Will be set to user config dir / video_projects
         "default_video_provider": "slideshow",  # "veo" or "slideshow"
-        "veo_model": "veo-3.0-generate-001",  # Default Veo model
+        "veo_model": "veo-3.1-generate-001",  # Default Veo model (post June 30 2026 GA)
         "ffmpeg_path": "ffmpeg",  # Auto-detect or user-specified
         "cache_size_mb": 5000,  # Max cache size in MB
         "concurrent_images": 3,  # Max parallel image generations
@@ -34,26 +35,19 @@ class VideoConfig:
         "llm_providers": format_provider_dict(),  # Now centralized in core.llm_models
         "veo_settings": {
             "models": {
-                "veo-3.0-generate-001": {
+                "veo-3.1-generate-001": {
                     "duration": 8,
                     "fps": 24,
                     "resolutions": ["720p", "1080p"],
-                    "aspect_ratios": ["16:9"],
+                    "aspect_ratios": ["16:9", "9:16", "1:1"],
                     "has_audio": True
                 },
-                "veo-3.0-fast-generate-001": {
+                "veo-3.1-fast-generate-001": {
                     "duration": 8,
-                    "fps": 24,
-                    "resolutions": ["720p", "1080p"],
-                    "aspect_ratios": ["16:9"],
-                    "has_audio": True
-                },
-                "veo-2.0-generate-001": {
-                    "duration": 5,  # 5-8 seconds
                     "fps": 24,
                     "resolutions": ["720p"],
                     "aspect_ratios": ["16:9", "9:16"],
-                    "has_audio": False
+                    "has_audio": True
                 }
             },
             "person_generation_options": ["dont_allow", "allow"],
@@ -70,7 +64,15 @@ class VideoConfig:
             "audio_bitrate": "192k"
         }
     }
-    
+
+    # Legacy Veo model IDs that Google Cloud is discontinuing on 2026-06-30.
+    # Any saved user config referencing these must be rewritten at load time.
+    _LEGACY_VEO_MIGRATION = {
+        "veo-3.0-generate-001": "veo-3.1-generate-001",
+        "veo-3.0-fast-generate-001": "veo-3.1-fast-generate-001",
+        "veo-2.0-generate-001": "veo-3.1-generate-001",
+    }
+
     def __init__(self, config_file: Optional[Path] = None):
         """
         Initialize video configuration.
@@ -96,7 +98,7 @@ class VideoConfig:
             config_file = config_dir / 'video_config.json'
         
         self.config_file = config_file
-        self.config = self.DEFAULT_CONFIG.copy()
+        self.config = copy.deepcopy(self.DEFAULT_CONFIG)
         
         # Set dynamic defaults
         if self.config["video_projects_dir"] is None:
@@ -105,6 +107,35 @@ class VideoConfig:
         # Load existing config if available
         self.load()
     
+    def _migrate_legacy_models(self) -> None:
+        """Rewrite legacy Veo model IDs in self.config to their GA replacements.
+
+        Called from load() so any user config saved before the 2026-06-30
+        GA deprecation continues to work after this code change. The shim
+        is idempotent — running it against an already-migrated config is a
+        no-op.
+        """
+        legacy_default = self.config.get("veo_model")
+        if legacy_default in self._LEGACY_VEO_MIGRATION:
+            new_default = self._LEGACY_VEO_MIGRATION[legacy_default]
+            self.logger.info(
+                f"Migrating legacy veo_model '{legacy_default}' -> '{new_default}'"
+            )
+            self.config["veo_model"] = new_default
+
+        models = self.config.get("veo_settings", {}).get("models")
+        if isinstance(models, dict):
+            for legacy_id in list(models.keys()):
+                if legacy_id in self._LEGACY_VEO_MIGRATION:
+                    self.logger.info(
+                        f"Dropping legacy veo_settings.models entry '{legacy_id}'"
+                    )
+                    models.pop(legacy_id)
+            # Ensure the GA models are always present after migration
+            for ga_id in ("veo-3.1-generate-001", "veo-3.1-fast-generate-001"):
+                if ga_id not in models:
+                    models[ga_id] = self.DEFAULT_CONFIG["veo_settings"]["models"][ga_id]
+
     def load(self) -> bool:
         """
         Load configuration from file.
@@ -122,7 +153,9 @@ class VideoConfig:
             
             # Merge with defaults (file config overrides defaults)
             self._deep_merge(self.config, file_config)
-            
+
+            self._migrate_legacy_models()
+
             self.logger.info(f"Loaded video config from {self.config_file}")
             return True
             

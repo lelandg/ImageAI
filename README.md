@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.37.0**
+**Version 0.38.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **Chameleon Labs Discord - Support, AI Art & Community: [Chameleon Labs Discord](https://discord.gg/chameleonlabs)**
@@ -12,7 +12,7 @@
 
 ## Overview
 
-**ImageAI** is a powerful desktop application and CLI tool for AI image generation, video creation, and professional layout design. It supports multiple providers including Google's Gemini API (with Imagen 3 and Veo 3), OpenAI's DALL·E models, Stability AI's Stable Diffusion, and local Stable Diffusion models. Beyond image generation, ImageAI provides a complete workflow for creating AI-powered videos with MIDI synchronization, karaoke overlays, and a professional layout engine for photo books, comics, and publications. It features enterprise-grade authentication options, secure credential management, and works seamlessly across Windows, macOS, and Linux.
+**ImageAI** is a powerful desktop application and CLI tool for AI image generation, video creation, and professional layout design. It supports multiple providers including Google's Gemini API (Gemini 2.5/3 Flash/Pro Image and Veo 3.1), OpenAI's GPT Image and DALL·E models, Stability AI's Stable Diffusion, and local Stable Diffusion models. Beyond image generation, ImageAI provides a complete workflow for creating AI-powered videos with MIDI synchronization, karaoke overlays, and a professional layout engine for photo books, comics, and publications. It features enterprise-grade authentication options, secure credential management, and works seamlessly across Windows, macOS, and Linux.
 
 ## Table of Contents
 - [Project Review & Recommendations](Docs/ProjectReview.md)
@@ -51,7 +51,10 @@
     - 1K (1024px), 2K (2048px), 4K (4096px) output quality
     - Dynamic resolution limits based on selected tier
     - Requires API key authentication (not gcloud)
-- **OpenAI DALL·E** - Support for DALL·E-3 and DALL·E-2 models
+- **OpenAI GPT Image & DALL·E** - Full support across the OpenAI image family:
+  - **GPT Image 2** *(default, released 2026-04-21)* — reasoning-driven image generation with `quality` as the thinking dial (`auto`/`low`/`medium`/`high`), custom resolutions up to 3840×2160, multi-reference compositing (up to 10 images), mask inpainting, streaming partial-image previews, and Batch API (50% discount). Requires OpenAI **Organization Verification** and a positive prepaid credit balance (see OpenAI Authentication below).
+  - **GPT Image 1.5 / 1 / 1-mini** — legacy options; `gpt-image-1.5` is the recommended fallback for transparent-background (alpha PNG) output, since `gpt-image-2` does not support transparent backgrounds.
+  - **DALL·E 3 / DALL·E 2** — retained for compatibility, variations (DALL·E 2), and classic style/quality knobs.
 - **Stability AI** - Stable Diffusion XL, SD 2.1, and more via API
 - **Local Stable Diffusion** - Run models locally without API keys (GPU recommended)
 - Easy provider switching in both GUI and CLI
@@ -403,11 +406,39 @@ You have two options for authenticating with Google's Gemini API:
 
 1. **Get your API key**:
    - Sign in at [OpenAI Platform](https://platform.openai.com/)
-   - Create API key at [API Keys page](https://platform.openai.com/api-keys)
+   - Create an API key at the [API Keys page](https://platform.openai.com/api-keys)
+   - Project-scoped keys (`sk-proj-…`) are preferred; note which project the key belongs to — project-level limits apply independently of org-level limits.
 
-2. **Review documentation**:
+2. **Fund the account — required for image models**:
+   - Open the [Billing page](https://platform.openai.com/settings/organization/billing/overview) and make sure your **credit balance is positive**. A zero or negative balance returns `billing_hard_limit_reached` on every image call, even if your monthly budget shows headroom — "usage budget" ≠ "credit balance".
+   - Recommended: enable **Auto-recharge** on the Billing page so a threshold top-up keeps long runs from stalling.
+   - Add credits at [Billing → Add to credit balance](https://platform.openai.com/settings/organization/billing/overview).
+
+3. **Complete Organization Verification** *(required for `gpt-image-2`, `gpt-image-1.x`)*:
+   - [Settings → Organization → General](https://platform.openai.com/settings/organization/general) → **Verify Organization**. Takes a few minutes (photo ID).
+   - Without verification, image calls return a 403 or `billing_limit_user_error` even with credits in the account.
+
+4. **Confirm project limits**:
+   - [Settings → Project → Limits](https://platform.openai.com/settings/organization/limits): the **project** budget and **org** budget are separate. Newly created projects sometimes default to $0; raise it to match the org cap if you hit `billing_hard_limit_reached` but org usage is low.
+
+5. **Pick a tier**:
+   - Tier 1 allows `gpt-image-2` at 5 images/min; Tier 2 raises to 20 IPM. Tier 2 unlocks automatically after **$50 in paid API usage** and **7 days since first payment** (see the "Increasing your limits" section of the Limits page).
+
+6. **Review documentation**:
    - [Rate Limits](https://platform.openai.com/docs/guides/rate-limits)
+   - [Usage Tiers](https://platform.openai.com/docs/guides/rate-limits#usage-tiers)
    - [Pricing](https://openai.com/pricing)
+   - [gpt-image-2 model card](https://developers.openai.com/api/docs/models/gpt-image-2)
+
+#### Troubleshooting OpenAI image generation
+
+| Error                                                                | Meaning                                                                  | Fix                                                                                          |
+|----------------------------------------------------------------------|--------------------------------------------------------------------------|----------------------------------------------------------------------------------------------|
+| `billing_hard_limit_reached` / `billing_limit_user_error`            | Credit balance ≤ $0, or a user-set budget cap (org **or** project) hit. | Add credits at Billing; enable Auto-recharge; verify both org and project usage limits.      |
+| 403 with "organization must be verified"                             | Org Verification not completed.                                          | Settings → Organization → General → Verify Organization.                                     |
+| `model not found` for `gpt-image-2`                                  | Org not verified, OR project's model permissions exclude image models.   | Complete verification; check Project → Model permissions.                                    |
+| `Transparent background not supported on gpt-image-2`                | gpt-image-2 does not support `background=transparent`.                   | Switch to `gpt-image-1.5` (or `gpt-image-1`) for alpha-channel PNGs.                         |
+| Rate limit (429) on bursts                                           | Hit Tier 1's 5-IPM cap for gpt-image-2.                                  | Wait, or queue via **Batch API** (`--batch`) at 50% discount with a 24h SLA.                 |
 
 ## 3. Installation
 
@@ -656,7 +687,7 @@ python main.py video --in lyrics.txt --midi song.mid --audio song.mp3 \
   --out karaoke_video.mp4
 
 # Using Veo AI for video generation (when available)
-python main.py video --in script.txt --veo-model veo-3.0-generate-001 \
+python main.py video --in script.txt --veo-model veo-3.1-generate-001 \
   --audio soundtrack.mp3 --out ai_video.mp4
 ```
 
@@ -2464,13 +2495,14 @@ A: Check each provider's terms:
 
 Since ImageAI's Video Project feature is designed to work with Google Veo for AI video generation, here's the current pricing:
 
-#### AI Video Generation Models (January 2025)
+#### AI Video Generation Models (April 2026 GA)
 
 | Model | Model ID | Duration | Audio | Gemini API Price | Features |
 |-------|----------|----------|-------|-----------------|----------|
-| **Veo 3** | `veo-3.0-generate-001` | 8 sec | ✅ Yes | $0.75/second<br>($6.00/video) | Best quality, physics-accurate |
-| **Veo 3 Fast** | `veo-3.0-fast-generate-001` | 8 sec | ✅ Yes | $0.40/second<br>($3.20/video) | Optimized for speed |
-| **Veo 2** | `veo-2.0-generate-001` | 5-8 sec | ❌ No | $0.35/second<br>($2.10-2.80/video) | 4K support, no audio |
+| **Veo 3.1** | `veo-3.1-generate-001` | 8 sec | ✅ Yes | $0.40/second<br>($3.20/video) | 1080p, reference images, frame interpolation |
+| **Veo 3.1 Fast** | `veo-3.1-fast-generate-001` | 4-8 sec | ✅ Yes | $0.15/second<br>($0.60-1.20/video) | 720p, 11-60s generation, reference images |
+
+> **Note:** Veo 2.0, Veo 3.0, and Veo 3.0 Fast were discontinued by Google Cloud on 2026-06-30. Legacy model IDs in saved configs are automatically migrated on load.
 
 #### Subscription Options
 

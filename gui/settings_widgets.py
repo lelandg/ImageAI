@@ -396,6 +396,7 @@ class ResolutionSelector(QWidget):
         self._width_mode = "manual"  # "manual" or "auto"
         self._height_mode = "auto"   # "manual" or "auto"
         self._lock_aspect_ratio = True  # Lock aspect ratio by default
+        self._custom_size_str = None  # "WxH" set by custom-size popup, or None
         self._init_ui()
     
     def _init_ui(self):
@@ -479,6 +480,16 @@ class ResolutionSelector(QWidget):
         self.lock_btn.setToolTip("Lock aspect ratio (linked width/height)\nClick to unlock for independent width/height entry")
         self.lock_btn.clicked.connect(self._toggle_lock_aspect_ratio)
         size_layout.addWidget(self.lock_btn)
+
+        self.custom_size_btn = QPushButton("Custom…")
+        self.custom_size_btn.setToolTip(
+            "Enter a custom WxH (gpt-image-2 only).\n"
+            "Both edges multiples of 16, max edge 3840, aspect ≤3:1, "
+            "total pixels 655K-8.3M."
+        )
+        self.custom_size_btn.clicked.connect(self._open_custom_size_dialog)
+        self.custom_size_btn.setVisible(False)
+        size_layout.addWidget(self.custom_size_btn)
 
         size_layout.addStretch()
 
@@ -860,6 +871,15 @@ class ResolutionSelector(QWidget):
         When switching to a model with different max resolution, automatically
         adjusts dimensions to the new model's max for the current aspect ratio.
         """
+        # Custom… button visibility runs unconditionally so re-entrant calls
+        # with the same model still set the right state on first paint.
+        try:
+            from providers.openai import MODEL_CAPS as _OAI_CAPS
+            _caps = _OAI_CAPS.get(model) if model else None
+            self.custom_size_btn.setVisible(bool(_caps and _caps.get("supports_custom_size")))
+        except ImportError:
+            self.custom_size_btn.setVisible(False)
+
         if model == self.model:
             return  # No change
 
@@ -1177,6 +1197,75 @@ class ResolutionSelector(QWidget):
                         return None, None
         return None, None
 
+    def _open_custom_size_dialog(self):
+        """Inline modal popup with W/H spinboxes and live validation label."""
+        from PySide6.QtWidgets import (
+            QDialog, QFormLayout, QSpinBox, QLabel, QDialogButtonBox, QHBoxLayout,
+        )
+        from providers.openai import MODEL_CAPS
+        from core.image_size import validate_custom_size
+
+        caps = MODEL_CAPS.get(self.model) if self.model else None
+        if not caps or not caps.get("supports_custom_size"):
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Custom image size")
+        form = QFormLayout(dlg)
+
+        w_spin = QSpinBox()
+        w_spin.setRange(16, int(caps.get("custom_size_max_edge", 3840)))
+        w_spin.setSingleStep(16)
+        w_spin.setValue(self._custom_width or 2048)
+        h_spin = QSpinBox()
+        h_spin.setRange(16, int(caps.get("custom_size_max_edge", 3840)))
+        h_spin.setSingleStep(16)
+        h_spin.setValue(self._custom_height or 1152)
+
+        status = QLabel("")
+        status.setStyleSheet("color: #4CAF50;")
+
+        def revalidate():
+            ok, why = validate_custom_size(w_spin.value(), h_spin.value(), caps)
+            if ok:
+                status.setText(f"✓ Valid ({w_spin.value()}×{h_spin.value()})")
+                status.setStyleSheet("color: #4CAF50;")
+            else:
+                status.setText(f"✗ {why}")
+                status.setStyleSheet("color: #E53935;")
+            buttons.button(QDialogButtonBox.Ok).setEnabled(ok)
+
+        w_spin.valueChanged.connect(lambda *_: revalidate())
+        h_spin.valueChanged.connect(lambda *_: revalidate())
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Width:"))
+        row.addWidget(w_spin)
+        row.addSpacing(8)
+        row.addWidget(QLabel("Height:"))
+        row.addWidget(h_spin)
+        form.addRow(row)
+        form.addRow(status)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dlg.accept)
+        buttons.rejected.connect(dlg.reject)
+        form.addRow(buttons)
+        revalidate()
+
+        if dlg.exec_() == QDialog.Accepted:
+            self._custom_width = w_spin.value()
+            self._custom_height = h_spin.value()
+            self._custom_size_str = f"{self._custom_width}x{self._custom_height}"
+            self.width_spin.setValue(self._custom_width)
+            self.height_spin.setValue(self._custom_height)
+            self._update_info_text()
+            self.resolutionChanged.emit(self._custom_size_str)
+
+    def get_custom_size(self):
+        """Return 'WxH' string set by the custom-size popup, or None."""
+        return self._custom_size_str
+
 
 class QualitySelector(QWidget):
     """Quality and style selector for providers."""
@@ -1220,6 +1309,29 @@ class QualitySelector(QWidget):
 
         self.standard_radio.setChecked(True)
         self.quality_buttons.buttonClicked.connect(self._on_quality_changed)
+
+        # GPT Image 2 reasoning levels (Low | Medium | High | Auto). Hidden
+        # except when the active OpenAI model is gpt-image-2.
+        self.gi2_buttons = QButtonGroup()
+        self.gi2_low_radio = QRadioButton("Low")
+        self.gi2_low_radio.setToolTip("Fastest, cheapest, no reasoning. ~$0.006/image at 1024².")
+        self.gi2_medium_radio = QRadioButton("Medium")
+        self.gi2_medium_radio.setToolTip("Balanced reasoning. ~$0.053/image at 1024².")
+        self.gi2_high_radio = QRadioButton("High")
+        self.gi2_high_radio.setToolTip("Maximum reasoning. ~$0.211/image at 1024².")
+        self.gi2_auto_radio = QRadioButton("Auto")
+        self.gi2_auto_radio.setToolTip("Let the API choose based on prompt complexity.")
+
+        for i, btn in enumerate((self.gi2_low_radio, self.gi2_medium_radio,
+                                 self.gi2_high_radio, self.gi2_auto_radio)):
+            self.gi2_buttons.addButton(btn, i)
+            quality_layout.addWidget(btn)
+            btn.setVisible(False)
+
+        self.gi2_auto_radio.setChecked(True)
+        self.gi2_buttons.buttonClicked.connect(self._on_gi2_quality_changed)
+
+        self.is_gi2_mode = False
 
         # NBP quality buttons (1K/2K/4K) - initially hidden
         self.nbp_buttons = QButtonGroup()
@@ -1299,13 +1411,16 @@ class QualitySelector(QWidget):
 
     def update_model(self, model_id: str):
         """Update quality options based on selected model."""
-        is_nbp = model_id and "gemini-3" in model_id
+        # Google Nano Banana Pro (1K/2K/4K)
+        is_nbp = bool(model_id and "gemini-3" in model_id)
         self._set_nbp_mode(is_nbp)
-
         if is_nbp:
-            # Emit signal with current NBP quality and max resolution
             tier = self.NBP_TIERS.get(self.nbp_quality, self.NBP_TIERS['2K'])
             self.nbpQualityChanged.emit(self.nbp_quality, tier['max_res'])
+
+        # OpenAI gpt-image-2 reasoning radios
+        is_gi2 = (model_id == "gpt-image-2")
+        self._set_gi2_mode(is_gi2)
 
     def _set_nbp_mode(self, enabled: bool):
         """Switch between standard quality and NBP quality modes."""
@@ -1364,7 +1479,32 @@ class QualitySelector(QWidget):
         quality = "hd" if self.hd_radio.isChecked() else "standard"
         self.settings["quality"] = quality
         self.settingsChanged.emit(self.settings)
-    
+
+    def _set_gi2_mode(self, enabled: bool):
+        """Toggle gpt-image-2 reasoning radios on/off."""
+        if self.is_gi2_mode == enabled:
+            return
+        self.is_gi2_mode = enabled
+        # Hide standard / hd when in gi2 mode
+        self.standard_radio.setVisible(not enabled)
+        self.hd_radio.setVisible(not enabled)
+        for btn in (self.gi2_low_radio, self.gi2_medium_radio,
+                    self.gi2_high_radio, self.gi2_auto_radio):
+            btn.setVisible(enabled)
+        if enabled:
+            self.quality_group.setTitle("Reasoning Quality")
+
+    def _on_gi2_quality_changed(self):
+        if self.gi2_low_radio.isChecked():
+            self.settings["quality"] = "low"
+        elif self.gi2_medium_radio.isChecked():
+            self.settings["quality"] = "medium"
+        elif self.gi2_high_radio.isChecked():
+            self.settings["quality"] = "high"
+        else:
+            self.settings["quality"] = "auto"
+        self.settingsChanged.emit(self.settings)
+
     def _on_style_changed(self):
         """Handle style change."""
         style = "natural" if self.natural_radio.isChecked() else "vivid"
@@ -1379,6 +1519,16 @@ class QualitySelector(QWidget):
             if self.is_nbp_mode:
                 # NBP mode - return output_quality for API
                 settings["output_quality"] = self.nbp_quality
+            elif getattr(self, 'is_gi2_mode', False):
+                for value, btn in (
+                    ("low", self.gi2_low_radio),
+                    ("medium", self.gi2_medium_radio),
+                    ("high", self.gi2_high_radio),
+                    ("auto", self.gi2_auto_radio),
+                ):
+                    if btn.isChecked():
+                        settings["quality"] = value
+                        break
             else:
                 settings["quality"] = "hd" if self.hd_radio.isChecked() else "standard"
         # Always save style setting if the group exists
@@ -1389,7 +1539,17 @@ class QualitySelector(QWidget):
     def set_settings(self, settings: dict):
         """Restore settings."""
         if "quality" in settings:
-            if settings["quality"] == "hd":
+            q = settings["quality"]
+            if q in {"low", "medium", "high", "auto"}:
+                # gpt-image-2 reasoning quality
+                mapping = {
+                    "low": self.gi2_low_radio,
+                    "medium": self.gi2_medium_radio,
+                    "high": self.gi2_high_radio,
+                    "auto": self.gi2_auto_radio,
+                }
+                mapping[q].setChecked(True)
+            elif q == "hd":
                 self.hd_radio.setChecked(True)
             else:
                 self.standard_radio.setChecked(True)
@@ -1804,9 +1964,171 @@ class AdvancedSettingsPanel(QWidget):
         
         if "cfg_scale" in settings:
             self.cfg_spin.setValue(settings["cfg_scale"])
-        
+
         if "steps" in settings:
             self.steps_spin.setValue(settings["steps"])
+
+
+class OutputFormatRow(QWidget):
+    """PNG / JPEG / WebP radios with a compression slider for jpeg/webp.
+
+    Driven by MODEL_CAPS[model]['supports_output_format']; hide the whole
+    widget when the active model doesn't support output_format.
+    """
+
+    settingsChanged = Signal(dict)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+        self.group = QGroupBox("Output Format")
+        gl = QHBoxLayout(self.group)
+
+        self.buttons = QButtonGroup(self)
+        self.png_radio = QRadioButton("PNG")
+        self.png_radio.setChecked(True)
+        self.jpeg_radio = QRadioButton("JPEG")
+        self.webp_radio = QRadioButton("WebP")
+        for i, b in enumerate((self.png_radio, self.jpeg_radio, self.webp_radio)):
+            self.buttons.addButton(b, i)
+            gl.addWidget(b)
+        self.buttons.buttonClicked.connect(self._on_changed)
+
+        gl.addSpacing(12)
+        self.compression_label = QLabel("Compression:")
+        self.compression_slider = QSlider(Qt.Horizontal)
+        self.compression_slider.setRange(0, 100)
+        self.compression_slider.setValue(90)
+        self.compression_slider.setMaximumWidth(140)
+        self.compression_value = QLabel("90")
+        self.compression_value.setMinimumWidth(28)
+        self.compression_slider.valueChanged.connect(
+            lambda v: (self.compression_value.setText(str(v)), self._on_changed())
+        )
+        gl.addWidget(self.compression_label)
+        gl.addWidget(self.compression_slider)
+        gl.addWidget(self.compression_value)
+        self._set_compression_visible(False)
+
+        layout.addWidget(self.group)
+
+    def update_model(self, model_id: str):
+        """Show/hide based on MODEL_CAPS; safe for non-openai models."""
+        try:
+            from providers.openai import MODEL_CAPS
+            caps = MODEL_CAPS.get(model_id)
+            self.group.setVisible(bool(caps and caps.get("supports_output_format")))
+        except ImportError:
+            self.group.setVisible(False)
+
+    def _on_changed(self, *_):
+        fmt = self.get_format()
+        self._set_compression_visible(fmt in ("jpeg", "webp"))
+        self.settingsChanged.emit(self.get_settings())
+
+    def _set_compression_visible(self, visible: bool):
+        for w in (self.compression_label, self.compression_slider, self.compression_value):
+            w.setVisible(visible)
+
+    def get_format(self) -> str:
+        if self.jpeg_radio.isChecked():
+            return "jpeg"
+        if self.webp_radio.isChecked():
+            return "webp"
+        return "png"
+
+    def get_settings(self) -> dict:
+        s = {"output_format": self.get_format()}
+        if s["output_format"] in ("jpeg", "webp"):
+            s["output_compression"] = self.compression_slider.value()
+        return s
+
+    def set_settings(self, settings: dict):
+        fmt = settings.get("output_format", "png")
+        if fmt == "jpeg":
+            self.jpeg_radio.setChecked(True)
+        elif fmt == "webp":
+            self.webp_radio.setChecked(True)
+        else:
+            self.png_radio.setChecked(True)
+        if "output_compression" in settings:
+            self.compression_slider.setValue(int(settings["output_compression"]))
+        self._set_compression_visible(fmt in ("jpeg", "webp"))
+
+
+class ModerationCheckbox(QWidget):
+    """Single 'permissive moderation' checkbox; visible only when caps allow."""
+
+    settingsChanged = Signal(dict)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.checkbox = QCheckBox("Permissive content moderation (moderation=low)")
+        self.checkbox.setToolTip(
+            "Loosens content filters. See OpenAI usage policy: "
+            "https://openai.com/policies/usage-policies/"
+        )
+        self.checkbox.toggled.connect(
+            lambda *_: self.settingsChanged.emit(self.get_settings())
+        )
+        layout.addWidget(self.checkbox)
+        layout.addStretch()
+
+    def update_model(self, model_id: str):
+        try:
+            from providers.openai import MODEL_CAPS
+            caps = MODEL_CAPS.get(model_id)
+            self.setVisible(bool(caps and caps.get("supports_moderation")))
+        except ImportError:
+            self.setVisible(False)
+
+    def get_settings(self) -> dict:
+        return {"moderation": "low" if self.checkbox.isChecked() else "auto"}
+
+    def set_settings(self, settings: dict):
+        self.checkbox.setChecked(settings.get("moderation") == "low")
+
+
+class ThinkingProgressToggle(QWidget):
+    """Show-thinking-progress checkbox; visible only when caps['supports_streaming']."""
+
+    settingsChanged = Signal(dict)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.checkbox = QCheckBox("Show thinking progress (stream partial frames)")
+        self.checkbox.setToolTip(
+            "Stream up to 2 partial images as the model thinks. "
+            "Each partial costs ~100 extra output tokens."
+        )
+        self.checkbox.toggled.connect(
+            lambda *_: self.settingsChanged.emit(self.get_settings())
+        )
+        layout.addWidget(self.checkbox)
+        layout.addStretch()
+
+    def update_model(self, model_id: str):
+        try:
+            from providers.openai import MODEL_CAPS
+            caps = MODEL_CAPS.get(model_id)
+            self.setVisible(bool(caps and caps.get("supports_streaming")))
+        except ImportError:
+            self.setVisible(False)
+
+    def is_enabled(self) -> bool:
+        return self.checkbox.isChecked()
+
+    def get_settings(self) -> dict:
+        return {"stream_partials": self.checkbox.isChecked()}
+
+    def set_settings(self, settings: dict):
+        self.checkbox.setChecked(bool(settings.get("stream_partials", False)))
 
 
 class CostEstimator:

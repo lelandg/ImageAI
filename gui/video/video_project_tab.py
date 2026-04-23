@@ -949,7 +949,7 @@ class VideoGenerationThread(QThread):
             # === NEW: Configure generation - NO HYBRID MODE ===
             # CRITICAL: If start or end frame is provided, DO NOT use reference images
             # This eliminates hybrid mode and simplifies the logic
-            selected_model = VeoModel.VEO_3_GENERATE
+            selected_model = VeoModel.VEO_3_1_GENERATE
             use_start_frame = None
             use_reference_images = None
 

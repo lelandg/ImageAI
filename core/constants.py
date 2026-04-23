@@ -6,7 +6,7 @@ from pathlib import Path
 
 # Application metadata
 APP_NAME = "ImageAI"
-VERSION = "0.37.0"
+VERSION = "0.38.0"
 __version__ = VERSION
 __author__ = "Leland Green"
 __email__ = "contact@lelandgreen.com"
@@ -27,12 +27,10 @@ PROVIDER_MODELS = {
         "gemini-3-pro-image-preview": "Gemini 3 Pro Image (Nano Banana Pro) - 4K",
         "gemini-3.1-flash-image-preview": "Gemini 3.1 Flash Image (Nano Banana 2) - 2K",
         "gemini-2.5-flash-image": "Gemini 2.5 Flash Image (Nano Banana)",
-        # Imagen Models (Vertex AI - gcloud only) - newest first
-        "imagen-4.0-generate-001": "Imagen 4 (Best Quality)",
-        "imagen-3.0-generate-002": "Imagen 3 (General Purpose)",
     },
     "openai": {
-        # GPT Image Series (December 2025) - newest first
+        # GPT Image Series — newest first
+        "gpt-image-2": "GPT Image 2 (Thinking, Best)",
         "gpt-image-1.5": "GPT Image 1.5 (Latest)",
         "gpt-image-1": "GPT Image 1",
         "gpt-image-1-mini": "GPT Image 1 Mini (Fast)",
@@ -56,6 +54,10 @@ PROVIDER_MODELS = {
         "CompVis/stable-diffusion-v1-4": "Stable Diffusion 1.4",
     },
 }
+
+# OpenAI gpt-image-2 reproducibility pin. Use this snapshot when sidecar
+# metadata needs the exact model snapshot, not the alias.
+GPT_IMAGE_2_SNAPSHOT = "gpt-image-2-2026-04-21"
 
 # Provider API key URLs
 PROVIDER_KEY_URLS = {
@@ -153,3 +155,7 @@ def get_user_data_dir() -> Path:
     else:  # Linux/Unix
         base = Path(os.getenv("XDG_CONFIG_HOME", home / ".config"))
         return base / APP_NAME
+
+
+# Persistent ledger for OpenAI Batch API jobs (one entry per submission).
+BATCH_JOBS_PATH = get_user_data_dir() / "batch_jobs.json"
