@@ -83,7 +83,7 @@ Models are specified with provider prefixes:
 
 - **OpenAI**: `gpt-4o`, `gpt-4-turbo`, `o1`, `o1-mini`
 - **Google**: `gemini/gemini-2.0-flash-exp`, `gemini/gemini-2.5-flash-preview`
-- **Anthropic**: `claude-3-5-sonnet-20241022`, `claude-3-5-haiku-20241022`
+- **Anthropic**: `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`
 - **Ollama**: `ollama/llama3.1`, `ollama/mistral`
 - **LM Studio**: `lmstudio/model-name`
 

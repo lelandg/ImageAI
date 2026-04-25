@@ -68,14 +68,12 @@ LLM_PROVIDERS = {
             # Claude 4.5 Series (Latest - November 2025)
             'claude-opus-4-5-20251101',      # Opus 4.5: Most intelligent, $5/$25 per 1M
             'claude-sonnet-4-5-20250514',    # Sonnet 4.5: Best for agents, $3/$15 per 1M
+            'claude-haiku-4-5-20251001',     # Haiku 4.5: Fastest, $0.80/$4 per 1M
             # Claude 4 Series (May 2025)
             'claude-opus-4-20250514',        # Opus 4: Best coding model, $15/$75 per 1M
-            'claude-sonnet-4-20250514',      # Sonnet 4: Balanced coding, $3/$15 per 1M
+            'claude-sonnet-4-6',             # Sonnet 4.6: Balanced coding, $3/$15 per 1M
             # Claude 3.7 Series
             'claude-3-7-sonnet-20250219',    # Extended thinking, $3/$15 per 1M
-            # Claude 3.5 Series
-            'claude-3-5-sonnet-20241022',    # Best speed/intelligence balance
-            'claude-3-5-haiku-20241022',     # Fastest, $0.80/$4 per 1M
         ],
         enabled_by_default=True,
         requires_api_key=True,

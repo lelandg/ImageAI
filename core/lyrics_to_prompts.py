@@ -165,7 +165,7 @@ Rules:
 
         Args:
             lyrics: List of lyric lines (all sent in one batch)
-            model: LLM model to use (e.g., "gpt-4o", "gemini/gemini-2.0-flash-exp", "claude-3-5-sonnet-20241022")
+            model: LLM model to use (e.g., "gpt-4o", "gemini/gemini-2.0-flash-exp", "claude-sonnet-4-6")
             temperature: Generation temperature (0.0-1.0)
             style_hint: Optional style guidance (e.g., "cinematic", "abstract", "photorealistic")
 
