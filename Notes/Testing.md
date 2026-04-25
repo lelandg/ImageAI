@@ -53,7 +53,7 @@ Falling back to individual generation
 
 **Known Issues:**
 - Gemini 2.5 Pro + LiteLLM still has intermittent None responses
-- If this happens, try Claude/Anthropic instead: `claude-3-5-sonnet-20241022`
+- If this happens, try Claude/Anthropic instead: `claude-sonnet-4-6`
 
 ---
 
@@ -324,7 +324,7 @@ C:\Users\aboog\AppData\Roaming\ImageAI\video_projects\
 | Google | gemini-2.5-flash | 0.7 | ✅ Yes | Faster, cheaper, may be more reliable |
 | OpenAI | gpt-5-chat-latest | 1.0 | ✅ Yes | Best instruction following, most detailed |
 | OpenAI | gpt-4o | 1.0 | ✅ Yes | Reliable, proven |
-| Anthropic | claude-3-5-sonnet-20241022 | 1.0 | ✅ Yes | Excellent structured output, no LiteLLM bugs |
+| Anthropic | claude-sonnet-4-6 | 1.0 | ✅ Yes | Excellent structured output, no LiteLLM bugs |
 
 **Test Procedure:**
 

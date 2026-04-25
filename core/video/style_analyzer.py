@@ -44,8 +44,8 @@ class StyleAnalyzer:
             "google": "gemini-2.5-pro",
             "gemini": "gemini-2.5-pro",
             "openai": "gpt-4o",  # GPT-4 with vision
-            "anthropic": "claude-3-5-sonnet-20241022",
-            "claude": "claude-3-5-sonnet-20241022"
+            "anthropic": "claude-sonnet-4-6",
+            "claude": "claude-sonnet-4-6"
         }
         return defaults.get(self.llm_provider, "gemini-2.5-pro")
 

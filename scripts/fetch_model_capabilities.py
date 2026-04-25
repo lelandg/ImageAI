@@ -879,7 +879,7 @@ class AnthropicModelFetcher:
             'pricing_input': 15.0, 'pricing_output': 75.0,
             'tags': ['coding', 'reasoning', 'agentic'],
         },
-        'claude-sonnet-4-20250514': {
+        'claude-sonnet-4-6': {
             'category': ModelCategory.LLM,
             'display_name': 'Claude Sonnet 4',
             'description': 'Excellent coding performance, balanced speed and capability',
@@ -908,7 +908,7 @@ class AnthropicModelFetcher:
         },
 
         # Claude 3.5 Series
-        'claude-3-5-sonnet-20241022': {
+        'claude-sonnet-4-6': {
             'category': ModelCategory.LLM,
             'display_name': 'Claude 3.5 Sonnet',
             'description': 'Best combination of speed and intelligence for most tasks',
@@ -919,7 +919,7 @@ class AnthropicModelFetcher:
             'pricing_input': 3.0, 'pricing_output': 15.0,
             'tags': ['balanced', 'general-purpose'],
         },
-        'claude-3-5-haiku-20241022': {
+        'claude-haiku-4-5-20251001': {
             'category': ModelCategory.LLM,
             'display_name': 'Claude 3.5 Haiku',
             'description': 'Fastest model with near-instant responses',

@@ -189,7 +189,7 @@ python src/submit_to_veo.py polished_scenes.json \
   * Vertex AI reference lists current **model IDs** (`veo-3.0-generate-001`, `veo-3.0-fast-generate-001`) and request parameters (`durationSeconds`, `aspectRatio`, `resolution`, `negativePrompt`, `seed`, etc.). ([Google Cloud][3])
   * Recent updates note **9:16 vertical support** (720p) and broader GA availability; pricing and capabilities can evolve—always check the latest docs. ([Google AI for Developers][2])
 
-* **Anthropic Claude**: Use the **Messages API** with a system prompt and JSON‑only instruction. Model names include snapshots like `claude-sonnet-4-20250514`; production code should prefer specific snapshots for consistency. ([Anthropic][4])
+* **Anthropic Claude**: Use the **Messages API** with a system prompt and JSON‑only instruction. Model names include snapshots like `claude-sonnet-4-6`; production code should prefer specific snapshots for consistency. ([Anthropic][4])
 
 * **Local LLMs**: Use **Ollama** via REST or the Python library (`pip install ollama-python`). Endpoint `/api/chat` or `/api/generate` can return responses; add a JSON repair step and validate against your schema. ([Ollama][5])
 
