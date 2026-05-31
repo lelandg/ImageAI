@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.38.1] - 2026-05-31
+
+### Fixed
+- **Duplicate Claude model entries** from the model-ID refresh. The legacy
+  `claude-sonnet-4-20250514` and `claude-3-5-sonnet-20241022` IDs both map to the
+  current `claude-sonnet-4-6` alias; the prior mechanical rename left a duplicate
+  dropdown entry in `core/llm_models.py` and a **duplicate dict key** in
+  `scripts/fetch_model_capabilities.py` (which silently dropped the Sonnet 4
+  metadata). Deduped to a single entry/key, moved Haiku 4.5 under the 4.5 series,
+  and corrected stale display names.
+
+### Changed
+- **In-repo Claude Code skill broadened**: `.claude/skills/imageai-gpt-image-2/`
+  is replaced by `.claude/skills/imageai-cli/`, which documents the entire CLI —
+  all four providers (Google/Nano Banana, OpenAI, Stability, local SD), every flag
+  in `cli/parser.py`, plus lyrics-to-prompts, Batch API, gcloud auth, and key
+  management. The gpt-image-2 cheat-sheet is preserved as one detailed section.
+
 ## [0.38.0] - 2026-04-22
 
 ### Added
