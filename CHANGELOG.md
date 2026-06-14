@@ -37,6 +37,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `core/prompt_enhancer_llm.py` never applied the required `anthropic/` LiteLLM prefix:
   the prefix map held a stale model ID instead of a prefix, and the code only prefixed
   Google. Anthropic models now get the correct prefix.
+- **OpenAI connection errors are now actionable.** `APIConnectionError` / `APITimeoutError`
+  previously slipped past the provider's `except` (they don't subclass
+  `ValueError`/`RuntimeError`) and surfaced as a bare "Connection error." The OpenAI
+  client now sets an explicit long read timeout (for slow `gpt-image-2` "thinking"
+  generations), and connection failures are caught and explained — including a hint to
+  enable streaming or check VPN/antivirus/proxy when an idle HTTPS connection is cut
+  mid-generation.
 
 ## [0.38.1] - 2026-05-31
 

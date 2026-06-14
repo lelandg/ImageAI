@@ -24,6 +24,22 @@ except ImportError:
 OpenAIClient = None
 
 
+def _connection_error_types():
+    """Lazily return OpenAI connection/timeout exception classes, or () if unavailable.
+
+    These subclass openai.OpenAIError (not ValueError/RuntimeError), so they are
+    caught separately to give the user an actionable message instead of the SDK's
+    bare "Connection error.".
+    """
+    if not OPENAI_AVAILABLE:
+        return ()
+    try:
+        from openai import APIConnectionError, APITimeoutError
+        return (APIConnectionError, APITimeoutError)
+    except ImportError:
+        return ()
+
+
 # Capability table for every OpenAI image model. The provider, GUI, and CLI
 # all consult this; never add per-model `if model == ...` branches outside
 # this dict — extend the dict instead.
@@ -189,7 +205,16 @@ class OpenAIProvider(ImageProvider):
         if not self.client:
             if not self.api_key:
                 raise ValueError("OpenAI requires an API key")
-            self.client = OpenAIClient(api_key=self.api_key)
+            client_kwargs = {"api_key": self.api_key, "max_retries": 2}
+            try:
+                import httpx  # openai depends on httpx
+                # gpt-image-2 "thinking" generations can take minutes and return
+                # nothing until done; allow a long read timeout but fail fast on a
+                # genuine connect failure.
+                client_kwargs["timeout"] = httpx.Timeout(600.0, connect=15.0)
+            except ImportError:
+                pass
+            self.client = OpenAIClient(**client_kwargs)
     
     def generate(
         self,
@@ -720,8 +745,25 @@ class OpenAIProvider(ImageProvider):
                 except Exception as e:
                     logger.warning(f"Post-processing failed, using original images: {e}")
 
-        except (ValueError, RuntimeError, AttributeError) as e:
-            raise RuntimeError(f"OpenAI generation failed: {e}")
+        except Exception as e:
+            conn_types = _connection_error_types()
+            if conn_types and isinstance(e, conn_types):
+                logger.error(f"OpenAI connection failure ({type(e).__name__}): {e!r}")
+                hint = "Connection to OpenAI dropped before the image was returned. "
+                if model == "gpt-image-2":
+                    hint += (
+                        "gpt-image-2 is a 'thinking' model that can take 1-3 minutes and "
+                        "returns nothing until it finishes, so an idle HTTPS connection may "
+                        "be cut by a VPN, antivirus HTTPS inspection, or proxy. Try enabling "
+                        "streaming partial images (--stream-partials / 'Show thinking "
+                        "progress'), or test a faster model (dall-e-3, gpt-image-1-mini). "
+                    )
+                hint += "Also check your VPN / antivirus / proxy and network connection."
+                raise RuntimeError(hint) from e
+            if isinstance(e, (ValueError, RuntimeError, AttributeError)):
+                raise RuntimeError(f"OpenAI generation failed: {e}") from e
+            logger.error(f"Unexpected OpenAI error ({type(e).__name__}): {e!r}")
+            raise
 
         return texts, images
     
