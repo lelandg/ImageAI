@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.38.1**
+**Version 0.39.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **Chameleon Labs Discord - Support, AI Art & Community: [Chameleon Labs Discord](https://discord.gg/chameleonlabs)**
@@ -1974,9 +1974,9 @@ python scripts/generate_tags.py --provider openai
 # Limit to specific number of items per category
 python scripts/generate_tags.py --limit 50
 
-# Use specific model
-python scripts/generate_tags.py --provider google --model gemini-2.0-flash-exp
-python scripts/generate_tags.py --provider openai --model gpt-5-chat-latest
+# Use specific model (fast, low-cost models are recommended for bulk tagging)
+python scripts/generate_tags.py --provider google --model gemini-3.5-flash
+python scripts/generate_tags.py --provider openai --model gpt-5.4-mini
 ```
 
 **Authentication**:
@@ -2011,7 +2011,7 @@ $ python scripts/generate_tags.py --test
 ======================================================================
 
 2025-01-12 14:30:22 - INFO - Test mode: processing only first 10 items per category
-2025-01-12 14:30:23 - INFO - Initialized TagGenerator with provider=google, model=gemini/gemini-2.0-flash-exp
+2025-01-12 14:30:23 - INFO - Initialized TagGenerator with provider=google, model=gemini/gemini-3.5-flash
 2025-01-12 14:30:23 - INFO - Loading prompt builder items...
 2025-01-12 14:30:23 - INFO - Processing 60 items across 6 categories
 Generating metadata: 100%|████████████████| 60/60 [02:15<00:00,  2.25s/it]
@@ -2570,14 +2570,17 @@ The Sora Video API is currently **in preview** with restricted access. To use So
 
 ### Provider Specifications
 
-#### Google Gemini Models
-- `gemini-2.5-flash-image-preview` (default)
-- `gemini-2.0-flash-lite-preview-02-05`
-- `gemini-2.0-flash-thinking-exp-01-21`
+#### Google Gemini Image Models
+- `gemini-3-pro-image-preview` - Nano Banana Pro, up to 4K (best quality)
+- `gemini-3.1-flash-image-preview` - Nano Banana 2, up to 2K
+- `gemini-2.5-flash-image` (default) - Nano Banana
 
-#### OpenAI Models
-- `dall-e-3` (default) - Best quality, 1024x1024
-- `dall-e-2` - Good quality, multiple sizes
+#### OpenAI Image Models
+- `gpt-image-2` (default) - Thinking model, best quality
+- `gpt-image-1.5` - Latest GPT Image
+- `gpt-image-1` / `gpt-image-1-mini` - Faster, lower cost
+- `dall-e-3` - Legacy, 1024x1024
+- `dall-e-2` - Legacy, multiple sizes
 
 #### Stability AI Models
 - `stable-diffusion-xl-1024-v1-0` (default) - SDXL, best quality

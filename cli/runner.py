@@ -7,6 +7,7 @@ from typing import Optional, Tuple, List
 from core import ConfigManager, get_api_key_url, sanitize_filename, read_key_file
 from core.utils import read_readme_text, extract_api_key_help
 from core.lyrics_to_prompts import LyricsToPromptsGenerator, load_lyrics_from_file
+from core.llm_models import resolve_model
 from providers import get_provider, preload_provider
 
 
@@ -94,8 +95,8 @@ def handle_lyrics_to_prompts(args) -> int:
         print(f"Error loading lyrics: {e}")
         return 2
 
-    # Get model (default to gpt-4o)
-    model = getattr(args, "lyrics_model", None) or "gpt-4o"
+    # Get model (default resolved from the model registry)
+    model = getattr(args, "lyrics_model", None) or resolve_model('openai', 'gpt', static_default='gpt-4o')
     temperature = getattr(args, "lyrics_temperature", 0.7)
     style_hint = getattr(args, "lyrics_style", None)
     output_file = getattr(args, "lyrics_output", None)

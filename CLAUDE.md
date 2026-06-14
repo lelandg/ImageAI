@@ -152,7 +152,6 @@ When the code map needs updating:
 - For testing Python code:
   - **In WSL/Linux bash**: Use `source /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/activate`
   - **In PowerShell**: Use `.\.venv\Scripts\Activate.ps1` (this is the primary environment)
-- Never add files to git
 - When interacting with LLMs, you MUST show everything sent to the LLM and responses received in the status console and the log.
 
 ## LLM Integration Guidelines

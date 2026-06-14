@@ -141,7 +141,7 @@ class MainWindow(QMainWindow):
         # Track selected model per provider for persistence when switching
         # This is restored from ui_state in _restore_ui_state()
         self._selected_models_per_provider = {}  # {"google": "gemini-3-pro-image-preview", "openai": "gpt-image-1.5", ...}
-        self._selected_llm_models_per_provider = {}  # {"OpenAI": "gpt-5.2", "Google": "gemini-3-pro-preview", ...}
+        self._selected_llm_models_per_provider = {}  # {"OpenAI": "gpt-5.5", "Google": "gemini-3.1-pro-preview", ...}
         self._current_llm_provider = "None"  # Track current LLM provider for model persistence
 
         # Session state

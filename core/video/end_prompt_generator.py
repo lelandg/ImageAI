@@ -9,6 +9,8 @@ import logging
 from typing import Optional
 from dataclasses import dataclass
 
+from core.llm_models import resolve_model
+
 
 @dataclass
 class EndPromptContext:
@@ -51,7 +53,7 @@ Format: 1-2 sentences describing the end state."""
         self,
         context: EndPromptContext,
         provider: str = "gemini",
-        model: str = "gemini-2.0-flash-exp",
+        model: Optional[str] = None,
         temperature: float = 0.8
     ) -> Optional[str]:
         """
@@ -69,6 +71,9 @@ Format: 1-2 sentences describing the end state."""
         if not self.is_available():
             self.logger.error("LLM provider not available")
             return self._fallback_prompt(context)
+
+        if not model:
+            model = resolve_model('gemini', 'flash', static_default='gemini-2.0-flash-exp')
 
         # Build user prompt based on context
         if context.next_start_prompt:
@@ -143,7 +148,7 @@ Describe a natural ending frame for this scene."""
         self,
         contexts: list[EndPromptContext],
         provider: str = "gemini",
-        model: str = "gemini-2.0-flash-exp",
+        model: Optional[str] = None,
         temperature: float = 0.8
     ) -> list[Optional[str]]:
         """
