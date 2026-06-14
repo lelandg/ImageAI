@@ -41,9 +41,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   previously slipped past the provider's `except` (they don't subclass
   `ValueError`/`RuntimeError`) and surfaced as a bare "Connection error." The OpenAI
   client now sets an explicit long read timeout (for slow `gpt-image-2` "thinking"
-  generations), and connection failures are caught and explained — including a hint to
-  enable streaming or check VPN/antivirus/proxy when an idle HTTPS connection is cut
-  mid-generation.
+  generations), and connection failures are caught and explained — retry-first, with a
+  hint to enable "Show thinking progress" or check VPN/antivirus/proxy when an idle
+  HTTPS connection is cut mid-generation.
+- **gpt-image-2 streaming was completely broken.** `--stream-partials` / the GUI's
+  "Show thinking progress" routed through the **Responses API**, passing the image model
+  (`gpt-image-2`) as the top-level `responses.stream(model=…)` — which isn't a
+  Responses-API model, so OpenAI returned `400 model_not_found`. Streaming now uses the
+  **Images API** (`client.images.generate(stream=True, partial_images=N)`), the same
+  endpoint as non-streaming generation, and any streaming failure degrades gracefully to
+  the non-streaming path instead of hard-failing. Verified end-to-end against the live
+  API (partial + final frames).
 
 ## [0.38.1] - 2026-05-31
 

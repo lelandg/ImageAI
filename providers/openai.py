@@ -749,14 +749,14 @@ class OpenAIProvider(ImageProvider):
             conn_types = _connection_error_types()
             if conn_types and isinstance(e, conn_types):
                 logger.error(f"OpenAI connection failure ({type(e).__name__}): {e!r}")
-                hint = "Connection to OpenAI dropped before the image was returned. "
+                hint = "Connection to OpenAI dropped before the image returned — usually transient, so retry first. "
                 if model == "gpt-image-2":
                     hint += (
-                        "gpt-image-2 is a 'thinking' model that can take 1-3 minutes and "
-                        "returns nothing until it finishes, so an idle HTTPS connection may "
-                        "be cut by a VPN, antivirus HTTPS inspection, or proxy. Try enabling "
-                        "streaming partial images (--stream-partials / 'Show thinking "
-                        "progress'), or test a faster model (dall-e-3, gpt-image-1-mini). "
+                        "gpt-image-2 is a 'thinking' model that can take 1-3 minutes and returns "
+                        "nothing until it finishes, so an idle HTTPS connection can be cut by a VPN, "
+                        "antivirus HTTPS inspection, or proxy. If it keeps failing, enable "
+                        "\"Show thinking progress\" (streams partial frames, keeping the connection "
+                        "active) or try a faster model (dall-e-3, gpt-image-1-mini). "
                     )
                 hint += "Also check your VPN / antivirus / proxy and network connection."
                 raise RuntimeError(hint) from e
@@ -1007,63 +1007,65 @@ class OpenAIProvider(ImageProvider):
         import logging
         logger = logging.getLogger(__name__)
 
-        if not hasattr(self.client, "responses") or not hasattr(self.client.responses, "stream"):
-            return None
-
-        tool = {
-            "type": "image_generation",
+        # GPT image models stream partials directly on the Images API
+        # (client.images.generate(..., stream=True, partial_images=N)). The image
+        # model id (e.g. gpt-image-2) is valid here — it is NOT a Responses-API
+        # model, so it must never be passed as responses.stream(model=...).
+        caps = _caps_for(model)
+        params: Dict[str, Any] = {
+            "model": model,
+            "prompt": prompt,
             "size": size,
-            "quality": quality,
-            "moderation": moderation,
-            "output_format": output_format,
+            "n": n,
+            "stream": True,
             "partial_images": partial_images,
         }
+        if quality in caps["quality_values"]:
+            params["quality"] = quality
+        if caps.get("supports_output_format") and output_format in {"png", "jpeg", "webp"}:
+            params["output_format"] = output_format
+        if caps.get("supports_moderation") and moderation in {"auto", "low"}:
+            params["moderation"] = moderation
 
         partials_seen = 0
         final_b64s: List[str] = []
 
         try:
-            with self.client.responses.stream(
-                model=model,
-                input=prompt,
-                tools=[tool],
-                tool_choice={"type": "image_generation"},
-            ) as stream:
-                for event in stream:
-                    etype = getattr(event, "type", "")
-                    if etype.endswith("partial_image"):
-                        b64 = (
-                            getattr(event, "partial_image_b64", None)
-                            or getattr(getattr(event, "partial_image", None), "b64_json", None)
-                        )
-                        if b64:
-                            partials_seen += 1
-                            try:
-                                on_partial(partials_seen - 1, b64decode(b64))
-                            except Exception as cb_err:  # noqa: BLE001
-                                logger.warning(f"on_partial callback raised: {cb_err}")
-                    elif etype.endswith("image_generation_call.completed"):
-                        b64 = getattr(event, "b64_json", None) or getattr(
-                            getattr(event, "result", None), "b64_json", None
-                        )
-                        if b64:
-                            final_b64s.append(b64)
-                response = stream.get_final_response()
-                # If the event loop didn't yield a completed b64, dig it out of the response.
-                if not final_b64s and response is not None:
-                    for output in (getattr(response, "output", []) or []):
-                        b64 = getattr(output, "b64_json", None) or getattr(
-                            getattr(output, "result", None), "b64_json", None
-                        )
-                        if b64:
-                            final_b64s.append(b64)
-        except (AttributeError, TypeError) as e:
-            logger.warning(f"Responses-API streaming failed structurally: {e}")
+            stream = self.client.images.generate(**params)
+            for event in stream:
+                etype = getattr(event, "type", "")
+                if etype == "image_generation.partial_image":
+                    b64 = getattr(event, "b64_json", None)
+                    if b64:
+                        idx = getattr(event, "partial_image_index", partials_seen)
+                        try:
+                            on_partial(int(idx), b64decode(b64))
+                        except Exception as cb_err:  # noqa: BLE001
+                            logger.warning(f"on_partial callback raised: {cb_err}")
+                        partials_seen += 1
+                elif etype == "image_generation.completed":
+                    b64 = getattr(event, "b64_json", None)
+                    if b64:
+                        final_b64s.append(b64)
+        except TypeError as e:
+            # Installed SDK predates streaming params on images.generate.
+            logger.warning(f"images.generate streaming unsupported by SDK ({e}); falling back to sync")
+            return None
+        except Exception as e:  # noqa: BLE001 — degrade to the working sync path, never hard-fail
+            logger.warning(
+                f"Streaming generation failed ({type(e).__name__}: {e}); falling back to sync"
+            )
             return None
 
         if not final_b64s:
             return None
-        return [b64decode(b) for b in final_b64s[:n]]
+        out: List[bytes] = []
+        for b64 in final_b64s[:n]:
+            try:
+                out.append(b64decode(b64))
+            except (ValueError, TypeError):
+                pass
+        return out or None
 
     def _create_alpha_mask(
         self,
