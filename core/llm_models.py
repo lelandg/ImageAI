@@ -8,10 +8,73 @@ All UI components and configuration will automatically use the updated lists.
 
 from typing import Dict, List, Optional
 from dataclasses import dataclass
+import json
 import logging
 import requests
 
+from core.model_registry import FALLBACK_PATH, resolve as _registry_resolve, RegistryError
+
 logger = logging.getLogger(__name__)
+
+
+# --- Model registry integration -------------------------------------------------
+# Cloud model IDs are resolved from the ChameleonLabs model registry so they never
+# go stale. Import-time list building reads the bundled fallback snapshot directly
+# (synchronous, offline-safe, no network); the snapshot is refreshed via
+# `/model-registry refresh-fallback`. Runtime call sites use the live registry via
+# resolve_model() (which falls back to the same snapshot when offline).
+
+# App provider aliases -> registry provider keys.
+_REGISTRY_PROVIDER = {
+    'google': 'gemini', 'gemini': 'gemini',
+    'openai': 'openai',
+    'anthropic': 'anthropic', 'claude': 'anthropic',
+}
+
+
+def _load_registry_families() -> Dict[str, Dict[str, str]]:
+    """Read provider->family->model-id from the bundled snapshot (no network)."""
+    try:
+        with open(FALLBACK_PATH, encoding="utf-8") as fh:
+            return json.load(fh).get("families", {})
+    except Exception as e:  # pragma: no cover - snapshot should always be present
+        logger.warning(f"model-registry fallback unreadable, using static model lists only: {e}")
+        return {}
+
+
+_REGISTRY_FAMILIES = _load_registry_families()
+
+
+def _provider_models(provider_id: str, families: List[str], tail: List[str]) -> List[str]:
+    """Build a model list: current family IDs (from the snapshot) first, then a
+    curated tail of still-usable older models, de-duplicated."""
+    pf = _REGISTRY_FAMILIES.get(provider_id, {})
+    ids: List[str] = []
+    for fam in families:
+        mid = pf.get(fam)
+        if mid and mid not in ids:
+            ids.append(mid)
+    for mid in tail:
+        if mid not in ids:
+            ids.append(mid)
+    return ids
+
+
+def resolve_model(provider_id: str, family: str, static_default: Optional[str] = None) -> str:
+    """Resolve the current model ID for (provider, family) via the live registry.
+
+    Accepts app provider aliases ('google' -> gemini, 'claude' -> anthropic).
+    Offline-safe (uses the bundled snapshot); returns ``static_default`` (or the
+    family name) if the provider/family is absent from the registry.
+    """
+    reg_provider = _REGISTRY_PROVIDER.get(provider_id.lower(), provider_id.lower())
+    try:
+        return _registry_resolve(reg_provider, family)
+    except (LookupError, RegistryError) as e:
+        logger.warning(f"registry resolve {reg_provider}/{family} failed ({e}); "
+                       f"using static default {static_default!r}")
+        return static_default or family
+# -------------------------------------------------------------------------------
 
 
 @dataclass
@@ -32,15 +95,9 @@ LLM_PROVIDERS = {
     'openai': LLMProvider(
         id='openai',
         display_name='OpenAI',
-        models=[
-            # GPT-5 Series (Latest - December 2025)
-            'gpt-5.2-pro',                     # GPT 5.2 Pro (newest flagship)
-            'gpt-5.2',                         # GPT 5.2 (latest stable)
-            'gpt-5.1',                         # GPT 5.1
-            'gpt-5-pro',                       # GPT 5 Pro
-            'gpt-5',                           # GPT 5
-            'gpt-5-mini',                      # GPT 5 Mini (balanced)
-            'gpt-5-nano',                      # GPT 5 Nano (fastest)
+        # Current flagship/mini/nano IDs come from the model registry (always
+        # current); the curated tail keeps still-usable older models available.
+        models=_provider_models('openai', ['gpt', 'gpt-pro', 'gpt-mini', 'gpt-nano'], [
             # Reasoning Models (o-series)
             'o4-mini',                         # O4 Mini (fast reasoning)
             'o3-pro',                          # O3 Pro (advanced reasoning)
@@ -55,7 +112,7 @@ LLM_PROVIDERS = {
             'gpt-4o',                          # GPT-4o (multimodal)
             'gpt-4o-mini',                     # GPT-4o Mini
             'gpt-4-turbo',                     # GPT-4 Turbo
-        ],
+        ]),
         enabled_by_default=True,
         requires_api_key=True,
         prefix=''  # No prefix for OpenAI
@@ -64,17 +121,12 @@ LLM_PROVIDERS = {
     'anthropic': LLMProvider(
         id='anthropic',
         display_name='Anthropic',
-        models=[
-            # Claude 4.5 Series (Latest - November 2025)
-            'claude-opus-4-5-20251101',      # Opus 4.5: Most intelligent, $5/$25 per 1M
-            'claude-sonnet-4-5-20250514',    # Sonnet 4.5: Best for agents, $3/$15 per 1M
-            'claude-haiku-4-5-20251001',     # Haiku 4.5: Fastest, $0.80/$4 per 1M
-            # Claude 4 Series (May 2025)
-            'claude-opus-4-20250514',        # Opus 4: Best coding model, $15/$75 per 1M
-            'claude-sonnet-4-6',             # Sonnet 4.6: Balanced coding, $3/$15 per 1M
-            # Claude 3.7 Series
-            'claude-3-7-sonnet-20250219',    # Extended thinking, $3/$15 per 1M
-        ],
+        # Current opus/sonnet/haiku IDs come from the model registry; curated tail
+        # keeps older Claude generations available.
+        models=_provider_models('anthropic', ['opus', 'sonnet', 'haiku'], [
+            'claude-opus-4-20250514',        # Opus 4: previous-gen coding model
+            'claude-3-7-sonnet-20250219',    # Claude 3.7 Sonnet: extended thinking
+        ]),
         enabled_by_default=True,
         requires_api_key=True,
         prefix='anthropic/'  # LiteLLM requires "anthropic/" prefix
@@ -83,18 +135,15 @@ LLM_PROVIDERS = {
     'gemini': LLMProvider(
         id='gemini',
         display_name='Google',
-        models=[
-            # Gemini 3 Series (Latest - December 2025)
-            'gemini-3-pro-preview',            # Gemini 3 Pro (state-of-the-art reasoning, 1M context)
-            'gemini-3-flash-preview',          # Gemini 3 Flash (frontier intelligence, fast, 1M context)
-            # Gemini 2.5 Series (Stable - June 2025)
+        # Current pro/flash/flash-lite IDs come from the model registry; curated
+        # tail keeps older Gemini generations available.
+        models=_provider_models('gemini', ['pro', 'flash', 'flash-lite'], [
             'gemini-2.5-pro',                  # Gemini 2.5 Pro (complex reasoning, 1M context)
             'gemini-2.5-flash',                # Gemini 2.5 Flash (price-performance, 1M context)
             'gemini-2.5-flash-lite',           # Gemini 2.5 Flash Lite (cost-efficient, 1M context)
-            # Gemini 2.0 Series (Previous Generation)
             'gemini-2.0-flash',                # Gemini 2.0 Flash (1M context, 8K output)
             'gemini-2.0-flash-lite',           # Gemini 2.0 Flash Lite
-        ],
+        ]),
         enabled_by_default=True,
         requires_api_key=True,
         prefix='gemini/'

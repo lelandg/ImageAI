@@ -508,7 +508,8 @@ class LLMWorker(QObject):
                 logger.info("Using Claude/Anthropic for prompt generation")
                 console.info("Using Claude/Anthropic for prompt generation")
 
-                model_name = self.llm_model or "claude-sonnet-4-5"
+                from core.llm_models import resolve_model
+                model_name = self.llm_model or resolve_model('anthropic', 'sonnet', static_default='claude-sonnet-4-6')
 
                 if use_litellm:
                     # Use litellm with Anthropic provider - must prefix with "anthropic/"

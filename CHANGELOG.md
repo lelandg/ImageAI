@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.39.0] - 2026-06-14
+
+### Added
+- **Model registry integration.** Cloud LLM model IDs (OpenAI / Anthropic / Gemini
+  chat models) now resolve at runtime from the ChameleonLabs model registry instead of
+  being hardcoded and going stale. New `core/model_registry/` vendors the stdlib-only
+  client plus a project wrapper that auto-wires a bundled fallback snapshot
+  (`core/model-registry.fallback.json`), so resolution works offline and never blocks
+  the UI. Refresh the snapshot with `/model-registry refresh-fallback`.
+- `core/llm_models.resolve_model(provider, family, static_default=…)` — runtime resolver
+  that accepts app provider aliases (`google`→gemini, `claude`→anthropic) and falls back
+  to the bundled snapshot (then a static default) when the registry is unreachable.
+
+### Changed
+- **LLM model picker lists are now registry-driven.** `LLM_PROVIDERS` lists lead with the
+  current family IDs from the bundled snapshot, followed by a curated tail of still-usable
+  older models. Local providers (`ollama`, `lmstudio`) are unchanged. The registry's full
+  `available()` list is deliberately not used wholesale (it includes non-chat models).
+- Hardcoded default model IDs across the CLI, GUI dialogs, lyrics-to-prompts, prompt
+  enhancement, the video prompt/style/end-frame generators, and the font glyph identifier
+  now resolve via `resolve_model(...)`.
+- Refreshed stale model names in docstrings, CLI `--help`, comments, and the README API
+  Reference / usage examples (current IDs and cost-appropriate recommendations).
+
+### Fixed
+- Invalid default model ID `claude-sonnet-4-5` (missing date suffix) in the prompt
+  generation dialog — now resolves the current Sonnet via the registry.
+- `core/prompt_enhancer_llm.py` never applied the required `anthropic/` LiteLLM prefix:
+  the prefix map held a stale model ID instead of a prefix, and the code only prefixed
+  Google. Anthropic models now get the correct prefix.
+
 ## [0.38.1] - 2026-05-31
 
 ### Fixed

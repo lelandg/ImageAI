@@ -10,6 +10,8 @@ import logging
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
+from core.llm_models import resolve_model
+
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
 
@@ -152,7 +154,7 @@ Rules:
     def generate(
         self,
         lyrics: List[str],
-        model: str = "gpt-4o",
+        model: Optional[str] = None,
         temperature: float = 0.7,
         style_hint: Optional[str] = None
     ) -> LyricsToPromptsResult:
@@ -165,7 +167,9 @@ Rules:
 
         Args:
             lyrics: List of lyric lines (all sent in one batch)
-            model: LLM model to use (e.g., "gpt-4o", "gemini/gemini-2.0-flash-exp", "claude-sonnet-4-6")
+            model: LLM model to use (e.g., "gpt-5.5", "gemini/gemini-3.5-flash",
+                "anthropic/claude-sonnet-4-6"). Defaults to the current OpenAI flagship
+                resolved from the model registry.
             temperature: Generation temperature (0.0-1.0)
             style_hint: Optional style guidance (e.g., "cinematic", "abstract", "photorealistic")
 
@@ -181,6 +185,10 @@ Rules:
             error = "No lyrics provided"
             logger.error(error)
             return LyricsToPromptsResult(prompts=[], raw_response="", success=False, error=error)
+
+        # Resolve the default model from the registry when not explicitly provided.
+        if not model:
+            model = resolve_model('openai', 'gpt', static_default='gpt-4o')
 
         # Build user prompt
         lyrics_text = "\n".join(lyrics)

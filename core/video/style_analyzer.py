@@ -39,15 +39,17 @@ class StyleAnalyzer:
         self.llm_model = llm_model or self._get_default_model()
 
     def _get_default_model(self) -> str:
-        """Get default vision model for the provider."""
-        defaults = {
-            "google": "gemini-2.5-pro",
-            "gemini": "gemini-2.5-pro",
-            "openai": "gpt-4o",  # GPT-4 with vision
-            "anthropic": "claude-sonnet-4-6",
-            "claude": "claude-sonnet-4-6"
-        }
-        return defaults.get(self.llm_provider, "gemini-2.5-pro")
+        """Get default vision model for the provider (resolved from the registry)."""
+        # (provider, family, static fallback) per app provider alias.
+        spec = {
+            "google": ("gemini", "pro", "gemini-2.5-pro"),
+            "gemini": ("gemini", "pro", "gemini-2.5-pro"),
+            "openai": ("openai", "gpt", "gpt-4o"),  # flagship is vision-capable
+            "anthropic": ("anthropic", "sonnet", "claude-sonnet-4-6"),
+            "claude": ("anthropic", "sonnet", "claude-sonnet-4-6"),
+        }.get(self.llm_provider, ("gemini", "pro", "gemini-2.5-pro"))
+        from core.llm_models import resolve_model
+        return resolve_model(spec[0], spec[1], static_default=spec[2])
 
     def analyze_for_style(self, image_path: Path) -> Optional[str]:
         """

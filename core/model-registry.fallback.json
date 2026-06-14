@@ -1,0 +1,909 @@
+{
+  "available": {
+    "anthropic": [
+      "claude-fable-5",
+      "claude-haiku-4-5-20251001",
+      "claude-opus-4-1-20250805",
+      "claude-opus-4-20250514",
+      "claude-opus-4-5-20251101",
+      "claude-opus-4-6",
+      "claude-opus-4-7",
+      "claude-opus-4-8",
+      "claude-sonnet-4-20250514",
+      "claude-sonnet-4-5-20250929",
+      "claude-sonnet-4-6"
+    ],
+    "gemini": [
+      "antigravity-preview-05-2026",
+      "gemini-2.0-flash",
+      "gemini-2.0-flash-001",
+      "gemini-2.0-flash-lite",
+      "gemini-2.0-flash-lite-001",
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite",
+      "gemini-2.5-pro",
+      "gemini-3-flash-preview",
+      "gemini-3-pro-preview",
+      "gemini-3.1-flash-lite",
+      "gemini-3.1-flash-lite-preview",
+      "gemini-3.1-pro-preview",
+      "gemini-3.5-flash",
+      "gemini-flash-latest",
+      "gemini-flash-lite-latest",
+      "gemini-pro-latest",
+      "gemma-4-26b-a4b-it",
+      "gemma-4-31b-it",
+      "nano-banana-pro-preview"
+    ],
+    "openai": [
+      "chat-latest",
+      "chatgpt-image-latest",
+      "gpt-3.5-turbo",
+      "gpt-3.5-turbo-0125",
+      "gpt-3.5-turbo-1106",
+      "gpt-3.5-turbo-16k",
+      "gpt-3.5-turbo-instruct",
+      "gpt-3.5-turbo-instruct-0914",
+      "gpt-4",
+      "gpt-4-0613",
+      "gpt-4-turbo",
+      "gpt-4.1",
+      "gpt-4.1-mini",
+      "gpt-4.1-nano",
+      "gpt-4o",
+      "gpt-4o-mini",
+      "gpt-4o-mini-search-preview",
+      "gpt-4o-mini-transcribe",
+      "gpt-4o-mini-tts",
+      "gpt-4o-search-preview",
+      "gpt-4o-transcribe",
+      "gpt-4o-transcribe-diarize",
+      "gpt-5",
+      "gpt-5-chat-latest",
+      "gpt-5-codex",
+      "gpt-5-mini",
+      "gpt-5-nano",
+      "gpt-5-pro",
+      "gpt-5-search-api",
+      "gpt-5.1",
+      "gpt-5.1-chat-latest",
+      "gpt-5.1-codex",
+      "gpt-5.1-codex-max",
+      "gpt-5.1-codex-mini",
+      "gpt-5.2",
+      "gpt-5.2-chat-latest",
+      "gpt-5.2-codex",
+      "gpt-5.2-pro",
+      "gpt-5.3-chat-latest",
+      "gpt-5.3-codex",
+      "gpt-5.4",
+      "gpt-5.4-mini",
+      "gpt-5.4-nano",
+      "gpt-5.4-pro",
+      "gpt-5.5",
+      "gpt-5.5-pro",
+      "o1",
+      "o1-pro",
+      "o3",
+      "o3-deep-research",
+      "o3-mini",
+      "o3-pro",
+      "o4-mini",
+      "o4-mini-deep-research"
+    ]
+  },
+  "capabilities": {
+    "antigravity-preview-05-2026": {
+      "context_window": 131072
+    },
+    "chatgpt-image-latest": {
+      "mode": "image_generation"
+    },
+    "claude-fable-5": {
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "claude-haiku-4-5-20251001": {
+      "context_window": 200000,
+      "max_output_tokens": 64000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "claude-opus-4-1-20250805": {
+      "context_window": 200000,
+      "max_output_tokens": 32000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "claude-opus-4-20250514": {
+      "context_window": 200000,
+      "max_output_tokens": 32000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "claude-opus-4-5-20251101": {
+      "context_window": 200000,
+      "max_output_tokens": 64000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "claude-opus-4-6": {
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "claude-opus-4-7": {
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "claude-opus-4-8": {
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "claude-sonnet-4-20250514": {
+      "context_window": 1000000,
+      "max_output_tokens": 64000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "claude-sonnet-4-5-20250929": {
+      "context_window": 1000000,
+      "max_output_tokens": 64000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "claude-sonnet-4-6": {
+      "context_window": 1000000,
+      "max_output_tokens": 64000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-2.0-flash": {
+      "context_window": 1048576,
+      "max_output_tokens": 8192,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_vision": true
+    },
+    "gemini-2.0-flash-001": {
+      "context_window": 1048576,
+      "max_output_tokens": 8192,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_vision": true
+    },
+    "gemini-2.0-flash-lite": {
+      "context_window": 1048576,
+      "max_output_tokens": 8192,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_vision": true
+    },
+    "gemini-2.0-flash-lite-001": {
+      "context_window": 1048576,
+      "max_output_tokens": 8192,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_vision": true
+    },
+    "gemini-2.5-flash": {
+      "context_window": 1048576,
+      "max_output_tokens": 65535,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-2.5-flash-lite": {
+      "context_window": 1048576,
+      "max_output_tokens": 65535,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-2.5-pro": {
+      "context_window": 1048576,
+      "max_output_tokens": 65535,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-3-flash-preview": {
+      "context_window": 1048576,
+      "max_output_tokens": 65535,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-3-pro-preview": {
+      "context_window": 1048576,
+      "max_output_tokens": 65535,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-3.1-flash-lite": {
+      "context_window": 1048576,
+      "max_output_tokens": 65536,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-3.1-flash-lite-preview": {
+      "context_window": 1048576,
+      "max_output_tokens": 65536,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-3.1-pro-preview": {
+      "context_window": 1048576,
+      "max_output_tokens": 65536,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-3.5-flash": {
+      "context_window": 1048576,
+      "max_output_tokens": 65535,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-flash-latest": {
+      "context_window": 1048576,
+      "max_output_tokens": 65535,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-flash-lite-latest": {
+      "context_window": 1048576,
+      "max_output_tokens": 65535,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-pro-latest": {
+      "context_window": 1048576,
+      "max_output_tokens": 65535,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemma-4-26b-a4b-it": {
+      "context_window": 262144
+    },
+    "gemma-4-31b-it": {
+      "context_window": 262144
+    },
+    "gpt-3.5-turbo": {
+      "context_window": 16385,
+      "max_output_tokens": 4096,
+      "mode": "chat",
+      "supports_function_calling": true
+    },
+    "gpt-3.5-turbo-0125": {
+      "context_window": 16385,
+      "max_output_tokens": 4096,
+      "mode": "chat",
+      "supports_function_calling": true
+    },
+    "gpt-3.5-turbo-1106": {
+      "context_window": 16385,
+      "max_output_tokens": 4096,
+      "mode": "chat",
+      "supports_function_calling": true
+    },
+    "gpt-3.5-turbo-16k": {
+      "context_window": 16385,
+      "max_output_tokens": 4096,
+      "mode": "chat"
+    },
+    "gpt-3.5-turbo-instruct": {
+      "context_window": 8192,
+      "max_output_tokens": 4096,
+      "mode": "completion"
+    },
+    "gpt-3.5-turbo-instruct-0914": {
+      "context_window": 8192,
+      "max_output_tokens": 4097,
+      "mode": "completion"
+    },
+    "gpt-4": {
+      "context_window": 8192,
+      "max_output_tokens": 4096,
+      "mode": "chat",
+      "supports_function_calling": true
+    },
+    "gpt-4-0613": {
+      "context_window": 8192,
+      "max_output_tokens": 4096,
+      "mode": "chat",
+      "supports_function_calling": true
+    },
+    "gpt-4-turbo": {
+      "context_window": 128000,
+      "max_output_tokens": 4096,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_vision": true
+    },
+    "gpt-4.1": {
+      "context_window": 1047576,
+      "max_output_tokens": 32768,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_vision": true
+    },
+    "gpt-4.1-mini": {
+      "context_window": 1047576,
+      "max_output_tokens": 32768,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_vision": true
+    },
+    "gpt-4.1-nano": {
+      "context_window": 1047576,
+      "max_output_tokens": 32768,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_vision": true
+    },
+    "gpt-4o": {
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_vision": true
+    },
+    "gpt-4o-mini": {
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_vision": true
+    },
+    "gpt-4o-mini-search-preview": {
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_vision": true
+    },
+    "gpt-4o-mini-transcribe": {
+      "context_window": 16000,
+      "max_output_tokens": 2000,
+      "mode": "audio_transcription"
+    },
+    "gpt-4o-mini-tts": {
+      "mode": "audio_speech"
+    },
+    "gpt-4o-search-preview": {
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_vision": true
+    },
+    "gpt-4o-transcribe": {
+      "context_window": 16000,
+      "max_output_tokens": 2000,
+      "mode": "audio_transcription"
+    },
+    "gpt-4o-transcribe-diarize": {
+      "context_window": 16000,
+      "max_output_tokens": 2000,
+      "mode": "audio_transcription"
+    },
+    "gpt-5": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5-chat-latest": {
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "mode": "chat",
+      "supports_function_calling": false,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5-codex": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5-mini": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5-nano": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5-pro": {
+      "context_window": 128000,
+      "max_output_tokens": 272000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5-search-api": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_vision": true
+    },
+    "gpt-5.1": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.1-chat-latest": {
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "mode": "chat",
+      "supports_function_calling": false,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.1-codex": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.1-codex-max": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.1-codex-mini": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.2": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.2-chat-latest": {
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.2-codex": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.2-pro": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.3-chat-latest": {
+      "context_window": 128000,
+      "max_output_tokens": 16384,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.3-codex": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.4": {
+      "context_window": 1050000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.4-mini": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.4-nano": {
+      "context_window": 272000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.4-pro": {
+      "context_window": 1050000,
+      "max_output_tokens": 128000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.5": {
+      "context_window": 1050000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.5-pro": {
+      "context_window": 1050000,
+      "max_output_tokens": 128000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "nano-banana-pro-preview": {
+      "context_window": 131072
+    },
+    "o1": {
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "o1-pro": {
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "o3": {
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "o3-deep-research": {
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_vision": true
+    },
+    "o3-mini": {
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_reasoning": true,
+      "supports_vision": false
+    },
+    "o3-pro": {
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "o4-mini": {
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "o4-mini-deep-research": {
+      "context_window": 200000,
+      "max_output_tokens": 100000,
+      "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_vision": true
+    }
+  },
+  "families": {
+    "anthropic": {
+      "haiku": "claude-haiku-4-5-20251001",
+      "opus": "claude-opus-4-8",
+      "sonnet": "claude-sonnet-4-6"
+    },
+    "gemini": {
+      "flash": "gemini-3.5-flash",
+      "flash-lite": "gemini-3.1-flash-lite",
+      "pro": "gemini-3.1-pro-preview"
+    },
+    "openai": {
+      "chat": "chat-latest",
+      "gpt": "gpt-5.5",
+      "gpt-mini": "gpt-5.4-mini",
+      "gpt-nano": "gpt-5.4-nano",
+      "gpt-pro": "gpt-5.5-pro"
+    }
+  },
+  "families_detail": {
+    "anthropic": {
+      "haiku": {
+        "active": "claude-haiku-4-5-20251001",
+        "stable": "claude-haiku-4-5-20251001"
+      },
+      "opus": {
+        "active": "claude-opus-4-8",
+        "stable": "claude-opus-4-8"
+      },
+      "sonnet": {
+        "active": "claude-sonnet-4-6",
+        "stable": "claude-sonnet-4-6"
+      }
+    },
+    "gemini": {
+      "flash": {
+        "active": "gemini-3.5-flash",
+        "stable": "gemini-3.5-flash"
+      },
+      "flash-lite": {
+        "active": "gemini-3.1-flash-lite",
+        "stable": "gemini-3.1-flash-lite"
+      },
+      "pro": {
+        "active": "gemini-3.1-pro-preview",
+        "preview": "gemini-3.1-pro-preview"
+      }
+    },
+    "openai": {
+      "chat": {
+        "active": "chat-latest",
+        "stable": "chat-latest"
+      },
+      "gpt": {
+        "active": "gpt-5.5",
+        "stable": "gpt-5.5"
+      },
+      "gpt-mini": {
+        "active": "gpt-5.4-mini",
+        "stable": "gpt-5.4-mini"
+      },
+      "gpt-nano": {
+        "active": "gpt-5.4-nano",
+        "stable": "gpt-5.4-nano"
+      },
+      "gpt-pro": {
+        "active": "gpt-5.5-pro",
+        "stable": "gpt-5.5-pro"
+      }
+    }
+  },
+  "fetched_at": "2026-06-10T21:00:45Z",
+  "providers_ok": [
+    "anthropic",
+    "openai",
+    "gemini"
+  ],
+  "schema_version": 2,
+  "unmatched": {
+    "anthropic": [
+      "claude-fable-5"
+    ],
+    "gemini": [
+      "gemini-flash-latest",
+      "gemini-flash-lite-latest",
+      "gemini-pro-latest"
+    ],
+    "openai": [
+      "gpt-3.5-turbo",
+      "gpt-3.5-turbo-16k",
+      "gpt-4-0613",
+      "gpt-4",
+      "gpt-3.5-turbo-instruct",
+      "gpt-3.5-turbo-instruct-0914",
+      "gpt-3.5-turbo-1106",
+      "gpt-3.5-turbo-0125",
+      "gpt-4-turbo",
+      "gpt-4-turbo-2024-04-09",
+      "gpt-4o",
+      "gpt-4o-2024-05-13",
+      "gpt-4o-mini-2024-07-18",
+      "gpt-4o-mini",
+      "gpt-4o-2024-08-06",
+      "o1-2024-12-17",
+      "o1",
+      "o3-mini",
+      "o3-mini-2025-01-31",
+      "gpt-4o-2024-11-20",
+      "gpt-4o-mini-search-preview-2025-03-11",
+      "gpt-4o-mini-search-preview",
+      "gpt-4o-transcribe",
+      "gpt-4o-mini-transcribe",
+      "o1-pro-2025-03-19",
+      "o1-pro",
+      "gpt-4o-mini-tts",
+      "o3-2025-04-16",
+      "o4-mini-2025-04-16",
+      "o3",
+      "o4-mini",
+      "o3-pro",
+      "o3-pro-2025-06-10",
+      "o4-mini-deep-research",
+      "o3-deep-research",
+      "gpt-4o-transcribe-diarize",
+      "o3-deep-research-2025-06-26",
+      "o4-mini-deep-research-2025-06-26",
+      "gpt-5-chat-latest",
+      "gpt-5-2025-08-07",
+      "gpt-5",
+      "gpt-5-mini-2025-08-07",
+      "gpt-5-mini",
+      "gpt-5-nano-2025-08-07",
+      "gpt-5-nano",
+      "gpt-5-codex",
+      "gpt-5-pro-2025-10-06",
+      "gpt-5-pro",
+      "gpt-5-search-api",
+      "gpt-5-search-api-2025-10-14",
+      "gpt-5.1-codex",
+      "gpt-5.1-codex-mini",
+      "gpt-5.1-codex-max",
+      "gpt-4o-mini-transcribe-2025-12-15",
+      "gpt-4o-mini-transcribe-2025-03-20",
+      "gpt-4o-mini-tts-2025-03-20",
+      "gpt-4o-mini-tts-2025-12-15",
+      "gpt-5.2-codex",
+      "gpt-5.3-codex",
+      "gpt-4o-search-preview",
+      "gpt-4o-search-preview-2025-03-11"
+    ]
+  }
+}

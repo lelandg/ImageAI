@@ -161,7 +161,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     lyrics_group = parser.add_argument_group("lyrics-to-prompts options")
     lyrics_group.add_argument(
         "--lyrics-model",
-        help="LLM model for lyrics-to-prompts (e.g., gpt-4o, gemini/gemini-2.0-flash-exp)"
+        help="LLM model for lyrics-to-prompts (e.g., gpt-5.5, gemini/gemini-3.5-flash, "
+             "anthropic/claude-sonnet-4-6). Default: current OpenAI flagship via model registry."
     )
     lyrics_group.add_argument(
         "--lyrics-temperature",

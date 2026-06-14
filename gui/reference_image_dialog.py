@@ -276,7 +276,7 @@ class ImageAnalysisWorker(QObject):
 
             # Generate with vision model
             response = client.models.generate_content(
-                model=self.llm_model,  # e.g., 'gemini-2.5-pro'
+                model=self.llm_model,  # e.g., a vision-capable model like 'gemini-3.1-pro-preview'
                 contents=contents,
                 config=types.GenerateContentConfig(
                     temperature=temperature,

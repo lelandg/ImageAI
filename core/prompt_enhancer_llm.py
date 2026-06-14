@@ -9,6 +9,7 @@ from typing import Dict, Any, Optional, List
 from pathlib import Path
 
 from core.prompt_enhancer import PromptEnhancer, EnhancementLevel
+from core.llm_models import resolve_model
 from gui.llm_utils import LLMResponseParser
 
 
@@ -155,23 +156,22 @@ class PromptEnhancerLLM:
         """
         # Prepare model identifier
         if provider == 'google':
-            model_id = model or 'gemini-2.0-flash-exp'
+            model_id = model or resolve_model('google', 'flash', static_default='gemini-2.0-flash-exp')
         elif provider == 'openai':
-            model_id = model or 'gpt-4o-mini'
+            model_id = model or resolve_model('openai', 'gpt-mini', static_default='gpt-4o-mini')
         elif provider == 'anthropic':
-            model_id = model or 'claude-3-haiku-20240307'
+            model_id = model or resolve_model('anthropic', 'haiku', static_default='claude-3-haiku-20240307')
         else:
-            model_id = model or 'gpt-4o-mini'
+            model_id = model or resolve_model('openai', 'gpt-mini', static_default='gpt-4o-mini')
 
-        # Add provider prefix if needed
+        # Add LiteLLM provider prefix if needed
         provider_prefixes = {
             'google': 'gemini/',
-            'anthropic': 'claude-3-haiku-20240307',
+            'anthropic': 'anthropic/',
         }
 
         if provider in provider_prefixes and not model_id.startswith(provider_prefixes[provider]):
-            if provider == 'google':
-                model_id = f"gemini/{model_id}"
+            model_id = f"{provider_prefixes[provider]}{model_id}"
 
         # Determine which token parameter to use
         # Use max_completion_tokens for newer OpenAI models (GPT-4+, GPT-5), max_tokens for GPT-3.5 and other providers

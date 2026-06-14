@@ -962,7 +962,8 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
         """
         # Set up the model if not specified
         if not model:
-            model = 'gpt-4o'  # Default vision-capable model
+            from core.llm_models import resolve_model
+            model = resolve_model('openai', 'gpt', static_default='gpt-4o')  # vision-capable
 
         # Prepare kwargs for litellm
         kwargs = {

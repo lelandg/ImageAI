@@ -384,7 +384,7 @@ Fixes based on comprehensive research documented in previous chat messages:
 **Further Actions:**
 - Use GPT-5 structured output mode (JSON schema)
 - Add post-processing filter to remove "BPM" if present
-- Try gpt-4o instead (may follow instructions better)
+- Try gpt-5.5, gemini-3.1, opus-4.8 or later. (May follow instructions better.)
 
 ### If Both Models Have Issues
 

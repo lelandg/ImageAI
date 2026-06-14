@@ -78,7 +78,7 @@ class AIGlyphIdentifier:
     Uses AI vision models to identify individual glyph images.
 
     Supports:
-    - Anthropic Claude (claude-opus-4-5-20251101) - Best accuracy for character recognition
+    - Anthropic Claude (Opus, resolved from the model registry) - Best accuracy for character recognition
     - Google Gemini (gemini-2.5-flash/pro) - Fast fallback option
     """
 
@@ -111,10 +111,17 @@ class AIGlyphIdentifier:
     PROVIDER_ANTHROPIC = "anthropic"
     PROVIDER_GEMINI = "gemini"
 
-    # Default models by provider
+    # Static fallback models by provider (used only if the registry is unreachable;
+    # the current ID is normally resolved from the model registry at runtime).
     DEFAULT_MODELS = {
         PROVIDER_ANTHROPIC: "claude-opus-4-5-20251101",
         PROVIDER_GEMINI: "gemini-2.5-pro",  # Pro for better accuracy than flash
+    }
+
+    # Registry family per provider for resolving the current default model.
+    _DEFAULT_FAMILIES = {
+        PROVIDER_ANTHROPIC: "opus",  # best accuracy for character recognition
+        PROVIDER_GEMINI: "pro",      # Pro for better accuracy than flash
     }
 
     def __init__(
@@ -135,7 +142,13 @@ class AIGlyphIdentifier:
         """
         self.provider = provider.lower()
         self.api_key = api_key
-        self.model = model or self.DEFAULT_MODELS.get(self.provider, self.DEFAULT_MODELS[self.PROVIDER_ANTHROPIC])
+        if model:
+            self.model = model
+        else:
+            static = self.DEFAULT_MODELS.get(self.provider, self.DEFAULT_MODELS[self.PROVIDER_ANTHROPIC])
+            family = self._DEFAULT_FAMILIES.get(self.provider, "opus")
+            from core.llm_models import resolve_model
+            self.model = resolve_model(self.provider, family, static_default=static)
         self.use_cloud_auth = use_cloud_auth
         self._client = None
         self._anthropic_client = None

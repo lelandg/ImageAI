@@ -157,7 +157,8 @@ class QuestionWorker(QObject):
                     logger.info("Using Google Cloud authentication (ADC) for Gemini")
                     console.info("Using Google Cloud authentication (ADC) for Gemini")
 
-                model_name = self.llm_model or "gemini-2.0-flash-exp"
+                from core.llm_models import resolve_model
+                model_name = self.llm_model or resolve_model('gemini', 'flash', static_default='gemini-2.0-flash-exp')
                 model = genai.GenerativeModel(model_name)
 
                 # Format conversation for Gemini
