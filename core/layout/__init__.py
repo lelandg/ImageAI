@@ -23,6 +23,9 @@ from .models import (
     ImageBlock,
     PageSpec,
     DocumentSpec,
+    PageSize,
+    Region,
+    migrate_legacy_blocks,
     Size,
     Rect,
 )
@@ -53,6 +56,9 @@ __all__ = [
     "ImageBlock",
     "PageSpec",
     "DocumentSpec",
+    "PageSize",
+    "Region",
+    "migrate_legacy_blocks",
     "Size",
     "Rect",
     # Phase 1 - Core
