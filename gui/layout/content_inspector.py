@@ -115,6 +115,8 @@ class ContentInspector(QWidget):
                 self._set_image_ref(path)
 
     def _set_image_ref(self, path: str):
+        if self._region is None:
+            return
         self.image_ref_label.setText(path)
         self.regionContentChanged.emit(self._region.id, path)
 

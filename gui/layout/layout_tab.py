@@ -108,6 +108,8 @@ class LayoutTab(QWidget):
 
     # --- content inspector ---
     def _find_region(self, region_id: str):
+        # MVP edits the first page only (the whole tab operates on pages[0]);
+        # revisit when multi-page navigation lands.
         if not region_id or not self.document or not self.document.pages:
             return None
         for r in self.document.pages[0].regions:
@@ -127,8 +129,12 @@ class LayoutTab(QWidget):
         if region is None:
             return
         if region.kind == "image":
+            if region.image_ref == value:
+                return
             region.image_ref = value
         else:
+            if region.text == value:
+                return
             region.text = value
         self._refresh()
 

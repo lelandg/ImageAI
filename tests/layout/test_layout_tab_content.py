@@ -29,6 +29,18 @@ def test_selecting_region_populates_inspector(qapp):
     assert tab.inspector.stack.currentIndex() == 0
 
 
+def test_canvas_selection_drives_inspector(qapp):
+    # Exercise the real signal path: selecting a scene item fires the scene's
+    # selectionChanged -> canvas.regionSelected -> _on_region_selected.
+    from PySide6.QtWidgets import QGraphicsItem
+    tab = _tab_with_regions()
+    scene = tab.canvas.scene()
+    target = next(it for it in scene.items()
+                  if (it.flags() & QGraphicsItem.ItemIsSelectable) and it.data(0) == "txt")
+    target.setSelected(True)
+    assert tab.inspector.stack.currentIndex() == 2  # text editor
+
+
 def test_image_content_change_sets_image_ref(qapp):
     tab = _tab_with_regions()
     tab._on_region_content_changed("img", "/path/to/pic.png")

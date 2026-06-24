@@ -27,11 +27,13 @@ def _resolve_bg(page: PageSpec) -> str:
     return "#FFFFFF"
 
 
-def _apply_flags(item: QGraphicsItem, selectable: bool, region_id: str) -> None:
+def _apply_flags(item: QGraphicsItem, selectable: bool, region_id: str,
+                 *, movable: bool = True) -> None:
     item.setData(0, region_id)
     if selectable:
         item.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        item.setFlag(QGraphicsItem.ItemIsMovable, True)
+        if movable:
+            item.setFlag(QGraphicsItem.ItemIsMovable, True)
 
 
 def _add_image_region(scene: QGraphicsScene, r: Region, selectable: bool) -> None:
@@ -52,7 +54,10 @@ def _add_image_region(scene: QGraphicsScene, r: Region, selectable: bool) -> Non
             scaled = pix.scaled(int(w), int(h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             pi = QGraphicsPixmapItem(scaled)
             pi.setPos(x, y)
-            _apply_flags(pi, selectable, r.id)
+            # Selectable so a filled image can be re-picked, but not movable —
+            # it sits on top of the (movable) placeholder rect and shouldn't be
+            # dragged off it.
+            _apply_flags(pi, selectable, r.id, movable=False)
             scene.addItem(pi)
             return
 
