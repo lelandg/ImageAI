@@ -29,3 +29,16 @@ def test_selection_emits_region_id(qapp):
                 if it.flags() & QGraphicsItem.ItemIsSelectable and it.data(0) == "a")
     item.setSelected(True)
     assert got and got[-1] == "a"
+
+
+def test_reload_page_selection_still_single_emit(qapp):
+    from PySide6.QtWidgets import QGraphicsItem
+    w = CanvasWidget()
+    w.load_page(_page())
+    w.load_page(_page())  # reload — old scene must be disconnected, not leaked
+    got = []
+    w.regionSelected.connect(lambda rid: got.append(rid))
+    item = next(it for it in w.scene().items()
+                if it.flags() & QGraphicsItem.ItemIsSelectable and it.data(0) == "a")
+    item.setSelected(True)
+    assert got == ["a"]  # exactly one emit from the current scene, no stale duplicates
