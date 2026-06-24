@@ -13,6 +13,30 @@ Rect = Tuple[int, int, int, int]  # (x, y, width, height) in pixels
 
 
 @dataclass
+class PageSize:
+    """Physical page size with unit + DPI; pixels derived on demand."""
+
+    width: float
+    height: float
+    unit: Literal["in", "mm", "pt", "px"] = "in"
+    orientation: Literal["portrait", "landscape"] = "portrait"
+    dpi: int = 300
+
+    def to_pixels(self) -> Tuple[int, int]:
+        from core.layout.page_sizes import to_inches
+        if self.unit == "px":
+            return (round(self.width), round(self.height))
+        return (
+            round(to_inches(self.width, self.unit) * self.dpi),
+            round(to_inches(self.height, self.unit) * self.dpi),
+        )
+
+    def swapped(self) -> "PageSize":
+        new_orient = "landscape" if self.orientation == "portrait" else "portrait"
+        return PageSize(self.height, self.width, self.unit, new_orient, self.dpi)
+
+
+@dataclass
 class TextStyle:
     """Style configuration for text blocks."""
 
