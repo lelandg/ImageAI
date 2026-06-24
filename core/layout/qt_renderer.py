@@ -1,6 +1,4 @@
 """Native Qt renderer: PageSpec -> QGraphicsScene -> QImage/PNG (source of truth)."""
-from typing import Optional
-
 from PySide6.QtWidgets import (
     QGraphicsScene, QGraphicsRectItem, QGraphicsPolygonItem,
     QGraphicsSimpleTextItem, QGraphicsItem, QGraphicsPixmapItem,
@@ -65,7 +63,8 @@ def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool) -> None
     if style:
         if style.family:
             font.setFamily(style.family[0])
-        font.setPixelSize(style.size_px)
+        if style.size_px:
+            font.setPixelSize(style.size_px)
         font.setBold(style.weight in ("bold", "black", "semibold"))
         font.setItalic(style.italic)
         text.setBrush(QBrush(QColor(style.color)))
