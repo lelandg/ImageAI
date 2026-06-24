@@ -44,7 +44,7 @@ def load_custom_sizes(config) -> List[Dict]:
 
 
 def save_custom_size(config, preset: Dict) -> None:
-    cfg = config.get_layout_config()
+    cfg = dict(config.get_layout_config())
     sizes = cfg.get("custom_page_sizes", [])
     sizes = [s for s in sizes if s.get("name") != preset.get("name")]
     sizes.append(preset)
