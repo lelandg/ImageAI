@@ -16,6 +16,7 @@ from gui.layout.canvas_widget import CanvasWidget
 from gui.layout.designer_panel import DesignerPanel
 from gui.layout.history_window import HistoryWindow
 from gui.layout.style_panel import StylePanel
+from gui.layout.content_inspector import ContentInspector
 
 logger = logging.getLogger("imageai.layout.tab")
 
@@ -64,6 +65,11 @@ class LayoutTab(QWidget):
         self.canvas = CanvasWidget()
         root.addWidget(self.canvas, 1)
 
+        self.inspector = ContentInspector(self.config)
+        self.inspector.regionContentChanged.connect(self._on_region_content_changed)
+        root.addWidget(self.inspector)
+        self.canvas.regionSelected.connect(self._on_region_selected)
+
         self.status = QLabel("")
         root.addWidget(self.status)
 
@@ -76,6 +82,8 @@ class LayoutTab(QWidget):
         self._style_user_modified = False
         if hasattr(self, "style_panel") and self.document.style:
             self.style_panel.set_style(self.document.style)
+        if hasattr(self, "inspector"):
+            self.inspector.set_region(None)
 
     def new_document(self):
         ps = self.page_setup.page_size() if hasattr(self, "page_setup") else PageSize(8.5, 11, "in")
@@ -97,6 +105,32 @@ class LayoutTab(QWidget):
             self.canvas.load_page(self.document.pages[0], self.document.style)
             self.status.setText(f"{self.document.title} — {self.document.pages[0].page_size_px}")
         self.documentChanged.emit()
+
+    # --- content inspector ---
+    def _find_region(self, region_id: str):
+        if not region_id or not self.document or not self.document.pages:
+            return None
+        for r in self.document.pages[0].regions:
+            if r.id == region_id:
+                return r
+        return None
+
+    def _on_region_selected(self, region_id: str):
+        self.inspector.set_region(self._find_region(region_id))
+
+    def _on_region_content_changed(self, region_id: str, value: str):
+        self.set_region_content(region_id, value)
+
+    def set_region_content(self, region_id: str, value: str):
+        """Apply edited content to a region and re-render (programmatic API)."""
+        region = self._find_region(region_id)
+        if region is None:
+            return
+        if region.kind == "image":
+            region.image_ref = value
+        else:
+            region.text = value
+        self._refresh()
 
     # --- programmatic API (tested) ---
     def save_project_to(self, path: str):
