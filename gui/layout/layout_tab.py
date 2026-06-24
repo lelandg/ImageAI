@@ -101,6 +101,8 @@ class LayoutTab(QWidget):
     def open_project_from(self, path: str):
         self.document = project_io.load_project(path)
         self.history = History(self.document)
+        if self.document.style is None:
+            self.document.style = styles.default_style_for(self.document.content_kind)
         if hasattr(self, "style_panel") and self.document.style:
             self.style_panel.set_style(self.document.style)
         self._refresh()
@@ -154,12 +156,13 @@ class LayoutTab(QWidget):
         self._refresh()
 
     def export_template_to(self, path: str):
+        if self.document is None:
+            return
         template_io.export_template(self.document, path)
         self.status.setText(f"Exported template {path}")
 
     def import_template_from(self, path: str):
         self.document = template_io.import_template(path)
-        from core.layout.history import History
         self.history = History(self.document)
         if self.document.style is None:
             self.document.style = styles.default_style_for(self.document.content_kind)

@@ -39,3 +39,13 @@ def test_export_then_import_template_roundtrip(qapp, tmp_path):
     assert regions[0].text == ""          # content stripped
     assert regions[0].role == "title"     # structure kept
     assert tab2.document.style is not None
+
+
+def test_open_legacy_project_seeds_style(qapp, tmp_path):
+    import json
+    legacy = {"title": "Old", "pages": [{"page_size_px": [400, 400], "regions": []}]}
+    p = tmp_path / "old.iaiproj.json"
+    p.write_text(json.dumps(legacy), encoding="utf-8")
+    tab = LayoutTab(config=FakeConfig())
+    tab.open_project_from(str(p))
+    assert tab.document.style is not None  # a default style is seeded for legacy projects
