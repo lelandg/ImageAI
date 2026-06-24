@@ -1,10 +1,12 @@
 """Default project style (font roles + palette) seeded by content kind."""
-from typing import Dict, List
+from typing import Dict, List, Literal
 
 from core.layout.models import ProjectStyle, TextStyle
 
 
-def _role(family: List[str], size: int, weight: str = "regular", color: str = "#111111") -> TextStyle:
+def _role(family: List[str], size: int,
+          weight: Literal["regular", "medium", "semibold", "bold", "black"] = "regular",
+          color: str = "#111111") -> TextStyle:
     return TextStyle(family=list(family), size_px=size, weight=weight, color=color)
 
 
@@ -36,8 +38,8 @@ _KIND_ROLES: Dict[str, Dict[str, TextStyle]] = {
     },
 }
 # aliases
-_KIND_ROLES["comic_strip"] = _KIND_ROLES["comic"]
-_KIND_ROLES["newspaper"] = _KIND_ROLES["magazine"]
+_KIND_ROLES["comic_strip"] = dict(_KIND_ROLES["comic"])
+_KIND_ROLES["newspaper"] = dict(_KIND_ROLES["magazine"])
 
 _DEFAULT_ROLE = {
     "children": "narration", "comic": "dialogue", "comic_strip": "dialogue",

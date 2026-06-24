@@ -80,7 +80,6 @@ def project_style_to_dict(s: "ProjectStyle") -> Dict:
 
 
 def project_style_from_dict(d: Dict) -> "ProjectStyle":
-    from core.layout.models import ProjectStyle
     return ProjectStyle(
         font_roles={name: TextStyle(**ts) for name, ts in d.get("font_roles", {}).items()},
         palette=dict(d.get("palette", {})),
