@@ -114,6 +114,18 @@ class Region:
 
 
 @dataclass
+class Snapshot:
+    """One iteration of the layout designer (browsable in history)."""
+
+    id: str
+    parent_id: Optional[str]
+    timestamp: str
+    prompt: str
+    document: Dict  # serialized DocumentSpec (without its own history)
+    thumbnail: Optional[str] = None
+
+
+@dataclass
 class PageSpec:
     """Specification for a single page layout."""
 
@@ -138,6 +150,7 @@ class DocumentSpec:
     metadata: Dict[str, str] = field(default_factory=dict)  # Custom metadata
     content_kind: str = "custom"
     schema_version: str = "2.0"
+    history: List["Snapshot"] = field(default_factory=list)
 
 
 def migrate_legacy_blocks(blocks: List[Union[TextBlock, ImageBlock]]) -> List[Region]:

@@ -3,7 +3,7 @@ from dataclasses import asdict, replace
 from typing import Dict, List, Tuple
 
 from core.layout.models import (
-    Region, PageSpec, DocumentSpec, PageSize, TextStyle, ImageStyle,
+    Region, PageSpec, DocumentSpec, PageSize, TextStyle, ImageStyle, Snapshot,
     migrate_legacy_blocks, TextBlock, ImageBlock,
 )
 
@@ -56,6 +56,22 @@ def region_from_dict(d: Dict) -> Region:
     )
 
 
+def snapshot_to_dict(s: "Snapshot") -> Dict:
+    return {
+        "id": s.id, "parent_id": s.parent_id, "timestamp": s.timestamp,
+        "prompt": s.prompt, "document": s.document, "thumbnail": s.thumbnail,
+    }
+
+
+def snapshot_from_dict(d: Dict) -> "Snapshot":
+    from core.layout.models import Snapshot
+    return Snapshot(
+        id=d["id"], parent_id=d.get("parent_id"), timestamp=d.get("timestamp", ""),
+        prompt=d.get("prompt", ""), document=d.get("document", {}),
+        thumbnail=d.get("thumbnail"),
+    )
+
+
 def _page_size_from_dict(d):
     return PageSize(**d) if d else None
 
@@ -97,6 +113,7 @@ def document_to_dict(doc: DocumentSpec) -> Dict:
         "schema_version": doc.schema_version, "title": doc.title, "author": doc.author,
         "content_kind": doc.content_kind, "theme": dict(doc.theme),
         "metadata": dict(doc.metadata), "pages": [page_to_dict(p) for p in doc.pages],
+        "history": [snapshot_to_dict(s) for s in doc.history],
     }
 
 
@@ -107,6 +124,7 @@ def document_from_dict(d: Dict) -> DocumentSpec:
         theme=dict(d.get("theme", {})), metadata=dict(d.get("metadata", {})),
         content_kind=d.get("content_kind", "custom"),
         schema_version=d.get("schema_version", "2.0"),
+        history=[snapshot_from_dict(s) for s in d.get("history", [])],
     )
 
 
