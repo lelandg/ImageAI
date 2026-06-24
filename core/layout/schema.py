@@ -64,7 +64,6 @@ def snapshot_to_dict(s: "Snapshot") -> Dict:
 
 
 def snapshot_from_dict(d: Dict) -> "Snapshot":
-    from core.layout.models import Snapshot
     return Snapshot(
         id=d["id"], parent_id=d.get("parent_id"), timestamp=d.get("timestamp", ""),
         prompt=d.get("prompt", ""), document=d.get("document", {}),

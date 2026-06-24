@@ -125,11 +125,14 @@ def run_completion(config, provider: str, model: str, messages: List[Dict],
         raise RuntimeError(f"No models available for provider {provider!r}")
     prefix = get_provider_prefix(pid)
     full_model = f"{prefix}{model_name}" if prefix else model_name
-    logger.info("Designer LLM call: model=%s temp=%s", full_model, temperature)
+    logger.info("Designer LLM request: provider=%s model=%s temperature=%s\nmessages=%s",
+                provider, full_model, temperature, messages)
     kwargs = {"model": full_model, "messages": messages, "temperature": temperature}
     if api_key:
         kwargs["api_key"] = api_key
     resp = litellm.completion(**kwargs)
     if not resp or not resp.choices:
         raise RuntimeError("Empty LLM response")
-    return resp.choices[0].message.content or ""
+    content = resp.choices[0].message.content or ""
+    logger.info("Designer LLM response:\n%s", content)
+    return content

@@ -108,17 +108,20 @@ class LayoutTab(QWidget):
                                    current_regions=page.regions or None)
 
     def _on_layout_proposed(self, result):
-        text = self.designer.prompt_edit.toPlainText().strip() if hasattr(self.designer, "prompt_edit") else ""
+        text = self.designer.prompt_edit.toPlainText().strip()
         self.apply_designer_result(result, user_text=text)
 
     def apply_designer_result(self, result, user_text: str = ""):
         if not self.document or not self.document.pages:
             return
-        self.document.content_kind = self.designer.content_kind() if hasattr(self, "designer") else self.document.content_kind
+        self.document.content_kind = self.designer.content_kind()
         if result.regions:
             self.document.pages[0].regions = list(result.regions)
             self.history.append(user_text or "design")
             self._refresh()
+        elif result.questions:
+            self.status.setText(
+                f"Designer asked {len(result.questions)} question(s) — see the Designer console.")
 
     def restore_snapshot(self, snapshot_id: str):
         restored = self.history.restore(snapshot_id)

@@ -46,3 +46,10 @@ def test_design_button_calls_start_design_with_page_size(qapp):
     a, k = captured["call"]
     assert a[0] == "a comic cover"                       # prompt text passed
     assert a[1] == tab.document.pages[0].page_size_px    # current page size supplied
+
+
+def test_apply_designer_result_questions_only_sets_status(qapp):
+    tab = LayoutTab(config=FakeConfig())
+    res = designer.DesignerResult(questions=["how many panels?"], regions=None, raw="")
+    tab.apply_designer_result(res, user_text="a comic")
+    assert "question" in tab.status.text().lower()

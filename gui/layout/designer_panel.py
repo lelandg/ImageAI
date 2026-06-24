@@ -105,7 +105,8 @@ class DesignerPanel(QWidget):
                      completion_fn: Optional[Callable[[List[Dict]], str]] = None):
         kind = self.content_kind()
         messages = designer.build_messages(kind, page_px, user_text, current_regions)
-        self.console.log(f"Designing ({kind}, {page_px[0]}x{page_px[1]}): {user_text}", "INFO")
+        self.console.log(f"Designing ({kind}, {page_px[0]}x{page_px[1]})", "INFO")
+        self.console.log("Prompt sent to LLM:\n" + messages[-1]["content"], "INFO")
         # Capture whether a completion_fn was injected BEFORE we build the production one.
         injected = completion_fn is not None
         if completion_fn is None:
@@ -123,6 +124,8 @@ class DesignerPanel(QWidget):
             self._worker.start()
 
     def _on_proposed(self, result):
+        if result.raw:
+            self.console.log("LLM response:\n" + result.raw, "INFO")
         n = len(result.regions) if result.regions else 0
         self.console.log(f"Proposed layout: {n} regions; {len(result.questions)} question(s).",
                          "SUCCESS")
