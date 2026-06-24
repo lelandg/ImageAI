@@ -15,6 +15,18 @@ _PLACEHOLDER_FILL = QColor("#E9ECEF")
 _PLACEHOLDER_PEN = QColor("#ADB5BD")
 
 
+def _resolve_bg(page: PageSpec) -> str:
+    """Resolve a page background to a hex color.
+
+    Image-path backgrounds are deferred to a later phase; until then a
+    non-hex background renders as white in every render path (editor, PNG,
+    PDF), keeping them consistent.
+    """
+    if page.background and page.background.startswith("#"):
+        return page.background
+    return "#FFFFFF"
+
+
 def _apply_flags(item: QGraphicsItem, selectable: bool, region_id: str) -> None:
     item.setData(0, region_id)
     if selectable:
@@ -77,7 +89,7 @@ def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool) -> None
 def build_scene(page: PageSpec, *, selectable: bool = False) -> QGraphicsScene:
     pw, ph = page.page_size_px
     scene = QGraphicsScene(0, 0, pw, ph)
-    bg = page.background if (page.background and page.background.startswith("#")) else "#FFFFFF"
+    bg = _resolve_bg(page)
     scene.setBackgroundBrush(QBrush(QColor(bg)))
     for r in sorted(page.regions, key=lambda rr: rr.z):
         if r.kind == "image":
@@ -91,7 +103,7 @@ def render_page_to_image(page: PageSpec) -> QImage:
     pw, ph = page.page_size_px
     scene = build_scene(page)
     img = QImage(pw, ph, QImage.Format_ARGB32)
-    bg = page.background if (page.background and page.background.startswith("#")) else "#FFFFFF"
+    bg = _resolve_bg(page)
     img.fill(QColor(bg))
     painter = QPainter(img)
     painter.setRenderHint(QPainter.Antialiasing, True)
@@ -109,9 +121,10 @@ def export_document_pdf(doc: DocumentSpec, path: str, dpi: int = 300) -> None:
     writer.setResolution(dpi)
     painter = QPainter()
     started = False
-    for i, page in enumerate(doc.pages):
+    for page in doc.pages:
         pw, ph = page.page_size_px
         size_inches = QSizeF(pw / dpi, ph / dpi)
+        # QPdfWriter contract: set page size/margins BEFORE begin() (first page) or newPage() (subsequent).
         writer.setPageSize(QPageSize(size_inches, QPageSize.Inch))
         writer.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Inch)
         if not started:

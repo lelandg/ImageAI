@@ -14,7 +14,6 @@ class PageSetupWidget(QWidget):
     def __init__(self, config, parent=None):
         super().__init__(parent)
         self._config = config
-        self._unit = "in"
         self._dpi = config.get_layout_config().get("export_dpi", 300) if config else 300
         self._orientation = "portrait"
         self._build()
@@ -33,7 +32,6 @@ class PageSetupWidget(QWidget):
         lay.addWidget(QLabel("Unit:"))
         self.unit_combo = QComboBox()
         self.unit_combo.addItems(["in", "mm", "pt", "px"])
-        self.unit_combo.currentTextChanged.connect(self._on_unit_changed)
         lay.addWidget(self.unit_combo)
 
         lay.addWidget(QLabel("DPI:"))
@@ -114,9 +112,6 @@ class PageSetupWidget(QWidget):
 
     def _on_freeform_entered(self):
         self.add_custom_from_text(self.size_combo.currentText())
-
-    def _on_unit_changed(self, unit):
-        self._unit = unit
 
     def _on_dpi_changed(self, _):
         self._emit_current()
