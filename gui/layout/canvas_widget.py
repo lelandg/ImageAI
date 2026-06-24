@@ -21,7 +21,7 @@ class CanvasWidget(QGraphicsView):
         self.setScene(QGraphicsScene(self))
 
     def load_page(self, page: PageSpec) -> None:
-        old = self.scene()
+        old = self._scene
         if old is not None:
             try:
                 old.selectionChanged.disconnect(self._on_selection_changed)
