@@ -30,7 +30,10 @@ def test_editing_family_updates_style_and_emits(qapp):
 def test_editing_size(qapp):
     p = StylePanel()
     p.set_style(_style())
+    got = []
+    p.styleChanged.connect(lambda s: got.append(s))
     p.role_combo.setCurrentText("body")
     p.size_spin.setValue(40)
     p._on_field_changed()
     assert p.style().font_roles["body"].size_px == 40
+    assert got and got[-1].font_roles["body"].size_px == 40

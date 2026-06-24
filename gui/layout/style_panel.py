@@ -25,7 +25,7 @@ class StylePanel(QWidget):
         form.addRow(QLabel("Font family:"), self.family_edit)
         self.size_spin = QSpinBox()
         self.size_spin.setRange(1, 2000)
-        self.size_spin.valueChanged.connect(self._on_field_changed)
+        self.size_spin.editingFinished.connect(self._on_field_changed)
         form.addRow(QLabel("Size (px):"), self.size_spin)
         self.color_edit = QLineEdit()
         self.color_edit.editingFinished.connect(self._on_field_changed)
@@ -38,7 +38,6 @@ class StylePanel(QWidget):
         self.role_combo.addItems(sorted(style.font_roles.keys()))
         self.role_combo.blockSignals(False)
         if self.role_combo.count():
-            self.role_combo.setCurrentIndex(0)
             self._load_role(self.role_combo.currentText())
 
     def style(self) -> ProjectStyle:
