@@ -69,18 +69,27 @@ class PageSetupWidget(QWidget):
         return ps.preset_to_page_size(p, self._orientation, self.dpi_spin.value())
 
     def set_page_size(self, page: PageSize) -> None:
+        """Display `page` as the current selection.
+
+        Transient: shows the size in the combo but does NOT persist it as a
+        custom preset (use add_custom_from_text to persist). Emits
+        pageSizeChanged exactly once, after all controls are updated.
+        """
         self._orientation = page.orientation
+        widgets = (self.unit_combo, self.dpi_spin, self.size_combo)
+        for w in widgets:
+            w.blockSignals(True)
         self.unit_combo.setCurrentText(page.unit)
         self.dpi_spin.setValue(page.dpi)
         name = f"Custom {page.width}x{page.height}"
         preset = {"name": name, "width": page.width, "height": page.height, "unit": page.unit}
         self._presets = [preset] + [p for p in self._presets if p.get("name") != name]
-        self.size_combo.blockSignals(True)
         self.size_combo.clear()
         for p in self._presets:
             self.size_combo.addItem(f'{p["name"]} ({p["width"]}x{p["height"]} {p["unit"]})')
         self.size_combo.setCurrentIndex(0)
-        self.size_combo.blockSignals(False)
+        for w in widgets:
+            w.blockSignals(False)
         self._emit_current()
 
     def add_custom_from_text(self, text: str) -> bool:
