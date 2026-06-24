@@ -52,7 +52,7 @@ def _add_image_region(scene: QGraphicsScene, r: Region, selectable: bool) -> Non
             scaled = pix.scaled(int(w), int(h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             pi = QGraphicsPixmapItem(scaled)
             pi.setPos(x, y)
-            pi.setData(0, r.id)
+            _apply_flags(pi, selectable, r.id)
             scene.addItem(pi)
             return
 
