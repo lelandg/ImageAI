@@ -53,3 +53,27 @@ def test_inspector_resets_on_new_document(qapp):
     assert tab.inspector.stack.currentIndex() == 1
     tab.new_document()
     assert tab.inspector.stack.currentIndex() == 0
+
+
+def test_fill_image_and_text_then_export_pdf(qapp, tmp_path):
+    # F-MVP acceptance: design a page, fill an image region (real file) and a
+    # text region, then export a valid PDF — no AI content features needed.
+    from PySide6.QtGui import QImage
+    from PySide6.QtCore import Qt
+    tab = _tab_with_regions()
+
+    img_path = tmp_path / "pic.png"
+    im = QImage(40, 40, QImage.Format_RGB32)
+    im.fill(Qt.blue)
+    assert im.save(str(img_path))
+
+    tab.set_region_content("img", str(img_path))
+    tab.set_region_content("txt", "The Title")
+
+    page = tab.document.pages[0]
+    assert page.regions[0].image_ref == str(img_path)
+    assert page.regions[1].text == "The Title"
+
+    out = tmp_path / "out.pdf"
+    tab.export_pdf_to(str(out))
+    assert out.exists() and out.read_bytes()[:4] == b"%PDF"
