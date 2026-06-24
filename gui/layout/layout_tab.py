@@ -1,4 +1,4 @@
-"""Layout tab — Phase 1 foundation: page setup + canvas + New/Open/Save/Export."""
+"""Layout tab — Phase 2: AI designer + history integration."""
 import logging
 from typing import Optional
 
@@ -9,8 +9,11 @@ from PySide6.QtCore import Signal
 
 from core.layout.models import DocumentSpec, PageSpec, PageSize
 from core.layout import project_io, qt_renderer
+from core.layout.history import History
 from gui.layout.page_setup_widget import PageSetupWidget
 from gui.layout.canvas_widget import CanvasWidget
+from gui.layout.designer_panel import DesignerPanel
+from gui.layout.history_window import HistoryWindow
 
 logger = logging.getLogger("imageai.layout.tab")
 
@@ -22,6 +25,7 @@ class LayoutTab(QWidget):
         super().__init__(parent)
         self.config = config
         self.document: Optional[DocumentSpec] = None
+        self.history: Optional[History] = None
         self._build()
         self.new_document()
 
@@ -32,6 +36,7 @@ class LayoutTab(QWidget):
         for label, slot in [
             ("New", self.new_document), ("Open…", self._open_dialog),
             ("Save…", self._save_dialog), ("Export PDF…", self._export_dialog),
+            ("History…", self._open_history),
         ]:
             btn = QPushButton(label)
             btn.clicked.connect(slot)
@@ -42,6 +47,11 @@ class LayoutTab(QWidget):
         self.page_setup = PageSetupWidget(self.config)
         self.page_setup.pageSizeChanged.connect(self._on_page_size_changed)
         root.addWidget(self.page_setup)
+
+        self.designer = DesignerPanel(self.config)
+        self.designer.layoutProposed.connect(self._on_layout_proposed)
+        self.designer.design_btn.clicked.connect(self._on_design_clicked)
+        root.addWidget(self.designer)
 
         self.canvas = CanvasWidget()
         root.addWidget(self.canvas, 1)
@@ -55,6 +65,7 @@ class LayoutTab(QWidget):
         pw, ph = ps.to_pixels()
         page = PageSpec(page_size_px=(pw, ph), page_size=ps, background="#FFFFFF")
         self.document = DocumentSpec(title="Untitled", pages=[page])
+        self.history = History(self.document)
         self._refresh()
 
     def _on_page_size_changed(self, ps: PageSize):
@@ -78,11 +89,47 @@ class LayoutTab(QWidget):
 
     def open_project_from(self, path: str):
         self.document = project_io.load_project(path)
+        self.history = History(self.document)
         self._refresh()
 
     def export_pdf_to(self, path: str):
         qt_renderer.export_document_pdf(self.document, path)
         self.status.setText(f"Exported {path}")
+
+    # --- designer + history methods ---
+    def _on_design_clicked(self):
+        if not self.document or not self.document.pages:
+            return
+        text = self.designer.prompt_edit.toPlainText().strip()
+        if not text:
+            return
+        page = self.document.pages[0]
+        self.designer.start_design(text, page.page_size_px,
+                                   current_regions=page.regions or None)
+
+    def _on_layout_proposed(self, result):
+        text = self.designer.prompt_edit.toPlainText().strip() if hasattr(self.designer, "prompt_edit") else ""
+        self.apply_designer_result(result, user_text=text)
+
+    def apply_designer_result(self, result, user_text: str = ""):
+        if not self.document or not self.document.pages:
+            return
+        self.document.content_kind = self.designer.content_kind() if hasattr(self, "designer") else self.document.content_kind
+        if result.regions:
+            self.document.pages[0].regions = list(result.regions)
+            self.history.append(user_text or "design")
+            self._refresh()
+
+    def restore_snapshot(self, snapshot_id: str):
+        restored = self.history.restore(snapshot_id)
+        self.document = restored
+        self.history = History(self.document)
+        self._refresh()
+
+    def _open_history(self):
+        win = HistoryWindow(self.history, self)
+        win.restoreRequested.connect(self.restore_snapshot)
+        win.exec()
 
     # --- dialogs ---
     def _save_dialog(self):
