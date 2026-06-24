@@ -53,3 +53,13 @@ def test_validate_document_flags_empty_pages():
     doc = DocumentSpec(title="x", pages=[])
     issues = schema.validate_document(doc)
     assert any("page" in i.lower() for i in issues)
+
+
+def test_normalize_region_origin_at_or_beyond_boundary():
+    r = Region(id="r", kind="image", bbox=(1100, 900, 200, 200))
+    n = schema.normalize_region(r, (1000, 800))
+    x, y, w, h = n.bbox
+    assert x + w <= 1000 and y + h <= 800
+    assert w >= 1 and h >= 1
+    # input Region must not be mutated
+    assert r.bbox == (1100, 900, 200, 200)

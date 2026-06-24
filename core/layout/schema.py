@@ -1,5 +1,5 @@
 """Serialization, normalization, and validation for layout documents."""
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from typing import Dict, List, Tuple
 
 from core.layout.models import (
@@ -115,14 +115,15 @@ def normalize_region(r: Region, page_px: Tuple[int, int]) -> Region:
     if r.shape == "polygon" and r.points:
         xs = [p[0] for p in r.points]
         ys = [p[1] for p in r.points]
-        r.bbox = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
-    x, y, w, h = r.bbox
-    x = max(0, min(x, pw))
-    y = max(0, min(y, ph))
+        bbox = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+    else:
+        bbox = r.bbox
+    x, y, w, h = bbox
+    x = max(0, min(x, pw - 1))
+    y = max(0, min(y, ph - 1))
     w = max(1, min(w, pw - x))
     h = max(1, min(h, ph - y))
-    r.bbox = (x, y, w, h)
-    return r
+    return replace(r, bbox=(x, y, w, h))
 
 
 def validate_document(doc: DocumentSpec) -> List[str]:
