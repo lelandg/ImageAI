@@ -3,7 +3,7 @@ from dataclasses import asdict, replace
 from typing import Dict, List, Tuple
 
 from core.layout.models import (
-    Region, PageSpec, DocumentSpec, PageSize, TextStyle, ImageStyle, Snapshot,
+    Region, PageSpec, DocumentSpec, PageSize, TextStyle, ImageStyle, Snapshot, ProjectStyle,
     migrate_legacy_blocks, TextBlock, ImageBlock,
 )
 
@@ -71,6 +71,23 @@ def snapshot_from_dict(d: Dict) -> "Snapshot":
     )
 
 
+def project_style_to_dict(s: "ProjectStyle") -> Dict:
+    return {
+        "font_roles": {name: asdict(ts) for name, ts in s.font_roles.items()},
+        "palette": dict(s.palette),
+        "default_text_role": s.default_text_role,
+    }
+
+
+def project_style_from_dict(d: Dict) -> "ProjectStyle":
+    from core.layout.models import ProjectStyle
+    return ProjectStyle(
+        font_roles={name: TextStyle(**ts) for name, ts in d.get("font_roles", {}).items()},
+        palette=dict(d.get("palette", {})),
+        default_text_role=d.get("default_text_role", "body"),
+    )
+
+
 def _page_size_from_dict(d):
     return PageSize(**d) if d else None
 
@@ -113,6 +130,7 @@ def document_to_dict(doc: DocumentSpec) -> Dict:
         "content_kind": doc.content_kind, "theme": dict(doc.theme),
         "metadata": dict(doc.metadata), "pages": [page_to_dict(p) for p in doc.pages],
         "history": [snapshot_to_dict(s) for s in doc.history],
+        "style": project_style_to_dict(doc.style) if doc.style else None,
     }
 
 
@@ -124,6 +142,7 @@ def document_from_dict(d: Dict) -> DocumentSpec:
         content_kind=d.get("content_kind", "custom"),
         schema_version=d.get("schema_version", "2.0"),
         history=[snapshot_from_dict(s) for s in d.get("history", [])],
+        style=project_style_from_dict(d["style"]) if d.get("style") else None,
     )
 
 

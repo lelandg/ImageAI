@@ -126,6 +126,15 @@ class Snapshot:
 
 
 @dataclass
+class ProjectStyle:
+    """Per-project named font roles + color palette."""
+
+    font_roles: Dict[str, TextStyle] = field(default_factory=dict)
+    palette: Dict[str, str] = field(default_factory=dict)  # name -> hex
+    default_text_role: str = "body"
+
+
+@dataclass
 class PageSpec:
     """Specification for a single page layout."""
 
@@ -151,6 +160,7 @@ class DocumentSpec:
     content_kind: str = "custom"
     schema_version: str = "2.0"
     history: List["Snapshot"] = field(default_factory=list)
+    style: Optional["ProjectStyle"] = None
 
 
 def migrate_legacy_blocks(blocks: List[Union[TextBlock, ImageBlock]]) -> List[Region]:
