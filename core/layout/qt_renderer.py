@@ -62,7 +62,7 @@ def _add_image_region(scene: QGraphicsScene, r: Region, selectable: bool) -> Non
     scene.addItem(label)
 
 
-def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool) -> None:
+def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool, project_style=None) -> None:
     x, y, w, h = r.bbox
     box = QGraphicsRectItem(QRectF(x, y, w, h))
     box.setBrush(QBrush(Qt.transparent))
@@ -71,40 +71,40 @@ def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool) -> None
     scene.addItem(box)
 
     text = QGraphicsSimpleTextItem(r.text or "")
-    style = r.text_style
+    ts = r.text_style
+    if ts is None and project_style is not None and r.role:
+        ts = project_style.font_roles.get(r.role)
     font = QFont()
-    if style:
-        if style.family:
-            font.setFamily(style.family[0])
-        if style.size_px:
-            font.setPixelSize(style.size_px)
-        font.setBold(style.weight in ("bold", "black", "semibold"))
-        font.setItalic(style.italic)
-        text.setBrush(QBrush(QColor(style.color)))
+    if ts:
+        if ts.family:
+            font.setFamily(ts.family[0])
+        if ts.size_px:
+            font.setPixelSize(ts.size_px)
+        font.setBold(ts.weight in ("bold", "black", "semibold"))
+        font.setItalic(ts.italic)
+        text.setBrush(QBrush(QColor(ts.color)))
     text.setFont(font)
     text.setPos(x + 2, y + 2)
     scene.addItem(text)
 
 
-def build_scene(page: PageSpec, *, selectable: bool = False) -> QGraphicsScene:
+def build_scene(page: PageSpec, *, selectable: bool = False, style=None) -> QGraphicsScene:
     pw, ph = page.page_size_px
     scene = QGraphicsScene(0, 0, pw, ph)
-    bg = _resolve_bg(page)
-    scene.setBackgroundBrush(QBrush(QColor(bg)))
+    scene.setBackgroundBrush(QBrush(QColor(_resolve_bg(page))))
     for r in sorted(page.regions, key=lambda rr: rr.z):
         if r.kind == "image":
             _add_image_region(scene, r, selectable)
         else:
-            _add_text_region(scene, r, selectable)
+            _add_text_region(scene, r, selectable, project_style=style)
     return scene
 
 
-def render_page_to_image(page: PageSpec) -> QImage:
+def render_page_to_image(page: PageSpec, *, style=None) -> QImage:
     pw, ph = page.page_size_px
-    scene = build_scene(page)
+    scene = build_scene(page, style=style)
     img = QImage(pw, ph, QImage.Format_ARGB32)
-    bg = _resolve_bg(page)
-    img.fill(QColor(bg))
+    img.fill(QColor(_resolve_bg(page)))
     painter = QPainter(img)
     painter.setRenderHint(QPainter.Antialiasing, True)
     scene.render(painter, QRectF(0, 0, pw, ph), QRectF(0, 0, pw, ph))
@@ -112,8 +112,8 @@ def render_page_to_image(page: PageSpec) -> QImage:
     return img
 
 
-def save_page_png(page: PageSpec, path: str) -> None:
-    render_page_to_image(page).save(path, "PNG")
+def save_page_png(page: PageSpec, path: str, *, style=None) -> None:
+    render_page_to_image(page, style=style).save(path, "PNG")
 
 
 def export_document_pdf(doc: DocumentSpec, path: str, dpi: int = 300) -> None:
@@ -132,7 +132,7 @@ def export_document_pdf(doc: DocumentSpec, path: str, dpi: int = 300) -> None:
             started = True
         else:
             writer.newPage()
-        scene = build_scene(page)
+        scene = build_scene(page, style=doc.style)
         target = painter.viewport()
         scene.render(painter, QRectF(target), QRectF(0, 0, pw, ph))
     if started:
