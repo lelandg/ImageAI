@@ -1,4 +1,4 @@
-"""Layout tab — Phase 2: AI designer + history integration."""
+"""Layout tab — Phase 3: style panel + template export/import integration."""
 import logging
 from typing import Optional
 
@@ -9,11 +9,13 @@ from PySide6.QtCore import Signal
 
 from core.layout.models import DocumentSpec, PageSpec, PageSize
 from core.layout import project_io, qt_renderer
+from core.layout import styles, template_io
 from core.layout.history import History
 from gui.layout.page_setup_widget import PageSetupWidget
 from gui.layout.canvas_widget import CanvasWidget
 from gui.layout.designer_panel import DesignerPanel
 from gui.layout.history_window import HistoryWindow
+from gui.layout.style_panel import StylePanel
 
 logger = logging.getLogger("imageai.layout.tab")
 
@@ -37,6 +39,8 @@ class LayoutTab(QWidget):
             ("New", self.new_document), ("Open…", self._open_dialog),
             ("Save…", self._save_dialog), ("Export PDF…", self._export_dialog),
             ("History…", self._open_history),
+            ("Export Template…", self._export_template_dialog),
+            ("Import Template…", self._import_template_dialog),
         ]:
             btn = QPushButton(label)
             btn.clicked.connect(slot)
@@ -53,6 +57,10 @@ class LayoutTab(QWidget):
         self.designer.design_btn.clicked.connect(self._on_design_clicked)
         root.addWidget(self.designer)
 
+        self.style_panel = StylePanel()
+        self.style_panel.styleChanged.connect(self.apply_style)
+        root.addWidget(self.style_panel)
+
         self.canvas = CanvasWidget()
         root.addWidget(self.canvas, 1)
 
@@ -66,6 +74,9 @@ class LayoutTab(QWidget):
         page = PageSpec(page_size_px=(pw, ph), page_size=ps, background="#FFFFFF")
         self.document = DocumentSpec(title="Untitled", pages=[page])
         self.history = History(self.document)
+        self.document.style = styles.default_style_for(self.document.content_kind)
+        if hasattr(self, "style_panel"):
+            self.style_panel.set_style(self.document.style)
         self._refresh()
 
     def _on_page_size_changed(self, ps: PageSize):
@@ -78,7 +89,7 @@ class LayoutTab(QWidget):
 
     def _refresh(self):
         if self.document and self.document.pages:
-            self.canvas.load_page(self.document.pages[0])
+            self.canvas.load_page(self.document.pages[0], self.document.style)
             self.status.setText(f"{self.document.title} — {self.document.pages[0].page_size_px}")
         self.documentChanged.emit()
 
@@ -90,6 +101,8 @@ class LayoutTab(QWidget):
     def open_project_from(self, path: str):
         self.document = project_io.load_project(path)
         self.history = History(self.document)
+        if hasattr(self, "style_panel") and self.document.style:
+            self.style_panel.set_style(self.document.style)
         self._refresh()
 
     def export_pdf_to(self, path: str):
@@ -133,6 +146,40 @@ class LayoutTab(QWidget):
         win = HistoryWindow(self.history, self)
         win.restoreRequested.connect(self.restore_snapshot)
         win.exec()
+
+    def apply_style(self, style):
+        if self.document is None:
+            return
+        self.document.style = style
+        self._refresh()
+
+    def export_template_to(self, path: str):
+        template_io.export_template(self.document, path)
+        self.status.setText(f"Exported template {path}")
+
+    def import_template_from(self, path: str):
+        self.document = template_io.import_template(path)
+        from core.layout.history import History
+        self.history = History(self.document)
+        if self.document.style is None:
+            self.document.style = styles.default_style_for(self.document.content_kind)
+        if hasattr(self, "style_panel") and self.document.style:
+            self.style_panel.set_style(self.document.style)
+        self._refresh()
+
+    def _export_template_dialog(self):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(self, "Export Template", "",
+                                              "ImageAI Layout Template (*.iailayout.json)")
+        if path:
+            self.export_template_to(path)
+
+    def _import_template_dialog(self):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(self, "Import Template", "",
+                                              "ImageAI Layout Template (*.iailayout.json)")
+        if path:
+            self.import_template_from(path)
 
     # --- dialogs ---
     def _save_dialog(self):
