@@ -91,6 +91,29 @@ class ImageBlock(BlockBase):
 
 
 @dataclass
+class Region:
+    """A selectable layout region (rect or polygon), image or text."""
+
+    id: str
+    kind: Literal["image", "text"]
+    shape: Literal["rect", "polygon"] = "rect"
+    bbox: Rect = (0, 0, 100, 100)
+    points: List[Tuple[int, int]] = field(default_factory=list)  # polygon vertices, page px
+    z: int = 0
+    name: str = ""
+    # content (text)
+    text: str = ""
+    role: str = ""  # font-role name resolved via ProjectStyle (Phase 3)
+    # content (image)
+    image_ref: Optional[str] = None
+    prompt: str = ""  # scaffolding for AI content phases
+    gen_settings: Dict[str, Union[str, int, float]] = field(default_factory=dict)
+    # style
+    text_style: Optional[TextStyle] = None
+    image_style: Optional[ImageStyle] = None
+
+
+@dataclass
 class PageSpec:
     """Specification for a single page layout."""
 
@@ -100,6 +123,8 @@ class PageSpec:
     background: Optional[str] = None  # Hex color or image path
     blocks: List[Union[TextBlock, ImageBlock]] = field(default_factory=list)
     variables: Dict[str, str] = field(default_factory=dict)  # Template variables
+    page_size: Optional[PageSize] = None
+    regions: List[Region] = field(default_factory=list)
 
 
 @dataclass
@@ -111,3 +136,25 @@ class DocumentSpec:
     pages: List[PageSpec] = field(default_factory=list)
     theme: Dict[str, str] = field(default_factory=dict)  # Color palette, etc.
     metadata: Dict[str, str] = field(default_factory=dict)  # Custom metadata
+    content_kind: str = "custom"
+    schema_version: str = "2.0"
+
+
+def migrate_legacy_blocks(blocks: List[Union[TextBlock, ImageBlock]]) -> List[Region]:
+    """Convert legacy TextBlock/ImageBlock objects into Region objects."""
+    regions: List[Region] = []
+    for b in blocks:
+        if getattr(b, "type", None) == "image" or isinstance(b, ImageBlock):
+            regions.append(Region(
+                id=b.id, kind="image", bbox=tuple(b.rect),
+                image_ref=getattr(b, "image_path", None),
+                image_style=getattr(b, "style", None),
+                name=getattr(b, "alt_text", "") or "",
+            ))
+        else:
+            regions.append(Region(
+                id=b.id, kind="text", bbox=tuple(b.rect),
+                text=getattr(b, "text", "") or "",
+                text_style=getattr(b, "style", None),
+            ))
+    return regions
