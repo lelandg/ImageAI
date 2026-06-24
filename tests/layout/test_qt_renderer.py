@@ -37,3 +37,13 @@ def test_save_png(qapp, tmp_path):
     out = tmp_path / "page.png"
     qt_renderer.save_page_png(_page(), str(out))
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_export_pdf(qapp, tmp_path):
+    from core.layout.models import DocumentSpec
+    from core.layout import qt_renderer
+    doc = DocumentSpec(title="D", pages=[_page(), _page()])
+    out = tmp_path / "doc.pdf"
+    qt_renderer.export_document_pdf(doc, str(out))
+    assert out.exists() and out.stat().st_size > 500
+    assert out.read_bytes()[:4] == b"%PDF"

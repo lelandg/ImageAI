@@ -5,10 +5,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import (
     QColor, QBrush, QPen, QPolygonF, QImage, QPainter, QFont, QPixmap,
+    QPdfWriter, QPageSize, QPageLayout,
 )
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPointF, QRectF, Qt, QSizeF, QMarginsF
 
-from core.layout.models import PageSpec, Region
+from core.layout.models import PageSpec, Region, DocumentSpec
 
 _PLACEHOLDER_FILL = QColor("#E9ECEF")
 _PLACEHOLDER_PEN = QColor("#ADB5BD")
@@ -101,3 +102,25 @@ def render_page_to_image(page: PageSpec) -> QImage:
 
 def save_page_png(page: PageSpec, path: str) -> None:
     render_page_to_image(page).save(path, "PNG")
+
+
+def export_document_pdf(doc: DocumentSpec, path: str, dpi: int = 300) -> None:
+    writer = QPdfWriter(path)
+    writer.setResolution(dpi)
+    painter = QPainter()
+    started = False
+    for i, page in enumerate(doc.pages):
+        pw, ph = page.page_size_px
+        size_inches = QSizeF(pw / dpi, ph / dpi)
+        writer.setPageSize(QPageSize(size_inches, QPageSize.Inch))
+        writer.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Inch)
+        if not started:
+            painter.begin(writer)
+            started = True
+        else:
+            writer.newPage()
+        scene = build_scene(page)
+        target = painter.viewport()
+        scene.render(painter, QRectF(target), QRectF(0, 0, pw, ph))
+    if started:
+        painter.end()
