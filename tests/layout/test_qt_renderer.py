@@ -75,3 +75,16 @@ def test_explicit_text_style_overrides_role(qapp):
     scene = qt_renderer.build_scene(page, style=style)
     texts = [it for it in scene.items() if isinstance(it, QGraphicsSimpleTextItem)]
     assert texts[0].font().pixelSize() == 20  # explicit style wins
+
+
+def test_unroled_text_uses_default_text_role(qapp):
+    from core.layout.models import Region, PageSpec, ProjectStyle, TextStyle
+    from core.layout import qt_renderer
+    from PySide6.QtWidgets import QGraphicsSimpleTextItem
+    style = ProjectStyle(font_roles={"body": TextStyle(family=["Arial"], size_px=33)},
+                         default_text_role="body")
+    page = PageSpec(page_size_px=(400, 200), regions=[
+        Region(id="t", kind="text", bbox=(0, 0, 400, 100), text="Hi", role="")])
+    scene = qt_renderer.build_scene(page, style=style)
+    texts = [it for it in scene.items() if isinstance(it, QGraphicsSimpleTextItem)]
+    assert texts[0].font().pixelSize() == 33  # fell back to default_text_role

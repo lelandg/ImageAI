@@ -49,3 +49,26 @@ def test_open_legacy_project_seeds_style(qapp, tmp_path):
     tab = LayoutTab(config=FakeConfig())
     tab.open_project_from(str(p))
     assert tab.document.style is not None  # a default style is seeded for legacy projects
+
+
+def test_design_reseeds_style_on_kind_change(qapp):
+    from core.layout import designer
+    tab = LayoutTab(config=FakeConfig())
+    tab.designer.kind_combo.setCurrentText("comic")
+    tab.apply_designer_result(
+        designer.DesignerResult(regions=[designer.Region(id="a", kind="text",
+                                bbox=(0, 0, 50, 20), text="hi", role="dialogue")]),
+        user_text="v1")
+    assert tab.document.content_kind == "comic"
+    assert "dialogue" in tab.document.style.font_roles
+
+
+def test_user_style_edit_not_clobbered_by_design(qapp):
+    from core.layout import designer, styles
+    tab = LayoutTab(config=FakeConfig())
+    tab.apply_style(styles.default_style_for("scientific"))  # user picks a style
+    tab.designer.kind_combo.setCurrentText("comic")
+    tab.apply_designer_result(
+        designer.DesignerResult(regions=[designer.Region(id="a", kind="text", bbox=(0, 0, 50, 20))]),
+        user_text="v1")
+    assert "heading" in tab.document.style.font_roles  # scientific roles preserved, not reseeded

@@ -72,8 +72,9 @@ def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool, project
 
     text = QGraphicsSimpleTextItem(r.text or "")
     ts = r.text_style
-    if ts is None and project_style is not None and r.role:
-        ts = project_style.font_roles.get(r.role)
+    if ts is None and project_style is not None:
+        role = r.role or project_style.default_text_role
+        ts = project_style.font_roles.get(role)
     font = QFont()
     if ts:
         if ts.family:

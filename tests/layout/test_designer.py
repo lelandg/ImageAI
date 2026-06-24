@@ -67,3 +67,10 @@ def test_parse_response_non_list_questions_does_not_split():
     res = designer.parse_response('{"questions": "why"}', (100, 100))
     assert "w" not in res.questions          # not iterated char-by-char
     assert res.regions is not None and len(res.regions) >= 1  # falls back to a layout
+
+
+def test_build_messages_instructs_role_with_kind_roles():
+    msgs = designer.build_messages("comic", (1000, 800), "a page")
+    joined = " ".join(m["content"] for m in msgs)
+    assert '"role"' in joined
+    assert "dialogue" in joined  # a comic role name is offered to the model

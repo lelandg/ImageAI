@@ -68,15 +68,20 @@ class LayoutTab(QWidget):
         root.addWidget(self.status)
 
     # --- document lifecycle ---
+    def _adopt_document(self, doc):
+        self.document = doc
+        self.history = History(self.document)
+        if self.document.style is None:
+            self.document.style = styles.default_style_for(self.document.content_kind)
+        self._style_user_modified = False
+        if hasattr(self, "style_panel") and self.document.style:
+            self.style_panel.set_style(self.document.style)
+
     def new_document(self):
         ps = self.page_setup.page_size() if hasattr(self, "page_setup") else PageSize(8.5, 11, "in")
         pw, ph = ps.to_pixels()
         page = PageSpec(page_size_px=(pw, ph), page_size=ps, background="#FFFFFF")
-        self.document = DocumentSpec(title="Untitled", pages=[page])
-        self.history = History(self.document)
-        self.document.style = styles.default_style_for(self.document.content_kind)
-        if hasattr(self, "style_panel"):
-            self.style_panel.set_style(self.document.style)
+        self._adopt_document(DocumentSpec(title="Untitled", pages=[page]))
         self._refresh()
 
     def _on_page_size_changed(self, ps: PageSize):
@@ -99,12 +104,7 @@ class LayoutTab(QWidget):
         self.status.setText(f"Saved {path}")
 
     def open_project_from(self, path: str):
-        self.document = project_io.load_project(path)
-        self.history = History(self.document)
-        if self.document.style is None:
-            self.document.style = styles.default_style_for(self.document.content_kind)
-        if hasattr(self, "style_panel") and self.document.style:
-            self.style_panel.set_style(self.document.style)
+        self._adopt_document(project_io.load_project(path))
         self._refresh()
 
     def export_pdf_to(self, path: str):
@@ -129,7 +129,13 @@ class LayoutTab(QWidget):
     def apply_designer_result(self, result, user_text: str = ""):
         if not self.document or not self.document.pages:
             return
-        self.document.content_kind = self.designer.content_kind()
+        kind = self.designer.content_kind()
+        if kind != self.document.content_kind:
+            self.document.content_kind = kind
+            if not getattr(self, "_style_user_modified", False):
+                self.document.style = styles.default_style_for(kind)
+                if hasattr(self, "style_panel"):
+                    self.style_panel.set_style(self.document.style)
         if result.regions:
             self.document.pages[0].regions = list(result.regions)
             self.history.append(user_text or "design")
@@ -140,8 +146,7 @@ class LayoutTab(QWidget):
 
     def restore_snapshot(self, snapshot_id: str):
         restored = self.history.restore(snapshot_id)
-        self.document = restored
-        self.history = History(self.document)
+        self._adopt_document(restored)
         self._refresh()
 
     def _open_history(self):
@@ -153,6 +158,7 @@ class LayoutTab(QWidget):
         if self.document is None:
             return
         self.document.style = style
+        self._style_user_modified = True
         self._refresh()
 
     def export_template_to(self, path: str):
@@ -162,12 +168,7 @@ class LayoutTab(QWidget):
         self.status.setText(f"Exported template {path}")
 
     def import_template_from(self, path: str):
-        self.document = template_io.import_template(path)
-        self.history = History(self.document)
-        if self.document.style is None:
-            self.document.style = styles.default_style_for(self.document.content_kind)
-        if hasattr(self, "style_panel") and self.document.style:
-            self.style_panel.set_style(self.document.style)
+        self._adopt_document(template_io.import_template(path))
         self._refresh()
 
     def _export_template_dialog(self):
