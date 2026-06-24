@@ -46,3 +46,87 @@ def build_messages(content_kind: str, page_px: Tuple[int, int], user_text: str,
         f"</instructions>"
     )
     return [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}]
+
+
+@dataclass
+class DesignerResult:
+    questions: List[str] = field(default_factory=list)
+    regions: Optional[List[Region]] = None
+    raw: str = ""
+
+
+def fallback_result(page_px: Tuple[int, int]) -> DesignerResult:
+    pw, ph = page_px
+    region = Region(id="region1", kind="image", shape="rect",
+                    bbox=(0, 0, pw, ph), name="full page")
+    return DesignerResult(
+        questions=["I couldn't parse a layout — here's a single full-page frame. "
+                   "Tell me how to divide it."],
+        regions=[region], raw="")
+
+
+def parse_response(content: str, page_px: Tuple[int, int]) -> DesignerResult:
+    from gui.llm_utils import LLMResponseParser
+    data = LLMResponseParser.parse_json_response(content, expected_type=dict)
+    if not isinstance(data, dict):
+        logger.warning("Designer: unparseable response, using fallback")
+        return fallback_result(page_px)
+    questions = [str(q) for q in data.get("questions", []) if str(q).strip()]
+    regions = None
+    layout = data.get("layout")
+    if isinstance(layout, dict) and isinstance(layout.get("regions"), list):
+        regions = []
+        for i, rd in enumerate(layout["regions"]):
+            if not isinstance(rd, dict):
+                continue
+            rd.setdefault("id", f"region{i + 1}")
+            rd.setdefault("kind", "image")
+            region = schema.region_from_dict(rd)
+            regions.append(schema.normalize_region(region, page_px))
+        if not regions:
+            regions = None
+    if regions is None and not questions:
+        return fallback_result(page_px)
+    return DesignerResult(questions=questions, regions=regions, raw=content)
+
+
+def run_design(messages: List[Dict], page_px: Tuple[int, int],
+               completion_fn: Callable[[List[Dict]], str]) -> DesignerResult:
+    content = completion_fn(messages)
+    return parse_response(content or "", page_px)
+
+
+def run_completion(config, provider: str, model: str, messages: List[Dict],
+                   temperature: float = 0.4) -> str:
+    """Real LLM call (mirrors TextGenerationWorker). Not unit-tested (network)."""
+    from gui.llm_utils import LiteLLMHandler
+    from core.llm_models import get_provider_models, get_provider_prefix
+    ok, litellm = LiteLLMHandler.setup_litellm(enable_console_logging=True)
+    if not ok or litellm is None:
+        raise RuntimeError("Failed to initialize LiteLLM")
+    provider = provider or (config.get_layout_llm_provider() if config else "google")
+    provider_map = {"google": "google", "anthropic": "anthropic", "openai": "openai",
+                    "ollama": "ollama", "lm studio": "lmstudio"}
+    pid_api = provider_map.get(provider.lower(), provider.lower())
+    pid = "gemini" if pid_api == "google" else pid_api
+    api_key = None
+    auth_mode = "api-key"
+    if pid_api == "google" and config is not None:
+        am = config.get("auth_mode", "api-key")
+        auth_mode = "gcloud" if am in ("gcloud", "Google Cloud Account") else "api-key"
+    if auth_mode == "api-key" and config is not None:
+        api_key = config.get_api_key(pid_api)
+    models = get_provider_models(pid)
+    model_name = model or (models[0] if models else None)
+    if not model_name:
+        raise RuntimeError(f"No models available for provider {provider!r}")
+    prefix = get_provider_prefix(pid)
+    full_model = f"{prefix}{model_name}" if prefix else model_name
+    logger.info("Designer LLM call: model=%s temp=%s", full_model, temperature)
+    kwargs = {"model": full_model, "messages": messages, "temperature": temperature}
+    if api_key:
+        kwargs["api_key"] = api_key
+    resp = litellm.completion(**kwargs)
+    if not resp or not resp.choices:
+        raise RuntimeError("Empty LLM response")
+    return resp.choices[0].message.content or ""
