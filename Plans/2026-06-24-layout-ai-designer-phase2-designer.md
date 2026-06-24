@@ -949,6 +949,17 @@ def test_restore_snapshot_reloads_document(qapp):
     assert [r.id for r in tab.document.pages[0].regions] == ["b"]
     tab.restore_snapshot(sid)
     assert [r.id for r in tab.document.pages[0].regions] == ["a"]  # back to v1
+
+
+def test_design_button_calls_start_design_with_page_size(qapp):
+    tab = LayoutTab(config=FakeConfig())
+    captured = {}
+    tab.designer.start_design = lambda *a, **k: captured.setdefault("call", (a, k))
+    tab.designer.prompt_edit.setPlainText("a comic cover")
+    tab._on_design_clicked()
+    a, k = captured["call"]
+    assert a[0] == "a comic cover"                       # prompt text passed
+    assert a[1] == tab.document.pages[0].page_size_px    # current page size supplied
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -981,8 +992,11 @@ After `root.addWidget(self.page_setup)` add the designer panel:
 ```python
         self.designer = DesignerPanel(self.config)
         self.designer.layoutProposed.connect(self._on_layout_proposed)
+        self.designer.design_btn.clicked.connect(self._on_design_clicked)
         root.addWidget(self.designer)
 ```
+
+The designer panel's "Design / Iterate" button does not self-wire (it has no page size); the tab owns that wiring — it supplies the current page's pixel size and regions.
 
 In `new_document`, after building `self.document`, bind history:
 
@@ -1002,6 +1016,16 @@ In `open_project_from` and after any place `self.document` is reassigned, rebind
 Add the new methods:
 
 ```python
+    def _on_design_clicked(self):
+        if not self.document or not self.document.pages:
+            return
+        text = self.designer.prompt_edit.toPlainText().strip()
+        if not text:
+            return
+        page = self.document.pages[0]
+        self.designer.start_design(text, page.page_size_px,
+                                   current_regions=page.regions or None)
+
     def _on_layout_proposed(self, result):
         text = self.designer.prompt_edit.toPlainText().strip() if hasattr(self.designer, "prompt_edit") else ""
         self.apply_designer_result(result, user_text=text)
@@ -1032,7 +1056,7 @@ Note: `new_document` must set `self.history` BEFORE `_refresh()` is first called
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `.venv_linux/bin/python -m pytest tests/layout/test_layout_tab_designer.py -v`
-Expected: PASS (2 passed).
+Expected: PASS (3 passed).
 
 - [ ] **Step 5: Run the FULL suite + import smoke**
 
