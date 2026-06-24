@@ -61,3 +61,9 @@ def test_run_design_uses_injected_completion():
     res = designer.run_design(msgs, (200, 200), fake_completion)
     assert captured["msgs"] == msgs
     assert [r.id for r in res.regions] == ["a"]
+
+
+def test_parse_response_non_list_questions_does_not_split():
+    res = designer.parse_response('{"questions": "why"}', (100, 100))
+    assert "w" not in res.questions          # not iterated char-by-char
+    assert res.regions is not None and len(res.regions) >= 1  # falls back to a layout

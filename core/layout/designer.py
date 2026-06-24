@@ -71,7 +71,9 @@ def parse_response(content: str, page_px: Tuple[int, int]) -> DesignerResult:
     if not isinstance(data, dict):
         logger.warning("Designer: unparseable response, using fallback")
         return fallback_result(page_px)
-    questions = [str(q) for q in data.get("questions", []) if str(q).strip()]
+    raw_questions = data.get("questions", [])
+    questions = ([str(q) for q in raw_questions if str(q).strip()]
+                 if isinstance(raw_questions, list) else [])
     regions = None
     layout = data.get("layout")
     if isinstance(layout, dict) and isinstance(layout.get("regions"), list):
@@ -79,6 +81,7 @@ def parse_response(content: str, page_px: Tuple[int, int]) -> DesignerResult:
         for i, rd in enumerate(layout["regions"]):
             if not isinstance(rd, dict):
                 continue
+            rd = dict(rd)  # don't mutate the parsed dict
             rd.setdefault("id", f"region{i + 1}")
             rd.setdefault("kind", "image")
             region = schema.region_from_dict(rd)
