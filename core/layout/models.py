@@ -144,16 +144,17 @@ def migrate_legacy_blocks(blocks: List[Union[TextBlock, ImageBlock]]) -> List[Re
     """Convert legacy TextBlock/ImageBlock objects into Region objects."""
     regions: List[Region] = []
     for b in blocks:
+        x, y, w, h = b.rect
         if getattr(b, "type", None) == "image" or isinstance(b, ImageBlock):
             regions.append(Region(
-                id=b.id, kind="image", bbox=tuple(b.rect),
+                id=b.id, kind="image", bbox=(x, y, w, h),
                 image_ref=getattr(b, "image_path", None),
                 image_style=getattr(b, "style", None),
-                name=getattr(b, "alt_text", "") or "",
+                name=getattr(b, "alt_text", None) or "",
             ))
         else:
             regions.append(Region(
-                id=b.id, kind="text", bbox=tuple(b.rect),
+                id=b.id, kind="text", bbox=(x, y, w, h),
                 text=getattr(b, "text", "") or "",
                 text_style=getattr(b, "style", None),
             ))
