@@ -11,7 +11,7 @@ from PySide6.QtCore import Signal
 from core.layout.models import DocumentSpec, PageSpec, PageSize, TextStyle
 from core.layout import project_io, qt_renderer
 from core.layout import styles, template_io
-from core.layout import designer, prompt_helper
+from core.layout import designer, prompt_helper, bundle_io
 from core.layout.history import History
 from gui.layout.page_setup_widget import PageSetupWidget
 from gui.layout.canvas_widget import CanvasWidget
@@ -46,6 +46,8 @@ class LayoutTab(QWidget):
             ("History…", self._open_history),
             ("Export Template…", self._export_template_dialog),
             ("Import Template…", self._import_template_dialog),
+            ("Export Bundle…", self._export_bundle_dialog),
+            ("Import Bundle…", self._import_bundle_dialog),
         ]:
             btn = QPushButton(label)
             btn.clicked.connect(slot)
@@ -395,6 +397,67 @@ class LayoutTab(QWidget):
     def import_template_from(self, path: str):
         self._adopt_document(template_io.import_template(path))
         self._refresh()
+
+    # --- bundles (.iaibundle: project + images + fonts, self-contained) ---
+    def _bundle_font_resolver(self):
+        """Lazily build a font_resolver from FontManager (best-effort).
+
+        Discovery scans system fonts, so it's built once and cached; any failure
+        degrades to None (fonts recorded by-name) — never blocks export.
+        """
+        if getattr(self, "_font_manager", None) is None:
+            try:
+                from core.layout.font_manager import FontManager
+                custom = self.config.get_fonts_dir() if self.config else None
+                self._font_manager = FontManager(
+                    custom_dirs=[custom] if custom else None)
+            except Exception:  # noqa: BLE001 - font scan must never block export
+                logger.exception("Layout: font discovery failed; bundling by name")
+                self._font_manager = False  # sentinel: tried and failed
+        fm = self._font_manager
+        return fm.select_font_file if fm else None
+
+    def _bundle_extract_dir(self, path: str) -> Path:
+        stem = Path(path).stem
+        base = getattr(self.config, "config_dir", None) if self.config else None
+        if base:
+            return Path(base) / "layout" / "bundles" / stem
+        return Path(path).parent / f"{stem}_files"
+
+    def export_bundle_to(self, path: str):
+        manifest = bundle_io.export_bundle(
+            self.document, path, font_resolver=self._bundle_font_resolver())
+        msg = f"Exported bundle {path}"
+        if manifest.warnings:
+            msg += f" ({len(manifest.warnings)} warning(s))"
+        self.status.setText(msg)
+
+    def import_bundle_from(self, path: str):
+        dest = self._bundle_extract_dir(path)
+        self._adopt_document(bundle_io.import_bundle(path, str(dest)))
+        page = (self.document.pages[0]
+                if self.document and self.document.pages else None)
+        if page is not None and page.page_size and hasattr(self, "page_setup"):
+            self.page_setup.set_page_size(page.page_size)
+        self._refresh()
+
+    def _export_bundle_dialog(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export Bundle", "",
+                                              "ImageAI Layout Bundle (*.iaibundle)")
+        if path:
+            try:
+                self.export_bundle_to(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("export bundle", e)
+
+    def _import_bundle_dialog(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Import Bundle", "",
+                                              "ImageAI Layout Bundle (*.iaibundle)")
+        if path:
+            try:
+                self.import_bundle_from(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("import bundle", e)
 
     # --- error reporting (repo rule: all errors logged + shown to the user) ---
     def _report_error(self, what: str, exc: Exception):
