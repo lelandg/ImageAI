@@ -11,6 +11,8 @@ class FakeConfig:
         self.store["layout"] = cfg
     def save(self):
         pass
+    def get_layout_llm_provider(self):
+        return "google"
 
 
 def test_new_document_creates_one_page(qapp):
