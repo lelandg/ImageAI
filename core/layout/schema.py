@@ -1,11 +1,21 @@
 """Serialization, normalization, and validation for layout documents."""
-from dataclasses import asdict, replace
+from dataclasses import asdict, replace, fields
 from typing import Dict, List, Tuple
 
 from core.layout.models import (
     Region, PageSpec, DocumentSpec, PageSize, TextStyle, ImageStyle, Snapshot, ProjectStyle,
     migrate_legacy_blocks, TextBlock, ImageBlock,
 )
+
+
+def _filtered(cls, d: Dict) -> Dict:
+    """Keep only keys that are real fields of dataclass ``cls``.
+
+    Lets a hand-edited or forward-version file carrying extra/renamed keys load
+    instead of crashing with ``TypeError: unexpected keyword argument``.
+    """
+    valid = {f.name for f in fields(cls)}
+    return {k: v for k, v in d.items() if k in valid}
 
 REGION_JSON_SCHEMA: Dict = {
     "type": "object",
@@ -44,15 +54,15 @@ def region_from_dict(d: Dict) -> Region:
     ts = d.get("text_style")
     is_ = d.get("image_style")
     return Region(
-        id=d["id"], kind=d["kind"], shape=d.get("shape", "rect"),
+        id=d.get("id", ""), kind=d.get("kind", "image"), shape=d.get("shape", "rect"),
         bbox=tuple(d.get("bbox", (0, 0, 100, 100))),
         points=[tuple(p) for p in d.get("points", [])],
         z=int(d.get("z", 0)), name=d.get("name", ""),
         text=d.get("text", ""), role=d.get("role", ""),
         image_ref=d.get("image_ref"), prompt=d.get("prompt", ""),
         gen_settings=dict(d.get("gen_settings", {})),
-        text_style=TextStyle(**ts) if ts else None,
-        image_style=ImageStyle(**is_) if is_ else None,
+        text_style=TextStyle(**_filtered(TextStyle, ts)) if ts else None,
+        image_style=ImageStyle(**_filtered(ImageStyle, is_)) if is_ else None,
     )
 
 
@@ -81,14 +91,15 @@ def project_style_to_dict(s: "ProjectStyle") -> Dict:
 
 def project_style_from_dict(d: Dict) -> "ProjectStyle":
     return ProjectStyle(
-        font_roles={name: TextStyle(**ts) for name, ts in d.get("font_roles", {}).items()},
+        font_roles={name: TextStyle(**_filtered(TextStyle, ts))
+                    for name, ts in d.get("font_roles", {}).items()},
         palette=dict(d.get("palette", {})),
         default_text_role=d.get("default_text_role", "body"),
     )
 
 
 def _page_size_from_dict(d):
-    return PageSize(**d) if d else None
+    return PageSize(**_filtered(PageSize, d)) if d else None
 
 
 def page_to_dict(p: PageSpec) -> Dict:
@@ -107,11 +118,12 @@ def page_from_dict(d: Dict) -> PageSpec:
     else:  # legacy: migrate blocks -> regions
         legacy = []
         for b in d.get("blocks", []):
+            rect = tuple(b.get("rect", (0, 0, 100, 100)))
             if b.get("type") == "image":
-                legacy.append(ImageBlock(id=b["id"], rect=tuple(b["rect"]),
+                legacy.append(ImageBlock(id=b.get("id", ""), rect=rect,
                                          image_path=b.get("image_path")))
             else:
-                legacy.append(TextBlock(id=b["id"], rect=tuple(b["rect"]),
+                legacy.append(TextBlock(id=b.get("id", ""), rect=rect,
                                         text=b.get("text", "")))
         regions = migrate_legacy_blocks(legacy)
     return PageSpec(
