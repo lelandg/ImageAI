@@ -109,3 +109,49 @@ def test_unroled_text_uses_default_text_role(qapp):
     scene = qt_renderer.build_scene(page, style=style)
     texts = [it for it in scene.items() if isinstance(it, QGraphicsSimpleTextItem)]
     assert texts[0].font().pixelSize() == 33  # fell back to default_text_role
+
+
+def test_text_with_no_resolvable_style_gets_readable_fallback(qapp):
+    # No style passed and no explicit text_style -> the bare QFont default (~16px)
+    # would be invisible on a hi-res page; the renderer pins a readable size.
+    from core.layout.models import Region, PageSpec
+    from core.layout import qt_renderer
+    from PySide6.QtWidgets import QGraphicsSimpleTextItem
+    page = PageSpec(page_size_px=(2550, 3300), regions=[
+        Region(id="t", kind="text", bbox=(0, 0, 2550, 200), text="Hi")])
+    scene = qt_renderer.build_scene(page)  # no style at all
+    texts = [it for it in scene.items() if isinstance(it, QGraphicsSimpleTextItem)]
+    assert texts and texts[0].font().pixelSize() == qt_renderer._DEFAULT_TEXT_PX
+
+
+def test_text_guide_box_pen_is_cosmetic(qapp):
+    # The dashed guide box must stay visible when fit-to-view shrinks the page,
+    # which requires a cosmetic pen (constant device-pixel width).
+    from core.layout.models import Region, PageSpec
+    from core.layout import qt_renderer
+    from PySide6.QtWidgets import QGraphicsRectItem
+    page = PageSpec(page_size_px=(2550, 3300), regions=[
+        Region(id="t", kind="text", bbox=(0, 0, 2550, 200), text="Hi")])
+    scene = qt_renderer.build_scene(page, selectable=True)
+    boxes = [it for it in scene.items()
+             if isinstance(it, QGraphicsRectItem) and it.data(0) == "t"]
+    assert boxes and boxes[0].pen().isCosmetic()
+
+
+def test_text_guide_box_is_editor_only(qapp):
+    # The dashed guide is an editor affordance: present when selectable (editor),
+    # absent in export (selectable=False) — but the text itself always renders.
+    from core.layout.models import Region, PageSpec
+    from core.layout import qt_renderer
+    from PySide6.QtWidgets import QGraphicsRectItem, QGraphicsSimpleTextItem
+    page = PageSpec(page_size_px=(400, 200), regions=[
+        Region(id="t", kind="text", bbox=(0, 0, 400, 100), text="Hi")])
+
+    editor = qt_renderer.build_scene(page, selectable=True)
+    assert any(isinstance(it, QGraphicsRectItem) and it.data(0) == "t"
+               for it in editor.items())
+
+    export = qt_renderer.build_scene(page, selectable=False)
+    assert not any(isinstance(it, QGraphicsRectItem) and it.data(0) == "t"
+                   for it in export.items())
+    assert any(isinstance(it, QGraphicsSimpleTextItem) for it in export.items())

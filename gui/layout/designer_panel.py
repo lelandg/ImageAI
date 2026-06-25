@@ -71,8 +71,21 @@ class DesignerPanel(QWidget):
         self.design_btn = QPushButton("Design / Iterate")
         lay.addWidget(self.design_btn)
 
+        # Designer output starts collapsed; the user expands it on demand (it
+        # still auto-opens on failure so errors are never hidden).
+        self.console_toggle = QPushButton("▶ Show designer output")
+        self.console_toggle.setCheckable(True)
+        self.console_toggle.toggled.connect(self._on_toggle_console)
+        lay.addWidget(self.console_toggle)
+
         self.console = DialogStatusConsole("Designer")
+        self.console.setVisible(False)
         lay.addWidget(self.console)
+
+    def _on_toggle_console(self, shown: bool):
+        self.console.setVisible(shown)
+        self.console_toggle.setText(
+            "▼ Hide designer output" if shown else "▶ Show designer output")
 
     def _populate_providers(self):
         from core.llm_models import get_all_provider_ids, get_provider_display_name
@@ -141,4 +154,6 @@ class DesignerPanel(QWidget):
 
     def _on_failed(self, err: str):
         self.design_btn.setEnabled(True)
+        if not self.console_toggle.isChecked():
+            self.console_toggle.setChecked(True)  # surface the failure (expands the console)
         self.console.log(err, "ERROR")

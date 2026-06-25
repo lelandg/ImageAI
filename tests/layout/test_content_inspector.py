@@ -77,3 +77,38 @@ def test_apply_text_emits(qapp):
     insp.text_edit.setPlainText("new text")
     insp.apply_text_btn.click()
     assert got == [("t1", "new text")]
+
+
+def test_text_page_has_font_controls(qapp):
+    from PySide6.QtWidgets import QComboBox, QSpinBox
+    insp = ContentInspector()
+    assert isinstance(insp.font_combo, QComboBox) and insp.font_combo.isEditable()
+    assert isinstance(insp.size_spin, QSpinBox)
+
+
+def test_set_region_loads_text_style_into_controls(qapp):
+    from core.layout.models import TextStyle
+    insp = ContentInspector()
+    insp.set_region(_txt(rid="t", text="hi"),
+                    text_style=TextStyle(family=["Georgia"], size_px=72))
+    assert insp.font_combo.currentText() == "Georgia"
+    assert insp.size_spin.value() == 72
+
+
+def test_apply_text_emits_font_style(qapp):
+    insp = ContentInspector()
+    insp.set_region(_txt(rid="t1", text="old"))
+    styles = []
+    insp.regionTextStyleChanged.connect(
+        lambda rid, fam, size: styles.append((rid, fam, size)))
+    insp.font_combo.setEditText("Comic Sans MS")
+    insp.size_spin.setValue(96)
+    insp.apply_text_btn.click()
+    assert styles == [("t1", "Comic Sans MS", 96)]
+
+
+def test_populate_fonts_fills_combo(qapp):
+    insp = ContentInspector()
+    insp._populate_fonts(["Alpha", "Beta", "Gamma"])
+    items = [insp.font_combo.itemText(i) for i in range(insp.font_combo.count())]
+    assert items == ["Alpha", "Beta", "Gamma"]
