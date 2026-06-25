@@ -187,6 +187,9 @@ class LayoutTab(QWidget):
     def restore_snapshot(self, snapshot_id: str):
         restored = self.history.restore(snapshot_id)
         self._adopt_document(restored)
+        # Continuing from a restored point is a branch: the next design snapshot
+        # must parent to snapshot_id, not the timeline's tail.
+        self.history.branch_from(snapshot_id)
         self._refresh()
 
     def _open_history(self):
@@ -211,33 +214,57 @@ class LayoutTab(QWidget):
         self._adopt_document(template_io.import_template(path))
         self._refresh()
 
+    # --- error reporting (repo rule: all errors logged + shown to the user) ---
+    def _report_error(self, what: str, exc: Exception):
+        logger.error("Layout: failed to %s: %s", what, exc, exc_info=True)
+        if hasattr(self, "status"):
+            self.status.setText(f"Error: failed to {what}")
+        try:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Layout error", f"Failed to {what}:\n{exc}")
+        except Exception:  # noqa: BLE001 - error reporting must never itself crash
+            pass
+
     def _export_template_dialog(self):
-        from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getSaveFileName(self, "Export Template", "",
                                               "ImageAI Layout Template (*.iailayout.json)")
         if path:
-            self.export_template_to(path)
+            try:
+                self.export_template_to(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("export template", e)
 
     def _import_template_dialog(self):
-        from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getOpenFileName(self, "Import Template", "",
                                               "ImageAI Layout Template (*.iailayout.json)")
         if path:
-            self.import_template_from(path)
+            try:
+                self.import_template_from(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("import template", e)
 
     # --- dialogs ---
     def _save_dialog(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save Project", "", "ImageAI Project (*.iaiproj.json)")
         if path:
-            self.save_project_to(path)
+            try:
+                self.save_project_to(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("save project", e)
 
     def _open_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open Project", "",
                                               "ImageAI Project (*.iaiproj.json *.layout.json)")
         if path:
-            self.open_project_from(path)
+            try:
+                self.open_project_from(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("open project", e)
 
     def _export_dialog(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export PDF", "", "PDF (*.pdf)")
         if path:
-            self.export_pdf_to(path)
+            try:
+                self.export_pdf_to(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("export PDF", e)

@@ -52,6 +52,29 @@ def build_messages(content_kind: str, page_px: Tuple[int, int], user_text: str,
     return [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}]
 
 
+def resolve_provider_ids(provider: str) -> Tuple[str, str]:
+    """Map a provider *display name* (or id/alias) to ``(api_key_id, registry_id)``.
+
+    ``api_key_id`` is the id the app stores the key under (Google's key lives
+    under ``"google"``); ``registry_id`` is the id ``core.llm_models`` knows
+    (Google → ``"gemini"``). They intentionally differ only for Google. This is
+    the single source of truth shared by the designer panel (model listing) and
+    ``run_completion`` (the production call) so the two can't drift apart.
+    """
+    p = (provider or "").strip().lower()
+    table = {
+        "openai": ("openai", "openai"),
+        "anthropic": ("anthropic", "anthropic"),
+        "claude": ("anthropic", "anthropic"),   # defensive: display name is "Anthropic"
+        "google": ("google", "gemini"),
+        "gemini": ("google", "gemini"),
+        "ollama": ("ollama", "ollama"),
+        "lm studio": ("lmstudio", "lmstudio"),
+        "lmstudio": ("lmstudio", "lmstudio"),
+    }
+    return table.get(p, (p, p))
+
+
 @dataclass
 class DesignerResult:
     questions: List[str] = field(default_factory=list)
@@ -112,10 +135,7 @@ def run_completion(config, provider: str, model: str, messages: List[Dict],
     if not ok or litellm is None:
         raise RuntimeError("Failed to initialize LiteLLM")
     provider = provider or (config.get_layout_llm_provider() if config else "google")
-    provider_map = {"google": "google", "anthropic": "anthropic", "openai": "openai",
-                    "ollama": "ollama", "lm studio": "lmstudio"}
-    pid_api = provider_map.get(provider.lower(), provider.lower())
-    pid = "gemini" if pid_api == "google" else pid_api
+    pid_api, pid = resolve_provider_ids(provider)
     api_key = None
     auth_mode = "api-key"
     if pid_api == "google" and config is not None:

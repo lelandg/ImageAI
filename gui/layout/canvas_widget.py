@@ -27,6 +27,7 @@ class CanvasWidget(QGraphicsView):
                 old.selectionChanged.disconnect(self._on_selection_changed)
             except (RuntimeError, TypeError):
                 pass
+            old.deleteLater()  # don't let replaced scenes accumulate as children
         self._page = page
         scene = qt_renderer.build_scene(page, selectable=True, style=style)
         scene.setParent(self)

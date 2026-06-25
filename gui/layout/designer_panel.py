@@ -81,7 +81,7 @@ class DesignerPanel(QWidget):
         self.provider_combo.addItems([get_provider_display_name(p) for p in get_all_provider_ids()])
         saved = self._config.get_layout_llm_provider() if self._config else None
         if saved:
-            idx = self.provider_combo.findText(saved, )
+            idx = self.provider_combo.findText(saved)
             if idx < 0:
                 idx = self.provider_combo.findText(saved.capitalize())
             if idx >= 0:
@@ -91,8 +91,7 @@ class DesignerPanel(QWidget):
 
     def _on_provider_changed(self, provider: str):
         from core.llm_models import get_provider_models
-        provider_map = {"claude": "anthropic", "google": "gemini", "lm studio": "lmstudio"}
-        pid = provider_map.get(provider.lower(), provider.lower())
+        _, pid = designer.resolve_provider_ids(provider)  # single source of truth
         self.model_combo.blockSignals(True)
         self.model_combo.clear()
         self.model_combo.addItems(get_provider_models(pid) or [])
@@ -103,6 +102,11 @@ class DesignerPanel(QWidget):
 
     def start_design(self, user_text: str, page_px, current_regions=None,
                      completion_fn: Optional[Callable[[List[Dict]], str]] = None):
+        # Don't overwrite a still-running QThread — dropping its only reference
+        # risks "QThread: Destroyed while thread is still running".
+        if self._worker is not None and self._worker.isRunning():
+            self.console.log("A design is already running — please wait.", "WARNING")
+            return
         kind = self.content_kind()
         messages = designer.build_messages(kind, page_px, user_text, current_regions)
         self.console.log(f"Designing ({kind}, {page_px[0]}x{page_px[1]})", "INFO")
@@ -114,16 +118,18 @@ class DesignerPanel(QWidget):
             model = self.model_combo.currentText()
             cfg = self._config
             completion_fn = lambda m: designer.run_completion(cfg, provider, model, m)
+        self.design_btn.setEnabled(False)
         self._worker = DesignerWorker(messages, page_px, completion_fn)
         self._worker.progress.connect(lambda msg: self.console.log(msg, "INFO"))
         self._worker.proposed.connect(self._on_proposed)
-        self._worker.failed.connect(lambda err: self.console.log(err, "ERROR"))
+        self._worker.failed.connect(self._on_failed)
         if injected:
             self._worker.run()      # synchronous for injected/test completions
         else:
             self._worker.start()
 
     def _on_proposed(self, result):
+        self.design_btn.setEnabled(True)
         if result.raw:
             self.console.log("LLM response:\n" + result.raw, "INFO")
         n = len(result.regions) if result.regions else 0
@@ -132,3 +138,7 @@ class DesignerPanel(QWidget):
         for q in result.questions:
             self.console.log(f"Q: {q}", "WARNING")
         self.layoutProposed.emit(result)
+
+    def _on_failed(self, err: str):
+        self.design_btn.setEnabled(True)
+        self.console.log(err, "ERROR")

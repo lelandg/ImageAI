@@ -55,6 +55,25 @@ def test_validate_document_flags_empty_pages():
     assert any("page" in i.lower() for i in issues)
 
 
+def test_from_dict_tolerates_unknown_and_forward_version_keys():
+    # A hand-edited / future-schema file with extra top-level keys and an
+    # unknown style key must load, not crash with TypeError/KeyError.
+    d = {
+        "id": "r1", "kind": "text", "bbox": [0, 0, 50, 20],
+        "text": "Hi", "future_field": 123,                 # unknown top-level key
+        "text_style": {"family": ["Arial"], "size_px": 18, "shadow": "yes"},  # unknown style key
+    }
+    r = schema.region_from_dict(d)
+    assert r.id == "r1" and r.text == "Hi"
+    assert r.text_style is not None and r.text_style.size_px == 18
+
+
+def test_region_from_dict_missing_id_and_kind_does_not_crash():
+    r = schema.region_from_dict({"bbox": [0, 0, 10, 10]})
+    assert r.kind == "image"   # sensible default, no KeyError
+    assert r.id == ""
+
+
 def test_normalize_region_origin_at_or_beyond_boundary():
     r = Region(id="r", kind="image", bbox=(1100, 900, 200, 200))
     n = schema.normalize_region(r, (1000, 800))

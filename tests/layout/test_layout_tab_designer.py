@@ -48,6 +48,24 @@ def test_design_button_calls_start_design_with_page_size(qapp):
     assert a[1] == tab.document.pages[0].page_size_px    # current page size supplied
 
 
+def test_design_after_restore_parents_to_branch_point(qapp):
+    tab = LayoutTab(config=FakeConfig())
+    tab.apply_designer_result(
+        designer.DesignerResult(regions=[designer.Region(id="a", kind="image", bbox=(0, 0, 50, 50))]),
+        user_text="v1")
+    s1 = tab.history.snapshots()[0].id
+    tab.apply_designer_result(
+        designer.DesignerResult(regions=[designer.Region(id="b", kind="image", bbox=(0, 0, 50, 50))]),
+        user_text="v2")
+    tab.restore_snapshot(s1)              # branch off v1
+    tab.apply_designer_result(
+        designer.DesignerResult(regions=[designer.Region(id="c", kind="image", bbox=(0, 0, 50, 50))]),
+        user_text="v3")
+    newest = tab.history.snapshots()[-1]
+    assert newest.prompt == "v3"
+    assert newest.parent_id == s1        # parents to the restored point, not v2
+
+
 def test_apply_designer_result_questions_only_sets_status(qapp):
     tab = LayoutTab(config=FakeConfig())
     res = designer.DesignerResult(questions=["how many panels?"], regions=None, raw="")

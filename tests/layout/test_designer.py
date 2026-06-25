@@ -74,3 +74,29 @@ def test_build_messages_instructs_role_with_kind_roles():
     joined = " ".join(m["content"] for m in msgs)
     assert '"role"' in joined
     assert "dialogue" in joined  # a comic role name is offered to the model
+
+
+def test_resolve_provider_ids_known_names():
+    cases = {
+        "OpenAI": ("openai", "openai"),
+        "Anthropic": ("anthropic", "anthropic"),
+        "Claude": ("anthropic", "anthropic"),   # defensive alias
+        "Google": ("google", "gemini"),          # api-key id vs registry id differ
+        "Ollama": ("ollama", "ollama"),
+        "LM Studio": ("lmstudio", "lmstudio"),
+    }
+    for display, expected in cases.items():
+        assert designer.resolve_provider_ids(display) == expected
+
+
+def test_every_provider_display_name_resolves_to_a_registry_id_with_models():
+    # Regression guard for the Anthropic/Claude path: every display name shown in
+    # the designer's provider combo must resolve to a registry id that actually
+    # has models, else the production LLM call would fail at runtime.
+    from core.llm_models import (
+        get_all_provider_ids, get_provider_display_name, get_provider_models)
+    for pid in get_all_provider_ids():
+        display = get_provider_display_name(pid)
+        _, registry_id = designer.resolve_provider_ids(display)
+        assert get_provider_models(registry_id), \
+            f"{display!r} -> {registry_id!r} resolves to no models"
