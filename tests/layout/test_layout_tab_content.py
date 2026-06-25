@@ -67,6 +67,30 @@ def test_inspector_resets_on_new_document(qapp):
     assert tab.inspector.stack.currentIndex() == 0
 
 
+def test_selecting_text_region_loads_resolved_font_into_inspector(qapp):
+    # The 'txt' region has role='title'; the inspector should show that role's
+    # resolved family/size, not a blank/shrunk default.
+    tab = _tab_with_regions()
+    title = tab.document.style.font_roles["title"]
+    tab._on_region_selected("txt")
+    assert tab.inspector.size_spin.value() == title.size_px
+    assert tab.inspector.font_combo.currentText() == title.family[0]
+
+
+def test_apply_font_style_sets_explicit_text_style_and_rerenders(qapp):
+    tab = _tab_with_regions()
+    tab._on_region_text_style_changed("txt", "Comic Sans MS", 120)
+    ts = tab.document.pages[0].regions[1].text_style
+    assert ts is not None
+    assert ts.family == ["Comic Sans MS"] and ts.size_px == 120
+
+
+def test_apply_font_style_unknown_id_is_noop(qapp):
+    tab = _tab_with_regions()
+    tab._on_region_text_style_changed("nope", "Arial", 40)  # must not raise
+    assert tab.document.pages[0].regions[1].text_style is None
+
+
 def test_fill_image_and_text_then_export_pdf(qapp, tmp_path):
     # F-MVP acceptance: design a page, fill an image region (real file) and a
     # text region, then export a valid PDF — no AI content features needed.

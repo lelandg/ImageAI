@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal
 
-from core.layout.models import DocumentSpec, PageSpec, PageSize
+from core.layout.models import DocumentSpec, PageSpec, PageSize, TextStyle
 from core.layout import project_io, qt_renderer
 from core.layout import styles, template_io
 from core.layout.history import History
@@ -67,6 +67,7 @@ class LayoutTab(QWidget):
 
         self.inspector = ContentInspector(self.config)
         self.inspector.regionContentChanged.connect(self._on_region_content_changed)
+        self.inspector.regionTextStyleChanged.connect(self._on_region_text_style_changed)
         root.addWidget(self.inspector)
         self.canvas.regionSelected.connect(self._on_region_selected)
 
@@ -118,10 +119,32 @@ class LayoutTab(QWidget):
         return None
 
     def _on_region_selected(self, region_id: str):
-        self.inspector.set_region(self._find_region(region_id))
+        region = self._find_region(region_id)
+        ts = None
+        if region is not None and region.kind != "image":
+            style = self.document.style if self.document else None
+            ts = styles.effective_text_style(region, style)
+        self.inspector.set_region(region, text_style=ts)
 
     def _on_region_content_changed(self, region_id: str, value: str):
         self.set_region_content(region_id, value)
+
+    def _on_region_text_style_changed(self, region_id: str, family: str, size_px: int):
+        """Apply the inspector's font family/size to a text region as an explicit
+        ``text_style`` (decoupling it from its role so per-box edits stick)."""
+        region = self._find_region(region_id)
+        if region is None or region.kind == "image":
+            return
+        base = (region.text_style
+                or styles.effective_text_style(region, self.document.style if self.document else None)
+                or TextStyle(family=["Arial"]))
+        region.text_style = TextStyle(
+            family=[family] if family else list(base.family),
+            weight=base.weight, italic=base.italic,
+            size_px=size_px, line_height=base.line_height, color=base.color,
+            align=base.align, wrap=base.wrap, letter_spacing=base.letter_spacing,
+        )
+        self._refresh()
 
     def set_region_content(self, region_id: str, value: str):
         """Apply edited content to a region and re-render (programmatic API)."""

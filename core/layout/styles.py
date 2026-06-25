@@ -1,7 +1,7 @@
 """Default project style (font roles + palette) seeded by content kind."""
-from typing import Dict, List, Literal
+from typing import Dict, List, Literal, Optional
 
-from core.layout.models import ProjectStyle, TextStyle
+from core.layout.models import ProjectStyle, Region, TextStyle
 
 
 def _role(family: List[str], size: int,
@@ -60,3 +60,20 @@ def default_style_for(content_kind: str) -> ProjectStyle:
         palette=dict(_PALETTE),
         default_text_role=_DEFAULT_ROLE.get(content_kind, "body"),
     )
+
+
+def effective_text_style(region: Region,
+                         project_style: Optional[ProjectStyle]) -> Optional[TextStyle]:
+    """Resolve the ``TextStyle`` that should render ``region``.
+
+    Precedence: the region's explicit ``text_style`` > the project style's
+    role (``region.role`` or the project's ``default_text_role``) > ``None``.
+    Shared by the renderer (to draw) and the content inspector (to show the
+    region's current font), so the two can't drift apart.
+    """
+    if region.text_style is not None:
+        return region.text_style
+    if project_style is not None:
+        role = region.role or project_style.default_text_role
+        return project_style.font_roles.get(role)
+    return None

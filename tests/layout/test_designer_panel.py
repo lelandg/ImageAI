@@ -50,3 +50,24 @@ def test_design_button_reenabled_after_failure(qapp):
 
     p.start_design("a page", (300, 300), completion_fn=boom)
     assert p.design_btn.isEnabled()  # _on_failed must re-enable the button
+
+
+def test_console_collapsed_by_default_and_toggles(qapp):
+    # isHidden() reflects the explicit hidden flag without needing the top-level
+    # widget to be shown (isVisible() would be False for any child until then).
+    p = DesignerPanel(FakeConfig())
+    assert p.console.isHidden()                # collapsed on open
+    assert not p.console_toggle.isChecked()
+    p.console_toggle.setChecked(True)          # user expands it
+    assert not p.console.isHidden()
+    assert "Hide" in p.console_toggle.text()
+
+
+def test_failure_auto_expands_console(qapp):
+    p = DesignerPanel(FakeConfig())
+
+    def boom(m):
+        raise RuntimeError("provider exploded")
+
+    p.start_design("a page", (300, 300), completion_fn=boom)
+    assert p.console_toggle.isChecked() and not p.console.isHidden()  # errors never hidden

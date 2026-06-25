@@ -10,9 +10,18 @@ from PySide6.QtGui import (
 from PySide6.QtCore import QPointF, QRectF, Qt, QSizeF, QMarginsF
 
 from core.layout.models import PageSpec, Region, DocumentSpec
+from core.layout.styles import effective_text_style
 
 _PLACEHOLDER_FILL = QColor("#E9ECEF")
 _PLACEHOLDER_PEN = QColor("#ADB5BD")
+# Text-region guide box: a medium grey dash that the cosmetic pen keeps at a
+# constant on-screen width no matter how far the page is zoomed out, so empty
+# text boxes stay visible in the editor instead of vanishing when fit-to-view
+# shrinks a 300-DPI page.
+_TEXT_GUIDE_PEN = QColor("#8A94A6")
+# Readable fallback when a text region resolves no role/style at all — without
+# it the bare QFont default (~16px) is invisible on a multi-thousand-pixel page.
+_DEFAULT_TEXT_PX = 48
 
 
 def _resolve_bg(page: PageSpec) -> str:
@@ -69,26 +78,30 @@ def _add_image_region(scene: QGraphicsScene, r: Region, selectable: bool) -> Non
 
 def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool, project_style=None) -> None:
     x, y, w, h = r.bbox
-    box = QGraphicsRectItem(QRectF(x, y, w, h))
-    box.setBrush(QBrush(Qt.transparent))
-    box.setPen(QPen(QColor("#CED4DA"), 1, Qt.DashLine))
-    _apply_flags(box, selectable, r.id)
-    scene.addItem(box)
+    # The dashed guide box is an editor-only affordance (it's also the region's
+    # selectable/movable handle). Export paths call build_scene(selectable=False),
+    # so skipping it there keeps the guides out of the rendered PNG/PDF.
+    if selectable:
+        box = QGraphicsRectItem(QRectF(x, y, w, h))
+        box.setBrush(QBrush(Qt.transparent))
+        pen = QPen(_TEXT_GUIDE_PEN, 1.5, Qt.DashLine)
+        pen.setCosmetic(True)  # constant on-screen width at any zoom -> always visible
+        box.setPen(pen)
+        _apply_flags(box, selectable, r.id)
+        scene.addItem(box)
 
     text = QGraphicsSimpleTextItem(r.text or "")
-    ts = r.text_style
-    if ts is None and project_style is not None:
-        role = r.role or project_style.default_text_role
-        ts = project_style.font_roles.get(role)
+    ts = effective_text_style(r, project_style)
     font = QFont()
     if ts:
         if ts.family:
             font.setFamily(ts.family[0])
-        if ts.size_px:
-            font.setPixelSize(ts.size_px)
         font.setBold(ts.weight in ("bold", "black", "semibold"))
         font.setItalic(ts.italic)
         text.setBrush(QBrush(QColor(ts.color)))
+    # Always pin a pixel size: an unresolved role/style would otherwise leave the
+    # QFont at its ~16px default, which is invisible on a 300-DPI page.
+    font.setPixelSize(ts.size_px if ts and ts.size_px else _DEFAULT_TEXT_PX)
     text.setFont(font)
     text.setPos(x + 2, y + 2)
     scene.addItem(text)
