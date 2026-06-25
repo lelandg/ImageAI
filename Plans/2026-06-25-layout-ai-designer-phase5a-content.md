@@ -1,5 +1,5 @@
-# Phase 5a — AI prompt help + bundles — Implementation Plan ⏳ 0%
-**Last Updated:** 2026-06-25 17:05
+# Phase 5a — AI prompt help + bundles — Implementation Plan ✅ 100%
+**Last Updated:** 2026-06-25 17:45
 **Author:** Leland Green + Claude (Opus 4.8)
 **Design source:** `Plans/2026-06-24-layout-ai-designer-design.md` §9 (F-AI) + §8 (bundles)
 **Branch:** `feat/layout-ai-designer-phase5`
@@ -169,9 +169,10 @@ import_bundle(path, dest_dir) -> DocumentSpec
 ---
 
 ## Task checklist
-1. ⏳ Plan doc (this file) — committed on the feature branch.
-2. ⬜ `core/layout/prompt_helper.py` + `tests/layout/test_prompt_helper.py`.
-3. ⬜ Inspector prompt UI + `prompt_worker.py` + LayoutTab orchestration + tests.
-4. ⬜ `core/layout/bundle_io.py` + `tests/layout/test_bundle_io.py`.
-5. ⬜ LayoutTab bundle toolbar + programmatic API + tests.
-6. ⬜ Full `tests/layout/` green headless; completion summary; PR.
+1. ✅ Plan doc (this file) — committed `3d4a7c9`.
+2. ✅ `core/layout/prompt_helper.py` + `tests/layout/test_prompt_helper.py` (`4356005`).
+3. ✅ Inspector prompt UI + `prompt_worker.py` + LayoutTab orchestration + tests (`4356005`).
+4. ✅ `core/layout/bundle_io.py` + `tests/layout/test_bundle_io.py` (`39734fb`).
+5. ✅ LayoutTab bundle toolbar + programmatic API + tests (`39734fb`).
+6. ✅ Full `tests/layout/` green headless — **151 passed** (112 → +39); see
+   `Plans/2026-06-25-layout-ai-designer-phase5a-completion.md`.
