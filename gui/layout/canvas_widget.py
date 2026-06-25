@@ -20,7 +20,7 @@ class CanvasWidget(QGraphicsView):
         self._scene: Optional[QGraphicsScene] = None
         self.setScene(QGraphicsScene(self))
 
-    def load_page(self, page: PageSpec, style=None) -> None:
+    def load_page(self, page: PageSpec, style=None, *, locked: bool = True) -> None:
         old = self._scene
         if old is not None:
             try:
@@ -29,7 +29,7 @@ class CanvasWidget(QGraphicsView):
                 pass
             old.deleteLater()  # don't let replaced scenes accumulate as children
         self._page = page
-        scene = qt_renderer.build_scene(page, selectable=True, style=style)
+        scene = qt_renderer.build_scene(page, selectable=True, style=style, locked=locked)
         scene.setParent(self)
         scene.selectionChanged.connect(self._on_selection_changed)
         self.setScene(scene)

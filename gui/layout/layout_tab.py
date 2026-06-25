@@ -1,5 +1,6 @@
 """Layout tab — Phase 3: style panel + template export/import integration."""
 import logging
+from pathlib import Path
 from typing import Optional
 
 from PySide6.QtWidgets import (
@@ -29,8 +30,9 @@ class LayoutTab(QWidget):
         self.config = config
         self.document: Optional[DocumentSpec] = None
         self.history: Optional[History] = None
+        self._locked = self._load_locked()
         self._build()
-        self.new_document()
+        self._restore_session_or_new()
 
     def _build(self):
         root = QVBoxLayout(self)
@@ -47,6 +49,14 @@ class LayoutTab(QWidget):
             btn.clicked.connect(slot)
             toolbar.addWidget(btn)
         toolbar.addStretch(1)
+        # Lock toggle: when locked (default) generated frames and applied text
+        # stay put; unlock to reposition them. State persists across launches.
+        self.lock_btn = QPushButton()
+        self.lock_btn.setCheckable(True)
+        self.lock_btn.setChecked(self._locked)
+        self.lock_btn.toggled.connect(self._on_lock_toggled)
+        self._update_lock_button()
+        toolbar.addWidget(self.lock_btn)
         root.addLayout(toolbar)
 
         self.page_setup = PageSetupWidget(self.config)
@@ -103,9 +113,87 @@ class LayoutTab(QWidget):
 
     def _refresh(self):
         if self.document and self.document.pages:
-            self.canvas.load_page(self.document.pages[0], self.document.style)
+            self.canvas.load_page(self.document.pages[0], self.document.style,
+                                  locked=self._locked)
             self.status.setText(f"{self.document.title} — {self.document.pages[0].page_size_px}")
         self.documentChanged.emit()
+
+    # --- lock state (frames + applied text stay put until unlocked) ---
+    def _load_locked(self) -> bool:
+        if not self.config:
+            return True
+        try:
+            return bool(self.config.get_layout_config().get("items_locked", True))
+        except Exception:  # noqa: BLE001 - config read must never block startup
+            logger.exception("Layout: failed to read lock state; defaulting to locked")
+            return True
+
+    def _update_lock_button(self):
+        # Frames are always locked; this toggle only governs text.
+        self.lock_btn.setText("🔒 Text locked" if self._locked else "🔓 Text unlocked")
+        self.lock_btn.setToolTip(
+            "Text is locked to its frame — click to unlock and reposition text. "
+            "(Image frames are always locked in place.)"
+            if self._locked else
+            "Text can be moved — click to lock it back to its frame. "
+            "(Image frames are always locked in place.)")
+
+    def _on_lock_toggled(self, checked: bool):
+        self._locked = bool(checked)
+        self._update_lock_button()
+        self._persist_locked()
+        self._refresh()
+
+    def _persist_locked(self):
+        if not self.config:
+            return
+        try:
+            cfg = self.config.get_layout_config()
+            cfg["items_locked"] = self._locked
+            self.config.set_layout_config(cfg)
+            self.config.save()
+        except Exception:  # noqa: BLE001 - persistence is best-effort
+            logger.exception("Layout: failed to persist lock state")
+
+    # --- session persistence (reload last layout on startup) ---
+    def _session_path(self) -> Optional[Path]:
+        base = getattr(self.config, "config_dir", None) if self.config else None
+        if not base:
+            return None
+        return Path(base) / "layout" / "last_session.iaiproj.json"
+
+    def _restore_session_or_new(self):
+        path = self._session_path()
+        if path and path.exists():
+            try:
+                self._adopt_document(project_io.load_project(str(path)))
+                page = (self.document.pages[0]
+                        if self.document and self.document.pages else None)
+                if page is not None and page.page_size and hasattr(self, "page_setup"):
+                    self.page_setup.set_page_size(page.page_size)
+                self._refresh()
+                logger.info("Layout: restored last session from %s", path)
+                return
+            except Exception:  # noqa: BLE001 - a bad session must not block the tab
+                logger.exception("Layout: failed to restore last session; starting new")
+        self.new_document()
+
+    def save_session(self):
+        """Persist the current document + lock state so the tab reloads next launch.
+
+        Invoked from ``MainWindow.closeEvent`` so the Layout tab remembers its
+        work the way the other tabs remember theirs.
+        """
+        self._persist_locked()
+        path = self._session_path()
+        if not path or self.document is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            project_io.save_project(self.document, str(path))
+            logger.info("Layout: saved session to %s", path)
+        except Exception:  # noqa: BLE001 - autosave is best-effort
+            logger.exception("Layout: failed to save session")
 
     # --- content inspector ---
     def _find_region(self, region_id: str):

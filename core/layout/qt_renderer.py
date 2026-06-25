@@ -43,51 +43,118 @@ def _apply_flags(item: QGraphicsItem, selectable: bool, region_id: str,
         item.setFlag(QGraphicsItem.ItemIsSelectable, True)
         if movable:
             item.setFlag(QGraphicsItem.ItemIsMovable, True)
+            # Needed for itemChange(ItemPositionHasChanged) to fire so a drag is
+            # written back into the region's geometry (see _RegionMoveMixin).
+            item.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
 
 
-def _add_image_region(scene: QGraphicsScene, r: Region, selectable: bool) -> None:
+def _writeback_move(item) -> None:
+    """Persist a drag into the bound region's ``bbox`` (and polygon ``points``).
+
+    Handles all carry their geometry in item-local coordinates with the item at
+    scene pos (0,0); a drag therefore shows up purely as ``item.pos()``, which is
+    the delta to apply to the region's original geometry.
+    """
+    region = getattr(item, "_region", None)
+    if region is None:
+        return
+    dx, dy = item.x(), item.y()
+    x, y, w, h = item._base_bbox
+    region.bbox = (round(x + dx), round(y + dy), w, h)
+    if item._base_points:
+        region.points = [(round(px + dx), round(py + dy)) for px, py in item._base_points]
+
+
+class _RegionMoveMixin:
+    """Mix in to a QGraphicsItem to write drag deltas back into a Region.
+
+    The renderer is rebuilt from the model on every refresh, so persisting moves
+    here is what makes "unlock, drag, re-lock" survive a refresh and a save.
+    """
+
+    def _bind_region(self, region: Region) -> None:
+        self._region = region
+        self._base_bbox = tuple(region.bbox)
+        self._base_points = list(region.points)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsItem.ItemPositionHasChanged:
+            _writeback_move(self)
+        return super().itemChange(change, value)
+
+
+class _RegionRectItem(_RegionMoveMixin, QGraphicsRectItem):
+    def __init__(self, rect: QRectF, region: Region):
+        super().__init__(rect)
+        self._bind_region(region)
+
+
+class _RegionPolygonItem(_RegionMoveMixin, QGraphicsPolygonItem):
+    def __init__(self, polygon: QPolygonF, region: Region):
+        super().__init__(polygon)
+        self._bind_region(region)
+
+
+class _RegionPixmapItem(_RegionMoveMixin, QGraphicsPixmapItem):
+    def __init__(self, pixmap: QPixmap, region: Region):
+        super().__init__(pixmap)
+        self._bind_region(region)
+
+
+def _add_image_region(scene: QGraphicsScene, r: Region, selectable: bool,
+                      *, locked: bool = True) -> None:
     x, y, w, h = r.bbox
+    # Image frames are ALWAYS locked in position — only text follows the lock
+    # toggle (see _add_text_region). They stay selectable so the region can be
+    # picked to set/replace its image, just never draggable.
+    movable = False
+    pix = QPixmap(r.image_ref) if r.image_ref else None
+    filled = pix is not None and not pix.isNull()
+
+    if filled:
+        # The pixmap on top is the region's handle; the placeholder fill rides
+        # along as a child drawn behind it (negative z) so transparent PNGs read
+        # as a solid frame and the two never fight over the cursor on a drag.
+        scaled = pix.scaled(int(w), int(h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        handle = _RegionPixmapItem(scaled, r)
+        handle.setOffset(x, y)
+        bg = QGraphicsRectItem(QRectF(x, y, w, h), handle)
+        bg.setBrush(QBrush(_PLACEHOLDER_FILL))
+        bg.setPen(QPen(_PLACEHOLDER_PEN, 1))
+        bg.setZValue(-1)
+        _apply_flags(handle, selectable, r.id, movable=movable)
+        scene.addItem(handle)
+        return
+
     if r.shape == "polygon" and r.points:
         poly = QPolygonF([QPointF(px, py) for px, py in r.points])
-        item = QGraphicsPolygonItem(poly)
+        item = _RegionPolygonItem(poly, r)
     else:
-        item = QGraphicsRectItem(QRectF(x, y, w, h))
+        item = _RegionRectItem(QRectF(x, y, w, h), r)
     item.setBrush(QBrush(_PLACEHOLDER_FILL))
     item.setPen(QPen(_PLACEHOLDER_PEN, 1))
-    _apply_flags(item, selectable, r.id)
+    _apply_flags(item, selectable, r.id, movable=movable)
     scene.addItem(item)
 
-    if r.image_ref:
-        pix = QPixmap(r.image_ref)
-        if not pix.isNull():
-            scaled = pix.scaled(int(w), int(h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            pi = QGraphicsPixmapItem(scaled)
-            pi.setPos(x, y)
-            # Selectable so a filled image can be re-picked, but not movable —
-            # it sits on top of the (movable) placeholder rect and shouldn't be
-            # dragged off it.
-            _apply_flags(pi, selectable, r.id, movable=False)
-            scene.addItem(pi)
-            return
-
-    label = QGraphicsSimpleTextItem(r.name or "[image]")
+    label = QGraphicsSimpleTextItem(r.name or "[image]", item)  # child -> moves with frame
     label.setPos(x + 4, y + 4)
     label.setBrush(QBrush(QColor("#6C757D")))
-    scene.addItem(label)
 
 
-def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool, project_style=None) -> None:
+def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool, project_style=None,
+                     *, locked: bool = True) -> None:
     x, y, w, h = r.bbox
     # The dashed guide box is an editor-only affordance (it's also the region's
     # selectable/movable handle). Export paths call build_scene(selectable=False),
     # so skipping it there keeps the guides out of the rendered PNG/PDF.
+    box = None
     if selectable:
-        box = QGraphicsRectItem(QRectF(x, y, w, h))
+        box = _RegionRectItem(QRectF(x, y, w, h), r)
         box.setBrush(QBrush(Qt.transparent))
         pen = QPen(_TEXT_GUIDE_PEN, 1.5, Qt.DashLine)
         pen.setCosmetic(True)  # constant on-screen width at any zoom -> always visible
         box.setPen(pen)
-        _apply_flags(box, selectable, r.id)
+        _apply_flags(box, selectable, r.id, movable=(selectable and not locked))
         scene.addItem(box)
 
     text = QGraphicsSimpleTextItem(r.text or "")
@@ -103,19 +170,26 @@ def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool, project
     # QFont at its ~16px default, which is invisible on a 300-DPI page.
     font.setPixelSize(ts.size_px if ts and ts.size_px else _DEFAULT_TEXT_PX)
     text.setFont(font)
+    # In the editor the text is a child of the guide box so applied text stays
+    # locked to its frame and moves with it; on export there is no box, so the
+    # text is a top-level scene item.
+    if box is not None:
+        text.setParentItem(box)
+    else:
+        scene.addItem(text)
     text.setPos(x + 2, y + 2)
-    scene.addItem(text)
 
 
-def build_scene(page: PageSpec, *, selectable: bool = False, style=None) -> QGraphicsScene:
+def build_scene(page: PageSpec, *, selectable: bool = False, style=None,
+                locked: bool = True) -> QGraphicsScene:
     pw, ph = page.page_size_px
     scene = QGraphicsScene(0, 0, pw, ph)
     scene.setBackgroundBrush(QBrush(QColor(_resolve_bg(page))))
     for r in sorted(page.regions, key=lambda rr: rr.z):
         if r.kind == "image":
-            _add_image_region(scene, r, selectable)
+            _add_image_region(scene, r, selectable, locked=locked)
         else:
-            _add_text_region(scene, r, selectable, project_style=style)
+            _add_text_region(scene, r, selectable, project_style=style, locked=locked)
     return scene
 
 

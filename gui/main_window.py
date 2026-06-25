@@ -7411,6 +7411,13 @@ For more detailed information, please refer to the full documentation.
                 except Exception as e:
                     logger.error(f"Error auto-saving video project: {e}")
 
+            # Auto-save the Layout tab so it reloads its last layout on startup
+            if hasattr(self, 'tab_layout') and hasattr(self.tab_layout, 'save_session'):
+                try:
+                    self.tab_layout.save_session()
+                except Exception as e:
+                    logger.error(f"Error saving layout session: {e}")
+
             # Save window geometry
             geo = {
                 "x": self.x(),
