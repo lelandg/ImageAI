@@ -11,6 +11,7 @@ from PySide6.QtCore import Signal
 from core.layout.models import DocumentSpec, PageSpec, PageSize, TextStyle
 from core.layout import project_io, qt_renderer
 from core.layout import styles, template_io
+from core.layout import designer, prompt_helper, bundle_io
 from core.layout.history import History
 from gui.layout.page_setup_widget import PageSetupWidget
 from gui.layout.canvas_widget import CanvasWidget
@@ -30,6 +31,7 @@ class LayoutTab(QWidget):
         self.config = config
         self.document: Optional[DocumentSpec] = None
         self.history: Optional[History] = None
+        self._prompt_worker = None  # keep alive so the QThread isn't GC'd mid-run
         self._locked = self._load_locked()
         self._build()
         self._restore_session_or_new()
@@ -44,6 +46,8 @@ class LayoutTab(QWidget):
             ("History…", self._open_history),
             ("Export Template…", self._export_template_dialog),
             ("Import Template…", self._import_template_dialog),
+            ("Export Bundle…", self._export_bundle_dialog),
+            ("Import Bundle…", self._import_bundle_dialog),
         ]:
             btn = QPushButton(label)
             btn.clicked.connect(slot)
@@ -78,6 +82,8 @@ class LayoutTab(QWidget):
         self.inspector = ContentInspector(self.config)
         self.inspector.regionContentChanged.connect(self._on_region_content_changed)
         self.inspector.regionTextStyleChanged.connect(self._on_region_text_style_changed)
+        self.inspector.regionPromptChanged.connect(self._on_region_prompt_changed)
+        self.inspector.regionPromptSuggestRequested.connect(self._on_region_prompt_suggest)
         root.addWidget(self.inspector)
         self.canvas.regionSelected.connect(self._on_region_selected)
 
@@ -249,6 +255,73 @@ class LayoutTab(QWidget):
             region.text = value
         self._refresh()
 
+    # --- per-region AI image-prompt help (Phase 5a) ---
+    def _on_region_prompt_changed(self, region_id: str, prompt: str):
+        """Persist an edited image prompt on the region (metadata; no re-render)."""
+        region = self._find_region(region_id)
+        if region is None or region.kind != "image":
+            return
+        region.prompt = prompt
+        self.status.setText(f"Saved prompt for {region.name or region.id}")
+
+    def _on_region_prompt_suggest(self, region_id: str, hint: str):
+        self.suggest_region_prompt(region_id, hint)
+
+    def suggest_region_prompt(self, region_id: str, hint: str = "", completion_fn=None):
+        """Draft an image prompt for ``region_id`` from the project theme.
+
+        ``completion_fn`` is injected in tests (run synchronously); in production
+        it wraps ``designer.run_completion`` with the Designer panel's selected
+        provider/model so there's a single LLM config for the tab.
+        """
+        region = self._find_region(region_id)
+        if region is None or region.kind != "image" or self.document is None:
+            return
+        if self._prompt_worker is not None and self._prompt_worker.isRunning():
+            self.designer.console.log("A prompt suggestion is already running.", "WARNING")
+            return
+        messages = prompt_helper.build_prompt_messages(self.document, region, hint)
+        self.designer.console.log(
+            f"Suggesting image prompt for {region.name or region.id}:\n"
+            + messages[-1]["content"], "INFO")
+        injected = completion_fn is not None
+        if completion_fn is None:
+            provider = self.designer.provider_combo.currentText()
+            model = self.designer.model_combo.currentText()
+            cfg = self.config
+            completion_fn = lambda m: designer.run_completion(cfg, provider, model, m)
+        self.inspector.set_suggest_enabled(False)
+        from gui.layout.prompt_worker import PromptSuggestWorker
+        self._prompt_worker = PromptSuggestWorker(region_id, messages, completion_fn)
+        self._prompt_worker.suggested.connect(self._on_prompt_suggested)
+        self._prompt_worker.failed.connect(self._on_prompt_failed)
+        if injected:
+            self._prompt_worker.run()   # synchronous for injected/test completions
+        else:
+            self._prompt_worker.start()
+
+    def _on_prompt_suggested(self, region_id: str, prompt: str):
+        self.inspector.set_suggest_enabled(True)
+        region = self._find_region(region_id)
+        if region is None or region.kind != "image":
+            return
+        if not prompt:
+            self.designer.console.log(
+                "Prompt suggestion came back empty — keeping the existing prompt.",
+                "WARNING")
+            return
+        region.prompt = prompt
+        self.inspector.set_prompt_text(region_id, prompt)
+        self.designer.console.log("Suggested prompt:\n" + prompt, "SUCCESS")
+        self.status.setText(f"Suggested prompt for {region.name or region.id}")
+
+    def _on_prompt_failed(self, region_id: str, err: str):
+        self.inspector.set_suggest_enabled(True)
+        if not self.designer.console_toggle.isChecked():
+            self.designer.console_toggle.setChecked(True)  # surface the failure
+        self.designer.console.log(f"Prompt suggestion failed: {err}", "ERROR")
+        self.status.setText("Error: prompt suggestion failed")
+
     # --- programmatic API (tested) ---
     def save_project_to(self, path: str):
         project_io.save_project(self.document, path)
@@ -324,6 +397,69 @@ class LayoutTab(QWidget):
     def import_template_from(self, path: str):
         self._adopt_document(template_io.import_template(path))
         self._refresh()
+
+    # --- bundles (.iaibundle: project + images + fonts, self-contained) ---
+    def _bundle_font_resolver(self):
+        """Lazily build a font_resolver from FontManager (best-effort).
+
+        Discovery scans system fonts, so it's built once and cached; any failure
+        degrades to None (fonts recorded by-name) — never blocks export.
+        """
+        if getattr(self, "_font_manager", None) is None:
+            try:
+                from core.layout.font_manager import FontManager
+                custom = self.config.get_fonts_dir() if self.config else None
+                self._font_manager = FontManager(
+                    custom_dirs=[custom] if custom else None)
+            except Exception:  # noqa: BLE001 - font scan must never block export
+                logger.exception("Layout: font discovery failed; bundling by name")
+                self._font_manager = False  # sentinel: tried and failed
+        fm = self._font_manager
+        return fm.select_font_file if fm else None
+
+    def _bundle_extract_dir(self, path: str) -> Path:
+        stem = Path(path).stem
+        base = getattr(self.config, "config_dir", None) if self.config else None
+        if base:
+            return Path(base) / "layout" / "bundles" / stem
+        return Path(path).parent / f"{stem}_files"
+
+    def export_bundle_to(self, path: str):
+        if self.document is None:
+            return
+        manifest = bundle_io.export_bundle(
+            self.document, path, font_resolver=self._bundle_font_resolver())
+        msg = f"Exported bundle {path}"
+        if manifest.warnings:
+            msg += f" ({len(manifest.warnings)} warning(s))"
+        self.status.setText(msg)
+
+    def import_bundle_from(self, path: str):
+        dest = self._bundle_extract_dir(path)
+        self._adopt_document(bundle_io.import_bundle(path, str(dest)))
+        page = (self.document.pages[0]
+                if self.document and self.document.pages else None)
+        if page is not None and page.page_size and hasattr(self, "page_setup"):
+            self.page_setup.set_page_size(page.page_size)
+        self._refresh()
+
+    def _export_bundle_dialog(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export Bundle", "",
+                                              "ImageAI Layout Bundle (*.iaibundle)")
+        if path:
+            try:
+                self.export_bundle_to(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("export bundle", e)
+
+    def _import_bundle_dialog(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Import Bundle", "",
+                                              "ImageAI Layout Bundle (*.iaibundle)")
+        if path:
+            try:
+                self.import_bundle_from(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("import bundle", e)
 
     # --- error reporting (repo rule: all errors logged + shown to the user) ---
     def _report_error(self, what: str, exc: Exception):
