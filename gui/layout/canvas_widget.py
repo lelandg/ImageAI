@@ -20,15 +20,15 @@ class CanvasWidget(QGraphicsView):
         self._scene: Optional[QGraphicsScene] = None
         self.setScene(QGraphicsScene(self))
 
-    def load_page(self, page: PageSpec) -> None:
+    def load_page(self, page: PageSpec, style=None) -> None:
         old = self._scene
         if old is not None:
             try:
                 old.selectionChanged.disconnect(self._on_selection_changed)
             except (RuntimeError, TypeError):
-                pass  # old scene's signal was not connected
+                pass
         self._page = page
-        scene = qt_renderer.build_scene(page, selectable=True)
+        scene = qt_renderer.build_scene(page, selectable=True, style=style)
         scene.setParent(self)
         scene.selectionChanged.connect(self._on_selection_changed)
         self.setScene(scene)

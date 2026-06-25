@@ -19,6 +19,9 @@ _SYSTEM = (
 def build_messages(content_kind: str, page_px: Tuple[int, int], user_text: str,
                    current_regions: Optional[List[Region]] = None) -> List[Dict[str, str]]:
     pw, ph = page_px
+    from core.layout import styles
+    role_names = sorted(styles.default_style_for(content_kind).font_roles.keys())
+    roles = ", ".join(role_names)
     current = ""
     if current_regions:
         current = (
@@ -39,8 +42,9 @@ def build_messages(content_kind: str, page_px: Tuple[int, int], user_text: str,
         f'  "layout": {{ "regions": [ {{\n'
         f'      "id": string, "kind": "image"|"text", "shape": "rect"|"polygon",\n'
         f'      "bbox": [x,y,w,h], "points": [[x,y],...] (polygon only),\n'
-        f'      "z": int, "text": string (text only) }} ] }}\n'
+        f'      "z": int, "role": string, "text": string (text only) }} ] }}\n'
         f"All coordinates MUST be within the page ({pw} x {ph}). Prefer 'rect' unless the\n"
+        f"Each text region MUST set \"role\" to one of: {roles}.\n"
         f"request implies panels that flow into each other (then use 'polygon'). You may\n"
         f"return questions, a layout, or both.\n"
         f"</instructions>"
