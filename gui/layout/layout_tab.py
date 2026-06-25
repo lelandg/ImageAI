@@ -425,6 +425,8 @@ class LayoutTab(QWidget):
         return Path(path).parent / f"{stem}_files"
 
     def export_bundle_to(self, path: str):
+        if self.document is None:
+            return
         manifest = bundle_io.export_bundle(
             self.document, path, font_resolver=self._bundle_font_resolver())
         msg = f"Exported bundle {path}"
