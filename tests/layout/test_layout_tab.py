@@ -41,3 +41,20 @@ def test_export_pdf(qapp, tmp_path):
     out = tmp_path / "out.pdf"
     tab.export_pdf_to(str(out))
     assert out.exists() and out.read_bytes()[:4] == b"%PDF"
+
+
+def test_open_dialog_reports_error_on_malformed_file(qapp, tmp_path, monkeypatch):
+    # A malformed project file must not raise out of the Qt slot — it must be
+    # logged and surfaced via a dialog (repo rule: all errors logged + shown).
+    import gui.layout.layout_tab as lt
+    bad = tmp_path / "bad.iaiproj.json"
+    bad.write_text("{ this is not valid json", encoding="utf-8")
+    monkeypatch.setattr(lt.QFileDialog, "getOpenFileName",
+                        staticmethod(lambda *a, **k: (str(bad), "")))
+    reported = {}
+    monkeypatch.setattr(LayoutTab, "_report_error",
+                        lambda self, what, exc: reported.update(what=what, exc=exc))
+    tab = LayoutTab(config=FakeConfig())
+    tab._open_dialog()  # must not raise
+    assert reported.get("what") == "open project"
+    assert isinstance(reported.get("exc"), Exception)

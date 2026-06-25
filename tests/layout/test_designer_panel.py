@@ -33,3 +33,20 @@ def test_panel_start_design_emits_layout_proposed(qapp):
     fake = lambda m: '{"layout": {"regions": [{"id":"z","kind":"text","bbox":[0,0,50,50],"text":"hi"}]}}'
     p.start_design("a title page", (300, 300), completion_fn=fake)
     assert got and [r.id for r in got[0].regions] == ["z"]
+
+
+def test_design_button_reenabled_after_completion(qapp):
+    p = DesignerPanel(FakeConfig())
+    fake = lambda m: '{"layout": {"regions": [{"id":"z","kind":"image","bbox":[0,0,50,50]}]}}'
+    p.start_design("a page", (300, 300), completion_fn=fake)
+    assert p.design_btn.isEnabled()  # re-enabled once the (synchronous) design finished
+
+
+def test_design_button_reenabled_after_failure(qapp):
+    p = DesignerPanel(FakeConfig())
+
+    def boom(m):
+        raise RuntimeError("provider exploded")
+
+    p.start_design("a page", (300, 300), completion_fn=boom)
+    assert p.design_btn.isEnabled()  # _on_failed must re-enable the button

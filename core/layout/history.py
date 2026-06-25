@@ -12,6 +12,11 @@ class History:
 
     def __init__(self, document: DocumentSpec):
         self.document = document
+        # The snapshot the next append should parent to. None → fall back to the
+        # latest snapshot (linear history). Set by branch_from() after a restore
+        # so a design that continues from a restored point records the real
+        # branch topology rather than re-parenting to the timeline's tail.
+        self._current_id: Optional[str] = None
 
     def snapshots(self) -> List[Snapshot]:
         return self.document.history
@@ -26,8 +31,11 @@ class History:
                timestamp: Optional[str] = None, parent_id: Optional[str] = None) -> Snapshot:
         doc_dict = schema.document_to_dict(self.document)
         doc_dict.pop("history", None)  # never nest history inside a snapshot
-        if parent_id is None and self.document.history:
-            parent_id = self.document.history[-1].id
+        if parent_id is None:
+            if self._current_id is not None:
+                parent_id = self._current_id
+            elif self.document.history:
+                parent_id = self.document.history[-1].id
         snap = Snapshot(
             id=snapshot_id or uuid.uuid4().hex[:8],
             parent_id=parent_id,
@@ -36,7 +44,13 @@ class History:
             document=doc_dict,
         )
         self.document.history.append(snap)
+        self._current_id = snap.id  # subsequent appends chain from this snapshot
         return snap
+
+    def branch_from(self, snapshot_id: str) -> None:
+        """Record the snapshot a restore branched from, so the next append
+        parents to it (faithful branch topology, not the timeline's tail)."""
+        self._current_id = snapshot_id
 
     def restore(self, snapshot_id: str) -> DocumentSpec:
         snap = self.get(snapshot_id)

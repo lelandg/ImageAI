@@ -16,6 +16,7 @@ from gui.layout.canvas_widget import CanvasWidget
 from gui.layout.designer_panel import DesignerPanel
 from gui.layout.history_window import HistoryWindow
 from gui.layout.style_panel import StylePanel
+from gui.layout.content_inspector import ContentInspector
 
 logger = logging.getLogger("imageai.layout.tab")
 
@@ -64,6 +65,11 @@ class LayoutTab(QWidget):
         self.canvas = CanvasWidget()
         root.addWidget(self.canvas, 1)
 
+        self.inspector = ContentInspector(self.config)
+        self.inspector.regionContentChanged.connect(self._on_region_content_changed)
+        root.addWidget(self.inspector)
+        self.canvas.regionSelected.connect(self._on_region_selected)
+
         self.status = QLabel("")
         root.addWidget(self.status)
 
@@ -76,6 +82,8 @@ class LayoutTab(QWidget):
         self._style_user_modified = False
         if hasattr(self, "style_panel") and self.document.style:
             self.style_panel.set_style(self.document.style)
+        if hasattr(self, "inspector"):
+            self.inspector.set_region(None)
 
     def new_document(self):
         ps = self.page_setup.page_size() if hasattr(self, "page_setup") else PageSize(8.5, 11, "in")
@@ -97,6 +105,38 @@ class LayoutTab(QWidget):
             self.canvas.load_page(self.document.pages[0], self.document.style)
             self.status.setText(f"{self.document.title} — {self.document.pages[0].page_size_px}")
         self.documentChanged.emit()
+
+    # --- content inspector ---
+    def _find_region(self, region_id: str):
+        # MVP edits the first page only (the whole tab operates on pages[0]);
+        # revisit when multi-page navigation lands.
+        if not region_id or not self.document or not self.document.pages:
+            return None
+        for r in self.document.pages[0].regions:
+            if r.id == region_id:
+                return r
+        return None
+
+    def _on_region_selected(self, region_id: str):
+        self.inspector.set_region(self._find_region(region_id))
+
+    def _on_region_content_changed(self, region_id: str, value: str):
+        self.set_region_content(region_id, value)
+
+    def set_region_content(self, region_id: str, value: str):
+        """Apply edited content to a region and re-render (programmatic API)."""
+        region = self._find_region(region_id)
+        if region is None:
+            return
+        if region.kind == "image":
+            if region.image_ref == value:
+                return
+            region.image_ref = value
+        else:
+            if region.text == value:
+                return
+            region.text = value
+        self._refresh()
 
     # --- programmatic API (tested) ---
     def save_project_to(self, path: str):
@@ -147,6 +187,9 @@ class LayoutTab(QWidget):
     def restore_snapshot(self, snapshot_id: str):
         restored = self.history.restore(snapshot_id)
         self._adopt_document(restored)
+        # Continuing from a restored point is a branch: the next design snapshot
+        # must parent to snapshot_id, not the timeline's tail.
+        self.history.branch_from(snapshot_id)
         self._refresh()
 
     def _open_history(self):
@@ -171,33 +214,57 @@ class LayoutTab(QWidget):
         self._adopt_document(template_io.import_template(path))
         self._refresh()
 
+    # --- error reporting (repo rule: all errors logged + shown to the user) ---
+    def _report_error(self, what: str, exc: Exception):
+        logger.error("Layout: failed to %s: %s", what, exc, exc_info=True)
+        if hasattr(self, "status"):
+            self.status.setText(f"Error: failed to {what}")
+        try:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "Layout error", f"Failed to {what}:\n{exc}")
+        except Exception:  # noqa: BLE001 - error reporting must never itself crash
+            pass
+
     def _export_template_dialog(self):
-        from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getSaveFileName(self, "Export Template", "",
                                               "ImageAI Layout Template (*.iailayout.json)")
         if path:
-            self.export_template_to(path)
+            try:
+                self.export_template_to(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("export template", e)
 
     def _import_template_dialog(self):
-        from PySide6.QtWidgets import QFileDialog
         path, _ = QFileDialog.getOpenFileName(self, "Import Template", "",
                                               "ImageAI Layout Template (*.iailayout.json)")
         if path:
-            self.import_template_from(path)
+            try:
+                self.import_template_from(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("import template", e)
 
     # --- dialogs ---
     def _save_dialog(self):
         path, _ = QFileDialog.getSaveFileName(self, "Save Project", "", "ImageAI Project (*.iaiproj.json)")
         if path:
-            self.save_project_to(path)
+            try:
+                self.save_project_to(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("save project", e)
 
     def _open_dialog(self):
         path, _ = QFileDialog.getOpenFileName(self, "Open Project", "",
                                               "ImageAI Project (*.iaiproj.json *.layout.json)")
         if path:
-            self.open_project_from(path)
+            try:
+                self.open_project_from(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("open project", e)
 
     def _export_dialog(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export PDF", "", "PDF (*.pdf)")
         if path:
-            self.export_pdf_to(path)
+            try:
+                self.export_pdf_to(path)
+            except Exception as e:  # noqa: BLE001 - surfaced to UI + log
+                self._report_error("export PDF", e)

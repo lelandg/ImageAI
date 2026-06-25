@@ -49,6 +49,27 @@ def test_export_pdf(qapp, tmp_path):
     assert out.read_bytes()[:4] == b"%PDF"
 
 
+def test_filled_image_region_is_selectable(qapp, tmp_path):
+    # The loaded image draws a pixmap ON TOP of the placeholder rect; that
+    # topmost item is what a click hits, so it must itself be selectable and
+    # carry the region id (else a filled image region can't be re-selected).
+    from PySide6.QtWidgets import QGraphicsItem, QGraphicsPixmapItem
+    from PySide6.QtGui import QImage
+    from PySide6.QtCore import Qt
+    img_path = tmp_path / "ref.png"
+    im = QImage(20, 20, QImage.Format_RGB32)
+    im.fill(Qt.white)
+    assert im.save(str(img_path))
+    page = PageSpec(page_size_px=(200, 150), background="#FFFFFF", regions=[
+        Region(id="img1", kind="image", bbox=(10, 10, 80, 80), image_ref=str(img_path))])
+    scene = qt_renderer.build_scene(page, selectable=True)
+    pix_items = [it for it in scene.items() if isinstance(it, QGraphicsPixmapItem)]
+    assert pix_items, "expected a pixmap item for the loaded image"
+    pi = pix_items[0]
+    assert pi.flags() & QGraphicsItem.ItemIsSelectable
+    assert pi.data(0) == "img1"
+
+
 def test_text_region_resolves_font_role_from_style(qapp):
     from core.layout.models import Region, PageSpec, ProjectStyle, TextStyle
     from core.layout import qt_renderer

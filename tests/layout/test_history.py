@@ -61,3 +61,22 @@ def test_history_get_missing_returns_none():
     from core.layout.history import History
     h = History(_doc_with_text("v1"))
     assert h.get("nope") is None
+
+
+def test_branch_from_records_real_branch_topology():
+    from core.layout.history import History
+    doc = _doc_with_text("v1")
+    h = History(doc)
+    h.append("first", snapshot_id="s1", timestamp="t1")
+    doc.pages[0].regions[0].text = "v2"
+    h.append("second", snapshot_id="s2", timestamp="t2")
+    # user restores s1 and keeps iterating -> a fresh History on the restored doc
+    restored = h.restore("s1")
+    h2 = History(restored)
+    h2.branch_from("s1")
+    s3 = h2.append("third", snapshot_id="s3", timestamp="t3")
+    # parents to the restored branch point, NOT the timeline tail (s2)
+    assert s3.parent_id == "s1"
+    # and the next append chains from s3, not s1 again
+    s4 = h2.append("fourth", snapshot_id="s4", timestamp="t4")
+    assert s4.parent_id == "s3"
