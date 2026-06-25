@@ -27,6 +27,8 @@ class ContentInspector(QWidget):
 
     regionContentChanged = Signal(str, str)       # (region_id, new_value)
     regionTextStyleChanged = Signal(str, str, int)  # (region_id, family, size_px)
+    regionPromptChanged = Signal(str, str)          # (region_id, image prompt)
+    regionPromptSuggestRequested = Signal(str, str)  # (region_id, hint = current prompt)
 
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
@@ -67,6 +69,25 @@ class ContentInspector(QWidget):
         self.image_ref_label.setWordWrap(True)
         self.image_ref_label.setStyleSheet("color: #666; font-size: 11px;")
         img_lay.addWidget(self.image_ref_label)
+
+        # Image-generation prompt (saved on the region; used by the AI handoff /
+        # batch phases). "Suggest with AI" drafts one from the project theme.
+        img_lay.addWidget(QLabel("Image prompt:"))
+        self.prompt_edit = QPlainTextEdit()
+        self.prompt_edit.setPlaceholderText(
+            "Prompt for generating this image (optional)…")
+        self.prompt_edit.setFixedHeight(70)
+        img_lay.addWidget(self.prompt_edit)
+        prompt_btns = QHBoxLayout()
+        self.suggest_prompt_btn = QPushButton("Suggest with AI")
+        self.suggest_prompt_btn.clicked.connect(self._on_suggest_prompt)
+        self.apply_prompt_btn = QPushButton("Apply prompt")
+        self.apply_prompt_btn.clicked.connect(self._on_apply_prompt)
+        prompt_btns.addWidget(self.suggest_prompt_btn)
+        prompt_btns.addWidget(self.apply_prompt_btn)
+        prompt_btns.addStretch(1)
+        img_lay.addLayout(prompt_btns)
+
         img_lay.addStretch(1)
         self.stack.addWidget(img_page)
 
@@ -135,6 +156,9 @@ class ContentInspector(QWidget):
         if region.kind == "image":
             self.header.setText(f"Image region: {label}")
             self.image_ref_label.setText(region.image_ref or "(no image)")
+            self.prompt_edit.blockSignals(True)
+            self.prompt_edit.setPlainText(region.prompt or "")
+            self.prompt_edit.blockSignals(False)
             self.stack.setCurrentIndex(1)
         else:
             self.header.setText(f"Text region: {label}")
@@ -179,6 +203,30 @@ class ContentInspector(QWidget):
             return
         self.image_ref_label.setText(path)
         self.regionContentChanged.emit(self._region.id, path)
+
+    # --- image prompt ---
+    def _on_apply_prompt(self):
+        if self._region is None:
+            return
+        self.regionPromptChanged.emit(self._region.id, self.prompt_edit.toPlainText().strip())
+
+    def _on_suggest_prompt(self):
+        if self._region is None:
+            return
+        # The current text doubles as a hint to steer the suggestion.
+        self.regionPromptSuggestRequested.emit(
+            self._region.id, self.prompt_edit.toPlainText().strip())
+
+    def set_prompt_text(self, region_id: str, text: str):
+        """Push an AI-suggested prompt into the box (only if still showing it)."""
+        if self._region is not None and self._region.id == region_id:
+            self.prompt_edit.blockSignals(True)
+            self.prompt_edit.setPlainText(text)
+            self.prompt_edit.blockSignals(False)
+
+    def set_suggest_enabled(self, enabled: bool):
+        """Disable the Suggest button while a suggestion is in flight."""
+        self.suggest_prompt_btn.setEnabled(enabled)
 
     # --- text ---
     def _on_apply_text(self):

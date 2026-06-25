@@ -11,6 +11,7 @@ from PySide6.QtCore import Signal
 from core.layout.models import DocumentSpec, PageSpec, PageSize, TextStyle
 from core.layout import project_io, qt_renderer
 from core.layout import styles, template_io
+from core.layout import designer, prompt_helper
 from core.layout.history import History
 from gui.layout.page_setup_widget import PageSetupWidget
 from gui.layout.canvas_widget import CanvasWidget
@@ -30,6 +31,7 @@ class LayoutTab(QWidget):
         self.config = config
         self.document: Optional[DocumentSpec] = None
         self.history: Optional[History] = None
+        self._prompt_worker = None  # keep alive so the QThread isn't GC'd mid-run
         self._locked = self._load_locked()
         self._build()
         self._restore_session_or_new()
@@ -78,6 +80,8 @@ class LayoutTab(QWidget):
         self.inspector = ContentInspector(self.config)
         self.inspector.regionContentChanged.connect(self._on_region_content_changed)
         self.inspector.regionTextStyleChanged.connect(self._on_region_text_style_changed)
+        self.inspector.regionPromptChanged.connect(self._on_region_prompt_changed)
+        self.inspector.regionPromptSuggestRequested.connect(self._on_region_prompt_suggest)
         root.addWidget(self.inspector)
         self.canvas.regionSelected.connect(self._on_region_selected)
 
@@ -248,6 +252,73 @@ class LayoutTab(QWidget):
                 return
             region.text = value
         self._refresh()
+
+    # --- per-region AI image-prompt help (Phase 5a) ---
+    def _on_region_prompt_changed(self, region_id: str, prompt: str):
+        """Persist an edited image prompt on the region (metadata; no re-render)."""
+        region = self._find_region(region_id)
+        if region is None or region.kind != "image":
+            return
+        region.prompt = prompt
+        self.status.setText(f"Saved prompt for {region.name or region.id}")
+
+    def _on_region_prompt_suggest(self, region_id: str, hint: str):
+        self.suggest_region_prompt(region_id, hint)
+
+    def suggest_region_prompt(self, region_id: str, hint: str = "", completion_fn=None):
+        """Draft an image prompt for ``region_id`` from the project theme.
+
+        ``completion_fn`` is injected in tests (run synchronously); in production
+        it wraps ``designer.run_completion`` with the Designer panel's selected
+        provider/model so there's a single LLM config for the tab.
+        """
+        region = self._find_region(region_id)
+        if region is None or region.kind != "image" or self.document is None:
+            return
+        if self._prompt_worker is not None and self._prompt_worker.isRunning():
+            self.designer.console.log("A prompt suggestion is already running.", "WARNING")
+            return
+        messages = prompt_helper.build_prompt_messages(self.document, region, hint)
+        self.designer.console.log(
+            f"Suggesting image prompt for {region.name or region.id}:\n"
+            + messages[-1]["content"], "INFO")
+        injected = completion_fn is not None
+        if completion_fn is None:
+            provider = self.designer.provider_combo.currentText()
+            model = self.designer.model_combo.currentText()
+            cfg = self.config
+            completion_fn = lambda m: designer.run_completion(cfg, provider, model, m)
+        self.inspector.set_suggest_enabled(False)
+        from gui.layout.prompt_worker import PromptSuggestWorker
+        self._prompt_worker = PromptSuggestWorker(region_id, messages, completion_fn)
+        self._prompt_worker.suggested.connect(self._on_prompt_suggested)
+        self._prompt_worker.failed.connect(self._on_prompt_failed)
+        if injected:
+            self._prompt_worker.run()   # synchronous for injected/test completions
+        else:
+            self._prompt_worker.start()
+
+    def _on_prompt_suggested(self, region_id: str, prompt: str):
+        self.inspector.set_suggest_enabled(True)
+        region = self._find_region(region_id)
+        if region is None or region.kind != "image":
+            return
+        if not prompt:
+            self.designer.console.log(
+                "Prompt suggestion came back empty — keeping the existing prompt.",
+                "WARNING")
+            return
+        region.prompt = prompt
+        self.inspector.set_prompt_text(region_id, prompt)
+        self.designer.console.log("Suggested prompt:\n" + prompt, "SUCCESS")
+        self.status.setText(f"Suggested prompt for {region.name or region.id}")
+
+    def _on_prompt_failed(self, region_id: str, err: str):
+        self.inspector.set_suggest_enabled(True)
+        if not self.designer.console_toggle.isChecked():
+            self.designer.console_toggle.setChecked(True)  # surface the failure
+        self.designer.console.log(f"Prompt suggestion failed: {err}", "ERROR")
+        self.status.setText("Error: prompt suggestion failed")
 
     # --- programmatic API (tested) ---
     def save_project_to(self, path: str):

@@ -112,3 +112,40 @@ def test_populate_fonts_fills_combo(qapp):
     insp._populate_fonts(["Alpha", "Beta", "Gamma"])
     items = [insp.font_combo.itemText(i) for i in range(insp.font_combo.count())]
     assert items == ["Alpha", "Beta", "Gamma"]
+
+
+def test_image_page_loads_prompt(qapp):
+    insp = ContentInspector()
+    insp.set_region(_img(rid="i", ref="/p.png"))
+    insp._region.prompt = "a castle"          # set then re-show
+    insp.set_region(insp._region)
+    assert insp.prompt_edit.toPlainText() == "a castle"
+
+
+def test_apply_prompt_emits(qapp):
+    insp = ContentInspector()
+    insp.set_region(_img(rid="i1"))
+    got = []
+    insp.regionPromptChanged.connect(lambda rid, v: got.append((rid, v)))
+    insp.prompt_edit.setPlainText("a glowing forest")
+    insp.apply_prompt_btn.click()
+    assert got == [("i1", "a glowing forest")]
+
+
+def test_suggest_prompt_emits_with_hint(qapp):
+    insp = ContentInspector()
+    insp.set_region(_img(rid="i1"))
+    got = []
+    insp.regionPromptSuggestRequested.connect(lambda rid, hint: got.append((rid, hint)))
+    insp.prompt_edit.setPlainText("dawn light")   # current text becomes the hint
+    insp.suggest_prompt_btn.click()
+    assert got == [("i1", "dawn light")]
+
+
+def test_set_prompt_text_only_updates_current_region(qapp):
+    insp = ContentInspector()
+    insp.set_region(_img(rid="i1"))
+    insp.set_prompt_text("other", "ignored")
+    assert insp.prompt_edit.toPlainText() == ""
+    insp.set_prompt_text("i1", "applied")
+    assert insp.prompt_edit.toPlainText() == "applied"
