@@ -73,8 +73,8 @@ def _first_image_bytes(response: Dict) -> Optional[bytes]:
             if data:
                 try:
                     return base64.b64decode(data)
-                except Exception:  # noqa: BLE001 - skip a malformed part
-                    return None
+                except Exception:  # noqa: BLE001 - skip a malformed part, keep scanning
+                    continue
     return None
 
 

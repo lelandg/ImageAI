@@ -63,6 +63,19 @@ def test_parse_result_jsonl_keys_images():
     assert out == {"i1": b"IMG-1", "i3": b"IMG-3"}
 
 
+def test_parse_result_jsonl_recovers_after_malformed_part():
+    # A bad part must not shadow a valid image part later in the same response.
+    good = base64.b64encode(b"OK").decode("ascii")
+    line = json.dumps({
+        "key": "i1",
+        "response": {"candidates": [{"content": {"parts": [
+            {"inline_data": {"data": "!!notbase64!!="}},   # malformed
+            {"inline_data": {"data": good}},               # valid -> used
+        ]}}]},
+    })
+    assert batch_fill.parse_result_jsonl(line) == {"i1": b"OK"}
+
+
 def test_results_to_placements_filters_to_doc_regions():
     doc = _doc([Region(id="i1", kind="image", bbox=(0, 0, 10, 10), prompt="x")])
     placements = batch_fill.results_to_placements(doc, {"i1": b"A", "ghost": b"B"})

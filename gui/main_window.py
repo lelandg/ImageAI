@@ -6087,6 +6087,7 @@ For more detailed information, please refer to the full documentation.
         self._append_to_console(f"ERROR: {error}", "#ff6666")  # Red
         QMessageBox.critical(self, APP_NAME, f"Generation failed:\n{error}")
         self.btn_generate.setEnabled(True)
+        self._clear_layout_handoff()  # a failed handoff must not misroute a later run
         self._cleanup_thread()
 
     def _on_streaming_partial(self, idx: int, png_bytes: bytes):
@@ -6168,12 +6169,23 @@ For more detailed information, please refer to the full documentation.
         if cur is not None:
             self._configure_image_for_region(cur)
 
+    def _clear_layout_handoff(self):
+        """Drop any pending layout handoff so a later normal generation can't be
+        misrouted into a region (called on every generation failure path)."""
+        self._pending_layout_region_id = None
+        self._layout_fill_plan = None
+
     def _maybe_place_image_in_layout(self, saved_paths):
         """Place a generated image into its region, then advance the fill plan."""
         region_id = getattr(self, "_pending_layout_region_id", None)
-        if not region_id or not saved_paths:
+        if not region_id:
             return
         self._pending_layout_region_id = None  # consume regardless of outcome
+        if not saved_paths:
+            # Generation produced no file — release the handoff and stop any fill
+            # plan rather than risk routing a later image into this region.
+            self._layout_fill_plan = None
+            return
         try:
             path = str(saved_paths[0])
             if hasattr(self.tab_layout, "set_region_content"):
@@ -6255,6 +6267,7 @@ For more detailed information, please refer to the full documentation.
                 self._append_to_console("  • Transient API issue - try again", "#ffcc66")
             # Re-enable the generate button so user can try again
             self.btn_generate.setEnabled(True)
+            self._clear_layout_handoff()  # no image: release any pending handoff
             self._cleanup_thread()
             return
 
