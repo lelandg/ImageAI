@@ -557,6 +557,16 @@ class MainWindow(QMainWindow):
             logger.error(f"Failed to create layout tab: {e}", exc_info=True)
             self.tab_layout = QWidget()  # Fallback placeholder
 
+        # Phase 5b: cross-tab handoff. The Layout tab asks us to open the Image
+        # tab pre-configured for a region; we route the generated image back into
+        # that region by id (see _on_layout_send_to_image / _maybe_place_image_in_layout).
+        self._pending_layout_region_id = None
+        self._layout_fill_plan = None  # FillPlan driving layout-complete mode
+        if hasattr(self.tab_layout, "sendToImageRequested"):
+            self.tab_layout.sendToImageRequested.connect(self._on_layout_send_to_image)
+        if hasattr(self.tab_layout, "fillAllRequested"):
+            self.tab_layout.fillAllRequested.connect(self._on_layout_fill_all)
+
         # Add tabs
         self.tabs.addTab(self.tab_generate, "🎨 Image")
         self.tabs.addTab(self.tab_templates, "📝 Templates")
@@ -6077,6 +6087,7 @@ For more detailed information, please refer to the full documentation.
         self._append_to_console(f"ERROR: {error}", "#ff6666")  # Red
         QMessageBox.critical(self, APP_NAME, f"Generation failed:\n{error}")
         self.btn_generate.setEnabled(True)
+        self._clear_layout_handoff()  # a failed handoff must not misroute a later run
         self._cleanup_thread()
 
     def _on_streaming_partial(self, idx: int, png_bytes: bytes):
@@ -6098,6 +6109,108 @@ For more detailed information, please refer to the full documentation.
         except Exception as e:  # noqa: BLE001
             if hasattr(self, 'logger'):
                 self.logger.warning(f"Failed to render streaming partial: {e}")
+
+    def _configure_image_for_region(self, payload: dict):
+        """Set the Image tab's prompt + size for a region and mark it pending.
+
+        Every step is guarded so a Layout handoff can never destabilize the tab.
+        """
+        try:
+            if not isinstance(payload, dict):
+                return
+            region_id = payload.get("region_id")
+            prompt = payload.get("prompt") or ""
+            width, height = payload.get("width"), payload.get("height")
+            if hasattr(self, "prompt_edit") and self.prompt_edit is not None:
+                self.prompt_edit.setPlainText(prompt)
+            if (width and height and hasattr(self, "resolution_selector")
+                    and self.resolution_selector is not None):
+                try:
+                    self.resolution_selector.set_resolution(f"{int(width)}x{int(height)}")
+                except Exception:  # noqa: BLE001 - sizing is best-effort
+                    logger.exception("Layout handoff: could not set resolution")
+            self._pending_layout_region_id = region_id
+            if hasattr(self, "tabs") and hasattr(self, "tab_generate"):
+                self.tabs.setCurrentWidget(self.tab_generate)
+            logger.info("Layout handoff: Image tab configured for region %s (%sx%s)",
+                        region_id, width, height)
+        except Exception:  # noqa: BLE001 - never let a handoff crash the UI
+            logger.exception("Layout handoff: configuring Image tab failed")
+
+    def _on_layout_send_to_image(self, payload: dict):
+        """Single-region handoff: a one-element fill plan (Phase 5b)."""
+        if not isinstance(payload, dict):
+            return
+        self._begin_layout_fill([payload])
+        if hasattr(self, "status_label"):
+            self.status_label.setText(
+                "Image tab ready for the layout region — review and Generate.")
+
+    def _on_layout_fill_all(self, payloads):
+        """Layout-complete mode: fill every prompted image region in sequence."""
+        try:
+            payloads = [p for p in (payloads or []) if isinstance(p, dict)]
+        except TypeError:
+            return
+        if not payloads:
+            if hasattr(self, "status_label"):
+                self.status_label.setText("No image regions with prompts to fill.")
+            return
+        self._begin_layout_fill(payloads)
+        done, total = self._layout_fill_plan.progress()
+        if hasattr(self, "status_label"):
+            self.status_label.setText(
+                f"Layout fill: region {done} of {total} — review and Generate.")
+
+    def _begin_layout_fill(self, payloads):
+        from core.layout.fill_plan import FillPlan
+        self._layout_fill_plan = FillPlan(list(payloads))
+        cur = self._layout_fill_plan.current()
+        if cur is not None:
+            self._configure_image_for_region(cur)
+
+    def _clear_layout_handoff(self):
+        """Drop any pending layout handoff so a later normal generation can't be
+        misrouted into a region (called on every generation failure path)."""
+        self._pending_layout_region_id = None
+        self._layout_fill_plan = None
+
+    def _maybe_place_image_in_layout(self, saved_paths):
+        """Place a generated image into its region, then advance the fill plan."""
+        region_id = getattr(self, "_pending_layout_region_id", None)
+        if not region_id:
+            return
+        self._pending_layout_region_id = None  # consume regardless of outcome
+        if not saved_paths:
+            # Generation produced no file — release the handoff and stop any fill
+            # plan rather than risk routing a later image into this region.
+            self._layout_fill_plan = None
+            return
+        try:
+            path = str(saved_paths[0])
+            if hasattr(self.tab_layout, "set_region_content"):
+                self.tab_layout.set_region_content(region_id, path)
+                logger.info("Placed generated image into layout region %s: %s",
+                            region_id, path)
+        except Exception:  # noqa: BLE001 - placement must not break generation
+            logger.exception("Failed to place generated image into layout region %s",
+                             region_id)
+        # Advance the fill plan: configure the next region, or finish.
+        plan = getattr(self, "_layout_fill_plan", None)
+        nxt = plan.advance() if plan is not None else None
+        if nxt is not None:
+            self._configure_image_for_region(nxt)
+            done, total = plan.progress()
+            if hasattr(self, "status_label"):
+                self.status_label.setText(
+                    f"Layout fill: region {done} of {total} — review and Generate.")
+        else:
+            self._layout_fill_plan = None
+            if hasattr(self, "tabs") and hasattr(self, "tab_layout"):
+                self.tabs.setCurrentWidget(self.tab_layout)
+            if hasattr(self, "status_label"):
+                self.status_label.setText(
+                    f"Placed generated image into layout region {region_id}")
 
     def _on_generation_finished(self, texts: List[str], images: List[bytes]):
         """Handle successful generation."""
@@ -6154,6 +6267,7 @@ For more detailed information, please refer to the full documentation.
                 self._append_to_console("  • Transient API issue - try again", "#ffcc66")
             # Re-enable the generate button so user can try again
             self.btn_generate.setEnabled(True)
+            self._clear_layout_handoff()  # no image: release any pending handoff
             self._cleanup_thread()
             return
 
@@ -6322,6 +6436,10 @@ For more detailed information, please refer to the full documentation.
             # Store original path references
             self.current_original_paths = original_paths
             self.current_saved_paths = saved_paths
+
+            # Phase 5b: if this generation was launched from the Layout tab's
+            # "Send to Image", drop the saved image back into its region.
+            self._maybe_place_image_in_layout(saved_paths)
 
             # Display first processed image
             self.current_image_data = processed_images[0]

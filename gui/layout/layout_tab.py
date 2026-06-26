@@ -25,6 +25,13 @@ logger = logging.getLogger("imageai.layout.tab")
 
 class LayoutTab(QWidget):
     documentChanged = Signal()
+    # Ask the host (MainWindow) to open the Image tab for a region. Payload dict:
+    # {region_id, prompt, width, height}. The host places the result back via
+    # set_region_content(region_id, path). Decouples LayoutTab from MainWindow.
+    sendToImageRequested = Signal(object)
+    # Layout-complete mode: an ordered list of the above payloads (one per image
+    # region with a prompt). The host fills them one at a time via the Image tab.
+    fillAllRequested = Signal(object)
 
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
@@ -48,6 +55,7 @@ class LayoutTab(QWidget):
             ("Import Template…", self._import_template_dialog),
             ("Export Bundle…", self._export_bundle_dialog),
             ("Import Bundle…", self._import_bundle_dialog),
+            ("Fill all regions →", self._on_fill_all_clicked),
         ]:
             btn = QPushButton(label)
             btn.clicked.connect(slot)
@@ -84,6 +92,7 @@ class LayoutTab(QWidget):
         self.inspector.regionTextStyleChanged.connect(self._on_region_text_style_changed)
         self.inspector.regionPromptChanged.connect(self._on_region_prompt_changed)
         self.inspector.regionPromptSuggestRequested.connect(self._on_region_prompt_suggest)
+        self.inspector.regionSendToImageRequested.connect(self._on_region_send_to_image)
         root.addWidget(self.inspector)
         self.canvas.regionSelected.connect(self._on_region_selected)
 
@@ -266,6 +275,42 @@ class LayoutTab(QWidget):
 
     def _on_region_prompt_suggest(self, region_id: str, hint: str):
         self.suggest_region_prompt(region_id, hint)
+
+    def _on_region_send_to_image(self, region_id: str, prompt: str):
+        """Persist the prompt and ask the host to open the Image tab for it."""
+        region = self._find_region(region_id)
+        if region is None or region.kind != "image":
+            return
+        region.prompt = prompt
+        _, _, w, h = region.bbox
+        self.sendToImageRequested.emit({
+            "region_id": region_id, "prompt": prompt,
+            "width": int(w), "height": int(h),
+        })
+        self.status.setText(f"Sent {region.name or region.id} to the Image tab")
+
+    def _collect_fill_payloads(self):
+        """Ordered payloads for every image region carrying a prompt (page 0)."""
+        payloads = []
+        if not self.document or not self.document.pages:
+            return payloads
+        for r in self.document.pages[0].regions:
+            if r.kind != "image" or not (r.prompt or "").strip():
+                continue
+            _, _, w, h = r.bbox
+            payloads.append({"region_id": r.id, "prompt": r.prompt,
+                             "width": int(w), "height": int(h)})
+        return payloads
+
+    def _on_fill_all_clicked(self):
+        """Layout-complete mode: fill every prompted image region in sequence."""
+        payloads = self._collect_fill_payloads()
+        if not payloads:
+            self.status.setText(
+                "No image regions with prompts — add prompts (Suggest with AI) first.")
+            return
+        self.fillAllRequested.emit(payloads)
+        self.status.setText(f"Filling {len(payloads)} image region(s) via the Image tab…")
 
     def suggest_region_prompt(self, region_id: str, hint: str = "", completion_fn=None):
         """Draft an image prompt for ``region_id`` from the project theme.

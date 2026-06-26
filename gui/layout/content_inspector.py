@@ -29,6 +29,7 @@ class ContentInspector(QWidget):
     regionTextStyleChanged = Signal(str, str, int)  # (region_id, family, size_px)
     regionPromptChanged = Signal(str, str)          # (region_id, image prompt)
     regionPromptSuggestRequested = Signal(str, str)  # (region_id, hint = current prompt)
+    regionSendToImageRequested = Signal(str, str)    # (region_id, current prompt text)
 
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
@@ -87,6 +88,15 @@ class ContentInspector(QWidget):
         prompt_btns.addWidget(self.apply_prompt_btn)
         prompt_btns.addStretch(1)
         img_lay.addLayout(prompt_btns)
+
+        # Hand this region's prompt off to the Image tab; the generated result is
+        # routed back into this region by id (see LayoutTab.sendToImageRequested).
+        self.send_to_image_btn = QPushButton("Send to Image →")
+        self.send_to_image_btn.setToolTip(
+            "Open the Image tab pre-filled with this region's prompt and size; "
+            "the generated image is placed back into this region.")
+        self.send_to_image_btn.clicked.connect(self._on_send_to_image)
+        img_lay.addWidget(self.send_to_image_btn)
 
         img_lay.addStretch(1)
         self.stack.addWidget(img_page)
@@ -215,6 +225,12 @@ class ContentInspector(QWidget):
             return
         # The current text doubles as a hint to steer the suggestion.
         self.regionPromptSuggestRequested.emit(
+            self._region.id, self.prompt_edit.toPlainText().strip())
+
+    def _on_send_to_image(self):
+        if self._region is None:
+            return
+        self.regionSendToImageRequested.emit(
             self._region.id, self.prompt_edit.toPlainText().strip())
 
     def set_prompt_text(self, region_id: str, text: str):
