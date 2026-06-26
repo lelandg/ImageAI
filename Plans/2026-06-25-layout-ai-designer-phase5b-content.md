@@ -1,5 +1,5 @@
-# Phase 5b — AI content handoff (Send-to-Image, batch, layout-complete) ⏳ 0%
-**Last Updated:** 2026-06-25 18:20
+# Phase 5b — AI content handoff (Send-to-Image, batch, layout-complete) ✅ shipped
+**Last Updated:** 2026-06-25 19:10
 **Author:** Leland Green + Claude (Opus 4.8)
 **Design source:** `Plans/2026-06-24-layout-ai-designer-design.md` §9 (F-AI)
 **Branch:** `feat/layout-ai-designer-phase5b`
@@ -129,8 +129,11 @@ the queue drains. A small status shows "filling region k of N".
   auto-regenerate loops. `.iaibundle` already shipped in 5a.
 
 ## Task checklist
-1. ⏳ Plan doc (this file) — committed on the branch.
-2. ⬜ Feature 1 — Send to Image tab handoff + result routing.
-3. ⬜ Feature 2 — batch placement (`batch_fill.py` + wiring).
-4. ⬜ Feature 3 — layout-complete mode (region queue).
-5. ⬜ Full `tests/layout/` green; completion summary; opus review; PR.
+1. ✅ Plan doc (this file) — committed `b7ff0b8`.
+2. ✅ Feature 1 — Send to Image tab handoff + result routing (`232cb21`).
+3. ✅ Feature 3 — layout-complete mode (`FillPlan` + queue) (`8e9b681`).
+4. ✅ Feature 2 — **batch-fill core** (`batch_fill.py`, `c120dd1`); **live async
+   submission/polling/placement deferred** (needs a Google client, a keyed-results
+   accessor on `BatchManager`, and GUI verification — see completion summary).
+5. ✅ Full `tests/layout/` green — **166 passed** (151 → +15); completion summary
+   in `Plans/2026-06-25-layout-ai-designer-phase5b-completion.md`.
