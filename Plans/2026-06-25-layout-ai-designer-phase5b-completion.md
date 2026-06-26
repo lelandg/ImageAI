@@ -64,6 +64,17 @@ in sequence.
 - `test_batch_fill.py` (5): request keys/filtering/only-empty; nearest-ratio;
   JSONL parsing; placement filtering.
 
+## Review
+Opus structured review over the branch diff: **no Critical issues.** One Important
+issue fixed (`a465719`): the layout handoff state (`_pending_layout_region_id` /
+`_layout_fill_plan`) was cleared only on a *successful* placement, so a failed or
+image-less generation could misroute the next normal generation into a region —
+now cleared on every failure path via `_clear_layout_handoff()` (and the
+empty-`saved_paths` case consumes the pending id). One Minor fixed
+(`batch_fill` recovers past a malformed image part). Review confirmed the routing
+hook is fully guarded (can't break generation), single-send/fill-all share one
+path, and a failed `set_region_content` still advances the queue.
+
 ## Verify in PowerShell (`.venv`)
 1. Layout tab → design a page with image regions → on an image region click
    **Suggest with AI**, then **Send to Image →**. The Image tab opens with the
