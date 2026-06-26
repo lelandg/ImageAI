@@ -557,6 +557,13 @@ class MainWindow(QMainWindow):
             logger.error(f"Failed to create layout tab: {e}", exc_info=True)
             self.tab_layout = QWidget()  # Fallback placeholder
 
+        # Phase 5b: cross-tab handoff. The Layout tab asks us to open the Image
+        # tab pre-configured for a region; we route the generated image back into
+        # that region by id (see _on_layout_send_to_image / _maybe_place_image_in_layout).
+        self._pending_layout_region_id = None
+        if hasattr(self.tab_layout, "sendToImageRequested"):
+            self.tab_layout.sendToImageRequested.connect(self._on_layout_send_to_image)
+
         # Add tabs
         self.tabs.addTab(self.tab_generate, "🎨 Image")
         self.tabs.addTab(self.tab_templates, "📝 Templates")
@@ -6099,6 +6106,59 @@ For more detailed information, please refer to the full documentation.
             if hasattr(self, 'logger'):
                 self.logger.warning(f"Failed to render streaming partial: {e}")
 
+    def _on_layout_send_to_image(self, payload: dict):
+        """Open the Image tab pre-configured for a Layout region (Phase 5b).
+
+        Sets the prompt + a target size derived from the region's pixel bbox, then
+        remembers the region id so the next generation result routes back into it.
+        Every step is guarded so a Layout handoff can never destabilize the tab.
+        """
+        try:
+            if not isinstance(payload, dict):
+                return
+            region_id = payload.get("region_id")
+            prompt = payload.get("prompt") or ""
+            width, height = payload.get("width"), payload.get("height")
+            if hasattr(self, "prompt_edit") and self.prompt_edit is not None:
+                self.prompt_edit.setPlainText(prompt)
+            if (width and height and hasattr(self, "resolution_selector")
+                    and self.resolution_selector is not None):
+                try:
+                    self.resolution_selector.set_resolution(f"{int(width)}x{int(height)}")
+                except Exception:  # noqa: BLE001 - sizing is best-effort
+                    logger.exception("Layout handoff: could not set resolution")
+            self._pending_layout_region_id = region_id
+            if hasattr(self, "tabs") and hasattr(self, "tab_generate"):
+                self.tabs.setCurrentWidget(self.tab_generate)
+            if hasattr(self, "status_label"):
+                self.status_label.setText(
+                    "Image tab ready for the layout region — review and Generate.")
+            logger.info("Layout handoff: Image tab configured for region %s (%sx%s)",
+                        region_id, width, height)
+        except Exception:  # noqa: BLE001 - never let a handoff crash the UI
+            logger.exception("Layout handoff to Image tab failed")
+
+    def _maybe_place_image_in_layout(self, saved_paths):
+        """Route a just-generated image back into the pending Layout region."""
+        region_id = getattr(self, "_pending_layout_region_id", None)
+        if not region_id or not saved_paths:
+            return
+        self._pending_layout_region_id = None  # consume regardless of outcome
+        try:
+            path = str(saved_paths[0])
+            if hasattr(self.tab_layout, "set_region_content"):
+                self.tab_layout.set_region_content(region_id, path)
+                if hasattr(self, "tabs") and hasattr(self, "tab_layout"):
+                    self.tabs.setCurrentWidget(self.tab_layout)
+                if hasattr(self, "status_label"):
+                    self.status_label.setText(
+                        f"Placed generated image into layout region {region_id}")
+                logger.info("Placed generated image into layout region %s: %s",
+                            region_id, path)
+        except Exception:  # noqa: BLE001 - placement must not break generation
+            logger.exception("Failed to place generated image into layout region %s",
+                             region_id)
+
     def _on_generation_finished(self, texts: List[str], images: List[bytes]):
         """Handle successful generation."""
         # Reset Discord presence to IDLE
@@ -6322,6 +6382,10 @@ For more detailed information, please refer to the full documentation.
             # Store original path references
             self.current_original_paths = original_paths
             self.current_saved_paths = saved_paths
+
+            # Phase 5b: if this generation was launched from the Layout tab's
+            # "Send to Image", drop the saved image back into its region.
+            self._maybe_place_image_in_layout(saved_paths)
 
             # Display first processed image
             self.current_image_data = processed_images[0]

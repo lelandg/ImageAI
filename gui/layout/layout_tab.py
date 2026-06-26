@@ -25,6 +25,10 @@ logger = logging.getLogger("imageai.layout.tab")
 
 class LayoutTab(QWidget):
     documentChanged = Signal()
+    # Ask the host (MainWindow) to open the Image tab for a region. Payload dict:
+    # {region_id, prompt, width, height}. The host places the result back via
+    # set_region_content(region_id, path). Decouples LayoutTab from MainWindow.
+    sendToImageRequested = Signal(object)
 
     def __init__(self, config=None, parent=None):
         super().__init__(parent)
@@ -84,6 +88,7 @@ class LayoutTab(QWidget):
         self.inspector.regionTextStyleChanged.connect(self._on_region_text_style_changed)
         self.inspector.regionPromptChanged.connect(self._on_region_prompt_changed)
         self.inspector.regionPromptSuggestRequested.connect(self._on_region_prompt_suggest)
+        self.inspector.regionSendToImageRequested.connect(self._on_region_send_to_image)
         root.addWidget(self.inspector)
         self.canvas.regionSelected.connect(self._on_region_selected)
 
@@ -266,6 +271,19 @@ class LayoutTab(QWidget):
 
     def _on_region_prompt_suggest(self, region_id: str, hint: str):
         self.suggest_region_prompt(region_id, hint)
+
+    def _on_region_send_to_image(self, region_id: str, prompt: str):
+        """Persist the prompt and ask the host to open the Image tab for it."""
+        region = self._find_region(region_id)
+        if region is None or region.kind != "image":
+            return
+        region.prompt = prompt
+        _, _, w, h = region.bbox
+        self.sendToImageRequested.emit({
+            "region_id": region_id, "prompt": prompt,
+            "width": int(w), "height": int(h),
+        })
+        self.status.setText(f"Sent {region.name or region.id} to the Image tab")
 
     def suggest_region_prompt(self, region_id: str, hint: str = "", completion_fn=None):
         """Draft an image prompt for ``region_id`` from the project theme.
