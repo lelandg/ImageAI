@@ -111,14 +111,6 @@ def inset_polygon(poly: Poly, dists: List[float], *, miter_limit: float = 4.0) -
     n = len(poly)
     if n < 3 or len(dists) != n:
         return None
-    # check if any inset distance is too large (would cause over-inset / collapse)
-    min_edge_length = float('inf')
-    for i in range(n):
-        p, q = poly[i], poly[(i + 1) % n]
-        dist = math.hypot(q[0] - p[0], q[1] - p[1])
-        min_edge_length = min(min_edge_length, dist)
-    if min_edge_length > EPS and max(dists) >= min_edge_length / 2:
-        return None
     # offset line per edge: a point on it + its direction
     off_pt: List[Point] = []
     off_dir: List[Point] = []
@@ -142,6 +134,14 @@ def inset_polygon(poly: Poly, dists: List[float], *, miter_limit: float = 4.0) -
             if math.hypot(pt[0] - ox, pt[1] - oy) > miter_limit * (max(dists) + EPS):
                 pt = off_pt[i]
         out.append(pt)
+    # over-inset detection: if an edge flipped direction the cell collapsed
+    for i in range(n):
+        o0, o1 = poly[i], poly[(i + 1) % n]
+        n0, n1 = out[i], out[(i + 1) % n]
+        odx, ody = o1[0] - o0[0], o1[1] - o0[1]
+        ndx, ndy = n1[0] - n0[0], n1[1] - n0[1]
+        if odx * ndx + ody * ndy < 0:  # edge direction reversed
+            return None
     # collapse guards
     if len(out) < 3 or signed_area(out) <= EPS:
         return None

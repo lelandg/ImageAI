@@ -76,3 +76,12 @@ def test_inset_concave_L_keeps_reflex():
 def test_inset_collapse_returns_none():
     sq = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
     assert inset_polygon(sq, [3.0, 3.0, 3.0, 3.0]) is None  # 3+3 > 4 each axis -> collapse
+
+
+def test_inset_large_dist_on_short_edge_not_falsely_collapsed():
+    # 10x2 rectangle; a big inset (1.2) on a short (len-2) edge still leaves
+    # plenty of width -> must NOT collapse (the old heuristic wrongly dropped this).
+    rect = [(0.0, 0.0), (10.0, 0.0), (10.0, 2.0), (0.0, 2.0)]
+    out = inset_polygon(rect, [0.5, 1.2, 0.5, 0.6])
+    assert out is not None
+    assert signed_area(out) > 0
