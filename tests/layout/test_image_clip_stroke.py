@@ -55,13 +55,25 @@ def test_concave_notch_is_background(qapp, tmp_path):
 
 
 def test_borderless_when_stroke_zero(qapp, tmp_path):
+    ref = _solid_png(tmp_path, Qt.blue)
     page = PageSpec(page_size_px=(200, 150), regions=[
         Region(id="e", kind="image", bbox=(10, 10, 80, 80),
-               image_style=ImageStyle(stroke_px=0))])
+               image_ref=ref, image_style=ImageStyle(stroke_px=0))])
     scene = qt_renderer.build_scene(page)
     frame = [it for it in scene.items()
-             if it.data(0) == "e" and hasattr(it, "path")][0]
+             if it.data(0) == "e" and hasattr(it, "path")
+             and not isinstance(it, QGraphicsPixmapItem)][0]
     assert frame.pen().style() == Qt.NoPen
+
+
+def test_empty_region_keeps_placeholder_outline(qapp):
+    page = PageSpec(page_size_px=(200, 150), regions=[
+        Region(id="e2", kind="image", bbox=(10, 10, 80, 80))])
+    scene = qt_renderer.build_scene(page)
+    frame = [it for it in scene.items()
+             if it.data(0) == "e2" and hasattr(it, "path")
+             and not isinstance(it, QGraphicsPixmapItem)][0]
+    assert frame.pen().style() != Qt.NoPen
 
 
 def test_stroke_pen_when_stroke_positive(qapp):

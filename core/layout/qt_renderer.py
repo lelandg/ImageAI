@@ -185,6 +185,11 @@ def _add_image_region(scene: QGraphicsScene, r: Region, selectable: bool,
         _apply_flags(child, selectable, r.id, movable=movable)
     else:
         frame.setBrush(QBrush(_PLACEHOLDER_FILL))
+        if stroke_px == 0:
+            # Keep empty image placeholders outlined in the editor even when no
+            # comic-frame stroke is configured. A real stroke (stroke_px > 0) was
+            # already applied to the frame above, so only fill the gap for 0.
+            frame.setPen(QPen(_PLACEHOLDER_PEN, 1))
         lx, ly, _, _ = r.bbox
         label = QGraphicsSimpleTextItem(r.name or "[image]", frame)
         label.setPos(lx + 4, ly + 4)
