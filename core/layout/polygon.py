@@ -81,3 +81,68 @@ def polygon_to_segments(poly: Poly) -> List[PathSegment]:
         segs.append(PathSegment(type="line", pts=[(float(p[0]), float(p[1]))]))
     segs.append(PathSegment(type="close", pts=[]))
     return segs
+
+
+def _unit(dx: float, dy: float) -> Tuple[float, float]:
+    h = math.hypot(dx, dy)
+    if h <= EPS:
+        return (0.0, 0.0)
+    return (dx / h, dy / h)
+
+
+def _line_intersect(p1: Point, d1: Point, p2: Point, d2: Point) -> Optional[Point]:
+    """Intersect line p1+t*d1 with p2+u*d2. None if (near-)parallel."""
+    denom = d1[0] * d2[1] - d1[1] * d2[0]
+    if abs(denom) <= EPS:
+        return None
+    t = ((p2[0] - p1[0]) * d2[1] - (p2[1] - p1[1]) * d2[0]) / denom
+    return (p1[0] + t * d1[0], p1[1] + t * d1[1])
+
+
+def inset_polygon(poly: Poly, dists: List[float], *, miter_limit: float = 4.0) -> Optional[Poly]:
+    """Offset each edge inward by dists[i]; return inset polygon or None on collapse.
+
+    Edge i runs poly[i] -> poly[i+1]. Inward normal (positive orientation,
+    screen coords) is (-dy, dx). New vertex i is the intersection of the offset
+    lines of edge i-1 and edge i (miter join); a near-parallel pair falls back to
+    the offset point (bevel-equivalent). Returns None if the result is degenerate.
+    """
+    poly = ensure_orientation(poly)
+    n = len(poly)
+    if n < 3 or len(dists) != n:
+        return None
+    # check if any inset distance is too large (would cause over-inset / collapse)
+    min_edge_length = float('inf')
+    for i in range(n):
+        p, q = poly[i], poly[(i + 1) % n]
+        dist = math.hypot(q[0] - p[0], q[1] - p[1])
+        min_edge_length = min(min_edge_length, dist)
+    if min_edge_length > EPS and max(dists) >= min_edge_length / 2:
+        return None
+    # offset line per edge: a point on it + its direction
+    off_pt: List[Point] = []
+    off_dir: List[Point] = []
+    for i in range(n):
+        p, q = poly[i], poly[(i + 1) % n]
+        dx, dy = q[0] - p[0], q[1] - p[1]
+        ux, uy = _unit(dx, dy)
+        nx, ny = -uy, ux  # inward normal for positive-area poly in screen coords
+        d = dists[i]
+        off_pt.append((p[0] + nx * d, p[1] + ny * d))
+        off_dir.append((dx, dy))
+    out: Poly = []
+    for i in range(n):
+        prev = (i - 1) % n
+        pt = _line_intersect(off_pt[prev], off_dir[prev], off_pt[i], off_dir[i])
+        if pt is None:
+            pt = off_pt[i]  # parallel consecutive edges -> use offset point
+        else:
+            # crude miter clamp: if the join shot far from the original vertex, bevel to offset point
+            ox, oy = poly[i]
+            if math.hypot(pt[0] - ox, pt[1] - oy) > miter_limit * (max(dists) + EPS):
+                pt = off_pt[i]
+        out.append(pt)
+    # collapse guards
+    if len(out) < 3 or signed_area(out) <= EPS:
+        return None
+    return out

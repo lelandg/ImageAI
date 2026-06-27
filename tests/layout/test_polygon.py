@@ -1,5 +1,5 @@
 from core.layout.polygon import (
-    signed_area, ensure_orientation, clip_halfplane, polygon_to_segments,
+    signed_area, ensure_orientation, clip_halfplane, polygon_to_segments, inset_polygon,
 )
 
 
@@ -42,3 +42,37 @@ def test_polygon_to_segments_round_trip_shape():
     assert segs[1].pts == [(3.0, 2.0)]
     assert segs[2].pts == [(2.0, 5.0)]
     assert segs[3].pts == []
+
+
+def test_inset_square_uniform():
+    sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    out = inset_polygon(sq, [1.0, 1.0, 1.0, 1.0])
+    xs = sorted({round(x, 3) for x, _ in out})
+    ys = sorted({round(y, 3) for _, y in out})
+    assert xs == [1.0, 9.0]
+    assert ys == [1.0, 9.0]
+
+
+def test_inset_square_per_edge_distances():
+    # edges: 0:(0,0)->(10,0) top, 1:(10,0)->(10,10) right, 2:(10,10)->(0,10) bottom, 3:(0,10)->(0,0) left
+    sq = [(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)]
+    out = inset_polygon(sq, [2.0, 1.0, 2.0, 1.0])  # top/bottom in 2, left/right in 1
+    xs = sorted({round(x, 3) for x, _ in out})
+    ys = sorted({round(y, 3) for _, y in out})
+    assert xs == [1.0, 9.0]   # left/right edges moved 1
+    assert ys == [2.0, 8.0]   # top/bottom edges moved 2
+
+
+def test_inset_concave_L_keeps_reflex():
+    # L-shape (concave): 6 vertices, positive area
+    L = [(0.0, 0.0), (10.0, 0.0), (10.0, 4.0), (4.0, 4.0), (4.0, 10.0), (0.0, 10.0)]
+    out = inset_polygon(L, [1.0] * 6)
+    assert out is not None
+    assert len(out) == 6                      # still an L (one reflex vertex)
+    assert signed_area(out) > 0
+    assert signed_area(out) < signed_area(L)  # shrunk
+
+
+def test_inset_collapse_returns_none():
+    sq = [(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)]
+    assert inset_polygon(sq, [3.0, 3.0, 3.0, 3.0]) is None  # 3+3 > 4 each axis -> collapse
