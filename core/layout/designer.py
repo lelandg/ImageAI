@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple, Callable
 
-from core.layout.models import Region
+from core.layout.models import Region, Overlay
 from core.layout import schema
 
 logger = logging.getLogger("imageai.layout.designer")
@@ -79,6 +79,7 @@ def resolve_provider_ids(provider: str) -> Tuple[str, str]:
 class DesignerResult:
     questions: List[str] = field(default_factory=list)
     regions: Optional[List[Region]] = None
+    overlays: List[Overlay] = field(default_factory=list)
     raw: str = ""
 
 
@@ -92,6 +93,71 @@ def fallback_result(page_px: Tuple[int, int]) -> DesignerResult:
         regions=[region], raw="")
 
 
+def _resolve_overlay_anchor(od: Dict, regions_by_id: Dict, page_px: Tuple[int, int]):
+    """Resolve an overlay dict's placement to (anchor_px, anchor_mode, tail_px|None).
+
+    Raw-pixel "anchor"/"tail_target" win; otherwise "anchor_region"+"anchor_offset"
+    (0..1 within the region bbox) and "tail_to_region" (region center) are resolved
+    against the already-parsed regions. Returns None (drop the overlay) if no anchor
+    can be resolved. All resolution is logged on failure; never raises.
+    """
+    pw, ph = page_px
+    anchor_mode = od.get("anchor_mode", "center")
+    anchor = None
+    raw = od.get("anchor")
+    if isinstance(raw, (list, tuple)) and len(raw) == 2:
+        anchor = (float(raw[0]), float(raw[1]))
+    else:
+        rid = od.get("anchor_region")
+        if rid is not None and rid in regions_by_id:
+            bx, by, bw, bh = regions_by_id[rid].bbox
+            off = od.get("anchor_offset", [0.5, 0.5])
+            if isinstance(off, (list, tuple)) and len(off) == 2:
+                ox, oy = float(off[0]), float(off[1])
+            else:
+                ox, oy = 0.5, 0.5
+            anchor = (bx + ox * bw, by + oy * bh)
+        elif rid is not None:
+            logger.warning("Designer overlay %r: unknown anchor_region %r; skipped",
+                           od.get("id"), rid)
+            return None
+    if anchor is None:
+        logger.warning("Designer overlay %r: no anchor or anchor_region; skipped", od.get("id"))
+        return None
+    anchor = (min(max(anchor[0], 0.0), float(pw)), min(max(anchor[1], 0.0), float(ph)))
+
+    tail = None
+    traw = od.get("tail_target")
+    if isinstance(traw, (list, tuple)) and len(traw) == 2:
+        tail = (float(traw[0]), float(traw[1]))
+    else:
+        trid = od.get("tail_to_region")
+        if trid is not None and trid in regions_by_id:
+            bx, by, bw, bh = regions_by_id[trid].bbox
+            tail = (bx + bw / 2.0, by + bh / 2.0)
+        elif trid is not None:
+            logger.warning("Designer overlay %r: unknown tail_to_region %r; tail dropped",
+                           od.get("id"), trid)
+    return anchor, anchor_mode, tail
+
+
+def _build_overlay(od: Dict, regions_by_id: Dict, page_px: Tuple[int, int], idx: int):
+    """Build one Overlay from an LLM overlay dict, or None to skip it."""
+    kind = od.get("kind")
+    if kind not in ("speech", "thought", "caption", "sfx"):
+        logger.warning("Designer overlay %r: unknown kind %r; skipped", od.get("id"), kind)
+        return None
+    resolved = _resolve_overlay_anchor(od, regions_by_id, page_px)
+    if resolved is None:
+        return None
+    anchor, anchor_mode, tail = resolved
+    return Overlay(
+        id=od.get("id", f"ov{idx + 1}"), kind=kind, text=str(od.get("text", "")),
+        anchor=anchor, anchor_mode=anchor_mode, tail_target=tail,
+        z=int(od.get("z", 0)), role=od.get("role", ""),
+    )
+
+
 def parse_response(content: str, page_px: Tuple[int, int]) -> DesignerResult:
     from gui.llm_utils import LLMResponseParser
     data = LLMResponseParser.parse_json_response(content, expected_type=dict)
@@ -102,22 +168,31 @@ def parse_response(content: str, page_px: Tuple[int, int]) -> DesignerResult:
     questions = ([str(q) for q in raw_questions if str(q).strip()]
                  if isinstance(raw_questions, list) else [])
     regions = None
+    overlays: List[Overlay] = []
     layout = data.get("layout")
-    if isinstance(layout, dict) and isinstance(layout.get("regions"), list):
-        regions = []
-        for i, rd in enumerate(layout["regions"]):
-            if not isinstance(rd, dict):
-                continue
-            rd = dict(rd)  # don't mutate the parsed dict
-            rd.setdefault("id", f"region{i + 1}")
-            rd.setdefault("kind", "image")
-            region = schema.region_from_dict(rd)
-            regions.append(schema.normalize_region(region, page_px))
-        if not regions:
-            regions = None
-    if regions is None and not questions:
+    if isinstance(layout, dict):
+        if isinstance(layout.get("regions"), list):
+            collected = []
+            for i, rd in enumerate(layout["regions"]):
+                if not isinstance(rd, dict):
+                    continue
+                rd = dict(rd)  # don't mutate the parsed dict
+                rd.setdefault("id", f"region{i + 1}")
+                rd.setdefault("kind", "image")
+                region = schema.region_from_dict(rd)
+                collected.append(schema.normalize_region(region, page_px))
+            if collected:
+                regions = collected
+        if isinstance(layout.get("overlays"), list):
+            by_id = {r.id: r for r in (regions or [])}
+            for i, od in enumerate(layout["overlays"]):
+                if isinstance(od, dict):
+                    ov = _build_overlay(od, by_id, page_px, i)
+                    if ov is not None:
+                        overlays.append(ov)
+    if regions is None and not questions and not overlays:
         return fallback_result(page_px)
-    return DesignerResult(questions=questions, regions=regions, raw=content)
+    return DesignerResult(questions=questions, regions=regions, overlays=overlays, raw=content)
 
 
 def run_design(messages: List[Dict], page_px: Tuple[int, int],

@@ -100,3 +100,47 @@ def test_every_provider_display_name_resolves_to_a_registry_id_with_models():
         _, registry_id = designer.resolve_provider_ids(display)
         assert get_provider_models(registry_id), \
             f"{display!r} -> {registry_id!r} resolves to no models"
+
+
+def test_designer_result_overlays_defaults_empty():
+    res = designer.parse_response(
+        '{"layout": {"regions": [{"id":"a","kind":"image","bbox":[0,0,100,100]}]}}',
+        (200, 200))
+    assert res.overlays == []
+
+
+def test_parse_overlay_raw_pixel_anchor():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[0,0,200,200]}],'
+               ' "overlays": [{"id":"o1","kind":"speech","text":"Hi",'
+               ' "anchor":[50,40],"tail_target":[50,120]}]}}')
+    res = designer.parse_response(content, (300, 300))
+    assert len(res.overlays) == 1
+    ov = res.overlays[0]
+    assert ov.kind == "speech" and ov.text == "Hi"
+    assert ov.anchor == (50.0, 40.0)
+    assert ov.tail_target == (50.0, 120.0)
+
+
+def test_parse_overlay_region_relative_anchor_resolves_to_pixels():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[100,100,200,100]}],'
+               ' "overlays": [{"id":"o1","kind":"speech","text":"Yo","anchor_region":"p1",'
+               ' "anchor_offset":[0.5,0.5],"tail_to_region":"p1"}]}}')
+    res = designer.parse_response(content, (500, 500))
+    ov = res.overlays[0]
+    assert ov.anchor == (200.0, 150.0)        # 100 + 0.5*200, 100 + 0.5*100
+    assert ov.tail_target == (200.0, 150.0)   # region center
+
+
+def test_parse_overlay_unknown_region_dropped_but_others_kept():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[0,0,100,100]}],'
+               ' "overlays": [{"id":"bad","kind":"speech","text":"x","anchor_region":"nope"},'
+               ' {"id":"ok","kind":"sfx","text":"BOOM","anchor":[50,50]}]}}')
+    res = designer.parse_response(content, (200, 200))
+    assert [o.id for o in res.overlays] == ["ok"]
+
+
+def test_parse_overlay_unknown_kind_skipped():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[0,0,100,100]}],'
+               ' "overlays": [{"id":"o1","kind":"bubble","text":"x","anchor":[10,10]}]}}')
+    res = designer.parse_response(content, (200, 200))
+    assert res.overlays == []
