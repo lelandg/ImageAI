@@ -11,7 +11,7 @@ from typing import List, Literal, Optional, Tuple, Union
 from core.layout.geometry import segments_bbox
 from core.layout.models import Region
 from core.layout.polygon import (
-    Poly, clip_halfplane, inset_polygon, polygon_to_segments, union_polygons, EPS,
+    Poly, clip_halfplane, inset_polygon, polygon_to_segments, union_polygons,
 )
 
 logger = logging.getLogger(__name__)
@@ -116,7 +116,7 @@ def tile(tree: Node, page_rect: Rect, *, gutter: float, margin: float) -> List[R
     panels: List[Tuple[Leaf, Poly]] = []
     # group polygons by merge key, preserving first-encounter order
     groups: dict = {}
-    order: List[Optional[str]] = []
+    order: List[Union[int, str]] = []
     for leaf, cell in leaves:
         key = leaf.merge
         if key is None:
