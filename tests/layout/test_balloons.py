@@ -1,4 +1,4 @@
-from core.layout.balloons import caption_body, speech_body, overlay_to_segments
+from core.layout.balloons import caption_body, speech_body, overlay_to_segments, thought_body, thought_trail
 from core.layout.models import OverlayStyle
 from core.layout.geometry import validate_segments, segments_bbox
 
@@ -95,3 +95,33 @@ def test_speech_tail_single_closed_ring():
     segs = overlay_to_segments("speech", INNER, (50.0, 120.0), style)
     assert sum(1 for s in segs if s.type == "move") == 1   # one subpath
     assert sum(1 for s in segs if s.type == "close") == 1
+
+
+def test_thought_body_is_valid_cloud_containing_inner():
+    segs = thought_body(INNER, scallop=8.0)
+    assert validate_segments(segs) == []
+    assert any(s.type == "quad" for s in segs)         # scalloped bumps
+    assert _contains(segments_bbox(segs), INNER)
+
+
+def test_thought_trail_marches_toward_target_with_count_subpaths():
+    trail = thought_trail((50.0, 40.0), (90.0, 90.0), count=3)
+    assert validate_segments(trail) == []
+    assert sum(1 for s in trail if s.type == "move") == 3   # 3 ellipse subpaths
+    # last (smallest) bubble is nearest the target
+    xs = [s.pts[0][0] for s in trail if s.type == "move"]
+    assert xs[-1] > xs[0]  # progressing toward target.x = 90
+
+
+def test_overlay_thought_has_body_plus_trail():
+    style = OverlayStyle(radius_px=10.0)
+    segs = overlay_to_segments("thought", INNER, (95.0, 95.0), style)
+    assert validate_segments(segs) == []
+    moves = sum(1 for s in segs if s.type == "move")
+    assert moves == 1 + 3   # body + 3 trail bubbles
+
+
+def test_overlay_thought_no_target_body_only():
+    style = OverlayStyle(radius_px=10.0)
+    segs = overlay_to_segments("thought", INNER, None, style)
+    assert sum(1 for s in segs if s.type == "move") == 1   # body only, no trail

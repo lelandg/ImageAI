@@ -9,6 +9,7 @@ font metrics here — the renderer measures text and passes us `inner`.
 from __future__ import annotations
 
 import logging
+import math
 from typing import List, Optional, Tuple
 
 from core.layout.models import OverlayStyle, PathSegment
@@ -122,6 +123,55 @@ def _splice_speech_tail(segs: List[PathSegment], inner: Rect, target: Point,
     return out
 
 
+def _circle_segments(cx: float, cy: float, r: float) -> List[PathSegment]:
+    """A closed circle approximated by four cubic quarter-arcs (move..close)."""
+    k = r * KAPPA
+    return [
+        PathSegment(type="move", pts=[(cx + r, cy)]),
+        PathSegment(type="cubic", pts=[(cx + r, cy + k), (cx + k, cy + r), (cx, cy + r)]),
+        PathSegment(type="cubic", pts=[(cx - k, cy + r), (cx - r, cy + k), (cx - r, cy)]),
+        PathSegment(type="cubic", pts=[(cx - r, cy - k), (cx - k, cy - r), (cx, cy - r)]),
+        PathSegment(type="cubic", pts=[(cx + k, cy - r), (cx + r, cy - k), (cx + r, cy)]),
+        PathSegment(type="close", pts=[]),
+    ]
+
+
+def thought_body(inner: Rect, *, scallop: float) -> List[PathSegment]:
+    """A scalloped 'cloud' on an ellipse circumscribing `inner`.
+
+    N outward quad bumps around the ellipse. The circumscribing ellipse
+    (semi-axes 1.42x the rect half-extents) contains `inner`'s corners; the
+    bumps extend further, so bbox(cloud) contains `inner`.
+    """
+    x, y, w, h = inner
+    cx, cy = x + w / 2.0, y + h / 2.0
+    ax, ay = (w / 2.0) * 1.42, (h / 2.0) * 1.42  # circumscribe the corners
+    bumps = max(8, int(((w + h) / 40.0)) * 2)    # even count, scales with size
+    pts = [(cx + ax * math.cos(2 * math.pi * i / bumps),
+            cy + ay * math.sin(2 * math.pi * i / bumps)) for i in range(bumps)]
+    segs = [PathSegment(type="move", pts=[pts[0]])]
+    for i in range(bumps):
+        nxt = pts[(i + 1) % bumps]
+        mid_ang = 2 * math.pi * (i + 0.5) / bumps
+        ctrl = (cx + (ax + scallop) * math.cos(mid_ang),
+                cy + (ay + scallop) * math.sin(mid_ang))
+        segs.append(PathSegment(type="quad", pts=[ctrl, nxt]))
+    segs.append(PathSegment(type="close", pts=[]))
+    return segs
+
+
+def thought_trail(body_center: Point, target: Point, *, count: int = 3) -> List[PathSegment]:
+    """`count` shrinking circles from near `body_center` toward `target`."""
+    out: List[PathSegment] = []
+    for i in range(count):
+        t = (i + 1) / (count + 1)
+        cx = body_center[0] + (target[0] - body_center[0]) * t
+        cy = body_center[1] + (target[1] - body_center[1]) * t
+        r = max(1.0, 6.0 * (1.0 - t))   # shrink toward the target
+        out.extend(_circle_segments(cx, cy, r))
+    return out
+
+
 def overlay_to_segments(kind: str, inner: Rect, tail_target: Optional[Point],
                         style: OverlayStyle) -> List[PathSegment]:
     """Compile an overlay body (+ tail) for `kind`.
@@ -145,8 +195,10 @@ def overlay_to_segments(kind: str, inner: Rect, tail_target: Optional[Point],
         base_width = max(8.0, min(inner[2], inner[3]) * 0.35)
         return _splice_speech_tail(body, inner, tail_target, base_width, style.radius_px)
     if kind == "thought":
-        # Implemented in Task 4; until then fall back to a plain body so callers
-        # never crash. Replaced by thought_body + trail in Task 4.
-        return speech_body(inner, radius=style.radius_px)
+        body = thought_body(inner, scallop=max(4.0, style.radius_px * 0.5))
+        if tail_target is None:
+            return body
+        cx, cy = inner[0] + inner[2] / 2.0, inner[1] + inner[3] / 2.0
+        return body + thought_trail((cx, cy), tail_target, count=3)
     logger.warning("Overlay has unknown kind %r; no body", kind)
     return []
