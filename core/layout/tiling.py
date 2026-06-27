@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
 
 from core.layout.geometry import segments_bbox
-from core.layout.models import Region
+from core.layout.models import Region, PageSpec
 from core.layout.polygon import (
     Poly, clip_halfplane, inset_polygon, polygon_to_segments, union_polygons,
 )
@@ -152,3 +152,66 @@ def tile(tree: Node, page_rect: Rect, *, gutter: float, margin: float) -> List[R
             regions.append(r)
             z += 1
     return regions
+
+
+# ---------------------------------------------------------------------------
+# Preset tree builders
+# ---------------------------------------------------------------------------
+
+def grid(rows: int, cols: int, *, kind: Literal["image", "text"] = "image", prefix: str = "p") -> Node:
+    """A regular rows x cols grid (nested y-then-x splits)."""
+    if rows < 1 or cols < 1:
+        raise ValueError("grid requires rows >= 1 and cols >= 1")
+
+    def row(r: int) -> Node:
+        def col(c: int) -> Node:
+            leaf = Leaf(id=f"{prefix}{r}_{c}", kind=kind)
+            if c == cols - 1:
+                return leaf
+            return Split(axis="x", at=1.0 / (cols - c), a=leaf, b=col(c + 1))
+        return col(0)
+
+    def build(r: int) -> Node:
+        if r == rows - 1:
+            return row(r)
+        return Split(axis="y", at=1.0 / (rows - r), a=row(r), b=build(r + 1))
+
+    return build(0)
+
+
+def three_tiers() -> Node:
+    """Three full-width horizontal tiers."""
+    return Split(axis="y", at=1 / 3, a=Leaf(id="t0"),
+                 b=Split(axis="y", at=0.5, a=Leaf(id="t1"), b=Leaf(id="t2")))
+
+
+def splash_with_strip() -> Node:
+    """A large top splash panel and a bottom strip of two."""
+    return Split(axis="y", at=0.66, a=Leaf(id="splash"),
+                 b=Split(axis="x", at=0.5, a=Leaf(id="s0"), b=Leaf(id="s1")))
+
+
+def diagonal_action() -> Node:
+    """Two panels divided by a strongly angled gutter."""
+    return Split(axis="x", at=0.5, a=Leaf(id="d0"), b=Leaf(id="d1"), skew=0.6)
+
+
+def feature_L() -> Node:
+    """A concave L hero (top-left + bottom strip merged) beside a tall right panel."""
+    top = Split(axis="x", at=0.6, a=Leaf(id="hero", merge="L"), b=Leaf(id="side"))
+    return Split(axis="y", at=0.6, a=top, b=Leaf(id="hero_b", merge="L"))
+
+
+def apply_tiling(page: PageSpec, tree: Node, *, gutter: float, margin: float,
+                 floating: Tuple[Region, ...] = ()) -> PageSpec:
+    """Tile the page and layer floating panels on top (higher z). Mutates + returns page."""
+    pw, ph = page.page_size_px
+    base = tile(tree, (0, 0, pw, ph), gutter=gutter, margin=margin)
+    next_z = (max((r.z for r in base), default=-1)) + 1
+    layered: List[Region] = list(base)
+    for r in floating:
+        r.z = next_z
+        next_z += 1
+        layered.append(r)
+    page.regions = layered
+    return page
