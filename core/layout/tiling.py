@@ -11,7 +11,7 @@ from typing import List, Literal, Optional, Tuple, Union
 from core.layout.geometry import segments_bbox
 from core.layout.models import Region
 from core.layout.polygon import (
-    Poly, clip_halfplane, inset_polygon, polygon_to_segments, EPS,
+    Poly, clip_halfplane, inset_polygon, polygon_to_segments,
 )
 
 logger = logging.getLogger(__name__)
