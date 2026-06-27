@@ -193,3 +193,10 @@ def test_tiling_and_explicit_regions_coexist():
     res = designer.parse_response(content, (300, 300))
     ids = [r.id for r in res.regions]
     assert "x" in ids and len(ids) == 4  # 3 tiers + 1 explicit region
+
+
+def test_build_messages_documents_new_capabilities():
+    msgs = designer.build_messages("comic", (1000, 800), "a dynamic comic page")
+    joined = " ".join(m["content"] for m in msgs)
+    for token in ("svg", "tiling", "grid", "overlays", "speech", "anchor_region", "bleed"):
+        assert token in joined, token

@@ -37,16 +37,34 @@ def build_messages(content_kind: str, page_px: Tuple[int, int], user_text: str,
         f"{current}"
         f"<request>\n{user_text}\n</request>\n"
         f"<instructions>\n"
-        f"Return a JSON object with optional keys:\n"
+        f"Return a SINGLE JSON object with optional keys:\n"
         f'  "questions": [strings]   // ask for missing detail if needed\n'
-        f'  "layout": {{ "regions": [ {{\n'
-        f'      "id": string, "kind": "image"|"text", "shape": "rect"|"polygon",\n'
-        f'      "bbox": [x,y,w,h], "points": [[x,y],...] (polygon only),\n'
-        f'      "z": int, "role": string, "text": string (text only) }} ] }}\n'
-        f"All coordinates MUST be within the page ({pw} x {ph}). Prefer 'rect' unless the\n"
+        f'  "layout": {{\n'
+        f'    "tiling": {{ "preset": "grid"|"three_tiers"|"splash_with_strip"|'
+        f'"diagonal_action"|"feature_L",\n'
+        f'                "params": {{ "rows": int, "cols": int, "gutter_px": number,'
+        f' "margin_px": number }} }},\n'
+        f"        // optional; generates gap-free panels. rows/cols apply to \"grid\".\n"
+        f'    "regions": [ {{ "id": string, "kind": "image"|"text",\n'
+        f'        "shape": "rect"|"polygon"|"path",\n'
+        f'        "bbox": [x,y,w,h], "points": [[x,y],...] (polygon only),\n'
+        f'        "svg": "M.. L.. C.. Z" (path only; SVG path data in page pixels),\n'
+        f'        "bleed": bool, "stroke_px": number,\n'
+        f'        "z": int, "role": string, "text": string (text only) }} ],\n'
+        f'    "overlays": [ {{ "id": string,\n'
+        f'        "kind": "speech"|"thought"|"caption"|"sfx", "text": string,\n'
+        f'        "anchor_region": string, "anchor_offset": [fx,fy] (0..1 within region),\n'
+        f'        "tail_to_region": string,            // tail points at that region center\n'
+        f'        "anchor": [x,y], "tail_target": [x,y], // raw-pixel alternative\n'
+        f'        "role": string }} ]\n'
+        f'  }}\n'
+        f"All coordinates MUST be within the page ({pw} x {ph}). Prefer \"rect\" for simple\n"
+        f"panels; use \"tiling\" for clean gap-free grids/strips; use \"shape\":\"path\" with\n"
+        f"\"svg\" for curved or angled panels; use \"polygon\" for straight-edged non-rect panels.\n"
         f"Each text region MUST set \"role\" to one of: {roles}.\n"
-        f"request implies panels that flow into each other (then use 'polygon'). You may\n"
-        f"return questions, a layout, or both.\n"
+        f"Overlays float above panels: prefer \"anchor_region\"+\"anchor_offset\" (and\n"
+        f"\"tail_to_region\") so balloons sit inside a panel; use raw \"anchor\"/\"tail_target\"\n"
+        f"pixels only for free placement. You may return questions, a layout, or both.\n"
         f"</instructions>"
     )
     return [{"role": "system", "content": _SYSTEM}, {"role": "user", "content": user}]
