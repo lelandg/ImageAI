@@ -405,8 +405,14 @@ class LayoutTab(QWidget):
                 self.document.style = styles.default_style_for(kind)
                 if hasattr(self, "style_panel"):
                     self.style_panel.set_style(self.document.style)
+        applied = False
         if result.regions:
             self.document.pages[0].regions = list(result.regions)
+            applied = True
+        if getattr(result, "overlays", None):
+            self.document.pages[0].overlays = list(result.overlays)
+            applied = True
+        if applied:
             self.history.append(user_text or "design")
             self._refresh()
         elif result.questions:

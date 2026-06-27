@@ -146,8 +146,10 @@ class DesignerPanel(QWidget):
         if result.raw:
             self.console.log("LLM response:\n" + result.raw, "INFO")
         n = len(result.regions) if result.regions else 0
-        self.console.log(f"Proposed layout: {n} regions; {len(result.questions)} question(s).",
-                         "SUCCESS")
+        nov = len(getattr(result, "overlays", []) or [])
+        self.console.log(
+            f"Proposed layout: {n} regions; {nov} overlay(s); {len(result.questions)} question(s).",
+            "SUCCESS")
         for q in result.questions:
             self.console.log(f"Q: {q}", "WARNING")
         self.layoutProposed.emit(result)
