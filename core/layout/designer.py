@@ -151,10 +151,14 @@ def _build_overlay(od: Dict, regions_by_id: Dict, page_px: Tuple[int, int], idx:
     if resolved is None:
         return None
     anchor, anchor_mode, tail = resolved
+    try:
+        z = int(od.get("z", 0))
+    except (TypeError, ValueError):
+        z = 0
     return Overlay(
         id=od.get("id", f"ov{idx + 1}"), kind=kind, text=str(od.get("text", "")),
         anchor=anchor, anchor_mode=anchor_mode, tail_target=tail,
-        z=int(od.get("z", 0)), role=od.get("role", ""),
+        z=z, role=od.get("role", ""),
     )
 
 

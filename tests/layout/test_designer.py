@@ -144,3 +144,12 @@ def test_parse_overlay_unknown_kind_skipped():
                ' "overlays": [{"id":"o1","kind":"bubble","text":"x","anchor":[10,10]}]}}')
     res = designer.parse_response(content, (200, 200))
     assert res.overlays == []
+
+
+def test_parse_overlay_bad_z_degrades_to_zero():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[0,0,100,100]}],'
+               ' "overlays": [{"id":"o1","kind":"sfx","text":"x","anchor":[10,10],"z":"top"},'
+               ' {"id":"o2","kind":"sfx","text":"y","anchor":[20,20],"z":null}]}}')
+    res = designer.parse_response(content, (200, 200))
+    assert [o.id for o in res.overlays] == ["o1", "o2"]
+    assert all(o.z == 0 for o in res.overlays)
