@@ -954,8 +954,11 @@ git commit -m "feat(layout): bleed-aware rendering on an extended canvas"
 
 ## Notes / deliberately deferred (not gaps)
 - **PDF bleed:** `export_document_pdf` is left at trim size in #1; applying bleed to the PDF path is folded into the later page/export work. (PNG/`QImage` bleed — the testable acceptance criterion — is implemented here.)
+- **GUI export still uses the PIL engine, not this Qt renderer (whole-branch review, Important #2).** `gui/layout/export_dialog.py` renders PNG/PDF via `core/layout/engine.py` (`LayoutEngine.render_page`), which has **none** of #1's shape-clipping / per-region stroke / bleed. The live editor canvas (`gui/layout/canvas_widget.py`) *does* use the Qt `build_scene`, so the new rendering is visible in-editor — but real exports diverge. **Sub-project #2 (or a dedicated export task) must consciously pick the source of truth:** migrate export to the Qt path or port the features. This is the single biggest follow-up for the renderer to actually reach exported output.
+- **Canvas growth on `PageSpec.bleed_px`:** `render_page_to_image` grows the export canvas whenever `bleed_px > 0` (print-bleed semantics — see the design doc's bleed decision), independent of whether any region is `bleed=True`. Deliberate; revisit only if a "grow only when a region bleeds" semantics is preferred.
 - **Editor authoring** of curves/vertices, **tiling/inset gutters**, **balloons**, and the **AI designer** emitting `path`/`segments` are sub-projects #2–#5 per the spec.
 - **`contain` centering:** the scaled pixmap is centered in the bbox for both fits; arbitrary alignment is not in scope.
+- **Path-region drag writeback (#5):** `_writeback_move` persists drags into `bbox`/`points` only, not `segments`; image frames are `movable=False` today so this is not a live bug, but the manual editor (#5) must handle segment writeback.
 
 ## Self-Review (completed by plan author)
 - **Spec coverage:** path geometry (T1), pure helpers (T2), serialization + normalize (T3), path builder (T4), image clip-to-shape + stroke/borderless (T5), text clip (T6), bleed (T7). All §3–§8 spec items map to a task; acceptance criteria 1–7 are each covered by a test.

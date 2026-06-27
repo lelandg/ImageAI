@@ -143,6 +143,13 @@ Pure so it unit-tests headless without a display.
   so a classic full-bleed borderless panel is `bleed=True` + `stroke_px=0` (no
   page-edge detection needed). (Auto edge-snap of a panel to the page edge is #2;
   #1 only honors the flag + bleed box.)
+  - **Decision (canvas growth):** the **export canvas** grows to include the bleed
+    margin whenever `PageSpec.bleed_px > 0` — standard print-bleed semantics, where
+    the bleed area is a property of the *page*, not of any one panel. The per-region
+    `bleed` flag then decides which regions may paint into that margin. (With no
+    legacy projects this changes nothing observed; it is a deliberate print default,
+    not incidental. Alternative considered: grow only when some region has
+    `bleed=True` — rejected as less print-correct.)
 - **Text regions** are clipped to the path too (text cannot spill past a shaped
   panel). Full text-reflow-inside-an-arbitrary-shape stays with #3.
 
