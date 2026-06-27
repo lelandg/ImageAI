@@ -32,3 +32,13 @@ def test_invalid_segments_fall_back_to_bbox(qapp):
     r = Region(id="r", kind="image", shape="path", segments=segs, bbox=(5, 5, 20, 20))
     b = qt_renderer.region_to_painter_path(r).boundingRect()
     assert (round(b.x()), round(b.y()), round(b.width()), round(b.height())) == (5, 5, 20, 20)
+
+
+def test_empty_path_segments_falls_back_and_logs(qapp, caplog):
+    import logging
+    from core.layout.models import Region
+    r = Region(id="ep", kind="image", shape="path", segments=[], bbox=(5, 5, 20, 20))
+    with caplog.at_level(logging.WARNING):
+        b = qt_renderer.region_to_painter_path(r).boundingRect()
+    assert (round(b.x()), round(b.y()), round(b.width()), round(b.height())) == (5, 5, 20, 20)
+    assert any("no segments" in rec.message or "shape='path'" in rec.message for rec in caplog.records)

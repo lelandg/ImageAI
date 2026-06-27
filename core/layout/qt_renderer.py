@@ -1,6 +1,6 @@
 """Native Qt renderer: PageSpec -> QGraphicsScene -> QImage/PNG (source of truth)."""
 from PySide6.QtWidgets import (
-    QGraphicsScene, QGraphicsRectItem, QGraphicsPolygonItem,
+    QGraphicsScene, QGraphicsRectItem,
     QGraphicsSimpleTextItem, QGraphicsItem, QGraphicsPixmapItem, QGraphicsPathItem,
 )
 from PySide6.QtGui import (
@@ -48,27 +48,30 @@ def region_to_painter_path(r: Region) -> QPainterPath:
     rectangle, so a region never renders as nothing.
     """
     path = QPainterPath()
-    if r.shape == "path" and r.segments:
-        issues = validate_segments(r.segments)
-        if issues:
-            logger.error("Region %s has invalid path segments; falling back to bbox: %s",
-                         r.id, "; ".join(issues))
+    if r.shape == "path":
+        if not r.segments:
+            logger.warning("Region %s has shape='path' but no segments; falling back to bbox", r.id)
         else:
-            for seg in r.segments:
-                if seg.type == "move":
-                    path.moveTo(*seg.pts[0])
-                elif seg.type == "line":
-                    path.lineTo(*seg.pts[0])
-                elif seg.type == "quad":
-                    (cx, cy), (ex, ey) = seg.pts
-                    path.quadTo(cx, cy, ex, ey)
-                elif seg.type == "cubic":
-                    (c1x, c1y), (c2x, c2y), (ex, ey) = seg.pts
-                    path.cubicTo(c1x, c1y, c2x, c2y, ex, ey)
-                elif seg.type == "close":
-                    path.closeSubpath()
-            if not path.isEmpty():
-                return path
+            issues = validate_segments(r.segments)
+            if issues:
+                logger.error("Region %s has invalid path segments; falling back to bbox: %s",
+                             r.id, "; ".join(issues))
+            else:
+                for seg in r.segments:
+                    if seg.type == "move":
+                        path.moveTo(*seg.pts[0])
+                    elif seg.type == "line":
+                        path.lineTo(*seg.pts[0])
+                    elif seg.type == "quad":
+                        (cx, cy), (ex, ey) = seg.pts
+                        path.quadTo(cx, cy, ex, ey)
+                    elif seg.type == "cubic":
+                        (c1x, c1y), (c2x, c2y), (ex, ey) = seg.pts
+                        path.cubicTo(c1x, c1y, c2x, c2y, ex, ey)
+                    elif seg.type == "close":
+                        path.closeSubpath()
+                if not path.isEmpty():
+                    return path
     elif r.shape == "polygon" and r.points:
         path.addPolygon(QPolygonF([QPointF(px, py) for px, py in r.points]))
         path.closeSubpath()
@@ -96,6 +99,11 @@ def _writeback_move(item) -> None:
     Handles all carry their geometry in item-local coordinates with the item at
     scene pos (0,0); a drag therefore shows up purely as ``item.pos()``, which is
     the delta to apply to the region's original geometry.
+
+    NOTE — shape="path" regions carry their geometry in ``segments``, not in
+    ``bbox``/``points``, so drag-writeback for path-shaped regions is deferred to
+    the manual-editor sub-project (#5). Image frames are currently movable=False,
+    so this is not a live bug — just a sharp edge to address in #5.
     """
     region = getattr(item, "_region", None)
     if region is None:
@@ -128,12 +136,6 @@ class _RegionMoveMixin:
 class _RegionRectItem(_RegionMoveMixin, QGraphicsRectItem):
     def __init__(self, rect: QRectF, region: Region):
         super().__init__(rect)
-        self._bind_region(region)
-
-
-class _RegionPolygonItem(_RegionMoveMixin, QGraphicsPolygonItem):
-    def __init__(self, polygon: QPolygonF, region: Region):
-        super().__init__(polygon)
         self._bind_region(region)
 
 

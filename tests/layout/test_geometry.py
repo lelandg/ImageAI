@@ -1,4 +1,3 @@
-import math
 from core.layout.models import PathSegment
 from core.layout.geometry import validate_segments, segments_bbox
 

@@ -104,7 +104,7 @@ class PathSegment:
 
 @dataclass
 class Region:
-    """A selectable layout region (rect or polygon), image or text."""
+    """A selectable layout region (rect, polygon, or path), image or text."""
 
     id: str
     kind: Literal["image", "text"]
