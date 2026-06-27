@@ -41,6 +41,29 @@ def _resolve_bg(page: PageSpec) -> str:
     return "#FFFFFF"
 
 
+def segments_to_painter_path(segments) -> QPainterPath:
+    """Convert a list of PathSegment objects into a QPainterPath.
+
+    Extracted from ``region_to_painter_path`` so overlays can reuse the same
+    move/line/quad/cubic/close switch without going through a Region wrapper.
+    """
+    path = QPainterPath()
+    for seg in segments:
+        if seg.type == "move":
+            path.moveTo(*seg.pts[0])
+        elif seg.type == "line":
+            path.lineTo(*seg.pts[0])
+        elif seg.type == "quad":
+            (cx, cy), (ex, ey) = seg.pts
+            path.quadTo(cx, cy, ex, ey)
+        elif seg.type == "cubic":
+            (c1x, c1y), (c2x, c2y), (ex, ey) = seg.pts
+            path.cubicTo(c1x, c1y, c2x, c2y, ex, ey)
+        elif seg.type == "close":
+            path.closeSubpath()
+    return path
+
+
 def region_to_painter_path(r: Region) -> QPainterPath:
     """Build a QPainterPath for a region (rect | polygon | path).
 
@@ -57,19 +80,7 @@ def region_to_painter_path(r: Region) -> QPainterPath:
                 logger.error("Region %s has invalid path segments; falling back to bbox: %s",
                              r.id, "; ".join(issues))
             else:
-                for seg in r.segments:
-                    if seg.type == "move":
-                        path.moveTo(*seg.pts[0])
-                    elif seg.type == "line":
-                        path.lineTo(*seg.pts[0])
-                    elif seg.type == "quad":
-                        (cx, cy), (ex, ey) = seg.pts
-                        path.quadTo(cx, cy, ex, ey)
-                    elif seg.type == "cubic":
-                        (c1x, c1y), (c2x, c2y), (ex, ey) = seg.pts
-                        path.cubicTo(c1x, c1y, c2x, c2y, ex, ey)
-                    elif seg.type == "close":
-                        path.closeSubpath()
+                path = segments_to_painter_path(r.segments)
                 if not path.isEmpty():
                     return path
     elif r.shape == "polygon" and r.points:
@@ -243,8 +254,107 @@ def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool, project
     text.setPos(x + 2, y + 2)
 
 
+class _OverlayPathItem(QGraphicsPathItem):
+    """A QGraphicsPathItem whose shape() returns the FILLED interior.
+
+    The default QGraphicsPathItem.shape() returns the pen-stroked outline, which
+    causes ItemClipsChildrenToShape to clip children (the text item) to a thin
+    ring — making text invisible. Overriding shape() to return self.path()
+    (the filled region) matches what _RegionPathItem does for region children.
+    """
+
+    def shape(self):
+        return self.path()
+
+
+class _OverlayStyleable:
+    """Minimal adapter exposing .text_style and .role for effective_text_style."""
+    __slots__ = ("text_style", "role")
+
+    def __init__(self, text_style, role):
+        self.text_style = text_style
+        self.role = role
+
+
+def _overlay_as_styleable(ov, role):
+    return _OverlayStyleable(ov.text_style, role)
+
+
+def _add_overlay(scene: QGraphicsScene, ov, project_style, base_z: float) -> None:
+    """Measure wrapped text, build balloon body+tail, add body and text to scene.
+
+    Resolution 2 applied: body is _OverlayPathItem (overrides shape() to filled
+    interior so text children are NOT clipped to a thin stroked ring).
+    SFX overlays have no body (overlay_to_segments returns []) — text added directly.
+    """
+    from PySide6.QtCore import Qt, QRectF
+    from PySide6.QtGui import QFont, QColor, QPen, QBrush, QFontMetricsF
+    from PySide6.QtWidgets import QGraphicsTextItem
+    from core.layout.balloons import overlay_to_segments
+
+    # Resolve role: explicit > kind-default > "dialogue"
+    role = ov.role or {
+        "speech": "dialogue", "thought": "dialogue",
+        "caption": "caption", "sfx": "sfx",
+    }.get(ov.kind, "dialogue")
+    ts = effective_text_style(_overlay_as_styleable(ov, role), project_style)
+
+    # Build font from resolved text style
+    font = QFont(ts.family[0] if ts and ts.family else "DejaVu Sans",
+                 ts.size_px if ts and ts.size_px else 16)
+    if ts and ts.italic:
+        font.setItalic(True)
+
+    # Measure wrapped text to size the body
+    fm = QFontMetricsF(font)
+    max_w = max(20.0, ov.style.max_width_px)
+    rect = fm.boundingRect(QRectF(0, 0, max_w, 100000),
+                           int(Qt.TextWordWrap), ov.text)
+    text_w, text_h = rect.width(), rect.height()
+    pad = ov.style.padding_px
+    inner_w = text_w + 2 * pad
+    inner_h = text_h + 2 * pad
+
+    # Anchor body: center or topleft
+    ax, ay = ov.anchor
+    if ov.anchor_mode == "center":
+        ix, iy = ax - inner_w / 2.0, ay - inner_h / 2.0
+    else:
+        ix, iy = ax, ay
+    inner = (ix, iy, inner_w, inner_h)
+
+    z = base_z + ov.z
+
+    # Build body geometry via balloons
+    segs = overlay_to_segments(ov.kind, inner, ov.tail_target, ov.style)
+    body_item = None
+    if segs:
+        path = segments_to_painter_path(segs)
+        body_item = _OverlayPathItem(path)
+        body_item.setBrush(QBrush(QColor(ov.style.fill)))
+        if ov.style.stroke_px > 0:
+            body_item.setPen(QPen(QColor(ov.style.stroke_color), ov.style.stroke_px))
+        else:
+            body_item.setPen(QPen(Qt.NoPen))
+        body_item.setZValue(z)
+        body_item.setFlag(QGraphicsPathItem.GraphicsItemFlag.ItemClipsChildrenToShape, True)
+        scene.addItem(body_item)
+
+    # Text item: child of body (clipped) or direct scene item (sfx, no body)
+    text_item = QGraphicsTextItem(ov.text, parent=body_item)
+    text_item.setFont(font)
+    if ts and ts.color:
+        text_item.setDefaultTextColor(QColor(ts.color))
+    text_item.setTextWidth(text_w)
+    text_item.setPos(ix + pad, iy + pad)
+    text_item.setZValue(z + 0.1)
+    if body_item is None:  # sfx: no body, add text directly to scene
+        scene.addItem(text_item)
+
+
 def build_scene(page: PageSpec, *, selectable: bool = False, style=None,
-                locked: bool = True, region_filter=None) -> QGraphicsScene:
+                locked: bool = True, region_filter=None,
+                include_overlays: bool = True) -> QGraphicsScene:
     pw, ph = page.page_size_px
     scene = QGraphicsScene(0, 0, pw, ph)
     scene.setBackgroundBrush(QBrush(QColor(_resolve_bg(page))))
@@ -254,6 +364,14 @@ def build_scene(page: PageSpec, *, selectable: bool = False, style=None,
             _add_image_region(scene, r, selectable, locked=locked)
         else:
             _add_text_region(scene, r, selectable, project_style=style, locked=locked)
+    # Overlay pass: render after all regions so overlays sit on top.
+    # Gated on include_overlays to avoid double-rendering in the bleed path
+    # (Resolution 1): overlays live in page/trim coords and render with the
+    # non-bleed scene only.
+    if include_overlays and page.overlays:
+        base_z = max((r.z for r in page.regions), default=0) + 1000
+        for ov in sorted(page.overlays, key=lambda o: o.z):
+            _add_overlay(scene, ov, style, base_z)
     return scene
 
 
@@ -279,7 +397,10 @@ def render_page_to_image(page: PageSpec, *, style=None) -> QImage:
     # Bleed regions may extend into the surrounding margin: map the full bleed box
     # in scene coords onto the whole canvas.  Use a transparent background so the
     # bleed scene does not paint over the already-rendered trim content.
-    bleed_scene = build_scene(page, style=style, region_filter=lambda r: r.bleed)
+    # include_overlays=False: overlays live in trim coords and were already rendered
+    # with the non-bleed scene above (Resolution 1 — avoids double-rendering).
+    bleed_scene = build_scene(page, style=style, region_filter=lambda r: r.bleed,
+                              include_overlays=False)
     bleed_scene.setBackgroundBrush(Qt.transparent)
     bleed_scene.render(painter, QRectF(0, 0, cw, ch), QRectF(-b, -b, cw, ch))
     painter.end()
