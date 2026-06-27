@@ -299,9 +299,11 @@ def _add_overlay(scene: QGraphicsScene, ov, project_style, base_z: float) -> Non
     }.get(ov.kind, "dialogue")
     ts = effective_text_style(_overlay_as_styleable(ov, role), project_style)
 
-    # Build font from resolved text style
-    font = QFont(ts.family[0] if ts and ts.family else "DejaVu Sans",
-                 ts.size_px if ts and ts.size_px else 16)
+    # Build font from resolved text style — size via setPixelSize (PIXELS),
+    # matching _add_text_region so overlay and region text render at the same scale.
+    font = QFont()
+    font.setFamily(ts.family[0] if ts and ts.family else "DejaVu Sans")
+    font.setPixelSize(ts.size_px if ts and ts.size_px else 16)
     if ts and ts.italic:
         font.setItalic(True)
 
@@ -346,6 +348,8 @@ def _add_overlay(scene: QGraphicsScene, ov, project_style, base_z: float) -> Non
     if ts and ts.color:
         text_item.setDefaultTextColor(QColor(ts.color))
     text_item.setTextWidth(text_w)
+    # body item lives at scene origin (path holds page-space verts), so the
+    # text's parent-relative pos equals its scene pos.
     text_item.setPos(ix + pad, iy + pad)
     text_item.setZValue(z + 0.1)
     if body_item is None:  # sfx: no body, add text directly to scene
