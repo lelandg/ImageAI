@@ -155,6 +155,10 @@ def _q(p: Point) -> Point:
 def _colinear_between(a: Point, b: Point, p: Point) -> bool:
     """True if p is colinear with a-b and strictly between a and b."""
     cross = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+    # 1e-6 (looser than module EPS) is intentional: union_polygons quantizes
+    # all vertices to 3 decimals first, so colinear points land exactly on the
+    # line and this generous threshold never mis-classifies. Do NOT feed raw
+    # (un-quantized) floats here — the tolerance assumes quantized input.
     if abs(cross) > 1e-6:
         return False
     dot = (p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])
