@@ -91,14 +91,28 @@ class ImageBlock(BlockBase):
 
 
 @dataclass
+class PathSegment:
+    """One command of a region's vector outline (page-pixel coords).
+
+    Point counts by type: move=1, line=1, quad=2 (control, end),
+    cubic=3 (c1, c2, end), close=0. A valid path starts with a 'move'.
+    """
+
+    type: Literal["move", "line", "quad", "cubic", "close"]
+    pts: List[Tuple[float, float]] = field(default_factory=list)
+
+
+@dataclass
 class Region:
     """A selectable layout region (rect or polygon), image or text."""
 
     id: str
     kind: Literal["image", "text"]
-    shape: Literal["rect", "polygon"] = "rect"
+    shape: Literal["rect", "polygon", "path"] = "rect"
     bbox: Rect = (0, 0, 100, 100)
     points: List[Tuple[int, int]] = field(default_factory=list)  # polygon vertices, page px
+    segments: List["PathSegment"] = field(default_factory=list)  # used when shape == "path"
+    bleed: bool = False
     z: int = 0
     name: str = ""
     # content (text)
