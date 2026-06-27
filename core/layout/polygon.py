@@ -36,11 +36,6 @@ def ensure_orientation(poly: Poly) -> Poly:
     return list(reversed(poly)) if signed_area(poly) < 0 else list(poly)
 
 
-def _cross(o: Point, a: Point, b: Point) -> float:
-    """Cross product (a-o) x (b-o); >0 means b is left of ray o->a's... use as side test."""
-    return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-
 def _side(p: Point, a: Point, b: Point) -> float:
     """>0 if p is left of directed line a->b, <0 right, ~0 on the line."""
     return (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
