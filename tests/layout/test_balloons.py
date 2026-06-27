@@ -53,3 +53,45 @@ def test_overlay_to_segments_degenerate_logs_and_empty(caplog):
         assert overlay_to_segments("speech", (0.0, 0.0, 0.0, 30.0), None, style) == []
     assert any("degenerate" in r.message.lower() or "non-positive" in r.message.lower()
                for r in caplog.records)
+
+
+def _all_points(segs):
+    return [p for s in segs for p in s.pts]
+
+
+def test_speech_tail_reaches_target_below():
+    style = OverlayStyle(radius_px=10.0)
+    target = (50.0, 120.0)  # well below INNER (which ends at y=60)
+    segs = overlay_to_segments("speech", INNER, target, style)
+    assert validate_segments(segs) == []
+    # the tail tip is an exact vertex on the outline
+    assert any(abs(px - target[0]) < 1e-6 and abs(py - target[1]) < 1e-6
+               for px, py in _all_points(segs))
+    # bbox now extends below the body to reach the target
+    bbox = segments_bbox(segs)
+    assert bbox[1] + bbox[3] >= target[1] - 1e-6
+
+
+def test_speech_tail_target_above():
+    style = OverlayStyle(radius_px=10.0)
+    target = (50.0, -30.0)  # above the body
+    segs = overlay_to_segments("speech", INNER, target, style)
+    assert validate_segments(segs) == []
+    assert any(abs(py - target[1]) < 1e-6 for _, py in _all_points(segs))
+    assert segments_bbox(segs)[1] <= target[1] + 1e-6  # bbox reaches up to target
+
+
+def test_speech_no_target_has_no_tail():
+    style = OverlayStyle(radius_px=10.0)
+    segs = overlay_to_segments("speech", INNER, None, style)
+    # bbox stays within the inner bounds (no tail protrusion)
+    bbox = segments_bbox(segs)
+    assert bbox[1] >= INNER[1] - 1e-6
+    assert bbox[1] + bbox[3] <= INNER[1] + INNER[3] + 1e-6
+
+
+def test_speech_tail_single_closed_ring():
+    style = OverlayStyle(radius_px=10.0)
+    segs = overlay_to_segments("speech", INNER, (50.0, 120.0), style)
+    assert sum(1 for s in segs if s.type == "move") == 1   # one subpath
+    assert sum(1 for s in segs if s.type == "close") == 1
