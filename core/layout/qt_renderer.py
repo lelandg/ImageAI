@@ -242,11 +242,12 @@ def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool, project
 
 
 def build_scene(page: PageSpec, *, selectable: bool = False, style=None,
-                locked: bool = True) -> QGraphicsScene:
+                locked: bool = True, region_filter=None) -> QGraphicsScene:
     pw, ph = page.page_size_px
     scene = QGraphicsScene(0, 0, pw, ph)
     scene.setBackgroundBrush(QBrush(QColor(_resolve_bg(page))))
-    for r in sorted(page.regions, key=lambda rr: rr.z):
+    regions = page.regions if region_filter is None else [r for r in page.regions if region_filter(r)]
+    for r in sorted(regions, key=lambda rr: rr.z):
         if r.kind == "image":
             _add_image_region(scene, r, selectable, locked=locked)
         else:
@@ -256,12 +257,29 @@ def build_scene(page: PageSpec, *, selectable: bool = False, style=None,
 
 def render_page_to_image(page: PageSpec, *, style=None) -> QImage:
     pw, ph = page.page_size_px
-    scene = build_scene(page, style=style)
-    img = QImage(pw, ph, QImage.Format_ARGB32)
+    b = max(0, int(getattr(page, "bleed_px", 0) or 0))
+    cw, ch = pw + 2 * b, ph + 2 * b
+    img = QImage(cw, ch, QImage.Format_ARGB32)
     img.fill(QColor(_resolve_bg(page)))
     painter = QPainter(img)
     painter.setRenderHint(QPainter.Antialiasing, True)
-    scene.render(painter, QRectF(0, 0, pw, ph), QRectF(0, 0, pw, ph))
+    if b == 0:
+        scene = build_scene(page, style=style)
+        scene.render(painter, QRectF(0, 0, pw, ph), QRectF(0, 0, pw, ph))
+        painter.end()
+        return img
+    # Non-bleed regions are clipped to the trim box, offset into the bleed canvas.
+    painter.save()
+    painter.setClipRect(QRectF(b, b, pw, ph))
+    non_bleed = build_scene(page, style=style, region_filter=lambda r: not r.bleed)
+    non_bleed.render(painter, QRectF(b, b, pw, ph), QRectF(0, 0, pw, ph))
+    painter.restore()
+    # Bleed regions may extend into the surrounding margin: map the full bleed box
+    # in scene coords onto the whole canvas.  Use a transparent background so the
+    # bleed scene does not paint over the already-rendered trim content.
+    bleed_scene = build_scene(page, style=style, region_filter=lambda r: r.bleed)
+    bleed_scene.setBackgroundBrush(Qt.transparent)
+    bleed_scene.render(painter, QRectF(0, 0, cw, ch), QRectF(-b, -b, cw, ch))
     painter.end()
     return img
 
