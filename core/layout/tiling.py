@@ -11,7 +11,7 @@ from typing import List, Literal, Optional, Tuple, Union
 from core.layout.geometry import segments_bbox
 from core.layout.models import Region
 from core.layout.polygon import (
-    Poly, clip_halfplane, inset_polygon, polygon_to_segments,
+    Poly, clip_halfplane, inset_polygon, polygon_to_segments, union_polygons, EPS,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,15 +106,48 @@ def _panel_to_region(panel: Poly, leaf: Leaf, rect: Rect, *, gutter: float, marg
 
 
 def tile(tree: Node, page_rect: Rect, *, gutter: float, margin: float) -> List[Region]:
-    """Partition page_rect by the slice tree and inset each leaf into a Region."""
+    """Partition page_rect, merge cells sharing a merge key, then inset each panel."""
     rx, ry, rw, rh = page_rect
     page_poly: Poly = [(rx, ry), (rx + rw, ry), (rx + rw, ry + rh), (rx, ry + rh)]
     leaves: List[Tuple[Leaf, Poly]] = []
     _collect_leaves(tree, page_poly, leaves)
+
+    # Build the panel list: each entry is (representative_leaf, panel_polygon).
+    panels: List[Tuple[Leaf, Poly]] = []
+    # group polygons by merge key, preserving first-encounter order
+    groups: dict = {}
+    order: List[Optional[str]] = []
+    for leaf, cell in leaves:
+        key = leaf.merge
+        if key is None:
+            order.append(id(leaf))
+            groups[id(leaf)] = (leaf, [(leaf, cell)])
+        else:
+            if key not in groups:
+                groups[key] = (leaf, [])
+                order.append(key)
+            groups[key][1].append((leaf, cell))
+
+    for key in order:
+        rep_leaf, leaf_cells = groups[key]
+        cells = [cell for _, cell in leaf_cells]
+        if len(cells) == 1:
+            panels.append((rep_leaf, cells[0]))
+            continue
+        rings = union_polygons(cells)
+        if len(rings) == 1:
+            panels.append((rep_leaf, rings[0]))
+        else:
+            logger.error("Tiling: merge group %r is disconnected (%d pieces); leaving unmerged",
+                         key, len(rings))
+            # fall back: emit each original cell with its own leaf identity
+            for orig_leaf, orig_cell in leaf_cells:
+                panels.append((orig_leaf, orig_cell))
+
     regions: List[Region] = []
     z = 0
-    for leaf, cell in leaves:
-        r = _panel_to_region(cell, leaf, page_rect, gutter=gutter, margin=margin, z=z)
+    for leaf, panel in panels:
+        r = _panel_to_region(panel, leaf, page_rect, gutter=gutter, margin=margin, z=z)
         if r is not None:
             regions.append(r)
             z += 1

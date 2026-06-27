@@ -1,4 +1,5 @@
 from core.layout.tiling import Split, Leaf, tile
+from core.layout.geometry import segments_bbox
 
 
 def _bbox(region):
@@ -35,3 +36,41 @@ def test_angled_cut_produces_non_axis_aligned_edge():
     # the shared (interior) edge is slanted: its two endpoints differ in x
     xs = sorted({round(p.pts[0][0], 2) for p in left.segments if p.pts})
     assert max(xs) - min(xs) > 1.0  # not a single vertical line -> angled
+
+
+def test_merge_group_forms_one_concave_panel():
+    # 3 cells; merge top-left + bottom (full width) into an L; top-right stays.
+    # layout: top tier split L/R; bottom tier full width.
+    top = Split(axis="x", at=0.5, a=Leaf(id="tl", merge="hero"), b=Leaf(id="tr"))
+    tree = Split(axis="y", at=0.5, a=top, b=Leaf(id="bottom", merge="hero"))
+    regions = {r.id: r for r in tile(tree, (0, 0, 100, 100), gutter=6, margin=6)}
+    # merged panel takes the first-encountered merged leaf's id ("tl"); "bottom" is absorbed
+    assert "tl" in regions and "bottom" not in regions and "tr" in regions
+    assert len(regions) == 2
+    hero = regions["tl"]
+    # concave L panel has more than 4 vertices (move + N lines + close)
+    line_pts = [s for s in hero.segments if s.type == "line"]
+    assert len(line_pts) >= 5  # L-shape -> >=6 vertices total
+
+
+def test_bleed_leaf_boundary_edges_reach_page_rect():
+    tree = Split(axis="x", at=0.5, a=Leaf(id="L", bleed=True), b=Leaf(id="R"))
+    regions = {r.id: r for r in tile(tree, (0, 0, 100, 100), gutter=10, margin=10)}
+    lx, ly, lw, lh = (round(v) for v in segments_bbox(regions["L"].segments))
+    # bleed: left/top/bottom boundary edges NOT inset (reach 0,0 and y=0..100); only the
+    # interior right edge insets by gutter/2 (5).
+    assert lx == 0 and ly == 0
+    assert lh == 100
+    assert lx + lw == 45  # 50 (cut) - 5 (interior gutter/2)
+
+
+def test_disconnected_merge_is_logged_and_unmerged(caplog):
+    import logging
+    # two non-adjacent cells share a merge key -> cannot union -> stay separate
+    top = Split(axis="x", at=0.5, a=Leaf(id="tl", merge="x"), b=Leaf(id="tr"))
+    tree = Split(axis="y", at=0.5, a=top, b=Split(axis="x", at=0.5, a=Leaf(id="bl"), b=Leaf(id="br", merge="x")))
+    with caplog.at_level(logging.ERROR):
+        regions = {r.id: r for r in tile(tree, (0, 0, 100, 100), gutter=6, margin=6)}
+    # tl and br are diagonal (not edge-adjacent) -> union yields 2 rings -> unmerged
+    assert "tl" in regions and "br" in regions
+    assert any("merge" in rec.message.lower() for rec in caplog.records)
