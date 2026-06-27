@@ -202,18 +202,29 @@ def _add_image_region(scene: QGraphicsScene, r: Region, selectable: bool,
 def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool, project_style=None,
                      *, locked: bool = True) -> None:
     x, y, w, h = r.bbox
-    # The dashed guide box is an editor-only affordance (it's also the region's
-    # selectable/movable handle). Export paths call build_scene(selectable=False),
-    # so skipping it there keeps the guides out of the rendered PNG/PDF.
+
+    # Editor-only dashed guide box doubles as the region's selectable/movable
+    # handle; export paths (selectable=False) omit it.
     box = None
     if selectable:
         box = _RegionRectItem(QRectF(x, y, w, h), r)
         box.setBrush(QBrush(Qt.transparent))
         pen = QPen(_TEXT_GUIDE_PEN, 1.5, Qt.DashLine)
-        pen.setCosmetic(True)  # constant on-screen width at any zoom -> always visible
+        pen.setCosmetic(True)
         box.setPen(pen)
         _apply_flags(box, selectable, r.id, movable=(selectable and not locked))
         scene.addItem(box)
+
+    # Clip item: text is parented here so it cannot spill past the panel shape.
+    # When a guide box exists, the clip rides under it so a drag moves both.
+    clip = _RegionPathItem(region_to_painter_path(r), r)
+    clip.setPen(QPen(Qt.NoPen))
+    clip.setBrush(QBrush(Qt.transparent))
+    clip.setFlag(QGraphicsItem.ItemClipsChildrenToShape, True)
+    if box is not None:
+        clip.setParentItem(box)
+    else:
+        scene.addItem(clip)
 
     text = QGraphicsSimpleTextItem(r.text or "")
     ts = effective_text_style(r, project_style)
@@ -224,17 +235,9 @@ def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool, project
         font.setBold(ts.weight in ("bold", "black", "semibold"))
         font.setItalic(ts.italic)
         text.setBrush(QBrush(QColor(ts.color)))
-    # Always pin a pixel size: an unresolved role/style would otherwise leave the
-    # QFont at its ~16px default, which is invisible on a 300-DPI page.
     font.setPixelSize(ts.size_px if ts and ts.size_px else _DEFAULT_TEXT_PX)
     text.setFont(font)
-    # In the editor the text is a child of the guide box so applied text stays
-    # locked to its frame and moves with it; on export there is no box, so the
-    # text is a top-level scene item.
-    if box is not None:
-        text.setParentItem(box)
-    else:
-        scene.addItem(text)
+    text.setParentItem(clip)
     text.setPos(x + 2, y + 2)
 
 
