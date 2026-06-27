@@ -200,3 +200,12 @@ def test_build_messages_documents_new_capabilities():
     joined = " ".join(m["content"] for m in msgs)
     for token in ("svg", "tiling", "grid", "overlays", "speech", "anchor_region", "bleed"):
         assert token in joined, token
+
+
+def test_parse_overlay_bad_coords_drop_only_that_overlay():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[0,0,100,100]}],'
+               ' "overlays": [{"id":"bad","kind":"speech","text":"x","anchor":[null,null]},'
+               ' {"id":"bad2","kind":"sfx","text":"y","anchor":["left","top"]},'
+               ' {"id":"ok","kind":"sfx","text":"z","anchor":[50,50]}]}}')
+    res = designer.parse_response(content, (200, 200))
+    assert [o.id for o in res.overlays] == ["ok"]

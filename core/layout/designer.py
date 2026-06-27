@@ -261,7 +261,12 @@ def parse_response(content: str, page_px: Tuple[int, int]) -> DesignerResult:
             by_id = {r.id: r for r in (regions or [])}
             for i, od in enumerate(layout["overlays"]):
                 if isinstance(od, dict):
-                    ov = _build_overlay(od, by_id, page_px, i)
+                    try:
+                        ov = _build_overlay(od, by_id, page_px, i)
+                    except (TypeError, ValueError) as e:
+                        logger.warning("Designer overlay %r: malformed numeric field (%s); skipped",
+                                       od.get("id"), e)
+                        ov = None
                     if ov is not None:
                         overlays.append(ov)
     if regions is None and not questions and not overlays:
