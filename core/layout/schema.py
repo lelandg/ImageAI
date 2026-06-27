@@ -4,7 +4,7 @@ from typing import Dict, List, Tuple
 
 from core.layout.models import (
     Region, PageSpec, DocumentSpec, PageSize, TextStyle, ImageStyle, Snapshot, ProjectStyle,
-    migrate_legacy_blocks, TextBlock, ImageBlock,
+    migrate_legacy_blocks, TextBlock, ImageBlock, PathSegment,
 )
 
 
@@ -23,9 +23,19 @@ REGION_JSON_SCHEMA: Dict = {
     "properties": {
         "id": {"type": "string"},
         "kind": {"enum": ["image", "text"]},
-        "shape": {"enum": ["rect", "polygon"]},
+        "shape": {"enum": ["rect", "polygon", "path"]},
         "bbox": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
         "points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+        "segments": {"type": "array", "items": {
+            "type": "object",
+            "required": ["type", "pts"],
+            "properties": {
+                "type": {"enum": ["move", "line", "quad", "cubic", "close"]},
+                "pts": {"type": "array", "items": {
+                    "type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}},
+            },
+        }},
+        "bleed": {"type": "boolean"},
         "z": {"type": "integer"},
         "text": {"type": "string"},
         "role": {"type": "string"},
@@ -45,6 +55,8 @@ def region_to_dict(r: Region) -> Dict:
         "bbox": list(r.bbox), "points": [list(p) for p in r.points],
         "z": r.z, "name": r.name, "text": r.text, "role": r.role,
         "image_ref": r.image_ref, "prompt": r.prompt, "gen_settings": dict(r.gen_settings),
+        "segments": [{"type": s.type, "pts": [list(p) for p in s.pts]} for s in r.segments],
+        "bleed": r.bleed,
         "text_style": _style_to_dict(r.text_style),
         "image_style": _style_to_dict(r.image_style),
     }
@@ -61,6 +73,10 @@ def region_from_dict(d: Dict) -> Region:
         text=d.get("text", ""), role=d.get("role", ""),
         image_ref=d.get("image_ref"), prompt=d.get("prompt", ""),
         gen_settings=dict(d.get("gen_settings", {})),
+        segments=[PathSegment(type=s.get("type", "line"),
+                              pts=[tuple(p) for p in s.get("pts", [])])
+                  for s in d.get("segments", [])],
+        bleed=bool(d.get("bleed", False)),
         text_style=TextStyle(**_filtered(TextStyle, ts)) if ts else None,
         image_style=ImageStyle(**_filtered(ImageStyle, is_)) if is_ else None,
     )
@@ -163,6 +179,9 @@ def normalize_region(r: Region, page_px: Tuple[int, int]) -> Region:
         xs = [p[0] for p in r.points]
         ys = [p[1] for p in r.points]
         bbox = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+    elif r.shape == "path" and r.segments:
+        from core.layout.geometry import segments_bbox
+        bbox = tuple(round(v) for v in segments_bbox(r.segments))
     else:
         bbox = r.bbox
     x, y, w, h = bbox
