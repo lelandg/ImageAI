@@ -52,6 +52,17 @@ class TextStyle:
 
 
 @dataclass
+class OverlayStyle:
+    """Visual style for a comic text overlay's body (balloon/caption shell)."""
+    fill: str = "#FFFFFF"
+    stroke_px: float = 2.0
+    stroke_color: str = "#000000"
+    padding_px: float = 10.0        # inset between the text box and the body edge
+    radius_px: float = 16.0         # corner roundness (speech) / scallop radius (thought)
+    max_width_px: float = 240.0     # wrap-width cap used by the renderer's auto-fit
+
+
+@dataclass
 class ImageStyle:
     """Style configuration for image blocks."""
 
@@ -128,6 +139,27 @@ class Region:
 
 
 @dataclass
+class Overlay:
+    """A declarative comic text overlay (speech/thought/caption/sfx).
+
+    Qt-free and serializable. The renderer measures the wrapped text to size the
+    body; balloons.py builds the body/tail geometry. `anchor` places the body
+    (center or top-left per `anchor_mode`); `tail_target` is a free page-pixel
+    point the tail points at (None = no tail).
+    """
+    id: str
+    kind: Literal["speech", "thought", "caption", "sfx"]
+    text: str
+    anchor: Tuple[float, float]
+    anchor_mode: Literal["center", "topleft"] = "center"
+    tail_target: Optional[Tuple[float, float]] = None
+    z: int = 0
+    role: str = ""
+    text_style: Optional[TextStyle] = None
+    style: OverlayStyle = field(default_factory=OverlayStyle)
+
+
+@dataclass
 class Snapshot:
     """One iteration of the layout designer (browsable in history)."""
 
@@ -160,6 +192,7 @@ class PageSpec:
     variables: Dict[str, str] = field(default_factory=dict)  # Template variables
     page_size: Optional[PageSize] = None
     regions: List[Region] = field(default_factory=list)
+    overlays: List[Overlay] = field(default_factory=list)
 
 
 @dataclass
