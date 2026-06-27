@@ -1,5 +1,5 @@
 from core.layout.models import PageSpec, Region
-from core.layout.tiling import grid, three_tiers, diagonal_action, feature_L, apply_tiling, tile
+from core.layout.tiling import grid, three_tiers, splash_with_strip, diagonal_action, feature_L, apply_tiling, tile
 from core.layout.geometry import validate_segments
 from core.layout.schema import region_to_dict, region_from_dict
 
@@ -9,7 +9,7 @@ def test_grid_preset_counts():
 
 
 def test_named_presets_build_and_tile():
-    for tree in (three_tiers(), diagonal_action(), feature_L()):
+    for tree in (three_tiers(), splash_with_strip(), diagonal_action(), feature_L()):
         regions = tile(tree, (0, 0, 200, 300), gutter=8, margin=10)
         assert regions  # non-empty
         for r in regions:

@@ -4,6 +4,7 @@ Pure (no Qt). Emits shape="path" Regions rendered by the geometry/render core.
 """
 from __future__ import annotations
 
+import dataclasses
 import logging
 from dataclasses import dataclass
 from typing import List, Literal, Optional, Tuple, Union
@@ -210,8 +211,7 @@ def apply_tiling(page: PageSpec, tree: Node, *, gutter: float, margin: float,
     next_z = (max((r.z for r in base), default=-1)) + 1
     layered: List[Region] = list(base)
     for r in floating:
-        r.z = next_z
+        layered.append(dataclasses.replace(r, z=next_z))
         next_z += 1
-        layered.append(r)
     page.regions = layered
     return page
