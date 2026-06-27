@@ -202,6 +202,15 @@ def test_build_messages_documents_new_capabilities():
         assert token in joined, token
 
 
+def test_build_messages_documents_tiled_panel_ids():
+    # The prompt must teach the LLM how tiled panels are named, so overlays can
+    # be anchored to them via anchor_region/tail_to_region.
+    msgs = designer.build_messages("comic", (1000, 800), "a dynamic comic page")
+    joined = " ".join(m["content"] for m in msgs)
+    for token in ("p{row}_{col}", "t0", "splash", "s0", "d0", "hero", "side"):
+        assert token in joined, token
+
+
 def test_parse_overlay_bad_coords_drop_only_that_overlay():
     content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[0,0,100,100]}],'
                ' "overlays": [{"id":"bad","kind":"speech","text":"x","anchor":[null,null]},'

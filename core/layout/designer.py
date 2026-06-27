@@ -45,6 +45,9 @@ def build_messages(content_kind: str, page_px: Tuple[int, int], user_text: str,
         f'                "params": {{ "rows": int, "cols": int, "gutter_px": number,'
         f' "margin_px": number }} }},\n'
         f"        // optional; generates gap-free panels. rows/cols apply to \"grid\".\n"
+        f"        // tiled panels are auto-named; reference them in anchor_region/tail_to_region:\n"
+        f'        //   grid->"p{{row}}_{{col}}" (0-based); three_tiers->t0,t1,t2;\n'
+        f"        //   splash_with_strip->splash,s0,s1; diagonal_action->d0,d1; feature_L->hero,side\n"
         f'    "regions": [ {{ "id": string, "kind": "image"|"text",\n'
         f'        "shape": "rect"|"polygon"|"path",\n'
         f'        "bbox": [x,y,w,h], "points": [[x,y],...] (polygon only),\n'
