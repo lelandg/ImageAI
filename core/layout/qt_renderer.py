@@ -5,12 +5,17 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import (
     QColor, QBrush, QPen, QPolygonF, QImage, QPainter, QFont, QPixmap,
-    QPdfWriter, QPageSize, QPageLayout,
+    QPdfWriter, QPageSize, QPageLayout, QPainterPath,
 )
 from PySide6.QtCore import QPointF, QRectF, Qt, QSizeF, QMarginsF
 
+import logging
+
 from core.layout.models import PageSpec, Region, DocumentSpec
 from core.layout.styles import effective_text_style
+from core.layout.geometry import validate_segments
+
+logger = logging.getLogger(__name__)
 
 _PLACEHOLDER_FILL = QColor("#E9ECEF")
 _PLACEHOLDER_PEN = QColor("#ADB5BD")
@@ -34,6 +39,43 @@ def _resolve_bg(page: PageSpec) -> str:
     if page.background and page.background.startswith("#"):
         return page.background
     return "#FFFFFF"
+
+
+def region_to_painter_path(r: Region) -> QPainterPath:
+    """Build a QPainterPath for a region (rect | polygon | path).
+
+    Invalid path segments are logged and the region falls back to its bbox
+    rectangle, so a region never renders as nothing.
+    """
+    path = QPainterPath()
+    if r.shape == "path" and r.segments:
+        issues = validate_segments(r.segments)
+        if issues:
+            logger.error("Region %s has invalid path segments; falling back to bbox: %s",
+                         r.id, "; ".join(issues))
+        else:
+            for seg in r.segments:
+                if seg.type == "move":
+                    path.moveTo(*seg.pts[0])
+                elif seg.type == "line":
+                    path.lineTo(*seg.pts[0])
+                elif seg.type == "quad":
+                    (cx, cy), (ex, ey) = seg.pts
+                    path.quadTo(cx, cy, ex, ey)
+                elif seg.type == "cubic":
+                    (c1x, c1y), (c2x, c2y), (ex, ey) = seg.pts
+                    path.cubicTo(c1x, c1y, c2x, c2y, ex, ey)
+                elif seg.type == "close":
+                    path.closeSubpath()
+            if not path.isEmpty():
+                return path
+    elif r.shape == "polygon" and r.points:
+        path.addPolygon(QPolygonF([QPointF(px, py) for px, py in r.points]))
+        path.closeSubpath()
+        return path
+    x, y, w, h = r.bbox
+    path.addRect(QRectF(x, y, w, h))
+    return path
 
 
 def _apply_flags(item: QGraphicsItem, selectable: bool, region_id: str,
