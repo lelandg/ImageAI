@@ -153,3 +153,43 @@ def test_parse_overlay_bad_z_degrades_to_zero():
     res = designer.parse_response(content, (200, 200))
     assert [o.id for o in res.overlays] == ["o1", "o2"]
     assert all(o.z == 0 for o in res.overlays)
+
+
+def test_parse_svg_path_region():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","shape":"path",'
+               ' "svg":"M10 10 L90 10 L90 90 Z","bleed":true}]}}')
+    res = designer.parse_response(content, (200, 200))
+    r = res.regions[0]
+    assert r.shape == "path"
+    assert [s.type for s in r.segments] == ["move", "line", "line", "close"]
+    assert r.bleed is True
+
+
+def test_parse_region_stroke_px_maps_to_image_style():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","shape":"rect",'
+               ' "bbox":[0,0,100,100],"stroke_px":6}]}}')
+    res = designer.parse_response(content, (200, 200))
+    assert res.regions[0].image_style is not None
+    assert res.regions[0].image_style.stroke_px == 6
+
+
+def test_parse_tiling_preset_expands_to_panels():
+    content = '{"layout": {"tiling": {"preset":"grid","params":{"rows":2,"cols":2,"gutter_px":10}}}}'
+    res = designer.parse_response(content, (400, 400))
+    assert res.regions is not None and len(res.regions) == 4
+    assert all(r.shape == "path" for r in res.regions)
+
+
+def test_unknown_tiling_preset_degrades_keeps_explicit_regions():
+    content = ('{"layout": {"tiling": {"preset":"spiral"},'
+               ' "regions":[{"id":"a","kind":"image","bbox":[0,0,50,50]}]}}')
+    res = designer.parse_response(content, (200, 200))
+    assert [r.id for r in res.regions] == ["a"]  # unknown preset ignored; explicit region kept
+
+
+def test_tiling_and_explicit_regions_coexist():
+    content = ('{"layout": {"tiling": {"preset":"three_tiers"},'
+               ' "regions":[{"id":"x","kind":"text","bbox":[0,0,40,20],"role":"caption"}]}}')
+    res = designer.parse_response(content, (300, 300))
+    ids = [r.id for r in res.regions]
+    assert "x" in ids and len(ids) == 4  # 3 tiers + 1 explicit region

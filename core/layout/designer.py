@@ -162,6 +162,57 @@ def _build_overlay(od: Dict, regions_by_id: Dict, page_px: Tuple[int, int], idx:
     )
 
 
+def _regions_from_tiling(tspec, page_px: Tuple[int, int]) -> List[Region]:
+    """Expand a tiling-preset request into gap-free panel Regions (or [] on failure)."""
+    if not isinstance(tspec, dict):
+        return []
+    from core.layout import tiling
+    preset = tspec.get("preset")
+    params = tspec.get("params") or {}
+    pw, ph = page_px
+    try:
+        if preset == "grid":
+            tree = tiling.grid(int(params.get("rows", 2)), int(params.get("cols", 2)))
+        elif preset == "three_tiers":
+            tree = tiling.three_tiers()
+        elif preset == "splash_with_strip":
+            tree = tiling.splash_with_strip()
+        elif preset == "diagonal_action":
+            tree = tiling.diagonal_action()
+        elif preset == "feature_L":
+            tree = tiling.feature_L()
+        else:
+            logger.warning("Designer: unknown tiling preset %r; ignored", preset)
+            return []
+        gutter = float(params.get("gutter_px", 12))
+        margin = float(params.get("margin_px", 24))
+        return tiling.tile(tree, (0, 0, pw, ph), gutter=gutter, margin=margin)
+    except Exception as e:  # noqa: BLE001 - degrade, never crash
+        logger.warning("Designer: tiling preset %r failed: %s", preset, e)
+        return []
+
+
+def _normalize_region_dict(rd: Dict) -> Dict:
+    """Map LLM region shorthands onto schema.region_from_dict's expected keys.
+
+    "svg" -> shape="path" + "segments"; top-level "stroke_px" -> image_style.stroke_px.
+    Returns a new dict; the caller's parsed dict is not mutated.
+    """
+    rd = dict(rd)
+    svg = rd.pop("svg", None)
+    if svg:
+        from core.layout.svg_path import svg_to_segments
+        segs = svg_to_segments(str(svg))
+        rd["shape"] = "path"
+        rd["segments"] = [{"type": s.type, "pts": [list(p) for p in s.pts]} for s in segs]
+    stroke = rd.pop("stroke_px", None)
+    if stroke is not None:
+        istyle = dict(rd.get("image_style") or {})
+        istyle.setdefault("stroke_px", stroke)
+        rd["image_style"] = istyle
+    return rd
+
+
 def parse_response(content: str, page_px: Tuple[int, int]) -> DesignerResult:
     from gui.llm_utils import LLMResponseParser
     data = LLMResponseParser.parse_json_response(content, expected_type=dict)
@@ -175,18 +226,19 @@ def parse_response(content: str, page_px: Tuple[int, int]) -> DesignerResult:
     overlays: List[Overlay] = []
     layout = data.get("layout")
     if isinstance(layout, dict):
+        collected = []
+        collected.extend(_regions_from_tiling(layout.get("tiling"), page_px))
         if isinstance(layout.get("regions"), list):
-            collected = []
             for i, rd in enumerate(layout["regions"]):
                 if not isinstance(rd, dict):
                     continue
-                rd = dict(rd)  # don't mutate the parsed dict
+                rd = _normalize_region_dict(rd)
                 rd.setdefault("id", f"region{i + 1}")
                 rd.setdefault("kind", "image")
                 region = schema.region_from_dict(rd)
                 collected.append(schema.normalize_region(region, page_px))
-            if collected:
-                regions = collected
+        if collected:
+            regions = collected
         if isinstance(layout.get("overlays"), list):
             by_id = {r.id: r for r in (regions or [])}
             for i, od in enumerate(layout["overlays"]):
