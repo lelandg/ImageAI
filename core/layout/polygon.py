@@ -146,3 +146,150 @@ def inset_polygon(poly: Poly, dists: List[float], *, miter_limit: float = 4.0) -
     if len(out) < 3 or signed_area(out) <= EPS:
         return None
     return out
+
+
+def _q(p: Point) -> Point:
+    return (round(p[0], 3), round(p[1], 3))
+
+
+def _colinear_between(a: Point, b: Point, p: Point) -> bool:
+    """True if p is colinear with a-b and strictly between a and b."""
+    cross = (b[0] - a[0]) * (p[1] - a[1]) - (b[1] - a[1]) * (p[0] - a[0])
+    if abs(cross) > 1e-6:
+        return False
+    dot = (p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])
+    if dot <= EPS:
+        return False
+    l2 = (b[0] - a[0]) ** 2 + (b[1] - a[1]) ** 2
+    return dot < l2 - EPS
+
+
+def _subdivide(edges: List[Tuple[Point, Point]]) -> List[Tuple[Point, Point]]:
+    """Split each edge at any other edge's endpoint that lies on it (colinear)."""
+    pts: set = set()
+    for a, b in edges:
+        pts.add(a)
+        pts.add(b)
+    out: List[Tuple[Point, Point]] = []
+    for a, b in edges:
+        cuts = [p for p in pts if _colinear_between(a, b, p)]
+        cuts.sort(key=lambda p: (p[0] - a[0]) ** 2 + (p[1] - a[1]) ** 2)
+        chain = [a] + cuts + [b]
+        for i in range(len(chain) - 1):
+            out.append((chain[i], chain[i + 1]))
+    return out
+
+
+def _remove_colinear(ring: Poly) -> Poly:
+    """Remove vertices that lie exactly on the segment between their neighbors."""
+    if len(ring) < 3:
+        return ring
+    result = list(ring)
+    changed = True
+    while changed:
+        changed = False
+        n = len(result)
+        if n < 3:
+            break
+        keep = []
+        for i in range(n):
+            prev_pt = result[(i - 1) % n]
+            cur_pt = result[i]
+            next_pt = result[(i + 1) % n]
+            cross = ((cur_pt[0] - prev_pt[0]) * (next_pt[1] - prev_pt[1])
+                     - (cur_pt[1] - prev_pt[1]) * (next_pt[0] - prev_pt[0]))
+            if abs(cross) > 1e-9:
+                keep.append(cur_pt)
+            else:
+                changed = True
+        result = keep
+    return result
+
+
+def union_polygons(polys: List[Poly]) -> List[Poly]:
+    """Union edge-sharing polygons via directed-edge cancellation.
+
+    Returns one positively-oriented ring per connected component. Vertices are
+    quantized to 3 decimals so shared edges match exactly. Only valid for
+    exact-partition, edge-sharing inputs (as produced by the tiler) — not a
+    general boolean-union library.
+    """
+    from collections import Counter, defaultdict
+
+    # Build directed edge list with quantized vertices
+    edges: List[Tuple[Point, Point]] = []
+    for poly in polys:
+        ring = [_q(p) for p in ensure_orientation(poly)]
+        n = len(ring)
+        for i in range(n):
+            edges.append((ring[i], ring[(i + 1) % n]))
+
+    # Subdivide edges at colinear partial-overlap points
+    edges = _subdivide(edges)
+
+    # Cancel exact opposite pairs — interior shared edges cancel out
+    counts: Counter = Counter(edges)
+    survivors: List[Tuple[Point, Point]] = []
+    for e, cnt in counts.items():
+        a, b = e
+        opp = (b, a)
+        net = cnt - counts.get(opp, 0)
+        for _ in range(max(0, net)):
+            survivors.append(e)
+
+    if not survivors:
+        logger.warning("union_polygons: no survivor edges after cancellation")
+        return []
+
+    # Build adjacency: start_vertex -> list of edge indices
+    starts: dict = defaultdict(list)
+    for idx, e in enumerate(survivors):
+        starts[e[0]].append(idx)
+
+    # Chain survivors into closed rings using index-based tracking
+    # (id()-based tracking is unreliable: Python may reuse tuple object ids)
+    rings: List[Poly] = []
+    used: set = set()  # set of survivor indices already consumed
+
+    for start_idx, e0 in enumerate(survivors):
+        if start_idx in used:
+            continue
+
+        ring: Poly = []
+        cur_idx = start_idx
+        guard = 0
+
+        while True:
+            guard += 1
+            if guard > len(survivors) + 5:
+                logger.warning("union_polygons: ring-chaining guard triggered; breaking")
+                break
+
+            used.add(cur_idx)
+            cur = survivors[cur_idx]
+            ring.append(cur[0])
+
+            # Find the next unused edge whose start == cur's end
+            next_vertex = cur[1]
+            candidates = [i for i in starts[next_vertex] if i not in used]
+
+            if not candidates:
+                break
+
+            # Pick the next edge; if it closes back to ring[0] we're done
+            next_idx = candidates[0]
+            next_edge = survivors[next_idx]
+
+            if next_edge[0] == e0[0]:
+                # Ring would close here — mark it used and stop
+                used.add(next_idx)
+                break
+
+            cur_idx = next_idx
+
+        if len(ring) >= 3:
+            ring = _remove_colinear(ring)
+            if len(ring) >= 3:
+                rings.append(ensure_orientation(ring))
+
+    return rings

@@ -85,3 +85,48 @@ def test_inset_large_dist_on_short_edge_not_falsely_collapsed():
     out = inset_polygon(rect, [0.5, 1.2, 0.5, 0.6])
     assert out is not None
     assert signed_area(out) > 0
+
+
+from core.layout.polygon import union_polygons
+
+
+def test_union_two_adjacent_squares_is_rectangle():
+    left = [(0.0, 0.0), (5.0, 0.0), (5.0, 10.0), (0.0, 10.0)]
+    right = [(5.0, 0.0), (10.0, 0.0), (10.0, 10.0), (5.0, 10.0)]
+    rings = union_polygons([left, right])
+    assert len(rings) == 1
+    ring = rings[0]
+    xs = sorted({round(x, 3) for x, _ in ring})
+    ys = sorted({round(y, 3) for _, y in ring})
+    assert xs == [0.0, 10.0] and ys == [0.0, 10.0]
+    assert len(ring) == 4  # the shared interior edge is gone
+
+
+def test_union_makes_concave_L():
+    # bottom wide strip + top-left square -> L shape
+    bottom = [(0.0, 6.0), (10.0, 6.0), (10.0, 10.0), (0.0, 10.0)]
+    topleft = [(0.0, 0.0), (4.0, 0.0), (4.0, 6.0), (0.0, 6.0)]
+    rings = union_polygons([bottom, topleft])
+    assert len(rings) == 1
+    assert len(rings[0]) == 6  # L-shape has 6 vertices (one reflex)
+
+
+def test_union_partial_shared_edge():
+    # right cell is shorter than left's full edge -> partial colinear overlap
+    left = [(0.0, 0.0), (5.0, 0.0), (5.0, 10.0), (0.0, 10.0)]
+    right = [(5.0, 0.0), (10.0, 0.0), (10.0, 5.0), (5.0, 5.0)]
+    rings = union_polygons([left, right])
+    assert len(rings) == 1
+    assert abs(_area(rings[0]) - 75.0) < 1e-6  # 50 + 25
+
+
+def test_union_disconnected_returns_two_rings():
+    a = [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]
+    b = [(8.0, 8.0), (10.0, 8.0), (10.0, 10.0), (8.0, 10.0)]
+    rings = union_polygons([a, b])
+    assert len(rings) == 2
+
+
+def _area(poly):
+    from core.layout.polygon import signed_area
+    return abs(signed_area(poly))
