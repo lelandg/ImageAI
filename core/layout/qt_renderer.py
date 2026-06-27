@@ -1,7 +1,7 @@
 """Native Qt renderer: PageSpec -> QGraphicsScene -> QImage/PNG (source of truth)."""
 from PySide6.QtWidgets import (
     QGraphicsScene, QGraphicsRectItem, QGraphicsPolygonItem,
-    QGraphicsSimpleTextItem, QGraphicsItem, QGraphicsPixmapItem,
+    QGraphicsSimpleTextItem, QGraphicsItem, QGraphicsPixmapItem, QGraphicsPathItem,
 )
 from PySide6.QtGui import (
     QColor, QBrush, QPen, QPolygonF, QImage, QPainter, QFont, QPixmap,
@@ -143,44 +143,55 @@ class _RegionPixmapItem(_RegionMoveMixin, QGraphicsPixmapItem):
         self._bind_region(region)
 
 
+class _RegionPathItem(_RegionMoveMixin, QGraphicsPathItem):
+    def __init__(self, path: QPainterPath, region: Region):
+        super().__init__(path)
+        self._bind_region(region)
+
+    def shape(self):
+        # Clip children to the FILLED interior, not the stroked outline (the
+        # default QGraphicsPathItem.shape() would return just the pen outline).
+        return self.path()
+
+
 def _add_image_region(scene: QGraphicsScene, r: Region, selectable: bool,
                       *, locked: bool = True) -> None:
-    x, y, w, h = r.bbox
-    # Image frames are ALWAYS locked in position — only text follows the lock
-    # toggle (see _add_text_region). They stay selectable so the region can be
-    # picked to set/replace its image, just never draggable.
+    # Image frames are ALWAYS locked in position (only text follows the lock
+    # toggle); they stay selectable so the region can be picked.
     movable = False
+    istyle = r.image_style
+    stroke_px = istyle.stroke_px if istyle else 0
+    stroke_color = istyle.stroke_color if istyle else "#000000"
+    fit = istyle.fit if istyle else "cover"
+
+    path = region_to_painter_path(r)
+    frame = _RegionPathItem(path, r)
+    frame.setFlag(QGraphicsItem.ItemClipsChildrenToShape, True)
+    frame.setPen(QPen(QColor(stroke_color), stroke_px) if stroke_px > 0 else QPen(Qt.NoPen))
+
     pix = QPixmap(r.image_ref) if r.image_ref else None
     filled = pix is not None and not pix.isNull()
 
     if filled:
-        # The pixmap on top is the region's handle; the placeholder fill rides
-        # along as a child drawn behind it (negative z) so transparent PNGs read
-        # as a solid frame and the two never fight over the cursor on a drag.
-        scaled = pix.scaled(int(w), int(h), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        handle = _RegionPixmapItem(scaled, r)
-        handle.setOffset(x, y)
-        bg = QGraphicsRectItem(QRectF(x, y, w, h), handle)
-        bg.setBrush(QBrush(_PLACEHOLDER_FILL))
-        bg.setPen(QPen(_PLACEHOLDER_PEN, 1))
-        bg.setZValue(-1)
-        _apply_flags(handle, selectable, r.id, movable=movable)
-        scene.addItem(handle)
-        return
-
-    if r.shape == "polygon" and r.points:
-        poly = QPolygonF([QPointF(px, py) for px, py in r.points])
-        item = _RegionPolygonItem(poly, r)
+        frame.setBrush(QBrush(Qt.transparent))
+        x, y, w, h = r.bbox
+        mode = Qt.KeepAspectRatioByExpanding if fit == "cover" else Qt.KeepAspectRatio
+        scaled = pix.scaled(int(w), int(h), mode, Qt.SmoothTransformation)
+        child = _RegionPixmapItem(scaled, r)
+        # Center the scaled pixmap in the bbox; the parent shape clip crops the
+        # overflow (cover) or reveals panel bg in the letterbox (contain).
+        child.setOffset(x + (w - scaled.width()) / 2.0, y + (h - scaled.height()) / 2.0)
+        child.setParentItem(frame)
+        _apply_flags(child, selectable, r.id, movable=movable)
     else:
-        item = _RegionRectItem(QRectF(x, y, w, h), r)
-    item.setBrush(QBrush(_PLACEHOLDER_FILL))
-    item.setPen(QPen(_PLACEHOLDER_PEN, 1))
-    _apply_flags(item, selectable, r.id, movable=movable)
-    scene.addItem(item)
+        frame.setBrush(QBrush(_PLACEHOLDER_FILL))
+        lx, ly, _, _ = r.bbox
+        label = QGraphicsSimpleTextItem(r.name or "[image]", frame)
+        label.setPos(lx + 4, ly + 4)
+        label.setBrush(QBrush(QColor("#6C757D")))
 
-    label = QGraphicsSimpleTextItem(r.name or "[image]", item)  # child -> moves with frame
-    label.setPos(x + 4, y + 4)
-    label.setBrush(QBrush(QColor("#6C757D")))
+    _apply_flags(frame, selectable, r.id, movable=movable)
+    scene.addItem(frame)
 
 
 def _add_text_region(scene: QGraphicsScene, r: Region, selectable: bool, project_style=None,
