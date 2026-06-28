@@ -302,7 +302,6 @@ class LayoutTab(QWidget):
         return True
 
     def _apply_knife(self, region_id: str, a, b) -> bool:
-        import logging
         page = self._current_page()
         idx = self._region_index(region_id)
         if page is None or idx is None:
@@ -310,7 +309,7 @@ class LayoutTab(QWidget):
         from core.layout.region_ops import split_region
         out = split_region(page.regions[idx], a, b)
         if out is None:
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "knife: cut missed or unsupported shape for region %s", region_id)
             self.status.setText("Cannot split — the cut line missed the panel")
             return False
@@ -319,7 +318,6 @@ class LayoutTab(QWidget):
         return True
 
     def _apply_merge(self, base_id: str, other_id: str) -> bool:
-        import logging
         page = self._current_page()
         if page is None or base_id == other_id:
             return False
@@ -330,7 +328,7 @@ class LayoutTab(QWidget):
         from core.layout.region_ops import merge_regions
         merged = merge_regions(page.regions[bi], page.regions[oi])
         if merged is None:
-            logging.getLogger(__name__).warning(
+            logger.warning(
                 "merge: regions %s + %s are not adjacent", base_id, other_id)
             self.status.setText("Cannot merge — panels are not adjacent")
             return False

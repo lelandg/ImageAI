@@ -367,6 +367,8 @@ def _add_overlay(scene: QGraphicsScene, ov, project_style, base_z: float) -> Non
             body_item.setTransformOriginPoint(QPointF(ax, ay))  # body sits at scene origin
             body_item.setRotation(rot)
         else:
+            # sfx text has a non-zero pos, so convert the scene anchor into the
+            # text item's local frame before using it as the rotation origin.
             text_item.setTransformOriginPoint(
                 QPointF(ax - text_item.x(), ay - text_item.y()))
             text_item.setRotation(rot)

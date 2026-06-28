@@ -170,6 +170,8 @@ def _colinear_between(a: Point, b: Point, p: Point) -> bool:
 
 def _subdivide(edges: List[Tuple[Point, Point]]) -> List[Tuple[Point, Point]]:
     """Split each edge at any other edge's endpoint that lies on it (colinear)."""
+    # O(E^2): every edge is tested against every endpoint. Fine for tiling-scale
+    # inputs (E is a handful of panel edges); revisit if ever run on large meshes.
     pts: set = set()
     for a, b in edges:
         pts.add(a)
@@ -280,7 +282,16 @@ def union_polygons(polys: List[Poly]) -> List[Poly]:
             if not candidates:
                 break
 
-            # Pick the next edge; if it closes back to ring[0] we're done
+            # Pick the next edge; if it closes back to ring[0] we're done.
+            # candidates[0] is arbitrary when a vertex is touched by >1 surviving
+            # outgoing edge (a junction shared by 3+ cells). Safe for the only
+            # supported case — exact edge-sharing partition inputs — but log it so a
+            # mis-chained concave merge is diagnosable rather than silent.
+            if len(candidates) > 1:
+                logger.warning(
+                    "union_polygons: %d candidate edges at vertex %s; picking first "
+                    "(valid only for edge-sharing partition inputs)",
+                    len(candidates), next_vertex)
             next_idx = candidates[0]
             next_edge = survivors[next_idx]
 

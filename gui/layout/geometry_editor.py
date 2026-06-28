@@ -4,6 +4,7 @@ The renderer rebuilds the whole scene on every refresh, so handles are
 regenerated from the model after each rebuild (see LayoutTab._refresh) rather
 than preserved. Move-only: handle generation here; dragging/commit is #5a Task 5.
 """
+import logging
 from typing import Callable, List, Optional
 
 from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsItem
@@ -11,6 +12,8 @@ from PySide6.QtGui import QBrush, QPen, QColor
 from PySide6.QtCore import QRectF
 
 from core.layout.qt_renderer import region_to_painter_path
+
+logger = logging.getLogger(__name__)
 
 _HANDLE_R = 6.0  # handle radius in scene (page-pixel) units
 
@@ -188,8 +191,7 @@ class GeometryEditor:
         if region.shape == "path":
             issues = validate_segments(region.segments)
             if issues:
-                import logging
-                logging.getLogger(__name__).warning(
+                logger.warning(
                     "Geometry edit on %s produced invalid segments; reverting: %s",
                     region.id, "; ".join(issues))
                 if self._pre is not None:
