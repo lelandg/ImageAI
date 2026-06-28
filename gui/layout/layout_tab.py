@@ -94,6 +94,9 @@ class LayoutTab(QWidget):
         from gui.layout.geometry_editor import GeometryEditor
         self.geometry_editor = GeometryEditor(self.canvas, self)
 
+        from gui.layout.overlay_editor import OverlayEditor
+        self.overlay_editor = OverlayEditor(self.canvas, self)
+
         self.inspector = ContentInspector(self.config)
         self.inspector.regionContentChanged.connect(self._on_region_content_changed)
         self.inspector.regionTextStyleChanged.connect(self._on_region_text_style_changed)
@@ -157,6 +160,9 @@ class LayoutTab(QWidget):
             ge = getattr(self, "geometry_editor", None)
             if ge is not None:
                 ge.rebuild_handles()
+            oe = getattr(self, "overlay_editor", None)
+            if oe is not None:
+                oe.rebuild_handles()
         self.documentChanged.emit()
 
     def set_refresh_suspended(self, on: bool):
