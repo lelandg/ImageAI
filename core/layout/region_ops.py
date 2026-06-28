@@ -70,3 +70,25 @@ def _region_from_polygon(template: Region, poly: Poly, *, id: str) -> Region:
         text_style=template.text_style,
         image_style=template.image_style,
     )
+
+
+def split_region(region: Region, a: Point, b: Point) -> Optional[Tuple[Region, Region]]:
+    """Cut ``region`` by the line through a->b into two polygon regions.
+
+    Returns ``(left, right)`` — ``left`` is the half on the LEFT of a->b, ``right``
+    the other half (clip with the cut reversed). Returns None if the region is
+    curved/unsupported or the cut misses (either side has < 3 vertices). The input
+    region is never mutated. New ids are ``f"{region.id}_a"`` / ``f"{region.id}_b"``.
+    """
+    poly = region_to_polygon(region)
+    if poly is None:
+        return None
+    poly = ensure_orientation(poly)
+    left = clip_halfplane(poly, a, b)
+    right = clip_halfplane(poly, b, a)
+    if len(left) < 3 or len(right) < 3:
+        return None
+    return (
+        _region_from_polygon(region, left, id=f"{region.id}_a"),
+        _region_from_polygon(region, right, id=f"{region.id}_b"),
+    )
