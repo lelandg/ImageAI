@@ -215,6 +215,17 @@ def run_cli(args) -> int:
     if getattr(args, "lyrics_to_prompts", None):
         return handle_lyrics_to_prompts(args)
 
+    # Handle layout commands (publication layout engine)
+    if getattr(args, "layout_design", None):
+        from cli.commands.layout import run_design_cmd
+        return run_design_cmd(args, ConfigManager())
+    if getattr(args, "layout_fill", None):
+        from cli.commands.layout import run_fill_cmd
+        return run_fill_cmd(args, ConfigManager())
+    if getattr(args, "layout_export", None):
+        from cli.commands.layout import run_export_cmd
+        return run_export_cmd(args, ConfigManager())
+
     # Validate auth mode for provider
     if provider != "google" and auth_mode == "gcloud":
         print(f"Warning: --auth-mode=gcloud is only supported for Google provider.")
