@@ -1,5 +1,6 @@
 """CLI handlers for the publication layout engine (design / fill / export)."""
 import logging
+import os
 from pathlib import Path
 
 from cli.runner import resolve_api_key
@@ -153,6 +154,67 @@ def run_fill_cmd(args, config) -> int:
     print(f"Saved project to {out}. "
           f"Filled {filled}, skipped {len(skipped)}, failed {len(failed)}.")
     return 0 if not failed else 4
+
+
+def _with_offscreen_qapp(fn):
+    """Run fn() with a headless QApplication; raise RuntimeError if PySide6 absent."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    try:
+        from PySide6.QtWidgets import QApplication
+    except ImportError as e:
+        raise RuntimeError(
+            "Layout export requires PySide6 — install with: pip install PySide6") from e
+    app = QApplication.instance() or QApplication([])  # noqa: F841 - kept alive
+    return fn()
+
+
+def run_export_cmd(args, config) -> int:
+    """Render a layout project to PDF or PNG (format inferred from -o)."""
+    src = Path(getattr(args, "layout_export")).expanduser()
+    out = getattr(args, "out", None)
+    if not out:
+        print("Error: --layout-export requires -o/--out (.pdf or .png)")
+        return 2
+    if not src.exists():
+        print(f"Error: project file not found: {src}")
+        return 2
+    try:
+        fmt = _export_format(out)
+    except ValueError as e:
+        print(f"Error: {e}")
+        return 2
+    try:
+        doc = project_io.load_project(str(src))
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to load project %s: %s", src, e)
+        print(f"Error: failed to load project: {e}")
+        return 2
+    dpi = int(getattr(args, "dpi", None) or config.get_layout_export_dpi() or 300)
+    out_path = Path(out).expanduser()
+
+    def _do():
+        from core.layout import qt_renderer
+        if fmt == "pdf":
+            qt_renderer.export_document_pdf(doc, str(out_path), dpi=dpi)
+            print(f"Exported PDF to {out_path}")
+        else:
+            pages = doc.pages
+            if len(pages) == 1:
+                qt_renderer.save_page_png(pages[0], str(out_path), style=doc.style)
+                print(f"Exported PNG to {out_path}")
+            else:
+                for i, page in enumerate(pages, start=1):
+                    p = out_path.with_name(f"{out_path.stem}-{i:03d}{out_path.suffix}")
+                    qt_renderer.save_page_png(page, str(p), style=doc.style)
+                    print(f"Exported PNG to {p}")
+
+    try:
+        _with_offscreen_qapp(_do)
+    except RuntimeError as e:
+        logger.error("Layout export failed: %s", e)
+        print(f"Error: {e}")
+        return 2
+    return 0
 
 
 def _assemble_document(result, page_size: str, orientation: str, dpi: int,
