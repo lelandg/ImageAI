@@ -147,10 +147,10 @@ class GeometryEditor:
         return None
 
     def _clear(self) -> None:
-        scene = self._canvas.scene()
-        if scene is not None:
-            for h in self._handles:
-                scene.removeItem(h)
+        for h in self._handles:
+            s = h.scene()
+            if s is not None:
+                s.removeItem(h)
         self._handles = []
         self._points = []
         self._shape_item = None
