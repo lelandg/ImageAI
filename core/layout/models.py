@@ -157,6 +157,7 @@ class Overlay:
     role: str = ""
     text_style: Optional[TextStyle] = None
     style: OverlayStyle = field(default_factory=OverlayStyle)
+    rotation: float = 0.0  # degrees clockwise about the anchor (SFX & balloons)
 
 
 @dataclass

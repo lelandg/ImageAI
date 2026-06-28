@@ -122,7 +122,7 @@ def overlay_to_dict(ov: Overlay) -> Dict:
         "anchor_mode": ov.anchor_mode,
         "tail_target": (None if ov.tail_target is None
                         else [ov.tail_target[0], ov.tail_target[1]]),
-        "z": ov.z, "role": ov.role,
+        "z": ov.z, "role": ov.role, "rotation": ov.rotation,
         "text_style": _style_to_dict(ov.text_style),
         "style": _overlay_style_to_dict(ov.style),
     }
@@ -141,6 +141,7 @@ def overlay_from_dict(d: Dict) -> Overlay:
         z=int(d.get("z", 0)), role=d.get("role", ""),
         text_style=TextStyle(**_filtered(TextStyle, ts)) if ts else None,
         style=_overlay_style_from_dict(d.get("style") or {}),
+        rotation=float(d.get("rotation", 0.0) or 0.0),
     )
 
 
