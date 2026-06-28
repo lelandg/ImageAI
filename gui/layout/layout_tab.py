@@ -249,6 +249,70 @@ class LayoutTab(QWidget):
                 return r
         return None
 
+    def _current_page(self):
+        if not self.document or not self.document.pages:
+            return None
+        return self.document.pages[0]
+
+    def _region_index(self, region_id: str):
+        page = self._current_page()
+        if page is None:
+            return None
+        for i, r in enumerate(page.regions):
+            if r.id == region_id:
+                return i
+        return None
+
+    def _apply_delete(self, region_id: str) -> bool:
+        page = self._current_page()
+        idx = self._region_index(region_id)
+        if page is None or idx is None:
+            return False
+        if self.geometry_editor.active_region_id() == region_id:
+            self.geometry_editor.set_edit_region(None)
+        region = page.regions[idx]
+        del page.regions[idx]
+        self.snapshot_and_refresh(f"delete panel: {region.name or region.id}")
+        return True
+
+    def _apply_knife(self, region_id: str, a, b) -> bool:
+        import logging
+        page = self._current_page()
+        idx = self._region_index(region_id)
+        if page is None or idx is None:
+            return False
+        from core.layout.region_ops import split_region
+        out = split_region(page.regions[idx], a, b)
+        if out is None:
+            logging.getLogger(__name__).warning(
+                "knife: cut missed or unsupported shape for region %s", region_id)
+            self.status.setText("Cannot split — the cut line missed the panel")
+            return False
+        page.regions[idx:idx + 1] = list(out)
+        self.snapshot_and_refresh(f"split panel: {region_id}")
+        return True
+
+    def _apply_merge(self, base_id: str, other_id: str) -> bool:
+        import logging
+        page = self._current_page()
+        if page is None or base_id == other_id:
+            return False
+        bi = self._region_index(base_id)
+        oi = self._region_index(other_id)
+        if bi is None or oi is None:
+            return False
+        from core.layout.region_ops import merge_regions
+        merged = merge_regions(page.regions[bi], page.regions[oi])
+        if merged is None:
+            logging.getLogger(__name__).warning(
+                "merge: regions %s + %s are not adjacent", base_id, other_id)
+            self.status.setText("Cannot merge — panels are not adjacent")
+            return False
+        page.regions[bi] = merged
+        del page.regions[oi]  # replacing base did not change length, so oi is valid
+        self.snapshot_and_refresh(f"merge panels: {base_id} + {other_id}")
+        return True
+
     def _on_region_selected(self, region_id: str):
         region = self._find_region(region_id)
         ts = None
