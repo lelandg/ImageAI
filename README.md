@@ -691,6 +691,30 @@ python main.py video --in script.txt --veo-model veo-3.1-generate-001 \
   --audio soundtrack.mp3 --out ai_video.mp4
 ```
 
+### Layout (publication layout engine)
+
+```bash
+# Design a layout from a description (LLM → project JSON)
+python main.py --layout-design "4-panel comic about a cat heist" \
+    --content-kind comic --page-size Letter -o heist.iaiproj.json
+
+# Generate images for every prompted region (in-place)
+python main.py --layout-fill heist.iaiproj.json --provider google
+
+# Render to PDF or PNG
+python main.py --layout-export heist.iaiproj.json -o heist.pdf
+python main.py --layout-export heist.iaiproj.json -o heist.png
+```
+
+**Notes:**
+- `--layout-design` uses the text LLM (`--layout-llm-provider`/`--layout-llm-model`);
+  `--layout-fill` uses the image provider (`--provider`/`-m`).
+- `--layout-export` requires PySide6 (`pip install PySide6`); design and fill do not.
+- PNG export renders at the project's native pixel size; `--dpi` controls PDF
+  rendering and design geometry.
+- **content-kind choices**: children, comic, comic_strip, magazine, newspaper, scientific, custom.
+- `--layout-fill` passes each region's pixel dimensions to the image provider; OpenAI and Stability honor them, but Google/Gemini uses its own aspect-ratio sizing internally regardless of the requested pixel size.
+
 ## 7. GUI Features
 
 ### Main Interface

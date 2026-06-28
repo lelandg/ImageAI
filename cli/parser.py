@@ -179,6 +179,54 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Output JSON file for generated prompts"
     )
 
+    # Layout (publication layout engine)
+    layout_group = parser.add_argument_group("layout")
+    layout_group.add_argument(
+        "--layout-design",
+        metavar="DESCRIPTION",
+        help="Generate a layout project from a text description (requires -o)",
+    )
+    layout_group.add_argument(
+        "--layout-export",
+        metavar="PROJECT",
+        help="Render a layout project (.iaiproj.json/.layout.json) to PDF/PNG (requires -o)",
+    )
+    layout_group.add_argument(
+        "--layout-fill",
+        metavar="PROJECT",
+        help="Generate images for all prompted image regions in a layout project",
+    )
+    layout_group.add_argument(
+        "--content-kind",
+        choices=["children", "comic", "comic_strip", "magazine",
+                 "newspaper", "scientific", "custom"],
+        help="Content kind for --layout-design (default: custom)",
+    )
+    layout_group.add_argument(
+        "--page-size",
+        help="Page size for --layout-design (e.g. Letter, A4, A5, Tabloid, US Comic; "
+             "default: Letter)",
+    )
+    layout_group.add_argument(
+        "--orientation",
+        choices=["portrait", "landscape"],
+        help="Page orientation for --layout-design (default: portrait)",
+    )
+    layout_group.add_argument(
+        "--dpi",
+        type=int,
+        help="DPI for --layout-design geometry and --layout-export PDF (default: 300)",
+    )
+    layout_group.add_argument(
+        "--layout-llm-provider",
+        choices=["openai", "anthropic", "google", "ollama", "lmstudio"],
+        help="Text-LLM provider for --layout-design (default: configured layout provider)",
+    )
+    layout_group.add_argument(
+        "--layout-llm-model",
+        help="Text-LLM model for --layout-design (default: provider's first registry model)",
+    )
+
     # Help options
     help_group = parser.add_argument_group("help")
     help_group.add_argument(
