@@ -2,7 +2,7 @@
 import logging
 from pathlib import Path
 
-from core.layout import designer, styles
+from core.layout import designer, project_io, styles
 from core.layout.models import DocumentSpec, PageSpec, Region
 from core.layout.page_sizes import PRESETS, preset_to_page_size
 
@@ -48,6 +48,45 @@ def _region_size_str(region: Region, cap: int = 1024) -> str:
         w = max(1, round(w * scale))
         h = max(1, round(h * scale))
     return f"{w}x{h}"
+
+
+def run_design_cmd(args, config) -> int:
+    """Generate a layout project from a text description via the layout LLM."""
+    text = args.layout_design
+    out = getattr(args, "out", None)
+    if not out:
+        print("Error: --layout-design requires -o/--out (project .json path)")
+        return 2
+    content_kind = getattr(args, "content_kind", None) or "custom"
+    page_size = getattr(args, "page_size", None) or "Letter"
+    orientation = getattr(args, "orientation", None) or "portrait"
+    dpi = int(getattr(args, "dpi", None) or 300)
+    llm_provider = getattr(args, "layout_llm_provider", None) or config.get_layout_llm_provider()
+    llm_model = getattr(args, "layout_llm_model", None)
+    try:
+        page_px = _page_px(page_size, orientation, dpi)
+    except ValueError as e:
+        print(f"Error: {e}")
+        return 2
+
+    messages = designer.build_messages(content_kind, page_px, text)
+    try:
+        content = designer.run_completion(config, llm_provider, llm_model, messages)
+    except Exception as e:  # noqa: BLE001 - surface + log any LLM/runtime failure
+        logger.error("Layout design LLM call failed: %s", e)
+        print(f"Error: layout design failed: {e}")
+        return 3
+
+    result = designer.parse_response(content or "", page_px)
+    for q in result.questions:
+        print(f"[designer] {q}")
+    title = Path(out).stem or "Untitled"
+    doc = _assemble_document(result, page_size, orientation, dpi, content_kind, title)
+    project_io.save_project(doc, str(Path(out).expanduser()))
+    page0 = doc.pages[0]
+    print(f"Saved layout project to {out} "
+          f"({len(page0.regions)} regions, {len(page0.overlays)} overlays)")
+    return 0
 
 
 def _assemble_document(result, page_size: str, orientation: str, dpi: int,
