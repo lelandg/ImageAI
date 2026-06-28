@@ -105,23 +105,25 @@ def _apply_flags(item: QGraphicsItem, selectable: bool, region_id: str,
 
 
 def _writeback_move(item) -> None:
-    """Persist a drag into the bound region's ``bbox`` (and polygon ``points``).
+    """Persist a drag into the bound region's geometry.
 
-    Handles all carry their geometry in item-local coordinates with the item at
-    scene pos (0,0); a drag therefore shows up purely as ``item.pos()``, which is
-    the delta to apply to the region's original geometry.
-
-    NOTE — shape="path" regions carry their geometry in ``segments``, not in
-    ``bbox``/``points``, so drag-writeback for path-shaped regions is deferred to
-    the manual-editor sub-project (#5). Image frames are currently movable=False,
-    so this is not a live bug — just a sharp edge to address in #5.
+    Handles carry their geometry in item-local coords with the item at scene
+    (0,0), so a drag shows up purely as ``item.pos()`` — the delta to apply to
+    the region's original geometry. For ``shape="path"`` regions the delta is
+    applied to ``segments`` (the geometry the renderer reads); rect/polygon
+    regions translate ``bbox`` and ``points``.
     """
     region = getattr(item, "_region", None)
     if region is None:
         return
     dx, dy = item.x(), item.y()
-    x, y, w, h = item._base_bbox
-    region.bbox = (round(x + dx), round(y + dy), w, h)
+    bx, by, bw, bh = item._base_bbox
+    if region.shape == "path" and getattr(item, "_base_segments", None):
+        from core.layout.geometry import translate_segments
+        region.segments = translate_segments(item._base_segments, dx, dy)
+        region.bbox = (round(bx + dx), round(by + dy), bw, bh)
+        return
+    region.bbox = (round(bx + dx), round(by + dy), bw, bh)
     if item._base_points:
         region.points = [(round(px + dx), round(py + dy)) for px, py in item._base_points]
 
@@ -137,6 +139,7 @@ class _RegionMoveMixin:
         self._region = region
         self._base_bbox = tuple(region.bbox)
         self._base_points = list(region.points)
+        self._base_segments = list(region.segments)
 
     def itemChange(self, change, value):
         if change == QGraphicsItem.ItemPositionHasChanged:
