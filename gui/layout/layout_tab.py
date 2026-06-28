@@ -97,6 +97,15 @@ class LayoutTab(QWidget):
         from gui.layout.overlay_editor import OverlayEditor
         self.overlay_editor = OverlayEditor(self.canvas, self)
 
+        from gui.layout.overlay_inspector import OverlayInspector
+        self.overlay_inspector = OverlayInspector()
+        self.overlay_inspector.addRequested.connect(self._add_overlay)
+        self.overlay_inspector.deleteRequested.connect(self._delete_overlay)
+        self.overlay_inspector.rotationChanged.connect(self._set_overlay_rotation)
+        self.overlay_inspector.overlaySelected.connect(self._on_overlay_selected)
+        self.overlay_inspector.editToggled.connect(self._on_overlay_edit_toggled)
+        root.addWidget(self.overlay_inspector)
+
         self.inspector = ContentInspector(self.config)
         self.inspector.regionContentChanged.connect(self._on_region_content_changed)
         self.inspector.regionTextStyleChanged.connect(self._on_region_text_style_changed)
@@ -163,6 +172,9 @@ class LayoutTab(QWidget):
             oe = getattr(self, "overlay_editor", None)
             if oe is not None:
                 oe.rebuild_handles()
+            oi = getattr(self, "overlay_inspector", None)
+            if oi is not None and self.document and self.document.pages:
+                oi.set_page(self.document.pages[0])
         self.documentChanged.emit()
 
     def set_refresh_suspended(self, on: bool):
@@ -441,6 +453,72 @@ class LayoutTab(QWidget):
             self.history.append(f"z: {region.name or region.id}")
         self._refresh()
 
+    # --- overlay handlers ---
+    _OVERLAY_DEFAULT_TEXT = {
+        "speech": "Dialogue", "thought": "Thinking…",
+        "caption": "Caption", "sfx": "POW!",
+    }
+
+    def _new_overlay_id(self, page) -> str:
+        n = 1
+        existing = {o.id for o in page.overlays}
+        while f"ov{n}" in existing:
+            n += 1
+        return f"ov{n}"
+
+    def _add_overlay(self, kind: str) -> bool:
+        from core.layout.models import Overlay
+        page = self._current_page()
+        if page is None or kind not in ("speech", "thought", "caption", "sfx"):
+            return False
+        pw, ph = page.page_size_px
+        cx, cy = pw / 2.0, ph / 2.0
+        tail = (cx, cy + 80.0) if kind in ("speech", "thought") else None
+        ov = Overlay(id=self._new_overlay_id(page), kind=kind,
+                     text=self._OVERLAY_DEFAULT_TEXT.get(kind, ""),
+                     anchor=(cx, cy), tail_target=tail)
+        page.overlays.append(ov)
+        self.snapshot_and_refresh(f"add {kind} overlay")
+        self.overlay_inspector.set_selected(ov.id)
+        return True
+
+    def _find_overlay(self, overlay_id):
+        page = self._current_page()
+        if page is None:
+            return None
+        for ov in page.overlays:
+            if ov.id == overlay_id:
+                return ov
+        return None
+
+    def _delete_overlay(self, overlay_id: str) -> bool:
+        page = self._current_page()
+        if page is None:
+            return False
+        for i, ov in enumerate(page.overlays):
+            if ov.id == overlay_id:
+                if self.overlay_editor.active_overlay_id() == overlay_id:
+                    self.overlay_editor.set_edit_overlay(None)
+                del page.overlays[i]
+                self.snapshot_and_refresh(f"delete overlay: {overlay_id}")
+                return True
+        return False
+
+    def _set_overlay_rotation(self, overlay_id: str, deg: int) -> bool:
+        ov = self._find_overlay(overlay_id)
+        if ov is None:
+            return False
+        ov.rotation = float(deg)
+        self.snapshot_and_refresh(f"rotate overlay: {overlay_id}")
+        return True
+
+    def _on_overlay_selected(self, overlay_id: str):
+        self.overlay_inspector.set_selected(overlay_id)
+        self.overlay_editor.set_edit_overlay(None)
+
+    def _on_overlay_edit_toggled(self, overlay_id: str, on: bool):
+        self.overlay_editor.set_edit_overlay(overlay_id if on else None)
+
     def set_region_content(self, region_id: str, value: str):
         """Apply edited content to a region and re-render (programmatic API)."""
         region = self._find_region(region_id)
@@ -604,6 +682,10 @@ class LayoutTab(QWidget):
         if getattr(result, "overlays", None):
             self.document.pages[0].overlays = list(result.overlays)
             applied = True
+        elif result.regions:
+            # Regions-only redesign: tidy overlays stranded over the new panels.
+            from core.layout.overlay_ops import reposition_stranded_overlays
+            reposition_stranded_overlays(self.document.pages[0])
         if applied:
             self.history.append(user_text or "design")
             self._refresh()
