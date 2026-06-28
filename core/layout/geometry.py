@@ -48,3 +48,16 @@ def segments_bbox(segments: List[PathSegment]) -> Tuple[float, float, float, flo
     if not xs:
         return (0.0, 0.0, 0.0, 0.0)
     return (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+
+
+def translate_segments(segments: List[PathSegment], dx: float, dy: float) -> List[PathSegment]:
+    """Return NEW PathSegments with every point offset by (dx, dy).
+
+    Pure/Qt-free. The manual editor uses this to persist a whole-panel translate
+    drag into a path region's ``segments`` (the write-back gap deferred from #5)
+    and as the offset primitive for geometry edits. The input is never mutated.
+    """
+    return [
+        PathSegment(type=seg.type, pts=[(px + dx, py + dy) for (px, py) in seg.pts])
+        for seg in segments
+    ]
