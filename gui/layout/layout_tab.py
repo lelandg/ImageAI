@@ -22,6 +22,8 @@ from gui.layout.content_inspector import ContentInspector
 
 logger = logging.getLogger("imageai.layout.tab")
 
+_DEFAULT_STROKE_PX = 4  # panel stroke applied when "borderless" is unchecked
+
 
 class LayoutTab(QWidget):
     documentChanged = Signal()
@@ -94,6 +96,14 @@ class LayoutTab(QWidget):
         self.inspector.regionPromptSuggestRequested.connect(self._on_region_prompt_suggest)
         self.inspector.regionSendToImageRequested.connect(self._on_region_send_to_image)
         root.addWidget(self.inspector)
+
+        from gui.layout.geometry_inspector import GeometryInspector
+        self.geometry_inspector = GeometryInspector()
+        self.geometry_inspector.bleedToggled.connect(self._on_region_bleed_toggled)
+        self.geometry_inspector.borderlessToggled.connect(self._on_region_borderless_toggled)
+        self.geometry_inspector.zChanged.connect(self._on_region_z_changed)
+        root.addWidget(self.geometry_inspector)
+
         self.canvas.regionSelected.connect(self._on_region_selected)
 
         self.status = QLabel("")
@@ -228,6 +238,7 @@ class LayoutTab(QWidget):
             style = self.document.style if self.document else None
             ts = styles.effective_text_style(region, style)
         self.inspector.set_region(region, text_style=ts)
+        self.geometry_inspector.set_region(region)
 
     def _on_region_content_changed(self, region_id: str, value: str):
         self.set_region_content(region_id, value)
@@ -247,6 +258,36 @@ class LayoutTab(QWidget):
             size_px=size_px, line_height=base.line_height, color=base.color,
             align=base.align, wrap=base.wrap, letter_spacing=base.letter_spacing,
         )
+        self._refresh()
+
+    def _on_region_bleed_toggled(self, region_id: str, bleed: bool):
+        region = self._find_region(region_id)
+        if region is None:
+            return
+        region.bleed = bool(bleed)
+        if self.history is not None:
+            self.history.append(f"bleed: {region.name or region.id}")
+        self._refresh()
+
+    def _on_region_borderless_toggled(self, region_id: str, borderless: bool):
+        region = self._find_region(region_id)
+        if region is None:
+            return
+        from core.layout.models import ImageStyle
+        if region.image_style is None:
+            region.image_style = ImageStyle()
+        region.image_style.stroke_px = 0 if borderless else _DEFAULT_STROKE_PX
+        if self.history is not None:
+            self.history.append(f"borderless: {region.name or region.id}")
+        self._refresh()
+
+    def _on_region_z_changed(self, region_id: str, z: int):
+        region = self._find_region(region_id)
+        if region is None:
+            return
+        region.z = int(z)
+        if self.history is not None:
+            self.history.append(f"z: {region.name or region.id}")
         self._refresh()
 
     def set_region_content(self, region_id: str, value: str):
