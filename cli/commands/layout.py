@@ -2,7 +2,8 @@
 import logging
 from pathlib import Path
 
-from core.layout.models import Region
+from core.layout import designer, styles
+from core.layout.models import DocumentSpec, PageSpec, Region
 from core.layout.page_sizes import PRESETS, preset_to_page_size
 
 logger = logging.getLogger("imageai.cli.layout")
@@ -47,3 +48,20 @@ def _region_size_str(region: Region, cap: int = 1024) -> str:
         w = max(1, round(w * scale))
         h = max(1, round(h * scale))
     return f"{w}x{h}"
+
+
+def _assemble_document(result, page_size: str, orientation: str, dpi: int,
+                       content_kind: str, title: str) -> DocumentSpec:
+    """Build a one-page DocumentSpec from a DesignerResult (mirrors GUI new-doc)."""
+    ps = preset_to_page_size(_resolve_preset(page_size), orientation, dpi)
+    pw, ph = ps.to_pixels()
+    regions = (result.regions if result.regions is not None
+               else designer.fallback_result((pw, ph)).regions)
+    page = PageSpec(
+        page_size_px=(pw, ph), page_size=ps, background="#FFFFFF",
+        regions=list(regions), overlays=list(result.overlays or []),
+    )
+    return DocumentSpec(
+        title=title or "Untitled", pages=[page],
+        content_kind=content_kind, style=styles.default_style_for(content_kind),
+    )
