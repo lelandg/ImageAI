@@ -74,7 +74,8 @@ class ExportWorker(QThread):
             page = self.document.pages[page_num]
             progress_pct = int((idx / num_pages) * 100)
             self.progress.emit(progress_pct, f"Rendering page {page_num + 1}...")
-            image = qt_renderer.render_page_to_image(page, style=self.document.style)
+            image = qt_renderer.render_page_to_image(page, style=self.document.style,
+                                                      scale=self.dpi / 72.0)
             if num_pages > 1:
                 page_output = output_path.parent / f"{output_path.stem}_page{page_num + 1:03d}.png"
             else:

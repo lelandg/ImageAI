@@ -395,24 +395,26 @@ def build_scene(page: PageSpec, *, selectable: bool = False, style=None,
     return scene
 
 
-def render_page_to_image(page: PageSpec, *, style=None) -> QImage:
+def render_page_to_image(page: PageSpec, *, style=None, scale: float = 1.0) -> QImage:
     pw, ph = page.page_size_px
     b = max(0, int(getattr(page, "bleed_px", 0) or 0))
     cw, ch = pw + 2 * b, ph + 2 * b
-    img = QImage(cw, ch, QImage.Format_ARGB32)
+    sw, sh = max(1, round(cw * scale)), max(1, round(ch * scale))
+    img = QImage(sw, sh, QImage.Format_ARGB32)
     img.fill(QColor(_resolve_bg(page)))
     painter = QPainter(img)
     painter.setRenderHint(QPainter.Antialiasing, True)
     if b == 0:
         scene = build_scene(page, style=style)
-        scene.render(painter, QRectF(0, 0, pw, ph), QRectF(0, 0, pw, ph))
+        scene.render(painter, QRectF(0, 0, sw, sh), QRectF(0, 0, pw, ph))
         painter.end()
         return img
     # Non-bleed regions are clipped to the trim box, offset into the bleed canvas.
     painter.save()
-    painter.setClipRect(QRectF(b, b, pw, ph))
+    painter.setClipRect(QRectF(b * scale, b * scale, pw * scale, ph * scale))
     non_bleed = build_scene(page, style=style, region_filter=lambda r: not r.bleed)
-    non_bleed.render(painter, QRectF(b, b, pw, ph), QRectF(0, 0, pw, ph))
+    non_bleed.render(painter, QRectF(b * scale, b * scale, pw * scale, ph * scale),
+                     QRectF(0, 0, pw, ph))
     painter.restore()
     # Bleed regions may extend into the surrounding margin: map the full bleed box
     # in scene coords onto the whole canvas.  Use a transparent background so the
@@ -422,7 +424,7 @@ def render_page_to_image(page: PageSpec, *, style=None) -> QImage:
     bleed_scene = build_scene(page, style=style, region_filter=lambda r: r.bleed,
                               include_overlays=False)
     bleed_scene.setBackgroundBrush(Qt.transparent)
-    bleed_scene.render(painter, QRectF(0, 0, cw, ch), QRectF(-b, -b, cw, ch))
+    bleed_scene.render(painter, QRectF(0, 0, sw, sh), QRectF(-b, -b, cw, ch))
     painter.end()
     return img
 

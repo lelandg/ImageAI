@@ -23,3 +23,12 @@ def test_export_worker_uses_qt_renderer(qapp):
     src = inspect.getsource(export_dialog.LayoutExportWorker)
     assert "qt_renderer" in src
     assert "engine.render_page" not in src  # PIL render path removed
+
+
+def test_render_page_to_image_scale_doubles_dimensions(qapp):
+    from core.layout import qt_renderer
+    from core.layout.models import PageSpec
+    page = PageSpec(page_size_px=(200, 150), regions=[], overlays=[])
+    base = qt_renderer.render_page_to_image(page)
+    scaled = qt_renderer.render_page_to_image(page, scale=2.0)
+    assert (scaled.width(), scaled.height()) == (base.width() * 2, base.height() * 2)
