@@ -713,6 +713,7 @@ python main.py --layout-export heist.iaiproj.json -o heist.png
 - PNG export renders at the project's native pixel size; `--dpi` controls PDF
   rendering and design geometry.
 - **content-kind choices**: children, comic, comic_strip, magazine, newspaper, scientific, custom.
+- `--layout-fill` passes each region's pixel dimensions to the image provider; OpenAI and Stability honor them, but Google/Gemini uses its own aspect-ratio sizing internally regardless of the requested pixel size.
 
 ## 7. GUI Features
 

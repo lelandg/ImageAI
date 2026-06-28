@@ -58,6 +58,7 @@ def run_design_cmd(args, config) -> int:
     text = args.layout_design
     out = getattr(args, "out", None)
     if not out:
+        logger.warning("Error: --layout-design requires -o/--out (project .json path)")
         print("Error: --layout-design requires -o/--out (project .json path)")
         return 2
     content_kind = getattr(args, "content_kind", None) or "custom"
@@ -69,6 +70,7 @@ def run_design_cmd(args, config) -> int:
     try:
         page_px = _page_px(page_size, orientation, dpi)
     except ValueError as e:
+        logger.warning("Error: %s", e)
         print(f"Error: {e}")
         return 2
 
@@ -96,6 +98,7 @@ def run_fill_cmd(args, config) -> int:
     """Generate images for every prompted image region, in-place (or to -o)."""
     src = Path(getattr(args, "layout_fill")).expanduser()
     if not src.exists():
+        logger.warning("Error: project file not found: %s", src)
         print(f"Error: project file not found: {src}")
         return 2
     try:
@@ -109,6 +112,7 @@ def run_fill_cmd(args, config) -> int:
     key, _ = resolve_api_key(getattr(args, "api_key", None),
                              getattr(args, "api_key_file", None), provider)
     if not key and provider != "local_sd":
+        logger.warning("No API key. Use --api-key/--api-key-file or --set-key.")
         print("No API key. Use --api-key/--api-key-file or --set-key.")
         return 2
     provider_config = {"api_key": key, "auth_mode": getattr(args, "auth_mode", "api-key")}
@@ -173,14 +177,17 @@ def run_export_cmd(args, config) -> int:
     src = Path(getattr(args, "layout_export")).expanduser()
     out = getattr(args, "out", None)
     if not out:
+        logger.warning("Error: --layout-export requires -o/--out (.pdf or .png)")
         print("Error: --layout-export requires -o/--out (.pdf or .png)")
         return 2
     if not src.exists():
+        logger.warning("Error: project file not found: %s", src)
         print(f"Error: project file not found: {src}")
         return 2
     try:
         fmt = _export_format(out)
     except ValueError as e:
+        logger.warning("Error: %s", e)
         print(f"Error: {e}")
         return 2
     try:
