@@ -89,6 +89,9 @@ class LayoutTab(QWidget):
         self.canvas = CanvasWidget()
         root.addWidget(self.canvas, 1)
 
+        from gui.layout.geometry_editor import GeometryEditor
+        self.geometry_editor = GeometryEditor(self.canvas, self)
+
         self.inspector = ContentInspector(self.config)
         self.inspector.regionContentChanged.connect(self._on_region_content_changed)
         self.inspector.regionTextStyleChanged.connect(self._on_region_text_style_changed)
@@ -102,6 +105,7 @@ class LayoutTab(QWidget):
         self.geometry_inspector.bleedToggled.connect(self._on_region_bleed_toggled)
         self.geometry_inspector.borderlessToggled.connect(self._on_region_borderless_toggled)
         self.geometry_inspector.zChanged.connect(self._on_region_z_changed)
+        self.geometry_inspector.editShapeToggled.connect(self._on_region_edit_shape_toggled)
         root.addWidget(self.geometry_inspector)
 
         self.canvas.regionSelected.connect(self._on_region_selected)
@@ -141,6 +145,9 @@ class LayoutTab(QWidget):
             self.canvas.load_page(self.document.pages[0], self.document.style,
                                   locked=self._locked)
             self.status.setText(f"{self.document.title} — {self.document.pages[0].page_size_px}")
+            ge = getattr(self, "geometry_editor", None)
+            if ge is not None:
+                ge.rebuild_handles()
         self.documentChanged.emit()
 
     # --- lock state (frames + applied text stay put until unlocked) ---
@@ -239,6 +246,10 @@ class LayoutTab(QWidget):
             ts = styles.effective_text_style(region, style)
         self.inspector.set_region(region, text_style=ts)
         self.geometry_inspector.set_region(region)
+        self.geometry_editor.set_edit_region(None)
+
+    def _on_region_edit_shape_toggled(self, region_id: str, on: bool):
+        self.geometry_editor.set_edit_region(region_id if on else None)
 
     def _on_region_content_changed(self, region_id: str, value: str):
         self.set_region_content(region_id, value)

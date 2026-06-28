@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Signal
 
+
 from core.layout.models import Region
 
 
@@ -17,6 +18,7 @@ class GeometryInspector(QWidget):
     bleedToggled = Signal(str, bool)        # (region_id, bleed)
     borderlessToggled = Signal(str, bool)   # (region_id, borderless)
     zChanged = Signal(str, int)             # (region_id, z)
+    editShapeToggled = Signal(str, bool)    # (region_id, on)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -52,11 +54,20 @@ class GeometryInspector(QWidget):
         z_row.addStretch(1)
         root.addLayout(z_row)
 
+        self.edit_shape_chk = QCheckBox("Edit shape (drag vertices)")
+        self.edit_shape_chk.toggled.connect(self._on_edit_shape)
+        root.addWidget(self.edit_shape_chk)
+
     def set_region(self, region: Optional[Region]):
         self._region = region
         enabled = region is not None
         for w in (self.bleed_chk, self.borderless_chk, self.z_spin):
             w.setEnabled(enabled)
+        # Edit-shape applies only to vertex-bearing shapes; reset on every change.
+        self.edit_shape_chk.blockSignals(True)
+        self.edit_shape_chk.setChecked(False)
+        self.edit_shape_chk.setEnabled(bool(region and region.shape in ("path", "polygon")))
+        self.edit_shape_chk.blockSignals(False)
         if region is None:
             self.header.setText("No region selected")
             self.shape_label.setText("")
@@ -85,3 +96,7 @@ class GeometryInspector(QWidget):
     def _on_z(self, value: int):
         if self._region is not None:
             self.zChanged.emit(self._region.id, int(value))
+
+    def _on_edit_shape(self, checked: bool):
+        if self._region is not None:
+            self.editShapeToggled.emit(self._region.id, bool(checked))
