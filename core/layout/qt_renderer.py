@@ -358,6 +358,19 @@ def _add_overlay(scene: QGraphicsScene, ov, project_style, base_z: float) -> Non
     if body_item is None:  # sfx: no body, add text directly to scene
         scene.addItem(text_item)
 
+    # Rotation: spin the body (text rides along as its child) or, for SFX with no
+    # body, the text item — both about the overlay anchor (scene coords).
+    rot = getattr(ov, "rotation", 0.0) or 0.0
+    if rot:
+        from PySide6.QtCore import QPointF
+        if body_item is not None:
+            body_item.setTransformOriginPoint(QPointF(ax, ay))  # body sits at scene origin
+            body_item.setRotation(rot)
+        else:
+            text_item.setTransformOriginPoint(
+                QPointF(ax - text_item.x(), ay - text_item.y()))
+            text_item.setRotation(rot)
+
 
 def build_scene(page: PageSpec, *, selectable: bool = False, style=None,
                 locked: bool = True, region_filter=None,
