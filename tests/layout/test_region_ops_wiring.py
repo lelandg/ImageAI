@@ -48,3 +48,24 @@ def test_merge_wiring_end_to_end(qapp):
     assert tab.canvas.tool_mode() == "merge"
     tab.canvas.mergeTarget.emit("R")
     assert [r.id for r in tab.document.pages[0].regions] == ["L"]
+
+
+def test_op_completion_unchecks_tool_button(qapp):
+    tab = _tab_with([Region(id="x", kind="image", shape="rect", bbox=(0, 0, 100, 100))])
+    tab._on_region_knife_toggled("x", True)
+    assert tab.geometry_inspector.knife_btn.isChecked() is True
+    tab.canvas.knifeLine.emit(50.0, 0.0, 50.0, 100.0)
+    assert tab.geometry_inspector.knife_btn.isChecked() is False
+    assert tab.canvas.tool_mode() == "none"
+
+
+def test_selection_change_disarms_tool(qapp):
+    tab = _tab_with([
+        Region(id="a", kind="image", shape="rect", bbox=(0, 0, 50, 50)),
+        Region(id="b", kind="image", shape="rect", bbox=(50, 0, 50, 50)),
+    ])
+    tab._on_region_knife_toggled("a", True)
+    assert tab.canvas.tool_mode() == "knife"
+    tab._on_region_selected("b")
+    assert tab.canvas.tool_mode() == "none"
+    assert tab._knife_region_id is None

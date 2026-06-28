@@ -7,15 +7,12 @@ None so callers degrade gracefully — never crash, never corrupt the model.
 """
 from __future__ import annotations
 
-import logging
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 from core.layout.models import Region
 from core.layout.polygon import (
     Poly, Point, clip_halfplane, union_polygons, ensure_orientation, signed_area,
 )
-
-logger = logging.getLogger(__name__)
 
 Rect = Tuple[int, int, int, int]
 _AREA_EPS = 1.0  # sq-px tolerance for the merge area-conservation check

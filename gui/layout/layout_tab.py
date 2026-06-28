@@ -328,6 +328,10 @@ class LayoutTab(QWidget):
             self._knife_region_id = region_id
             self.canvas.set_tool_mode("knife")
             self.status.setText("Knife: click two points to cut the panel")
+            insp = self.geometry_inspector
+            insp.knife_btn.blockSignals(True)
+            insp.knife_btn.setChecked(True)
+            insp.knife_btn.blockSignals(False)
         else:
             self._knife_region_id = None
             self.canvas.set_tool_mode("none")
@@ -337,6 +341,7 @@ class LayoutTab(QWidget):
         self._knife_region_id = None
         if rid:
             self._apply_knife(rid, (x1, y1), (x2, y2))
+        self._reset_region_tools()
 
     def _on_region_merge_toggled(self, region_id: str, on: bool):
         if on:
@@ -352,6 +357,19 @@ class LayoutTab(QWidget):
         self._merge_base_id = None
         if base:
             self._apply_merge(base, other_id)
+        self._reset_region_tools()
+
+    def _reset_region_tools(self):
+        """Disarm knife/merge: clear canvas tool mode, stashed ids, and uncheck the
+        inspector toggles (without re-emitting their toggled signals)."""
+        self.canvas.set_tool_mode("none")
+        self._knife_region_id = None
+        self._merge_base_id = None
+        insp = self.geometry_inspector
+        for btn in (insp.knife_btn, insp.merge_btn):
+            btn.blockSignals(True)
+            btn.setChecked(False)
+            btn.blockSignals(False)
 
     def _on_region_selected(self, region_id: str):
         region = self._find_region(region_id)
@@ -362,6 +380,7 @@ class LayoutTab(QWidget):
         self.inspector.set_region(region, text_style=ts)
         self.geometry_inspector.set_region(region)
         self.geometry_editor.set_edit_region(None)
+        self._reset_region_tools()
 
     def _on_region_edit_shape_toggled(self, region_id: str, on: bool):
         self.geometry_editor.set_edit_region(region_id if on else None)
