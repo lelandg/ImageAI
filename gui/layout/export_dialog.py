@@ -15,7 +15,6 @@ from PySide6.QtCore import Qt, QThread, Signal
 
 from core.config import ConfigManager
 from core.layout.models import DocumentSpec
-from core.layout import LayoutEngine
 
 logger = logging.getLogger(__name__)
 
@@ -69,84 +68,30 @@ class ExportWorker(QThread):
             self.error.emit(f"Export failed: {e}")
 
     def _export_png(self, output_path: Path, pages_to_export: List[int], num_pages: int):
-        """Export to PNG sequence."""
-        # Create engine
-        engine = LayoutEngine()
-
+        """Export to PNG sequence via the Qt renderer (comic geometry + overlays)."""
+        from core.layout import qt_renderer
         for idx, page_num in enumerate(pages_to_export):
             page = self.document.pages[page_num]
-
-            # Update progress
             progress_pct = int((idx / num_pages) * 100)
             self.progress.emit(progress_pct, f"Rendering page {page_num + 1}...")
-
-            # Render page
-            image = engine.render_page(page, dpi=self.dpi)
-
-            # Save with page number if multiple pages
+            image = qt_renderer.render_page_to_image(page, style=self.document.style)
             if num_pages > 1:
                 page_output = output_path.parent / f"{output_path.stem}_page{page_num + 1:03d}.png"
             else:
                 page_output = output_path
-
             image.save(str(page_output), "PNG")
             logger.info(f"Exported page {page_num + 1} to {page_output}")
-
         self.progress.emit(100, "Complete!")
 
     def _export_pdf(self, output_path: Path, pages_to_export: List[int], num_pages: int):
-        """Export to PDF."""
-        try:
-            from PIL import Image
-            from reportlab.pdfgen import canvas
-            from reportlab.lib.utils import ImageReader
-            import io
-
-            # Create engine
-            engine = LayoutEngine()
-
-            # Create PDF
-            c = canvas.Canvas(str(output_path))
-
-            for idx, page_num in enumerate(pages_to_export):
-                page = self.document.pages[page_num]
-
-                # Update progress
-                progress_pct = int((idx / num_pages) * 100)
-                self.progress.emit(progress_pct, f"Rendering page {page_num + 1}...")
-
-                # Render page
-                image = engine.render_page(page, dpi=self.dpi)
-
-                # Convert PIL image to reportlab format
-                img_buffer = io.BytesIO()
-                image.save(img_buffer, format='PNG')
-                img_buffer.seek(0)
-                img_reader = ImageReader(img_buffer)
-
-                # Get page size from image
-                width_px, height_px = image.size
-                # Convert pixels to points (72 points = 1 inch)
-                width_pt = (width_px / self.dpi) * 72
-                height_pt = (height_px / self.dpi) * 72
-
-                # Set page size and draw image
-                c.setPageSize((width_pt, height_pt))
-                c.drawImage(img_reader, 0, 0, width=width_pt, height=height_pt)
-
-                # Add new page if not last
-                if idx < num_pages - 1:
-                    c.showPage()
-
-                logger.info(f"Added page {page_num + 1} to PDF")
-
-            # Save PDF
-            c.save()
-            self.progress.emit(100, "Complete!")
-
-        except ImportError:
-            self.error.emit("PDF export requires 'reportlab' package. Install with: pip install reportlab")
-            return
+        """Export to PDF via the Qt renderer (comic geometry + overlays)."""
+        from dataclasses import replace
+        from core.layout import qt_renderer
+        self.progress.emit(0, "Rendering PDF...")
+        sub = replace(self.document,
+                      pages=[self.document.pages[i] for i in pages_to_export])
+        qt_renderer.export_document_pdf(sub, str(output_path), dpi=self.dpi)
+        self.progress.emit(100, "Complete!")
 
     def _export_json(self, output_path: Path):
         """Export to JSON project file."""
@@ -476,3 +421,7 @@ class ExportDialog(QDialog):
                 # QThread's destructor will wait for it
 
         super().closeEvent(event)
+
+
+# Alias so tests and external callers can reference the worker by a stable name.
+LayoutExportWorker = ExportWorker

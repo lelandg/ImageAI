@@ -54,6 +54,7 @@ class LayoutTab(QWidget):
         for label, slot in [
             ("New", self.new_document), ("Open…", self._open_dialog),
             ("Save…", self._save_dialog), ("Export PDF…", self._export_dialog),
+            ("Export PNG…", self._export_png_dialog),
             ("History…", self._open_history),
             ("Export Template…", self._export_template_dialog),
             ("Import Template…", self._import_template_dialog),
@@ -650,6 +651,14 @@ class LayoutTab(QWidget):
         qt_renderer.export_document_pdf(self.document, path)
         self.status.setText(f"Exported {path}")
 
+    def export_png_to(self, path: str):
+        if self.document is None or not self.document.pages:
+            return
+        from core.layout import qt_renderer
+        style = self.document.style if self.document else None
+        qt_renderer.save_page_png(self.document.pages[0], path, style=style)
+        self.status.setText(f"Exported {path}")
+
     # --- designer + history methods ---
     def _on_design_clicked(self):
         if not self.document or not self.document.pages:
@@ -840,3 +849,12 @@ class LayoutTab(QWidget):
                 self.export_pdf_to(path)
             except Exception as e:  # noqa: BLE001 - surfaced to UI + log
                 self._report_error("export PDF", e)
+
+    def _export_png_dialog(self):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(self, "Export PNG", "", "PNG Images (*.png)")
+        if path:
+            try:
+                self.export_png_to(path)
+            except Exception as e:  # noqa: BLE001
+                self._report_error("export png", e)
