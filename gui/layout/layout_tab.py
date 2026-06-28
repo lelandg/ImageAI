@@ -141,6 +141,8 @@ class LayoutTab(QWidget):
         self._refresh()
 
     def _refresh(self):
+        if getattr(self, "_suspend_refresh", False):
+            return
         if self.document and self.document.pages:
             self.canvas.load_page(self.document.pages[0], self.document.style,
                                   locked=self._locked)
@@ -149,6 +151,15 @@ class LayoutTab(QWidget):
             if ge is not None:
                 ge.rebuild_handles()
         self.documentChanged.emit()
+
+    def set_refresh_suspended(self, on: bool):
+        """Block scene rebuilds during an active handle drag (else handles vanish)."""
+        self._suspend_refresh = bool(on)
+
+    def snapshot_and_refresh(self, prompt: str):
+        if self.history is not None:
+            self.history.append(prompt)
+        self._refresh()
 
     # --- lock state (frames + applied text stay put until unlocked) ---
     def _load_locked(self) -> bool:

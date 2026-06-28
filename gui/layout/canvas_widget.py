@@ -43,6 +43,12 @@ class CanvasWidget(QGraphicsView):
                 return rid
         return None
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        scene = self.scene()
+        if scene is not None:
+            self.fitInView(scene.sceneRect(), Qt.KeepAspectRatio)
+
     def _on_selection_changed(self):
         rid = self.selected_region_id()
         self.regionSelected.emit(rid or "")
