@@ -58,11 +58,17 @@ def test_applied_text_is_child_of_its_frame_and_moves_with_it(qapp):
     scene = qt_renderer.build_scene(_page(), selectable=True, locked=False)
     box = next(it for it in scene.items()
                if isinstance(it, QGraphicsRectItem) and it.data(0) == "txt")
-    children = [c for c in box.childItems() if isinstance(c, QGraphicsSimpleTextItem)]
-    assert children, "applied text must be locked to its frame (a child of the box)"
-    before = children[0].scenePos()
+    # Text is now a grandchild of the box (box -> clip -> text) so that the clip
+    # item can enforce the panel-shape boundary.  Walk descendants to find it.
+    def _descendants(item):
+        for child in item.childItems():
+            yield child
+            yield from _descendants(child)
+    texts = [c for c in _descendants(box) if isinstance(c, QGraphicsSimpleTextItem)]
+    assert texts, "applied text must be a descendant of its frame and move with it"
+    before = texts[0].scenePos()
     box.setPos(15, 15)
-    after = children[0].scenePos()
+    after = texts[0].scenePos()
     assert (after.x() - before.x(), after.y() - before.y()) == (15, 15)
 
 

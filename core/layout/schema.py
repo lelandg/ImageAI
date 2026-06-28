@@ -4,7 +4,8 @@ from typing import Dict, List, Tuple
 
 from core.layout.models import (
     Region, PageSpec, DocumentSpec, PageSize, TextStyle, ImageStyle, Snapshot, ProjectStyle,
-    migrate_legacy_blocks, TextBlock, ImageBlock,
+    migrate_legacy_blocks, TextBlock, ImageBlock, PathSegment,
+    Overlay, OverlayStyle,
 )
 
 
@@ -23,14 +24,45 @@ REGION_JSON_SCHEMA: Dict = {
     "properties": {
         "id": {"type": "string"},
         "kind": {"enum": ["image", "text"]},
-        "shape": {"enum": ["rect", "polygon"]},
+        "shape": {"enum": ["rect", "polygon", "path"]},
         "bbox": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4},
         "points": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+        "segments": {"type": "array", "items": {
+            "type": "object",
+            "required": ["type", "pts"],
+            "properties": {
+                "type": {"enum": ["move", "line", "quad", "cubic", "close"]},
+                "pts": {"type": "array", "items": {
+                    "type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2}},
+            },
+        }},
+        "bleed": {"type": "boolean"},
         "z": {"type": "integer"},
         "text": {"type": "string"},
         "role": {"type": "string"},
         "image_ref": {"type": ["string", "null"]},
         "prompt": {"type": "string"},
+    },
+}
+
+
+OVERLAY_JSON_SCHEMA: Dict = {
+    "type": "object",
+    "required": ["id", "kind", "text", "anchor"],
+    "properties": {
+        "id": {"type": "string"},
+        "kind": {"enum": ["speech", "thought", "caption", "sfx"]},
+        "text": {"type": "string"},
+        "anchor": {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+        "anchor_mode": {"enum": ["center", "topleft"]},
+        "tail_target": {"oneOf": [
+            {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+            {"type": "null"},
+        ]},
+        "z": {"type": "integer"},
+        "role": {"type": "string"},
+        "text_style": {"type": ["object", "null"]},
+        "style": {"type": "object"},
     },
 }
 
@@ -45,6 +77,8 @@ def region_to_dict(r: Region) -> Dict:
         "bbox": list(r.bbox), "points": [list(p) for p in r.points],
         "z": r.z, "name": r.name, "text": r.text, "role": r.role,
         "image_ref": r.image_ref, "prompt": r.prompt, "gen_settings": dict(r.gen_settings),
+        "segments": [{"type": s.type, "pts": [list(p) for p in s.pts]} for s in r.segments],
+        "bleed": r.bleed,
         "text_style": _style_to_dict(r.text_style),
         "image_style": _style_to_dict(r.image_style),
     }
@@ -61,8 +95,53 @@ def region_from_dict(d: Dict) -> Region:
         text=d.get("text", ""), role=d.get("role", ""),
         image_ref=d.get("image_ref"), prompt=d.get("prompt", ""),
         gen_settings=dict(d.get("gen_settings", {})),
+        segments=[PathSegment(type=s.get("type", "line"),
+                              pts=[tuple(p) for p in s.get("pts", [])])
+                  for s in d.get("segments", [])],
+        bleed=bool(d.get("bleed", False)),
         text_style=TextStyle(**_filtered(TextStyle, ts)) if ts else None,
         image_style=ImageStyle(**_filtered(ImageStyle, is_)) if is_ else None,
+    )
+
+
+def _overlay_style_to_dict(s: OverlayStyle) -> Dict:
+    return {
+        "fill": s.fill, "stroke_px": s.stroke_px, "stroke_color": s.stroke_color,
+        "padding_px": s.padding_px, "radius_px": s.radius_px, "max_width_px": s.max_width_px,
+    }
+
+
+def _overlay_style_from_dict(d: Dict) -> OverlayStyle:
+    return OverlayStyle(**_filtered(OverlayStyle, d)) if d else OverlayStyle()
+
+
+def overlay_to_dict(ov: Overlay) -> Dict:
+    d: Dict = {
+        "id": ov.id, "kind": ov.kind, "text": ov.text,
+        "anchor": [ov.anchor[0], ov.anchor[1]],
+        "anchor_mode": ov.anchor_mode,
+        "tail_target": (None if ov.tail_target is None
+                        else [ov.tail_target[0], ov.tail_target[1]]),
+        "z": ov.z, "role": ov.role, "rotation": ov.rotation,
+        "text_style": _style_to_dict(ov.text_style),
+        "style": _overlay_style_to_dict(ov.style),
+    }
+    return d
+
+
+def overlay_from_dict(d: Dict) -> Overlay:
+    anchor_raw = d["anchor"]
+    tt = d.get("tail_target")
+    ts = d.get("text_style")
+    return Overlay(
+        id=d["id"], kind=d["kind"], text=d.get("text", ""),
+        anchor=(float(anchor_raw[0]), float(anchor_raw[1])),
+        anchor_mode=d.get("anchor_mode", "center"),
+        tail_target=(None if tt is None else (float(tt[0]), float(tt[1]))),
+        z=int(d.get("z", 0)), role=d.get("role", ""),
+        text_style=TextStyle(**_filtered(TextStyle, ts)) if ts else None,
+        style=_overlay_style_from_dict(d.get("style") or {}),
+        rotation=float(d.get("rotation", 0.0) or 0.0),
     )
 
 
@@ -108,6 +187,7 @@ def page_to_dict(p: PageSpec) -> Dict:
         "page_size": asdict(p.page_size) if p.page_size else None,
         "margin_px": p.margin_px, "bleed_px": p.bleed_px, "background": p.background,
         "regions": [region_to_dict(r) for r in p.regions],
+        "overlays": [overlay_to_dict(o) for o in p.overlays],
         "variables": dict(p.variables),
     }
 
@@ -131,6 +211,7 @@ def page_from_dict(d: Dict) -> PageSpec:
         page_size=_page_size_from_dict(d.get("page_size")),
         margin_px=d.get("margin_px", 64), bleed_px=d.get("bleed_px", 0),
         background=d.get("background"), regions=regions,
+        overlays=[overlay_from_dict(o) for o in d.get("overlays", [])],
         variables=dict(d.get("variables", {})),
     )
 
@@ -163,6 +244,9 @@ def normalize_region(r: Region, page_px: Tuple[int, int]) -> Region:
         xs = [p[0] for p in r.points]
         ys = [p[1] for p in r.points]
         bbox = (min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
+    elif r.shape == "path" and r.segments:
+        from core.layout.geometry import segments_bbox
+        bbox = tuple(round(v) for v in segments_bbox(r.segments))
     else:
         bbox = r.bbox
     x, y, w, h = bbox

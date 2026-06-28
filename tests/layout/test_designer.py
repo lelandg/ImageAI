@@ -100,3 +100,121 @@ def test_every_provider_display_name_resolves_to_a_registry_id_with_models():
         _, registry_id = designer.resolve_provider_ids(display)
         assert get_provider_models(registry_id), \
             f"{display!r} -> {registry_id!r} resolves to no models"
+
+
+def test_designer_result_overlays_defaults_empty():
+    res = designer.parse_response(
+        '{"layout": {"regions": [{"id":"a","kind":"image","bbox":[0,0,100,100]}]}}',
+        (200, 200))
+    assert res.overlays == []
+
+
+def test_parse_overlay_raw_pixel_anchor():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[0,0,200,200]}],'
+               ' "overlays": [{"id":"o1","kind":"speech","text":"Hi",'
+               ' "anchor":[50,40],"tail_target":[50,120]}]}}')
+    res = designer.parse_response(content, (300, 300))
+    assert len(res.overlays) == 1
+    ov = res.overlays[0]
+    assert ov.kind == "speech" and ov.text == "Hi"
+    assert ov.anchor == (50.0, 40.0)
+    assert ov.tail_target == (50.0, 120.0)
+
+
+def test_parse_overlay_region_relative_anchor_resolves_to_pixels():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[100,100,200,100]}],'
+               ' "overlays": [{"id":"o1","kind":"speech","text":"Yo","anchor_region":"p1",'
+               ' "anchor_offset":[0.5,0.5],"tail_to_region":"p1"}]}}')
+    res = designer.parse_response(content, (500, 500))
+    ov = res.overlays[0]
+    assert ov.anchor == (200.0, 150.0)        # 100 + 0.5*200, 100 + 0.5*100
+    assert ov.tail_target == (200.0, 150.0)   # region center
+
+
+def test_parse_overlay_unknown_region_dropped_but_others_kept():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[0,0,100,100]}],'
+               ' "overlays": [{"id":"bad","kind":"speech","text":"x","anchor_region":"nope"},'
+               ' {"id":"ok","kind":"sfx","text":"BOOM","anchor":[50,50]}]}}')
+    res = designer.parse_response(content, (200, 200))
+    assert [o.id for o in res.overlays] == ["ok"]
+
+
+def test_parse_overlay_unknown_kind_skipped():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[0,0,100,100]}],'
+               ' "overlays": [{"id":"o1","kind":"bubble","text":"x","anchor":[10,10]}]}}')
+    res = designer.parse_response(content, (200, 200))
+    assert res.overlays == []
+
+
+def test_parse_overlay_bad_z_degrades_to_zero():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[0,0,100,100]}],'
+               ' "overlays": [{"id":"o1","kind":"sfx","text":"x","anchor":[10,10],"z":"top"},'
+               ' {"id":"o2","kind":"sfx","text":"y","anchor":[20,20],"z":null}]}}')
+    res = designer.parse_response(content, (200, 200))
+    assert [o.id for o in res.overlays] == ["o1", "o2"]
+    assert all(o.z == 0 for o in res.overlays)
+
+
+def test_parse_svg_path_region():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","shape":"path",'
+               ' "svg":"M10 10 L90 10 L90 90 Z","bleed":true}]}}')
+    res = designer.parse_response(content, (200, 200))
+    r = res.regions[0]
+    assert r.shape == "path"
+    assert [s.type for s in r.segments] == ["move", "line", "line", "close"]
+    assert r.bleed is True
+
+
+def test_parse_region_stroke_px_maps_to_image_style():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","shape":"rect",'
+               ' "bbox":[0,0,100,100],"stroke_px":6}]}}')
+    res = designer.parse_response(content, (200, 200))
+    assert res.regions[0].image_style is not None
+    assert res.regions[0].image_style.stroke_px == 6
+
+
+def test_parse_tiling_preset_expands_to_panels():
+    content = '{"layout": {"tiling": {"preset":"grid","params":{"rows":2,"cols":2,"gutter_px":10}}}}'
+    res = designer.parse_response(content, (400, 400))
+    assert res.regions is not None and len(res.regions) == 4
+    assert all(r.shape == "path" for r in res.regions)
+
+
+def test_unknown_tiling_preset_degrades_keeps_explicit_regions():
+    content = ('{"layout": {"tiling": {"preset":"spiral"},'
+               ' "regions":[{"id":"a","kind":"image","bbox":[0,0,50,50]}]}}')
+    res = designer.parse_response(content, (200, 200))
+    assert [r.id for r in res.regions] == ["a"]  # unknown preset ignored; explicit region kept
+
+
+def test_tiling_and_explicit_regions_coexist():
+    content = ('{"layout": {"tiling": {"preset":"three_tiers"},'
+               ' "regions":[{"id":"x","kind":"text","bbox":[0,0,40,20],"role":"caption"}]}}')
+    res = designer.parse_response(content, (300, 300))
+    ids = [r.id for r in res.regions]
+    assert "x" in ids and len(ids) == 4  # 3 tiers + 1 explicit region
+
+
+def test_build_messages_documents_new_capabilities():
+    msgs = designer.build_messages("comic", (1000, 800), "a dynamic comic page")
+    joined = " ".join(m["content"] for m in msgs)
+    for token in ("svg", "tiling", "grid", "overlays", "speech", "anchor_region", "bleed"):
+        assert token in joined, token
+
+
+def test_build_messages_documents_tiled_panel_ids():
+    # The prompt must teach the LLM how tiled panels are named, so overlays can
+    # be anchored to them via anchor_region/tail_to_region.
+    msgs = designer.build_messages("comic", (1000, 800), "a dynamic comic page")
+    joined = " ".join(m["content"] for m in msgs)
+    for token in ("p{row}_{col}", "t0", "splash", "s0", "d0", "hero", "side"):
+        assert token in joined, token
+
+
+def test_parse_overlay_bad_coords_drop_only_that_overlay():
+    content = ('{"layout": {"regions": [{"id":"p1","kind":"image","bbox":[0,0,100,100]}],'
+               ' "overlays": [{"id":"bad","kind":"speech","text":"x","anchor":[null,null]},'
+               ' {"id":"bad2","kind":"sfx","text":"y","anchor":["left","top"]},'
+               ' {"id":"ok","kind":"sfx","text":"z","anchor":[50,50]}]}}')
+    res = designer.parse_response(content, (200, 200))
+    assert [o.id for o in res.overlays] == ["ok"]

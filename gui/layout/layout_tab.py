@@ -22,6 +22,8 @@ from gui.layout.content_inspector import ContentInspector
 
 logger = logging.getLogger("imageai.layout.tab")
 
+_DEFAULT_STROKE_PX = 4  # panel stroke applied when "borderless" is unchecked
+
 
 class LayoutTab(QWidget):
     documentChanged = Signal()
@@ -40,6 +42,8 @@ class LayoutTab(QWidget):
         self.history: Optional[History] = None
         self._prompt_worker = None  # keep alive so the QThread isn't GC'd mid-run
         self._locked = self._load_locked()
+        self._knife_region_id = None
+        self._merge_base_id = None
         self._build()
         self._restore_session_or_new()
 
@@ -50,6 +54,7 @@ class LayoutTab(QWidget):
         for label, slot in [
             ("New", self.new_document), ("Open…", self._open_dialog),
             ("Save…", self._save_dialog), ("Export PDF…", self._export_dialog),
+            ("Export PNG…", self._export_png_dialog),
             ("History…", self._open_history),
             ("Export Template…", self._export_template_dialog),
             ("Import Template…", self._import_template_dialog),
@@ -87,6 +92,21 @@ class LayoutTab(QWidget):
         self.canvas = CanvasWidget()
         root.addWidget(self.canvas, 1)
 
+        from gui.layout.geometry_editor import GeometryEditor
+        self.geometry_editor = GeometryEditor(self.canvas, self)
+
+        from gui.layout.overlay_editor import OverlayEditor
+        self.overlay_editor = OverlayEditor(self.canvas, self)
+
+        from gui.layout.overlay_inspector import OverlayInspector
+        self.overlay_inspector = OverlayInspector()
+        self.overlay_inspector.addRequested.connect(self._add_overlay)
+        self.overlay_inspector.deleteRequested.connect(self._delete_overlay)
+        self.overlay_inspector.rotationChanged.connect(self._set_overlay_rotation)
+        self.overlay_inspector.overlaySelected.connect(self._on_overlay_selected)
+        self.overlay_inspector.editToggled.connect(self._on_overlay_edit_toggled)
+        root.addWidget(self.overlay_inspector)
+
         self.inspector = ContentInspector(self.config)
         self.inspector.regionContentChanged.connect(self._on_region_content_changed)
         self.inspector.regionTextStyleChanged.connect(self._on_region_text_style_changed)
@@ -94,7 +114,21 @@ class LayoutTab(QWidget):
         self.inspector.regionPromptSuggestRequested.connect(self._on_region_prompt_suggest)
         self.inspector.regionSendToImageRequested.connect(self._on_region_send_to_image)
         root.addWidget(self.inspector)
+
+        from gui.layout.geometry_inspector import GeometryInspector
+        self.geometry_inspector = GeometryInspector()
+        self.geometry_inspector.bleedToggled.connect(self._on_region_bleed_toggled)
+        self.geometry_inspector.borderlessToggled.connect(self._on_region_borderless_toggled)
+        self.geometry_inspector.zChanged.connect(self._on_region_z_changed)
+        self.geometry_inspector.editShapeToggled.connect(self._on_region_edit_shape_toggled)
+        self.geometry_inspector.deleteRequested.connect(self._on_region_delete_requested)
+        self.geometry_inspector.knifeToggled.connect(self._on_region_knife_toggled)
+        self.geometry_inspector.mergeToggled.connect(self._on_region_merge_toggled)
+        root.addWidget(self.geometry_inspector)
+
         self.canvas.regionSelected.connect(self._on_region_selected)
+        self.canvas.knifeLine.connect(self._on_canvas_knife_line)
+        self.canvas.mergeTarget.connect(self._on_canvas_merge_target)
 
         self.status = QLabel("")
         root.addWidget(self.status)
@@ -127,11 +161,31 @@ class LayoutTab(QWidget):
         self._refresh()
 
     def _refresh(self):
+        if getattr(self, "_suspend_refresh", False):
+            return
         if self.document and self.document.pages:
             self.canvas.load_page(self.document.pages[0], self.document.style,
                                   locked=self._locked)
             self.status.setText(f"{self.document.title} — {self.document.pages[0].page_size_px}")
+            ge = getattr(self, "geometry_editor", None)
+            if ge is not None:
+                ge.rebuild_handles()
+            oe = getattr(self, "overlay_editor", None)
+            if oe is not None:
+                oe.rebuild_handles()
+            oi = getattr(self, "overlay_inspector", None)
+            if oi is not None and self.document and self.document.pages:
+                oi.set_page(self.document.pages[0])
         self.documentChanged.emit()
+
+    def set_refresh_suspended(self, on: bool):
+        """Block scene rebuilds during an active handle drag (else handles vanish)."""
+        self._suspend_refresh = bool(on)
+
+    def snapshot_and_refresh(self, prompt: str):
+        if self.history is not None:
+            self.history.append(prompt)
+        self._refresh()
 
     # --- lock state (frames + applied text stay put until unlocked) ---
     def _load_locked(self) -> bool:
@@ -221,6 +275,119 @@ class LayoutTab(QWidget):
                 return r
         return None
 
+    def _current_page(self):
+        if not self.document or not self.document.pages:
+            return None
+        return self.document.pages[0]
+
+    def _region_index(self, region_id: str):
+        page = self._current_page()
+        if page is None:
+            return None
+        for i, r in enumerate(page.regions):
+            if r.id == region_id:
+                return i
+        return None
+
+    def _apply_delete(self, region_id: str) -> bool:
+        page = self._current_page()
+        idx = self._region_index(region_id)
+        if page is None or idx is None:
+            return False
+        if self.geometry_editor.active_region_id() == region_id:
+            self.geometry_editor.set_edit_region(None)
+        region = page.regions[idx]
+        del page.regions[idx]
+        self.snapshot_and_refresh(f"delete panel: {region.name or region.id}")
+        return True
+
+    def _apply_knife(self, region_id: str, a, b) -> bool:
+        page = self._current_page()
+        idx = self._region_index(region_id)
+        if page is None or idx is None:
+            return False
+        from core.layout.region_ops import split_region
+        out = split_region(page.regions[idx], a, b)
+        if out is None:
+            logger.warning(
+                "knife: cut missed or unsupported shape for region %s", region_id)
+            self.status.setText("Cannot split — the cut line missed the panel")
+            return False
+        page.regions[idx:idx + 1] = list(out)
+        self.snapshot_and_refresh(f"split panel: {region_id}")
+        return True
+
+    def _apply_merge(self, base_id: str, other_id: str) -> bool:
+        page = self._current_page()
+        if page is None or base_id == other_id:
+            return False
+        bi = self._region_index(base_id)
+        oi = self._region_index(other_id)
+        if bi is None or oi is None:
+            return False
+        from core.layout.region_ops import merge_regions
+        merged = merge_regions(page.regions[bi], page.regions[oi])
+        if merged is None:
+            logger.warning(
+                "merge: regions %s + %s are not adjacent", base_id, other_id)
+            self.status.setText("Cannot merge — panels are not adjacent")
+            return False
+        page.regions[bi] = merged
+        del page.regions[oi]  # replacing base did not change length, so oi is valid
+        self.snapshot_and_refresh(f"merge panels: {base_id} + {other_id}")
+        return True
+
+    def _on_region_delete_requested(self, region_id: str):
+        self._apply_delete(region_id)
+
+    def _on_region_knife_toggled(self, region_id: str, on: bool):
+        if on:
+            self._knife_region_id = region_id
+            self.canvas.set_tool_mode("knife")
+            self.status.setText("Knife: click two points to cut the panel")
+            insp = self.geometry_inspector
+            insp.knife_btn.blockSignals(True)
+            insp.knife_btn.setChecked(True)
+            insp.knife_btn.blockSignals(False)
+        else:
+            self._knife_region_id = None
+            self.canvas.set_tool_mode("none")
+
+    def _on_canvas_knife_line(self, x1: float, y1: float, x2: float, y2: float):
+        rid = self._knife_region_id
+        self._knife_region_id = None
+        if rid:
+            self._apply_knife(rid, (x1, y1), (x2, y2))
+        self._reset_region_tools()
+
+    def _on_region_merge_toggled(self, region_id: str, on: bool):
+        if on:
+            self._merge_base_id = region_id
+            self.canvas.set_tool_mode("merge")
+            self.status.setText("Merge: click an adjacent panel")
+        else:
+            self._merge_base_id = None
+            self.canvas.set_tool_mode("none")
+
+    def _on_canvas_merge_target(self, other_id: str):
+        base = self._merge_base_id
+        self._merge_base_id = None
+        if base:
+            self._apply_merge(base, other_id)
+        self._reset_region_tools()
+
+    def _reset_region_tools(self):
+        """Disarm knife/merge: clear canvas tool mode, stashed ids, and uncheck the
+        inspector toggles (without re-emitting their toggled signals)."""
+        self.canvas.set_tool_mode("none")
+        self._knife_region_id = None
+        self._merge_base_id = None
+        insp = self.geometry_inspector
+        for btn in (insp.knife_btn, insp.merge_btn):
+            btn.blockSignals(True)
+            btn.setChecked(False)
+            btn.blockSignals(False)
+
     def _on_region_selected(self, region_id: str):
         region = self._find_region(region_id)
         ts = None
@@ -228,6 +395,12 @@ class LayoutTab(QWidget):
             style = self.document.style if self.document else None
             ts = styles.effective_text_style(region, style)
         self.inspector.set_region(region, text_style=ts)
+        self.geometry_inspector.set_region(region)
+        self.geometry_editor.set_edit_region(None)
+        self._reset_region_tools()
+
+    def _on_region_edit_shape_toggled(self, region_id: str, on: bool):
+        self.geometry_editor.set_edit_region(region_id if on else None)
 
     def _on_region_content_changed(self, region_id: str, value: str):
         self.set_region_content(region_id, value)
@@ -248,6 +421,102 @@ class LayoutTab(QWidget):
             align=base.align, wrap=base.wrap, letter_spacing=base.letter_spacing,
         )
         self._refresh()
+
+    def _on_region_bleed_toggled(self, region_id: str, bleed: bool):
+        region = self._find_region(region_id)
+        if region is None:
+            return
+        region.bleed = bool(bleed)
+        if self.history is not None:
+            self.history.append(f"bleed: {region.name or region.id}")
+        self._refresh()
+
+    def _on_region_borderless_toggled(self, region_id: str, borderless: bool):
+        region = self._find_region(region_id)
+        if region is None:
+            return
+        from core.layout.models import ImageStyle
+        if region.image_style is None:
+            region.image_style = ImageStyle()
+        region.image_style.stroke_px = 0 if borderless else _DEFAULT_STROKE_PX
+        if self.history is not None:
+            self.history.append(f"borderless: {region.name or region.id}")
+        self._refresh()
+
+    def _on_region_z_changed(self, region_id: str, z: int):
+        region = self._find_region(region_id)
+        if region is None:
+            return
+        region.z = int(z)
+        if self.history is not None:
+            self.history.append(f"z: {region.name or region.id}")
+        self._refresh()
+
+    # --- overlay handlers ---
+    _OVERLAY_DEFAULT_TEXT = {
+        "speech": "Dialogue", "thought": "Thinking…",
+        "caption": "Caption", "sfx": "POW!",
+    }
+
+    def _new_overlay_id(self, page) -> str:
+        n = 1
+        existing = {o.id for o in page.overlays}
+        while f"ov{n}" in existing:
+            n += 1
+        return f"ov{n}"
+
+    def _add_overlay(self, kind: str) -> bool:
+        from core.layout.models import Overlay
+        page = self._current_page()
+        if page is None or kind not in ("speech", "thought", "caption", "sfx"):
+            return False
+        pw, ph = page.page_size_px
+        cx, cy = pw / 2.0, ph / 2.0
+        tail = (cx, cy + 80.0) if kind in ("speech", "thought") else None
+        ov = Overlay(id=self._new_overlay_id(page), kind=kind,
+                     text=self._OVERLAY_DEFAULT_TEXT.get(kind, ""),
+                     anchor=(cx, cy), tail_target=tail)
+        page.overlays.append(ov)
+        self.snapshot_and_refresh(f"add {kind} overlay")
+        self.overlay_inspector.set_selected(ov.id)
+        return True
+
+    def _find_overlay(self, overlay_id):
+        page = self._current_page()
+        if page is None:
+            return None
+        for ov in page.overlays:
+            if ov.id == overlay_id:
+                return ov
+        return None
+
+    def _delete_overlay(self, overlay_id: str) -> bool:
+        page = self._current_page()
+        if page is None:
+            return False
+        for i, ov in enumerate(page.overlays):
+            if ov.id == overlay_id:
+                if self.overlay_editor.active_overlay_id() == overlay_id:
+                    self.overlay_editor.set_edit_overlay(None)
+                del page.overlays[i]
+                self.snapshot_and_refresh(f"delete overlay: {overlay_id}")
+                return True
+        return False
+
+    def _set_overlay_rotation(self, overlay_id: str, deg: int) -> bool:
+        ov = self._find_overlay(overlay_id)
+        if ov is None:
+            return False
+        ov.rotation = float(deg)
+        self.snapshot_and_refresh(f"rotate overlay: {overlay_id}")
+        return True
+
+    def _on_overlay_selected(self, overlay_id: str):
+        self.overlay_inspector.set_selected(overlay_id)
+        self.overlay_editor.set_edit_overlay(None)
+
+    def _on_overlay_edit_toggled(self, overlay_id: str, on: bool):
+        self.overlay_editor.set_edit_overlay(overlay_id if on else None)
 
     def set_region_content(self, region_id: str, value: str):
         """Apply edited content to a region and re-render (programmatic API)."""
@@ -380,6 +649,14 @@ class LayoutTab(QWidget):
         qt_renderer.export_document_pdf(self.document, path)
         self.status.setText(f"Exported {path}")
 
+    def export_png_to(self, path: str):
+        if self.document is None or not self.document.pages:
+            return
+        from core.layout import qt_renderer
+        style = self.document.style if self.document else None
+        qt_renderer.save_page_png(self.document.pages[0], path, style=style)
+        self.status.setText(f"Exported {path}")
+
     # --- designer + history methods ---
     def _on_design_clicked(self):
         if not self.document or not self.document.pages:
@@ -405,8 +682,18 @@ class LayoutTab(QWidget):
                 self.document.style = styles.default_style_for(kind)
                 if hasattr(self, "style_panel"):
                     self.style_panel.set_style(self.document.style)
+        applied = False
         if result.regions:
             self.document.pages[0].regions = list(result.regions)
+            applied = True
+        if getattr(result, "overlays", None):
+            self.document.pages[0].overlays = list(result.overlays)
+            applied = True
+        elif result.regions:
+            # Regions-only redesign: tidy overlays stranded over the new panels.
+            from core.layout.overlay_ops import reposition_stranded_overlays
+            reposition_stranded_overlays(self.document.pages[0])
+        if applied:
             self.history.append(user_text or "design")
             self._refresh()
         elif result.questions:
@@ -560,3 +847,12 @@ class LayoutTab(QWidget):
                 self.export_pdf_to(path)
             except Exception as e:  # noqa: BLE001 - surfaced to UI + log
                 self._report_error("export PDF", e)
+
+    def _export_png_dialog(self):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getSaveFileName(self, "Export PNG", "", "PNG Images (*.png)")
+        if path:
+            try:
+                self.export_png_to(path)
+            except Exception as e:  # noqa: BLE001
+                self._report_error("export png", e)
