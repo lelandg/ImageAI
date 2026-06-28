@@ -92,3 +92,26 @@ def split_region(region: Region, a: Point, b: Point) -> Optional[Tuple[Region, R
         _region_from_polygon(region, left, id=f"{region.id}_a"),
         _region_from_polygon(region, right, id=f"{region.id}_b"),
     )
+
+
+def merge_regions(base: Region, other: Region) -> Optional[Region]:
+    """Union two adjacent regions into one polygon region (keeps base's identity).
+
+    Returns None if either region is curved/unsupported, or the two are not a clean
+    edge-merge: the union must yield exactly one ring whose area equals the sum of
+    the inputs' areas (no gap, no overlap). This makes the result independent of
+    ``union_polygons`` behavior on disjoint input. Inputs are never mutated.
+    """
+    p1 = region_to_polygon(base)
+    p2 = region_to_polygon(other)
+    if p1 is None or p2 is None:
+        return None
+    p1 = ensure_orientation(p1)
+    p2 = ensure_orientation(p2)
+    rings = union_polygons([p1, p2])
+    if len(rings) != 1 or len(rings[0]) < 3:
+        return None
+    merged = ensure_orientation(rings[0])
+    if abs(signed_area(merged) - (signed_area(p1) + signed_area(p2))) > _AREA_EPS:
+        return None  # gap or overlap -> not a clean adjacency merge
+    return _region_from_polygon(base, merged, id=base.id)

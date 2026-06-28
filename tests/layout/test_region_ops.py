@@ -72,3 +72,30 @@ def test_split_curved_path_none():
         PathSegment(type="close", pts=[]),
     ])
     assert split_region(r, (10.0, 0.0), (10.0, 50.0)) is None
+
+
+from core.layout.region_ops import merge_regions
+
+
+def test_merge_adjacent_squares():
+    left = Region(id="L", kind="image", shape="rect", bbox=(0, 0, 50, 100), z=3)
+    right = Region(id="R", kind="image", shape="rect", bbox=(50, 0, 50, 100))
+    m = merge_regions(left, right)
+    assert m is not None
+    assert m.id == "L" and m.shape == "polygon" and m.z == 3
+    assert m.bbox == (0, 0, 100, 100)
+
+
+def test_merge_disjoint_returns_none():
+    left = Region(id="L", kind="image", shape="rect", bbox=(0, 0, 50, 100))
+    far = Region(id="R", kind="image", shape="rect", bbox=(60, 0, 50, 100))
+    assert merge_regions(left, far) is None
+
+
+def test_merge_curved_returns_none():
+    left = Region(id="L", kind="image", shape="rect", bbox=(0, 0, 50, 100))
+    curved = Region(id="C", kind="image", shape="path", bbox=(0, 0, 3, 3), segments=[
+        PathSegment(type="move", pts=[(0.0, 0.0)]),
+        PathSegment(type="cubic", pts=[(1.0, 1.0), (2.0, 2.0), (3.0, 3.0)]),
+    ])
+    assert merge_regions(left, curved) is None
