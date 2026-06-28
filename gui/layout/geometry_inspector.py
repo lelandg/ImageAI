@@ -6,7 +6,7 @@ ContentInspector). The "Edit shape" toggle is added in #5a Task 4.
 from typing import Optional
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QSpinBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QSpinBox, QPushButton,
 )
 from PySide6.QtCore import Signal
 
@@ -19,6 +19,9 @@ class GeometryInspector(QWidget):
     borderlessToggled = Signal(str, bool)   # (region_id, borderless)
     zChanged = Signal(str, int)             # (region_id, z)
     editShapeToggled = Signal(str, bool)    # (region_id, on)
+    deleteRequested = Signal(str)        # (region_id)
+    knifeToggled = Signal(str, bool)     # (region_id, on)
+    mergeToggled = Signal(str, bool)     # (region_id, on)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -58,6 +61,20 @@ class GeometryInspector(QWidget):
         self.edit_shape_chk.toggled.connect(self._on_edit_shape)
         root.addWidget(self.edit_shape_chk)
 
+        ops_row = QHBoxLayout()
+        self.delete_btn = QPushButton("Delete panel")
+        self.delete_btn.clicked.connect(self._on_delete)
+        ops_row.addWidget(self.delete_btn)
+        self.knife_btn = QPushButton("Knife (split)")
+        self.knife_btn.setCheckable(True)
+        self.knife_btn.toggled.connect(self._on_knife)
+        ops_row.addWidget(self.knife_btn)
+        self.merge_btn = QPushButton("Merge…")
+        self.merge_btn.setCheckable(True)
+        self.merge_btn.toggled.connect(self._on_merge)
+        ops_row.addWidget(self.merge_btn)
+        root.addLayout(ops_row)
+
     def set_region(self, region: Optional[Region]):
         self._region = region
         enabled = region is not None
@@ -68,6 +85,12 @@ class GeometryInspector(QWidget):
         self.edit_shape_chk.setChecked(False)
         self.edit_shape_chk.setEnabled(bool(region and region.shape in ("path", "polygon")))
         self.edit_shape_chk.blockSignals(False)
+        for btn in (self.knife_btn, self.merge_btn):
+            btn.blockSignals(True)
+            btn.setChecked(False)
+            btn.setEnabled(region is not None)
+            btn.blockSignals(False)
+        self.delete_btn.setEnabled(region is not None)
         if region is None:
             self.header.setText("No region selected")
             self.shape_label.setText("")
@@ -100,3 +123,15 @@ class GeometryInspector(QWidget):
     def _on_edit_shape(self, checked: bool):
         if self._region is not None:
             self.editShapeToggled.emit(self._region.id, bool(checked))
+
+    def _on_delete(self):
+        if self._region is not None:
+            self.deleteRequested.emit(self._region.id)
+
+    def _on_knife(self, checked: bool):
+        if self._region is not None:
+            self.knifeToggled.emit(self._region.id, bool(checked))
+
+    def _on_merge(self, checked: bool):
+        if self._region is not None:
+            self.mergeToggled.emit(self._region.id, bool(checked))

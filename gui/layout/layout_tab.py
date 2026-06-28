@@ -42,6 +42,8 @@ class LayoutTab(QWidget):
         self.history: Optional[History] = None
         self._prompt_worker = None  # keep alive so the QThread isn't GC'd mid-run
         self._locked = self._load_locked()
+        self._knife_region_id = None
+        self._merge_base_id = None
         self._build()
         self._restore_session_or_new()
 
@@ -106,9 +108,14 @@ class LayoutTab(QWidget):
         self.geometry_inspector.borderlessToggled.connect(self._on_region_borderless_toggled)
         self.geometry_inspector.zChanged.connect(self._on_region_z_changed)
         self.geometry_inspector.editShapeToggled.connect(self._on_region_edit_shape_toggled)
+        self.geometry_inspector.deleteRequested.connect(self._on_region_delete_requested)
+        self.geometry_inspector.knifeToggled.connect(self._on_region_knife_toggled)
+        self.geometry_inspector.mergeToggled.connect(self._on_region_merge_toggled)
         root.addWidget(self.geometry_inspector)
 
         self.canvas.regionSelected.connect(self._on_region_selected)
+        self.canvas.knifeLine.connect(self._on_canvas_knife_line)
+        self.canvas.mergeTarget.connect(self._on_canvas_merge_target)
 
         self.status = QLabel("")
         root.addWidget(self.status)
@@ -312,6 +319,39 @@ class LayoutTab(QWidget):
         del page.regions[oi]  # replacing base did not change length, so oi is valid
         self.snapshot_and_refresh(f"merge panels: {base_id} + {other_id}")
         return True
+
+    def _on_region_delete_requested(self, region_id: str):
+        self._apply_delete(region_id)
+
+    def _on_region_knife_toggled(self, region_id: str, on: bool):
+        if on:
+            self._knife_region_id = region_id
+            self.canvas.set_tool_mode("knife")
+            self.status.setText("Knife: click two points to cut the panel")
+        else:
+            self._knife_region_id = None
+            self.canvas.set_tool_mode("none")
+
+    def _on_canvas_knife_line(self, x1: float, y1: float, x2: float, y2: float):
+        rid = self._knife_region_id
+        self._knife_region_id = None
+        if rid:
+            self._apply_knife(rid, (x1, y1), (x2, y2))
+
+    def _on_region_merge_toggled(self, region_id: str, on: bool):
+        if on:
+            self._merge_base_id = region_id
+            self.canvas.set_tool_mode("merge")
+            self.status.setText("Merge: click an adjacent panel")
+        else:
+            self._merge_base_id = None
+            self.canvas.set_tool_mode("none")
+
+    def _on_canvas_merge_target(self, other_id: str):
+        base = self._merge_base_id
+        self._merge_base_id = None
+        if base:
+            self._apply_merge(base, other_id)
 
     def _on_region_selected(self, region_id: str):
         region = self._find_region(region_id)
