@@ -32,3 +32,30 @@ def test_render_page_to_image_scale_doubles_dimensions(qapp):
     base = qt_renderer.render_page_to_image(page)
     scaled = qt_renderer.render_page_to_image(page, scale=2.0)
     assert (scaled.width(), scaled.height()) == (base.width() * 2, base.height() * 2)
+
+
+def _doc():
+    from core.layout.models import DocumentSpec, PageSpec, Region
+    return DocumentSpec(title="t", pages=[PageSpec(
+        page_size_px=(200, 150),
+        regions=[Region(id="r", kind="image", shape="rect", bbox=(0, 0, 100, 100))],
+        overlays=[])])
+
+
+def test_export_worker_pdf_executes_via_qt(qapp, tmp_path):
+    # Execute the PDF worker path (not just grep its source): proves
+    # export_document_pdf(dpi=...) actually accepts the kwarg and renders.
+    from gui.layout.export_dialog import ExportWorker
+    out = tmp_path / "doc.pdf"
+    worker = ExportWorker(_doc(), "pdf", str(out), dpi=300)
+    worker._export_pdf(out, [0], 1)
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_export_worker_png_executes_via_qt(qapp, tmp_path):
+    # Execute the PNG worker path end-to-end through the Qt renderer (dpi -> scale).
+    from gui.layout.export_dialog import ExportWorker
+    out = tmp_path / "doc.png"
+    worker = ExportWorker(_doc(), "png", str(out), dpi=144)
+    worker._export_png(out, [0], 1)
+    assert out.exists() and out.stat().st_size > 0
