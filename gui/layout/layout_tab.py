@@ -5,8 +5,9 @@ from typing import Optional
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLabel,
+    QSplitter, QScrollArea,
 )
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, Qt
 
 from core.layout.models import DocumentSpec, PageSpec, PageSize, TextStyle
 from core.layout import project_io, qt_renderer
@@ -44,6 +45,10 @@ class LayoutTab(QWidget):
         self._locked = self._load_locked()
         self._knife_region_id = None
         self._merge_base_id = None
+        # Last page orientation the render-position toggle auto-synced to. Lets a
+        # manual override survive non-orientation edits (DPI/size) and only flip
+        # back to auto on a real portrait<->landscape change.
+        self._last_orientation: Optional[str] = None
         self._build()
         self._restore_session_or_new()
 
@@ -74,29 +79,53 @@ class LayoutTab(QWidget):
         self.lock_btn.toggled.connect(self._on_lock_toggled)
         self._update_lock_button()
         toolbar.addWidget(self.lock_btn)
+
+        # View toggle: stack the page render ABOVE the settings (vertical split)
+        # instead of beside them (horizontal). Auto-enabled for landscape pages
+        # on app/layout load and on orientation change; see
+        # _sync_split_to_orientation. A manual click overrides until the next
+        # orientation change.
+        self.orient_split_btn = QPushButton("⬓ Render Position")
+        self.orient_split_btn.setCheckable(True)
+        self.orient_split_btn.setToolTip(
+            "Show the page render above the settings (best for landscape pages).\n"
+            "Auto-enabled when the page is landscape; click to override.")
+        self.orient_split_btn.toggled.connect(self._on_orient_split_toggled)
+        toolbar.addWidget(self.orient_split_btn)
         root.addLayout(toolbar)
 
-        self.page_setup = PageSetupWidget(self.config)
-        self.page_setup.pageSizeChanged.connect(self._on_page_size_changed)
-        root.addWidget(self.page_setup)
-
-        self.designer = DesignerPanel(self.config)
-        self.designer.layoutProposed.connect(self._on_layout_proposed)
-        self.designer.design_btn.clicked.connect(self._on_design_clicked)
-        root.addWidget(self.designer)
-
-        self.style_panel = StylePanel()
-        self.style_panel.styleChanged.connect(self.apply_style)
-        root.addWidget(self.style_panel)
+        # Main area: big canvas on the left, scrollable control dock on the right,
+        # split by a draggable handle. Keeps the canvas usable instead of starving
+        # it inside one tall vertical column (the old layout).
+        split = QSplitter(Qt.Horizontal)
 
         self.canvas = CanvasWidget()
-        root.addWidget(self.canvas, 1)
+        split.addWidget(self.canvas)
 
         from gui.layout.geometry_editor import GeometryEditor
         self.geometry_editor = GeometryEditor(self.canvas, self)
 
         from gui.layout.overlay_editor import OverlayEditor
         self.overlay_editor = OverlayEditor(self.canvas, self)
+
+        # Right-hand control dock — all inspectors/panels stacked in a scroll area
+        # so they never compete with the canvas for height.
+        dock = QWidget()
+        dock_col = QVBoxLayout(dock)
+        dock_col.setContentsMargins(0, 0, 0, 0)
+
+        self.page_setup = PageSetupWidget(self.config)
+        self.page_setup.pageSizeChanged.connect(self._on_page_size_changed)
+        dock_col.addWidget(self.page_setup)
+
+        self.designer = DesignerPanel(self.config)
+        self.designer.layoutProposed.connect(self._on_layout_proposed)
+        self.designer.design_btn.clicked.connect(self._on_design_clicked)
+        dock_col.addWidget(self.designer)
+
+        self.style_panel = StylePanel(self.config)
+        self.style_panel.styleChanged.connect(self.apply_style)
+        dock_col.addWidget(self.style_panel)
 
         from gui.layout.overlay_inspector import OverlayInspector
         self.overlay_inspector = OverlayInspector()
@@ -105,7 +134,7 @@ class LayoutTab(QWidget):
         self.overlay_inspector.rotationChanged.connect(self._set_overlay_rotation)
         self.overlay_inspector.overlaySelected.connect(self._on_overlay_selected)
         self.overlay_inspector.editToggled.connect(self._on_overlay_edit_toggled)
-        root.addWidget(self.overlay_inspector)
+        dock_col.addWidget(self.overlay_inspector)
 
         self.inspector = ContentInspector(self.config)
         self.inspector.regionContentChanged.connect(self._on_region_content_changed)
@@ -113,7 +142,7 @@ class LayoutTab(QWidget):
         self.inspector.regionPromptChanged.connect(self._on_region_prompt_changed)
         self.inspector.regionPromptSuggestRequested.connect(self._on_region_prompt_suggest)
         self.inspector.regionSendToImageRequested.connect(self._on_region_send_to_image)
-        root.addWidget(self.inspector)
+        dock_col.addWidget(self.inspector)
 
         from gui.layout.geometry_inspector import GeometryInspector
         self.geometry_inspector = GeometryInspector()
@@ -124,7 +153,29 @@ class LayoutTab(QWidget):
         self.geometry_inspector.deleteRequested.connect(self._on_region_delete_requested)
         self.geometry_inspector.knifeToggled.connect(self._on_region_knife_toggled)
         self.geometry_inspector.mergeToggled.connect(self._on_region_merge_toggled)
-        root.addWidget(self.geometry_inspector)
+        dock_col.addWidget(self.geometry_inspector)
+        dock_col.addStretch(1)
+
+        dock_scroll = QScrollArea()
+        dock_scroll.setWidgetResizable(True)
+        # Scroll horizontally only if the dock is dragged narrower than its
+        # controls need, so nothing is ever clipped (vertical scroll handles
+        # height). 440px comfortably fits the widest row (the +Speech/+Thought/
+        # +Caption/+SFX buttons).
+        dock_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        dock_scroll.setWidget(dock)
+        dock_scroll.setMinimumWidth(440)
+        split.addWidget(dock_scroll)
+
+        # Canvas pane grows, dock pane stays compact; give the canvas the lion's
+        # share on first show. The dock opens at ~690px so its widest row (page
+        # setup) fits without a horizontal scrollbar; drag the handle narrower to
+        # reclaim space (it scrolls below ~670px).
+        split.setStretchFactor(0, 1)
+        split.setStretchFactor(1, 0)
+        split.setSizes([1000, 690])
+        self._main_split = split
+        root.addWidget(split, 1)
 
         self.canvas.regionSelected.connect(self._on_region_selected)
         self.canvas.knifeLine.connect(self._on_canvas_knife_line)
@@ -145,20 +196,82 @@ class LayoutTab(QWidget):
         if hasattr(self, "inspector"):
             self.inspector.set_region(None)
 
+    def _sync_page_setup_from_document(self):
+        """Reflect the loaded document's page size/orientation in the page-setup
+        controls (and, via PageSetupWidget.pageSizeChanged → _on_page_size_changed,
+        the render-on-top toggle). Every path that adopts a document calls this so
+        the controls and view never drift from what was loaded.
+
+        A loaded document may carry a per-project render-position override
+        (``render_on_top``); it wins over the orientation-derived default. Capture
+        it before set_page_size (whose orientation auto-sync would overwrite it via
+        _on_orient_split_toggled), then re-apply it on top."""
+        page = (self.document.pages[0]
+                if self.document and self.document.pages else None)
+        stored = self.document.render_on_top if self.document else None
+        # Treat the load as a fresh orientation baseline so set_page_size's
+        # auto-sync always reflects the loaded page, then the stored override wins.
+        self._last_orientation = None
+        if page is not None and page.page_size and hasattr(self, "page_setup"):
+            self.page_setup.set_page_size(page.page_size)
+        btn = getattr(self, "orient_split_btn", None)
+        if stored is not None and btn is not None and btn.isChecked() != stored:
+            btn.setChecked(bool(stored))  # toggled → _apply_split_orientation
+
     def new_document(self):
         ps = self.page_setup.page_size() if hasattr(self, "page_setup") else PageSize(8.5, 11, "in")
         pw, ph = ps.to_pixels()
         page = PageSpec(page_size_px=(pw, ph), page_size=ps, background="#FFFFFF")
         self._adopt_document(DocumentSpec(title="Untitled", pages=[page]))
+        self._last_orientation = ps.orientation
         self._refresh()
 
     def _on_page_size_changed(self, ps: PageSize):
+        # Keep the render-on-top view in step with the page orientation (landscape
+        # → render above settings) regardless of whether a document exists yet.
+        self._sync_split_to_orientation(ps.orientation)
         if not self.document or not self.document.pages:
             return
         page = self.document.pages[0]
         page.page_size = ps
         page.page_size_px = ps.to_pixels()
         self._refresh()
+
+    # --- split orientation (render beside vs. above the settings) ---
+    def _on_orient_split_toggled(self, on_top: bool):
+        self._apply_split_orientation(on_top)
+        # Remember the effective choice on the document so it persists with the
+        # project. Both manual clicks and orientation-driven auto-syncs land here.
+        if self.document is not None:
+            self.document.render_on_top = bool(on_top)
+
+    def _apply_split_orientation(self, on_top: bool):
+        """Horizontal = canvas left / settings right (portrait default);
+        Vertical = canvas on top / settings below (landscape / 'render on top')."""
+        split = getattr(self, "_main_split", None)
+        if split is None:
+            return
+        if on_top:
+            split.setOrientation(Qt.Vertical)
+            split.setSizes([700, 500])
+        else:
+            split.setOrientation(Qt.Horizontal)
+            split.setSizes([1000, 690])
+
+    def _sync_split_to_orientation(self, orientation: str):
+        """Drive the render-on-top toggle from the page orientation. Only acts when
+        the orientation actually flips, so a manual toggle (and the per-project
+        stored override) survives unrelated changes like DPI/size edits."""
+        btn = getattr(self, "orient_split_btn", None)
+        if btn is None:
+            return
+        prev = self._last_orientation
+        self._last_orientation = orientation
+        if orientation == prev:
+            return  # same orientation → leave the current (possibly manual) choice
+        want_on_top = (orientation == "landscape")
+        if btn.isChecked() != want_on_top:
+            btn.setChecked(want_on_top)  # toggled → _apply_split_orientation
 
     def _refresh(self):
         if getattr(self, "_suspend_refresh", False):
@@ -236,10 +349,7 @@ class LayoutTab(QWidget):
         if path and path.exists():
             try:
                 self._adopt_document(project_io.load_project(str(path)))
-                page = (self.document.pages[0]
-                        if self.document and self.document.pages else None)
-                if page is not None and page.page_size and hasattr(self, "page_setup"):
-                    self.page_setup.set_page_size(page.page_size)
+                self._sync_page_setup_from_document()
                 self._refresh()
                 logger.info("Layout: restored last session from %s", path)
                 return
@@ -643,6 +753,7 @@ class LayoutTab(QWidget):
 
     def open_project_from(self, path: str):
         self._adopt_document(project_io.load_project(path))
+        self._sync_page_setup_from_document()
         self._refresh()
 
     def export_pdf_to(self, path: str):
@@ -728,6 +839,7 @@ class LayoutTab(QWidget):
 
     def import_template_from(self, path: str):
         self._adopt_document(template_io.import_template(path))
+        self._sync_page_setup_from_document()
         self._refresh()
 
     # --- bundles (.iaibundle: project + images + fonts, self-contained) ---
@@ -769,10 +881,7 @@ class LayoutTab(QWidget):
     def import_bundle_from(self, path: str):
         dest = self._bundle_extract_dir(path)
         self._adopt_document(bundle_io.import_bundle(path, str(dest)))
-        page = (self.document.pages[0]
-                if self.document and self.document.pages else None)
-        if page is not None and page.page_size and hasattr(self, "page_setup"):
-            self.page_setup.set_page_size(page.page_size)
+        self._sync_page_setup_from_document()
         self._refresh()
 
     def _export_bundle_dialog(self):

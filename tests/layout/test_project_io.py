@@ -16,6 +16,22 @@ def test_save_load_roundtrip(tmp_path):
     assert loaded.pages[0].regions[0].text == "Hi"
 
 
+def test_render_on_top_roundtrip(tmp_path):
+    doc = DocumentSpec(title="Proj", pages=[PageSpec(page_size_px=(500, 500))],
+                       render_on_top=True)
+    p = tmp_path / "x.iaiproj.json"
+    project_io.save_project(doc, str(p))
+    assert project_io.load_project(str(p)).render_on_top is True
+
+
+def test_render_on_top_defaults_none_for_legacy(tmp_path):
+    # Projects saved before this field existed load with no stored override.
+    legacy = {"title": "Old", "pages": [{"page_size_px": [400, 400]}]}
+    p = tmp_path / "old.iaiproj.json"
+    p.write_text(json.dumps(legacy), encoding="utf-8")
+    assert project_io.load_project(str(p)).render_on_top is None
+
+
 def test_load_legacy_layout_json(tmp_path):
     legacy = {"title": "Legacy", "pages": [{
         "page_size_px": [400, 400],

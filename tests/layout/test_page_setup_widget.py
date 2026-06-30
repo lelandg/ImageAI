@@ -42,3 +42,27 @@ def test_emits_page_size_changed(qapp):
     w.pageSizeChanged.connect(lambda ps: received.append(ps))
     w.set_page_size(PageSize(4, 6, "in", "portrait", 300))
     assert received and received[-1].to_pixels() == (1200, 1800)
+
+
+def test_orientation_buttons_default_portrait(qapp):
+    w = PageSetupWidget(FakeConfig())
+    assert w.portrait_btn.isChecked()
+    assert not w.landscape_btn.isChecked()
+
+
+def test_orientation_buttons_sync_on_load(qapp):
+    w = PageSetupWidget(FakeConfig())
+    w.set_page_size(PageSize(11, 8.5, "in", "landscape", 300))
+    assert w.landscape_btn.isChecked()
+    assert not w.portrait_btn.isChecked()
+    w.set_page_size(PageSize(8.5, 11, "in", "portrait", 300))
+    assert w.portrait_btn.isChecked()
+    assert not w.landscape_btn.isChecked()
+
+
+def test_orientation_buttons_sync_on_click(qapp):
+    w = PageSetupWidget(FakeConfig())
+    w._on_landscape()
+    assert w.landscape_btn.isChecked() and not w.portrait_btn.isChecked()
+    w._on_portrait()
+    assert w.portrait_btn.isChecked() and not w.landscape_btn.isChecked()

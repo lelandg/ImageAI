@@ -223,6 +223,7 @@ def document_to_dict(doc: DocumentSpec) -> Dict:
         "metadata": dict(doc.metadata), "pages": [page_to_dict(p) for p in doc.pages],
         "history": [snapshot_to_dict(s) for s in doc.history],
         "style": project_style_to_dict(doc.style) if doc.style else None,
+        "render_on_top": doc.render_on_top,
     }
 
 
@@ -235,6 +236,7 @@ def document_from_dict(d: Dict) -> DocumentSpec:
         schema_version=d.get("schema_version", "2.0"),
         history=[snapshot_from_dict(s) for s in d.get("history", [])],
         style=project_style_from_dict(d["style"]) if d.get("style") else None,
+        render_on_top=d.get("render_on_top"),
     )
 
 

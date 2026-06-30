@@ -33,6 +33,9 @@ class OverlayInspector(QWidget):
         root.addWidget(QLabel("Overlays"))
 
         self.overlay_list = QListWidget()
+        # Cap the height so the list doesn't balloon and starve the panels below
+        # it inside the control dock; it scrolls internally when overlays overflow.
+        self.overlay_list.setMaximumHeight(140)
         self.overlay_list.itemSelectionChanged.connect(self._on_row_changed)
         root.addWidget(self.overlay_list)
 

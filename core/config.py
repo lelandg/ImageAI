@@ -303,6 +303,39 @@ class ConfigManager:
         layout_config["llm_provider"] = provider
         self.set_layout_config(layout_config)
 
+    def get_layout_llm_model(self) -> str:
+        """Get last-selected LLM model for the layout designer ('' if none)."""
+        layout_config = self.get_layout_config()
+        return layout_config.get("llm_model", "")
+
+    def set_layout_llm_model(self, model: str) -> None:
+        """Persist the layout designer's LLM model selection."""
+        layout_config = self.get_layout_config()
+        layout_config["llm_model"] = model
+        self.set_layout_config(layout_config)
+
+    def get_layout_content_kind(self) -> str:
+        """Get last-selected designer content kind ('' if none)."""
+        layout_config = self.get_layout_config()
+        return layout_config.get("content_kind", "")
+
+    def set_layout_content_kind(self, kind: str) -> None:
+        """Persist the layout designer's content-kind selection."""
+        layout_config = self.get_layout_config()
+        layout_config["content_kind"] = kind
+        self.set_layout_config(layout_config)
+
+    def get_layout_style_role(self) -> str:
+        """Get last-viewed style role in the Style panel ('' if none)."""
+        layout_config = self.get_layout_config()
+        return layout_config.get("style_role", "")
+
+    def set_layout_style_role(self, role: str) -> None:
+        """Persist the Style panel's last-viewed role."""
+        layout_config = self.get_layout_config()
+        layout_config["style_role"] = role
+        self.set_layout_config(layout_config)
+
     # Discord Rich Presence Configuration
 
     def get_discord_config(self) -> Dict[str, Any]:

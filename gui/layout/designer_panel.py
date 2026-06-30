@@ -52,12 +52,21 @@ class DesignerPanel(QWidget):
         row.addWidget(QLabel("Kind:"))
         self.kind_combo = QComboBox()
         self.kind_combo.addItems(CONTENT_KINDS)
+        saved_kind = self._cfg_get("get_layout_content_kind")
+        if saved_kind and saved_kind in CONTENT_KINDS:
+            self.kind_combo.setCurrentText(saved_kind)
+        self.kind_combo.currentTextChanged.connect(self._save_kind)
         row.addWidget(self.kind_combo)
         row.addWidget(QLabel("Provider:"))
         self.provider_combo = QComboBox()
         self.model_combo = QComboBox()
         self._populate_providers()
+        # _on_provider_changed (re)populates the model list AND reselects the saved
+        # model; _save_provider/_save_model only fire on real user changes (the
+        # init path sets indexes with signals blocked / via direct calls).
         self.provider_combo.currentTextChanged.connect(self._on_provider_changed)
+        self.provider_combo.currentTextChanged.connect(self._save_provider)
+        self.model_combo.currentTextChanged.connect(self._save_model)
         row.addWidget(self.provider_combo)
         row.addWidget(self.model_combo)
         lay.addLayout(row)
@@ -105,10 +114,40 @@ class DesignerPanel(QWidget):
     def _on_provider_changed(self, provider: str):
         from core.llm_models import get_provider_models
         _, pid = designer.resolve_provider_ids(provider)  # single source of truth
+        models = get_provider_models(pid) or []
         self.model_combo.blockSignals(True)
         self.model_combo.clear()
-        self.model_combo.addItems(get_provider_models(pid) or [])
+        self.model_combo.addItems(models)
+        # Reselect the saved model once its list is populated (mirrors the Image
+        # tab's provider→populate→restore ordering); fall back to the first model.
+        saved_model = self._cfg_get("get_layout_llm_model")
+        if saved_model and saved_model in models:
+            self.model_combo.setCurrentText(saved_model)
         self.model_combo.blockSignals(False)
+
+    # --- settings persistence ---
+    def _cfg_get(self, getter: str):
+        """Call an optional config getter, tolerating minimal test fakes."""
+        fn = getattr(self._config, getter, None) if self._config else None
+        return fn() if callable(fn) else None
+
+    def _cfg_set(self, setter: str, value):
+        fn = getattr(self._config, setter, None) if self._config else None
+        if callable(fn):
+            fn(value)
+            save = getattr(self._config, "save", None)
+            if callable(save):
+                save()
+
+    def _save_kind(self, kind: str):
+        self._cfg_set("set_layout_content_kind", kind)
+
+    def _save_provider(self, provider: str):
+        self._cfg_set("set_layout_llm_provider", provider)
+
+    def _save_model(self, model: str):
+        if model:  # ignore the transient empty state during list repopulation
+            self._cfg_set("set_layout_llm_model", model)
 
     def content_kind(self) -> str:
         return self.kind_combo.currentText()
