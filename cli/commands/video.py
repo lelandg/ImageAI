@@ -1,4 +1,5 @@
 """CLI handler for single-clip video generation (Gemini Omni + Veo)."""
+import json
 import logging
 import shutil
 import sys
@@ -174,8 +175,68 @@ def _run_veo(args, out_path):
     }
 
 
+def _status_payload(result):
+    """Normalized result dict -> the documented JSON/sidecar shape."""
+    return {
+        "status": "completed" if result.get("success") else "failed",
+        "output_path": result.get("output_path"),
+        "provider": result.get("provider"),
+        "model": result.get("model"),
+        "aspect_ratio": result.get("aspect_ratio"),
+        "operation_id": result.get("operation_id"),
+        "error": result.get("error"),
+    }
+
+
+def _write_sidecar(out_path, payload):
+    """Write the JSON sidecar next to the .mp4 (best-effort; logs on failure)."""
+    sidecar = out_path.with_suffix(".json")
+    try:
+        sidecar.parent.mkdir(parents=True, exist_ok=True)
+        sidecar.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError as e:
+        logger.warning("Could not write sidecar %s: %s", sidecar, e)
+
+
+def _report(result, as_json, exit_code):
+    """Emit the result (stdout JSON if as_json, else stderr text) and return exit_code."""
+    payload = _status_payload(result)
+    if as_json:
+        print(json.dumps(payload), file=sys.stdout)
+    elif result.get("success"):
+        _emit(f"✅ Video saved: {result.get('output_path')}")
+    else:
+        _emit(f"❌ Video generation failed: {result.get('error')}")
+    return exit_code
+
+
 def run_video_cmd(args, config=None) -> int:
     """Generate a single video clip via Gemini Omni or Veo. Returns an exit code."""
-    # Full implementation lands in Tasks 2-4.
-    _emit("Video CLI not yet implemented.")
-    return 0
+    provider = (getattr(args, "video_provider", None) or "veo").strip().lower()
+    as_json = bool(getattr(args, "json", False))
+    out_path = _derive_output(args)
+
+    def _fail(message, code):
+        logger.error("Video CLI: %s", message)
+        return _report({
+            "success": False, "output_path": str(out_path), "provider": provider,
+            "model": getattr(args, "video_model", None),
+            "aspect_ratio": getattr(args, "aspect", None),
+            "operation_id": None, "error": message,
+        }, as_json, code)
+
+    try:
+        if provider == "omni":
+            result = _run_omni(args, out_path)
+        elif provider == "veo":
+            result = _run_veo(args, out_path)
+        else:
+            return _fail(f"Unknown --video-provider {provider!r}. Choices: omni, veo.", 2)
+    except VideoCliError as e:
+        return _fail(str(e), 2)
+    except Exception as e:  # noqa: BLE001 - surface + log any client/runtime failure
+        logger.error("Video generation failed: %s", e, exc_info=True)
+        return _fail(str(e), 3)
+
+    _write_sidecar(out_path, _status_payload(result))
+    return _report(result, as_json, 0 if result["success"] else 1)
