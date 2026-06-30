@@ -226,6 +226,11 @@ def run_cli(args) -> int:
         from cli.commands.layout import run_export_cmd
         return run_export_cmd(args, ConfigManager())
 
+    # Handle video generation (single clip)
+    if getattr(args, "video", False):
+        from cli.commands.video import run_video_cmd
+        return run_video_cmd(args)
+
     # Validate auth mode for provider
     if provider != "google" and auth_mode == "gcloud":
         print(f"Warning: --auth-mode=gcloud is only supported for Google provider.")

@@ -227,6 +227,49 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Text-LLM model for --layout-design (default: provider's first registry model)",
     )
 
+    # Video generation (single clip)
+    video_group = parser.add_argument_group("video generation")
+    video_group.add_argument(
+        "--video",
+        action="store_true",
+        help="Generate a single video clip (uses -p/--prompt and -o/--out)",
+    )
+    video_group.add_argument(
+        "--video-provider",
+        choices=["omni", "veo"],
+        default="veo",
+        help="Video provider: 'omni' (Gemini Omni) or 'veo' (default: veo)",
+    )
+    video_group.add_argument(
+        "--video-model",
+        help="Video model id override (default: provider's resolved default)",
+    )
+    video_group.add_argument(
+        "--aspect",
+        help="Aspect ratio, e.g. 16:9 or 9:16 (validated per provider)",
+    )
+    video_group.add_argument(
+        "--ref-image",
+        action="append",
+        metavar="PATH",
+        help="Reference image (repeatable; omni: 1, veo: up to 3)",
+    )
+    video_group.add_argument(
+        "--last-frame",
+        metavar="PATH",
+        help="End frame for Veo frame-to-frame interpolation (veo only)",
+    )
+    video_group.add_argument(
+        "--extend",
+        metavar="PATH",
+        help="Extend this existing video (veo only); implies extend mode",
+    )
+    video_group.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit a single machine-readable JSON result on stdout",
+    )
+
     # Help options
     help_group = parser.add_argument_group("help")
     help_group.add_argument(
