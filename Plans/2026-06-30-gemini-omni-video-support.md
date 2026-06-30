@@ -92,13 +92,18 @@ Write `scratch/omni_probe.py` that, using `client.interactions.create(model="gem
 
 Fill in the "Phase 0 results" block below with: confirmed model ID/availability, exact attribute path for inline bytes vs URI, the polling terminal states, error-envelope shape, whether audio is actually present, and any auth surprises. **If the model is NOT available to this account, STOP** — the feature is blocked upstream; record that and close the loop with Leland rather than building UI against an uncallable model.
 
-> **Phase 0 results (fill in during execution):**
-> - Model callable: ⬜ yes / ⬜ no — version used: `__________`
-> - Inline bytes path: `interaction.output_video.________`
-> - URI path + poll terminal states: `__________`
-> - Error envelope shape: `__________`
-> - Audio present in output: ⬜ / format: `__________`
-> - Auth used: ⬜ API key / ⬜ ADC / ⬜ Vertex
+> **Phase 0 results — SDK introspection done 2026-06-30 (live API call still BLOCKED, see below):**
+>
+> Installed: `google-genai 2.8.0` (PyPI has up to 2.10.0; floor 2.3.0+ confirmed). `client.interactions` is present but emits `UserWarning: Interactions usage is experimental and may change`. Verified the **actual** `create()` signature and types — several plan assumptions (from web docs) are WRONG against the installed SDK and are corrected here:
+>
+> - **`create()` real kwargs:** `input`, `model`, `background`, `generation_config`, `previous_interaction_id`, `response_format`, `response_mime_type`, `response_modalities`, `service_tier`, `store`, `stream`, `system_instruction`, `tools`, `webhook_config`, `agent`, `agent_config`. Returns `Interaction | Stream[InteractionSSEEvent]`.
+> - **No `VideoResponseFormat`.** `response_format` ∈ {Audio, Text, Image, `object`}. Video output must be requested via **`response_modalities=['video']`** (valid literal), NOT a `response_format={"type":"video"}`. **There is no video aspect-ratio field anywhere in the SDK** (only `ImageResponseFormat.aspect_ratio`). → the plan's aspect-ratio handling and `delivery` key for video are unconfirmed; `VideoContent.resolution` is `low|medium|high|ultra_high`, not "720p".
+> - **No `interaction.output_video`.** Response is `Interaction{ id, created, status∈[in_progress,requires_action,completed,failed,cancelled,incomplete,budget_exceeded], steps[], usage }`. Generated video arrives as a **`VideoContent` inside a `ModelOutputStep.content[]` within `interaction.steps`** (`VideoContent.data` base64 / `.uri` / `.mime_type`). Client code must walk `steps`, not read `output_video`.
+> - **No `generation_config.video_config.task`.** `GenerationConfig` = `{image_config, speech_config, seed, temperature, top_p, max_output_tokens, stop_sequences, thinking_level, thinking_summaries, tool_choice}`. The plan's `task=text_to_video|image_to_video|reference_to_video|edit` mechanism does not exist in this SDK — task is inferred from the input content shape (text-only vs image+text vs video+text).
+> - **Model not enumerated:** the `model` Literal lists gemini-2.5/3/3.1/3.5, lyria-3, deep-research — **no `gemini-omni-flash-preview`**. It is accepted only as a free `str`, i.e. the SDK has no first-class knowledge of it.
+> - Model callable: **UNVERIFIED — BLOCKED.** No `GOOGLE_API_KEY`/`GEMINI_API_KEY` in env and `config.get_api_key("google")` returns empty in the Linux venv, so the live probe could not run. Combined with the model's absence from the SDK's known list, availability for this account is unconfirmed.
+>
+> **Consequence for the plan:** the Interactions-API *direction* is correct (real `create`, `previous_interaction_id`, `VideoContent`, inline/uri delivery), but Tasks 3–4's concrete request/response shape must be rewritten to: request video via `response_modalities=['video']`; read output by walking `interaction.steps → ModelOutputStep.content → VideoContent`; drop `video_config.task` and the `response_format` video keys. **Do not implement until (a) a Google API key is available to the run environment and (b) a live `create()` confirms the model is callable and reveals the real output shape** (whether video comes back inline on the step, via a `uri` needing a Files-API poll, or via `background=True`).
 
 ---
 
