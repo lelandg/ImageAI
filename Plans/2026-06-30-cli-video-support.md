@@ -1,6 +1,6 @@
 # CLI Video Generation Support (single-clip: Gemini Omni + Veo)
 
-**Status:** 📝 Design approved — ready for implementation plan
+**Status:** ✅ Implemented
 **Last Updated:** 2026-06-30 17:38
 **Branch:** `feat/cli-video`
 **Related:** Omni provider (PR #29), Omni Refine UI (PR #31), Sora removal (issue #32)
@@ -200,8 +200,8 @@ Existing suites (`tests/video`, `tests/layout`) must stay green.
 
 _(Updated during implementation.)_
 
-- ⏳ Phase 1 — parser flags + runner routing
-- ⏳ Phase 2 — `cli/commands/video.py` dispatch + config mapping
-- ⏳ Phase 3 — output + sidecar + `--json` reporting
-- ⏳ Phase 4 — validation/error paths
-- ⏳ Phase 5 — tests (mocked) + docs (README CLI section, imageai-cli skill note)
+- ✅ Phase 1 — parser flags + runner routing
+- ✅ Phase 2 — `cli/commands/video.py` dispatch + config mapping
+- ✅ Phase 3 — output + sidecar + `--json` reporting
+- ✅ Phase 4 — validation/error paths
+- ✅ Phase 5 — tests (mocked) + docs (README CLI section, imageai-cli skill note)
