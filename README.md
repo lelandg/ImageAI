@@ -988,6 +988,10 @@ I'm tap-tap-tappin' in my head
    - Choose rendering method:
      - FFmpeg Slideshow: Generate images first, then render with Ken Burns effects
      - Google Veo: Generate motion video clips for each scene
+     - OpenAI Sora: Generate Sora 2 motion video clips for each scene
+     - Gemini Omni: Fast conversational video generation via the Interactions
+       API (text-to-video, image-to-video, and conversational editing; 720p,
+       3–10s, with audio; 16:9 or 9:16). Uses your Google API key.
    - Click "Render Video" to create final output
 
 3. **Professional AI Motion Video with Continuity** (Google Veo 3.0/3.1):

@@ -4,7 +4,36 @@
 >
 > **Source issue:** [#28 — Support Gemini Omni Flash](https://github.com/lelandg/ImageAI/issues/28). Reporter asked for a *plan* with open questions documented; brainstorming is explicitly deferred to the reporter. This plan is therefore staged behind a **Phase 0 verification gate** because the target model is *preview* and the SDK surface is new.
 
-**Last Updated:** 2026-06-30 14:05
+**Last Updated:** 2026-06-30 15:20
+
+## Implementation status (2026-06-30)
+
+**Implemented on branch `feat/gemini-omni-video`** (suite 410 green):
+
+- ✅ `core/video/omni_client.py` — `OmniClient` / `OmniGenerationConfig` /
+  `OmniGenerationResult` / `OmniModel`, built against the **verified** SDK 2.8.0
+  shape (request via `response_modalities=['video']`; read output by walking
+  `interaction.steps → ModelOutputStep → VideoContent`; inline-base64 and
+  Files-API-URI delivery; `previous_interaction_id` for edits). 12 mocked unit
+  tests.
+- ✅ Model ID via `resolve_model('google','omni', static_default='gemini-omni-flash-preview')` (no hardcode).
+- ✅ `core/video/config.py` `omni_settings` + `get_omni_model_config`; `__init__.py` `OMNI_AVAILABLE` export; `requirements.txt` floor → `google-genai>=2.3.0`.
+- ✅ Video-tab UI: combo entry + Omni model/aspect widgets + visibility toggle + kwargs packing (`workspace_widget.py`).
+- ✅ Dispatch + `_generate_video_clip_omni` on `VideoGenerationThread` (`video_project_tab.py`); FFmpeg path concatenates clips (mirrors Sora — no `_render_video` branch needed).
+- ✅ Conversational editing plumbing (interaction id saved on scene; reused as `previous_interaction_id` only when an explicit `omni_edit` is requested).
+- ✅ Fixed the pre-existing **"Google Veo" vs "Gemini Veo"** save/restore mismatch + added Sora/Omni restore branches; `test_video_provider_persistence.py` locks the label contract.
+- ✅ Auth: Omni uses the existing `google_api_key` (API-key) path — no `providers/google.py` change. README updated.
+
+**⚠️ NOT YET VERIFIED LIVE (the Phase 0 gate):** no Google API key reaches the WSL
+run env, so no real `client.interactions.create` call has been made. Two pieces
+are coded to best-understanding and need a real call (run from PowerShell with a
+key + confirmed Omni access) to confirm/adjust:
+1. **Aspect-ratio request shape** — sent best-effort as `response_format=[{"type":"video","aspect_ratio":...}]` via the SDK's `object` escape-hatch (no typed `VideoResponseFormat`). The server may ignore or reject it.
+2. **Output delivery** — whether the MP4 returns inline on the step, as a Files-API `uri`, or via `background=True`. The client handles inline + uri; if Omni only returns via background, `_await_terminal` polling covers it, but the exact `VideoContent` location in `steps` should be confirmed against a real response.
+
+**Remaining (deferred):** dedicated "Refine" UI button (plumbing is ready — it just
+needs to pass `omni_edit=True`); uploaded-video editing; `background`/`webhook`;
+SynthID surfacing. See "Deferred / out of scope".
 
 **Goal:** Add "Gemini Omni" as a fourth video provider on the Video tab — text/image/reference-to-video plus conversational editing — driven through Google's new **Interactions API** (`client.interactions.create`, model `gemini-omni-flash-preview`).
 
