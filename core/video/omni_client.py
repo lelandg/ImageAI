@@ -7,17 +7,16 @@ video-generation model driven through Google's **Interactions API**
 It supports text-to-video, image-to-video, and stateful conversational editing
 (via ``previous_interaction_id``) with audio in the output.
 
-Implementation notes (verified against ``google-genai`` 2.8.0):
-- The Interactions API is marked *experimental* by the SDK.
-- There is **no** ``VideoResponseFormat`` and **no** ``output_video`` attribute.
-  Video output is requested with ``response_modalities=['video']`` and read back
-  by walking ``interaction.steps`` for a ``ModelOutputStep`` whose ``content``
-  contains a video item (``type == 'video'`` with ``data`` base64 or ``uri``).
-- Aspect ratio has no typed field for video; we pass it best-effort through the
-  ``response_format`` *object* escape-hatch the SDK union allows. It is never
-  embedded in the prompt text (AGENTS.md §9).
-- ``gemini-omni-flash-preview`` is not in the SDK's enumerated model list; it is
-  accepted as a free string and resolved via ``resolve_model`` so the ID is not
+Implementation notes (verified against ``google-genai`` 2.9.0, the GeminiNextGen
+``client.interactions`` surface — the older 2.8.0 ``_interactions`` surface lacked
+``output_video`` and is NOT compatible, hence the >=2.9.0 floor):
+- Video + aspect ratio are requested with ``response_format={"type": "video",
+  "aspect_ratio": "16:9"|"9:16"}`` (a dict), per the Omni docs. The aspect ratio
+  is never embedded in the prompt text (AGENTS.md §9).
+- The generated video is read from ``interaction.output_video`` (a ``VideoContent``
+  with base64 ``data`` and/or a ``uri``); we keep a defensive fallback that walks
+  ``interaction.steps`` for a video content item.
+- ``gemini-omni-flash-preview`` is resolved via ``resolve_model`` so the ID is not
   hard-coded (AGENTS.md §8).
 """
 
@@ -98,10 +97,11 @@ class OmniGenerationConfig:
     def to_interaction_kwargs(self) -> Dict[str, Any]:
         """Build the kwargs for ``client.interactions.create(**kwargs)``.
 
-        Returns a dict using ``response_modalities=['video']`` to request video
-        output and a best-effort ``response_format`` object carrying the aspect
-        ratio (the SDK has no typed video response-format; the union accepts a
-        raw object). The aspect ratio is never placed in the prompt text.
+        Matches the documented Gemini Omni request shape: video output and
+        aspect ratio are requested via ``response_format={"type": "video",
+        "aspect_ratio": ...}`` (a dict). The aspect ratio is never placed in the
+        prompt text (AGENTS.md §9). For image-to-video, ``input`` is a content
+        list ``[{image}, {text}]``; otherwise it is the plain prompt string.
         """
         # Build the input: a plain string for text-to-video, or a content list
         # when a reference image is supplied.
@@ -121,9 +121,7 @@ class OmniGenerationConfig:
         kwargs: Dict[str, Any] = {
             "model": self.model,
             "input": input_payload,
-            "response_modalities": ["video"],
-            # Best-effort aspect-ratio hint via the response_format object union.
-            "response_format": [{"type": "video", "aspect_ratio": self.aspect_ratio}],
+            "response_format": {"type": "video", "aspect_ratio": self.aspect_ratio},
         }
         if self.previous_interaction_id:
             kwargs["previous_interaction_id"] = self.previous_interaction_id
@@ -334,14 +332,23 @@ class OmniClient:
         )
         return interaction
 
-    @staticmethod
-    def _extract_video(interaction: Any) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
-        """Walk the interaction steps and return (video_bytes, uri, mime_type).
+    @classmethod
+    def _extract_video(cls, interaction: Any) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
+        """Return (video_bytes, uri, mime_type) for a completed interaction.
 
-        Output video arrives as a ``VideoContent`` (``type == 'video'``) inside a
-        ``ModelOutputStep.content`` list. Returns decoded bytes when ``data`` is
-        present (base64), otherwise the ``uri`` for separate download.
+        The documented path is ``interaction.output_video`` (a ``VideoContent``
+        with base64 ``data`` and/or a ``uri``). As a defensive fallback we also
+        walk ``interaction.steps`` for a ``ModelOutputStep`` containing a video
+        content item, in case a delivery variant returns it there.
         """
+        # Primary: interaction.output_video (VideoContent) per the Omni docs.
+        out = getattr(interaction, "output_video", None)
+        if out is not None:
+            data, uri, mime = cls._video_content_parts(out)
+            if data is not None or uri is not None:
+                return data, uri, mime
+
+        # Fallback: walk steps -> ModelOutputStep.content -> video item.
         steps = getattr(interaction, "steps", None) or []
         for step in steps:
             content = getattr(step, "content", None)
@@ -353,17 +360,25 @@ class OmniClient:
                     item_type = item.get("type")
                 if item_type != "video":
                     continue
-                data = getattr(item, "data", None) if not isinstance(item, dict) else item.get("data")
-                uri = getattr(item, "uri", None) if not isinstance(item, dict) else item.get("uri")
-                mime = getattr(item, "mime_type", None) if not isinstance(item, dict) else item.get("mime_type")
-                video_bytes = None
-                if data:
-                    try:
-                        video_bytes = base64.b64decode(data)
-                    except Exception:
-                        video_bytes = None
-                return video_bytes, uri, mime
+                return cls._video_content_parts(item)
         return None, None, None
+
+    @staticmethod
+    def _video_content_parts(item: Any) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
+        """Decode a VideoContent-like item (object or dict) to (bytes, uri, mime)."""
+        if isinstance(item, dict):
+            data, uri, mime = item.get("data"), item.get("uri"), item.get("mime_type")
+        else:
+            data = getattr(item, "data", None)
+            uri = getattr(item, "uri", None)
+            mime = getattr(item, "mime_type", None)
+        video_bytes = None
+        if data:
+            try:
+                video_bytes = base64.b64decode(data)
+            except Exception:
+                video_bytes = None
+        return video_bytes, uri, mime
 
     async def _download_uri(self, uri: str) -> Optional[bytes]:
         """Download video bytes for a Files-API URI, polling until ACTIVE."""

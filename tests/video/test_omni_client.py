@@ -35,10 +35,12 @@ class _FakeModelOutputStep:
 
 
 class _FakeInteraction:
-    def __init__(self, id="int_123", status="completed", steps=None):
+    def __init__(self, id="int_123", status="completed", steps=None, output_video=None):
         self.id = id
         self.status = status
         self.steps = steps or []
+        # Documented primary path: interaction.output_video (a VideoContent).
+        self.output_video = output_video
 
 
 class _FakeInteractionsResource:
@@ -71,15 +73,17 @@ MP4_BYTES = b"\x00\x00\x00\x18ftypmp42fake-omni-video"
 
 # --- Config validation ------------------------------------------------------
 
-def test_text_to_video_kwargs_request_video_modality():
+def test_text_to_video_kwargs_match_documented_shape():
     cfg = OmniGenerationConfig(prompt="a marble rolling down a track",
                                model="gemini-omni-flash-preview", aspect_ratio="16:9")
     kw = cfg.to_interaction_kwargs()
     assert kw["model"] == "gemini-omni-flash-preview"
     assert kw["input"] == "a marble rolling down a track"
-    assert kw["response_modalities"] == ["video"]
-    # Aspect ratio is carried in response_format, NOT in the prompt text.
-    assert kw["response_format"][0]["aspect_ratio"] == "16:9"
+    # Documented shape: response_format is a DICT {"type": "video", ...}; there
+    # is no response_modalities key.
+    assert kw["response_format"] == {"type": "video", "aspect_ratio": "16:9"}
+    assert "response_modalities" not in kw
+    # Aspect ratio is never embedded in the prompt text.
     assert "16:9" not in kw["input"]
     assert "previous_interaction_id" not in kw
 
@@ -127,9 +131,8 @@ def test_default_model_resolves_to_omni():
 
 def test_generate_inline_base64_writes_mp4(tmp_path):
     b64 = base64.b64encode(MP4_BYTES).decode("ascii")
-    interaction = _FakeInteraction(steps=[
-        _FakeModelOutputStep([_FakeVideoContent(data=b64)])
-    ])
+    # Documented primary path: interaction.output_video carries the base64 data.
+    interaction = _FakeInteraction(output_video=_FakeVideoContent(data=b64))
     client = _make_client(interaction)
     out = tmp_path / "out.mp4"
     cfg = OmniGenerationConfig(prompt="a sunset")
@@ -141,8 +144,26 @@ def test_generate_inline_base64_writes_mp4(tmp_path):
     assert result.video_path == out
     assert out.read_bytes() == MP4_BYTES
     assert result.interaction_id == "int_123"
-    # The request asked for video output.
-    assert client.client.interactions.create_calls[0]["response_modalities"] == ["video"]
+    # The request used the documented dict response_format.
+    assert client.client.interactions.create_calls[0]["response_format"] == {
+        "type": "video", "aspect_ratio": "16:9"
+    }
+
+
+def test_generate_reads_video_from_steps_fallback(tmp_path):
+    # Defensive fallback: no output_video, but a step carries the video content.
+    b64 = base64.b64encode(MP4_BYTES).decode("ascii")
+    interaction = _FakeInteraction(
+        output_video=None,
+        steps=[_FakeModelOutputStep([_FakeVideoContent(data=b64)])],
+    )
+    client = _make_client(interaction)
+    out = tmp_path / "out.mp4"
+
+    result = client.generate_video(OmniGenerationConfig(prompt="a sunset"), out)
+
+    assert result.success is True
+    assert out.read_bytes() == MP4_BYTES
 
 
 def test_generate_failed_status_returns_error(tmp_path):
@@ -182,9 +203,9 @@ def test_no_client_configured_returns_error(tmp_path):
 # --- URI delivery (Files API poll + download) -------------------------------
 
 def test_generate_uri_delivery_downloads(tmp_path):
-    interaction = _FakeInteraction(steps=[
-        _FakeModelOutputStep([_FakeVideoContent(data=None, uri="files/omnivid123")])
-    ])
+    interaction = _FakeInteraction(
+        output_video=_FakeVideoContent(data=None, uri="files/omnivid123")
+    )
     client = _make_client(interaction)
 
     # Fake Files API: state ACTIVE immediately, download returns bytes.
