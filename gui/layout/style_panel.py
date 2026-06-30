@@ -10,8 +10,9 @@ from core.layout.models import ProjectStyle, TextStyle
 class StylePanel(QWidget):
     styleChanged = Signal(object)  # ProjectStyle
 
-    def __init__(self, parent=None):
+    def __init__(self, config=None, parent=None):
         super().__init__(parent)
+        self._config = config
         self._style = ProjectStyle()
         self._build()
 
@@ -36,6 +37,11 @@ class StylePanel(QWidget):
         self.role_combo.blockSignals(True)
         self.role_combo.clear()
         self.role_combo.addItems(sorted(style.font_roles.keys()))
+        # Restore the last-viewed role if it still exists in this style; else the
+        # combo keeps its default (first) selection.
+        saved = self._cfg_get("get_layout_style_role")
+        if saved and saved in style.font_roles:
+            self.role_combo.setCurrentText(saved)
         self.role_combo.blockSignals(False)
         if self.role_combo.count():
             self._load_role(self.role_combo.currentText())
@@ -58,6 +64,20 @@ class StylePanel(QWidget):
     def _on_role_selected(self, role: str):
         if role:
             self._load_role(role)
+            self._cfg_set("set_layout_style_role", role)
+
+    # --- settings persistence (tolerant of minimal test config fakes) ---
+    def _cfg_get(self, getter: str):
+        fn = getattr(self._config, getter, None) if self._config else None
+        return fn() if callable(fn) else None
+
+    def _cfg_set(self, setter: str, value):
+        fn = getattr(self._config, setter, None) if self._config else None
+        if callable(fn):
+            fn(value)
+            save = getattr(self._config, "save", None)
+            if callable(save):
+                save()
 
     def _on_field_changed(self):
         role = self.role_combo.currentText()

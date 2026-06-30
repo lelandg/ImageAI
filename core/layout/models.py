@@ -209,6 +209,9 @@ class DocumentSpec:
     schema_version: str = "2.0"
     history: List["Snapshot"] = field(default_factory=list)
     style: Optional["ProjectStyle"] = None
+    # Per-project render-position override: True = canvas above settings,
+    # False = beside, None = no stored choice (fall back to orientation).
+    render_on_top: Optional[bool] = None
 
 
 def migrate_legacy_blocks(blocks: List[Union[TextBlock, ImageBlock]]) -> List[Region]:

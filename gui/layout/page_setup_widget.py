@@ -41,12 +41,17 @@ class PageSetupWidget(QWidget):
         self.dpi_spin.valueChanged.connect(self._on_dpi_changed)
         lay.addWidget(self.dpi_spin)
 
+        # Checkable so the active orientation stays visibly highlighted and can be
+        # synced to a loaded document (set_page_size) instead of silently drifting.
         self.portrait_btn = QPushButton("Portrait")
+        self.portrait_btn.setCheckable(True)
         self.portrait_btn.clicked.connect(self._on_portrait)
         self.landscape_btn = QPushButton("Landscape")
+        self.landscape_btn.setCheckable(True)
         self.landscape_btn.clicked.connect(self._on_landscape)
         lay.addWidget(self.portrait_btn)
         lay.addWidget(self.landscape_btn)
+        self._sync_orientation_buttons()
 
     def _reload_presets(self):
         self.size_combo.blockSignals(True)
@@ -88,6 +93,7 @@ class PageSetupWidget(QWidget):
         self.size_combo.setCurrentIndex(0)
         for w in widgets:
             w.blockSignals(False)
+        self._sync_orientation_buttons()
         self._emit_current()
 
     def add_custom_from_text(self, text: str) -> bool:
@@ -118,11 +124,21 @@ class PageSetupWidget(QWidget):
 
     def _on_portrait(self):
         self._orientation = "portrait"
+        self._sync_orientation_buttons()
         self._emit_current()
 
     def _on_landscape(self):
         self._orientation = "landscape"
+        self._sync_orientation_buttons()
         self._emit_current()
+
+    def _sync_orientation_buttons(self):
+        """Reflect ``self._orientation`` in the (mutually exclusive) buttons."""
+        for btn, name in ((self.portrait_btn, "portrait"),
+                          (self.landscape_btn, "landscape")):
+            btn.blockSignals(True)
+            btn.setChecked(self._orientation == name)
+            btn.blockSignals(False)
 
     def _emit_current(self):
         self.pageSizeChanged.emit(self.page_size())
