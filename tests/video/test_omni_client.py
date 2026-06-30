@@ -1,9 +1,10 @@
 """Unit tests for the Gemini Omni Interactions-API client.
 
 These tests mock the google.genai client entirely — no network is used. They
-lock the request shape (response_modalities=['video'], reference-image content
-list, previous_interaction_id passthrough) and the response parsing (walking
-interaction.steps -> ModelOutputStep -> VideoContent, inline base64 vs URI).
+lock the documented request shape (response_format={"type":"video",...} dict,
+reference-image content list, previous_interaction_id passthrough) and the
+response parsing (interaction.output_video primary, steps-walk fallback, inline
+base64 vs Files-API URI), plus the polling and download-failure branches.
 """
 
 import base64
@@ -221,3 +222,72 @@ def test_generate_uri_delivery_downloads(tmp_path):
 
     assert result.success is True
     assert out.read_bytes() == MP4_BYTES
+
+
+def test_uri_download_fails_cleanly_if_never_active(tmp_path):
+    # Files API stays PROCESSING forever -> must fail, not write a partial file.
+    interaction = _FakeInteraction(
+        output_video=_FakeVideoContent(data=None, uri="files/omnivid123")
+    )
+    client = _make_client(interaction)
+    downloaded = {"called": False}
+
+    def _download(file):
+        downloaded["called"] = True
+        return MP4_BYTES
+
+    processing = pytypes.SimpleNamespace(state=pytypes.SimpleNamespace(name="PROCESSING"))
+    client.client.files = pytypes.SimpleNamespace(get=lambda name: processing, download=_download)
+    client.polling_interval = 0
+    client.timeout = 0  # deadline already passed -> loop body never marks ACTIVE
+
+    out = tmp_path / "out.mp4"
+    result = client.generate_video(OmniGenerationConfig(prompt="a sunset"), out)
+
+    assert result.success is False
+    assert downloaded["called"] is False  # never downloaded a non-ACTIVE file
+    assert not out.exists()
+
+
+def test_uri_download_fails_on_files_failed_state(tmp_path):
+    interaction = _FakeInteraction(
+        output_video=_FakeVideoContent(data=None, uri="files/omnivid123")
+    )
+    client = _make_client(interaction)
+    failed = pytypes.SimpleNamespace(state=pytypes.SimpleNamespace(name="FAILED"))
+    client.client.files = pytypes.SimpleNamespace(
+        get=lambda name: failed,
+        download=lambda file: MP4_BYTES,
+    )
+    client.polling_interval = 0
+
+    result = client.generate_video(OmniGenerationConfig(prompt="a sunset"), tmp_path / "out.mp4")
+    assert result.success is False
+
+
+def test_await_terminal_polls_until_completed(tmp_path):
+    # create() returns in_progress; get() flips to completed with output_video.
+    b64 = base64.b64encode(MP4_BYTES).decode("ascii")
+    in_progress = _FakeInteraction(id="int_poll", status="in_progress")
+    completed = _FakeInteraction(id="int_poll", status="completed",
+                                 output_video=_FakeVideoContent(data=b64))
+
+    client = OmniClient(api_key="test-key")
+    res = _FakeInteractionsResource(in_progress)
+    res.get = lambda interaction_id: completed  # type: ignore[assignment]
+    client.client = pytypes.SimpleNamespace(interactions=res, files=None)
+    client.polling_interval = 0
+
+    out = tmp_path / "out.mp4"
+    result = client.generate_video(OmniGenerationConfig(prompt="a sunset"), out)
+
+    assert result.success is True
+    assert out.read_bytes() == MP4_BYTES
+
+
+def test_reference_image_mime_detection(tmp_path):
+    webp = tmp_path / "ref.webp"
+    webp.write_bytes(b"RIFFfakewebp")
+    cfg = OmniGenerationConfig(prompt="go", task="image_to_video", reference_image=webp)
+    kw = cfg.to_interaction_kwargs()
+    assert kw["input"][0]["mime_type"] == "image/webp"

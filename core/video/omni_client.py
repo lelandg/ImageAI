@@ -45,6 +45,15 @@ except ImportError:
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "incomplete", "budget_exceeded"}
 _FAILED_STATUSES = {"failed", "cancelled", "incomplete", "budget_exceeded"}
 
+# Reference-image MIME types by file suffix (for image-to-video input).
+_IMAGE_MIME_BY_SUFFIX = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+}
+
 
 class OmniModel(Enum):
     """Available Gemini Omni models.
@@ -108,9 +117,9 @@ class OmniGenerationConfig:
         if self.reference_image is not None:
             image_bytes = Path(self.reference_image).read_bytes()
             b64 = base64.b64encode(image_bytes).decode("ascii")
-            mime = "image/png"
-            if str(self.reference_image).lower().endswith((".jpg", ".jpeg")):
-                mime = "image/jpeg"
+            mime = _IMAGE_MIME_BY_SUFFIX.get(
+                Path(self.reference_image).suffix.lower(), "image/png"
+            )
             input_payload: Any = [
                 {"type": "image", "data": b64, "mime_type": mime},
                 {"type": "text", "text": self.prompt},
@@ -385,15 +394,24 @@ class OmniClient:
         try:
             file_name = uri.split("/")[-1]
             deadline = time.time() + self.timeout
+            became_active = False
             while time.time() < deadline:
                 info = await asyncio.to_thread(self.client.files.get, name=f"files/{file_name}")
                 state = getattr(getattr(info, "state", None), "name", None) or getattr(info, "state", None)
                 if state == "ACTIVE":
+                    became_active = True
                     break
                 if state == "FAILED":
                     self.logger.error(f"Files API reports FAILED for {uri}")
                     return None
                 await asyncio.sleep(self.polling_interval)
+            # Only download once the file is ACTIVE; otherwise we'd risk writing a
+            # partial/empty MP4 on timeout. Fail cleanly instead.
+            if not became_active:
+                self.logger.error(
+                    f"Files API did not reach ACTIVE for {uri} within {self.timeout}s"
+                )
+                return None
             data = await asyncio.to_thread(self.client.files.download, file=uri)
             return data
         except Exception as e:

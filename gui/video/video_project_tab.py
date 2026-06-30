@@ -1523,11 +1523,18 @@ class VideoGenerationThread(QThread):
                 self.generation_complete.emit(False, "Google API key required for Gemini Omni video generation")
                 return
 
-            # Map aspect ratio for Omni (only supports 16:9 and 9:16)
-            if aspect_ratio in ['9:16', '3:4']:
-                omni_aspect = '9:16'
-            else:
-                omni_aspect = '16:9'
+            # Map aspect ratio for Omni (only supports 16:9 and 9:16). Prefer the
+            # dedicated Omni aspect selector; fall back to the project's general
+            # aspect ratio, coercing unsupported values to the nearest of 16:9/9:16.
+            omni_aspect = self.kwargs.get('omni_aspect_ratio')
+            if omni_aspect not in ('16:9', '9:16'):
+                fallback_source = omni_aspect if omni_aspect else aspect_ratio
+                omni_aspect = '9:16' if aspect_ratio in ('9:16', '3:4', '4:5') else '16:9'
+                if fallback_source not in ('16:9', '9:16'):
+                    logger.debug(
+                        f"Omni: coercing aspect ratio {fallback_source!r} -> {omni_aspect} "
+                        f"(Omni supports only 16:9 / 9:16)"
+                    )
 
             # Determine task + reference image. Conversational editing chains on
             # the previous interaction id ONLY when an explicit edit was requested

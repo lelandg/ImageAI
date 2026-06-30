@@ -1692,9 +1692,15 @@ class WorkspaceWidget(QWidget):
         self.sora_resolution_combo.currentTextChanged.connect(self._auto_save_settings)
         provider_layout.addWidget(self.sora_resolution_combo)
 
-        # Gemini Omni model selection (hidden by default)
+        # Gemini Omni model selection (hidden by default). The default model ID is
+        # resolved via the registry (resolve_model) rather than hardcoded (AGENTS.md §8).
+        try:
+            from core.video.omni_client import OmniModel
+            _omni_default_model = OmniModel.default_id()
+        except Exception:
+            _omni_default_model = "gemini-omni-flash-preview"
         self.omni_model_combo = QComboBox()
-        self.omni_model_combo.addItems(["gemini-omni-flash-preview"])
+        self.omni_model_combo.addItems([_omni_default_model])
         self.omni_model_combo.setCurrentIndex(0)
         self.omni_model_combo.setVisible(False)  # Hidden by default
         self.omni_model_combo.setMinimumWidth(220)

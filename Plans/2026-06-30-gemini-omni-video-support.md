@@ -135,9 +135,17 @@ Write `scratch/omni_probe.py` that, using `client.interactions.create(model="gem
 
 Fill in the "Phase 0 results" block below with: confirmed model ID/availability, exact attribute path for inline bytes vs URI, the polling terminal states, error-envelope shape, whether audio is actually present, and any auth surprises. **If the model is NOT available to this account, STOP** — the feature is blocked upstream; record that and close the loop with Leland rather than building UI against an uncallable model.
 
-> **Phase 0 results — SDK introspection done 2026-06-30 (live API call still BLOCKED, see below):**
+> **⚠️ SUPERSEDED — see "Implementation status" at the top of this doc.** The
+> findings in this block were introspected against `google-genai` **2.8.0**, whose
+> transitional `_interactions` surface is NOT the real Omni API. The shipped client
+> targets the **2.9.0+ `_gaos` "GeminiNextGen"** surface: video is requested via
+> `response_format={"type":"video","aspect_ratio":...}` (a dict) and read from
+> `interaction.output_video` — and this was **confirmed working end-to-end** with a
+> real key. The 2.8.0 notes below are kept only as a record of the wrong turn.
 >
-> Installed: `google-genai 2.8.0` (PyPI has up to 2.10.0; floor 2.3.0+ confirmed). `client.interactions` is present but emits `UserWarning: Interactions usage is experimental and may change`. Verified the **actual** `create()` signature and types — several plan assumptions (from web docs) are WRONG against the installed SDK and are corrected here:
+> **Phase 0 results — SDK introspection done 2026-06-30 (later proven to be the WRONG SDK surface):**
+>
+> Installed at the time: `google-genai 2.8.0`. `client.interactions` is present but emits `UserWarning: Interactions usage is experimental and may change`. Verified the **actual** `create()` signature and types — several plan assumptions (from web docs) looked WRONG against 2.8.0, but 2.8.0 itself was the wrong surface (the docs target 2.9.0+):
 >
 > - **`create()` real kwargs:** `input`, `model`, `background`, `generation_config`, `previous_interaction_id`, `response_format`, `response_mime_type`, `response_modalities`, `service_tier`, `store`, `stream`, `system_instruction`, `tools`, `webhook_config`, `agent`, `agent_config`. Returns `Interaction | Stream[InteractionSSEEvent]`.
 > - **No `VideoResponseFormat`.** `response_format` ∈ {Audio, Text, Image, `object`}. Video output must be requested via **`response_modalities=['video']`** (valid literal), NOT a `response_format={"type":"video"}`. **There is no video aspect-ratio field anywhere in the SDK** (only `ImageResponseFormat.aspect_ratio`). → the plan's aspect-ratio handling and `delivery` key for video are unconfirmed; `VideoContent.resolution` is `low|medium|high|ultra_high`, not "720p".
