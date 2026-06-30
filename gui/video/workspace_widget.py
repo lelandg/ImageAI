@@ -1625,13 +1625,14 @@ class WorkspaceWidget(QWidget):
         provider_layout = QHBoxLayout()
         provider_layout.addWidget(QLabel("Render Method:"))
         self.video_provider_combo = QComboBox()
-        self.video_provider_combo.addItems(["FFmpeg Slideshow", "Gemini Veo", "OpenAI Sora"])
+        self.video_provider_combo.addItems(["FFmpeg Slideshow", "Gemini Veo", "OpenAI Sora", "Gemini Omni"])
         self.video_provider_combo.setCurrentIndex(1)  # Default to Gemini Veo
         self.video_provider_combo.setToolTip(
             "Video rendering method:\n"
             "- FFmpeg Slideshow: Traditional slideshow with transitions\n"
             "- Gemini Veo: Google AI-powered video generation\n"
-            "- OpenAI Sora: OpenAI Sora 2 video generation"
+            "- OpenAI Sora: OpenAI Sora 2 video generation\n"
+            "- Gemini Omni: Google conversational video generation (Interactions API)"
         )
         self.video_provider_combo.currentTextChanged.connect(self.on_video_provider_changed)
         provider_layout.addWidget(self.video_provider_combo)
@@ -1690,6 +1691,32 @@ class WorkspaceWidget(QWidget):
         self.sora_resolution_combo.setToolTip("Resolution (1080p only available with sora-2-pro)")
         self.sora_resolution_combo.currentTextChanged.connect(self._auto_save_settings)
         provider_layout.addWidget(self.sora_resolution_combo)
+
+        # Gemini Omni model selection (hidden by default)
+        self.omni_model_combo = QComboBox()
+        self.omni_model_combo.addItems(["gemini-omni-flash-preview"])
+        self.omni_model_combo.setCurrentIndex(0)
+        self.omni_model_combo.setVisible(False)  # Hidden by default
+        self.omni_model_combo.setMinimumWidth(220)
+        self.omni_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+        self.omni_model_combo.setToolTip(
+            "Gemini Omni model:\n"
+            "- gemini-omni-flash-preview: fast conversational video (720p, 24fps,\n"
+            "  3-10s, with audio). Supports text-to-video, image-to-video, and\n"
+            "  conversational editing via the Interactions API."
+        )
+        self.omni_model_combo.currentTextChanged.connect(self._auto_save_settings)
+        provider_layout.addWidget(self.omni_model_combo)
+
+        # Gemini Omni aspect ratio (only 16:9 / 9:16; hidden by default)
+        self.omni_aspect_combo = QComboBox()
+        self.omni_aspect_combo.addItems(["16:9", "9:16"])
+        self.omni_aspect_combo.setCurrentIndex(0)
+        self.omni_aspect_combo.setVisible(False)
+        self.omni_aspect_combo.setMinimumWidth(80)
+        self.omni_aspect_combo.setToolTip("Gemini Omni aspect ratio (16:9 landscape or 9:16 portrait)")
+        self.omni_aspect_combo.currentTextChanged.connect(self._auto_save_settings)
+        provider_layout.addWidget(self.omni_aspect_combo)
 
         provider_layout.addStretch()
         layout.addLayout(provider_layout)
@@ -6049,6 +6076,8 @@ class WorkspaceWidget(QWidget):
             'veo_model': self.veo_model_combo.currentText(),
             'sora_model': self.sora_model_combo.currentText() if hasattr(self, 'sora_model_combo') else 'sora-2',
             'sora_resolution': self.sora_resolution_combo.currentText() if hasattr(self, 'sora_resolution_combo') else '720p',
+            'omni_model': self.omni_model_combo.currentText() if hasattr(self, 'omni_model_combo') else 'gemini-omni-flash-preview',
+            'omni_aspect_ratio': self.omni_aspect_combo.currentText() if hasattr(self, 'omni_aspect_combo') else '16:9',
             'ken_burns': self.ken_burns_check.isChecked(),
             'transitions': self.transitions_check.isChecked(),
             'captions': self.captions_check.isChecked(),
@@ -6245,6 +6274,13 @@ class WorkspaceWidget(QWidget):
             self._update_sora_resolution_visibility()
         else:
             self.sora_resolution_combo.setVisible(False)
+
+        # Show/hide Gemini Omni options
+        is_omni = provider == "Gemini Omni"
+        if hasattr(self, 'omni_model_combo'):
+            self.omni_model_combo.setVisible(is_omni)
+        if hasattr(self, 'omni_aspect_combo'):
+            self.omni_aspect_combo.setVisible(is_omni)
 
         # Update smooth transitions checkbox visibility
         # (Only available for Veo 3.1 or Sora)
@@ -7381,9 +7417,12 @@ class WorkspaceWidget(QWidget):
         self.current_project.image_model = img_model
         
         # Save video provider settings
-        self.current_project.video_provider = self.video_provider_combo.currentText().lower()
-        if self.video_provider_combo.currentText() == "Google Veo":
+        provider_text = self.video_provider_combo.currentText()
+        self.current_project.video_provider = provider_text.lower()
+        if provider_text == "Gemini Veo":
             self.current_project.video_model = self.veo_model_combo.currentText()
+        elif provider_text == "Gemini Omni" and hasattr(self, 'omni_model_combo'):
+            self.current_project.video_model = self.omni_model_combo.currentText()
         else:
             self.current_project.video_model = None
         
@@ -7572,12 +7611,15 @@ class WorkspaceWidget(QWidget):
                 self.img_provider_combo.currentTextChanged.connect(self.on_img_provider_changed)
                 self.prompt_style_input.currentTextChanged.connect(self._on_style_changed)
 
-            # Load video provider settings
+            # Load video provider settings. Saved value is the lowercased combo
+            # text (e.g. "gemini veo", "openai sora", "gemini omni", "ffmpeg
+            # slideshow"); older projects may have "slideshow"/"veo"/"google veo".
             if self.current_project.video_provider:
-                if self.current_project.video_provider == "slideshow":
+                saved_provider = self.current_project.video_provider
+                if saved_provider in ("slideshow", "ffmpeg slideshow"):
                     self.video_provider_combo.setCurrentIndex(0)
-                elif self.current_project.video_provider == "veo" or self.current_project.video_provider == "google veo":
-                    index = self.video_provider_combo.findText("Google Veo")
+                elif saved_provider in ("veo", "google veo", "gemini veo"):
+                    index = self.video_provider_combo.findText("Gemini Veo")
                     if index >= 0:
                         self.video_provider_combo.setCurrentIndex(index)
                         # Set Veo model if available
@@ -7585,6 +7627,19 @@ class WorkspaceWidget(QWidget):
                             model_index = self.veo_model_combo.findText(self.current_project.video_model)
                             if model_index >= 0:
                                 self.veo_model_combo.setCurrentIndex(model_index)
+                elif saved_provider in ("sora", "openai sora"):
+                    index = self.video_provider_combo.findText("OpenAI Sora")
+                    if index >= 0:
+                        self.video_provider_combo.setCurrentIndex(index)
+                elif saved_provider in ("omni", "gemini omni"):
+                    index = self.video_provider_combo.findText("Gemini Omni")
+                    if index >= 0:
+                        self.video_provider_combo.setCurrentIndex(index)
+                        # Set Omni model if available
+                        if self.current_project.video_model and hasattr(self, 'omni_model_combo'):
+                            model_index = self.omni_model_combo.findText(self.current_project.video_model)
+                            if model_index >= 0:
+                                self.omni_model_combo.setCurrentIndex(model_index)
             
             # Load style settings
             if hasattr(self.current_project, 'aspect_ratio') and self.current_project.aspect_ratio:
