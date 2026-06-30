@@ -24,12 +24,26 @@
 - ✅ Fixed the pre-existing **"Google Veo" vs "Gemini Veo"** save/restore mismatch + added Sora/Omni restore branches; `test_video_provider_persistence.py` locks the label contract.
 - ✅ Auth: Omni uses the existing `google_api_key` (API-key) path — no `providers/google.py` change. README updated.
 
-**⚠️ NOT YET VERIFIED LIVE (the Phase 0 gate):** no Google API key reaches the WSL
-run env, so no real `client.interactions.create` call has been made. Two pieces
-are coded to best-understanding and need a real call (run from PowerShell with a
-key + confirmed Omni access) to confirm/adjust:
-1. **Aspect-ratio request shape** — sent best-effort as `response_format=[{"type":"video","aspect_ratio":...}]` via the SDK's `object` escape-hatch (no typed `VideoResponseFormat`). The server may ignore or reject it.
-2. **Output delivery** — whether the MP4 returns inline on the step, as a Files-API `uri`, or via `background=True`. The client handles inline + uri; if Omni only returns via background, `_await_terminal` polling covers it, but the exact `VideoContent` location in `steps` should be confirmed against a real response.
+**SDK surface corrected + verified (2026-06-30, after first live test failed).**
+The initial client was built against `google-genai` **2.8.0**'s transitional
+`_interactions` surface, which is wrong. The real Omni API is the **2.9.0+ `_gaos`
+"GeminiNextGen"** surface:
+- Request: `response_format={"type":"video","aspect_ratio":"16:9"|"9:16"}` (a **dict**;
+  no `response_modalities`, not list-wrapped).
+- Response: `interaction.output_video` (a `VideoContent` with base64 `data` / `uri`).
+- Floor raised to `google-genai>=2.9.0` (2.8.0 lacks `output_video`; 2.9.0 is the
+  oldest compliant version — 2.10.0 also works but was <7 days old at writing).
+
+Verified the corrected request is accepted by the installed 2.9.0 SDK and reaches
+Google's endpoint (400 `API_KEY_INVALID` with a dummy key — i.e. the request shape
+passed validation; only auth remained). **A full end-to-end generation with a valid
+key on PowerShell is the last confirmation** (delivery as inline `data` vs Files-API
+`uri` is both handled; `_await_terminal` polls if the interaction returns
+non-terminal).
+
+**Action for the run env:** the PowerShell `.venv` must `pip install -r
+requirements.txt` to pull `google-genai>=2.9.0` — an older SDK there is part of why
+the first attempt failed.
 
 **Remaining (deferred):** dedicated "Refine" UI button (plumbing is ready — it just
 needs to pass `omni_edit=True`); uploaded-video editing; `background`/`webhook`;
