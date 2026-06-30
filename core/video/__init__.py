@@ -28,6 +28,23 @@ except ImportError:
     SoraGenerationResult = None
     SoraErrorType = None
 
+# Gemini Omni client exports (lazy import; needs google-genai >= 2.3.0 for the
+# Interactions API).
+try:
+    from .omni_client import (
+        OmniClient,
+        OmniModel,
+        OmniGenerationConfig,
+        OmniGenerationResult,
+    )
+    OMNI_AVAILABLE = True
+except ImportError:
+    OMNI_AVAILABLE = False
+    OmniClient = None
+    OmniModel = None
+    OmniGenerationConfig = None
+    OmniGenerationResult = None
+
 __all__ = [
     # FFmpeg utilities
     'get_ffmpeg_manager',
@@ -44,4 +61,10 @@ __all__ = [
     'SoraGenerationConfig',
     'SoraGenerationResult',
     'SoraErrorType',
+    # Gemini Omni client
+    'OMNI_AVAILABLE',
+    'OmniClient',
+    'OmniModel',
+    'OmniGenerationConfig',
+    'OmniGenerationResult',
 ]

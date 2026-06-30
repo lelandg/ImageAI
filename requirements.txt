@@ -1,6 +1,6 @@
 protobuf>=4.25.3,<5  # Pinned for mediapipe compatibility; GetPrototype patch in main.py
 pillow
-google-genai>=1.49.0  # v1.49.0+ required for image_size parameter (NBP 1K/2K/4K output)
+google-genai>=2.3.0  # 2.3.0+: Interactions API (Gemini Omni video). NBP image_size (1K/2K/4K) still supported.
 google-cloud-aiplatform
 PySide6
 openai
