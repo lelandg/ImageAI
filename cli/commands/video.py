@@ -1,9 +1,11 @@
 """CLI handler for single-clip video generation (Gemini Omni + Veo)."""
 import logging
+import shutil
 import sys
 from pathlib import Path
 
 from core import sanitize_filename
+from cli.runner import resolve_api_key
 
 logger = logging.getLogger("imageai.cli.video")
 
@@ -95,6 +97,81 @@ def build_veo_config(args):
         return VeoGenerationConfig(**kwargs)  # __post_init__ validates model/refs
     except ValueError as e:
         raise VideoCliError(str(e))
+
+
+def _run_omni(args, out_path):
+    """Generate via Gemini Omni; writes directly to out_path. Returns normalized dict."""
+    from core.video.omni_client import OmniClient
+    if getattr(args, "auth_mode", "api-key") == "gcloud":
+        raise VideoCliError(
+            "Gemini Omni supports api-key auth only (not --auth-mode gcloud)."
+        )
+    key, _src = resolve_api_key(
+        getattr(args, "api_key", None), getattr(args, "api_key_file", None), "google")
+    if not key:
+        raise VideoCliError(
+            "No Google API key found. Use --api-key/--api-key-file or set GOOGLE_API_KEY.")
+    cfg = build_omni_config(args)
+    _emit(f"[omni] generating video (aspect={cfg.aspect_ratio}, model={cfg.model})...")
+    result = OmniClient(api_key=key).generate_video(cfg, out_path)
+    return {
+        "success": bool(result.success),
+        "output_path": str(result.video_path or out_path),
+        "provider": "omni",
+        "model": cfg.model,
+        "aspect_ratio": cfg.aspect_ratio,
+        "operation_id": getattr(result, "interaction_id", None),
+        "error": getattr(result, "error", None),
+    }
+
+
+def _run_veo(args, out_path):
+    """Generate or extend via Veo; copies Veo's saved file to out_path. Returns dict."""
+    import os
+    from core.video.veo_client import VeoClient
+    cfg = build_veo_config(args)
+    if getattr(args, "auth_mode", "api-key") == "gcloud":
+        project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
+        if not project_id:
+            raise VideoCliError(
+                "--auth-mode gcloud requires GOOGLE_CLOUD_PROJECT to be set.")
+        client = VeoClient(auth_mode="gcloud", project_id=project_id)
+    else:
+        key, _src = resolve_api_key(
+            getattr(args, "api_key", None), getattr(args, "api_key_file", None), "google")
+        if not key:
+            raise VideoCliError(
+                "No Google API key found. Use --api-key/--api-key-file or set GOOGLE_API_KEY.")
+        client = VeoClient(api_key=key, auth_mode="api-key")
+
+    extend = getattr(args, "extend", None)
+    if extend:
+        prev = Path(extend).expanduser()
+        if not prev.exists():
+            raise VideoCliError(f"--extend video not found: {prev}")
+        _emit(f"[veo] extending {prev.name} (model={cfg.model.value})...")
+        result = client.extend_video(previous_video_path=prev,
+                                     prompt=getattr(args, "prompt", None) or "", config=cfg)
+    else:
+        _emit(f"[veo] generating video (aspect={cfg.aspect_ratio}, model={cfg.model.value})...")
+        result = client.generate_video(cfg)
+
+    final_path = out_path
+    if result.success and result.video_path and Path(result.video_path) != out_path:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(result.video_path, out_path)
+    elif not result.success:
+        final_path = Path(result.video_path) if result.video_path else out_path
+
+    return {
+        "success": bool(result.success),
+        "output_path": str(final_path),
+        "provider": "veo",
+        "model": cfg.model.value,
+        "aspect_ratio": cfg.aspect_ratio,
+        "operation_id": getattr(result, "operation_id", None),
+        "error": getattr(result, "error", None),
+    }
 
 
 def run_video_cmd(args, config=None) -> int:
