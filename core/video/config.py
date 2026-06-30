@@ -16,7 +16,7 @@ class VideoConfig:
     DEFAULT_CONFIG = {
         "enabled": True,
         "video_projects_dir": None,  # Will be set to user config dir / video_projects
-        "default_video_provider": "slideshow",  # "veo" or "slideshow"
+        "default_video_provider": "slideshow",  # "slideshow", "veo", "sora", or "omni"
         "veo_model": "veo-3.1-generate-001",  # Default Veo model (post June 30 2026 GA)
         "ffmpeg_path": "ffmpeg",  # Auto-detect or user-specified
         "cache_size_mb": 5000,  # Max cache size in MB
@@ -54,6 +54,21 @@ class VideoConfig:
             "default_person_generation": "dont_allow",
             "retention_days": 2,  # Server retention period
             "polling_interval": 10,  # seconds between status checks
+            "timeout": 600  # Maximum wait time in seconds
+        },
+        "omni_settings": {
+            # Gemini Omni video generation via the Interactions API.
+            "models": {
+                "gemini-omni-flash-preview": {
+                    "fps": 24,
+                    "resolution": "720p",
+                    "duration_range": [3, 10],
+                    "aspect_ratios": ["16:9", "9:16"],
+                    "has_audio": True,
+                    "supports_conversational_edit": True
+                }
+            },
+            "polling_interval": 10,  # seconds between Interaction status polls
             "timeout": 600  # Maximum wait time in seconds
         },
         "export_settings": {
@@ -275,7 +290,19 @@ class VideoConfig:
             Model configuration dictionary
         """
         return self.get(f"veo_settings.models.{model}", {})
-    
+
+    def get_omni_model_config(self, model: str) -> Dict[str, Any]:
+        """
+        Get configuration for a specific Gemini Omni model.
+
+        Args:
+            model: Omni model name
+
+        Returns:
+            Model configuration dictionary
+        """
+        return self.get(f"omni_settings.models.{model}", {})
+
     def is_llm_provider_enabled(self, provider: str) -> bool:
         """
         Check if an LLM provider is enabled.

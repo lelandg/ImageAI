@@ -731,6 +731,9 @@ class VideoGenerationThread(QThread):
             if video_provider == 'OpenAI Sora':
                 return self._generate_video_clip_sora()
 
+            if video_provider == 'Gemini Omni':
+                return self._generate_video_clip_omni()
+
             # Default to Veo
             from core.video.veo_client import VeoClient, VeoGenerationConfig, VeoModel
             from core.video.midi_processor import snap_duration_to_veo
@@ -1473,6 +1476,171 @@ class VideoGenerationThread(QThread):
             logger = logging.getLogger(__name__)
             logger.error(f"Sora video generation failed: {e}", exc_info=True)
             self.generation_complete.emit(False, f"Sora video generation failed: {e}")
+
+    def _generate_video_clip_omni(self):
+        """Generate video clip for a single scene using Gemini Omni (Interactions API)."""
+        try:
+            from core.video.omni_client import OmniClient, OmniGenerationConfig
+            from pathlib import Path
+            import logging
+            from datetime import datetime
+
+            logger = logging.getLogger(__name__)
+
+            # Get scene indices
+            scene_indices = self.kwargs.get('scene_indices', None)
+            if not scene_indices or len(scene_indices) == 0:
+                self.generation_complete.emit(False, "No scene specified for video clip generation")
+                return
+
+            scene_index = scene_indices[0]
+            if scene_index >= len(self.project.scenes):
+                self.generation_complete.emit(False, f"Invalid scene index: {scene_index}")
+                return
+
+            scene = self.project.scenes[scene_index]
+
+            # Get generation parameters
+            seed_image_path = self.kwargs.get('start_frame') or self.kwargs.get('seed_image')
+
+            # Use video_prompt if available, otherwise fall back to regular prompt
+            prompt = self.kwargs.get('video_prompt') or scene.video_prompt or scene.prompt
+            aspect_ratio = self.kwargs.get('aspect_ratio', '16:9')
+
+            # Prepend prompt_style to the prompt
+            prompt_style = self.kwargs.get('prompt_style', 'Cinematic')
+            if prompt_style and prompt_style.lower() != 'none':
+                if not prompt.lower().startswith(prompt_style.lower()):
+                    prompt = f"{prompt_style} style: {prompt}"
+
+            logger.info(f"Using Gemini Omni for scene {scene_index}: {prompt[:100]}...")
+
+            self.progress_update.emit(5, "Initializing Gemini Omni client...")
+
+            # Get Google API key (Omni authenticates with a plain API key)
+            google_api_key = self.kwargs.get('google_api_key')
+            if not google_api_key:
+                self.generation_complete.emit(False, "Google API key required for Gemini Omni video generation")
+                return
+
+            # Map aspect ratio for Omni (only supports 16:9 and 9:16). Prefer the
+            # dedicated Omni aspect selector; fall back to the project's general
+            # aspect ratio, coercing unsupported values to the nearest of 16:9/9:16.
+            omni_aspect = self.kwargs.get('omni_aspect_ratio')
+            if omni_aspect not in ('16:9', '9:16'):
+                fallback_source = omni_aspect if omni_aspect else aspect_ratio
+                omni_aspect = '9:16' if aspect_ratio in ('9:16', '3:4', '4:5') else '16:9'
+                if fallback_source not in ('16:9', '9:16'):
+                    logger.debug(
+                        f"Omni: coercing aspect ratio {fallback_source!r} -> {omni_aspect} "
+                        f"(Omni supports only 16:9 / 9:16)"
+                    )
+
+            # Determine task + reference image. Conversational editing chains on
+            # the previous interaction id ONLY when an explicit edit was requested
+            # (omni_edit kwarg, e.g. from a "Refine" action); a plain (re)generate
+            # is always a fresh text-to-video (or image-to-video with a seed frame).
+            reference_image = (
+                Path(seed_image_path)
+                if seed_image_path and Path(seed_image_path).exists()
+                else None
+            )
+            is_edit = bool(self.kwargs.get('omni_edit'))
+            previous_interaction_id = scene.metadata.get('omni_interaction_id') if is_edit else None
+            if is_edit and previous_interaction_id:
+                task = 'edit'
+            elif reference_image is not None:
+                task = 'image_to_video'
+            else:
+                task = 'text_to_video'
+
+            # Pull polling/timeout from video config
+            try:
+                from core.video.config import VideoConfig
+                vcfg = VideoConfig()
+                polling_interval = int(vcfg.get('omni_settings.polling_interval', 10))
+                timeout = int(vcfg.get('omni_settings.timeout', 600))
+            except Exception:
+                polling_interval, timeout = 10, 600
+
+            omni_model = self.kwargs.get('omni_model') or ''
+            logger.info("🎬 Gemini Omni Configuration:")
+            logger.info(f"   Model: {omni_model or 'gemini-omni-flash-preview (resolved)'}")
+            logger.info(f"   Task: {task}")
+            logger.info(f"   Aspect Ratio: {omni_aspect}")
+            logger.info(f"   Reference image: {reference_image}")
+            logger.info(f"   Previous interaction id: {previous_interaction_id}")
+
+            self.progress_update.emit(10, "Starting Gemini Omni generation...")
+
+            client = OmniClient(
+                api_key=google_api_key,
+                polling_interval=polling_interval,
+                timeout=timeout,
+            )
+
+            config_kwargs = dict(
+                prompt=prompt,
+                aspect_ratio=omni_aspect,
+                task=task,
+                reference_image=reference_image,
+                previous_interaction_id=previous_interaction_id,
+            )
+            if omni_model:
+                config_kwargs['model'] = omni_model
+            config = OmniGenerationConfig(**config_kwargs)
+
+            # Write straight into the project clips directory.
+            clips_dir = self.project.project_dir / "clips"
+            clips_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            video_path = clips_dir / f"scene_{scene_index}_{timestamp}.mp4"
+
+            result = client.generate_video(config, video_path)
+
+            if not result.success:
+                raise Exception(f"Gemini Omni generation failed: {result.error}")
+            if not result.video_path or not Path(result.video_path).exists():
+                raise Exception("Video generation succeeded but no video file was created")
+
+            # Persist the interaction id so a later "refine" can chain edits.
+            if result.interaction_id:
+                scene.metadata['omni_interaction_id'] = result.interaction_id
+
+            # Apply lip-sync if enabled for this scene
+            video_path = self._apply_lipsync_to_scene(video_path, scene_index)
+
+            self.progress_update.emit(94, "Extracting last frame...")
+            last_frame_path = self._extract_last_frame(video_path, scene_index)
+
+            self.progress_update.emit(97, "Extracting first frame...")
+            first_frame_path = self._extract_first_frame(video_path, scene_index)
+
+            # Update scene with video clip and frames
+            scene.video_clip = video_path
+            scene.first_frame = first_frame_path
+            scene.last_frame = last_frame_path
+
+            self.progress_update.emit(100, f"Gemini Omni video generated for scene {scene_index + 1}")
+
+            result_data = {
+                "scene_id": scene.id,
+                "video_clip": str(video_path),
+                "first_frame": str(first_frame_path),
+                "last_frame": str(last_frame_path),
+                "status": "completed",
+                "provider": "omni",
+                "model": config.model,
+                "interaction_id": result.interaction_id,
+            }
+            self.scene_complete.emit(scene.id, result_data)
+            self.generation_complete.emit(True, f"Gemini Omni video generated for scene {scene_index + 1}")
+
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Gemini Omni video generation failed: {e}", exc_info=True)
+            self.generation_complete.emit(False, f"Gemini Omni video generation failed: {e}")
 
     def _render_video(self):
         """Render the final video"""
