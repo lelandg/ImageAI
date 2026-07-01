@@ -777,7 +777,6 @@ class VideoGenerationThread(QThread):
                     prompt = f"{prompt_style} style: {prompt}"
 
             # Log which prompt is being used
-            import logging
             logger = logging.getLogger(__name__)
             if scene.video_prompt:
                 logger.info(f"Using video_prompt for scene {scene_index}:\n{prompt}")
@@ -882,7 +881,6 @@ class VideoGenerationThread(QThread):
             processed_seed_path = None
             if seed_image_path and Path(seed_image_path).exists():
                 from PIL import Image
-                import logging
                 logger = logging.getLogger(__name__)
 
                 try:
