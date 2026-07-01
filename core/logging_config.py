@@ -59,7 +59,8 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
     )
     
     # Console handler (simple format for user)
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Use stderr so diagnostic logs never pollute stdout (critical for --json CLI purity).
+    console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(logging.WARNING)  # Only show warnings and errors in console
     console_handler.setFormatter(simple_formatter)
     root_logger.addHandler(console_handler)

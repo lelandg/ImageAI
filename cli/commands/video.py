@@ -1,6 +1,7 @@
 """CLI handler for single-clip video generation (Gemini Omni + Veo)."""
 import json
 import logging
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -47,7 +48,7 @@ def build_omni_config(args):
     refs = _ref_images(args)
     if len(refs) > OMNI_MAX_REFS:
         raise VideoCliError(
-            f"Gemini Omni supports {OMNI_MAX_REFS} reference image; got {len(refs)}."
+            f"Gemini Omni supports at most {OMNI_MAX_REFS} reference image(s); got {len(refs)}."
         )
     kwargs = dict(
         prompt=getattr(args, "prompt", None) or "",
@@ -128,7 +129,6 @@ def _run_omni(args, out_path):
 
 def _run_veo(args, out_path):
     """Generate or extend via Veo; copies Veo's saved file to out_path. Returns dict."""
-    import os
     from core.video.veo_client import VeoClient
     cfg = build_veo_config(args)
     if getattr(args, "auth_mode", "api-key") == "gcloud":
@@ -160,7 +160,10 @@ def _run_veo(args, out_path):
     final_path = out_path
     if result.success and result.video_path and Path(result.video_path) != out_path:
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(result.video_path, out_path)
+        try:
+            shutil.copy2(result.video_path, out_path)
+        except shutil.SameFileError:
+            pass
     elif not result.success:
         final_path = Path(result.video_path) if result.video_path else out_path
 
@@ -198,19 +201,18 @@ def _write_sidecar(out_path, payload):
         logger.warning("Could not write sidecar %s: %s", sidecar, e)
 
 
-def _report(result, as_json, exit_code):
-    """Emit the result (stdout JSON if as_json, else stderr text) and return exit_code."""
-    payload = _status_payload(result)
+def _report(payload, as_json, exit_code):
+    """Emit the result payload (stdout JSON if as_json, else stderr text) and return exit_code."""
     if as_json:
         print(json.dumps(payload), file=sys.stdout)
-    elif result.get("success"):
-        _emit(f"✅ Video saved: {result.get('output_path')}")
+    elif payload.get("status") == "completed":
+        _emit(f"✅ Video saved: {payload.get('output_path')}")
     else:
-        _emit(f"❌ Video generation failed: {result.get('error')}")
+        _emit(f"❌ Video generation failed: {payload.get('error')}")
     return exit_code
 
 
-def run_video_cmd(args, config=None) -> int:
+def run_video_cmd(args) -> int:
     """Generate a single video clip via Gemini Omni or Veo. Returns an exit code."""
     provider = (getattr(args, "video_provider", None) or "veo").strip().lower()
     as_json = bool(getattr(args, "json", False))
@@ -218,12 +220,13 @@ def run_video_cmd(args, config=None) -> int:
 
     def _fail(message, code):
         logger.error("Video CLI: %s", message)
-        return _report({
+        payload = _status_payload({
             "success": False, "output_path": str(out_path), "provider": provider,
             "model": getattr(args, "video_model", None),
             "aspect_ratio": getattr(args, "aspect", None),
             "operation_id": None, "error": message,
-        }, as_json, code)
+        })
+        return _report(payload, as_json, code)
 
     try:
         if provider == "omni":
@@ -238,5 +241,6 @@ def run_video_cmd(args, config=None) -> int:
         logger.error("Video generation failed: %s", e, exc_info=True)
         return _fail(str(e), 3)
 
-    _write_sidecar(out_path, _status_payload(result))
-    return _report(result, as_json, 0 if result["success"] else 1)
+    payload = _status_payload(result)
+    _write_sidecar(out_path, payload)
+    return _report(payload, as_json, 0 if result["success"] else 1)
