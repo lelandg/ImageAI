@@ -1014,7 +1014,6 @@ I'm tap-tap-tappin' in my head
    - Choose rendering method:
      - FFmpeg Slideshow: Generate images first, then render with Ken Burns effects
      - Google Veo: Generate motion video clips for each scene
-     - OpenAI Sora: Generate Sora 2 motion video clips for each scene
      - Gemini Omni: Fast conversational video generation via the Interactions
        API (text-to-video, image-to-video, and conversational editing; 720p,
        3–10s, with audio; 16:9 or 9:16). Uses your Google API key.
@@ -2571,54 +2570,6 @@ Since ImageAI's Video Project feature is designed to work with Google Veo for AI
 - Generated videos stored for 2 days only
 - All videos include SynthID watermark
 - Available in US (consumer plans), global via Vertex AI
-
-### OpenAI Sora Video Generation (Preview)
-
-ImageAI includes support for **OpenAI Sora 2** video generation as an alternative to Google Veo.
-
-#### Sora API Access
-
-The Sora Video API is currently **in preview** with restricted access. To use Sora:
-
-| Requirement | Details |
-|-------------|---------|
-| **ChatGPT Pro** | $200/month subscription - Priority access |
-| **ChatGPT Plus** | $20/month subscription - Waitlist access |
-| **Geographic** | Currently US and Canada only |
-| **SDK Version** | Run `pip install openai --upgrade` for `.videos` namespace |
-
-#### How to Request Access
-
-1. **Subscribe to ChatGPT Pro/Plus**: [chat.openai.com/upgrade](https://chat.openai.com/upgrade)
-2. **Verify your organization**: [platform.openai.com/settings/organization/general](https://platform.openai.com/settings/organization/general)
-3. **Check API access**: [platform.openai.com/settings/project/](https://platform.openai.com/settings/project/)
-
-#### Sora 2 Pricing & Performance (December 2025)
-
-| Model | Duration | Resolution | Estimated Cost | Gen Time | Features |
-|-------|----------|------------|----------------|----------|----------|
-| **Sora 2** | 4/8/12 sec | 720p | ~$0.10/sec | ~7 min | Standard model |
-| **Sora 2 Pro** | 4/8/12 sec | 720p-1080p | ~$0.30-0.50/sec | ~7 min | Higher quality |
-
-**Actual Performance**: 8-second video generated in ~410 seconds (~7 minutes) with 39 polling cycles.
-
-#### Sora Resources
-
-- **Official Docs**: [platform.openai.com/docs/guides/video-generation](https://platform.openai.com/docs/guides/video-generation)
-- **API Reference**: [platform.openai.com/docs/api-reference/videos](https://platform.openai.com/docs/api-reference/videos)
-- **Prompting Guide**: [cookbook.openai.com/examples/sora/sora2_prompting_guide](https://cookbook.openai.com/examples/sora/sora2_prompting_guide)
-- **Azure Option**: [learn.microsoft.com/azure/ai-foundry/openai/video-generation-quickstart](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/video-generation-quickstart)
-
-#### Sora Features in ImageAI
-
-- Text-to-video generation
-- Image-to-video (reference image input)
-- Video library management (list, delete)
-- Thumbnail and spritesheet downloads
-- Progress tracking with callbacks
-- Automatic polling for completion
-
-**Note**: If you receive a `403 Forbidden` error, your API key doesn't have Sora access yet. Check your subscription status and organization verification.
 
 ## 14. API Reference
 

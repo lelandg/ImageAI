@@ -16,7 +16,7 @@ class VideoConfig:
     DEFAULT_CONFIG = {
         "enabled": True,
         "video_projects_dir": None,  # Will be set to user config dir / video_projects
-        "default_video_provider": "slideshow",  # "slideshow", "veo", "sora", or "omni"
+        "default_video_provider": "slideshow",  # "slideshow", "veo", or "omni"
         "veo_model": "veo-3.1-generate-001",  # Default Veo model (post June 30 2026 GA)
         "ffmpeg_path": "ffmpeg",  # Auto-detect or user-specified
         "cache_size_mb": 5000,  # Max cache size in MB
@@ -130,6 +130,14 @@ class VideoConfig:
         is idempotent — running it against an already-migrated config is a
         no-op.
         """
+        # Coerce saved "sora" default_video_provider to "omni" (Sora removed).
+        if self.config.get("default_video_provider") == "sora":
+            self.logger.info(
+                "Migrating legacy default_video_provider 'sora' -> 'omni' "
+                "(OpenAI Sora provider has been removed)"
+            )
+            self.config["default_video_provider"] = "omni"
+
         legacy_default = self.config.get("veo_model")
         if legacy_default in self._LEGACY_VEO_MIGRATION:
             new_default = self._LEGACY_VEO_MIGRATION[legacy_default]

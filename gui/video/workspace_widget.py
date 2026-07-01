@@ -1625,13 +1625,12 @@ class WorkspaceWidget(QWidget):
         provider_layout = QHBoxLayout()
         provider_layout.addWidget(QLabel("Render Method:"))
         self.video_provider_combo = QComboBox()
-        self.video_provider_combo.addItems(["FFmpeg Slideshow", "Gemini Veo", "OpenAI Sora", "Gemini Omni"])
+        self.video_provider_combo.addItems(["FFmpeg Slideshow", "Gemini Veo", "Gemini Omni"])
         self.video_provider_combo.setCurrentIndex(1)  # Default to Gemini Veo
         self.video_provider_combo.setToolTip(
             "Video rendering method:\n"
             "- FFmpeg Slideshow: Traditional slideshow with transitions\n"
             "- Gemini Veo: Google AI-powered video generation\n"
-            "- OpenAI Sora: OpenAI Sora 2 video generation\n"
             "- Gemini Omni: Google conversational video generation (Interactions API)"
         )
         self.video_provider_combo.currentTextChanged.connect(self.on_video_provider_changed)
@@ -1661,36 +1660,6 @@ class WorkspaceWidget(QWidget):
         )
         self.veo_model_combo.currentTextChanged.connect(self.on_veo_model_changed)
         provider_layout.addWidget(self.veo_model_combo)
-
-        # Sora model selection (hidden by default)
-        self.sora_model_combo = QComboBox()
-        self.sora_model_combo.addItems([
-            "sora-2",
-            "sora-2-2025-12-08",
-            "sora-2-pro"
-        ])
-        self.sora_model_combo.setCurrentIndex(0)
-        self.sora_model_combo.setVisible(False)  # Hidden by default
-        self.sora_model_combo.setMinimumWidth(180)
-        self.sora_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
-        self.sora_model_combo.setToolTip(
-            "Sora model:\n"
-            "- sora-2: Standard quality, latest (720p, $0.10/sec)\n"
-            "- sora-2-2025-12-08: Dec 2025 snapshot (720p, $0.10/sec)\n"
-            "- sora-2-pro: Pro quality (720p/1080p, $0.30-0.50/sec)"
-        )
-        self.sora_model_combo.currentTextChanged.connect(self.on_sora_model_changed)
-        provider_layout.addWidget(self.sora_model_combo)
-
-        # Sora resolution selection (only visible for Sora Pro)
-        self.sora_resolution_combo = QComboBox()
-        self.sora_resolution_combo.addItems(["720p", "1080p"])
-        self.sora_resolution_combo.setCurrentIndex(0)
-        self.sora_resolution_combo.setVisible(False)
-        self.sora_resolution_combo.setMinimumWidth(80)
-        self.sora_resolution_combo.setToolTip("Resolution (1080p only available with sora-2-pro)")
-        self.sora_resolution_combo.currentTextChanged.connect(self._auto_save_settings)
-        provider_layout.addWidget(self.sora_resolution_combo)
 
         # Gemini Omni model selection (hidden by default). The default model ID is
         # resolved via the registry (resolve_model) rather than hardcoded (AGENTS.md §8).
@@ -6151,8 +6120,6 @@ class WorkspaceWidget(QWidget):
             'negative_prompt': self.negative_prompt.text(),
             'video_provider': self.video_provider_combo.currentText(),
             'veo_model': self.veo_model_combo.currentText(),
-            'sora_model': self.sora_model_combo.currentText() if hasattr(self, 'sora_model_combo') else 'sora-2',
-            'sora_resolution': self.sora_resolution_combo.currentText() if hasattr(self, 'sora_resolution_combo') else '720p',
             'omni_model': self.omni_model_combo.currentText() if hasattr(self, 'omni_model_combo') else 'gemini-omni-flash-preview',
             'omni_aspect_ratio': self.omni_aspect_combo.currentText() if hasattr(self, 'omni_aspect_combo') else '16:9',
             'ken_burns': self.ken_burns_check.isChecked(),
@@ -6342,16 +6309,6 @@ class WorkspaceWidget(QWidget):
         is_veo = provider == "Gemini Veo"
         self.veo_model_combo.setVisible(is_veo)
 
-        # Show/hide Sora options
-        is_sora = provider == "OpenAI Sora"
-        self.sora_model_combo.setVisible(is_sora)
-
-        # Update Sora resolution visibility based on selected model
-        if is_sora:
-            self._update_sora_resolution_visibility()
-        else:
-            self.sora_resolution_combo.setVisible(False)
-
         # Show/hide Gemini Omni options
         is_omni = provider == "Gemini Omni"
         if hasattr(self, 'omni_model_combo'):
@@ -6360,12 +6317,9 @@ class WorkspaceWidget(QWidget):
             self.omni_aspect_combo.setVisible(is_omni)
 
         # Update smooth transitions checkbox visibility
-        # (Only available for Veo 3.1 or Sora)
+        # (Only available for Veo 3.1)
         if hasattr(self, 'use_prev_last_frame_check'):
-            supports_smooth = (
-                provider == "OpenAI Sora" or
-                (is_veo and "3.1" in self.veo_model_combo.currentText())
-            )
+            supports_smooth = is_veo and "3.1" in self.veo_model_combo.currentText()
             self.use_prev_last_frame_check.setEnabled(supports_smooth)
             if not supports_smooth:
                 self.use_prev_last_frame_check.setChecked(False)
@@ -6408,11 +6362,6 @@ class WorkspaceWidget(QWidget):
         self._update_cost_estimate()
         self._auto_save_settings()
 
-    def on_sora_model_changed(self, model: str):
-        """Handle Sora model selection change"""
-        self._update_sora_resolution_visibility()
-        self._auto_save_settings()
-
     def _update_cost_estimate(self):
         """Update the cost estimation label based on current model and audio settings"""
         if not hasattr(self, 'cost_estimate_label'):
@@ -6449,21 +6398,6 @@ class WorkspaceWidget(QWidget):
         total_cost = cost_per_second * duration
         audio_indicator = "w/audio" if include_audio else "no audio"
         self.cost_estimate_label.setText(f"Est. Cost: ${total_cost:.2f} ({audio_indicator})")
-
-    def _update_sora_resolution_visibility(self):
-        """Update Sora resolution combo visibility based on selected model"""
-        if not hasattr(self, 'sora_model_combo') or not hasattr(self, 'sora_resolution_combo'):
-            return
-
-        sora_model = self.sora_model_combo.currentText()
-        is_pro = sora_model == "sora-2-pro"
-
-        # Show resolution selector only for Sora Pro (which supports 1080p)
-        self.sora_resolution_combo.setVisible(is_pro)
-
-        # Reset to 720p if switching from Pro to standard
-        if not is_pro:
-            self.sora_resolution_combo.setCurrentIndex(0)  # 720p
 
     def _toggle_input_options(self, checked=None):
         """Toggle the input options panel visibility."""
@@ -7689,8 +7623,9 @@ class WorkspaceWidget(QWidget):
                 self.prompt_style_input.currentTextChanged.connect(self._on_style_changed)
 
             # Load video provider settings. Saved value is the lowercased combo
-            # text (e.g. "gemini veo", "openai sora", "gemini omni", "ffmpeg
-            # slideshow"); older projects may have "slideshow"/"veo"/"google veo".
+            # text (e.g. "gemini veo", "gemini omni", "ffmpeg slideshow"); older
+            # projects may have "slideshow"/"veo"/"google veo". Projects that
+            # previously used OpenAI Sora are coerced to Gemini Omni.
             if self.current_project.video_provider:
                 saved_provider = self.current_project.video_provider
                 if saved_provider in ("slideshow", "ffmpeg slideshow"):
@@ -7705,9 +7640,20 @@ class WorkspaceWidget(QWidget):
                             if model_index >= 0:
                                 self.veo_model_combo.setCurrentIndex(model_index)
                 elif saved_provider in ("sora", "openai sora"):
-                    index = self.video_provider_combo.findText("OpenAI Sora")
+                    # Sora has been removed — coerce to Gemini Omni
+                    self.logger.warning(
+                        "Project video_provider '%s' refers to removed OpenAI Sora; "
+                        "coercing to Gemini Omni", saved_provider
+                    )
+                    index = self.video_provider_combo.findText("Gemini Omni")
                     if index >= 0:
                         self.video_provider_combo.setCurrentIndex(index)
+                    get_dialog_manager(self).show_warning(
+                        "Provider Removed",
+                        "This project used the OpenAI Sora video provider, which has been "
+                        "removed from ImageAI.\n\nThe provider has been switched to Gemini Omni. "
+                        "Please save the project to apply this change."
+                    )
                 elif saved_provider in ("omni", "gemini omni"):
                     index = self.video_provider_combo.findText("Gemini Omni")
                     if index >= 0:
