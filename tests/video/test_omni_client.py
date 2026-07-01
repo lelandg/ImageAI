@@ -291,3 +291,61 @@ def test_reference_image_mime_detection(tmp_path):
     cfg = OmniGenerationConfig(prompt="go", task="image_to_video", reference_image=webp)
     kw = cfg.to_interaction_kwargs()
     assert kw["input"][0]["mime_type"] == "image/webp"
+
+
+# --- Multi-reference images (reference_to_video) -----------------------------
+
+def _write_png(tmp_path, name):
+    p = tmp_path / name
+    p.write_bytes(b"\x89PNG\r\n\x1a\nfakepng-" + name.encode())
+    return p
+
+
+def test_multiple_reference_images_build_content_list(tmp_path):
+    cat = _write_png(tmp_path, "cat.png")
+    yarn = _write_png(tmp_path, "yarn.png")
+    cfg = OmniGenerationConfig(prompt="A cat playfully batting at a ball of yarn.",
+                               reference_images=[cat, yarn])
+    kw = cfg.to_interaction_kwargs()
+    # Documented shape: N image items followed by exactly one text item.
+    assert [item["type"] for item in kw["input"]] == ["image", "image", "text"]
+    assert kw["input"][2]["text"] == "A cat playfully batting at a ball of yarn."
+    # Two subject references => reference_to_video (inferred).
+    assert cfg.task == "reference_to_video"
+
+
+def test_single_reference_image_infers_image_to_video(tmp_path):
+    ref = _write_png(tmp_path, "ref.png")
+    cfg = OmniGenerationConfig(prompt="make it move", reference_images=[ref])
+    assert cfg.task == "image_to_video"
+
+
+def test_legacy_reference_image_folds_into_list(tmp_path):
+    ref = _write_png(tmp_path, "ref.png")
+    cfg = OmniGenerationConfig(prompt="go", task="image_to_video", reference_image=ref)
+    assert cfg.reference_images == [ref]
+    kw = cfg.to_interaction_kwargs()
+    assert [item["type"] for item in kw["input"]] == ["image", "text"]
+
+
+def test_too_many_reference_images_rejected(tmp_path):
+    refs = [_write_png(tmp_path, f"r{i}.png") for i in range(4)]
+    with pytest.raises(ValueError, match="reference image"):
+        OmniGenerationConfig(prompt="x", reference_images=refs)
+
+
+def test_previous_interaction_id_infers_edit_task():
+    cfg = OmniGenerationConfig(prompt="make the violin invisible",
+                               previous_interaction_id="int_prev")
+    assert cfg.task == "edit"
+
+
+def test_validate_config_checks_all_reference_images_exist(tmp_path):
+    ok = _write_png(tmp_path, "ok.png")
+    missing = tmp_path / "missing.png"
+    cfg = OmniGenerationConfig(prompt="x", reference_images=[ok])
+    cfg.reference_images.append(missing)  # bypass __post_init__ to hit validate_config
+    client = OmniClient(api_key="test-key")
+    is_valid, error = client.validate_config(cfg)
+    assert is_valid is False
+    assert "missing.png" in error

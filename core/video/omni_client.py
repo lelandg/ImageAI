@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.llm_models import resolve_model
 
@@ -78,14 +78,29 @@ class OmniGenerationConfig:
     prompt: str = ""
     model: str = ""  # Resolved Omni model ID; defaults via __post_init__.
     aspect_ratio: str = "16:9"  # "16:9" (landscape) or "9:16" (portrait).
-    reference_image: Optional[Path] = None  # Start/reference frame (image-to-video).
+    reference_image: Optional[Path] = None  # Back-compat single ref; folds into reference_images.
+    reference_images: List[Path] = field(default_factory=list)  # Subject/first-frame refs.
     previous_interaction_id: Optional[str] = None  # Chain a conversational edit.
-    # Task is inferred from the input shape; kept for logging/metadata only.
-    task: str = "text_to_video"
+    # Task sent as generation_config.video_config.task; inferred when left "".
+    task: str = ""
 
     def __post_init__(self):
         if not self.model:
             self.model = OmniModel.default_id()
+
+        if self.reference_image is not None and not self.reference_images:
+            self.reference_images = [Path(self.reference_image)]
+        self.reference_images = [Path(p) for p in self.reference_images]
+
+        max_refs = OmniClient.MODEL_CONSTRAINTS["max_reference_images"]
+        if len(self.reference_images) > max_refs:
+            raise ValueError(
+                f"Gemini Omni supports at most {max_refs} reference image(s); "
+                f"got {len(self.reference_images)}."
+            )
+
+        if not self.task:
+            self.task = self._infer_task()
 
         if self.aspect_ratio not in OmniClient.MODEL_CONSTRAINTS["aspect_ratios"]:
             raise ValueError(
@@ -98,10 +113,20 @@ class OmniGenerationConfig:
             raise ValueError(f"task {self.task!r} invalid. Use one of {valid_tasks}.")
 
         # image_to_video / reference_to_video require a reference image.
-        if self.task in ("image_to_video", "reference_to_video") and not self.reference_image:
+        if self.task in ("image_to_video", "reference_to_video") and not self.reference_images:
             raise ValueError(
                 f"task {self.task!r} requires a reference_image, but none was provided."
             )
+
+    def _infer_task(self) -> str:
+        """Infer the video_config task from the input shape (docs task enum)."""
+        if self.previous_interaction_id:
+            return "edit"
+        if len(self.reference_images) >= 2:
+            return "reference_to_video"
+        if self.reference_images:
+            return "image_to_video"
+        return "text_to_video"
 
     def to_interaction_kwargs(self) -> Dict[str, Any]:
         """Build the kwargs for ``client.interactions.create(**kwargs)``.
@@ -109,21 +134,19 @@ class OmniGenerationConfig:
         Matches the documented Gemini Omni request shape: video output and
         aspect ratio are requested via ``response_format={"type": "video",
         "aspect_ratio": ...}`` (a dict). The aspect ratio is never placed in the
-        prompt text (AGENTS.md §9). For image-to-video, ``input`` is a content
-        list ``[{image}, {text}]``; otherwise it is the plain prompt string.
+        prompt text (AGENTS.md §9). With reference images, ``input`` is a content
+        list ``[{image}, ..., {text}]``; otherwise it is the plain prompt string.
         """
-        # Build the input: a plain string for text-to-video, or a content list
-        # when a reference image is supplied.
-        if self.reference_image is not None:
-            image_bytes = Path(self.reference_image).read_bytes()
+        content: List[Dict[str, Any]] = []
+        for ref in self.reference_images:
+            image_bytes = Path(ref).read_bytes()
             b64 = base64.b64encode(image_bytes).decode("ascii")
-            mime = _IMAGE_MIME_BY_SUFFIX.get(
-                Path(self.reference_image).suffix.lower(), "image/png"
-            )
-            input_payload: Any = [
-                {"type": "image", "data": b64, "mime_type": mime},
-                {"type": "text", "text": self.prompt},
-            ]
+            mime = _IMAGE_MIME_BY_SUFFIX.get(Path(ref).suffix.lower(), "image/png")
+            content.append({"type": "image", "data": b64, "mime_type": mime})
+
+        if content:
+            content.append({"type": "text", "text": self.prompt})
+            input_payload: Any = content
         else:
             input_payload = self.prompt
 
@@ -156,6 +179,7 @@ class OmniClient:
     MODEL_CONSTRAINTS = {
         "aspect_ratios": ["16:9", "9:16"],
         "tasks": ["text_to_video", "image_to_video", "reference_to_video", "edit"],
+        "max_reference_images": 3,  # Docs show multi-subject refs (<IMAGE_REF_N>, N=0..2).
         "duration_range": (3, 10),  # seconds (informational; no SDK duration field)
         "fps": 24,
         "resolution": "720p",
@@ -193,8 +217,9 @@ class OmniClient:
             )
         if config.task not in self.MODEL_CONSTRAINTS["tasks"]:
             return False, f"Task {config.task} not supported."
-        if config.reference_image is not None and not Path(config.reference_image).exists():
-            return False, f"Reference image not found: {config.reference_image}"
+        for ref in (config.reference_images or []):
+            if not Path(ref).exists():
+                return False, f"Reference image not found: {ref}"
         return True, None
 
     async def generate_video_async(self, config: OmniGenerationConfig,
