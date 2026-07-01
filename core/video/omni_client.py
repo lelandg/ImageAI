@@ -293,7 +293,7 @@ class OmniClient:
             self.logger.info("=" * 60)
             self.logger.info(f"Gemini Omni request — model={config.model} task={config.task}")
             self.logger.info(f"  aspect_ratio={config.aspect_ratio} "
-                             f"reference_image={config.reference_image} "
+                             f"reference_images={[str(p) for p in config.reference_images]} "
                              f"input_video={config.input_video} "
                              f"previous_interaction_id={config.previous_interaction_id}")
             self.logger.info(f"  Prompt:\n{config.prompt}")
