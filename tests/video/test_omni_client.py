@@ -291,3 +291,187 @@ def test_reference_image_mime_detection(tmp_path):
     cfg = OmniGenerationConfig(prompt="go", task="image_to_video", reference_image=webp)
     kw = cfg.to_interaction_kwargs()
     assert kw["input"][0]["mime_type"] == "image/webp"
+
+
+# --- Multi-reference images (reference_to_video) -----------------------------
+
+def _write_png(tmp_path, name):
+    p = tmp_path / name
+    p.write_bytes(b"\x89PNG\r\n\x1a\nfakepng-" + name.encode())
+    return p
+
+
+def test_multiple_reference_images_build_content_list(tmp_path):
+    cat = _write_png(tmp_path, "cat.png")
+    yarn = _write_png(tmp_path, "yarn.png")
+    cfg = OmniGenerationConfig(prompt="A cat playfully batting at a ball of yarn.",
+                               reference_images=[cat, yarn])
+    kw = cfg.to_interaction_kwargs()
+    # Documented shape: N image items followed by exactly one text item.
+    assert [item["type"] for item in kw["input"]] == ["image", "image", "text"]
+    assert kw["input"][2]["text"] == "A cat playfully batting at a ball of yarn."
+    # Two subject references => reference_to_video (inferred).
+    assert cfg.task == "reference_to_video"
+
+
+def test_single_reference_image_infers_image_to_video(tmp_path):
+    ref = _write_png(tmp_path, "ref.png")
+    cfg = OmniGenerationConfig(prompt="make it move", reference_images=[ref])
+    assert cfg.task == "image_to_video"
+
+
+def test_legacy_reference_image_folds_into_list(tmp_path):
+    ref = _write_png(tmp_path, "ref.png")
+    cfg = OmniGenerationConfig(prompt="go", task="image_to_video", reference_image=ref)
+    assert cfg.reference_images == [ref]
+    kw = cfg.to_interaction_kwargs()
+    assert [item["type"] for item in kw["input"]] == ["image", "text"]
+
+
+def test_too_many_reference_images_rejected(tmp_path):
+    refs = [_write_png(tmp_path, f"r{i}.png") for i in range(4)]
+    with pytest.raises(ValueError, match="reference image"):
+        OmniGenerationConfig(prompt="x", reference_images=refs)
+
+
+def test_previous_interaction_id_infers_edit_task():
+    cfg = OmniGenerationConfig(prompt="make the violin invisible",
+                               previous_interaction_id="int_prev")
+    assert cfg.task == "edit"
+
+
+def test_validate_config_checks_all_reference_images_exist(tmp_path):
+    ok = _write_png(tmp_path, "ok.png")
+    missing = tmp_path / "missing.png"
+    cfg = OmniGenerationConfig(prompt="x", reference_images=[ok])
+    cfg.reference_images.append(missing)  # bypass __post_init__ to hit validate_config
+    client = OmniClient(api_key="test-key")
+    is_valid, error = client.validate_config(cfg)
+    assert is_valid is False
+    assert "missing.png" in error
+
+
+# --- Explicit generation_config.video_config.task ----------------------------
+
+def test_task_sent_in_generation_config_text_to_video():
+    cfg = OmniGenerationConfig(prompt="a sunset")
+    kw = cfg.to_interaction_kwargs()
+    assert kw["generation_config"] == {"video_config": {"task": "text_to_video"}}
+
+
+def test_task_sent_in_generation_config_reference_to_video(tmp_path):
+    refs = [_write_png(tmp_path, f"s{i}.png") for i in range(2)]
+    cfg = OmniGenerationConfig(prompt="together in a park", reference_images=refs)
+    kw = cfg.to_interaction_kwargs()
+    # Disambiguates subject references from a first-frame image (identical
+    # input shapes otherwise).
+    assert kw["generation_config"]["video_config"]["task"] == "reference_to_video"
+
+
+# --- delivery="uri" -----------------------------------------------------------
+
+def test_delivery_uri_in_response_format():
+    cfg = OmniGenerationConfig(prompt="a sunset", delivery="uri")
+    kw = cfg.to_interaction_kwargs()
+    assert kw["response_format"] == {
+        "type": "video", "aspect_ratio": "16:9", "delivery": "uri"
+    }
+
+
+def test_delivery_default_omits_key():
+    cfg = OmniGenerationConfig(prompt="a sunset")
+    assert "delivery" not in cfg.to_interaction_kwargs()["response_format"]
+
+
+def test_delivery_inline_omits_key():
+    cfg = OmniGenerationConfig(prompt="a sunset", delivery="inline")
+    assert "delivery" not in cfg.to_interaction_kwargs()["response_format"]
+
+
+def test_invalid_delivery_rejected():
+    with pytest.raises(ValueError, match="delivery"):
+        OmniGenerationConfig(prompt="x", delivery="carrier-pigeon")
+
+
+# --- Edit uploaded videos (Files API document input) --------------------------
+
+def test_input_video_infers_edit_task(tmp_path):
+    vid = tmp_path / "clip.mp4"
+    vid.write_bytes(MP4_BYTES)
+    cfg = OmniGenerationConfig(prompt="make the mirror ripple", input_video=vid)
+    assert cfg.task == "edit"
+
+
+def test_document_uri_first_in_content_list(tmp_path):
+    vid = tmp_path / "clip.mp4"
+    vid.write_bytes(MP4_BYTES)
+    cfg = OmniGenerationConfig(prompt="make the mirror ripple", input_video=vid)
+    kw = cfg.to_interaction_kwargs(video_uri="https://files.example/files/abc123")
+    assert kw["input"][0] == {"type": "document",
+                              "uri": "https://files.example/files/abc123"}
+    assert kw["input"][-1] == {"type": "text", "text": "make the mirror ripple"}
+    assert kw["generation_config"]["video_config"]["task"] == "edit"
+
+
+def test_generate_uploads_input_video_then_creates(tmp_path):
+    vid = tmp_path / "clip.mp4"
+    vid.write_bytes(MP4_BYTES)
+    b64 = base64.b64encode(MP4_BYTES).decode("ascii")
+    interaction = _FakeInteraction(output_video=_FakeVideoContent(data=b64))
+    client = _make_client(interaction)
+
+    uploaded = pytypes.SimpleNamespace(
+        name="files/upload1", uri="https://files.example/files/upload1",
+        state=pytypes.SimpleNamespace(name="ACTIVE"),
+    )
+    upload_calls = []
+
+    def _upload(file):
+        upload_calls.append(file)
+        return uploaded
+
+    client.client.files = pytypes.SimpleNamespace(
+        upload=_upload, get=lambda name: uploaded, download=lambda file: MP4_BYTES,
+    )
+    client.polling_interval = 0
+
+    out = tmp_path / "out.mp4"
+    cfg = OmniGenerationConfig(prompt="ripple the mirror", input_video=vid)
+    result = client.generate_video(cfg, out)
+
+    assert result.success is True
+    assert upload_calls == [str(vid)]
+    sent = client.client.interactions.create_calls[0]
+    assert sent["input"][0] == {"type": "document",
+                                "uri": "https://files.example/files/upload1"}
+
+
+def test_generate_fails_cleanly_if_upload_fails(tmp_path):
+    vid = tmp_path / "clip.mp4"
+    vid.write_bytes(MP4_BYTES)
+    interaction = _FakeInteraction()
+    client = _make_client(interaction)
+    failed = pytypes.SimpleNamespace(
+        name="files/upload1", uri=None, state=pytypes.SimpleNamespace(name="FAILED"),
+    )
+    client.client.files = pytypes.SimpleNamespace(
+        upload=lambda file: failed, get=lambda name: failed,
+        download=lambda file: MP4_BYTES,
+    )
+    client.polling_interval = 0
+
+    cfg = OmniGenerationConfig(prompt="ripple", input_video=vid)
+    result = client.generate_video(cfg, tmp_path / "out.mp4")
+
+    assert result.success is False
+    assert "upload" in result.error.lower() or "failed" in result.error.lower()
+    assert client.client.interactions.create_calls == []  # never created
+
+
+def test_validate_config_checks_input_video_exists(tmp_path):
+    cfg = OmniGenerationConfig(prompt="x")
+    cfg.input_video = tmp_path / "missing.mp4"  # bypass __post_init__
+    client = OmniClient(api_key="test-key")
+    is_valid, error = client.validate_config(cfg)
+    assert is_valid is False
+    assert "missing.mp4" in error

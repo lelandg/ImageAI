@@ -252,7 +252,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--ref-image",
         action="append",
         metavar="PATH",
-        help="Reference image (repeatable; omni: 1, veo: up to 3)",
+        help="Reference image (repeatable; omni: up to 3, veo: up to 3)",
     )
     video_group.add_argument(
         "--last-frame",
@@ -263,6 +263,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--extend",
         metavar="PATH",
         help="Extend this existing video (veo only); implies extend mode",
+    )
+    video_group.add_argument(
+        "--delivery",
+        choices=["inline", "uri"],
+        help="Omni only: video delivery ('uri' recommended for large/720p clips)",
+    )
+    video_group.add_argument(
+        "--refine-from",
+        metavar="INTERACTION_ID",
+        help="Omni only: conversationally refine a previous generation "
+             "(interaction id = 'operation_id' in the JSON sidecar)",
+    )
+    video_group.add_argument(
+        "--edit-video",
+        metavar="PATH",
+        help="Omni only: upload this video and edit it with the prompt",
     )
     video_group.add_argument(
         "--json",

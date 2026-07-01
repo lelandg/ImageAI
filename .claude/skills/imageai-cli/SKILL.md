@@ -1,6 +1,6 @@
 ---
 name: imageai-cli
-description: Use when generating, editing, batching, or scripting images with the ImageAI CLI (`python main.py ...`) from inside the ImageAI repo, across any provider — Google Gemini / Nano Banana, OpenAI (gpt-image-2/1.5/1, DALL·E), Stability AI, or local Stable Diffusion. Covers model selection, sizing/aspect, references & masks, streaming, Batch API, lyrics-to-prompts, gcloud auth, and key management. Trigger whenever the user wants to make or edit an image (or set up/test a provider key) from the command line in this working directory.
+description: Use when generating, editing, batching, or scripting images or videos with the ImageAI CLI (`python main.py ...`) from inside the ImageAI repo, across any provider — Google Gemini / Nano Banana, OpenAI (gpt-image-2/1.5/1, DALL·E), Stability AI, or local Stable Diffusion. Covers model selection, sizing/aspect, references & masks, streaming, Batch API, lyrics-to-prompts, gcloud auth, key management, and video generation (Gemini Omni + Veo: refs, conversational refine, edit-your-own-video). Trigger whenever the user wants to make or edit an image or video (or set up/test a provider key) from the command line in this working directory.
 ---
 
 # imageai-cli
@@ -217,6 +217,46 @@ python main.py --lyrics-to-prompts song.txt \
 
 `--lyrics-model` accepts any LiteLLM id (`gpt-4o`, `gemini/gemini-2.0-flash-exp`,
 `claude-sonnet-4-6`, …). Feed the resulting prompts back into image generation.
+
+## Video generation (`--video`)
+
+Two providers: `--video-provider omni` (Gemini Omni, conversational, audio
+baked in) and `veo` (default). Reuses `-p/--prompt` and `-o/--out`.
+
+```bash
+# Omni text-to-video (16:9 default; audio auto-generated)
+python main.py --video --video-provider omni -p "a marble run, smooth shot" -o marble.mp4
+
+# Subject references (up to 3 images; Omni infers reference_to_video)
+python main.py --video --video-provider omni -p "the cat bats the yarn ball" \
+    --ref-image cat.png --ref-image yarn.png -o cat.mp4
+
+# Conversationally refine the previous clip (id = operation_id in the sidecar)
+python main.py --video --video-provider omni --refine-from int_abc123 \
+    -p "make the violin invisible" -o v2.mp4
+
+# Edit your own footage (uploads via the Files API first)
+python main.py --video --video-provider omni --edit-video input.mp4 \
+    -p "make the mirror ripple like liquid" -o edited.mp4
+
+# Large/720p clips: ask for URI delivery
+python main.py --video --video-provider omni --delivery uri -p "city timelapse" -o city.mp4
+```
+
+### Omni prompt superpowers (in the prompt text, not flags)
+
+- **Image roles**: `<FIRST_FRAME>` (start frame) vs `<IMAGE_REF_N>` (subject refs,
+  N=0,1,2); declare with `[# Sources <FIRST_FRAME>@Image1]`.
+- **Timing**: natural language ("after 3 seconds, ...") or timecodes
+  (`[0-3s] a woman enters`, "every 2s cut to a new angle").
+- **Audio direction**: describe music/sound design in the prompt — Omni
+  soundtracks every clip by default.
+- **On-screen text**: Omni renders readable/animated text ("a neon sign that
+  reads OPEN").
+- Aspect ratio goes in `--aspect` (16:9 or 9:16), **never** in the prompt.
+
+Omni does **not** support: video extension (`--extend` is Veo-only), video
+references > 3s, negative-prompt configs, temperature/system instructions.
 
 ## Keys, testing & auth
 

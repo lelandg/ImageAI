@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.llm_models import resolve_model
 
@@ -55,6 +55,12 @@ _IMAGE_MIME_BY_SUFFIX = {
 }
 
 
+def _file_state(f: Any) -> Optional[str]:
+    """Files-API state as a string ('PROCESSING'/'ACTIVE'/'FAILED')."""
+    state = getattr(f, "state", None)
+    return getattr(state, "name", None) or (str(state) if state else None)
+
+
 class OmniModel(Enum):
     """Available Gemini Omni models.
 
@@ -78,14 +84,31 @@ class OmniGenerationConfig:
     prompt: str = ""
     model: str = ""  # Resolved Omni model ID; defaults via __post_init__.
     aspect_ratio: str = "16:9"  # "16:9" (landscape) or "9:16" (portrait).
-    reference_image: Optional[Path] = None  # Start/reference frame (image-to-video).
+    reference_image: Optional[Path] = None  # Back-compat single ref; folds into reference_images.
+    reference_images: List[Path] = field(default_factory=list)  # Subject/first-frame refs.
+    input_video: Optional[Path] = None  # Existing video to edit (uploaded via Files API).
     previous_interaction_id: Optional[str] = None  # Chain a conversational edit.
-    # Task is inferred from the input shape; kept for logging/metadata only.
-    task: str = "text_to_video"
+    delivery: Optional[str] = None  # None/"inline" (base64) or "uri" (Files API; big clips).
+    # Task sent as generation_config.video_config.task; inferred when left "".
+    task: str = ""
 
     def __post_init__(self):
         if not self.model:
             self.model = OmniModel.default_id()
+
+        if self.reference_image is not None and not self.reference_images:
+            self.reference_images = [Path(self.reference_image)]
+        self.reference_images = [Path(p) for p in self.reference_images]
+
+        max_refs = OmniClient.MODEL_CONSTRAINTS["max_reference_images"]
+        if len(self.reference_images) > max_refs:
+            raise ValueError(
+                f"Gemini Omni supports at most {max_refs} reference image(s); "
+                f"got {len(self.reference_images)}."
+            )
+
+        if not self.task:
+            self.task = self._infer_task()
 
         if self.aspect_ratio not in OmniClient.MODEL_CONSTRAINTS["aspect_ratios"]:
             raise ValueError(
@@ -98,39 +121,70 @@ class OmniGenerationConfig:
             raise ValueError(f"task {self.task!r} invalid. Use one of {valid_tasks}.")
 
         # image_to_video / reference_to_video require a reference image.
-        if self.task in ("image_to_video", "reference_to_video") and not self.reference_image:
+        if self.task in ("image_to_video", "reference_to_video") and not self.reference_images:
             raise ValueError(
                 f"task {self.task!r} requires a reference_image, but none was provided."
             )
 
-    def to_interaction_kwargs(self) -> Dict[str, Any]:
+        if self.task == "edit" and not (self.previous_interaction_id or self.input_video):
+            raise ValueError(
+                "task 'edit' requires previous_interaction_id or input_video."
+            )
+
+        if self.delivery not in (None, "inline", "uri"):
+            raise ValueError(
+                f"delivery {self.delivery!r} invalid. Use 'inline' or 'uri'."
+            )
+
+    def _infer_task(self) -> str:
+        """Infer the video_config task from the input shape (docs task enum)."""
+        if self.input_video is not None or self.previous_interaction_id:
+            return "edit"
+        if len(self.reference_images) >= 2:
+            return "reference_to_video"
+        if self.reference_images:
+            return "image_to_video"
+        return "text_to_video"
+
+    def to_interaction_kwargs(self, video_uri: Optional[str] = None) -> Dict[str, Any]:
         """Build the kwargs for ``client.interactions.create(**kwargs)``.
 
         Matches the documented Gemini Omni request shape: video output and
         aspect ratio are requested via ``response_format={"type": "video",
         "aspect_ratio": ...}`` (a dict). The aspect ratio is never placed in the
-        prompt text (AGENTS.md §9). For image-to-video, ``input`` is a content
-        list ``[{image}, {text}]``; otherwise it is the plain prompt string.
+        prompt text (AGENTS.md §9). With reference images, ``input`` is a content
+        list ``[{image}, ..., {text}]``; otherwise it is the plain prompt string.
+        When ``video_uri`` is given (an uploaded video to edit), a ``document``
+        item referencing that URI is placed first in the content list.
         """
-        # Build the input: a plain string for text-to-video, or a content list
-        # when a reference image is supplied.
-        if self.reference_image is not None:
-            image_bytes = Path(self.reference_image).read_bytes()
+        content: List[Dict[str, Any]] = []
+        if video_uri:
+            # Uploaded video to edit — documented as a "document" item by URI.
+            content.append({"type": "document", "uri": video_uri})
+        for ref in self.reference_images:
+            image_bytes = Path(ref).read_bytes()
             b64 = base64.b64encode(image_bytes).decode("ascii")
-            mime = _IMAGE_MIME_BY_SUFFIX.get(
-                Path(self.reference_image).suffix.lower(), "image/png"
-            )
-            input_payload: Any = [
-                {"type": "image", "data": b64, "mime_type": mime},
-                {"type": "text", "text": self.prompt},
-            ]
+            mime = _IMAGE_MIME_BY_SUFFIX.get(Path(ref).suffix.lower(), "image/png")
+            content.append({"type": "image", "data": b64, "mime_type": mime})
+
+        if content:
+            content.append({"type": "text", "text": self.prompt})
+            input_payload: Any = content
         else:
             input_payload = self.prompt
+
+        response_format: Dict[str, Any] = {
+            "type": "video", "aspect_ratio": self.aspect_ratio
+        }
+        if self.delivery == "uri":
+            # Docs recommend URI delivery for clips over ~4MB / higher res.
+            response_format["delivery"] = "uri"
 
         kwargs: Dict[str, Any] = {
             "model": self.model,
             "input": input_payload,
-            "response_format": {"type": "video", "aspect_ratio": self.aspect_ratio},
+            "response_format": response_format,
+            "generation_config": {"video_config": {"task": self.task}},
         }
         if self.previous_interaction_id:
             kwargs["previous_interaction_id"] = self.previous_interaction_id
@@ -156,6 +210,8 @@ class OmniClient:
     MODEL_CONSTRAINTS = {
         "aspect_ratios": ["16:9", "9:16"],
         "tasks": ["text_to_video", "image_to_video", "reference_to_video", "edit"],
+        "max_reference_images": 3,  # Docs show multi-subject refs (<IMAGE_REF_N>, N=0..2).
+        "deliveries": ["inline", "uri"],
         "duration_range": (3, 10),  # seconds (informational; no SDK duration field)
         "fps": 24,
         "resolution": "720p",
@@ -193,8 +249,11 @@ class OmniClient:
             )
         if config.task not in self.MODEL_CONSTRAINTS["tasks"]:
             return False, f"Task {config.task} not supported."
-        if config.reference_image is not None and not Path(config.reference_image).exists():
-            return False, f"Reference image not found: {config.reference_image}"
+        for ref in (config.reference_images or []):
+            if not Path(ref).exists():
+                return False, f"Reference image not found: {ref}"
+        if config.input_video is not None and not Path(config.input_video).exists():
+            return False, f"Input video not found: {config.input_video}"
         return True, None
 
     async def generate_video_async(self, config: OmniGenerationConfig,
@@ -225,14 +284,19 @@ class OmniClient:
             return result
 
         try:
-            kwargs = config.to_interaction_kwargs()
+            video_uri = None
+            if config.input_video is not None:
+                video_uri = await self._upload_video(Path(config.input_video))
+            kwargs = config.to_interaction_kwargs(video_uri=video_uri)
 
             # Log the full request (AGENTS.md §8 — show everything sent to the LLM).
             self.logger.info("=" * 60)
             self.logger.info(f"Gemini Omni request — model={config.model} task={config.task}")
             self.logger.info(f"  aspect_ratio={config.aspect_ratio} "
-                             f"reference_image={config.reference_image} "
-                             f"previous_interaction_id={config.previous_interaction_id}")
+                             f"reference_images={[str(p) for p in config.reference_images]} "
+                             f"input_video={config.input_video} "
+                             f"previous_interaction_id={config.previous_interaction_id} "
+                             f"delivery={config.delivery}")
             self.logger.info(f"  Prompt:\n{config.prompt}")
             self.logger.info("=" * 60)
 
@@ -340,6 +404,28 @@ class OmniClient:
             f"Omni interaction {interaction_id} did not finish within {self.timeout}s"
         )
         return interaction
+
+    async def _upload_video(self, path: Path) -> str:
+        """Upload a video via the Files API and wait until it is ACTIVE.
+
+        Returns the file URI to reference as a ``document`` input item.
+        Raises RuntimeError if processing fails or times out.
+        """
+        self.logger.info(f"Uploading video for Omni edit: {path}")
+        video_file = await asyncio.to_thread(self.client.files.upload, file=str(path))
+        deadline = time.time() + self.timeout
+        while _file_state(video_file) == "PROCESSING" and time.time() < deadline:
+            await asyncio.sleep(self.polling_interval)
+            video_file = await asyncio.to_thread(
+                self.client.files.get, name=video_file.name
+            )
+        state = _file_state(video_file)
+        if state != "ACTIVE":
+            raise RuntimeError(
+                f"Files API upload of {path} did not become ACTIVE (state={state})."
+            )
+        self.logger.info(f"Omni edit video uploaded: {video_file.uri}")
+        return video_file.uri
 
     @classmethod
     def _extract_video(cls, interaction: Any) -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
