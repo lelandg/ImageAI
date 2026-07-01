@@ -45,9 +45,12 @@ non-terminal).
 requirements.txt` to pull `google-genai>=2.9.0` — an older SDK there is part of why
 the first attempt failed.
 
-**Remaining (deferred):** dedicated "Refine" UI button (plumbing is ready — it just
-needs to pass `omni_edit=True`); uploaded-video editing; `background`/`webhook`;
-SynthID surfacing. See "Deferred / out of scope".
+**Remaining (deferred):** ~~dedicated "Refine" UI button~~ **DONE 2026-06-30** —
+`VideoButton` gained a `refine_requested` signal + "✨ Refine (Omni)…" context-menu
+action (gated on a stored `omni_interaction_id`); `workspace_widget._refine_video_clip()`
+prompts for an edit instruction and re-dispatches with `omni_edit=True`. Uploaded-video
+editing is **dropped** (geo-gated EEA/CH/UK; Leland is out of region). `background`/`webhook`
+and SynthID surfacing remain optional. See "Deferred / out of scope".
 
 **Goal:** Add "Gemini Omni" as a fourth video provider on the Video tab — text/image/reference-to-video plus conversational editing — driven through Google's new **Interactions API** (`client.interactions.create`, model `gemini-omni-flash-preview`).
 
@@ -421,11 +424,12 @@ Create `tests/video/test_video_provider_persistence.py` that round-trips a proje
 
 ## Deferred / out of scope (record so nothing is silently dropped)
 
-- **Uploaded-video editing** (Files-API `document` input) — geo-gated (EEA/CH/UK); larger UI surface (file upload + processing-state poll). Follow-up.
-- **`background=true` + `webhook_config`** async execution — current Veo/Sora flow long-polls on a worker thread; adopt only if Omni latency makes it necessary.
-- **`stream=True`** incremental events — not needed for finished-MP4 delivery.
-- **SynthID watermark surfacing** in the UI — note-only for now.
-- **Multimodal Omni features beyond video** (audio-in/out as an LLM provider, scene analysis) — out of scope for the Video tab per the reporter; would need the deferred brainstorming pass.
+- **Conversational "Refine" UI** — ✅ **DONE 2026-06-30.** Client/dispatch plumbing was already present (`omni_edit` → `previous_interaction_id` chaining); added the missing UI trigger (`VideoButton.refine_requested` + context-menu action + `_refine_video_clip`).
+- **Uploaded-video editing** (Files-API `document` input) — ❌ **DROPPED** (was: follow-up). Geo-gated to EEA/CH/UK and Leland is out of region; also a larger UI surface (file upload + processing-state poll). Not building.
+- **Multimodal Omni features beyond video** (audio-in/out as an LLM provider, scene analysis) — ❌ **DROPPED** per Leland (2026-06-30). Out of scope for the Video tab.
+- **`background=true` + `webhook_config`** async execution — *optional nice-to-have.* Current Veo/Sora flow long-polls on a worker thread; adopt only if Omni latency makes it necessary.
+- **`stream=True`** incremental events — *optional nice-to-have.* Not needed for finished-MP4 delivery.
+- **SynthID watermark surfacing** in the UI — *optional nice-to-have.* The watermark is always embedded server-side; this is just a visible badge/verify affordance. Note-only for now.
 
 ---
 

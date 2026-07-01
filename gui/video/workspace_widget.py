@@ -3669,8 +3669,11 @@ class WorkspaceWidget(QWidget):
             video_path = scene.video_clip if scene.video_clip else None
             first_frame_path = scene.first_frame if hasattr(scene, 'first_frame') else None
             uses_veo_31 = scene.uses_veo_31() if hasattr(scene, 'uses_veo_31') else False
+            # A clip is Omni-refinable once Omni has generated it and stored an
+            # interaction id (needed to chain the conversational edit).
+            is_omni = bool(getattr(scene, 'metadata', None) and scene.metadata.get('omni_interaction_id'))
 
-            video_btn.set_video_state(video_path, first_frame_path, has_video_prompt, uses_veo_31)
+            video_btn.set_video_state(video_path, first_frame_path, has_video_prompt, uses_veo_31, is_omni=is_omni)
 
             # Install event filter for double-click detection
             video_btn.installEventFilter(self)
@@ -3684,6 +3687,7 @@ class WorkspaceWidget(QWidget):
             video_btn.play_requested.connect(lambda idx=i: self._play_video_in_panel(idx))
             video_btn.select_existing_requested.connect(lambda idx=i: self._select_existing_video(idx))
             video_btn.extend_requested.connect(lambda idx=i: self._extend_video_clip(idx))
+            video_btn.refine_requested.connect(lambda idx=i: self._refine_video_clip(idx))
 
             self.scene_table.setCellWidget(i, 4, self._create_top_aligned_widget(video_btn))
 
@@ -4632,6 +4636,73 @@ class WorkspaceWidget(QWidget):
         # IMPORTANT: For single scene generation, never use previous scene's last frame
         # The start_frame is explicitly set above from the scene's approved_image/images
         # The use_prev_last_frame setting should only apply during batch/export operations
+        params['use_prev_last_frame'] = False
+
+        self.generation_requested.emit("generate_video_clip", params)
+
+    def _refine_video_clip(self, scene_index: int):
+        """
+        Conversationally refine an existing Gemini Omni clip.
+
+        Prompts the user for an edit instruction and re-dispatches Omni
+        generation with ``omni_edit=True`` so the worker chains the edit on the
+        clip's stored ``omni_interaction_id`` (Interactions API conversational
+        editing). The original clip's interaction id must already exist on the
+        scene metadata, which is how the Refine action is gated in the first place.
+        """
+        if not self.current_project or scene_index >= len(self.current_project.scenes):
+            return
+
+        scene = self.current_project.scenes[scene_index]
+
+        # Guard: refinement requires a prior Omni interaction to chain from.
+        previous_interaction_id = (
+            scene.metadata.get('omni_interaction_id')
+            if getattr(scene, 'metadata', None) else None
+        )
+        if not previous_interaction_id:
+            from gui.common.dialog_manager import get_dialog_manager
+            get_dialog_manager(self).show_warning(
+                "Cannot Refine",
+                "This clip has no Gemini Omni interaction to refine.\n"
+                "Generate the clip with Gemini Omni first, then refine it."
+            )
+            return
+
+        # Ask for the edit instruction.
+        instruction, ok = QInputDialog.getMultiLineText(
+            self,
+            f"Refine Scene #{scene_index + 1} (Gemini Omni)",
+            "Describe the change to make to this clip\n"
+            "(e.g. \"make it night\", \"add falling snow\", \"slower camera pan\"):",
+            ""
+        )
+        if not ok:
+            return
+        instruction = instruction.strip()
+        if not instruction:
+            from gui.common.dialog_manager import get_dialog_manager
+            get_dialog_manager(self).show_warning(
+                "No Instruction",
+                "Please enter an edit instruction to refine the clip."
+            )
+            return
+
+        self.logger.info(
+            f"Refining Omni clip for scene {scene_index + 1} "
+            f"(previous_interaction_id={previous_interaction_id}): {instruction[:100]}"
+        )
+
+        # Build params mirroring generate_video_clip, but force the Omni edit path.
+        params = self.gather_generation_params()
+        params['scene_indices'] = [scene_index]
+        params['video_provider'] = 'Gemini Omni'  # Force Omni regardless of combo state
+        params['omni_edit'] = True                  # Worker chains on omni_interaction_id
+        params['video_prompt'] = instruction        # The edit instruction is the prompt
+        params['duration'] = scene.duration_sec
+        params['generate_video'] = True
+        params['start_frame'] = None                # Edits chain on the interaction, not a frame
+        params['end_frame'] = None
         params['use_prev_last_frame'] = False
 
         self.generation_requested.emit("generate_video_clip", params)
