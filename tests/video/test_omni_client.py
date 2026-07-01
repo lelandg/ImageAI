@@ -391,3 +391,87 @@ def test_delivery_inline_omits_key():
 def test_invalid_delivery_rejected():
     with pytest.raises(ValueError, match="delivery"):
         OmniGenerationConfig(prompt="x", delivery="carrier-pigeon")
+
+
+# --- Edit uploaded videos (Files API document input) --------------------------
+
+def test_input_video_infers_edit_task(tmp_path):
+    vid = tmp_path / "clip.mp4"
+    vid.write_bytes(MP4_BYTES)
+    cfg = OmniGenerationConfig(prompt="make the mirror ripple", input_video=vid)
+    assert cfg.task == "edit"
+
+
+def test_document_uri_first_in_content_list(tmp_path):
+    vid = tmp_path / "clip.mp4"
+    vid.write_bytes(MP4_BYTES)
+    cfg = OmniGenerationConfig(prompt="make the mirror ripple", input_video=vid)
+    kw = cfg.to_interaction_kwargs(video_uri="https://files.example/files/abc123")
+    assert kw["input"][0] == {"type": "document",
+                              "uri": "https://files.example/files/abc123"}
+    assert kw["input"][-1] == {"type": "text", "text": "make the mirror ripple"}
+    assert kw["generation_config"]["video_config"]["task"] == "edit"
+
+
+def test_generate_uploads_input_video_then_creates(tmp_path):
+    vid = tmp_path / "clip.mp4"
+    vid.write_bytes(MP4_BYTES)
+    b64 = base64.b64encode(MP4_BYTES).decode("ascii")
+    interaction = _FakeInteraction(output_video=_FakeVideoContent(data=b64))
+    client = _make_client(interaction)
+
+    uploaded = pytypes.SimpleNamespace(
+        name="files/upload1", uri="https://files.example/files/upload1",
+        state=pytypes.SimpleNamespace(name="ACTIVE"),
+    )
+    upload_calls = []
+
+    def _upload(file):
+        upload_calls.append(file)
+        return uploaded
+
+    client.client.files = pytypes.SimpleNamespace(
+        upload=_upload, get=lambda name: uploaded, download=lambda file: MP4_BYTES,
+    )
+    client.polling_interval = 0
+
+    out = tmp_path / "out.mp4"
+    cfg = OmniGenerationConfig(prompt="ripple the mirror", input_video=vid)
+    result = client.generate_video(cfg, out)
+
+    assert result.success is True
+    assert upload_calls == [str(vid)]
+    sent = client.client.interactions.create_calls[0]
+    assert sent["input"][0] == {"type": "document",
+                                "uri": "https://files.example/files/upload1"}
+
+
+def test_generate_fails_cleanly_if_upload_fails(tmp_path):
+    vid = tmp_path / "clip.mp4"
+    vid.write_bytes(MP4_BYTES)
+    interaction = _FakeInteraction()
+    client = _make_client(interaction)
+    failed = pytypes.SimpleNamespace(
+        name="files/upload1", uri=None, state=pytypes.SimpleNamespace(name="FAILED"),
+    )
+    client.client.files = pytypes.SimpleNamespace(
+        upload=lambda file: failed, get=lambda name: failed,
+        download=lambda file: MP4_BYTES,
+    )
+    client.polling_interval = 0
+
+    cfg = OmniGenerationConfig(prompt="ripple", input_video=vid)
+    result = client.generate_video(cfg, tmp_path / "out.mp4")
+
+    assert result.success is False
+    assert "upload" in result.error.lower() or "failed" in result.error.lower()
+    assert client.client.interactions.create_calls == []  # never created
+
+
+def test_validate_config_checks_input_video_exists(tmp_path):
+    cfg = OmniGenerationConfig(prompt="x")
+    cfg.input_video = tmp_path / "missing.mp4"  # bypass __post_init__
+    client = OmniClient(api_key="test-key")
+    is_valid, error = client.validate_config(cfg)
+    assert is_valid is False
+    assert "missing.mp4" in error
