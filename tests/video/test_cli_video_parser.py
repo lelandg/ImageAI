@@ -43,3 +43,13 @@ def test_run_cli_routes_to_video_command():
         rc = run_cli(args)
     assert rc == 0
     m.assert_called_once()
+
+
+def test_refine_and_edit_video_flags_parse():
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        ["--video", "-p", "x", "--video-provider", "omni",
+         "--refine-from", "int_1", "--edit-video", "clip.mp4"]
+    )
+    assert args.refine_from == "int_1"
+    assert args.edit_video == "clip.mp4"

@@ -60,6 +60,13 @@ def build_omni_config(args):
         kwargs["reference_images"] = refs
     if getattr(args, "delivery", None):
         kwargs["delivery"] = args.delivery
+    if getattr(args, "refine_from", None):
+        kwargs["previous_interaction_id"] = args.refine_from
+    if getattr(args, "edit_video", None):
+        vid = Path(args.edit_video).expanduser()
+        if not vid.exists():
+            raise VideoCliError(f"--edit-video video not found: {vid}")
+        kwargs["input_video"] = vid
     try:
         return OmniGenerationConfig(**kwargs)  # __post_init__ validates aspect/task; infers task
     except ValueError as e:
@@ -84,6 +91,10 @@ def build_veo_config(args):
     from core.video.veo_client import VeoGenerationConfig
     if getattr(args, "delivery", None):
         raise VideoCliError("--delivery is only supported with --video-provider omni.")
+    if getattr(args, "refine_from", None):
+        raise VideoCliError("--refine-from is only supported with --video-provider omni.")
+    if getattr(args, "edit_video", None):
+        raise VideoCliError("--edit-video is only supported with --video-provider omni.")
     refs = _ref_images(args)
     if len(refs) > VEO_MAX_REFS:
         raise VideoCliError(

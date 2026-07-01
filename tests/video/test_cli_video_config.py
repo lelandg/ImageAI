@@ -78,3 +78,33 @@ def test_veo_default_model():
     from core.video.veo_client import VeoModel
     cfg = build_veo_config(_ns())
     assert cfg.model == VeoModel.VEO_3_1_GENERATE
+
+
+def test_omni_refine_from_maps_to_previous_interaction():
+    cfg = build_omni_config(_ns(prompt="make the violin invisible",
+                                refine_from="int_abc123"))
+    assert cfg.previous_interaction_id == "int_abc123"
+    assert cfg.task == "edit"
+
+
+def test_omni_edit_video_maps_to_input_video(tmp_path):
+    vid = tmp_path / "clip.mp4"
+    vid.write_bytes(b"\x00\x00\x00\x18ftypmp42fake")
+    cfg = build_omni_config(_ns(prompt="ripple the mirror", edit_video=str(vid)))
+    assert cfg.input_video == vid
+    assert cfg.task == "edit"
+
+
+def test_omni_edit_video_missing_file_errors(tmp_path):
+    with pytest.raises(VideoCliError, match="not found"):
+        build_omni_config(_ns(prompt="x", edit_video=str(tmp_path / "nope.mp4")))
+
+
+def test_veo_rejects_refine_from():
+    with pytest.raises(VideoCliError, match="omni"):
+        build_veo_config(_ns(prompt="x", refine_from="int_abc"))
+
+
+def test_veo_rejects_edit_video():
+    with pytest.raises(VideoCliError, match="omni"):
+        build_veo_config(_ns(prompt="x", edit_video="clip.mp4"))

@@ -270,6 +270,17 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Omni only: video delivery ('uri' recommended for large/720p clips)",
     )
     video_group.add_argument(
+        "--refine-from",
+        metavar="INTERACTION_ID",
+        help="Omni only: conversationally refine a previous generation "
+             "(interaction id = 'operation_id' in the JSON sidecar)",
+    )
+    video_group.add_argument(
+        "--edit-video",
+        metavar="PATH",
+        help="Omni only: upload this video and edit it with the prompt",
+    )
+    video_group.add_argument(
         "--json",
         action="store_true",
         help="Emit a single machine-readable JSON result on stdout",
