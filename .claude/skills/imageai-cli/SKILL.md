@@ -1,6 +1,6 @@
 ---
 name: imageai-cli
-description: Use when generating, editing, batching, or scripting images with the ImageAI CLI (`python main.py ...`) from inside the ImageAI repo, across any provider — Google Gemini / Nano Banana, OpenAI (gpt-image-2/1.5/1, DALL·E), Stability AI, or local Stable Diffusion. Covers model selection, sizing/aspect, references & masks, streaming, Batch API, lyrics-to-prompts, gcloud auth, and key management. Trigger whenever the user wants to make or edit an image (or set up/test a provider key) from the command line in this working directory.
+description: Use when generating, editing, batching, or scripting images or videos with the ImageAI CLI (`python main.py ...`) from inside the ImageAI repo, across any provider — Google Gemini / Nano Banana, OpenAI (gpt-image-2/1.5/1, DALL·E), Stability AI, or local Stable Diffusion. Covers model selection, sizing/aspect, references & masks, streaming, Batch API, lyrics-to-prompts, gcloud auth, key management, and video generation (Gemini Omni + Veo: refs, conversational refine, edit-your-own-video). Trigger whenever the user wants to make or edit an image or video (or set up/test a provider key) from the command line in this working directory.
 ---
 
 # imageai-cli
