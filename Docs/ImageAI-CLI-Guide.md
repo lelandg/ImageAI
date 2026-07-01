@@ -42,13 +42,14 @@ large section of agent-oriented use cases and recipes at the end.
 
 ```bash
 # Simplest possible image (default provider google, default model Nano Banana)
-python main.py -p "a red fox in snow"
+python main.py -p "a paper crane unfolding into a real crane, mid-transformation"
 
 # Pick provider + model + explicit output
-python main.py --provider openai -m gpt-image-2 -p "a red fox in snow" -o fox.png
+python main.py --provider openai -m gpt-image-2 \
+    -p "a paper crane unfolding into a real crane, mid-transformation" -o crane.png
 
 # A single video clip (default video provider: Veo)
-python main.py --video -p "a red fox running through snow" -o fox.mp4
+python main.py --video -p "the paper crane takes flight over an origami ocean" -o crane.mp4
 
 # Verify a provider's API key works
 python main.py --provider openai -t
@@ -97,7 +98,8 @@ Default provider **`google`**, default model **`gemini-2.5-flash-image`**.
 
 ```bash
 # Provider + model + N images in one call
-python main.py --provider openai -m gpt-image-2 -n 4 -p "logo ideas" -o logo.png
+python main.py --provider openai -m gpt-image-2 -n 4 \
+    -p "logo concepts for 'Moonshot Coffee' — a crescent moon pouring espresso" -o logo.png
 ```
 
 ### Google Gemini (Nano Banana)
@@ -110,14 +112,14 @@ python main.py --provider openai -m gpt-image-2 -n 4 -p "logo ideas" -o logo.png
 
 ```bash
 # Default Nano Banana
-python main.py -p "watercolor harbor at dawn" -o harbor.png
+python main.py -p "watercolor harbor where the moored boats are floating teacups" -o harbor.png
 
 # Nano Banana Pro, 16:9 (the provider maps --size to an aspect ratio)
 python main.py -m gemini-3-pro-image-preview --size 1920x1080 \
-    -p "cinematic desert highway" -o road.png
+    -p "cinematic desert highway at dusk, an abandoned drive-in glowing on the horizon" -o road.png
 
 # gcloud Application Default Credentials instead of an API key
-python main.py --auth-mode gcloud -p "aurora over pines" -o aurora.png
+python main.py --auth-mode gcloud -p "aurora borealis reflected in a wolf's eye, macro" -o aurora.png
 ```
 
 - **Aspect ratio, not pixels in the prompt.** Set sizing via `--size`; Gemini
@@ -141,13 +143,14 @@ python main.py --auth-mode gcloud -p "aurora over pines" -o aurora.png
 | `dall-e-2` | Legacy. |
 
 ```bash
-# gpt-image-2 with explicit reasoning level
+# gpt-image-2 with explicit reasoning level (it excels at legible text)
 python main.py --provider openai -m gpt-image-2 --quality high \
-    -p "complex composition with legible text" -o gen.png
+    -p "a vintage seed catalog page for plants that grow musical instruments, with readable labels" \
+    -o catalog.png
 
 # DALL·E 3 in HD
 python main.py --provider openai -m dall-e-3 --quality hd \
-    -p "isometric city" -o city.png
+    -p "isometric cutaway of a wizard's tower, each floor a different season" -o tower.png
 ```
 
 ### Stability AI (hosted)
@@ -161,7 +164,7 @@ python main.py --provider openai -m dall-e-3 --quality hd \
 
 ```bash
 python main.py --provider stability -m stable-diffusion-xl-1024-v1-0 \
-    -p "fantasy castle, concept art" -o castle.png
+    -p "a castle carved into the back of a breaching stone whale, concept art" -o castle.png
 ```
 
 ### Local Stable Diffusion (offline)
@@ -176,7 +179,7 @@ python main.py --provider stability -m stable-diffusion-xl-1024-v1-0 \
 
 ```bash
 python main.py --provider local_sd -m segmind/SSD-1B \
-    -p "studio portrait, soft light" -o portrait.png
+    -p "studio portrait of a clockwork owl, soft rim light on brass feathers" -o portrait.png
 ```
 
 - No API key. **First run downloads multi-GB weights from Hugging Face.**
@@ -191,17 +194,18 @@ python main.py --provider local_sd -m segmind/SSD-1B \
 ```bash
 # Custom size (edges multiples of 16, max 3840, aspect <=3:1, pixels 655K-8.3M)
 python main.py --provider openai -m gpt-image-2 \
-    --custom-size 2048x1152 -p "ultrawide wallpaper" -o gen.png
+    --custom-size 2048x1152 \
+    -p "ultrawide wallpaper: a library whose shelves curve into a Möbius strip" -o gen.png
 
 # Streaming partials -> writes gen.p0.png, gen.p1.png, ... then gen.png
 python main.py --provider openai -m gpt-image-2 \
     --stream-partials --quality high \
-    -p "intricate technical diagram" -o gen.png
+    -p "exploded technical diagram of a mechanical hummingbird, annotated" -o gen.png
 
 # JPEG output with compression
 python main.py --provider openai -m gpt-image-2 \
     --output-format jpeg --output-compression 85 \
-    -p "photorealistic landscape" -o landscape.jpg
+    -p "photorealistic terraced tea fields under drifting morning fog" -o landscape.jpg
 
 # Permissive moderation
 python main.py --provider openai -m gpt-image-2 --moderation low \
@@ -231,12 +235,12 @@ Pass the snapshot ID as `-m` for bit-for-bit reruns across model releases.
 # Multi-reference compose (up to 10 images) -> /v1/images/edits
 python main.py --provider openai -m gpt-image-2 \
     --reference ref/a.png --reference ref/b.png \
-    -p "combine these styles" -o composed.png
+    -p "paint the subject of the first image in the brushwork of the second" -o composed.png
 
 # Mask inpainting (transparent pixels in the mask = the edit zone)
 python main.py --provider openai -m gpt-image-2 \
     --reference base.png --mask mask.png \
-    -p "replace the sky with stormy clouds" -o edited.png
+    -p "replace the sky with a migration of glowing paper lanterns" -o edited.png
 ```
 
 `--reference` is repeatable (≤10) and routes to the edits endpoint; `--mask`
@@ -266,25 +270,27 @@ and `-o/--out`.
 
 ```bash
 # Text -> video (Veo is the default video provider)
-python main.py --video -p "a fox running through snow" -o fox.mp4
+python main.py --video -p "a clockwork whale surfacing through a sea of clouds" -o whale.mp4
 
 # Gemini Omni, portrait, with audio baked into the output
 python main.py --video --video-provider omni --aspect 9:16 \
-    -p "neon city at night" -o city.mp4
+    -p "rain-slick neon alley at night, a lone saxophone echoing between the buildings" \
+    -o alley.mp4
 
 # Reference images (up to 3 for both providers; 2+ on Omni = subject references)
-python main.py --video -p "she walks toward camera" -o walk.mp4 \
-    --ref-image style.png --ref-image character.png
+python main.py --video -p "she walks toward camera through falling cherry blossoms" \
+    -o walk.mp4 --ref-image style.png --ref-image character.png
 
 # Extend an existing clip (Veo only) — continues from the given video
-python main.py --video --extend fox.mp4 -p "the fox leaps over a log" -o fox2.mp4
+python main.py --video --extend whale.mp4 \
+    -p "the whale dives, clouds cascading off its brass fins" -o whale2.mp4
 
 # Veo frame-to-frame interpolation (end frame)
-python main.py --video -p "sunrise timelapse" -o sunrise.mp4 \
-    --ref-image start.png --last-frame end.png
+python main.py --video -p "an acorn becomes an oak, four seasons in eight seconds" \
+    -o oak.mp4 --ref-image acorn.png --last-frame oak.png
 
 # Machine-readable result for agents (exactly one JSON object on stdout)
-python main.py --video -p "a fox in snow" -o fox.mp4 --json
+python main.py --video -p "a lighthouse beam sweeping across a fog bank" -o beam.mp4 --json
 
 # Conversationally refine the previous clip (Omni only; id = operation_id in the sidecar)
 python main.py --video --video-provider omni --refine-from int_abc123 \
@@ -295,7 +301,9 @@ python main.py --video --video-provider omni --edit-video input.mp4 \
     -p "make the mirror ripple like liquid" -o edited.mp4
 
 # Large/720p clips: ask for URI delivery (Omni only)
-python main.py --video --video-provider omni --delivery uri -p "city timelapse" -o city.mp4
+python main.py --video --video-provider omni --delivery uri \
+    -p "aerial city timelapse, day to night, windows lighting up like constellations" \
+    -o city.mp4
 ```
 
 ### Omni prompt superpowers (in the prompt text, not flags)
@@ -348,7 +356,7 @@ references > 3s, negative-prompt configs, temperature/system instructions.
 ```json
 {
   "status": "completed",
-  "output_path": "fox.mp4",
+  "output_path": "beam.mp4",
   "provider": "veo",
   "model": "veo-3.1-generate-001",
   "aspect_ratio": "16:9",
@@ -384,7 +392,8 @@ description, fill regions, export to PDF/PNG):
 
 ```bash
 # Design a layout project (.json) from a text description
-python main.py --layout-design "3-panel comic, action scene" -o comic.json \
+python main.py --layout-design "3-panel comic: a raccoon pulls off a birthday-cake heist" \
+    -o comic.json \
     --content-kind comic --page-size "US Comic" --orientation portrait --dpi 300
 
 # Fill a layout's regions with generated images

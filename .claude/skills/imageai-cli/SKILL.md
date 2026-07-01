@@ -1,17 +1,21 @@
 ---
 name: imageai-cli
-description: Use when generating, editing, batching, or scripting images or videos with the ImageAI CLI (`python main.py ...`) from inside the ImageAI repo, across any provider — Google Gemini / Nano Banana, OpenAI (gpt-image-2/1.5/1, DALL·E), Stability AI, or local Stable Diffusion. Covers model selection, sizing/aspect, references & masks, streaming, Batch API, lyrics-to-prompts, gcloud auth, key management, and video generation (Gemini Omni + Veo: refs, conversational refine, edit-your-own-video). Trigger whenever the user wants to make or edit an image or video (or set up/test a provider key) from the command line in this working directory.
+description: Use when generating, editing, batching, or scripting images, videos, or page layouts with the ImageAI CLI (`python main.py ...`) from inside the ImageAI repo, across any provider — Google Gemini / Nano Banana, OpenAI (gpt-image-2/1.5/1, DALL·E), Stability AI, or local Stable Diffusion. Covers model selection, sizing/aspect, references & masks, streaming, Batch API, lyrics-to-prompts, gcloud auth, key management, video generation (Gemini Omni + Veo: refs, extend, frame interpolation, conversational refine, edit-your-own-video, --json output contract), and the publication layout engine (--layout-design/--layout-fill/--layout-export for comics, magazines, PDFs). Trigger whenever the user wants to make or edit an image, video, or layout (or set up/test a provider key) from the command line in this working directory.
 ---
 
 # imageai-cli
 
 The cheat-sheet for driving **everything** the ImageAI CLI can do from
-`python main.py`. Four image providers, the lyrics-to-prompts pipeline, the
-OpenAI Batch API, and key/auth management — all from one entry point.
+`python main.py`. Four image providers, two video providers, the publication
+layout engine, the lyrics-to-prompts pipeline, the OpenAI Batch API, and
+key/auth management — all from one entry point.
 
 > GUI is the default when no action flag is given. Add `--gui` to force it, or
-> pass `-p/--prompt`, `-t/--test`, `-s/--set-key`, or `--lyrics-to-prompts` to
-> stay in the CLI.
+> pass `-p/--prompt`, `--video`, `-t/--test`, `-s/--set-key`,
+> `--lyrics-to-prompts`, or any `--layout-*` action to stay in the CLI.
+
+Full documentation (agent recipes, output contracts, exit codes):
+`Docs/ImageAI-CLI-Guide.md`.
 
 ## Pick a provider first
 
@@ -224,24 +228,53 @@ Two providers: `--video-provider omni` (Gemini Omni, conversational, audio
 baked in) and `veo` (default). Reuses `-p/--prompt` and `-o/--out`.
 
 ```bash
+# Veo text-to-video (default provider)
+python main.py --video -p "a fox running through snow" -o fox.mp4
+
 # Omni text-to-video (16:9 default; audio auto-generated)
 python main.py --video --video-provider omni -p "a marble run, smooth shot" -o marble.mp4
 
-# Subject references (up to 3 images; Omni infers reference_to_video)
+# Subject references (up to 3 images for either provider)
 python main.py --video --video-provider omni -p "the cat bats the yarn ball" \
     --ref-image cat.png --ref-image yarn.png -o cat.mp4
 
-# Conversationally refine the previous clip (id = operation_id in the sidecar)
+# Extend an existing clip (Veo only; extensions render at 720p)
+python main.py --video --extend fox.mp4 -p "the fox leaps over a log" -o fox2.mp4
+
+# Frame-to-frame interpolation (Veo only: start ref + end frame)
+python main.py --video -p "sunrise timelapse" -o sunrise.mp4 \
+    --ref-image start.png --last-frame end.png
+
+# Conversationally refine the previous clip (Omni; id = operation_id in the sidecar)
 python main.py --video --video-provider omni --refine-from int_abc123 \
     -p "make the violin invisible" -o v2.mp4
 
-# Edit your own footage (uploads via the Files API first)
+# Edit your own footage (Omni; uploads via the Files API first)
 python main.py --video --video-provider omni --edit-video input.mp4 \
     -p "make the mirror ripple like liquid" -o edited.mp4
 
-# Large/720p clips: ask for URI delivery
+# Large/720p clips: ask for URI delivery (Omni only)
 python main.py --video --video-provider omni --delivery uri -p "city timelapse" -o city.mp4
+
+# Machine-readable result (exactly one JSON object on stdout; logs on stderr)
+python main.py --video -p "a fox in snow" -o fox.mp4 --json
 ```
+
+### Provider capability split
+
+| Capability | Omni | Veo (default) |
+|------------|------|---------------|
+| `--ref-image` (≤3) | ✅ | ✅ |
+| `--last-frame` interpolation | ❌ | ✅ |
+| `--extend` existing clip | ❌ | ✅ (720p) |
+| `--refine-from` / `--edit-video` / `--delivery uri` | ✅ | ❌ |
+| Audio in output | ✅ always | ✅ (Veo 3) |
+| Aspect ratios | 16:9, 9:16 | 16:9, 9:16, 1:1 |
+| `--auth-mode gcloud` | ❌ (API key only) | ✅ |
+
+Clip length is model-fixed (~8 s) — no `--duration` knob; chain `--extend`
+(Veo) for longer sequences. `--video-model` overrides the resolved default
+model. Wrong provider/flag pairings fail fast with exit code 2.
 
 ### Omni prompt superpowers (in the prompt text, not flags)
 
@@ -257,6 +290,41 @@ python main.py --video --video-provider omni --delivery uri -p "city timelapse" 
 
 Omni does **not** support: video extension (`--extend` is Veo-only), video
 references > 3s, negative-prompt configs, temperature/system instructions.
+
+## Publication layout engine (`--layout-*`)
+
+Design a page from a text description, fill its image regions, export to
+PDF/PNG — fully headless.
+
+```bash
+# Design a layout project (.json) from a description (requires -o)
+python main.py --layout-design "3-panel comic, action scene" -o comic.json \
+    --content-kind comic --page-size "US Comic" --orientation portrait --dpi 300
+
+# Generate images for every prompted region in the project
+python main.py --layout-fill comic.json
+
+# Render to PDF or PNG (the -o extension picks the format)
+python main.py --layout-export comic.json -o comic.pdf
+```
+
+- `--content-kind`: `children | comic | comic_strip | magazine | newspaper |
+  scientific | custom` (default custom).
+- `--page-size` (Letter, A4, A5, Tabloid, US Comic, …), `--orientation`
+  (portrait/landscape), `--dpi` (default 300).
+- `--layout-design` uses a **text** LLM; override with `--layout-llm-provider`
+  (`openai | anthropic | google | ollama | lmstudio`) and `--layout-llm-model`.
+- `--layout-fill` uses the normal image `--provider`/`-m` selection.
+
+## Agent output contract
+
+- **`--json` (video):** stdout carries exactly one JSON object
+  (`status, output_path, provider, model, aspect_ratio, operation_id, error`);
+  all logs/progress go to **stderr**. Parse stdout only.
+- **Exit codes (video):** `0` success, `1` generation failed, `2` validation /
+  user error (bad flag combo, missing key), `3` unexpected exception.
+- **Sidecars:** every image and video gets a `<output>.json` sidecar with
+  prompt, resolved model, and ids — durable metadata even without `--json`.
 
 ## Keys, testing & auth
 
@@ -300,8 +368,26 @@ Key resolution order: **CLI flag (`-k`/`-K`) > stored config > environment**.
 | `--stream-partials` | flag | gpt-image-2 only; writes `out.pN.png`. |
 | `--batch` / `--batch-status` / `--batch-fetch` | flag / JOB_ID | OpenAI Batch API. |
 | `--lyrics-to-prompts` | LYRICS_FILE | Plus `--lyrics-model/-temperature/-style/-output`. |
-| `--auth-mode` | `api-key` \| `gcloud` | `gcloud` is Google-only. |
+| `--video` | flag | Video mode; reuses `-p`/`-o`. |
+| `--video-provider` | `omni` \| `veo` | Default `veo`. |
+| `--video-model` | model id | Optional override of the resolved default. |
+| `--aspect` | e.g. `16:9`, `9:16` | Validated per video provider. |
+| `--ref-image` | path (repeatable ≤3) | Video reference images. |
+| `--last-frame` | path | Veo-only end frame (interpolation). |
+| `--extend` | path | Veo-only: extend this existing clip. |
+| `--delivery` | `inline` \| `uri` | Omni-only; `uri` for large/720p clips. |
+| `--refine-from` | INTERACTION_ID | Omni-only conversational refine. |
+| `--edit-video` | path | Omni-only: upload + edit your own footage. |
+| `--json` | flag | Video: one JSON object on stdout. |
+| `--layout-design` | DESCRIPTION | New layout project (requires `-o`). |
+| `--layout-fill` | PROJECT | Generate images for prompted regions. |
+| `--layout-export` | PROJECT | Render to PDF/PNG (requires `-o`). |
+| `--content-kind` / `--page-size` / `--orientation` / `--dpi` | see layout section | `--layout-design` options. |
+| `--layout-llm-provider` / `--layout-llm-model` | see layout section | Text-LLM override for design. |
+| `--auth-mode` | `api-key` \| `gcloud` | Google-only (images + Veo; not Omni). |
 | `-k`/`-K`/`-s`/`-t` | — | Key inline / from file / store / test. |
+| `--help-api-key` | flag | API-key setup instructions. |
+| `--version` | flag | Print version and exit. |
 | `--gui` | flag | Force the GUI. |
 
 ## Anti-footguns
@@ -323,6 +409,12 @@ Key resolution order: **CLI flag (`-k`/`-K`) > stored config > environment**.
   are gpt-image-2 values. Don't cross them.
 - **local_sd first run** downloads multi-GB weights and may need GPU extras — warn
   the user; don't `pip install` system deps without asking.
+- **Video flag/provider pairing:** `--extend`/`--last-frame` need `veo`;
+  `--refine-from`/`--edit-video`/`--delivery` need `omni`. Mismatches exit 2.
+- **In `--json` mode, parse stdout only** — logs and progress are on stderr by
+  design; never grep stdout for progress text.
+- **`--layout-design` and `--layout-export` require `-o`**; `--layout-fill`
+  writes into the project file in place.
 
 ## GUI entry points
 
