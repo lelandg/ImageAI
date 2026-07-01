@@ -252,7 +252,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--ref-image",
         action="append",
         metavar="PATH",
-        help="Reference image (repeatable; omni: 1, veo: up to 3)",
+        help="Reference image (repeatable; omni: up to 3, veo: up to 3)",
     )
     video_group.add_argument(
         "--last-frame",
@@ -263,6 +263,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--extend",
         metavar="PATH",
         help="Extend this existing video (veo only); implies extend mode",
+    )
+    video_group.add_argument(
+        "--delivery",
+        choices=["inline", "uri"],
+        help="Omni only: video delivery ('uri' recommended for large/720p clips)",
     )
     video_group.add_argument(
         "--json",

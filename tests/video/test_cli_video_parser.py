@@ -27,6 +27,14 @@ def test_video_provider_defaults_to_veo():
     assert args.video_provider == "veo"
 
 
+def test_delivery_flag_parses():
+    parser = build_arg_parser()
+    args = parser.parse_args(
+        ["--video", "-p", "x", "--video-provider", "omni", "--delivery", "uri"]
+    )
+    assert args.delivery == "uri"
+
+
 def test_run_cli_routes_to_video_command():
     parser = build_arg_parser()
     args = parser.parse_args(["--video", "-p", "x", "-o", "x.mp4"])
