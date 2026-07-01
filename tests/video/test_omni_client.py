@@ -366,3 +366,28 @@ def test_task_sent_in_generation_config_reference_to_video(tmp_path):
     # Disambiguates subject references from a first-frame image (identical
     # input shapes otherwise).
     assert kw["generation_config"]["video_config"]["task"] == "reference_to_video"
+
+
+# --- delivery="uri" -----------------------------------------------------------
+
+def test_delivery_uri_in_response_format():
+    cfg = OmniGenerationConfig(prompt="a sunset", delivery="uri")
+    kw = cfg.to_interaction_kwargs()
+    assert kw["response_format"] == {
+        "type": "video", "aspect_ratio": "16:9", "delivery": "uri"
+    }
+
+
+def test_delivery_default_omits_key():
+    cfg = OmniGenerationConfig(prompt="a sunset")
+    assert "delivery" not in cfg.to_interaction_kwargs()["response_format"]
+
+
+def test_delivery_inline_omits_key():
+    cfg = OmniGenerationConfig(prompt="a sunset", delivery="inline")
+    assert "delivery" not in cfg.to_interaction_kwargs()["response_format"]
+
+
+def test_invalid_delivery_rejected():
+    with pytest.raises(ValueError, match="delivery"):
+        OmniGenerationConfig(prompt="x", delivery="carrier-pigeon")

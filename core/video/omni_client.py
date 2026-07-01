@@ -81,6 +81,7 @@ class OmniGenerationConfig:
     reference_image: Optional[Path] = None  # Back-compat single ref; folds into reference_images.
     reference_images: List[Path] = field(default_factory=list)  # Subject/first-frame refs.
     previous_interaction_id: Optional[str] = None  # Chain a conversational edit.
+    delivery: Optional[str] = None  # None/"inline" (base64) or "uri" (Files API; big clips).
     # Task sent as generation_config.video_config.task; inferred when left "".
     task: str = ""
 
@@ -118,6 +119,11 @@ class OmniGenerationConfig:
                 f"task {self.task!r} requires a reference_image, but none was provided."
             )
 
+        if self.delivery not in (None, "inline", "uri"):
+            raise ValueError(
+                f"delivery {self.delivery!r} invalid. Use 'inline' or 'uri'."
+            )
+
     def _infer_task(self) -> str:
         """Infer the video_config task from the input shape (docs task enum)."""
         if self.previous_interaction_id:
@@ -150,10 +156,17 @@ class OmniGenerationConfig:
         else:
             input_payload = self.prompt
 
+        response_format: Dict[str, Any] = {
+            "type": "video", "aspect_ratio": self.aspect_ratio
+        }
+        if self.delivery == "uri":
+            # Docs recommend URI delivery for clips over ~4MB / higher res.
+            response_format["delivery"] = "uri"
+
         kwargs: Dict[str, Any] = {
             "model": self.model,
             "input": input_payload,
-            "response_format": {"type": "video", "aspect_ratio": self.aspect_ratio},
+            "response_format": response_format,
             "generation_config": {"video_config": {"task": self.task}},
         }
         if self.previous_interaction_id:
@@ -181,6 +194,7 @@ class OmniClient:
         "aspect_ratios": ["16:9", "9:16"],
         "tasks": ["text_to_video", "image_to_video", "reference_to_video", "edit"],
         "max_reference_images": 3,  # Docs show multi-subject refs (<IMAGE_REF_N>, N=0..2).
+        "deliveries": ["inline", "uri"],
         "duration_range": (3, 10),  # seconds (informational; no SDK duration field)
         "fps": 24,
         "resolution": "720p",
