@@ -349,3 +349,20 @@ def test_validate_config_checks_all_reference_images_exist(tmp_path):
     is_valid, error = client.validate_config(cfg)
     assert is_valid is False
     assert "missing.png" in error
+
+
+# --- Explicit generation_config.video_config.task ----------------------------
+
+def test_task_sent_in_generation_config_text_to_video():
+    cfg = OmniGenerationConfig(prompt="a sunset")
+    kw = cfg.to_interaction_kwargs()
+    assert kw["generation_config"] == {"video_config": {"task": "text_to_video"}}
+
+
+def test_task_sent_in_generation_config_reference_to_video(tmp_path):
+    refs = [_write_png(tmp_path, f"s{i}.png") for i in range(2)]
+    cfg = OmniGenerationConfig(prompt="together in a park", reference_images=refs)
+    kw = cfg.to_interaction_kwargs()
+    # Disambiguates subject references from a first-frame image (identical
+    # input shapes otherwise).
+    assert kw["generation_config"]["video_config"]["task"] == "reference_to_video"

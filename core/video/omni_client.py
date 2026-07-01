@@ -154,6 +154,7 @@ class OmniGenerationConfig:
             "model": self.model,
             "input": input_payload,
             "response_format": {"type": "video", "aspect_ratio": self.aspect_ratio},
+            "generation_config": {"video_config": {"task": self.task}},
         }
         if self.previous_interaction_id:
             kwargs["previous_interaction_id"] = self.previous_interaction_id
