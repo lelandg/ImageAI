@@ -59,7 +59,8 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
     )
     
     # Console handler (simple format for user)
-    console_handler = logging.StreamHandler(sys.stdout)
+    # Use stderr so diagnostic logs never pollute stdout (critical for --json CLI purity).
+    console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(logging.WARNING)  # Only show warnings and errors in console
     console_handler.setFormatter(simple_formatter)
     root_logger.addHandler(console_handler)
@@ -121,9 +122,9 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
                 current_log = Path("./imageai_current.log")
                 if log_file.exists():
                     shutil.copy2(log_file, current_log)
-                    print(f"\nLog copied to: {current_log.absolute()}")
+                    print(f"\nLog copied to: {current_log.absolute()}", file=sys.stderr)
             except Exception as e:
-                print(f"Could not copy log file: {e}")
+                print(f"Could not copy log file: {e}", file=sys.stderr)
         
         atexit.register(copy_log_on_exit)
         

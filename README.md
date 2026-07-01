@@ -668,6 +668,32 @@ python main.py --provider stability -s -k "YOUR_STABILITY_KEY"
 python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
 ```
 
+### Generate video (CLI)
+
+Single-clip video generation with Gemini Omni or Veo:
+
+```bash
+# Text -> video (Veo is the default provider)
+python main.py --video -p "a fox running through snow" -o fox.mp4
+
+# Gemini Omni, portrait
+python main.py --video --video-provider omni --aspect 9:16 -p "neon city" -o city.mp4
+
+# Reference images (Veo up to 3, Omni 1)
+python main.py --video -p "she walks toward camera" -o walk.mp4 \
+    --ref-image style.png --ref-image character.png
+
+# Extend an existing clip (Veo only)
+python main.py --video --extend fox.mp4 -p "the fox leaps a log" -o fox2.mp4
+
+# Machine-readable result for agents (single JSON object on stdout)
+python main.py --video -p "a fox in snow" -o fox.mp4 --json
+```
+
+Both providers use the Google API key (`--api-key`/`--api-key-file`/`GOOGLE_API_KEY`);
+Veo also supports `--auth-mode gcloud` (`GOOGLE_CLOUD_PROJECT`). A `.json` sidecar is
+written next to the `.mp4`. Clip length is model-fixed (~8s).
+
 ### Video Generation with MIDI Sync (NEW!)
 
 ```bash
