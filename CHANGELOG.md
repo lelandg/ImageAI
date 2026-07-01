@@ -12,9 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Gemini Omni video generation parity with Veo 3.1**: Multiple reference images (via `reference_to_video` API field and new `--ref-image` flags up to 3), uploaded-video editing (Files API integration), explicit `video_config.task` field, and `delivery=uri` output mode in CLI and programmatic API.
 - **CLI video enhancements**:
-  - `--refine-from VIDEO_ID` — conversational "refine" mode for Omni videos (stream follow-ups to an existing generation).
-  - `--edit-video INPUT_VIDEO` — upload and edit an existing video file (Omni + Veo).
-  - `--delivery {inline|uri}` — output mode selection (inline base64 or signed GCS URI).
+  - `--refine-from INTERACTION_ID` — conversational "refine" mode for Omni videos (stream follow-ups to an existing generation).
+  - `--edit-video INPUT_VIDEO` — upload and edit an existing video file (Omni only).
+  - `--delivery {inline|uri}` — output mode selection (inline base64 or a Files API URI (polled until ACTIVE, then downloaded)).
   - `--ref-image` repeatable up to 3 times for Omni multi-reference support.
 
 ## [0.39.0] - 2026-06-14

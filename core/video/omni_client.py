@@ -295,7 +295,8 @@ class OmniClient:
             self.logger.info(f"  aspect_ratio={config.aspect_ratio} "
                              f"reference_images={[str(p) for p in config.reference_images]} "
                              f"input_video={config.input_video} "
-                             f"previous_interaction_id={config.previous_interaction_id}")
+                             f"previous_interaction_id={config.previous_interaction_id} "
+                             f"delivery={config.delivery}")
             self.logger.info(f"  Prompt:\n{config.prompt}")
             self.logger.info("=" * 60)
 
