@@ -309,13 +309,28 @@ def _add_overlay(scene: QGraphicsScene, ov, project_style, base_z: float) -> Non
     font.setPixelSize(ts.size_px if ts and ts.size_px else 16)
     if ts and ts.italic:
         font.setItalic(True)
+    if ts and ts.weight in ("bold", "black", "semibold"):
+        font.setBold(True)
 
-    # Measure wrapped text to size the body
-    fm = QFontMetricsF(font)
+    # Size the body from the text item's OWN layout (QTextDocument), not
+    # QFontMetricsF: the two wrap differently and the document adds margins,
+    # so metrics-based sizing lets the clip shape crop the last line.
+    text_item = QGraphicsTextItem(ov.text)
+    text_item.setFont(font)
+    if ts and ts.color:
+        text_item.setDefaultTextColor(QColor(ts.color))
+    doc = text_item.document()
+    doc.setDocumentMargin(0)
+    if ts and ts.align in ("center", "right", "justify"):
+        opt = doc.defaultTextOption()
+        opt.setAlignment({"center": Qt.AlignHCenter, "right": Qt.AlignRight,
+                          "justify": Qt.AlignJustify}[ts.align])
+        doc.setDefaultTextOption(opt)
     max_w = max(20.0, ov.style.max_width_px)
-    rect = fm.boundingRect(QRectF(0, 0, max_w, 100000),
-                           int(Qt.TextWordWrap), ov.text)
-    text_w, text_h = rect.width(), rect.height()
+    doc.setTextWidth(max_w)
+    text_w = min(max_w, doc.idealWidth())
+    text_item.setTextWidth(text_w)  # shrink-wrap so alignment centers real lines
+    text_h = doc.size().height()
     pad = ov.style.padding_px
     inner_w = text_w + 2 * pad
     inner_h = text_h + 2 * pad
@@ -345,12 +360,11 @@ def _add_overlay(scene: QGraphicsScene, ov, project_style, base_z: float) -> Non
         body_item.setFlag(QGraphicsPathItem.GraphicsItemFlag.ItemClipsChildrenToShape, True)
         scene.addItem(body_item)
 
-    # Text item: child of body (clipped) or direct scene item (sfx, no body)
-    text_item = QGraphicsTextItem(ov.text, parent=body_item)
-    text_item.setFont(font)
-    if ts and ts.color:
-        text_item.setDefaultTextColor(QColor(ts.color))
-    text_item.setTextWidth(text_w)
+    # Parent text via setParentItem, NOT the ctor kwarg: Shiboken only transfers
+    # C++ ownership on setParentItem, so a ctor-parented child is deleted with
+    # its Python wrapper at the next GC and the text silently vanishes.
+    if body_item is not None:
+        text_item.setParentItem(body_item)
     # body item lives at scene origin (path holds page-space verts), so the
     # text's parent-relative pos equals its scene pos.
     text_item.setPos(ix + pad, iy + pad)
