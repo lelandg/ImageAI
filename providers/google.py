@@ -1771,14 +1771,46 @@ class GoogleProvider(ImageProvider):
         """Get supported features."""
         return ["generate", "edit", "compose"]
     
+    # Reference-image MIME types by file suffix (edit/compose input).
+    _EDIT_MIME_BY_SUFFIX = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+    }
+
+    @classmethod
+    def _edit_input_parts(cls, image) -> List[dict]:
+        """Normalize edit/compose input to inline_data parts.
+
+        Accepts the same union as OpenAIProvider.edit_image: bytes, a str/Path
+        to an image file, or a list of either (multi-reference compose) — the
+        CLI passes a list of Paths for --reference.
+        """
+        items = image if isinstance(image, (list, tuple)) else [image]
+        parts: List[dict] = []
+        for item in items:
+            mime = "image/png"
+            if isinstance(item, (str, Path)):
+                p = Path(item)
+                mime = cls._EDIT_MIME_BY_SUFFIX.get(p.suffix.lower(), "image/png")
+                data = p.read_bytes()
+            elif isinstance(item, (bytes, bytearray)):
+                data = bytes(item)
+            else:
+                raise ValueError(f"Unsupported edit image input type: {type(item)!r}")
+            parts.append({"inline_data": {"data": data, "mime_type": mime}})
+        return parts
+
     def edit_image(
         self,
-        image: bytes,
+        image,  # bytes | str | Path | list of these (multi-reference compose)
         prompt: str,
         model: Optional[str] = None,
         **kwargs
     ) -> Tuple[List[str], List[bytes]]:
-        """Edit image with Google Gemini."""
+        """Edit an image (or compose from multiple references) with Google Gemini."""
         if not self.client:
             raise ValueError("No client configured")
 
@@ -1790,7 +1822,7 @@ class GoogleProvider(ImageProvider):
             # Gemini can process images as input
             response = self.client.models.generate_content(
                 model=model,
-                contents=[prompt, {"inline_data": {"data": image, "mime_type": "image/png"}}],
+                contents=[prompt, *self._edit_input_parts(image)],
             )
 
             if response and response.candidates:
