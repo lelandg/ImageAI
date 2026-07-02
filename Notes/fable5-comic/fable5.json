@@ -46,29 +46,6 @@
           "image_style": null
         },
         {
-          "id": "title",
-          "kind": "text",
-          "shape": "rect",
-          "bbox": [
-            180,
-            70,
-            1628,
-            180
-          ],
-          "points": [],
-          "z": 5,
-          "name": "",
-          "text": "THE FIFTH FOX",
-          "role": "logo_title",
-          "image_ref": null,
-          "prompt": "",
-          "gen_settings": {},
-          "segments": [],
-          "bleed": false,
-          "text_style": null,
-          "image_style": null
-        },
-        {
           "id": "p1",
           "kind": "image",
           "shape": "rect",
@@ -483,6 +460,43 @@
             "padding_px": 0.0,
             "radius_px": 0.0,
             "max_width_px": 1300.0
+          }
+        },
+        {
+          "id": "title_ov",
+          "kind": "sfx",
+          "text": "THE FIFTH FOX",
+          "anchor": [
+            994.0,
+            160.0
+          ],
+          "anchor_mode": "center",
+          "tail_target": null,
+          "z": 5,
+          "role": "logo_title",
+          "rotation": 0.0,
+          "text_style": {
+            "family": [
+              "URW Bookman",
+              "C059",
+              "DejaVu Serif"
+            ],
+            "weight": "bold",
+            "italic": false,
+            "size_px": 96,
+            "line_height": 1.2,
+            "color": "#241505",
+            "align": "center",
+            "wrap": "word",
+            "letter_spacing": 0.0
+          },
+          "style": {
+            "fill": "#00FFFFFF",
+            "stroke_px": 0.0,
+            "stroke_color": "#000000",
+            "padding_px": 0.0,
+            "radius_px": 0.0,
+            "max_width_px": 1800.0
           }
         }
       ],
