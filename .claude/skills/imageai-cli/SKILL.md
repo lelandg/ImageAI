@@ -316,6 +316,53 @@ python main.py --layout-export comic.json -o comic.pdf
   (`openai | anthropic | google | ollama | lmstudio`) and `--layout-llm-model`.
 - `--layout-fill` uses the normal image `--provider`/`-m` selection.
 
+### The project JSON is hand-editable (schema 2.0)
+
+For fine placement fixes, edit the project file directly and re-export — no
+GUI needed. Layout: `pages[N].regions[]` and `pages[N].overlays[]`.
+
+- Page pixels = inches × dpi (e.g. 6.625×10.25 in @ 300 → 1988×3075).
+- Region `bbox` is `[x, y, w, h]` in page pixels.
+- Regions carry `image_ref` (absolute path to the art; fills land in the
+  platform images dir, e.g. `~/.config/ImageAI/images/`), `prompt`, `z`.
+- Overlays (caption/speech/sfx) place by `anchor` `[x, y]` + `anchor_mode`:
+  `center` centers the whole text block on the anchor (so "move the title" =
+  set the anchor to the midpoint of the space it should occupy); `topleft`
+  pins the block's corner. Text look lives in `text_style`; box look and
+  `max_width_px` in `style`.
+
+### Region images are cover-cropped — match aspect or lose art
+
+`--layout-export` fills each region by scaling + **center-cropping** the art
+to the region's aspect. Art whose aspect ≠ bbox aspect silently loses its
+edges — 16:9 art in a ~6:5 comic panel loses ~35% of its width, amputating
+any off-center subject (symptom: "this panel looks cropped weird").
+
+- **Prevent:** before filling, compute each region's `w/h` and generate its
+  art at the closest supported ratio (Google: 1:1, 3:2, 4:3, 5:4, 16:9, …).
+- **Prevent (Nano Banana):** alternatively, tell the model the target
+  resolution in the prompt as a composition instruction — e.g. "compose the
+  scene to fill an 858×720 area" — and it confines the content to that area,
+  so the renderer's crop can't cut anything that matters. This is a *where to
+  put content* instruction, distinct from the sizing footgun below.
+- **Repair without regenerating:** pre-crop the source to exactly the bbox
+  aspect — full source height, width = height × (w/h), slide the x-window to
+  protect the subject — save as a **new** file and point `image_ref` at it.
+  The renderer's center-crop then becomes a no-op. Never overwrite the
+  original art.
+
+### Verify visually, headless
+
+After any placement change: `--layout-export proj.json -o page.png`, crop the
+area of interest with PIL, and look at it. Edit JSON → export → inspect is a
+cheap loop; don't trust coordinates alone.
+
+### `.iaibundle` is GUI-only
+
+The CLI exports PNG/PDF only. A project's `.iaibundle` is saved from the GUI
+and goes stale when the CLI edits the project — re-save it there if it must
+stay in sync.
+
 ## Agent output contract
 
 - **`--json` (video):** stdout carries exactly one JSON object
@@ -404,7 +451,10 @@ Key resolution order: **CLI flag (`-k`/`-K`) > stored config > environment**.
 - **Org Verification gate:** gpt-image-2 requires OpenAI Organization Verification.
   If `--provider openai -t` returns a verification message, complete it at
   https://platform.openai.com/settings/organization/general.
-- **Google sizing:** never put pixel dimensions in the prompt text; use `--size`.
+- **Google sizing:** never put pixel dimensions in the prompt text as a size
+  request ("(1024x768)" renders as literal text in the image); use `--size`.
+  The one sanctioned use of dimensions in a prompt is the Nano Banana
+  fill-area composition instruction in the layout section.
 - **`--quality standard/hd`** are DALL·E values; `--quality auto/low/medium/high`
   are gpt-image-2 values. Don't cross them.
 - **local_sd first run** downloads multi-GB weights and may need GPU extras — warn
@@ -413,6 +463,9 @@ Key resolution order: **CLI flag (`-k`/`-K`) > stored config > environment**.
   `--refine-from`/`--edit-video`/`--delivery` need `omni`. Mismatches exit 2.
 - **In `--json` mode, parse stdout only** — logs and progress are on stderr by
   design; never grep stdout for progress text.
+- **Layout art is cover-cropped to the region's bbox aspect.** Generate panel
+  art at a matching ratio (or pre-crop and swap `image_ref`) — a mismatch
+  silently cuts content off the panel edges.
 - **`--layout-design` and `--layout-export` require `-o`**; `--layout-fill`
   writes into the project file in place.
 
