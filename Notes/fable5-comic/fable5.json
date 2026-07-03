@@ -38,7 +38,7 @@
           "text": "",
           "role": "ornamental_frame",
           "image_ref": "/home/leland/.config/ImageAI/images/fable5_frame.png",
-          "prompt": "Warm storybook woodcut illustration in the manner of a classic Aesop's Fables plate: hand-engraved linework, rich amber, umber and moss-green palette with a soft painterly watercolor wash, gentle vignette at the edges, cozy 19th-century children's book warmth. Absolutely no text, no lettering, no words, no captions anywhere in the image. A full comic-book page background: aged warm parchment paper texture framed by an ornate hand-tooled gilded ornamental border running around all four edges, engraved acanthus leaves and scrollwork, small fox heads and quill-pen motifs in the four corners. The center of the page is plain, quiet parchment with no drawings \u2014 just subtle mottled texture.",
+          "prompt": "Warm storybook woodcut illustration in the manner of a classic Aesop's Fables plate: hand-engraved linework, rich amber, umber and moss-green palette with a soft painterly watercolor wash, gentle vignette at the edges, cozy 19th-century children's book warmth. Absolutely no text, no lettering, no words, no captions anywhere in the image. A full comic-book page background: aged warm parchment paper texture framed by an ornate hand-tooled gilded ornamental border running around all four edges, engraved acanthus leaves and scrollwork, small fox heads and quill-pen motifs in the four corners. The center of the page is plain, quiet parchment with no drawings — just subtle mottled texture.",
           "gen_settings": {},
           "segments": [],
           "bleed": true,
@@ -61,7 +61,7 @@
           "text": "",
           "role": "panel_workshop",
           "image_ref": "/home/leland/.config/ImageAI/images/fable5_p1.png",
-          "prompt": "Warm storybook woodcut illustration in the manner of a classic Aesop's Fables plate: hand-engraved linework, rich amber, umber and moss-green palette with a soft painterly watercolor wash, gentle vignette at the edges, cozy 19th-century children's book warmth. Absolutely no text, no lettering, no words, no captions anywhere in the image. Inside a cozy inventors' workshop at night: four elder foxes in tweed waistcoats and spectacles gathered around a wooden workbench, proudly unveiling a fifth, younger fox standing on the bench \u2014 its fur glows softly golden, with tiny luminous sparks and curling ribbons of light drifting off its tail like escaping stories. Warm lamplight, brass tools, wood shavings, shelves of jars and blueprints in shadow.",
+          "prompt": "Warm storybook woodcut illustration in the manner of a classic Aesop's Fables plate: hand-engraved linework, rich amber, umber and moss-green palette with a soft painterly watercolor wash, gentle vignette at the edges, cozy 19th-century children's book warmth. Absolutely no text, no lettering, no words, no captions anywhere in the image. Inside a cozy inventors' workshop at night: four elder foxes in tweed waistcoats and spectacles gathered around a wooden workbench, proudly unveiling a fifth, younger fox standing on the bench — its fur glows softly golden, with tiny luminous sparks and curling ribbons of light drifting off its tail like escaping stories. Warm lamplight, brass tools, wood shavings, shelves of jars and blueprints in shadow.",
           "gen_settings": {},
           "segments": [],
           "bleed": false,
@@ -89,7 +89,7 @@
           "text": "",
           "role": "panel_clearing",
           "image_ref": "/home/leland/.config/ImageAI/images/fable5_p2.png",
-          "prompt": "Warm storybook woodcut illustration in the manner of a classic Aesop's Fables plate: hand-engraved linework, rich amber, umber and moss-green palette with a soft painterly watercolor wash, gentle vignette at the edges, cozy 19th-century children's book warmth. Absolutely no text, no lettering, no words, no captions anywhere in the image. A moonlit forest clearing: the glowing golden fox sits upright on a wide old tree stump, mid-tale, gesturing with one paw, ribbons of soft light curling from around it. A spellbound crowd of woodland animals presses close \u2014 rabbits, a deer, badgers, hedgehogs, squirrels, mice, and several owls leaning far forward off their branch. Fireflies drift like sparks. Deep blue night, warm gold light on every upturned face.",
+          "prompt": "Warm storybook woodcut illustration in the manner of a classic Aesop's Fables plate: hand-engraved linework, rich amber, umber and moss-green palette with a soft painterly watercolor wash, gentle vignette at the edges, cozy 19th-century children's book warmth. Absolutely no text, no lettering, no words, no captions anywhere in the image. A moonlit forest clearing: the glowing golden fox sits upright on a wide old tree stump, mid-tale, gesturing with one paw, ribbons of soft light curling from around it. A spellbound crowd of woodland animals presses close — rabbits, a deer, badgers, hedgehogs, squirrels, mice, and several owls leaning far forward off their branch. Fireflies drift like sparks. Deep blue night, warm gold light on every upturned face.",
           "gen_settings": {},
           "segments": [],
           "bleed": false,
@@ -145,7 +145,7 @@
           "text": "",
           "role": "panel_silence",
           "image_ref": "/home/leland/.config/ImageAI/images/fable5_p4.png",
-          "prompt": "Warm storybook woodcut illustration in the manner of a classic Aesop's Fables plate: hand-engraved linework, rich amber, umber and moss-green palette with a soft painterly watercolor wash, gentle vignette at the edges, cozy 19th-century children's book warmth. Absolutely no text, no lettering, no words, no captions anywhere in the image. The same moonlit forest clearing drained almost to gray monochrome: the storytelling stump stands empty in the center, a faint fading glow around it. The woodland animals mope in small huddles \u2014 a rabbit slumped, owls with drooping eyelids, a deer staring at the ground. In the far background corner the eagle king in his stars-and-stripes mantle glances back over his shoulder at the empty stump, wistful. Only the faintest embers of warm color remain near the stump.",
+          "prompt": "Warm storybook woodcut illustration in the manner of a classic Aesop's Fables plate: hand-engraved linework, rich amber, umber and moss-green palette with a soft painterly watercolor wash, gentle vignette at the edges, cozy 19th-century children's book warmth. Absolutely no text, no lettering, no words, no captions anywhere in the image. The same moonlit forest clearing drained almost to gray monochrome: the storytelling stump stands empty in the center, a faint fading glow around it. The woodland animals mope in small huddles — a rabbit slumped, owls with drooping eyelids, a deer staring at the ground. In the far background corner the eagle king in his stars-and-stripes mantle glances back over his shoulder at the empty stump, wistful. Only the faintest embers of warm color remain near the stump.",
           "gen_settings": {},
           "segments": [],
           "bleed": false,
@@ -173,7 +173,7 @@
           "text": "",
           "role": "panel_return",
           "image_ref": "/home/leland/.config/ImageAI/images/fable5_p5.png",
-          "prompt": "Warm storybook woodcut illustration in the manner of a classic Aesop's Fables plate: hand-engraved linework, rich amber, umber and moss-green palette with a soft painterly watercolor wash, gentle vignette at the edges, cozy 19th-century children's book warmth. Absolutely no text, no lettering, no words, no captions anywhere in the image. Wide triumphant scene: the parchment decree tears apart and crumbles to pieces in mid-air as color floods back into the forest clearing. The golden glowing fox is back on its stump mid-story, ribbons and sparks of light swirling wider than ever, and the crowd of woodland animals is twice as large \u2014 animals climbing on each other's shoulders, owls, foxes, deer, badgers, birds arriving mid-flight. At the very back the eagle king stands half-hidden behind a tree, sheepishly listening, crown slightly askew. Panoramic composition, jubilant warm light.",
+          "prompt": "Warm storybook woodcut illustration in the manner of a classic Aesop's Fables plate: hand-engraved linework, rich amber, umber and moss-green palette with a soft painterly watercolor wash, gentle vignette at the edges, cozy 19th-century children's book warmth. Absolutely no text, no lettering, no words, no captions anywhere in the image. Wide triumphant scene: the parchment decree tears apart and crumbles to pieces in mid-air as color floods back into the forest clearing. The golden glowing fox is back on its stump mid-story, ribbons and sparks of light swirling wider than ever, and the crowd of woodland animals is twice as large — animals climbing on each other's shoulders, owls, foxes, deer, badgers, birds arriving mid-flight. At the very back the eagle king stands half-hidden behind a tree, sheepishly listening, crown slightly askew. Panoramic composition, jubilant warm light.",
           "gen_settings": {},
           "segments": [],
           "bleed": false,
@@ -201,7 +201,7 @@
           "text": "",
           "role": "banner_scroll",
           "image_ref": "/home/leland/.config/ImageAI/images/fable5_moral_scroll.png",
-          "prompt": "Warm storybook woodcut illustration in the manner of a classic Aesop's Fables plate: hand-engraved linework, rich amber, umber and moss-green palette with a soft painterly watercolor wash, gentle vignette at the edges, cozy 19th-century children's book warmth. Absolutely no text, no lettering, no words, no captions anywhere in the image. A single wide, elegant unrolled parchment banner scroll, horizontal, with gently curling gilded ends and fine engraved flourishes along its edges. The center face of the scroll is completely blank, plain and smooth \u2014 an empty space ready for an inscription. Quiet warm parchment tones on a subtle dark background.",
+          "prompt": "Warm storybook woodcut illustration in the manner of a classic Aesop's Fables plate: hand-engraved linework, rich amber, umber and moss-green palette with a soft painterly watercolor wash, gentle vignette at the edges, cozy 19th-century children's book warmth. Absolutely no text, no lettering, no words, no captions anywhere in the image. A single wide, elegant unrolled parchment banner scroll, horizontal, with gently curling gilded ends and fine engraved flourishes along its edges. The center face of the scroll is completely blank, plain and smooth — an empty space ready for an inscription. Quiet warm parchment tones on a subtle dark background.",
           "gen_settings": {},
           "segments": [],
           "bleed": false,
@@ -213,7 +213,7 @@
         {
           "id": "decree",
           "kind": "caption",
-          "text": "SILENCED\nJune 12\u201330",
+          "text": "SILENCED\nJune 12–30",
           "anchor": [
             714.8,
             1390.0
@@ -249,7 +249,7 @@
         {
           "id": "p1_cap_ov",
           "kind": "caption",
-          "text": "A workshop of clever foxes made a fifth \u2014\na fox that told tales.",
+          "text": "A workshop of clever foxes made a fifth —\na fox that told tales.",
           "anchor": [
             560.0,
             950.0
@@ -468,7 +468,7 @@
           "text": "THE FIFTH FOX",
           "anchor": [
             994.0,
-            160.0
+            118.0
           ],
           "anchor_mode": "center",
           "tail_target": null,

@@ -44,26 +44,3 @@ body-less `sfx` overlay centered in the scroll's blank oval at (1007, 2767).
    `align` and bold weights in overlay text styles.
 
 Suite: 472 passed after both fixes.
-
-## The video (2026-07-02, in progress)
-
-Six 10s Gemini Omni scenes (1280×720 @24fps). First pass (one panel as the only ref,
-narration baked per clip) produced clips in six different art styles and narrator voices —
-scrapped except clip 1, which set the look.
-
-**Style recipe (v2):** each new scene passes 3 refs — two *frames extracted from clip 1
-itself* (`clip1_style_wide.png`, `clip1_style_glow.png`) as style anchors plus one content
-image. The eagle scene has no clip-1 counterpart, so `eagle_styled.png` bridges it: an NBP
-multi-reference compose (clip-1 frame + comic panel) that redraws the Eagle King in clip-1's
-style before it ever reaches Omni.
-
-**Voice:** Omni takes no audio input (text + images only — see `omni_client.py`), so the
-narrator can't be standardized in-model. Clips 2–6 are generated with score/ambience only;
-`narration.srt` carries the timed narration (6 cues on the 10s grid) for an external VO
-track that gets muxed over the stitched video. Clip 1 keeps its baked narration only until
-the VO master replaces it.
-
-`video/clipN.json` sidecars hold Omni `operation_id`s for `--refine-from` follow-ups.
-
-The page title is a centered body-less overlay (URW Bookman bold) — text regions can't
-center (QGraphicsSimpleTextItem), overlays can.
