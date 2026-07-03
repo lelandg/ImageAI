@@ -247,3 +247,11 @@ Notes/CharacterAnimator_BugFixes_20260112.md
 Notes/CharacterAnimator_BugFixes_Round2_20260112.md
 Notes/doc-report-*.md
 Layouts/
+
+# Fable 5 comic media — large video/audio artifacts stay local
+Notes/fable5-comic/**/*.mp4
+Notes/fable5-comic/**/*.wav
+Notes/fable5-comic/**/*.ogg
+Notes/fable5-comic/**/*.acep
+Notes/fable5-comic/fable5-ace-music/
+Notes/fable5-comic/video/*.json
