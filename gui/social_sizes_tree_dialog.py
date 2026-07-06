@@ -7,7 +7,7 @@ Double-click to select a size immediately. Remembers expansion state.
 from pathlib import Path
 import re
 import json
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 from gui.dialog_utils import show_warning, show_error
 import logging
 logger = logging.getLogger(__name__)
@@ -19,52 +19,14 @@ from PySide6.QtWidgets import (
     QTreeWidget, QTreeWidgetItem, QPushButton, QMessageBox
 )
 
-
-def _parse_markdown_table(md_text: str) -> Tuple[List[str], List[List[str]]]:
-    """Parse the first GitHub-flavored Markdown table in text.
-
-    Returns (headers, rows). Only lines starting with '|' are considered,
-    and the second line with dashes is treated as the divider.
-    """
-    lines = [ln.rstrip() for ln in md_text.splitlines()]
-    table_lines: List[str] = []
-    in_table = False
-    for ln in lines:
-        if ln.strip().startswith('|'):
-            table_lines.append(ln)
-            in_table = True
-        elif in_table:
-            break
-    if not table_lines:
-        return [], []
-
-    # Expect header |----| divider as second line
-    header = [c.strip() for c in table_lines[0].strip('|').split('|')]
-    # Skip divider line and parse data rows
-    data_rows = []
-    for ln in table_lines[2:]:
-        parts = [c.strip() for c in ln.strip('|').split('|')]
-        # pad or trim to header length
-        if len(parts) < len(header):
-            parts += [''] * (len(header) - len(parts))
-        elif len(parts) > len(header):
-            parts = parts[:len(header)]
-        data_rows.append(parts)
-    return header, data_rows
+from .common.dialog_conventions import (
+    DialogCleanupMixin, bind_primary_action, set_default_button
+)
+from .common.markdown_tables import parse_markdown_table, extract_resolution_px
+from .theme import NAVY_LIGHT, BORDER_CYAN, TEXT_PRIMARY, CYAN_DARK
 
 
-def _extract_resolution_px(size_text: str) -> Optional[str]:
-    """Extract first WxH pair from text like '1080 × 1920' or '512x512'."""
-    if not size_text:
-        return None
-    match = re.search(r"(\d{2,5})\s*[×x]\s*(\d{2,5})", size_text)
-    if match:
-        w, h = match.group(1), match.group(2)
-        return f"{w}x{h}"
-    return None
-
-
-class SocialSizesTreeDialog(QDialog):
+class SocialSizesTreeDialog(DialogCleanupMixin, QDialog):
     """A dialog to browse and pick social media sizes using a tree view."""
 
     def __init__(self, parent=None):
@@ -74,7 +36,11 @@ class SocialSizesTreeDialog(QDialog):
         self._selected_resolution: Optional[str] = None
         self._selected_platform: Optional[str] = None
         self._selected_type: Optional[str] = None
+        self._highlighted_item: Optional[QTreeWidgetItem] = None
         self.settings = QSettings("ImageAI", "SocialSizesDialog")
+        geometry = self.settings.value("geometry")
+        if geometry is not None:
+            self.restoreGeometry(geometry)
         self._platform_icons: Dict[str, QIcon] = {}
         self._load_icons()
         self._init_ui()
@@ -128,26 +94,32 @@ class SocialSizesTreeDialog(QDialog):
     def _init_ui(self):
         v = QVBoxLayout(self)
 
-        # Selection info panel - always visible with fixed height to prevent layout shift
+        # Selection info panel - always visible with a font-metrics minimum
+        # height (two lines of rich text) to prevent layout shift
         self.info_panel = QLabel("")
-        self.info_panel.setStyleSheet("""
-            QLabel {
-                background-color: #f0f8ff;
-                border: 2px solid #4a90e2;
+        self.info_panel.setStyleSheet(f"""
+            QLabel {{
+                background-color: {NAVY_LIGHT};
+                border: 2px solid {BORDER_CYAN};
                 border-radius: 5px;
                 padding: 10px;
                 font-size: 14px;
-                color: #2c3e50;
-            }
+                color: {TEXT_PRIMARY};
+            }}
         """)
-        self.info_panel.setFixedHeight(60)
+        self.info_panel.setWordWrap(True)
+        self.info_panel.setMinimumHeight(
+            2 * self.info_panel.fontMetrics().lineSpacing() + 20
+        )
         self._show_help_text()
         v.addWidget(self.info_panel)
 
         # Search
         sh = QHBoxLayout()
-        sh.addWidget(QLabel("Search:"))
+        search_label = QLabel("&Search:")
+        sh.addWidget(search_label)
         self.search_edit = QLineEdit()
+        search_label.setBuddy(self.search_edit)
         self.search_edit.setPlaceholderText("Filter by platform, type, size...")
         self.search_edit.textChanged.connect(self._apply_filter)
         sh.addWidget(self.search_edit)
@@ -165,16 +137,15 @@ class SocialSizesTreeDialog(QDialog):
         v.addWidget(self.tree)
 
         # Add shortcut hint label
-        shortcut_label = QLabel("<small style='color: gray;'>Double-click to select, or use Enter key. Esc to close</small>")
+        shortcut_label = QLabel("<small style='color: gray;'>Double-click or press Enter to select (Ctrl+Enter also works). Esc to close</small>")
         shortcut_label.setAlignment(Qt.AlignCenter)
         v.addWidget(shortcut_label)
 
         # Buttons
         bh = QHBoxLayout()
         bh.addStretch()
-        self.btn_use = QPushButton("Use Size")
-        self.btn_use.setToolTip("Apply selected size (Enter)")
-        self.btn_use.setDefault(True)
+        self.btn_use = QPushButton("&Use Size")
+        self.btn_use.setToolTip("Apply selected size (Enter or Ctrl+Enter)")
         self.btn_use.setStyleSheet("""
             QPushButton {
                 font-weight: bold;
@@ -182,18 +153,23 @@ class SocialSizesTreeDialog(QDialog):
         """)
         self.btn_use.setEnabled(False)
         self.btn_use.clicked.connect(self._use_selected)
-        self.btn_close = QPushButton("Close")
+        self.btn_close = QPushButton("&Close")
         self.btn_close.clicked.connect(self.reject)
         bh.addWidget(self.btn_use)
         bh.addWidget(self.btn_close)
         v.addLayout(bh)
 
-        # Set up keyboard shortcuts
-        # Enter to use selected size
-        self.btn_use.setShortcut(QKeySequence("Return"))
+        # Set up keyboard shortcuts.
+        # Enter activates the single default button (no window-wide bare
+        # Return shortcut — that fired while typing in the search box).
+        set_default_button(self, self.btn_use, focus=False)
+        # Ctrl+Return / Ctrl+Enter also apply the selected size
+        self._primary_action = bind_primary_action(self, self._use_selected)
         # Escape to close
         escape_shortcut = QShortcut(QKeySequence("Escape"), self)
         escape_shortcut.activated.connect(self.reject)
+        # Initial focus goes to the primary input
+        self.search_edit.setFocus()
 
     def _load_data(self):
         """Load size presets from multiple markdown files organized by category."""
@@ -234,7 +210,7 @@ class SocialSizesTreeDialog(QDialog):
                 logger.error(f"Could not read {md_path}: {e}")
                 continue
 
-            headers, rows = _parse_markdown_table(text)
+            headers, rows = parse_markdown_table(text)
             if not headers or not rows:
                 logger.warning(f"No table rows parsed from {md_path}")
                 continue
@@ -307,7 +283,7 @@ class SocialSizesTreeDialog(QDialog):
                 size_item.setText(3, notes)
 
                 # Store resolution for quick retrieval
-                resolution = _extract_resolution_px(size_text)
+                resolution = extract_resolution_px(size_text)
                 size_item.setData(0, Qt.UserRole, resolution)
 
                 # Make non-editable
@@ -323,35 +299,56 @@ class SocialSizesTreeDialog(QDialog):
                    total_loaded, len(categories))
 
     def _apply_filter(self, text: str):
+        """Filter the three-level tree: Category → Platform → Size item.
+
+        Search words are matched against each size item's four columns plus
+        its platform and category names. Matching size items are revealed by
+        expanding both their category and platform.
+        """
         text = (text or '').lower().strip()
+        words = text.split()
 
-        # Iterate through all items
-        iterator = self.tree.invisibleRootItem()
-        for i in range(iterator.childCount()):
-            platform_item = iterator.child(i)
-            platform_visible = False
+        root = self.tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            category_item = root.child(i)
+            category_name = category_item.text(0).lower()
+            category_visible = False
 
-            for j in range(platform_item.childCount()):
-                child_item = platform_item.child(j)
-                # Get all text from the item
-                item_text = []
-                for col in range(4):
-                    item_text.append(child_item.text(col).lower())
-                full_text = " ".join(item_text)
+            for j in range(category_item.childCount()):
+                platform_item = category_item.child(j)
+                platform_name = platform_item.text(0).lower()
+                platform_visible = False
 
-                # Check if all search words are in the text
-                visible = all(word in full_text for word in text.split()) if text else True
-                child_item.setHidden(not visible)
+                for k in range(platform_item.childCount()):
+                    size_item = platform_item.child(k)
+                    # Match against the size row plus its ancestors' names
+                    item_text = [category_name, platform_name]
+                    for col in range(4):
+                        item_text.append(size_item.text(col).lower())
+                    full_text = " ".join(item_text)
 
-                if visible:
-                    platform_visible = True
+                    # Check if all search words are in the text
+                    visible = all(word in full_text for word in words) if words else True
+                    size_item.setHidden(not visible)
 
-            # Hide platform if no children are visible
-            platform_item.setHidden(not platform_visible)
+                    if visible:
+                        platform_visible = True
 
-            # Expand platform if it has visible items and there's a search
-            if platform_visible and text:
-                platform_item.setExpanded(True)
+                # Hide platform if no size items are visible
+                platform_item.setHidden(not platform_visible)
+                if platform_visible:
+                    category_visible = True
+
+                # Expand platform if it has visible items and there's a search
+                if platform_visible and words:
+                    platform_item.setExpanded(True)
+
+            # Hide category if no platforms are visible
+            category_item.setHidden(not category_visible)
+
+            # Expand category if it has visible items and there's a search
+            if category_visible and words:
+                category_item.setExpanded(True)
 
     def _show_help_text(self):
         """Show help text in the info panel when nothing is selected."""
@@ -373,9 +370,11 @@ class SocialSizesTreeDialog(QDialog):
 
             # Update visual feedback
             if resolution:
-                # Highlight current selection
+                # Highlight current selection (theme colors, readable on dark)
                 for col in range(4):
-                    item.setBackground(col, QBrush(QColor(220, 240, 255)))
+                    item.setBackground(col, QBrush(QColor(CYAN_DARK)))
+                    item.setForeground(col, QBrush(QColor(TEXT_PRIMARY)))
+                self._highlighted_item = item
 
                 # Get platform and type info
                 parent = item.parent()
@@ -401,20 +400,17 @@ class SocialSizesTreeDialog(QDialog):
             self._clear_all_highlights()
 
     def _clear_all_highlights(self):
-        """Clear all item highlights in the tree."""
-        iterator = self.tree.invisibleRootItem()
-        for i in range(iterator.childCount()):
-            platform_item = iterator.child(i)
-            for j in range(platform_item.childCount()):
-                child_item = platform_item.child(j)
-                for col in range(4):
-                    child_item.setBackground(col, QBrush())
+        """Clear the last highlighted size item (level 3) in the tree."""
+        if self._highlighted_item is not None:
+            for col in range(4):
+                self._highlighted_item.setBackground(col, QBrush())
+                self._highlighted_item.setForeground(col, QBrush())
+            self._highlighted_item = None
 
     def _on_double_click(self, item: QTreeWidgetItem, column: int):
         resolution = item.data(0, Qt.UserRole)
         if resolution:
             self._selected_resolution = resolution
-            self._save_expansion_state()
             self.accept()
 
     def _use_selected(self):
@@ -430,7 +426,6 @@ class SocialSizesTreeDialog(QDialog):
             return
 
         self._selected_resolution = resolution
-        self._save_expansion_state()
         self.accept()
 
     def _save_expansion_state(self):
@@ -544,10 +539,10 @@ class SocialSizesTreeDialog(QDialog):
                                     self.tree.scrollToItem(size_item)
                                     return
 
-    def closeEvent(self, event):
-        """Save state when closing."""
+    def on_dialog_close(self):
+        """Save state on every exit path (OK, Close, Escape, title-bar X)."""
         self._save_expansion_state()
-        super().closeEvent(event)
+        self.settings.setValue("geometry", self.saveGeometry())
 
     def selected_resolution(self) -> Optional[str]:
         return self._selected_resolution

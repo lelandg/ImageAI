@@ -5,7 +5,7 @@ Ensures all errors shown to users are also logged for debugging.
 
 import logging
 from functools import wraps
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 from PySide6.QtCore import QObject, QEvent, Qt
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,12 @@ class InputBlockerEventFilter(QObject):
     """
     Event filter that blocks user input during async operations.
 
-    Blocks:
+    Installed on the QApplication and scoped to descendants of `root` —
+    installing it on the dialog alone is ineffective, because key/mouse
+    events are delivered to the focused/clicked child widget, not to the
+    dialog object itself.
+
+    Blocks (for root and its descendants):
     - Mouse clicks (press, release, double-click)
     - Keyboard input (key press, key release)
     - Shortcuts
@@ -93,11 +98,12 @@ class InputBlockerEventFilter(QObject):
 
     Allows:
     - Paint events (keep UI responsive)
-    - Close events (allow cancellation)
+    - Escape and close events (allow cancellation)
     """
 
-    def __init__(self, parent=None, block_focus_changes=False):
-        super().__init__(parent)
+    def __init__(self, root=None, block_focus_changes=False):
+        super().__init__(root)
+        self._root = root
         self.block_focus_changes = block_focus_changes
         self._blocked_event_types = {
             QEvent.MouseButtonPress,
@@ -117,15 +123,27 @@ class InputBlockerEventFilter(QObject):
 
     def eventFilter(self, obj, event):
         """Filter events to block user input."""
-        if event.type() in self._blocked_event_types:
-            # Log blocked input (for debugging)
-            if event.type() == QEvent.KeyPress:
-                logger.debug(f"Blocked key press during operation: {event.key()}")
-            elif event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick):
-                logger.debug(f"Blocked mouse click during operation")
-            return True  # Block the event
+        if event.type() not in self._blocked_event_types:
+            return False  # Allow other events
 
-        return False  # Allow other events
+        # Scope to the guarded dialog and its descendants
+        if self._root is not None:
+            if not isinstance(obj, QWidget):
+                return False
+            if obj is not self._root and not self._root.isAncestorOf(obj):
+                return False
+
+        # Always let Escape through so the operation/dialog can be cancelled
+        if event.type() in (QEvent.KeyPress, QEvent.KeyRelease, QEvent.ShortcutOverride):
+            if event.key() == Qt.Key_Escape:
+                return False
+
+        # Log blocked input (for debugging)
+        if event.type() == QEvent.KeyPress:
+            logger.debug(f"Blocked key press during operation: {event.key()}")
+        elif event.type() in (QEvent.MouseButtonPress, QEvent.MouseButtonDblClick):
+            logger.debug(f"Blocked mouse click during operation")
+        return True  # Block the event
 
 
 class OperationGuardMixin:
@@ -190,10 +208,14 @@ class OperationGuardMixin:
         self._operation_running = True
         self._operation_name = operation_name
 
-        # Install input blocker if enabled
+        # Install input blocker if enabled. It must go on the application,
+        # scoped to this dialog's descendants: installing it on the dialog
+        # object alone never sees the children's key/mouse events.
         if self._block_all_input:
             self._input_blocker = InputBlockerEventFilter(self, self._block_focus_changes)
-            self.installEventFilter(self._input_blocker)
+            app = QApplication.instance()
+            if app is not None:
+                app.installEventFilter(self._input_blocker)
             logger.debug(f"Input blocker installed for operation: {operation_name}")
 
         logger.info(f"Operation started: {operation_name}")
@@ -211,7 +233,9 @@ class OperationGuardMixin:
 
         # Remove input blocker
         if self._input_blocker:
-            self.removeEventFilter(self._input_blocker)
+            app = QApplication.instance()
+            if app is not None:
+                app.removeEventFilter(self._input_blocker)
             self._input_blocker = None
             logger.debug(f"Input blocker removed after operation: {operation_name}")
 

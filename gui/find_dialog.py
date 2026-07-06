@@ -48,11 +48,13 @@ class FindDialog(QDialog):
 
         # Search input row
         search_layout = QHBoxLayout()
-        search_layout.addWidget(QLabel("Find:"))
+        find_label = QLabel("Fi&nd:")
+        search_layout.addWidget(find_label)
 
         self.search_input = QLineEdit()
         self.search_input.textChanged.connect(self.on_search_text_changed)
         self.search_input.returnPressed.connect(self.find_next)
+        find_label.setBuddy(self.search_input)
         search_layout.addWidget(self.search_input)
 
         layout.addLayout(search_layout)
@@ -66,6 +68,13 @@ class FindDialog(QDialog):
 
         self.whole_words_check = QCheckBox("Whole words")
         self.whole_words_check.stateChanged.connect(self.on_search_text_changed)
+        if self._is_webview:
+            # QWebEngineView's findText has no whole-word mode; disable the
+            # option instead of silently ignoring it.
+            self.whole_words_check.setEnabled(False)
+            self.whole_words_check.setToolTip(
+                "Whole-word search is not supported for web views"
+            )
         options_layout.addWidget(self.whole_words_check)
 
         options_layout.addStretch()

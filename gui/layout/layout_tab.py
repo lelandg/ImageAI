@@ -5,7 +5,7 @@ from typing import Optional
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QFileDialog, QLabel,
-    QSplitter, QScrollArea,
+    QScrollArea,
 )
 from PySide6.QtCore import Signal, Qt
 
@@ -20,6 +20,7 @@ from gui.layout.designer_panel import DesignerPanel
 from gui.layout.history_window import HistoryWindow
 from gui.layout.style_panel import StylePanel
 from gui.layout.content_inspector import ContentInspector
+from ..common.dialog_conventions import standard_splitter
 
 logger = logging.getLogger("imageai.layout.tab")
 
@@ -97,7 +98,7 @@ class LayoutTab(QWidget):
         # Main area: big canvas on the left, scrollable control dock on the right,
         # split by a draggable handle. Keeps the canvas usable instead of starving
         # it inside one tall vertical column (the old layout).
-        split = QSplitter(Qt.Horizontal)
+        split = standard_splitter(Qt.Horizontal)
 
         self.canvas = CanvasWidget()
         split.addWidget(self.canvas)

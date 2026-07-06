@@ -7,13 +7,17 @@ import logging
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGroupBox, QSlider, QComboBox, QProgressBar, QFileDialog,
-    QFrame, QSizePolicy, QMessageBox, QSplitter
+    QFrame, QSizePolicy, QMessageBox
 )
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, Signal, QThread, QSettings
 from PySide6.QtGui import QPixmap, QDragEnterEvent, QDropEvent
 
 from core.musetalk_installer import check_musetalk_installed
+from gui.llm_utils import DialogStatusConsole
 from gui.video.musetalk_install_dialog import show_musetalk_install_dialog
+from ..common.dialog_conventions import (
+    bind_primary_action, persist_splitter, restore_splitter, standard_splitter
+)
 from providers.video import (
     LipSyncBackend, get_lipsync_provider, get_available_lipsync_backends
 )
@@ -231,8 +235,8 @@ class LipSyncWidget(QWidget):
 
         layout.addWidget(self.status_frame)
 
-        # Main content area with splitter
-        splitter = QSplitter(Qt.Horizontal)
+        # Main content area with splitter (styled, non-collapsible)
+        self.main_splitter = standard_splitter(Qt.Horizontal)
 
         # Left panel - inputs
         input_panel = QWidget()
@@ -301,7 +305,7 @@ class LipSyncWidget(QWidget):
         audio_layout.addLayout(audio_controls)
         input_layout.addWidget(audio_group)
 
-        splitter.addWidget(input_panel)
+        self.main_splitter.addWidget(input_panel)
 
         # Right panel - parameters and output
         params_panel = QWidget()
@@ -320,6 +324,7 @@ class LipSyncWidget(QWidget):
         self.provider_combo.addItem("MuseTalk (Local)", LipSyncBackend.MUSETALK)
         self.provider_combo.addItem("D-ID (Cloud)", LipSyncBackend.DID)
         self.provider_combo.setItemData(1, False, Qt.UserRole - 1)  # Disable D-ID for now
+        self.provider_combo.setItemData(1, "D-ID cloud support coming soon", Qt.ToolTipRole)
         provider_layout.addWidget(self.provider_combo)
         provider_layout.addStretch()
 
@@ -363,11 +368,6 @@ class LipSyncWidget(QWidget):
         self.progress_bar.setVisible(False)
         output_layout.addWidget(self.progress_bar)
 
-        # Status message
-        self.output_status = QLabel("")
-        self.output_status.setWordWrap(True)
-        output_layout.addWidget(self.output_status)
-
         # Output preview (placeholder)
         self.output_preview = QLabel()
         self.output_preview.setAlignment(Qt.AlignCenter)
@@ -389,10 +389,23 @@ class LipSyncWidget(QWidget):
 
         params_layout.addWidget(output_group, 1)
 
-        splitter.addWidget(params_panel)
-        splitter.setSizes([400, 300])
+        self.main_splitter.addWidget(params_panel)
 
-        layout.addWidget(splitter, 1)
+        # Vertical splitter with the status console at the bottom
+        self.console_splitter = standard_splitter(Qt.Vertical)
+        self.console_splitter.addWidget(self.main_splitter)
+
+        self.status_console = DialogStatusConsole("Generation Status")
+        self.console_splitter.addWidget(self.status_console)
+
+        # Restore splitter positions, falling back to the hardcoded defaults
+        settings = QSettings("ImageAI", "VideoProjects")
+        if not restore_splitter(settings, "lipsync/main_splitter_state", self.main_splitter):
+            self.main_splitter.setSizes([400, 300])
+        if not restore_splitter(settings, "lipsync/console_splitter_state", self.console_splitter):
+            self.console_splitter.setSizes([400, 150])
+
+        layout.addWidget(self.console_splitter, 1)
 
         # Generate button
         self.generate_btn = QPushButton("Generate Lip-Sync Video")
@@ -420,12 +433,29 @@ class LipSyncWidget(QWidget):
         self.generate_btn.setEnabled(False)
         layout.addWidget(self.generate_btn)
 
+        # Ctrl+Enter / Ctrl+Return start generation (widget-scoped)
+        self._primary_action = bind_primary_action(
+            self, self._on_primary_action, context=Qt.WidgetWithChildrenShortcut
+        )
+
+    def _on_primary_action(self):
+        """Start generation via Ctrl+Enter when the button is enabled."""
+        if self.generate_btn.isEnabled():
+            self.start_generation()
+
+    def hideEvent(self, event):
+        """Persist splitter positions when the widget is hidden."""
+        settings = QSettings("ImageAI", "VideoProjects")
+        persist_splitter(settings, "lipsync/main_splitter_state", self.main_splitter)
+        persist_splitter(settings, "lipsync/console_splitter_state", self.console_splitter)
+        super().hideEvent(event)
+
     def update_install_status(self):
         """Update the installation status display."""
         is_installed, status = check_musetalk_installed()
 
         if is_installed:
-            self.status_icon.setText("")
+            self.status_icon.setText("✅")  # Check mark
             self.status_label.setText("MuseTalk is installed and ready")
             self.status_label.setStyleSheet("color: #66cc66;")
             self.install_btn.setVisible(False)
@@ -437,7 +467,7 @@ class LipSyncWidget(QWidget):
                 }
             """)
         else:
-            self.status_icon.setText("")
+            self.status_icon.setText("⚠")  # Warning sign
             self.status_label.setText(f"MuseTalk not installed: {status}")
             self.status_label.setStyleSheet("color: #ff9966;")
             self.install_btn.setVisible(True)
@@ -595,7 +625,13 @@ class LipSyncWidget(QWidget):
 
         # Update UI
         self.progress_bar.setVisible(True)
-        self.output_status.setText("Starting generation...")
+        self.status_console.separator()
+        self.status_console.log(f"Video: {self.video_path}")
+        self.status_console.log(f"Audio: {self.audio_path}")
+        self.status_console.log(
+            f"Provider: {self.provider_combo.currentText()} | bbox_shift: {bbox_shift}"
+        )
+        self.status_console.log("Starting generation...")
         self.generate_btn.setEnabled(False)
         self.generate_btn.setText("Generating...")
 
@@ -604,21 +640,19 @@ class LipSyncWidget(QWidget):
 
     def on_generation_progress(self, message: str):
         """Handle generation progress update."""
-        self.output_status.setText(message)
+        self.status_console.log(message)
 
     def on_generation_finished(self, success: bool, message: str, output_path: str):
         """Handle generation completion."""
         self.progress_bar.setVisible(False)
 
         if success:
-            self.output_status.setText(f"Success! Output: {output_path}")
-            self.output_status.setStyleSheet("color: #66cc66;")
+            self.status_console.log(f"Success! Output: {output_path}", "SUCCESS")
             self.open_output_btn.setEnabled(True)
             self._output_path = Path(output_path)
             self.generation_finished.emit(output_path)
         else:
-            self.output_status.setText(f"Failed: {message}")
-            self.output_status.setStyleSheet("color: #ff6666;")
+            self.status_console.log(f"Failed: {message}", "ERROR")
             self.generation_failed.emit(message)
 
         self.update_generate_button()

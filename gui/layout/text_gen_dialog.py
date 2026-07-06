@@ -7,17 +7,20 @@ import logging
 from typing import Optional, Dict, Any
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QSplitter,
+    QTextEdit, QComboBox, QSpinBox, QDoubleSpinBox, QSizePolicy,
     QGroupBox, QFormLayout, QCheckBox
 )
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import Qt, QThread, Signal, QSettings
 
 from core.config import ConfigManager
 from core.layout.models import TextBlock, DocumentSpec
 from core.llm_models import get_provider_models, get_provider_prefix
 from core.discord_rpc import discord_rpc, ActivityState
 from gui.llm_utils import DialogStatusConsole, LiteLLMHandler, LLMResponseParser
+from ..common.dialog_conventions import (
+    DialogCleanupMixin, bind_primary_action, persist_splitter,
+    restore_splitter, set_default_button, standard_splitter,
+)
 
 logger = logging.getLogger(__name__)
 console_logger = logging.getLogger("console")
@@ -377,7 +380,7 @@ Generate ONLY the text content, no other commentary."""
         return prompt
 
 
-class TextGenerationDialog(QDialog):
+class TextGenerationDialog(DialogCleanupMixin, QDialog):
     """Dialog for generating text content using LLM."""
 
     def __init__(self, config: ConfigManager, block: TextBlock,
@@ -401,6 +404,7 @@ class TextGenerationDialog(QDialog):
         self.model = model
         self.generated_text = None
         self.worker: Optional[TextGenerationWorker] = None
+        self.settings = QSettings("ImageAI", "TextGenerationDialog")
 
         self.setWindowTitle("Generate Text with LLM")
         self.resize(800, 700)

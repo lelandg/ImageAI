@@ -6,11 +6,14 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QWidget, QGridLayout, QButtonGroup, QRadioButton
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QPixmap
 
+from gui.theme import TEXT_SECONDARY
+from ..common.dialog_conventions import DialogCleanupMixin, bind_primary_action
 
-class VariantSelectorDialog(QDialog):
+
+class VariantSelectorDialog(DialogCleanupMixin, QDialog):
     """Dialog for selecting an image variant from a list of generated images."""
 
     def __init__(self, image_variants: List, current_selection: Optional[Path] = None,
@@ -32,7 +35,18 @@ class VariantSelectorDialog(QDialog):
         self.setWindowTitle(title)
         self.setMinimumSize(800, 600)
 
+        self.settings = QSettings("ImageAI", "VideoProjects")
+
         self.init_ui()
+
+        # Restore last-used window geometry
+        geometry = self.settings.value("variant_selector/geometry")
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+
+    def on_dialog_close(self):
+        """Persist window geometry on every exit path (OK/Cancel/Escape/X)."""
+        self.settings.setValue("variant_selector/geometry", self.saveGeometry())
 
     def init_ui(self):
         """Initialize the user interface."""
@@ -77,6 +91,8 @@ class VariantSelectorDialog(QDialog):
             # Radio button
             radio = QRadioButton()
             radio.setProperty("image_path", str(img_path))
+            radio.setAccessibleName(img_path.name)
+            radio.setToolTip(str(img_path))
 
             # Check if this is the current selection
             if self.current_selection and img_path == self.current_selection:
@@ -97,6 +113,7 @@ class VariantSelectorDialog(QDialog):
                 image_label = QLabel()
                 image_label.setPixmap(pixmap)
                 image_label.setAlignment(Qt.AlignCenter)
+                image_label.setToolTip(str(img_path))
                 image_label.setStyleSheet("""
                     QLabel {
                         border: 2px solid #ccc;
@@ -115,7 +132,7 @@ class VariantSelectorDialog(QDialog):
             filename_label = QLabel(img_path.name)
             filename_label.setWordWrap(True)
             filename_label.setAlignment(Qt.AlignCenter)
-            filename_label.setStyleSheet("font-size: 10px; color: #666;")
+            filename_label.setStyleSheet(f"font-size: 10px; color: {TEXT_SECONDARY};")
             card_layout.addWidget(filename_label)
 
             # Add card to grid
@@ -137,14 +154,28 @@ class VariantSelectorDialog(QDialog):
         select_btn = QPushButton("Select")
         select_btn.setDefault(True)
         select_btn.clicked.connect(self.accept)
+        # Disabled until a variant is chosen (matches SceneImageSelectorDialog)
+        select_btn.setEnabled(self.selected_image is not None)
+        self.select_btn = select_btn
         button_layout.addWidget(select_btn)
 
         layout.addLayout(button_layout)
+
+        # Ctrl+Enter / Ctrl+Return accept when a selection exists
+        self._primary_action = bind_primary_action(self, self._accept_if_enabled)
+
+    def _accept_if_enabled(self):
+        """Accept via Ctrl+Enter only when the Select button is enabled."""
+        if self.select_btn.isEnabled():
+            self.accept()
 
     def _on_selection_changed(self, checked: bool, image_path: Path):
         """Handle selection change."""
         if checked:
             self.selected_image = image_path
+            # Guard: the initial setChecked() fires before select_btn exists
+            if hasattr(self, 'select_btn'):
+                self.select_btn.setEnabled(True)
 
     def get_selected_image(self) -> Optional[Path]:
         """Get the selected image path."""

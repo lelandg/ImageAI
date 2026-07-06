@@ -11,13 +11,19 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime
 
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, Signal, QThread, QSettings
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QScrollArea, QWidget, QSplitter, QMessageBox,
     QFrame, QSizePolicy, QProgressBar
 )
+
+from .common.dialog_conventions import (
+    DialogCleanupMixin, bind_primary_action, persist_splitter,
+    restore_splitter, standard_splitter
+)
+from .llm_utils import DialogStatusConsole
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +105,7 @@ class RefineWorker(QThread):
             self.error.emit(str(e))
 
 
-class RefineImageDialog(QDialog):
+class RefineImageDialog(DialogCleanupMixin, QDialog):
     """
     Dialog for iteratively refining images through conversation.
 
@@ -125,6 +131,9 @@ class RefineImageDialog(QDialog):
         self.current_image_bytes = image_bytes or conversation.current_image_bytes
         self.aspect_ratio = aspect_ratio
         self.worker = None
+        self._refine_cancelled = False
+        self._original_pixmap = None
+        self.settings = QSettings("ImageAI", "RefineImageDialog")
 
         self.setWindowTitle("Refine Image - Multi-Turn Editing")
         self.setMinimumSize(800, 600)
@@ -132,6 +141,10 @@ class RefineImageDialog(QDialog):
 
         self._init_ui()
         self._load_history()
+        self._restore_settings()
+
+        # Initial focus goes to the primary input
+        self.prompt_input.setFocus()
 
     def _init_ui(self):
         """Initialize the user interface."""
@@ -145,8 +158,12 @@ class RefineImageDialog(QDialog):
         header_label.setWordWrap(True)
         layout.addWidget(header_label)
 
+        # Vertical splitter: main content on top, status console at bottom
+        self.console_splitter = standard_splitter(Qt.Vertical)
+
         # Main splitter: image on left, chat on right
-        splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter = standard_splitter(Qt.Horizontal)
+        self.main_splitter.splitterMoved.connect(self._rescale_image)
 
         # Left side: Image display
         image_frame = QFrame()
@@ -171,15 +188,21 @@ class RefineImageDialog(QDialog):
         self.image_info_label.setStyleSheet("color: #666; font-size: 10px;")
         image_layout.addWidget(self.image_info_label)
 
-        splitter.addWidget(image_frame)
+        self.main_splitter.addWidget(image_frame)
 
         # Right side: Chat history and input
         chat_frame = QFrame()
         chat_frame.setFrameShape(QFrame.StyledPanel)
         chat_layout = QVBoxLayout(chat_frame)
 
+        # History and input share a user-adjustable vertical splitter
+        self.chat_splitter = standard_splitter(Qt.Vertical)
+
         # Chat history
-        chat_layout.addWidget(QLabel("<b>Conversation History:</b>"))
+        history_container = QWidget()
+        history_container_layout = QVBoxLayout(history_container)
+        history_container_layout.setContentsMargins(0, 0, 0, 0)
+        history_container_layout.addWidget(QLabel("<b>Conversation History:</b>"))
 
         self.history_area = QScrollArea()
         self.history_area.setWidgetResizable(True)
@@ -190,10 +213,14 @@ class RefineImageDialog(QDialog):
         self.history_layout.setAlignment(Qt.AlignTop)
         self.history_area.setWidget(self.history_widget)
 
-        chat_layout.addWidget(self.history_area, 1)
+        history_container_layout.addWidget(self.history_area, 1)
+        self.chat_splitter.addWidget(history_container)
 
         # Refinement input
-        chat_layout.addWidget(QLabel("<b>Refinement Instructions:</b>"))
+        prompt_container = QWidget()
+        prompt_container_layout = QVBoxLayout(prompt_container)
+        prompt_container_layout.setContentsMargins(0, 0, 0, 0)
+        prompt_container_layout.addWidget(QLabel("<b>Refinement Instructions:</b>"))
 
         self.prompt_input = QTextEdit()
         self.prompt_input.setPlaceholderText(
@@ -204,8 +231,12 @@ class RefineImageDialog(QDialog):
             "- Change the text to say 'Hello World'\n"
             "- Make the person smile more"
         )
-        self.prompt_input.setMaximumHeight(120)
-        chat_layout.addWidget(self.prompt_input)
+        self.prompt_input.setMinimumHeight(80)
+        self.prompt_input.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        prompt_container_layout.addWidget(self.prompt_input, 1)
+        self.chat_splitter.addWidget(prompt_container)
+
+        chat_layout.addWidget(self.chat_splitter, 1)
 
         # Progress bar
         self.progress_bar = QProgressBar()
@@ -223,6 +254,7 @@ class RefineImageDialog(QDialog):
 
         self.refine_btn = QPushButton("Refine Image")
         self.refine_btn.setDefault(True)
+        self.refine_btn.setToolTip("Refine the image (Ctrl+Enter). Click again while running to stop.")
         self.refine_btn.clicked.connect(self._on_refine_clicked)
         self.refine_btn.setStyleSheet("""
             QPushButton {
@@ -252,12 +284,18 @@ class RefineImageDialog(QDialog):
 
         chat_layout.addLayout(button_layout)
 
-        splitter.addWidget(chat_frame)
+        self.main_splitter.addWidget(chat_frame)
 
-        # Set initial sizes (40% image, 60% chat)
-        splitter.setSizes([400, 600])
+        self.console_splitter.addWidget(self.main_splitter)
 
-        layout.addWidget(splitter)
+        # Status console at the bottom (LLM request/response log)
+        self.status_console = DialogStatusConsole("Status Console")
+        self.console_splitter.addWidget(self.status_console)
+
+        layout.addWidget(self.console_splitter, 1)
+
+        # Primary action: Ctrl+Return AND Ctrl+Enter
+        self._primary_action = bind_primary_action(self, self._on_refine_clicked)
 
     def _display_image(self, image_bytes: bytes):
         """Display image bytes in the image label."""
@@ -265,19 +303,30 @@ class RefineImageDialog(QDialog):
         pixmap.loadFromData(image_bytes)
 
         if not pixmap.isNull():
-            # Scale to fit while maintaining aspect ratio
-            scaled = pixmap.scaled(
-                self.image_label.size(),
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
-            )
-            self.image_label.setPixmap(scaled)
+            # Keep the original for rescaling on resize/splitter moves
+            self._original_pixmap = pixmap
+            self._rescale_image()
 
             # Update info label
             self.image_info_label.setText(
                 f"Size: {pixmap.width()}x{pixmap.height()} | "
                 f"Refinements: {self.conversation.get_message_count() // 2}"
             )
+
+    def _rescale_image(self, *args):
+        """Rescale the displayed pixmap to the label size (scaled, never cropped)."""
+        if self._original_pixmap is None or self._original_pixmap.isNull():
+            return
+        scaled = self._original_pixmap.scaled(
+            self.image_label.size(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+        self.image_label.setPixmap(scaled)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._rescale_image()
 
     def _load_history(self):
         """Load conversation history into the chat display."""
@@ -325,6 +374,9 @@ class RefineImageDialog(QDialog):
         # Content
         content_label = QLabel(content[:200] + "..." if len(content) > 200 else content)
         content_label.setWordWrap(True)
+        if len(content) > 200:
+            # Full text available on hover for truncated messages
+            content_label.setToolTip(content)
         msg_layout.addWidget(content_label)
 
         # Image indicator

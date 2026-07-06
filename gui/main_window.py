@@ -10,6 +10,9 @@ from core.llm_models import get_provider_models, get_all_provider_ids, get_provi
 
 logger = logging.getLogger(__name__)
 
+# Single source of truth for the GitHub issue tracker (Help tab + error-report dialog)
+ISSUES_URL = "https://github.com/lelandg/ImageAI/issues"
+
 try:
     from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSize, QRect, QStandardPaths
     from PySide6.QtGui import QPixmap, QAction, QPainter
@@ -89,6 +92,7 @@ from gui.theme import (
     TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DISABLED,
     BORDER_CYAN, GREEN, RED, AMBER
 )
+from gui.common.dialog_conventions import bind_primary_action
 
 # Midjourney has its own dedicated tab now, no longer needs panel import
 try:
@@ -103,6 +107,28 @@ except ImportError:
     BatchSelector = None
     AdvancedSettingsPanel = None
     CostEstimator = None
+
+
+class ProviderAuthTester(QThread):
+    """Background thread for validating provider auth without blocking the main GUI thread."""
+
+    # Signal to communicate results back to main thread
+    auth_tested = Signal(bool, str)  # (is_valid, message)
+
+    def __init__(self, provider_name: str, provider_config: dict):
+        super().__init__()
+        self.provider_name = provider_name
+        self.provider_config = provider_config
+
+    def run(self):
+        """Run in background thread - blocking network calls are safe here."""
+        try:
+            provider = get_provider(self.provider_name, self.provider_config)
+            is_valid, message = provider.validate_auth()
+            self.auth_tested.emit(is_valid, message)
+        except Exception as e:
+            # Emit error status
+            self.auth_tested.emit(False, f"Error: {str(e)}")
 
 
 class MainWindow(QMainWindow):
@@ -714,7 +740,8 @@ class MainWindow(QMainWindow):
         help_menu.addAction(act_report_error)
 
         # --- Generate menu ---
-        gen_menu = mb.addMenu("&Generate")
+        # 'Ge&nerate' (Alt+N): '&Generate' would collide with the Generate button's Alt+G
+        gen_menu = mb.addMenu("Ge&nerate")
         self.action_submit_batch = QAction("Submit as Batch Job…", self)
         self.action_submit_batch.setToolTip(
             "Send the current prompt to the OpenAI Batch API "
@@ -732,21 +759,25 @@ class MainWindow(QMainWindow):
         # LLM Provider and model selection at the very top
         llm_provider_layout = QHBoxLayout()
 
-        # LLM Provider dropdown
-        llm_provider_layout.addWidget(QLabel("LLM Provider:"))
+        # LLM Provider dropdown (label buddy + mnemonic for accessibility)
+        llm_provider_label = QLabel("&LLM Provider:")
+        llm_provider_layout.addWidget(llm_provider_label)
         self.llm_provider_combo = QComboBox()
         self.llm_provider_combo.setMinimumWidth(150)
         self.llm_provider_combo.addItems(self.get_llm_providers())
         self.llm_provider_combo.currentTextChanged.connect(self._on_llm_provider_changed)
+        llm_provider_label.setBuddy(self.llm_provider_combo)
         llm_provider_layout.addWidget(self.llm_provider_combo)
 
-        # LLM Model dropdown
-        llm_provider_layout.addWidget(QLabel("Model:"))
+        # LLM Model dropdown (label buddy + mnemonic for accessibility)
+        llm_model_label = QLabel("Mo&del:")
+        llm_provider_layout.addWidget(llm_model_label)
         self.llm_model_combo = QComboBox()
         self.llm_model_combo.setMinimumWidth(250)
         self.llm_model_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.llm_model_combo.setEnabled(False)
         self.llm_model_combo.currentTextChanged.connect(self._on_llm_model_changed)
+        llm_model_label.setBuddy(self.llm_model_combo)
         llm_provider_layout.addWidget(self.llm_model_combo)
         llm_provider_layout.addStretch()
         v.addLayout(llm_provider_layout)

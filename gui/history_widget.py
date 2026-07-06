@@ -9,10 +9,12 @@ from typing import List, Dict, Optional
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, QTableWidgetItem,
-    QHeaderView, QPushButton, QLabel, QTextEdit, QSplitter
+    QHeaderView, QPushButton, QLabel, QTextEdit, QMessageBox
 )
 from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtGui import QPixmap
+
+from .common.dialog_conventions import persist_splitter, restore_splitter, standard_splitter
 
 class DialogHistoryWidget(QWidget):
     """Reusable widget for showing dialog interaction history."""
@@ -34,7 +36,8 @@ class DialogHistoryWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Create splitter for table and detail view
-        splitter = QSplitter(Qt.Vertical)
+        self.splitter = standard_splitter(Qt.Vertical)
+        splitter = self.splitter
 
         # Top section: History table
         top_widget = QWidget()
@@ -78,13 +81,16 @@ class DialogHistoryWidget(QWidget):
 
         self.detail_view = QTextEdit()
         self.detail_view.setReadOnly(True)
-        self.detail_view.setMaximumHeight(150)
         bottom_layout.addWidget(self.detail_view)
 
         splitter.addWidget(bottom_widget)
 
-        # Set splitter proportions (70% table, 30% details)
-        splitter.setSizes([350, 150])
+        # Restore last position; default proportions (70% table, 30% details)
+        if not restore_splitter(self.settings, "splitter_state", splitter):
+            splitter.setSizes([350, 150])
+        splitter.splitterMoved.connect(
+            lambda *_: persist_splitter(self.settings, "splitter_state", self.splitter)
+        )
 
         layout.addWidget(splitter)
 
@@ -101,9 +107,10 @@ class DialogHistoryWidget(QWidget):
 
         layout.addLayout(button_layout)
 
-        # Connect signals
+        # Connect signals. itemActivated fires for both keyboard Enter and
+        # double-click, giving keyboard users parity.
         self.history_table.selectionModel().selectionChanged.connect(self._on_selection_changed)
-        self.history_table.itemDoubleClicked.connect(self._on_item_double_clicked)
+        self.history_table.itemActivated.connect(self._on_item_double_clicked)
 
     def add_entry(self, input_text: str, response_text: str, provider: str = "",
                   model: str = "", metadata: Optional[Dict] = None):
@@ -125,6 +132,9 @@ class DialogHistoryWidget(QWidget):
 
     def refresh_table(self):
         """Refresh the history table with current data."""
+        # Sorting must be off while populating, or rows get reordered
+        # mid-fill and items land in the wrong row.
+        self.history_table.setSortingEnabled(False)
         self.history_table.setRowCount(len(self.history))
 
         for row, item in enumerate(self.history):
@@ -170,6 +180,7 @@ class DialogHistoryWidget(QWidget):
         self.history_label.setText(f"History ({len(self.history)} items)")
 
         # Sort by date descending (newest first)
+        self.history_table.setSortingEnabled(True)
         self.history_table.sortByColumn(0, Qt.DescendingOrder)
 
     def _on_selection_changed(self):
@@ -199,7 +210,18 @@ class DialogHistoryWidget(QWidget):
             self.itemDoubleClicked.emit(item_data)
 
     def clear_history(self):
-        """Clear all history."""
+        """Clear all history (after confirmation — this is destructive)."""
+        if not self.history:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Clear History",
+            f"Delete all {len(self.history)} history entries? This cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        if reply != QMessageBox.Yes:
+            return
         self.history = []
         self.refresh_table()
         self.save_history()

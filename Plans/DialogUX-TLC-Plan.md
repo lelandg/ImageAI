@@ -1,6 +1,6 @@
 # Dialog & Tab UX TLC — Implementation Plan
 
-**Last Updated:** 2026-07-06 09:25
+**Last Updated:** 2026-07-06 09:46
 **Branch:** `feat/dialog-ux-tlc`
 **Audit findings:** `Notes/DialogUX-Audit-Findings-2026-07-06.md` (291 findings: 59 high / 142 medium / 90 low)
 
@@ -166,7 +166,22 @@ Batch 1 must land first (shared helpers); batches 2+ have disjoint file sets and
 
 CREATE gui/common/dialog_conventions.py per the standards doc: standard_splitter() (apply_splitter_style + setChildrenCollapsible(False)), persist_splitter()/restore_splitter() (named QSettings keys), bind_primary_action() returning a PrimaryAction that binds BOTH 'Ctrl+Return' and 'Ctrl+Enter' with retarget()/set_enabled(), set_default_button() (setDefault + focus + setAutoDefault(False) on siblings), and DialogCleanupMixin whose done() override runs an idempotent on_dialog_close() hook (fixes the app-wide 'cleanup only in closeEvent' class). FIX gui/dialog_utils.py:196: OperationGuardMixin installs InputBlockerEventFilter on the dialog only, so child widgets never get blocked — install on QApplication.instance() filtered by self.isAncestorOf(obj), or disable the content pane during operations. FIX gui/history_widget.py (embedded in 4 LLM dialogs): apply standard splitter treatment to the :37 splitter (style + non-collapsible), remove detail_view.setMaximumHeight(150) at :81, persist splitter state via the already-created but unused QSettings at :27, wrap refresh_table population in setSortingEnabled(False)/(True) (:128), and add a QMessageBox.question confirmation to clear_history (:201). All later batches consume this module; commit it first (batches 2+ can then run fully in parallel — no file overlaps).
 
-### Batch 2 [P2]: Generate Prompts dialog (gui/prompt_generation_dialog.py) ⏳
+### Batch 2 [P2]: Generate Prompts dialog (gui/prompt_generation_dialog.py) ✅ COMPLETE
+**Last Updated:** 2026-07-06 09:52 — done in working tree (477 tests green + offscreen
+smoke test): standard/named/persisted splitters (main, results, and a NEW
+`generate_splitter` making "Your Idea" draggable vs. the rest), input/preview caps
+removed, DialogCleanupMixin with `on_dialog_close()` (worker stop + presence reset +
+session/settings saves on every exit path), `save_settings` rewritten to persist named
+splitters (was a `findChildren(QSplitter)[0]` NameError after the import removal),
+`bind_primary_action` + `retarget()` replacing three stale `self.ctrl_enter_shortcut`
+references that crashed after generation / on history load,
+`set_default_button(generate_btn)`, mnemonics+buddies, Generate↔Stop cancel-in-flight
+via `_on_generate_clicked` dispatcher + `_cancel_generation`, temperature/max_tokens
+first-run defaults (`settings.value("temperature", 0.8, type=float)`). ALSO:
+`gui/common/splitter_style.py` handles now visible at rest (center grip line, 8px
+default) — app-wide fix for "invisible splitter" complaints; and repaired
+`gui/layout/layout_tab.py` left broken mid-edit (QHBoxLayout/QSplitter import removal
+with no body changes — 81 test failures), applying `standard_splitter` to its main split.
 **Files:** `gui/prompt_generation_dialog.py`
 
 Splitter (:734): replace with standard_splitter (styled + non-collapsible), keep as self.main_splitter, and persist it by reference — deleting the findChildren(QSplitter)[0] lookup at :1476/:901. Sizing: remove input_text.setMaximumHeight(100) (:755) with min-height + Expanding policy/stretch; remove preview_text cap (:870) and put results_list + preview_text in a nested standard splitter. Exit paths: adopt DialogCleanupMixin — override accept() (or on_dialog_close) so the OK/double-click/Ctrl+Enter path saves session, settings, geometry, and splitter state (:1304 finding); factor worker shutdown out of closeEvent (:1509-1531) into _stop_worker() used by every exit (:1489 finding). Cancel-in-flight: during generation, repurpose the Generate button as Stop wired to worker.stop() + thread.quit() + end_operation() (:1089, :724). Settings: restore temperature with settings.value('temperature', 0.8, type=float) (:1406 first-run 0.0 bug). Hotkeys: replace the single Ctrl+Return QShortcut (:852) with bind_primary_action, keeping the generate↔accept retarget logic at :1007/:1191/:1296 via PrimaryAction.retarget so keypad Enter follows. Accessibility: mnemonics + setBuddy for the settings-row labels (:766-820), '&Generate Prompts' accelerator, initial focus on input_text.

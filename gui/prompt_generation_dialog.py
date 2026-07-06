@@ -9,12 +9,16 @@ from pathlib import Path
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QPushButton, QListWidget, QListWidgetItem, QSpinBox,
-    QComboBox, QGroupBox, QSplitter, QMessageBox,
+    QComboBox, QGroupBox, QMessageBox,
     QTabWidget, QWidget, QDialogButtonBox, QDoubleSpinBox
 )
 from PySide6.QtCore import Qt, Signal, QThread, QObject, QSettings
 from PySide6.QtGui import QKeySequence, QShortcut
 
+from .common.dialog_conventions import (
+    DialogCleanupMixin, bind_primary_action, persist_splitter,
+    restore_splitter, set_default_button, standard_splitter
+)
 from .dialog_utils import OperationGuardMixin, guard_operation
 from .history_widget import DialogHistoryWidget
 from core.discord_rpc import discord_rpc, ActivityState
@@ -697,7 +701,7 @@ class LLMWorker(QObject):
             self.error.emit(f"LLM generation failed: {str(e)}")
 
 
-class PromptGenerationDialog(QDialog, OperationGuardMixin):
+class PromptGenerationDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
     """Dialog for generating prompts using LLM."""
 
     promptSelected = Signal(str)
@@ -720,8 +724,12 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
 
         self.init_ui()
 
-        # Initialize operation guard AFTER UI is created (needs status_console)
-        self.init_operation_guard(block_all_input=True)
+        # Initialize operation guard AFTER UI is created (needs status_console).
+        # block_all_input=False: the Generate button becomes Stop during
+        # generation and must stay clickable to cancel the in-flight request
+        # (the input blocker would swallow its clicks); re-entry is still
+        # prevented by @guard_operation.
+        self.init_operation_guard(block_all_input=False)
 
         self.load_llm_settings()
         self.restore_last_session()
@@ -730,8 +738,9 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         """Initialize the UI."""
         main_layout = QVBoxLayout(self)
 
-        # Create splitter for main content and status console
-        splitter = QSplitter(Qt.Vertical)
+        # Create splitter for main content and status console (styled, non-collapsible)
+        self.main_splitter = standard_splitter(Qt.Vertical)
+        splitter = self.main_splitter
 
         # Main content widget
         main_widget = QWidget()
@@ -744,6 +753,10 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         generate_widget = QWidget()
         generate_layout = QVBoxLayout(generate_widget)
 
+        # "Your Idea" sits above a visible splitter handle so the input box
+        # can be dragged larger against everything below it
+        self.generate_splitter = standard_splitter(Qt.Vertical)
+
         # Input section
         input_group = QGroupBox("Your Idea")
         input_layout = QVBoxLayout(input_group)
@@ -752,10 +765,16 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         self.input_text.setPlaceholderText(
             "Enter a basic idea or concept, e.g., 'futuristic city at sunset' or 'magical forest'"
         )
-        self.input_text.setMaximumHeight(100)
+        # Primary input: no max-height cap — grows with the dialog (floor only)
+        self.input_text.setMinimumHeight(80)
         input_layout.addWidget(self.input_text)
 
-        generate_layout.addWidget(input_group)
+        self.generate_splitter.addWidget(input_group)
+
+        # Everything below the input lives in the lower splitter pane
+        lower_widget = QWidget()
+        lower_layout = QVBoxLayout(lower_widget)
+        lower_layout.setContentsMargins(0, 0, 0, 0)
 
         # Settings section
         settings_group = QGroupBox("Generation Settings")
@@ -763,20 +782,26 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
 
         # First row: variations, provider, model
         first_row = QHBoxLayout()
-        first_row.addWidget(QLabel("Number of variations:"))
+        variations_label = QLabel("Number of &variations:")
+        first_row.addWidget(variations_label)
         self.num_variations_spin = QSpinBox()
         self.num_variations_spin.setRange(1, 10)
         self.num_variations_spin.setValue(3)
+        variations_label.setBuddy(self.num_variations_spin)
         first_row.addWidget(self.num_variations_spin)
 
         first_row.addStretch()
 
-        first_row.addWidget(QLabel("LLM Provider:"))
+        provider_label = QLabel("LLM &Provider:")
+        first_row.addWidget(provider_label)
         self.llm_provider_combo = QComboBox()
+        provider_label.setBuddy(self.llm_provider_combo)
         first_row.addWidget(self.llm_provider_combo)
 
-        first_row.addWidget(QLabel("Model:"))
+        model_label = QLabel("&Model:")
+        first_row.addWidget(model_label)
         self.llm_model_combo = QComboBox()
+        model_label.setBuddy(self.llm_model_combo)
         first_row.addWidget(self.llm_model_combo)
 
         settings_layout.addLayout(first_row)
@@ -786,20 +811,24 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         standard_layout = QHBoxLayout(self.standard_params_widget)
         standard_layout.setContentsMargins(0, 0, 0, 0)
 
-        standard_layout.addWidget(QLabel("Temperature:"))
+        temperature_label = QLabel("&Temperature:")
+        standard_layout.addWidget(temperature_label)
         self.temperature_spin = QDoubleSpinBox()
         self.temperature_spin.setRange(0.0, 2.0)
         self.temperature_spin.setSingleStep(0.1)
         self.temperature_spin.setValue(0.8)
         self.temperature_spin.setToolTip("Controls randomness (0=deterministic, 2=very creative)")
+        temperature_label.setBuddy(self.temperature_spin)
         standard_layout.addWidget(self.temperature_spin)
 
-        standard_layout.addWidget(QLabel("Max Tokens:"))
+        max_tokens_label = QLabel("Max To&kens:")
+        standard_layout.addWidget(max_tokens_label)
         self.max_tokens_spin = QSpinBox()
         self.max_tokens_spin.setRange(200, 4000)
         self.max_tokens_spin.setSingleStep(100)
         self.max_tokens_spin.setValue(1500)
         self.max_tokens_spin.setToolTip("Maximum length of the response (recommended: ~150 tokens per variation)")
+        max_tokens_label.setBuddy(self.max_tokens_spin)
         standard_layout.addWidget(self.max_tokens_spin)
 
         standard_layout.addStretch()
@@ -810,47 +839,50 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         gpt5_layout = QHBoxLayout(self.gpt5_params_widget)
         gpt5_layout.setContentsMargins(0, 0, 0, 0)
 
-        gpt5_layout.addWidget(QLabel("Reasoning:"))
+        reasoning_label = QLabel("&Reasoning:")
+        gpt5_layout.addWidget(reasoning_label)
         self.reasoning_combo = QComboBox()
         self.reasoning_combo.addItems(["low", "medium", "high"])
         self.reasoning_combo.setCurrentText("medium")
         self.reasoning_combo.setToolTip("GPT-5 reasoning effort level")
+        reasoning_label.setBuddy(self.reasoning_combo)
         gpt5_layout.addWidget(self.reasoning_combo)
 
-        gpt5_layout.addWidget(QLabel("Verbosity:"))
+        verbosity_label = QLabel("Verbosit&y:")
+        gpt5_layout.addWidget(verbosity_label)
         self.verbosity_combo = QComboBox()
         self.verbosity_combo.addItems(["low", "medium", "high"])
         self.verbosity_combo.setCurrentText("medium")
         self.verbosity_combo.setToolTip("GPT-5 response detail level")
+        verbosity_label.setBuddy(self.verbosity_combo)
         gpt5_layout.addWidget(self.verbosity_combo)
 
         gpt5_layout.addStretch()
         settings_layout.addWidget(self.gpt5_params_widget)
         self.gpt5_params_widget.setVisible(False)  # Hidden by default
 
-        generate_layout.addWidget(settings_group)
+        lower_layout.addWidget(settings_group)
 
         # Generate button
-        self.generate_btn = QPushButton("Generate Prompts")
+        self.generate_btn = QPushButton("&Generate Prompts")
         self.generate_btn.setToolTip("Generate creative prompts with AI (Ctrl+Enter)")
-        self.generate_btn.setDefault(True)
         self.generate_btn.setStyleSheet("""
             QPushButton {
                 font-weight: bold;
             }
         """)
-        self.generate_btn.clicked.connect(self.generate_prompts)
-        generate_layout.addWidget(self.generate_btn)
+        self.generate_btn.clicked.connect(self._on_generate_clicked)
+        lower_layout.addWidget(self.generate_btn)
 
         # Add shortcut hint label (store reference to update it later)
         self.shortcut_label = QLabel("<small style='color: gray;'>Shortcuts: Ctrl+Enter to generate, Esc to close</small>")
         self.shortcut_label.setAlignment(Qt.AlignCenter)
-        generate_layout.addWidget(self.shortcut_label)
+        lower_layout.addWidget(self.shortcut_label)
 
         # Set up keyboard shortcuts
-        # Ctrl+Enter to generate prompts (will change to OK after generation)
-        self.ctrl_enter_shortcut = QShortcut(QKeySequence("Ctrl+Return"), self)
-        self.ctrl_enter_shortcut.activated.connect(self.generate_prompts)
+        # Ctrl+Return AND Ctrl+Enter (keypad) to generate prompts
+        # (retargeted to OK after generation)
+        self.primary_action = bind_primary_action(self, self._on_generate_clicked)
 
         # Escape to close
         escape_shortcut = QShortcut(QKeySequence("Escape"), self)
@@ -862,15 +894,28 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
 
         self.results_list = QListWidget()
         self.results_list.itemDoubleClicked.connect(self.on_item_double_clicked)
-        results_layout.addWidget(self.results_list)
 
         # Result preview
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
-        self.preview_text.setMaximumHeight(100)
-        results_layout.addWidget(self.preview_text)
+        self.preview_text.setMinimumHeight(60)
 
-        generate_layout.addWidget(results_group)
+        # List and preview share space via a nested splitter (no max-height cap)
+        self.results_splitter = standard_splitter(Qt.Vertical)
+        self.results_splitter.addWidget(self.results_list)
+        self.results_splitter.addWidget(self.preview_text)
+        results_layout.addWidget(self.results_splitter)
+        if not restore_splitter(self.settings, "results_splitter_state", self.results_splitter):
+            self.results_splitter.setSizes([200, 100])
+
+        lower_layout.addWidget(results_group, 1)
+
+        self.generate_splitter.addWidget(lower_widget)
+        self.generate_splitter.setStretchFactor(0, 0)  # input keeps its size
+        self.generate_splitter.setStretchFactor(1, 1)  # results absorb resize
+        generate_layout.addWidget(self.generate_splitter)
+        if not restore_splitter(self.settings, "generate_splitter_state", self.generate_splitter):
+            self.generate_splitter.setSizes([130, 420])
 
         self.tab_widget.addTab(generate_widget, "Generate")
 
@@ -889,18 +934,15 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         self.status_console = DialogStatusConsole("Status", self)
         splitter.addWidget(self.status_console)
 
-        # Set splitter sizes (70% content, 30% console)
-        splitter.setSizes([490, 210])
         splitter.setStretchFactor(0, 1)  # Main content can stretch
         splitter.setStretchFactor(1, 0)  # Console maintains minimum size but can expand
 
         # Add splitter to main layout
         main_layout.addWidget(splitter)
 
-        # Restore splitter state if saved
-        splitter_state = self.settings.value("splitter_state")
-        if splitter_state:
-            splitter.restoreState(splitter_state)
+        # Restore splitter state; default sizes (70% content, 30% console) if none saved
+        if not restore_splitter(self.settings, "splitter_state", self.main_splitter):
+            splitter.setSizes([490, 210])
 
         # Always start on Generate tab (index 0), not History tab
         if hasattr(self, 'tab_widget'):
@@ -917,6 +959,10 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
 
         # Store reference to OK button
         self.ok_button = self.buttons.button(QDialogButtonBox.Ok)
+
+        # Generate is the single default button until results exist; focus
+        # goes to the idea box below instead of the button
+        set_default_button(self, self.generate_btn, focus=False)
 
         # Connect list selection to preview
         self.results_list.currentItemChanged.connect(self.on_selection_changed)
@@ -992,6 +1038,26 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         self.gpt5_params_widget.setVisible(is_gpt5)
         self.standard_params_widget.setVisible(not is_gpt5)
 
+    def _on_generate_clicked(self):
+        """Generate-button dispatcher: Generate normally, Stop while running."""
+        if self.is_operation_running():
+            self._cancel_generation()
+        else:
+            self.generate_prompts()
+
+    def _cancel_generation(self):
+        """Stop an in-flight generation at the user's request."""
+        self.status_console.log("Generation stopped by user", "WARNING")
+        self._stop_worker()
+        self.end_operation()
+        self._reset_generate_button()
+
+    def _reset_generate_button(self):
+        """Restore the Generate button after a run (or a Stop)."""
+        self.generate_btn.setText("&Generate Prompts")
+        self.generate_btn.setToolTip("Generate creative prompts with AI (Ctrl+Enter)")
+        self.generate_btn.setEnabled(True)
+
     @guard_operation("Prompt Generation")
     def generate_prompts(self):
         """Generate prompts using LLM."""
@@ -1002,12 +1068,8 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
 
         # Reset shortcuts and defaults when starting a new generation
         if self.prompts_generated:
-            # Reset Ctrl+Enter back to generate
-            try:
-                self.ctrl_enter_shortcut.activated.disconnect()
-            except:
-                pass
-            self.ctrl_enter_shortcut.activated.connect(self.generate_prompts)
+            # Reset Ctrl+Enter/Ctrl+Return back to generate
+            self.primary_action.retarget(self._on_generate_clicked)
 
             # Reset defaults
             self.generate_btn.setDefault(True)
@@ -1085,9 +1147,10 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         # Save session for restoration
         self.save_last_session()
 
-        # Disable UI during generation
-        self.generate_btn.setEnabled(False)
-        self.generate_btn.setText("Generating...")
+        # Repurpose the Generate button as Stop while the worker runs — it
+        # stays enabled so the user can cancel the in-flight request
+        self.generate_btn.setText("&Stop")
+        self.generate_btn.setToolTip("Stop the in-flight generation")
 
         # Clear previous results
         self.results_list.clear()
@@ -1178,20 +1241,15 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
             )
 
         # Re-enable UI
-        self.generate_btn.setEnabled(True)
-        self.generate_btn.setText("Generate Prompts")
+        self._reset_generate_button()
 
         # After generation: make OK button default, set focus to it, and update Ctrl+Enter
         self.ok_button.setDefault(True)
         self.generate_btn.setDefault(False)
         self.ok_button.setFocus()
 
-        # Update Ctrl+Enter shortcut to trigger OK button after generation
-        try:
-            self.ctrl_enter_shortcut.activated.disconnect()
-        except:
-            pass  # In case it's already disconnected
-        self.ctrl_enter_shortcut.activated.connect(self.accept_selection)
+        # Retarget Ctrl+Enter/Ctrl+Return to accept the selection
+        self.primary_action.retarget(self.accept_selection)
 
         # Update shortcut hint label
         self.shortcut_label.setText("<small style='color: gray;'>Shortcuts: Ctrl+Enter to use selected prompt, Esc to close</small>")
@@ -1206,15 +1264,13 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
 
         # Don't save errors to history - only save successful generations
 
-        self.generate_btn.setEnabled(True)
-        self.generate_btn.setText("Generate Prompts")
+        self._reset_generate_button()
 
         # End operation (disables input blocking)
         self.end_operation()
 
     def on_generation_progress(self, message: str):
-        """Handle progress updates."""
-        self.generate_btn.setText(message)
+        """Handle progress updates (console only — the button stays 'Stop')."""
         self.status_console.log(message, "INFO")
 
     def on_log_message(self, message: str, level: str):
@@ -1291,12 +1347,8 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
             self.ok_button.setDefault(True)
             self.generate_btn.setDefault(False)
 
-            # Update Ctrl+Enter shortcut to trigger OK button
-            try:
-                self.ctrl_enter_shortcut.activated.disconnect()
-            except:
-                pass
-            self.ctrl_enter_shortcut.activated.connect(self.accept_selection)
+            # Retarget Ctrl+Enter/Ctrl+Return to accept the selection
+            self.primary_action.retarget(self.accept_selection)
 
             # Update shortcut hint label
             self.shortcut_label.setText("<small style='color: gray;'>Shortcuts: Ctrl+Enter to use selected prompt, Esc to close</small>")
@@ -1402,17 +1454,17 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
 
     def restore_last_session(self):
         """Restore the last session state."""
-        # First restore from QSettings
-        temperature = self.settings.value("temperature", type=float)
-        if temperature is not None:
-            self.temperature_spin.setValue(temperature)
+        # First restore from QSettings. Defaults matter: with type= and no
+        # default, a missing key returns 0/0.0 (not None), which set
+        # temperature to 0.0 on first run.
+        temperature = self.settings.value("temperature", 0.8, type=float)
+        self.temperature_spin.setValue(temperature)
 
-        max_tokens = self.settings.value("max_tokens", type=int)
-        if max_tokens is not None:
-            # Enforce minimum of 200 tokens (old sessions may have had 100)
-            if max_tokens < 200:
-                max_tokens = 1500  # Reset to default if too low
-            self.max_tokens_spin.setValue(max_tokens)
+        max_tokens = self.settings.value("max_tokens", 1500, type=int)
+        # Enforce minimum of 200 tokens (old sessions may have had 100)
+        if max_tokens < 200:
+            max_tokens = 1500  # Reset to default if too low
+        self.max_tokens_spin.setValue(max_tokens)
 
         reasoning = self.settings.value("reasoning_effort", "medium")
         index = self.reasoning_combo.findText(reasoning)
@@ -1470,12 +1522,13 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
                     self.verbosity_combo.setCurrentIndex(index)
 
     def save_settings(self):
-        """Save window geometry and splitter state."""
+        """Save window geometry and splitter states."""
         self.settings.setValue("geometry", self.saveGeometry())
-        # Find and save splitter state
-        splitters = self.findChildren(QSplitter)
-        if splitters:
-            self.settings.setValue("splitter_state", splitters[0].saveState())
+        # Persist each named splitter under its own key (never findChildren —
+        # the embedded history widget contains its own splitter)
+        persist_splitter(self.settings, "splitter_state", self.main_splitter)
+        persist_splitter(self.settings, "generate_splitter_state", self.generate_splitter)
+        persist_splitter(self.settings, "results_splitter_state", self.results_splitter)
         # Save tab index
         if hasattr(self, 'tab_widget'):
             self.settings.setValue("tab_index", self.tab_widget.currentIndex())
@@ -1486,12 +1539,6 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
         if geometry:
             self.restoreGeometry(geometry)
 
-    def reject(self):
-        """Override reject to save settings before closing."""
-        self.save_last_session()
-        self.save_settings()
-        super().reject()
-
     def showEvent(self, event):
         """Handle show event - update Discord presence."""
         super().showEvent(event)
@@ -1500,12 +1547,8 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
             details="Prompt Generator"
         )
 
-    def closeEvent(self, event):
-        """Handle close event."""
-        # Reset Discord presence to IDLE
-        discord_rpc.update_presence(ActivityState.IDLE)
-
-        # Stop any running worker
+    def _stop_worker(self):
+        """Stop a running LLM worker and wait briefly for its thread."""
         if self.worker and self.thread and self.thread.isRunning():
             # Tell worker to stop
             self.worker.stop()
@@ -1530,8 +1573,9 @@ class PromptGenerationDialog(QDialog, OperationGuardMixin):
                 # Thread is still running, but we've disconnected signals
                 # The thread will clean up when the LLM call completes
 
-        # Save session state
+    def on_dialog_close(self):
+        """Cleanup on every exit path (OK, Cancel, Escape, X) via DialogCleanupMixin."""
+        discord_rpc.update_presence(ActivityState.IDLE)
+        self._stop_worker()
         self.save_last_session()
-        # Save window settings
         self.save_settings()
-        super().closeEvent(event)
