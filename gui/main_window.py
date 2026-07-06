@@ -110,7 +110,11 @@ except ImportError:
 
 
 class ProviderAuthTester(QThread):
-    """Background thread for validating provider auth without blocking the main GUI thread."""
+    """Background thread for validating provider auth without blocking the main GUI thread.
+
+    Staged for the dialog-UX TLC main-window batch (Plans/DialogUX-TLC-Plan.md
+    Batch 3): _save_and_test will move its validate_auth() call here.
+    """
 
     # Signal to communicate results back to main thread
     auth_tested = Signal(bool, str)  # (is_valid, message)

@@ -419,7 +419,7 @@ class InstallProgressDialog(DialogCleanupMixin, QDialog):
             )
 
     def reject(self):
-        """Prevent closing during installation."""
+        """Prevent closing during installation or model download."""
         if self.installer and self.installer.isRunning():
             QMessageBox.warning(
                 self,
@@ -429,7 +429,20 @@ class InstallProgressDialog(DialogCleanupMixin, QDialog):
             )
             return
 
+        if self.downloader and self.downloader.isRunning():
+            QMessageBox.warning(
+                self,
+                "Download in Progress",
+                "Please wait for the model download to complete.\n"
+                "Closing now would abandon the partial download."
+            )
+            return
+
         super().reject()
+
+    def on_dialog_close(self):
+        """Persist splitter proportions on every exit path."""
+        persist_splitter(self.settings, "console_splitter", self.console_splitter)
 
 
 class InstallCompleteDialog(QDialog):

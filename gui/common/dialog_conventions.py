@@ -86,6 +86,10 @@ def set_default_button(dialog: QWidget, button: QPushButton, *, focus: bool = Tr
     land on a utility button, and (optionally) gives the default button
     initial focus. Dialogs whose primary input should take focus instead pass
     focus=False and call setFocus() on that input.
+
+    Only affects buttons that exist at call time: a QPushButton created
+    afterward (e.g. in a dynamically rebuilt form) is auto-default again and
+    can steal Enter — call this again after such rebuilds.
     """
     for other in dialog.findChildren(QPushButton):
         other.setAutoDefault(False)
@@ -102,6 +106,11 @@ class DialogCleanupMixin:
     QDialog.accept()/reject() do NOT trigger closeEvent, so cleanup that only
     lives there is skipped on OK/Cancel/Escape. This mixin routes done() and
     closeEvent through an idempotent hook.
+
+    Caveat: this closeEvent runs cleanup unconditionally, BEFORE the event is
+    accepted or ignored. A subclass that guards closes (e.g. refusing to close
+    while an install runs) must put the guard in reject()/done() or fully
+    override closeEvent — otherwise cleanup fires even on a refused close.
 
     Usage:
         class MyDialog(DialogCleanupMixin, QDialog):

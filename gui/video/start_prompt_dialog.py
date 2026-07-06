@@ -340,15 +340,27 @@ class StartPromptDialog(DialogCleanupMixin, QDialog):
 
     def generate_prompt(self):
         """Generate start prompt using LLM"""
-        # Disable buttons during generation
+        # Disable buttons during generation - OK must not accept an empty
+        # prompt while the thread runs
         self.regenerate_btn.setEnabled(False)
+        self.ok_btn.setEnabled(False)
+        self._primary_action.set_enabled(False)
         self.progress_bar.show()
 
-        # Log generation parameters
+        # Log generation parameters (file log + status console)
         self.logger.info(f"Generating start prompt with {self.provider}/{self.model}")
         self.logger.info(f"Continuity mode: {self.continuity_mode.value}")
         if self.previous_frame_path:
             self.logger.info(f"Previous frame: {self.previous_frame_path}")
+
+        self.status_console.separator()
+        self.status_console.log(f"Generating start prompt with {self.provider}/{self.model}")
+        self.status_console.log(f"Continuity mode: {self._get_mode_display_name(self.continuity_mode)}")
+        if self.previous_frame_path:
+            self.status_console.log(f"Previous frame: {self.previous_frame_path}")
+        self.status_console.log(f"Source text:\n{self.source}")
+        if self.current_prompt:
+            self.status_console.log(f"Current prompt:\n{self.current_prompt}")
 
         # Create and start generation thread
         self.generation_thread = StartPromptGenerationThread(
@@ -370,7 +382,7 @@ class StartPromptDialog(DialogCleanupMixin, QDialog):
     def _on_progress_update(self, message: str):
         """Handle progress updates from generation thread."""
         self.logger.info(f"Progress: {message}")
-        # Could update a status label here if we add one
+        self.status_console.log(message)
 
     def _get_mode_display_name(self, mode: ContinuityMode) -> str:
         """Get display name for continuity mode."""
@@ -387,14 +399,20 @@ class StartPromptDialog(DialogCleanupMixin, QDialog):
         self.generated_prompt_edit.setPlainText(prompt)
         self.progress_bar.hide()
         self.regenerate_btn.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+        self._primary_action.set_enabled(True)
         # Change button text back to "Regenerate" after first generation
         self.regenerate_btn.setText("🔄 Regenerate")
+        self.status_console.log(f"Response received:\n{prompt}", level="SUCCESS")
         self.logger.info(f"Start prompt generated:\n{prompt}")
 
     def _on_generation_failed(self, error: str):
         """Handle generation failure"""
         self.progress_bar.hide()
         self.regenerate_btn.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+        self._primary_action.set_enabled(True)
+        self.status_console.log(f"Generation failed: {error}", level="ERROR")
         # Keep button as "Generate" if it was the first attempt, or change to "Regenerate"
         if self.generated_prompt is None:
             self.regenerate_btn.setText("🎨 Generate")
@@ -407,6 +425,12 @@ class StartPromptDialog(DialogCleanupMixin, QDialog):
         """Get the final prompt (edited or generated)"""
         return self.generated_prompt_edit.toPlainText().strip()
 
+    def restore_window_geometry(self):
+        """Restore window size and position from settings"""
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
     def showEvent(self, event):
         """Handle show event - update Discord presence."""
         super().showEvent(event)
@@ -415,8 +439,23 @@ class StartPromptDialog(DialogCleanupMixin, QDialog):
             details="Start Frame Prompt"
         )
 
-    def closeEvent(self, event):
-        """Handle close event."""
+    def on_dialog_close(self):
+        """Cleanup on every exit path (OK, Cancel, Escape, title-bar X)."""
         # Reset Discord presence to IDLE
         discord_rpc.update_presence(ActivityState.IDLE)
-        super().closeEvent(event)
+
+        # Persist geometry and splitter proportions
+        self.settings.setValue("geometry", self.saveGeometry())
+        persist_splitter(self.settings, "main_splitter", self.main_splitter)
+
+        # Stop the generation thread if it is still running
+        if self.generation_thread and self.generation_thread.isRunning():
+            try:
+                self.generation_thread.generation_complete.disconnect()
+                self.generation_thread.generation_failed.disconnect()
+                self.generation_thread.progress_update.disconnect()
+            except (RuntimeError, TypeError):
+                pass  # Signals may already be disconnected
+            self.generation_thread.quit()
+            if not self.generation_thread.wait(2000):
+                self.logger.warning("Start prompt generation thread did not finish in time")

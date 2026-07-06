@@ -1,6 +1,22 @@
 # Dialog & Tab UX TLC — Implementation Plan
 
-**Last Updated:** 2026-07-06 09:46
+**Last Updated:** 2026-07-06 10:15
+
+**PR #34 review follow-up (2026-07-06):** all three blocking construction crashes
+fixed — text_gen_dialog (imports removed mid-migration → migration finished:
+standard splitter, bind_primary_action + retarget-to-Apply, settings/geometry/splitter
+persistence in the former stubs, on_dialog_close), start_prompt_dialog (missing
+restore_window_geometry + on_dialog_close persistence/thread cleanup + console
+routing + OK-disable during generation, mirroring video_prompt_dialog),
+refine_image_dialog (missing _restore_settings + on_dialog_close + worker→console
+routing + real Refine↔Stop using _refine_cancelled). Non-blocking: install_dialog
+Escape now also blocked during model download + console splitter persisted;
+midjourney_dialog geometry/splitters persisted and _ACTIVE_STATUS_CONSOLE cleared
+via on_dialog_close; helper docstrings document the set_default_button
+call-time and CleanupMixin refused-close caveats. NEW tests/gui/test_dialog_conventions.py:
+unit tests for PrimaryAction/CleanupMixin/restore_splitter + offscreen construction
+smoke tests for 5 dialogs (suite 492). This partially completes Batches 7, 8, 13,
+14, 15 — the per-batch line items below remain the source of truth for what's left.
 **Branch:** `feat/dialog-ux-tlc`
 **Audit findings:** `Notes/DialogUX-Audit-Findings-2026-07-06.md` (291 findings: 59 high / 142 medium / 90 low)
 

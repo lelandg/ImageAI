@@ -15,7 +15,7 @@ from PySide6.QtCore import Qt, Signal, QThread, QSettings
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QTextEdit, QScrollArea, QWidget, QSplitter, QMessageBox,
+    QTextEdit, QScrollArea, QWidget, QMessageBox,
     QFrame, QSizePolicy, QProgressBar
 )
 
@@ -297,6 +297,39 @@ class RefineImageDialog(DialogCleanupMixin, QDialog):
         # Primary action: Ctrl+Return AND Ctrl+Enter
         self._primary_action = bind_primary_action(self, self._on_refine_clicked)
 
+    def _restore_settings(self):
+        """Restore window geometry and splitter proportions."""
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+        if not restore_splitter(self.settings, "console_splitter", self.console_splitter):
+            self.console_splitter.setSizes([500, 150])
+        if not restore_splitter(self.settings, "main_splitter", self.main_splitter):
+            # 40% image, 60% chat
+            self.main_splitter.setSizes([400, 600])
+        if not restore_splitter(self.settings, "chat_splitter", self.chat_splitter):
+            self.chat_splitter.setSizes([350, 150])
+
+    def on_dialog_close(self):
+        """Cleanup on every exit path (Close, Escape, title-bar X)."""
+        self.settings.setValue("geometry", self.saveGeometry())
+        persist_splitter(self.settings, "console_splitter", self.console_splitter)
+        persist_splitter(self.settings, "main_splitter", self.main_splitter)
+        persist_splitter(self.settings, "chat_splitter", self.chat_splitter)
+
+        # Stop the refine worker if it is still running
+        if self.worker and self.worker.isRunning():
+            self._refine_cancelled = True
+            try:
+                self.worker.finished.disconnect()
+                self.worker.error.disconnect()
+                self.worker.progress.disconnect()
+            except (RuntimeError, TypeError):
+                pass  # Signals may already be disconnected
+            self.worker.quit()
+            if not self.worker.wait(2000):
+                logger.warning("Refine worker did not finish in time")
+
     def _display_image(self, image_bytes: bytes):
         """Display image bytes in the image label."""
         pixmap = QPixmap()
@@ -393,7 +426,11 @@ class RefineImageDialog(DialogCleanupMixin, QDialog):
         )
 
     def _on_refine_clicked(self):
-        """Handle refine button click."""
+        """Refine button dispatcher: refine normally, Stop while running."""
+        if self.worker and self.worker.isRunning():
+            self._cancel_refine()
+            return
+
         prompt = self.prompt_input.toPlainText().strip()
 
         if not prompt:
@@ -408,8 +445,9 @@ class RefineImageDialog(DialogCleanupMixin, QDialog):
             )
             return
 
-        # Disable UI during processing
-        self.refine_btn.setEnabled(False)
+        # Repurpose the Refine button as Stop while the worker runs
+        self._refine_cancelled = False
+        self.refine_btn.setText("Stop")
         self.prompt_input.setEnabled(False)
         self.progress_bar.setVisible(True)
         self.progress_bar.setRange(0, 0)  # Indeterminate
@@ -417,6 +455,12 @@ class RefineImageDialog(DialogCleanupMixin, QDialog):
         # Add user message to history immediately
         self._add_history_message('user', prompt)
         self.conversation.add_message('user', prompt)
+
+        # Log the outgoing request to the status console
+        self.status_console.separator()
+        self.status_console.log(
+            f"Refinement request (aspect_ratio={self.aspect_ratio or 'unchanged'}):\n{prompt}"
+        )
 
         # Start worker
         self.worker = RefineWorker(
@@ -429,12 +473,34 @@ class RefineImageDialog(DialogCleanupMixin, QDialog):
         self.worker.progress.connect(self._on_progress)
         self.worker.start()
 
+    def _cancel_refine(self):
+        """Stop an in-flight refinement at the user's request."""
+        self._refine_cancelled = True
+        self.status_console.log("Refinement stopped by user", "WARNING")
+        self._reset_refine_ui("Refinement stopped")
+
+    def _reset_refine_ui(self, status: str = ""):
+        """Restore the input/button state after a run (or a Stop)."""
+        self.refine_btn.setText("Refine Image")
+        self.prompt_input.setEnabled(True)
+        self.progress_bar.setVisible(False)
+        if status:
+            self.status_label.setText(status)
+
     def _on_progress(self, message: str):
         """Handle progress updates."""
         self.status_label.setText(message)
+        self.status_console.log(message)
 
     def _on_refine_finished(self, image_bytes: bytes, response_text: str):
         """Handle successful refinement."""
+        if self._refine_cancelled:
+            return  # User stopped this run; drop the late result
+
+        self.status_console.log(
+            f"Response received:\n{response_text or 'Image refined'}", "SUCCESS"
+        )
+
         # Update conversation
         self.conversation.add_message('model', response_text or 'Image refined', image_bytes)
 
@@ -445,10 +511,7 @@ class RefineImageDialog(DialogCleanupMixin, QDialog):
 
         # Clear input and re-enable UI
         self.prompt_input.clear()
-        self.refine_btn.setEnabled(True)
-        self.prompt_input.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.status_label.setText("Refinement complete!")
+        self._reset_refine_ui("Refinement complete!")
 
         # Emit signal for main window
         prompt = self.prompt_input.toPlainText() or self.conversation.messages[-2]['content']
@@ -456,10 +519,11 @@ class RefineImageDialog(DialogCleanupMixin, QDialog):
 
     def _on_refine_error(self, error: str):
         """Handle refinement error."""
-        self.refine_btn.setEnabled(True)
-        self.prompt_input.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.status_label.setText(f"Error: {error}")
+        if self._refine_cancelled:
+            return  # User stopped this run; drop the late error
+
+        self.status_console.log(f"Refinement failed: {error}", "ERROR")
+        self._reset_refine_ui(f"Error: {error}")
 
         QMessageBox.critical(self, "Refinement Failed", f"Failed to refine image:\n{error}")
 

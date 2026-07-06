@@ -1003,8 +1003,19 @@ class MidjourneyWebDialog(DialogCleanupMixin, QDialog):
             self.imageGenerated.emit("Midjourney image generated")
             self.accept()
 
-    def closeEvent(self, event):
-        """Handle close event."""
+    def on_dialog_close(self):
+        """Cleanup on every exit path (accept, Escape, title-bar X)."""
+        # Release the shared download-feedback console before this widget is
+        # destroyed — a stale handle would silently swallow later messages
+        global _ACTIVE_STATUS_CONSOLE
+        if _ACTIVE_STATUS_CONSOLE is self.status_console:
+            _ACTIVE_STATUS_CONSOLE = None
+
+        # Persist geometry and splitter proportions
+        self.settings.setValue("geometry", self.saveGeometry())
+        persist_splitter(self.settings, "main_splitter_state", self.main_splitter)
+        persist_splitter(self.settings, "console_splitter_state", self.console_splitter)
+
         # Auto-import any downloaded images matching this prompt
         try:
             imported = self._import_downloaded_images(auto_import=True)
@@ -1027,8 +1038,6 @@ class MidjourneyWebDialog(DialogCleanupMixin, QDialog):
             self._popups = []
         except Exception:
             pass
-
-        super().closeEvent(event)
 
 
 class _AuthPopupDialog(QDialog):

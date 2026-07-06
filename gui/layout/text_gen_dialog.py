@@ -412,35 +412,41 @@ class TextGenerationDialog(DialogCleanupMixin, QDialog):
         self.init_ui()
         self.load_settings()
 
+        # Restore window geometry (after init_ui's resize default)
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
     def init_ui(self):
         """Initialize the UI."""
         layout = QVBoxLayout(self)
 
-        # Splitter for main content and status console
-        splitter = QSplitter(Qt.Vertical)
+        # Splitter for main content and status console (styled, non-collapsible)
+        self.main_splitter = standard_splitter(Qt.Vertical)
 
         # Top section: settings and preview
         top_widget = self._create_top_section()
-        splitter.addWidget(top_widget)
+        self.main_splitter.addWidget(top_widget)
 
         # Bottom section: status console
         self.status_console = DialogStatusConsole("Generation Status")
-        splitter.addWidget(self.status_console)
+        self.main_splitter.addWidget(self.status_console)
 
-        # Set splitter sizes (70% top, 30% bottom)
-        splitter.setSizes([500, 200])
-        layout.addWidget(splitter)
+        # Restore splitter proportions; default 70% top / 30% console on first run
+        if not restore_splitter(self.settings, "main_splitter", self.main_splitter):
+            self.main_splitter.setSizes([500, 200])
+        layout.addWidget(self.main_splitter)
 
         # Buttons
         button_layout = QHBoxLayout()
         button_layout.addStretch()
 
-        self.generate_btn = QPushButton("Generate")
-        self.generate_btn.setDefault(True)
+        self.generate_btn = QPushButton("&Generate")
+        self.generate_btn.setToolTip("Generate text with the LLM (Ctrl+Enter)")
         self.generate_btn.clicked.connect(self.generate)
         button_layout.addWidget(self.generate_btn)
 
-        self.apply_btn = QPushButton("Apply")
+        self.apply_btn = QPushButton("&Apply")
         self.apply_btn.setEnabled(False)
         self.apply_btn.clicked.connect(self.accept)
         button_layout.addWidget(self.apply_btn)
@@ -451,9 +457,12 @@ class TextGenerationDialog(DialogCleanupMixin, QDialog):
 
         layout.addLayout(button_layout)
 
-        # Keyboard shortcuts
-        QShortcut(QKeySequence("Ctrl+Return"), self, self.generate)
-        QShortcut(QKeySequence("Escape"), self, self.reject)
+        # Generate is the single default button until a result exists
+        set_default_button(self, self.generate_btn, focus=False)
+
+        # Ctrl+Return AND Ctrl+Enter start generation (retargeted to Apply
+        # after a result exists); Escape rejects via the QDialog default
+        self._primary_action = bind_primary_action(self, self.generate)
 
     def _create_top_section(self):
         """Create the top section with settings and preview."""
@@ -505,7 +514,8 @@ class TextGenerationDialog(DialogCleanupMixin, QDialog):
 
         self.custom_prompt_edit = QTextEdit()
         self.custom_prompt_edit.setPlaceholderText("Enter your custom prompt here...")
-        self.custom_prompt_edit.setMaximumHeight(100)
+        # Primary input: no max-height cap — grows with the dialog (floor only)
+        self.custom_prompt_edit.setMinimumHeight(80)
         custom_layout.addWidget(self.custom_prompt_edit)
 
         self.custom_prompt_group.setLayout(custom_layout)
@@ -531,15 +541,17 @@ class TextGenerationDialog(DialogCleanupMixin, QDialog):
         self.custom_prompt_group.setVisible(checked)
 
     def load_settings(self):
-        """Load settings from config."""
-        # Temperature
-        # Could add config storage for last-used temperature
-        pass
+        """Load persisted dialog settings."""
+        temperature = self.settings.value(
+            "temperature", self.temperature_spin.value(), type=float
+        )
+        self.temperature_spin.setValue(temperature)
 
     def save_settings(self):
-        """Save settings to config."""
-        # Could save temperature preference
-        pass
+        """Persist dialog settings, geometry, and splitter proportions."""
+        self.settings.setValue("temperature", self.temperature_spin.value())
+        self.settings.setValue("geometry", self.saveGeometry())
+        persist_splitter(self.settings, "main_splitter", self.main_splitter)
 
     def generate(self):
         """Start text generation."""
@@ -547,10 +559,13 @@ class TextGenerationDialog(DialogCleanupMixin, QDialog):
             self.status_console.log("Generation already in progress...", "WARNING")
             return
 
-        # Clear previous results
+        # Clear previous results; Ctrl+Enter means Generate again until a
+        # fresh result exists
         self.preview_edit.clear()
         self.apply_btn.setEnabled(False)
         self.generate_btn.setEnabled(False)
+        self._primary_action.retarget(self.generate)
+        set_default_button(self, self.generate_btn, focus=False)
         self.status_console.clear()
 
         # Build block context
@@ -603,6 +618,10 @@ class TextGenerationDialog(DialogCleanupMixin, QDialog):
         self.apply_btn.setEnabled(True)
         self.generate_btn.setEnabled(True)
 
+        # A result exists: Ctrl+Enter and the default button now Apply it
+        self._primary_action.retarget(self.accept)
+        set_default_button(self, self.apply_btn, focus=False)
+
     def _on_error(self, error: str):
         """Handle generation error."""
         self.status_console.log(f"Error: {error}", "ERROR")
@@ -622,10 +641,13 @@ class TextGenerationDialog(DialogCleanupMixin, QDialog):
             details="Generate Text"
         )
 
-    def closeEvent(self, event):
-        """Handle close event - ensure worker thread is stopped."""
+    def on_dialog_close(self):
+        """Cleanup on every exit path (Apply, Cancel, Escape, title-bar X)."""
         # Reset Discord presence to IDLE
         discord_rpc.update_presence(ActivityState.IDLE)
+
+        # Persist settings, geometry, and splitter proportions
+        self.save_settings()
 
         if self.worker and self.worker.isRunning():
             # Disconnect signals to prevent crashes during cleanup
@@ -633,7 +655,7 @@ class TextGenerationDialog(DialogCleanupMixin, QDialog):
                 self.worker.progress.disconnect()
                 self.worker.finished.disconnect()
                 self.worker.error.disconnect()
-            except:
+            except (RuntimeError, TypeError):
                 pass  # Signals may already be disconnected
 
             # Try to quit the thread gracefully
@@ -645,5 +667,3 @@ class TextGenerationDialog(DialogCleanupMixin, QDialog):
                 console_logger.warning("Worker thread did not finish in time")
                 # Thread is still running, but we've disconnected signals
                 # QThread's destructor will wait for it
-
-        super().closeEvent(event)
