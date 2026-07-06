@@ -12,14 +12,19 @@ from typing import Optional
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
-    QPushButton, QGroupBox, QProgressBar, QDialogButtonBox
+    QPushButton, QGroupBox, QProgressBar, QDialogButtonBox, QWidget
 )
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, Signal, QThread, QSettings
 from PySide6.QtGui import QFont
 
 from core.video.end_prompt_generator import EndPromptGenerator
 from core.video.style_analyzer import StyleAnalyzer, ContinuityMode
 from core.discord_rpc import discord_rpc, ActivityState
+from gui.llm_utils import DialogStatusConsole
+from ..common.dialog_conventions import (
+    DialogCleanupMixin, bind_primary_action, persist_splitter,
+    restore_splitter, set_default_button, standard_splitter,
+)
 
 
 class StartPromptGenerationThread(QThread):
@@ -182,7 +187,7 @@ Generate a detailed visual description suitable for AI image generation."""
         return prompt
 
 
-class StartPromptDialog(QDialog):
+class StartPromptDialog(DialogCleanupMixin, QDialog):
     """
     Dialog for generating start frame prompts with LLM.
 
@@ -215,12 +220,14 @@ class StartPromptDialog(QDialog):
         self.previous_frame_path = previous_frame_path
         self.generation_thread: Optional[StartPromptGenerationThread] = None
         self.generated_prompt: Optional[str] = None
+        self.settings = QSettings("ImageAI", "StartPromptDialog")
 
         self.setWindowTitle("Generate Start Frame Prompt with LLM")
         self.setMinimumWidth(600)
         self.setMinimumHeight(450)
 
         self.init_ui()
+        self.restore_window_geometry()
 
         # Auto-generate on open
         self.generate_prompt()
@@ -229,6 +236,14 @@ class StartPromptDialog(QDialog):
         """Initialize user interface"""
         layout = QVBoxLayout(self)
 
+        # Vertical splitter: context / generated prompt / status console
+        self.main_splitter = standard_splitter(Qt.Vertical, self)
+
+        # Context pane: source text (+ continuity info, current prompt)
+        context_widget = QWidget()
+        context_layout = QVBoxLayout(context_widget)
+        context_layout.setContentsMargins(0, 0, 0, 0)
+
         # Source text section
         source_group = QGroupBox("Source Text")
         source_layout = QVBoxLayout()
@@ -236,17 +251,18 @@ class StartPromptDialog(QDialog):
         self.source_display = QTextEdit()
         self.source_display.setPlainText(self.source)
         self.source_display.setReadOnly(True)
-        self.source_display.setMaximumHeight(80)
+        self.source_display.setMinimumHeight(60)
+        self.source_display.setFocusPolicy(Qt.ClickFocus)
         source_layout.addWidget(self.source_display)
 
         source_group.setLayout(source_layout)
-        layout.addWidget(source_group)
+        context_layout.addWidget(source_group)
 
         # Show continuity info if enabled
         if self.continuity_mode != ContinuityMode.NONE:
             continuity_info = QLabel(f"ℹ️ Continuity mode: {self._get_mode_display_name(self.continuity_mode)}")
             continuity_info.setStyleSheet("QLabel { color: #0066cc; font-style: italic; padding: 5px; }")
-            layout.addWidget(continuity_info)
+            context_layout.addWidget(continuity_info)
 
         # Current prompt section (if exists)
         if self.current_prompt:
@@ -256,11 +272,14 @@ class StartPromptDialog(QDialog):
             self.current_prompt_display = QTextEdit()
             self.current_prompt_display.setPlainText(self.current_prompt)
             self.current_prompt_display.setReadOnly(True)
-            self.current_prompt_display.setMaximumHeight(80)
+            self.current_prompt_display.setMinimumHeight(60)
+            self.current_prompt_display.setFocusPolicy(Qt.ClickFocus)
             current_layout.addWidget(self.current_prompt_display)
 
             current_group.setLayout(current_layout)
-            layout.addWidget(current_group)
+            context_layout.addWidget(current_group)
+
+        self.main_splitter.addWidget(context_widget)
 
         # Generated prompt section
         prompt_group = QGroupBox("Generated Start Prompt")
@@ -278,7 +297,17 @@ class StartPromptDialog(QDialog):
         prompt_layout.addWidget(self.progress_bar)
 
         prompt_group.setLayout(prompt_layout)
-        layout.addWidget(prompt_group)
+        self.main_splitter.addWidget(prompt_group)
+
+        # Status console (LLM request/response traffic + progress)
+        self.status_console = DialogStatusConsole("Status Console")
+        self.main_splitter.addWidget(self.status_console)
+
+        layout.addWidget(self.main_splitter, stretch=1)
+
+        # Restore splitter proportions, or apply defaults on first run
+        if not restore_splitter(self.settings, "main_splitter", self.main_splitter):
+            self.main_splitter.setSizes([150, 220, 140])
 
         # Action buttons
         action_layout = QHBoxLayout()
@@ -299,17 +328,39 @@ class StartPromptDialog(QDialog):
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
 
+        self.ok_btn = button_box.button(QDialogButtonBox.Ok)
+        set_default_button(self, self.ok_btn, focus=False)
+
+        # Ctrl+Enter / Ctrl+Return accepts the dialog (Enter in the prompt
+        # edit inserts a newline)
+        self._primary_action = bind_primary_action(self, self.accept)
+
+        # Initial focus on the editable prompt, not the read-only source
+        self.generated_prompt_edit.setFocus()
+
     def generate_prompt(self):
         """Generate start prompt using LLM"""
-        # Disable buttons during generation
+        # Disable buttons during generation - OK must not accept an empty
+        # prompt while the thread runs
         self.regenerate_btn.setEnabled(False)
+        self.ok_btn.setEnabled(False)
+        self._primary_action.set_enabled(False)
         self.progress_bar.show()
 
-        # Log generation parameters
+        # Log generation parameters (file log + status console)
         self.logger.info(f"Generating start prompt with {self.provider}/{self.model}")
         self.logger.info(f"Continuity mode: {self.continuity_mode.value}")
         if self.previous_frame_path:
             self.logger.info(f"Previous frame: {self.previous_frame_path}")
+
+        self.status_console.separator()
+        self.status_console.log(f"Generating start prompt with {self.provider}/{self.model}")
+        self.status_console.log(f"Continuity mode: {self._get_mode_display_name(self.continuity_mode)}")
+        if self.previous_frame_path:
+            self.status_console.log(f"Previous frame: {self.previous_frame_path}")
+        self.status_console.log(f"Source text:\n{self.source}")
+        if self.current_prompt:
+            self.status_console.log(f"Current prompt:\n{self.current_prompt}")
 
         # Create and start generation thread
         self.generation_thread = StartPromptGenerationThread(
@@ -331,7 +382,7 @@ class StartPromptDialog(QDialog):
     def _on_progress_update(self, message: str):
         """Handle progress updates from generation thread."""
         self.logger.info(f"Progress: {message}")
-        # Could update a status label here if we add one
+        self.status_console.log(message)
 
     def _get_mode_display_name(self, mode: ContinuityMode) -> str:
         """Get display name for continuity mode."""
@@ -348,14 +399,20 @@ class StartPromptDialog(QDialog):
         self.generated_prompt_edit.setPlainText(prompt)
         self.progress_bar.hide()
         self.regenerate_btn.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+        self._primary_action.set_enabled(True)
         # Change button text back to "Regenerate" after first generation
         self.regenerate_btn.setText("🔄 Regenerate")
+        self.status_console.log(f"Response received:\n{prompt}", level="SUCCESS")
         self.logger.info(f"Start prompt generated:\n{prompt}")
 
     def _on_generation_failed(self, error: str):
         """Handle generation failure"""
         self.progress_bar.hide()
         self.regenerate_btn.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+        self._primary_action.set_enabled(True)
+        self.status_console.log(f"Generation failed: {error}", level="ERROR")
         # Keep button as "Generate" if it was the first attempt, or change to "Regenerate"
         if self.generated_prompt is None:
             self.regenerate_btn.setText("🎨 Generate")
@@ -368,6 +425,12 @@ class StartPromptDialog(QDialog):
         """Get the final prompt (edited or generated)"""
         return self.generated_prompt_edit.toPlainText().strip()
 
+    def restore_window_geometry(self):
+        """Restore window size and position from settings"""
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
     def showEvent(self, event):
         """Handle show event - update Discord presence."""
         super().showEvent(event)
@@ -376,8 +439,23 @@ class StartPromptDialog(QDialog):
             details="Start Frame Prompt"
         )
 
-    def closeEvent(self, event):
-        """Handle close event."""
+    def on_dialog_close(self):
+        """Cleanup on every exit path (OK, Cancel, Escape, title-bar X)."""
         # Reset Discord presence to IDLE
         discord_rpc.update_presence(ActivityState.IDLE)
-        super().closeEvent(event)
+
+        # Persist geometry and splitter proportions
+        self.settings.setValue("geometry", self.saveGeometry())
+        persist_splitter(self.settings, "main_splitter", self.main_splitter)
+
+        # Stop the generation thread if it is still running
+        if self.generation_thread and self.generation_thread.isRunning():
+            try:
+                self.generation_thread.generation_complete.disconnect()
+                self.generation_thread.generation_failed.disconnect()
+                self.generation_thread.progress_update.disconnect()
+            except (RuntimeError, TypeError):
+                pass  # Signals may already be disconnected
+            self.generation_thread.quit()
+            if not self.generation_thread.wait(2000):
+                self.logger.warning("Start prompt generation thread did not finish in time")

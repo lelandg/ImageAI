@@ -1,9 +1,9 @@
 """Dialog windows for ImageAI GUI."""
 
 from typing import Optional
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QListWidget, 
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QTabWidget, QWidget, QComboBox, QFormLayout,
     QCheckBox, QPushButton, QLineEdit, QTextEdit
 )
@@ -11,9 +11,12 @@ from PySide6.QtWidgets import (
 from core.constants import GEMINI_TEMPLATES_PATH
 from templates import get_gemini_doc_templates
 from gui.shortcut_hint_widget import create_shortcut_hint
+from .common.dialog_conventions import (
+    DialogCleanupMixin, bind_primary_action, set_default_button
+)
 
 
-class ExamplesDialog(QDialog):
+class ExamplesDialog(DialogCleanupMixin, QDialog):
     """Dialog for selecting example prompts and templates."""
     
     EXAMPLES = [
@@ -30,8 +33,13 @@ class ExamplesDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Examples & Templates")
-        self.resize(620, 440)
-        
+        self.settings = QSettings("ImageAI", "ExamplesDialog")
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+        else:
+            self.resize(620, 440)
+
         self.append_to_prompt: bool = False
         self._last_values: dict[str, dict[str, str]] = {}
         
@@ -114,8 +122,25 @@ class ExamplesDialog(QDialog):
         
         self.btnCancel.clicked.connect(self.reject)
         self.btnOK.clicked.connect(self._on_ok)
-        self.listw.itemDoubleClicked.connect(self._on_ok)
-    
+        # itemActivated fires for both keyboard Enter and double-click,
+        # matching the "Double-click or Enter to use" hint above.
+        self.listw.itemActivated.connect(self._on_ok)
+
+        # Enter activates "Use Selected" (never Cancel); Ctrl+Enter/Return
+        # is the primary-action shortcut per the app-wide convention.
+        set_default_button(self, self.btnOK, focus=False)
+        self._primary_action = bind_primary_action(self, self._on_ok)
+
+        # Initial keyboard focus on the examples list with a selection so
+        # the advertised Enter-to-use flow works immediately.
+        if self.listw.count() > 0:
+            self.listw.setCurrentRow(0)
+        self.listw.setFocus()
+
+    def on_dialog_close(self):
+        """Persist geometry on every exit path (OK, Cancel, Escape, X)."""
+        self.settings.setValue("geometry", self.saveGeometry())
+
     def _rebuild_template_form(self):
         """Rebuild the template form for the selected template."""
         # Clear existing form

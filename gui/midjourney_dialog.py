@@ -4,12 +4,18 @@ import logging
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QTextEdit, QDialogButtonBox, QMessageBox,
-    QSplitter, QWidget, QGroupBox, QToolBar, QLineEdit
+    QWidget, QGroupBox, QToolBar, QLineEdit
 )
-from PySide6.QtCore import Qt, Signal, QUrl, QTimer
+from PySide6.QtCore import Qt, Signal, QUrl, QTimer, QSettings
 from PySide6.QtGui import QKeySequence, QShortcut, QDesktopServices
 
 from PySide6.QtWebEngineWidgets import QWebEngineView
+
+from .common.dialog_conventions import (
+    DialogCleanupMixin, bind_primary_action, persist_splitter,
+    restore_splitter, set_default_button, standard_splitter
+)
+from .llm_utils import DialogStatusConsole
 
 # Optional core classes for request interception
 try:
@@ -31,6 +37,24 @@ console = logging.getLogger("console")
 # Shared persistent profile for all Midjourney dialogs
 # This ensures cookies/auth persist across dialog instances
 _SHARED_MIDJOURNEY_PROFILE = None
+
+# Status console of the most recently opened dialog; module-level download
+# handlers mirror their feedback here so the user sees it in the dialog
+# instead of only in the (usually hidden) main-window console.
+_ACTIVE_STATUS_CONSOLE = None
+
+
+def _console_status(message: str, level: str = "INFO"):
+    """Log to the console logger and mirror into the active dialog console."""
+    if level == "ERROR":
+        console.error(message)
+    else:
+        console.info(message)
+    if _ACTIVE_STATUS_CONSOLE is not None:
+        try:
+            _ACTIVE_STATUS_CONSOLE.log(message, level)
+        except Exception:
+            pass
 
 
 def _handle_download(download):
@@ -56,7 +80,7 @@ def _handle_download(download):
         download.accept()
 
         logger.info(f"Download started: {suggested_name} -> {file_path}")
-        console.info(f"Downloading: {suggested_name}")
+        _console_status(f"Downloading: {suggested_name}")
 
         # Connect state changed signal to track completion
         def on_state_change(state):
@@ -64,7 +88,7 @@ def _handle_download(download):
                 # QWebEngineDownloadRequest.DownloadCompleted = 2
                 if int(state) == 2:
                     logger.info(f"Download finished: {suggested_name}")
-                    console.info(f"✓ Downloaded: {suggested_name}")
+                    _console_status(f"✓ Downloaded: {suggested_name}", "SUCCESS")
                 elif int(state) == 3:  # DownloadCancelled
                     logger.warning(f"Download cancelled: {suggested_name}")
                 elif int(state) == 4:  # DownloadInterrupted
@@ -141,7 +165,7 @@ def get_shared_midjourney_profile():
     return _SHARED_MIDJOURNEY_PROFILE
 
 
-class MidjourneyWebDialog(QDialog):
+class MidjourneyWebDialog(DialogCleanupMixin, QDialog):
     """Dialog for Midjourney web interface with instructions."""
 
     imageGenerated = Signal(str)  # Emitted when user confirms image is generated
@@ -238,11 +262,24 @@ class MidjourneyWebDialog(QDialog):
         self.setModal(False)  # Non-modal so user can interact with main window
         self.resize(1400, 900)
 
+        # Restore last size/position (large working window users reopen often)
+        self.settings = QSettings("ImageAI", "MidjourneyWebDialog")
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
+
+        # Status console (created early so feedback during setup is captured;
+        # added to the layout at the bottom, below the main splitter)
+        global _ACTIVE_STATUS_CONSOLE
+        self.status_console = DialogStatusConsole("Status", self)
+        _ACTIVE_STATUS_CONSOLE = self.status_console
+
         # Main layout
         layout = QVBoxLayout(self)
 
         # Create splitter for web view and instructions
-        splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter = standard_splitter(Qt.Horizontal)
+        splitter = self.main_splitter
 
         # Left side - Web view
         web_container = QWidget()
@@ -298,7 +335,7 @@ class MidjourneyWebDialog(QDialog):
         self.command_display = QTextEdit()
         self.command_display.setPlainText(self.web_command)  # Use web_command (no /imagine prefix)
         self.command_display.setReadOnly(True)
-        self.command_display.setMaximumHeight(150)
+        self.command_display.setMinimumHeight(80)
         self.command_display.setStyleSheet(
             "QTextEdit { font-family: monospace; font-size: 10pt; background-color: #f0f0f0; }"
         )
@@ -309,7 +346,8 @@ class MidjourneyWebDialog(QDialog):
         copy_btn.clicked.connect(self.copy_command)
         command_layout.addWidget(copy_btn)
 
-        right_layout.addWidget(command_group)
+        # Long commands get the extra vertical space (no height cap above)
+        right_layout.addWidget(command_group, 1)
 
         # Open in browser button
         browser_btn = QPushButton("🌐 Open in External Browser")
@@ -341,9 +379,6 @@ class MidjourneyWebDialog(QDialog):
         import_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 8px; }")
         right_layout.addWidget(import_btn)
 
-        # Add stretch to push buttons to bottom
-        right_layout.addStretch()
-
         # Status/tips
         tips_group = QGroupBox("Tips")
         tips_layout = QVBoxLayout(tips_group)
@@ -364,7 +399,7 @@ class MidjourneyWebDialog(QDialog):
         button_box = QDialogButtonBox()
 
         self.ready_btn = QPushButton("✓ Image Ready")
-        self.ready_btn.setToolTip("Click when your image is generated and ready")
+        self.ready_btn.setToolTip("Click when your image is generated and ready (Ctrl+Enter)")
         self.ready_btn.clicked.connect(self.on_image_ready)
         button_box.addButton(self.ready_btn, QDialogButtonBox.AcceptRole)
 
@@ -376,17 +411,33 @@ class MidjourneyWebDialog(QDialog):
 
         splitter.addWidget(right_panel)
 
-        # Set splitter sizes (70% web, 30% instructions)
-        splitter.setSizes([980, 420])
         splitter.setStretchFactor(0, 1)  # Web view can stretch
         splitter.setStretchFactor(1, 0)  # Instructions panel fixed
 
-        layout.addWidget(splitter)
+        # Vertical splitter: main content on top, status console at the bottom
+        self.console_splitter = standard_splitter(Qt.Vertical)
+        self.console_splitter.addWidget(splitter)
+        self.console_splitter.addWidget(self.status_console)
+        self.console_splitter.setStretchFactor(0, 1)
+        self.console_splitter.setStretchFactor(1, 0)
+
+        layout.addWidget(self.console_splitter)
+
+        # Restore splitter positions; fall back to defaults on first run
+        if not restore_splitter(self.settings, "main_splitter_state", self.main_splitter):
+            # 70% web, 30% instructions
+            self.main_splitter.setSizes([980, 420])
+        if not restore_splitter(self.settings, "console_splitter_state", self.console_splitter):
+            self.console_splitter.setSizes([740, 130])
 
         # Keyboard shortcuts
-        QShortcut(QKeySequence("Ctrl+V"), self, self.paste_to_web)
         QShortcut(QKeySequence("Escape"), self, self.reject)
-        QShortcut(QKeySequence("Ctrl+Enter"), self, self.on_image_ready)
+        # Primary action: Ctrl+Return AND Ctrl+Enter (keypad), always together
+        self._primary_action = bind_primary_action(self, self.on_image_ready)
+
+        # Enter activates the primary action only; utility buttons don't steal it.
+        # The web view keeps initial focus (focus=False).
+        set_default_button(self, self.ready_btn, focus=False)
 
         # Auto-copy command on dialog open
         QTimer.singleShot(100, self.copy_command)
@@ -640,12 +691,6 @@ class MidjourneyWebDialog(QDialog):
             console.info("Command copied to clipboard")
         except Exception as e:
             logger.error(f"Failed to copy to clipboard: {e}")
-
-    def paste_to_web(self):
-        """Attempt to paste into web view (may not work due to security)."""
-        # This is a placeholder - direct paste to web view is usually blocked
-        # User will need to manually paste
-        console.info("Please click in the message box and paste (Ctrl+V)")
 
     def open_in_browser(self):
         """Open Midjourney in external browser."""
@@ -958,8 +1003,19 @@ class MidjourneyWebDialog(QDialog):
             self.imageGenerated.emit("Midjourney image generated")
             self.accept()
 
-    def closeEvent(self, event):
-        """Handle close event."""
+    def on_dialog_close(self):
+        """Cleanup on every exit path (accept, Escape, title-bar X)."""
+        # Release the shared download-feedback console before this widget is
+        # destroyed — a stale handle would silently swallow later messages
+        global _ACTIVE_STATUS_CONSOLE
+        if _ACTIVE_STATUS_CONSOLE is self.status_console:
+            _ACTIVE_STATUS_CONSOLE = None
+
+        # Persist geometry and splitter proportions
+        self.settings.setValue("geometry", self.saveGeometry())
+        persist_splitter(self.settings, "main_splitter_state", self.main_splitter)
+        persist_splitter(self.settings, "console_splitter_state", self.console_splitter)
+
         # Auto-import any downloaded images matching this prompt
         try:
             imported = self._import_downloaded_images(auto_import=True)
@@ -982,8 +1038,6 @@ class MidjourneyWebDialog(QDialog):
             self._popups = []
         except Exception:
             pass
-
-        super().closeEvent(event)
 
 
 class _AuthPopupDialog(QDialog):

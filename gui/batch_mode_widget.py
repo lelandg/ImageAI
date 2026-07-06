@@ -10,15 +10,21 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer, QSettings
+from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTextEdit, QListWidget, QListWidgetItem, QGroupBox,
     QProgressBar, QMessageBox, QFileDialog, QSpinBox,
-    QCheckBox, QSplitter, QFrame
+    QCheckBox, QFrame, QAbstractItemView
 )
 
 from core.batch_manager import BatchRequest, BatchJob, BatchJobState, get_batch_manager
+from .common.dialog_conventions import (
+    bind_primary_action, persist_splitter, restore_splitter, standard_splitter
+)
+from .llm_utils import DialogStatusConsole
+from .theme import TEXT_SECONDARY
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +51,9 @@ class BatchModeWidget(QWidget):
         self.current_quality = "2k"  # For NBP
         self.active_jobs: List[BatchJob] = []
 
+        # Persisted UI state (splitter positions)
+        self.settings = QSettings("ImageAI", "BatchMode")
+
         # Timer for polling job status
         self.status_timer = QTimer(self)
         self.status_timer.timeout.connect(self._poll_job_status)
@@ -64,8 +73,8 @@ class BatchModeWidget(QWidget):
         header.setWordWrap(True)
         layout.addWidget(header)
 
-        # Splitter: Queue on left, Jobs on right
-        splitter = QSplitter(Qt.Horizontal)
+        # Splitter: Queue on left, Jobs on right (styled, non-collapsible)
+        self.queue_splitter = standard_splitter(Qt.Horizontal)
 
         # Left side: Prompt queue
         queue_frame = QFrame()
@@ -74,17 +83,19 @@ class BatchModeWidget(QWidget):
         queue_layout.addWidget(QLabel("<b>Prompt Queue:</b>"))
 
         self.queue_list = QListWidget()
-        self.queue_list.setToolTip("Queued prompts for batch processing")
+        self.queue_list.setToolTip("Queued prompts for batch processing (Delete removes selected)")
+        self.queue_list.setSelectionMode(QAbstractItemView.ExtendedSelection)
         queue_layout.addWidget(self.queue_list)
 
         # Queue controls
         queue_controls = QHBoxLayout()
 
-        self.remove_btn = QPushButton("Remove Selected")
+        self.remove_btn = QPushButton("&Remove Selected")
+        self.remove_btn.setToolTip("Remove the selected prompts from the queue (Delete)")
         self.remove_btn.clicked.connect(self._remove_selected)
         queue_controls.addWidget(self.remove_btn)
 
-        self.clear_btn = QPushButton("Clear All")
+        self.clear_btn = QPushButton("&Clear All")
         self.clear_btn.clicked.connect(self._clear_queue)
         queue_controls.addWidget(self.clear_btn)
 
@@ -93,19 +104,19 @@ class BatchModeWidget(QWidget):
         # Import/Export
         file_controls = QHBoxLayout()
 
-        self.import_btn = QPushButton("Import from File")
+        self.import_btn = QPushButton("&Import from File")
         self.import_btn.setToolTip("Import prompts from a text file (one per line)")
         self.import_btn.clicked.connect(self._import_prompts)
         file_controls.addWidget(self.import_btn)
 
-        self.export_btn = QPushButton("Export to File")
+        self.export_btn = QPushButton("&Export to File")
         self.export_btn.setToolTip("Export queued prompts to a text file")
         self.export_btn.clicked.connect(self._export_prompts)
         file_controls.addWidget(self.export_btn)
 
         queue_layout.addLayout(file_controls)
 
-        splitter.addWidget(queue_frame)
+        self.queue_splitter.addWidget(queue_frame)
 
         # Right side: Active jobs
         jobs_frame = QFrame()
@@ -120,20 +131,25 @@ class BatchModeWidget(QWidget):
         # Job controls
         job_controls = QHBoxLayout()
 
-        self.refresh_btn = QPushButton("Refresh Status")
+        self.refresh_btn = QPushButton("Re&fresh Status")
+        self.refresh_btn.setToolTip("Poll the provider for the current status of all active jobs")
         self.refresh_btn.clicked.connect(self._refresh_all_jobs)
         job_controls.addWidget(self.refresh_btn)
 
-        self.download_btn = QPushButton("Download Results")
+        self.download_btn = QPushButton("&Download Results")
+        self.download_btn.setToolTip("Download generated images from the selected completed job")
         self.download_btn.clicked.connect(self._download_results)
         job_controls.addWidget(self.download_btn)
 
         jobs_layout.addLayout(job_controls)
 
-        splitter.addWidget(jobs_frame)
-        splitter.setSizes([500, 500])
+        self.queue_splitter.addWidget(jobs_frame)
 
-        layout.addWidget(splitter)
+        # Upper pane: queue/jobs splitter + submit controls (console goes below)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.addWidget(self.queue_splitter, 1)
 
         # Submit controls
         submit_group = QGroupBox("Submit Batch Job")
@@ -142,11 +158,13 @@ class BatchModeWidget(QWidget):
         # Options row
         options_layout = QHBoxLayout()
 
-        options_layout.addWidget(QLabel("Batch Size:"))
+        batch_size_label = QLabel("Batch &Size:")
+        options_layout.addWidget(batch_size_label)
         self.batch_size_spin = QSpinBox()
         self.batch_size_spin.setRange(1, 100)
         self.batch_size_spin.setValue(10)
         self.batch_size_spin.setToolTip("Maximum prompts per batch job")
+        batch_size_label.setBuddy(self.batch_size_spin)
         options_layout.addWidget(self.batch_size_spin)
 
         options_layout.addStretch()
@@ -163,15 +181,16 @@ class BatchModeWidget(QWidget):
         self.progress_bar.setVisible(False)
         submit_layout.addWidget(self.progress_bar)
 
-        # Status
+        # Status (one-line summary; full details go to the status console)
         self.status_label = QLabel("Ready to submit batch jobs")
-        self.status_label.setStyleSheet("color: #666;")
+        self.status_label.setStyleSheet(f"color: {TEXT_SECONDARY};")
         submit_layout.addWidget(self.status_label)
 
         # Submit button
         button_layout = QHBoxLayout()
 
-        self.submit_btn = QPushButton("Submit Batch Job")
+        self.submit_btn = QPushButton("Su&bmit Batch Job")
+        self.submit_btn.setToolTip("Submit all queued prompts as an async batch job (Ctrl+Enter)")
         self.submit_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
@@ -193,7 +212,35 @@ class BatchModeWidget(QWidget):
 
         submit_layout.addLayout(button_layout)
 
-        layout.addWidget(submit_group)
+        content_layout.addWidget(submit_group)
+
+        # Vertical splitter: content on top, status console at the bottom
+        # (AGENTS.md §8 — real-time progress for long provider operations)
+        self.console_splitter = standard_splitter(Qt.Vertical)
+        self.console_splitter.addWidget(content)
+
+        self.status_console = DialogStatusConsole("Batch Status")
+        self.console_splitter.addWidget(self.status_console)
+
+        layout.addWidget(self.console_splitter, 1)
+
+        # Restore splitter positions; hardcoded defaults only on first run
+        if not restore_splitter(self.settings, "queue_splitter_state", self.queue_splitter):
+            self.queue_splitter.setSizes([500, 500])
+        if not restore_splitter(self.settings, "console_splitter_state", self.console_splitter):
+            self.console_splitter.setSizes([600, 150])
+        self.queue_splitter.splitterMoved.connect(
+            lambda *_: persist_splitter(self.settings, "queue_splitter_state", self.queue_splitter))
+        self.console_splitter.splitterMoved.connect(
+            lambda *_: persist_splitter(self.settings, "console_splitter_state", self.console_splitter))
+
+        # Hotkeys: Ctrl+Return/Ctrl+Enter = submit (scoped to this widget);
+        # Delete removes selected prompts while the queue list has focus.
+        self.primary_action = bind_primary_action(
+            self, self._submit_batch, context=Qt.WidgetWithChildrenShortcut)
+        self.delete_shortcut = QShortcut(QKeySequence(Qt.Key_Delete), self.queue_list)
+        self.delete_shortcut.setContext(Qt.WidgetWithChildrenShortcut)
+        self.delete_shortcut.activated.connect(self._remove_selected)
 
         self._update_ui()
 
@@ -257,9 +304,11 @@ class BatchModeWidget(QWidget):
 
     def _remove_selected(self):
         """Remove selected items from the queue."""
-        selected = self.queue_list.selectedItems()
-        for item in selected:
-            row = self.queue_list.row(item)
+        # Remove in descending row order so earlier removals don't shift
+        # the indices of later ones (list allows multi-selection).
+        rows = sorted((self.queue_list.row(item) for item in self.queue_list.selectedItems()),
+                      reverse=True)
+        for row in rows:
             self.queue_list.takeItem(row)
             if row < len(self.queued_prompts):
                 self.queued_prompts.pop(row)
@@ -342,6 +391,16 @@ class BatchModeWidget(QWidget):
 
             display_name = f"ImageAI-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
+            # Log full submission details to the status console
+            self.status_console.separator()
+            self.status_console.log(f"Submitting batch job: {display_name}")
+            self.status_console.log(
+                f"Model: {self.current_model} | Aspect ratio: {self.current_aspect_ratio} | "
+                f"Quality: {self.current_quality} | Prompts: {len(requests)}"
+            )
+            for req in requests:
+                self.status_console.log(f"  [{req.key}] {req.prompt}")
+
             job = batch_manager.create_batch_job(
                 requests=requests,
                 model=self.current_model,
@@ -361,12 +420,15 @@ class BatchModeWidget(QWidget):
                 self.status_timer.start(30000)  # Poll every 30 seconds
 
             self.status_label.setText(f"Submitted job: {job.display_name}")
+            self.status_console.log(
+                f"Submitted job {job.job_id} ({job.display_name}); polling every 30s", "SUCCESS")
             self.batch_started.emit(job.job_id)
 
         except Exception as e:
             logger.error(f"Failed to submit batch job: {e}", exc_info=True)
+            self.status_console.log(f"Submission failed: {e}", "ERROR")
             QMessageBox.critical(self, "Submission Failed", f"Failed to submit batch: {e}")
-            self.status_label.setText(f"Error: {str(e)[:50]}")
+            self.status_label.setText("Submission failed - see Batch Status console")
 
         finally:
             self.submit_btn.setEnabled(True)
@@ -404,6 +466,8 @@ class BatchModeWidget(QWidget):
             if not job.is_complete:
                 try:
                     updated_job = batch_manager.get_job_status(job.job_id)
+                    self.status_console.log(
+                        f"Poll {updated_job.display_name}: {updated_job.state.name}")
 
                     # Update list item
                     for i in range(self.jobs_list.count()):
@@ -417,6 +481,7 @@ class BatchModeWidget(QWidget):
 
                 except Exception as e:
                     logger.error(f"Failed to poll job {job.job_id}: {e}")
+                    self.status_console.log(f"Failed to poll job {job.job_id}: {e}", "ERROR")
 
         # Handle completed jobs
         for job in completed:
@@ -424,10 +489,14 @@ class BatchModeWidget(QWidget):
 
             if job.state == BatchJobState.SUCCEEDED:
                 self.status_label.setText(f"Job completed: {job.display_name}")
+                self.status_console.log(f"Job completed: {job.display_name}", "SUCCESS")
                 self.batch_completed.emit(job.job_id, [])  # Results downloaded separately
             else:
+                error_text = job.error or "Unknown error"
                 self.status_label.setText(f"Job failed: {job.display_name}")
-                self.batch_failed.emit(job.job_id, job.error or "Unknown error")
+                self.status_console.log(
+                    f"Job failed: {job.display_name}: {error_text}", "ERROR")
+                self.batch_failed.emit(job.job_id, error_text)
 
         # Stop timer if no active jobs
         if not any(not j.is_complete for j in self.active_jobs):
@@ -435,6 +504,7 @@ class BatchModeWidget(QWidget):
 
     def _refresh_all_jobs(self):
         """Manually refresh all job statuses."""
+        self.status_console.log("Refreshing job statuses...")
         self._poll_job_status()
         self.status_label.setText("Refreshed job statuses")
 
@@ -449,6 +519,7 @@ class BatchModeWidget(QWidget):
 
         try:
             batch_manager = get_batch_manager()
+            self.status_console.log(f"Downloading results for job {job_id}...")
             images, errors = batch_manager.get_job_results(job_id)
 
             if images:
@@ -463,6 +534,8 @@ class BatchModeWidget(QWidget):
                         output_path.write_bytes(img_bytes)
 
                     self.status_label.setText(f"Downloaded {len(images)} images")
+                    self.status_console.log(
+                        f"Downloaded {len(images)} images to {dir_path}", "SUCCESS")
                     QMessageBox.information(
                         self, "Download Complete",
                         f"Downloaded {len(images)} images to {dir_path}"
@@ -470,6 +543,10 @@ class BatchModeWidget(QWidget):
 
             if errors:
                 logger.warning(f"Batch job had errors: {errors}")
+                for error in errors:
+                    self.status_console.log(f"Job error: {error}", "WARNING")
 
         except Exception as e:
+            logger.error(f"Failed to download batch results: {e}", exc_info=True)
+            self.status_console.log(f"Download failed: {e}", "ERROR")
             QMessageBox.critical(self, "Download Failed", f"Failed to download: {e}")

@@ -12,11 +12,16 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QPushButton, QGroupBox, QProgressBar, QDialogButtonBox
 )
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt, Signal, QThread, QSettings
 from PySide6.QtGui import QFont
 
 from core.discord_rpc import discord_rpc, ActivityState
 from core.video.video_prompt_generator import VideoPromptGenerator, VideoPromptContext
+from gui.llm_utils import DialogStatusConsole
+from ..common.dialog_conventions import (
+    DialogCleanupMixin, bind_primary_action, persist_splitter,
+    restore_splitter, set_default_button, standard_splitter,
+)
 
 
 class VideoPromptGenerationThread(QThread):
@@ -77,7 +82,7 @@ class VideoPromptGenerationThread(QThread):
             self.generation_failed.emit(str(e))
 
 
-class VideoPromptDialog(QDialog):
+class VideoPromptDialog(DialogCleanupMixin, QDialog):
     """
     Dialog for generating video prompts with LLM.
 
@@ -109,12 +114,14 @@ class VideoPromptDialog(QDialog):
         self.previous_video_prompt = previous_video_prompt
         self.generation_thread: Optional[VideoPromptGenerationThread] = None
         self.generated_prompt: Optional[str] = None
+        self.settings = QSettings("ImageAI", "VideoPromptDialog")
 
         self.setWindowTitle("Generate Video Prompt with LLM")
         self.setMinimumWidth(600)
         self.setMinimumHeight(400)
 
         self.init_ui()
+        self.restore_window_geometry()
 
         # Auto-generate on open
         self.generate_prompt()
@@ -123,6 +130,9 @@ class VideoPromptDialog(QDialog):
         """Initialize user interface"""
         layout = QVBoxLayout(self)
 
+        # Vertical splitter: context / generated prompt / status console
+        self.main_splitter = standard_splitter(Qt.Vertical, self)
+
         # Start prompt section
         start_group = QGroupBox("Start Frame Description")
         start_layout = QVBoxLayout()
@@ -130,16 +140,17 @@ class VideoPromptDialog(QDialog):
         self.start_prompt_display = QTextEdit()
         self.start_prompt_display.setPlainText(self.start_prompt)
         self.start_prompt_display.setReadOnly(True)
-        self.start_prompt_display.setMaximumHeight(80)
+        self.start_prompt_display.setMinimumHeight(60)
+        self.start_prompt_display.setFocusPolicy(Qt.ClickFocus)
         start_layout.addWidget(self.start_prompt_display)
-
-        start_group.setLayout(start_layout)
-        layout.addWidget(start_group)
 
         # Duration display
         duration_label = QLabel(f"Duration: {self.duration:.1f}s")
         duration_label.setStyleSheet("font-weight: bold; margin: 5px;")
-        layout.addWidget(duration_label)
+        start_layout.addWidget(duration_label)
+
+        start_group.setLayout(start_layout)
+        self.main_splitter.addWidget(start_group)
 
         # Generated video prompt section
         prompt_group = QGroupBox("Generated Video Prompt")
@@ -157,7 +168,17 @@ class VideoPromptDialog(QDialog):
         prompt_layout.addWidget(self.progress_bar)
 
         prompt_group.setLayout(prompt_layout)
-        layout.addWidget(prompt_group)
+        self.main_splitter.addWidget(prompt_group)
+
+        # Status console (LLM request/response traffic)
+        self.status_console = DialogStatusConsole("Status Console")
+        self.main_splitter.addWidget(self.status_console)
+
+        layout.addWidget(self.main_splitter, stretch=1)
+
+        # Restore splitter proportions, or apply defaults on first run
+        if not restore_splitter(self.settings, "main_splitter", self.main_splitter):
+            self.main_splitter.setSizes([120, 220, 140])
 
         # Action buttons
         action_layout = QHBoxLayout()
@@ -178,11 +199,32 @@ class VideoPromptDialog(QDialog):
         button_box.rejected.connect(self.reject)
         layout.addWidget(button_box)
 
+        self.ok_btn = button_box.button(QDialogButtonBox.Ok)
+        set_default_button(self, self.ok_btn, focus=False)
+
+        # Ctrl+Enter / Ctrl+Return accepts the dialog (Enter in the prompt
+        # edit inserts a newline)
+        self._primary_action = bind_primary_action(self, self.accept)
+
+        # Initial focus on the editable prompt, not the read-only context
+        self.generated_prompt_edit.setFocus()
+
     def generate_prompt(self):
         """Generate video prompt using LLM"""
-        # Disable buttons during generation
+        # Disable buttons during generation - OK must not accept an empty
+        # prompt while the thread runs
         self.regenerate_btn.setEnabled(False)
+        self.ok_btn.setEnabled(False)
+        self._primary_action.set_enabled(False)
         self.progress_bar.show()
+
+        # Log the outgoing request to the status console
+        self.status_console.separator()
+        self.status_console.log(f"Generating video prompt with {self.provider}/{self.model} (temperature=0.7)")
+        self.status_console.log(f"Duration: {self.duration:.1f}s | Camera movements: {self.enable_camera_movements} | Prompt flow: {self.enable_prompt_flow}")
+        self.status_console.log(f"Start frame prompt:\n{self.start_prompt}")
+        if self.previous_video_prompt:
+            self.status_console.log(f"Previous video prompt:\n{self.previous_video_prompt}")
 
         # Create and start generation thread
         self.generation_thread = VideoPromptGenerationThread(
@@ -208,18 +250,30 @@ class VideoPromptDialog(QDialog):
         self.generated_prompt_edit.setPlainText(prompt)
         self.progress_bar.hide()
         self.regenerate_btn.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+        self._primary_action.set_enabled(True)
+        self.status_console.log(f"Response received:\n{prompt}", level="SUCCESS")
         self.logger.info(f"Video prompt generated:\n{prompt}")
 
     def _on_generation_failed(self, error: str):
         """Handle generation failure"""
         self.progress_bar.hide()
         self.regenerate_btn.setEnabled(True)
+        self.ok_btn.setEnabled(True)
+        self._primary_action.set_enabled(True)
         self.generated_prompt_edit.setPlainText(f"Generation failed: {error}\n\nPlease try again or edit manually.")
+        self.status_console.log(f"Generation failed: {error}", level="ERROR")
         self.logger.error(f"Video prompt generation failed: {error}")
 
     def get_prompt(self) -> str:
         """Get the final prompt (edited or generated)"""
         return self.generated_prompt_edit.toPlainText().strip()
+
+    def restore_window_geometry(self):
+        """Restore window size and position from settings"""
+        geometry = self.settings.value("geometry")
+        if geometry:
+            self.restoreGeometry(geometry)
 
     def showEvent(self, event):
         """Handle show event - update Discord presence."""
@@ -229,8 +283,22 @@ class VideoPromptDialog(QDialog):
             details="Video Prompt"
         )
 
-    def closeEvent(self, event):
-        """Handle close event."""
+    def on_dialog_close(self):
+        """Cleanup on every exit path (OK, Cancel, Escape, title-bar X)."""
         # Reset Discord presence to IDLE
         discord_rpc.update_presence(ActivityState.IDLE)
-        super().closeEvent(event)
+
+        # Persist geometry and splitter proportions
+        self.settings.setValue("geometry", self.saveGeometry())
+        persist_splitter(self.settings, "main_splitter", self.main_splitter)
+
+        # Stop the generation thread if it is still running
+        if self.generation_thread and self.generation_thread.isRunning():
+            try:
+                self.generation_thread.generation_complete.disconnect()
+                self.generation_thread.generation_failed.disconnect()
+            except (RuntimeError, TypeError):
+                pass  # Signals may already be disconnected
+            self.generation_thread.quit()
+            if not self.generation_thread.wait(2000):
+                self.logger.warning("Video prompt generation thread did not finish in time")

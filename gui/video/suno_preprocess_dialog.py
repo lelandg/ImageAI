@@ -14,14 +14,18 @@ from PySide6.QtWidgets import (
     QPushButton, QGroupBox, QScrollArea, QWidget, QMessageBox,
     QProgressDialog, QApplication
 )
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QSettings
 
 from core.video.suno_package import SunoPackage, get_package_info
+from gui.theme import TEXT_SECONDARY
+from ..common.dialog_conventions import (
+    DialogCleanupMixin, bind_primary_action, set_default_button
+)
 
 logger = logging.getLogger(__name__)
 
 
-class SunoPreprocessDialog(QDialog):
+class SunoPreprocessDialog(DialogCleanupMixin, QDialog):
     """
     Dialog for preprocessing Suno packages.
 
@@ -54,7 +58,18 @@ class SunoPreprocessDialog(QDialog):
         self.setMinimumWidth(500)
         self.setMinimumHeight(400)
 
+        self.settings = QSettings("ImageAI", "VideoProjects")
+
         self._setup_ui()
+
+        # Restore last-used window geometry
+        geometry = self.settings.value("suno_preprocess/geometry")
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+
+    def on_dialog_close(self):
+        """Persist window geometry on every exit path (OK/Cancel/Escape/X)."""
+        self.settings.setValue("suno_preprocess/geometry", self.saveGeometry())
 
     def _setup_ui(self):
         """Set up the dialog UI"""
@@ -84,7 +99,7 @@ class SunoPreprocessDialog(QDialog):
             f"All selected stems are merged at equal volume.{link_info}</i>"
         )
         instructions.setWordWrap(True)
-        instructions.setStyleSheet("color: #666; margin: 10px 0;")
+        instructions.setStyleSheet(f"color: {TEXT_SECONDARY}; margin: 10px 0;")
         layout.addWidget(instructions)
 
         # Scroll area for checkboxes
@@ -163,11 +178,15 @@ class SunoPreprocessDialog(QDialog):
         select_buttons_layout.addStretch()
         layout.addLayout(select_buttons_layout)
 
-        # Action buttons
+        # Action buttons (right-aligned, Cancel before primary, like sibling dialogs)
         button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
 
         preprocess_btn = QPushButton("Preprocess && Merge")
-        preprocess_btn.setDefault(True)
         preprocess_btn.clicked.connect(self._validate_and_accept)
         preprocess_btn.setStyleSheet("""
             QPushButton {
@@ -182,12 +201,11 @@ class SunoPreprocessDialog(QDialog):
         """)
         button_layout.addWidget(preprocess_btn)
 
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.clicked.connect(self.reject)
-        button_layout.addWidget(cancel_btn)
-
-        button_layout.addStretch()
         layout.addLayout(button_layout)
+
+        # Single default button (Enter) + Ctrl+Enter/Ctrl+Return primary action
+        set_default_button(self, preprocess_btn)
+        self._primary_action = bind_primary_action(self, self._validate_and_accept)
 
     def _on_audio_checkbox_changed(self, stem_name: str, state: int):
         """
@@ -291,6 +309,13 @@ def show_merge_progress_dialog(parent: QWidget,
 
     Returns:
         QProgressDialog configured for the merge operation
+
+    Note:
+        The dialog is intentionally indeterminate and not cancellable: the
+        merge runs synchronously in the caller's thread (there is no worker
+        to signal), and aborting mid-merge would leave partial output files
+        behind. If the merge ever moves to a worker thread, wire
+        QProgressDialog.canceled and report per-stem progress here.
     """
     tasks = []
     if merging_audio:

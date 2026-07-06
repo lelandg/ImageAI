@@ -7,11 +7,14 @@ from PySide6.QtWidgets import (
     QScrollArea, QWidget, QGridLayout, QButtonGroup, QRadioButton,
     QGroupBox
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSettings
 from PySide6.QtGui import QPixmap
 
+from gui.theme import TEXT_SECONDARY
+from ..common.dialog_conventions import DialogCleanupMixin, bind_primary_action
 
-class SceneImageSelectorDialog(QDialog):
+
+class SceneImageSelectorDialog(DialogCleanupMixin, QDialog):
     """Dialog for selecting an image from any scene in the project."""
 
     def __init__(self, scenes: List, current_scene_index: int,
@@ -34,7 +37,18 @@ class SceneImageSelectorDialog(QDialog):
         self.setWindowTitle(title)
         self.setMinimumSize(900, 700)
 
+        self.settings = QSettings("ImageAI", "VideoProjects")
+
         self.init_ui()
+
+        # Restore last-used window geometry
+        geometry = self.settings.value("scene_image_selector/geometry")
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+
+    def on_dialog_close(self):
+        """Persist window geometry on every exit path (OK/Cancel/Escape/X)."""
+        self.settings.setValue("scene_image_selector/geometry", self.saveGeometry())
 
     def init_ui(self):
         """Initialize the user interface."""
@@ -70,7 +84,7 @@ class SceneImageSelectorDialog(QDialog):
         if not scenes_with_images:
             # No images available in any scene
             no_images_label = QLabel("No scenes have generated images yet.\nGenerate images first.")
-            no_images_label.setStyleSheet("padding: 20px; color: #666;")
+            no_images_label.setStyleSheet(f"padding: 20px; color: {TEXT_SECONDARY};")
             no_images_label.setAlignment(Qt.AlignCenter)
             container_layout.addWidget(no_images_label)
         else:
@@ -99,6 +113,14 @@ class SceneImageSelectorDialog(QDialog):
         button_layout.addWidget(select_btn)
 
         layout.addLayout(button_layout)
+
+        # Ctrl+Enter / Ctrl+Return accept when a selection exists
+        self._primary_action = bind_primary_action(self, self._accept_if_enabled)
+
+    def _accept_if_enabled(self):
+        """Accept via Ctrl+Enter only when the Select button is enabled."""
+        if self.select_btn.isEnabled():
+            self.accept()
 
     def _create_scene_group(self, scene_idx: int, scene) -> QGroupBox:
         """Create a group box for a scene's images."""

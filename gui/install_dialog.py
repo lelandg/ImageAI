@@ -3,9 +3,9 @@
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
     QPushButton, QProgressBar, QMessageBox, QApplication,
-    QSystemTrayIcon, QGroupBox
+    QSystemTrayIcon, QGroupBox, QWidget
 )
-from PySide6.QtCore import Qt, Signal, QProcess, QTimer
+from PySide6.QtCore import Qt, Signal, QProcess, QSettings, QTimer
 from PySide6.QtGui import QFont, QIcon
 from pathlib import Path
 from datetime import datetime
@@ -14,6 +14,11 @@ import time
 import logging
 
 from core.constants import get_user_data_dir
+from .common.dialog_conventions import (
+    DialogCleanupMixin, bind_primary_action, persist_splitter,
+    restore_splitter, set_default_button, standard_splitter,
+)
+from .llm_utils import DialogStatusConsole
 from core.package_installer import (
     PackageInstaller, ModelDownloader,
     check_disk_space, get_realesrgan_packages,
@@ -84,7 +89,7 @@ Disk space required: ~7GB (mostly PyTorch)"""
         warning_group = QGroupBox("⚠️ Important")
         warning_layout = QVBoxLayout(warning_group)
 
-        warning_text = """• Installation runs in the background
+        warning_text = """• ImageAI will be busy until installation finishes
 • Please don't close the application until finished
 • Your requirements.txt will be automatically updated
 • Application restart required after installation
@@ -113,14 +118,19 @@ Disk space required: ~7GB (mostly PyTorch)"""
 
         self.install_btn = QPushButton("Install")
         self.install_btn.clicked.connect(self.accept)
-        self.install_btn.setDefault(True)
         self.install_btn.setEnabled(has_space)
         button_layout.addWidget(self.install_btn)
 
         layout.addLayout(button_layout)
 
+        # Install is the single default button and takes initial focus (when
+        # enabled) so Enter confirms instead of hitting the focused Cancel.
+        set_default_button(self, self.install_btn, focus=has_space)
+        # Ctrl+Enter/Ctrl+Return = primary action (no-op while disabled)
+        self._primary_action = bind_primary_action(self, self.install_btn.click)
 
-class InstallProgressDialog(QDialog):
+
+class InstallProgressDialog(DialogCleanupMixin, QDialog):
     """Progress dialog for installation."""
 
     installation_complete = Signal(bool, str)  # Success, message
@@ -142,11 +152,18 @@ class InstallProgressDialog(QDialog):
         self.installer = None
         self.downloader = None
         self.start_time = None
+        self.settings = QSettings("ImageAI", "InstallDialog")
         self.init_ui()
 
     def init_ui(self):
         """Initialize the UI."""
         layout = QVBoxLayout(self)
+
+        # Fixed upper panel (title, timing, progress) — top pane of the
+        # splitter so the user can trade space with the status console below.
+        top_panel = QWidget()
+        top_layout = QVBoxLayout(top_panel)
+        top_layout.setContentsMargins(0, 0, 0, 0)
 
         # Title
         self.title_label = QLabel("Installing AI Upscaling Components...")
@@ -154,7 +171,7 @@ class InstallProgressDialog(QDialog):
         title_font.setPointSize(11)
         title_font.setBold(True)
         self.title_label.setFont(title_font)
-        layout.addWidget(self.title_label)
+        top_layout.addWidget(self.title_label)
 
         # Time estimate and elapsed time
         time_layout = QHBoxLayout()
@@ -169,7 +186,7 @@ class InstallProgressDialog(QDialog):
         self.elapsed_label.setStyleSheet("color: #66ccff; font-weight: bold;")
         time_layout.addWidget(self.elapsed_label)
 
-        layout.addLayout(time_layout)
+        top_layout.addLayout(time_layout)
 
         # Timer to update elapsed time
         self.elapsed_timer = QTimer()
@@ -179,38 +196,35 @@ class InstallProgressDialog(QDialog):
         # Warning
         warning_label = QLabel("⚠️ Please don't close the application")
         warning_label.setStyleSheet("color: #ff9900; font-weight: bold; padding: 10px;")
-        layout.addWidget(warning_label)
+        top_layout.addWidget(warning_label)
 
         # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setRange(0, 100)
-        layout.addWidget(self.progress_bar)
+        top_layout.addWidget(self.progress_bar)
 
         # Current status
         self.status_label = QLabel("Starting installation...")
-        layout.addWidget(self.status_label)
+        top_layout.addWidget(self.status_label)
 
-        # Progress output (expandable)
-        output_group = QGroupBox("Installation Output")
-        output_layout = QVBoxLayout(output_group)
-
-        self.output_text = QTextEdit()
-        self.output_text.setReadOnly(True)
-        # Remove maximum height to allow expansion
-        self.output_text.setMinimumHeight(150)
-
-        # Set monospace font
-        font = QFont("Consolas" if "Consolas" in QFont().families() else "Courier", 9)
-        self.output_text.setFont(font)
-
-        output_layout.addWidget(self.output_text)
-        # Set stretch factor to make this expand
-        layout.addWidget(output_group, 1)
-
-        # Background indicator
-        self.background_label = QLabel("Running in background...")
+        # In-progress indicator
+        self.background_label = QLabel("Installation in progress...")
         self.background_label.setStyleSheet("color: #66ccff; font-style: italic;")
-        layout.addWidget(self.background_label)
+        top_layout.addWidget(self.background_label)
+
+        # Status console at the bottom, in a styled non-collapsible splitter
+        self.status_console = DialogStatusConsole("Installation Output")
+        # Kept for compatibility with anything that pokes output_text directly
+        self.output_text = self.status_console.console
+
+        self.console_splitter = standard_splitter(Qt.Vertical, self)
+        self.console_splitter.addWidget(top_panel)
+        self.console_splitter.addWidget(self.status_console)
+        self.console_splitter.setStretchFactor(0, 0)
+        self.console_splitter.setStretchFactor(1, 1)
+        if not restore_splitter(self.settings, "console_splitter", self.console_splitter):
+            self.console_splitter.setSizes([220, 280])
+        layout.addWidget(self.console_splitter, 1)
 
         # Buttons (initially hidden)
         button_layout = QHBoxLayout()
@@ -265,13 +279,7 @@ class InstallProgressDialog(QDialog):
     def on_progress(self, message: str):
         """Handle progress messages."""
         self.status_label.setText(message)
-        self.output_text.append(message)
-
-        # Auto-scroll to bottom
-        from PySide6.QtGui import QTextCursor
-        cursor = self.output_text.textCursor()
-        cursor.movePosition(QTextCursor.End)
-        self.output_text.setTextCursor(cursor)
+        self.status_console.log(message)
 
     def on_percentage(self, percentage: int):
         """Update progress bar."""
@@ -411,7 +419,7 @@ class InstallProgressDialog(QDialog):
             )
 
     def reject(self):
-        """Prevent closing during installation."""
+        """Prevent closing during installation or model download."""
         if self.installer and self.installer.isRunning():
             QMessageBox.warning(
                 self,
@@ -421,7 +429,20 @@ class InstallProgressDialog(QDialog):
             )
             return
 
+        if self.downloader and self.downloader.isRunning():
+            QMessageBox.warning(
+                self,
+                "Download in Progress",
+                "Please wait for the model download to complete.\n"
+                "Closing now would abandon the partial download."
+            )
+            return
+
         super().reject()
+
+    def on_dialog_close(self):
+        """Persist splitter proportions on every exit path."""
+        persist_splitter(self.settings, "console_splitter", self.console_splitter)
 
 
 class InstallCompleteDialog(QDialog):
