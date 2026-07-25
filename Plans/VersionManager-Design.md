@@ -77,14 +77,13 @@ source of drift and must not be part of the solution.**
   curated by hand before a version is cut.
 - No new binaries or package-manager dependencies. Python standard library only.
 
-### Scope assumption to confirm on review
+### Scope, resolved
 
-"We don't need the `--all`. I just want it going forward." is read as: drop the
-cross-repo sweep verb; the tool applies per-repository from now on. **`backfill`
-is retained**, per the earlier explicit decision to reconstruct tags and fill
-changelog gaps — it is simply run once per repository when that repository
-adopts the tool, rather than swept across all eight at once. If the intent was
-instead to drop history repair entirely, say so on review and §6 comes out.
+"We don't need the `--all`" drops the cross-repo sweep verb; the tool applies to
+one repository at a time. **`backfill` is retained** and is run once per
+repository when that repository adopts the tool. Backfill derives versions from
+git history rather than resetting anything to a fresh `0.1.0`, and synthesizes
+them at **branch / PR / feature** granularity, never per commit (§5.2).
 
 ## 3. Surface
 
@@ -129,10 +128,11 @@ Ladder, in priority order:
 3. **Module constant** — `**/version.py`, `*/constants.py` with `VERSION =`,
    or `<pkg>/__init__.py` with `__version__ =`.
 4. **A bare `VERSION` file.**
-5. **Nothing found → create one.** Seeded from the highest version in the
-   changelog if one exists (Heimdallr → `0.2.0`), otherwise `0.1.0`. Placed
-   per ecosystem: `pyproject.toml` if present, else `package.json` if present,
-   else a new `VERSION` file.
+5. **Nothing found → create one.** Placed per ecosystem: `pyproject.toml` if
+   present, else `package.json` if present, else a new `VERSION` file. The value
+   is **never a hardcoded `0.1.0`** — it is the head of the ledger derived from
+   git history (§5), so a repository with real history gets a version that
+   reflects that history rather than being reset to a fresh start.
 
 Additional rules:
 
@@ -166,6 +166,55 @@ which held `__version__` before the value moved to `core/constants.py` on
 
 **Changelog-declared.** Every `## [x.y.z] - YYYY-MM-DD` heading.
 
+### 5.1 Real record vs. placeholder
+
+The discriminator is **has the version file ever changed value in git history?**
+
+| Repository | Version-file bumps | PR refs | Classification |
+|---|---:|---:|---|
+| ImageAI | 46 | 6 | real record |
+| ChatMaster | several | 21 | real record |
+| RealtyShield | several | 3 | real record |
+| QuickStock | 3 (`0.0.0`→`0.1.0`→`1.1.0`) | 18 | real record, sparse |
+| ChameleonLabs | 1 (`0.1.0`, set 2025-11-10, never moved) | 348 | placeholder |
+| HealthCheck | 1 (`0.1.0`, never moved) | 5 | placeholder |
+| LelandGreenProductions | 1 (`0.0.0`, never moved) | 0 | placeholder |
+| Heimdallr | `0.1.0`, changelog has 2 versions | 0 | real record (changelog) |
+
+**Real record** — the bumps *are* the ledger. Versions are never invented
+between them. QuickStock keeps exactly three versions across 333 commits;
+that is coarse but true, and fabricating `1.0.x` entries between real releases
+would be inventing history.
+
+**Placeholder** — a version set once and never moved is not a record, it is a
+default nobody updated. The ledger is synthesized from git history instead,
+counting **forward from `0.1.0`**, and the derived head replaces the placeholder
+value.
+
+### 5.2 Boundary signal for synthesized ledgers
+
+Versions are synthesized per **branch / PR / feature — never per commit.** First
+signal that yields boundaries wins:
+
+1. PR merge references — a `(#NN)` suffix in the subject (ChameleonLabs 348,
+   ChatMaster 21, QuickStock 18)
+2. Merge commits
+3. `feat:` conventional-commit subjects
+4. None of the above → a single version at the current head
+
+Increment per boundary: **minor** if the range contains any `feat:` or a
+breaking marker (`!`, `BREAKING CHANGE`), otherwise **patch**.
+
+**Plausibility guard.** If a signal yields more than 60 boundaries, one version
+per boundary produces a meaningless number — ChameleonLabs' 348 PRs would give
+`0.348.0`. Above that threshold, boundaries are grouped by calendar month and
+one version is emitted per month that contains any, turning ChameleonLabs'
+8.5-month span into roughly nine versions (`0.1.0` … `0.9.0`). The report always
+states which signal was used, how many boundaries it found, and whether grouping
+was applied.
+
+### 5.3 Reconciliation categories
+
 The ledger is the union, with each entry tagged by provenance: `git`,
 `changelog`, or `both`. Reconciliation output is exactly the four categories
 that make up `check`:
@@ -179,6 +228,12 @@ that make up `check`:
 
 Run once per repository, on adoption. Order matters: tags are written before the
 changelog, so a failure mid-run leaves a re-runnable state.
+
+Step 0 for **placeholder** repositories (§5.1): synthesize the ledger from
+boundary signals (§5.2) counting forward from `0.1.0`, then write the derived
+head into the version location, replacing the placeholder. The report shows the
+old value, the derived head, and the boundary count before anything is written.
+From step 1 on, placeholder and real-record repositories follow the same path.
 
 1. **Reconstruct tags.** Create an annotated tag at each ledger entry that has a
    locatable bump commit, message `Version <x.y.z>` and the original committer
@@ -262,7 +317,10 @@ real-world shape found in the survey:
 | `version_behind_changelog` | Heimdallr | `check` reports code 0.1.0 vs changelog 0.2.0 |
 | `relocated_version_home` | ImageAI | Ledger recovers versions from a prior file |
 | `empty_package_json` | ChatMaster | Stub skipped, `VERSION` file canonical |
-| `no_version_anywhere` | greenfield | Location created, seeded from changelog |
+| `no_version_anywhere` | greenfield | Location created, seeded from the derived ledger head, never a hardcoded `0.1.0` |
+| `placeholder_version` | ChameleonLabs | Version set once and never moved is classified placeholder; ledger synthesized from PR refs; head replaces the placeholder |
+| `sparse_real_record` | QuickStock | Three real bumps stay three versions; no versions invented between them |
+| `boundary_guard` | ChameleonLabs | 348 boundaries trigger month grouping, not `0.348.0`; report names the signal and the grouping |
 | `changelog_gaps` | ImageAI | `0.29.0`/`0.30.0` identified and filled |
 | `date_mismatch` | ImageAI | Reported with both dates; unchanged without confirmation |
 | `unlocatable_versions` | ImageAI | Reported untagged, never tagged at a guess |
@@ -278,5 +336,12 @@ new value → changelog section written with the real date → annotated tag exi
    `.claude/VERSION_LOCATIONS.md` and update `AGENTS.md` §10 to point at the tool.
 3. Add the house rule to `~/.config/agents/AGENTS.md`.
 4. Adopt in the remaining repositories individually as work touches them.
-   RealtyShield needs its `0.9.0` / `0.2.0` split resolved by hand on first run;
-   Heimdallr needs its version advanced to `0.2.0` to match its changelog.
+   Expected first-run behaviour per repo:
+   - **RealtyShield** — `0.9.0` / `0.2.0` split resolved by hand (§4 pointer
+     comment names `src/version.py`, so the tool proposes `0.9.0`).
+   - **Heimdallr** — version advanced to `0.2.0` to match its changelog.
+   - **QuickStock** — three real bumps tagged; nothing invented between them.
+   - **ChameleonLabs, HealthCheck, LelandGreenProductions** — classified
+     placeholder; ledger synthesized and the never-moved value replaced.
+     ChameleonLabs' 348 PR boundaries trigger the month-grouping guard.
+   - **ChatMaster** — `VERSION` file canonical, empty `package.json` untouched.
