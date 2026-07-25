@@ -1,7 +1,9 @@
 # Version Manager — Design
 
-**Last Updated:** 2026-07-25 09:09
-**Status:** Approved design, not yet implemented
+**Last Updated:** 2026-07-25 10:34
+**Status:** ✅ Implemented — `~/.claude/skills/version-manager/`, 31 tests passing,
+`check` verified read-only against all eight repositories. Adoption
+(`backfill --apply`) not yet run anywhere.
 **Deliverable:** a global skill at `~/.claude/skills/version-manager/`, plus one rule added to `~/.config/agents/AGENTS.md`
 
 ---
@@ -329,7 +331,36 @@ Plus a release round-trip: bump → every location including the README holds th
 new value → changelog section written with the real date → annotated tag exists
 → working tree clean.
 
-## 11. Rollout
+## 11. Implementation notes (2026-07-25)
+
+Five things the design did not anticipate, all found by running `check` against
+the real repositories:
+
+1. **Two pointer phrasings, not one.** RealtyShield uses both `The actual version
+   is managed in src/version.py` *and* `# See src/version.py for centralized
+   version management`. §4 rung 1 matches both.
+2. **`VERSION` files are not always bare.** RealtyShield's carries explanatory
+   comments beneath the number. Matching only the first line detects it; the
+   comments survive a bump.
+3. **Generated code poisons the ledger.** QuickStock tracked a generated Prisma
+   client whose bundled `package.json` declares `"version": "6.19.0"` — which
+   surfaced as a QuickStock release. Fixed with a depth limit (≤3) plus
+   generated/vendored directory exclusion.
+4. **A changelog is a record even when the version file is frozen.** Heimdallr
+   shipped 0.1.0 and 0.2.0 while `app/__init__.py` sat at 0.1.0. Classifying it
+   placeholder synthesized a series starting at `0.0.1` — *below* what shipped.
+   `is_placeholder` now requires both signals to be absent, and `synthesize`
+   takes a floor so a series can never regress.
+5. **One `git log -p` pass, not one per path.** Walking 17 candidate paths
+   separately with `--follow` took over two minutes on RealtyShield; a single
+   pass over all paths with `--unified=0` does it in 14 seconds. `--follow` is
+   redundant because relocated homes are probed explicitly.
+
+The single-pass ledger also recovers **more** than the original hand audit: 51
+versions in ImageAI rather than 46, including `0.2.0` and `0.5.0` from the
+`main.py` era.
+
+## 12. Rollout
 
 1. Build and test the skill.
 2. Adopt in ImageAI first — `check`, then `backfill`, then delete
