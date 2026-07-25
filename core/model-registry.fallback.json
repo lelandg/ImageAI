@@ -4,14 +4,14 @@
       "claude-fable-5",
       "claude-haiku-4-5-20251001",
       "claude-opus-4-1-20250805",
-      "claude-opus-4-20250514",
       "claude-opus-4-5-20251101",
       "claude-opus-4-6",
       "claude-opus-4-7",
       "claude-opus-4-8",
-      "claude-sonnet-4-20250514",
+      "claude-opus-5",
       "claude-sonnet-4-5-20250929",
-      "claude-sonnet-4-6"
+      "claude-sonnet-4-6",
+      "claude-sonnet-5"
     ],
     "gemini": [
       "antigravity-preview-05-2026",
@@ -28,8 +28,11 @@
       "gemini-3.1-flash-lite-preview",
       "gemini-3.1-pro-preview",
       "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.6-flash",
       "gemini-flash-latest",
       "gemini-flash-lite-latest",
+      "gemini-omni-flash-preview",
       "gemini-pro-latest",
       "gemma-4-26b-a4b-it",
       "gemma-4-31b-it",
@@ -82,6 +85,9 @@
       "gpt-5.4-pro",
       "gpt-5.5",
       "gpt-5.5-pro",
+      "gpt-5.6-luna",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
       "o1",
       "o1-pro",
       "o3",
@@ -126,15 +132,6 @@
       "supports_reasoning": true,
       "supports_vision": true
     },
-    "claude-opus-4-20250514": {
-      "context_window": 200000,
-      "max_output_tokens": 32000,
-      "mode": "chat",
-      "supports_function_calling": true,
-      "supports_pdf_input": true,
-      "supports_reasoning": true,
-      "supports_vision": true
-    },
     "claude-opus-4-5-20251101": {
       "context_window": 200000,
       "max_output_tokens": 64000,
@@ -171,9 +168,9 @@
       "supports_reasoning": true,
       "supports_vision": true
     },
-    "claude-sonnet-4-20250514": {
+    "claude-opus-5": {
       "context_window": 1000000,
-      "max_output_tokens": 64000,
+      "max_output_tokens": 128000,
       "mode": "chat",
       "supports_function_calling": true,
       "supports_pdf_input": true,
@@ -192,6 +189,15 @@
     "claude-sonnet-4-6": {
       "context_window": 1000000,
       "max_output_tokens": 64000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "claude-sonnet-5": {
+      "context_window": 1000000,
+      "max_output_tokens": 128000,
       "mode": "chat",
       "supports_function_calling": true,
       "supports_pdf_input": true,
@@ -307,6 +313,24 @@
       "supports_reasoning": true,
       "supports_vision": true
     },
+    "gemini-3.5-flash-lite": {
+      "context_window": 1048576,
+      "max_output_tokens": 65536,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-3.6-flash": {
+      "context_window": 1048576,
+      "max_output_tokens": 65536,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
     "gemini-flash-latest": {
       "context_window": 1048576,
       "max_output_tokens": 65535,
@@ -322,6 +346,13 @@
       "mode": "chat",
       "supports_function_calling": true,
       "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gemini-omni-flash-preview": {
+      "context_window": 131072,
+      "max_output_tokens": 65535,
+      "mode": "chat",
       "supports_reasoning": true,
       "supports_vision": true
     },
@@ -513,8 +544,8 @@
       "supports_vision": true
     },
     "gpt-5-pro": {
-      "context_window": 128000,
-      "max_output_tokens": 272000,
+      "context_window": 400000,
+      "max_output_tokens": 128000,
       "mode": "responses",
       "supports_function_calling": true,
       "supports_pdf_input": true,
@@ -638,7 +669,7 @@
       "supports_vision": true
     },
     "gpt-5.4-mini": {
-      "context_window": 272000,
+      "context_window": 1050000,
       "max_output_tokens": 128000,
       "mode": "chat",
       "supports_function_calling": true,
@@ -647,7 +678,7 @@
       "supports_vision": true
     },
     "gpt-5.4-nano": {
-      "context_window": 272000,
+      "context_window": 1050000,
       "max_output_tokens": 128000,
       "mode": "chat",
       "supports_function_calling": true,
@@ -677,6 +708,33 @@
       "context_window": 1050000,
       "max_output_tokens": 128000,
       "mode": "responses",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.6-luna": {
+      "context_window": 1050000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.6-sol": {
+      "context_window": 1050000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
+      "supports_function_calling": true,
+      "supports_pdf_input": true,
+      "supports_reasoning": true,
+      "supports_vision": true
+    },
+    "gpt-5.6-terra": {
+      "context_window": 1050000,
+      "max_output_tokens": 128000,
+      "mode": "chat",
       "supports_function_calling": true,
       "supports_pdf_input": true,
       "supports_reasoning": true,
@@ -757,46 +815,51 @@
   },
   "families": {
     "anthropic": {
+      "fable": "claude-fable-5",
       "haiku": "claude-haiku-4-5-20251001",
-      "opus": "claude-opus-4-8",
-      "sonnet": "claude-sonnet-4-6"
+      "opus": "claude-opus-5",
+      "sonnet": "claude-sonnet-5"
     },
     "gemini": {
-      "flash": "gemini-3.5-flash",
-      "flash-lite": "gemini-3.1-flash-lite",
+      "flash": "gemini-3.6-flash",
+      "flash-lite": "gemini-3.5-flash-lite",
       "pro": "gemini-3.1-pro-preview"
     },
     "openai": {
       "chat": "chat-latest",
-      "gpt": "gpt-5.5",
-      "gpt-mini": "gpt-5.4-mini",
-      "gpt-nano": "gpt-5.4-nano",
+      "gpt": "gpt-5.6-sol",
+      "gpt-mini": "gpt-5.6-terra",
+      "gpt-nano": "gpt-5.6-luna",
       "gpt-pro": "gpt-5.5-pro"
     }
   },
   "families_detail": {
     "anthropic": {
+      "fable": {
+        "active": "claude-fable-5",
+        "stable": "claude-fable-5"
+      },
       "haiku": {
         "active": "claude-haiku-4-5-20251001",
         "stable": "claude-haiku-4-5-20251001"
       },
       "opus": {
-        "active": "claude-opus-4-8",
-        "stable": "claude-opus-4-8"
+        "active": "claude-opus-5",
+        "stable": "claude-opus-5"
       },
       "sonnet": {
-        "active": "claude-sonnet-4-6",
-        "stable": "claude-sonnet-4-6"
+        "active": "claude-sonnet-5",
+        "stable": "claude-sonnet-5"
       }
     },
     "gemini": {
       "flash": {
-        "active": "gemini-3.5-flash",
-        "stable": "gemini-3.5-flash"
+        "active": "gemini-3.6-flash",
+        "stable": "gemini-3.6-flash"
       },
       "flash-lite": {
-        "active": "gemini-3.1-flash-lite",
-        "stable": "gemini-3.1-flash-lite"
+        "active": "gemini-3.5-flash-lite",
+        "stable": "gemini-3.5-flash-lite"
       },
       "pro": {
         "active": "gemini-3.1-pro-preview",
@@ -809,16 +872,16 @@
         "stable": "chat-latest"
       },
       "gpt": {
-        "active": "gpt-5.5",
-        "stable": "gpt-5.5"
+        "active": "gpt-5.6-sol",
+        "stable": "gpt-5.6-sol"
       },
       "gpt-mini": {
-        "active": "gpt-5.4-mini",
-        "stable": "gpt-5.4-mini"
+        "active": "gpt-5.6-terra",
+        "stable": "gpt-5.6-terra"
       },
       "gpt-nano": {
-        "active": "gpt-5.4-nano",
-        "stable": "gpt-5.4-nano"
+        "active": "gpt-5.6-luna",
+        "stable": "gpt-5.6-luna"
       },
       "gpt-pro": {
         "active": "gpt-5.5-pro",
@@ -826,7 +889,7 @@
       }
     }
   },
-  "fetched_at": "2026-06-10T21:00:45Z",
+  "fetched_at": "2026-07-25T08:00:05Z",
   "providers_ok": [
     "anthropic",
     "openai",
@@ -834,13 +897,12 @@
   ],
   "schema_version": 2,
   "unmatched": {
-    "anthropic": [
-      "claude-fable-5"
-    ],
+    "anthropic": [],
     "gemini": [
       "gemini-flash-latest",
       "gemini-flash-lite-latest",
-      "gemini-pro-latest"
+      "gemini-pro-latest",
+      "gemini-omni-flash-preview"
     ],
     "openai": [
       "gpt-3.5-turbo",

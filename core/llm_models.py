@@ -121,9 +121,10 @@ LLM_PROVIDERS = {
     'anthropic': LLMProvider(
         id='anthropic',
         display_name='Anthropic',
-        # Current opus/sonnet/haiku IDs come from the model registry; curated tail
-        # keeps older Claude generations available.
-        models=_provider_models('anthropic', ['opus', 'sonnet', 'haiku'], [
+        # Current opus/fable/sonnet/haiku IDs come from the model registry; curated
+        # tail keeps older Claude generations available. Opus stays first so it
+        # remains the implicit default (see core/layout/designer.py models[0]).
+        models=_provider_models('anthropic', ['opus', 'fable', 'sonnet', 'haiku'], [
             'claude-opus-4-20250514',        # Opus 4: previous-gen coding model
             'claude-3-7-sonnet-20250219',    # Claude 3.7 Sonnet: extended thinking
         ]),
