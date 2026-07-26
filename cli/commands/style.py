@@ -110,6 +110,31 @@ def run_style_cmd(args, config) -> int:
             return _handle_create(args, config, store)
 
         # Task 9 extends this router: --style-export/import.
+        if getattr(args, "style_export", None):
+            style = _require(store, args.style_export)
+            out = getattr(args, "out", None)
+            if not out:
+                raise StyleCliError(
+                    "--style-export needs -o FILE.zip for the output path")
+            out_path = Path(out).expanduser()
+            if out_path.suffix.lower() != ".zip":
+                out_path = out_path.with_suffix(".zip")
+            if not store.export_zip(style.id, out_path):
+                raise StyleCliError(f"Export failed for {style.id}")
+            _emit(f"Exported '{style.name}' to {out_path}")
+            return 0
+
+        if getattr(args, "style_import", None):
+            zip_path = Path(args.style_import).expanduser()
+            if not zip_path.exists():
+                raise StyleCliError(f"File not found: {zip_path}")
+            imported = store.import_zip(zip_path)
+            if imported is None:
+                raise StyleCliError(f"Not a valid style zip: {zip_path}")
+            _emit(f"Imported '{imported.name}' as {imported.id}")
+            print(imported.id)
+            return 0
+
         raise StyleCliError("No style verb matched")
     except (StyleCliError, StyleAnalysisError) as e:
         logger.warning(str(e))
