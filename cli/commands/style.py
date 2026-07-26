@@ -2,16 +2,21 @@
 import json
 import logging
 import sys
+from datetime import datetime
 from pathlib import Path
 
+from core.styles.analyzer import StyleAnalysisError, StyleAnalysisService
 from core.styles.models import Style
-from core.styles.store import StyleStore
+from core.styles.store import StyleStore, EXEMPLAR_DEFAULT_CAP
 
 logger = logging.getLogger("imageai.cli.style")
 
 
 class StyleCliError(Exception):
     """User-facing CLI validation error (maps to exit code 2)."""
+
+
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 
 
 def _emit(msg: str) -> None:
@@ -25,6 +30,55 @@ def _require(store: StyleStore, name: str) -> Style:
         names = ", ".join(s.name for s in store.list_styles()) or "(none)"
         raise StyleCliError(f"Style not found: {name}. Available: {names}")
     return style
+
+
+def _collect_images(specs) -> list:
+    """Resolve --style-images specs (files, dirs, globs) to sorted unique paths."""
+    import glob as globmod
+    found = []
+    for spec in specs or []:
+        p = Path(spec).expanduser()
+        if p.is_dir():
+            found.extend(c for c in p.iterdir()
+                         if c.suffix.lower() in IMAGE_EXTS)
+        elif p.is_file():
+            found.append(p)
+        else:
+            found.extend(Path(m) for m in globmod.glob(str(p))
+                         if Path(m).suffix.lower() in IMAGE_EXTS)
+    unique = sorted(set(p.resolve() for p in found))
+    if not unique:
+        raise StyleCliError(
+            f"No images found in: {', '.join(specs or ['(nothing)'])}")
+    return unique
+
+
+def _handle_create(args, config, store: StyleStore) -> int:
+    if not getattr(args, "style_images", None):
+        raise StyleCliError("--style-create requires --style-images PATH ...")
+    paths = _collect_images(args.style_images)
+    _emit(f"Deriving style '{args.style_create}' from {len(paths)} image(s)...")
+
+    service = StyleAnalysisService(config,
+                                   provider=getattr(args, "style_llm_provider", None),
+                                   model=getattr(args, "style_llm_model", None))
+    data = service.derive(paths, progress_cb=_emit)
+
+    from core.styles.models import Style, StyleDescriptor
+    style = Style(id=store.new_id(args.style_create), name=args.style_create,
+                  descriptor=StyleDescriptor.from_dict(data["descriptor"]),
+                  prompt_text=data["prompt_text"],
+                  source={"provider": service.provider, "model": service.model,
+                          "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                          "image_count": len(paths)})
+    store.save(style)
+    store.add_reference_images(style, paths)
+    style.exemplars = style.reference_images[:EXEMPLAR_DEFAULT_CAP]
+    store.save(style)
+    _emit(f"Created style '{style.name}' ({style.id}) with "
+          f"{len(style.reference_images)} reference image(s)")
+    print(style.id)  # stdout: the id, scripting-friendly
+    return 0
 
 
 def run_style_cmd(args, config) -> int:
@@ -54,9 +108,12 @@ def run_style_cmd(args, config) -> int:
             _emit(f"Deleted style '{style.name}' ({style.id})")
             return 0
 
-        # Tasks 8-9 extend this router: --style-create, --style-export/import.
+        if getattr(args, "style_create", None):
+            return _handle_create(args, config, store)
+
+        # Tasks 9 extends this router: --style-export/import.
         raise StyleCliError("No style verb matched")
-    except StyleCliError as e:
+    except (StyleCliError, StyleAnalysisError) as e:
         logger.warning(str(e))
         print(f"Error: {e}")
         return 2
