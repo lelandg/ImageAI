@@ -170,3 +170,44 @@ class StyleStore:
             else:
                 logger.warning(f"Style {style.id}: missing reference file {rel}")
         return out
+
+    # ---- zip export / import --------------------------------------------
+
+    def export_zip(self, style_id: str, out_path: Path) -> bool:
+        """Write <out_path> as a zip: style.json + refs/*. Shareable bundle."""
+        import zipfile
+        style = self.get(style_id)
+        if style is None:
+            logger.error(f"Cannot export unknown style: {style_id}")
+            return False
+        out_path = Path(out_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.writestr("style.json", json.dumps(style.to_dict(), indent=2,
+                                                 ensure_ascii=False))
+            for p in self.resolve_refs(style):
+                zf.write(p, f"refs/{p.name}")
+        logger.info(f"Exported style {style_id} to {out_path}")
+        return True
+
+    def import_zip(self, zip_path: Path) -> Optional[Style]:
+        """Import a style zip; assigns a fresh id on collision."""
+        import zipfile
+        try:
+            with zipfile.ZipFile(zip_path) as zf:
+                data = json.loads(zf.read("style.json").decode("utf-8"))
+                style = Style.from_dict(data)
+                style.id = self.new_id(style.name)
+                style.is_builtin = False
+                refs_dir = self.style_dir(style.id) / "refs"
+                refs_dir.mkdir(parents=True, exist_ok=True)
+                for info in zf.infolist():
+                    name = Path(info.filename).name
+                    if info.filename.startswith("refs/") and name:
+                        (refs_dir / name).write_bytes(zf.read(info))
+        except (zipfile.BadZipFile, KeyError, json.JSONDecodeError, OSError) as e:
+            logger.error(f"Failed to import style zip {zip_path}: {e}")
+            return None
+        self.save(style)
+        logger.info(f"Imported style '{style.name}' as {style.id}")
+        return style
