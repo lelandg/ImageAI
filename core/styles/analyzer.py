@@ -170,7 +170,15 @@ def derive_style_data(paths: List[Path],
     for i, chunk in enumerate(chunks, start=1):
         emit(f"Analyzing chunk {i}/{len(chunks)} ({len(chunk)} image(s))...")
         messages = build_chunk_messages(chunk)
-        reply = vision_fn(messages)
+        try:
+            reply = vision_fn(messages)
+        except StyleAnalysisError:
+            raise
+        except Exception as e:  # noqa: BLE001 - surface as user-facing error
+            logger.error(f"Style analysis chunk {i}/{len(chunks)} failed: {e}")
+            raise StyleAnalysisError(
+                f"Style analysis failed on chunk {i}/{len(chunks)}: {e}. "
+                f"No style was saved.") from e
         logger.info(f"Style chunk {i} response ({len(reply or '')} chars): {reply}")
         desc = parse_descriptor(reply)
         if desc is None:

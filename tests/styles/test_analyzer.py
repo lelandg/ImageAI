@@ -121,3 +121,11 @@ def test_derive_style_data_unparseable_chunk_raises(tmp_path):
 def test_derive_style_data_no_paths_raises(tmp_path):
     with pytest.raises(StyleAnalysisError):
         derive_style_data([], lambda m: "{}", lambda m: "{}")
+
+
+def test_derive_style_data_vision_exception_wrapped(tmp_path):
+    paths = _imgs(tmp_path, 2)
+    def boom(messages):
+        raise RuntimeError("network down")
+    with pytest.raises(StyleAnalysisError, match="network down"):
+        derive_style_data(paths, boom, lambda m: "{}")
