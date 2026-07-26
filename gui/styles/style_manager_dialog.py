@@ -206,6 +206,9 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         return self.store.get(item.data(Qt.UserRole))
 
     def _on_selected(self, _row: int):
+        # A derived descriptor only ever belongs to the style it was analyzed
+        # for — never carry it across a selection change.
+        self._pending_descriptor = None
         s = self._current_style()
         if s is None:
             return
@@ -396,6 +399,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
             return
         if not self.start_operation("analyze"):
             return
+        self._pending_descriptor = None
         self.analyze_btn.setEnabled(False)
         self.console.separator()
         self.console.log(
