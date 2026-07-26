@@ -94,3 +94,18 @@ def test_delete_removes_style_dir(tmp_path):
     assert d.exists()
     store.delete(s.id)
     assert not d.exists()
+
+
+def test_add_after_middle_removal_does_not_overwrite(tmp_path):
+    store = StyleStore(base_dir=tmp_path / "styles")
+    s = Style(id=store.new_id("Seq"), name="Seq")
+    store.save(s)
+    imgs = [_make_image(tmp_path / f"s{n}.png", color=(n * 40, 0, 0)) for n in range(3)]
+    store.add_reference_images(s, imgs)
+    store.remove_reference_image(s, "refs/0002.jpg")
+    survivor_bytes = (store.style_dir(s.id) / "refs" / "0003.jpg").read_bytes()
+    store.add_reference_images(s, [_make_image(tmp_path / "new.png", color=(9, 9, 9))])
+    # survivor untouched, new file got a fresh number, no duplicate entries
+    assert (store.style_dir(s.id) / "refs" / "0003.jpg").read_bytes() == survivor_bytes
+    assert len(set(s.reference_images)) == len(s.reference_images)
+    assert "refs/0004.jpg" in s.reference_images

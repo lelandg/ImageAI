@@ -123,7 +123,16 @@ class StyleStore:
         from PIL import Image
         refs_dir = self.style_dir(style.id) / "refs"
         refs_dir.mkdir(parents=True, exist_ok=True)
-        seq = len(style.reference_images)
+        # Derive sequence number from actual files on disk, not list length
+        existing_nums = []
+        if refs_dir.exists():
+            for f in refs_dir.glob("*.jpg"):
+                try:
+                    num = int(f.stem)
+                    existing_nums.append(num)
+                except ValueError:
+                    pass
+        seq = max(existing_nums) if existing_nums else 0
         added: List[str] = []
         for src in paths:
             src = Path(src)
