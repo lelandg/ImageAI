@@ -128,6 +128,7 @@
   - Visual feedback showing which mode is active (green for AR, blue for resolution)
   - **Social Media Sizes Dialog** - Quick access to platform-specific image dimensions for Instagram, Twitter/X, Facebook, LinkedIn, YouTube, TikTok, and more
 - **Quality & Style Options** - Standard/HD quality, style presets for different looks
+- **Custom Styles** - Derive a reusable style from your own reference images (via vision-LLM analysis) and apply it across providers — image generation, video, and layout fill ([full guide](Docs/CustomStyles.md))
 - **Batch Generation** - Generate multiple variations at once
 - **Cost Estimation** - Real-time cost calculation for all providers
 - **Advanced Settings Panel** - Fine-tune generation parameters:
