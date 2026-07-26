@@ -131,6 +131,7 @@ def run_fill_cmd(args, config) -> int:
         fill_style = _store.get_by_name(args.style)
         if fill_style is None:
             names = ", ".join(s.name for s in _store.list_styles()) or "(none)"
+            logger.warning("Error: style not found: %s. Available: %s", args.style, names)
             print(f"Error: style not found: {args.style}. Available: {names}")
             return 2
         print(f"Applying style '{fill_style.name}' to region prompts",

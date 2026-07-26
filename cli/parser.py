@@ -293,7 +293,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                                "(works with -p, --video, --layout-fill)")
     g_styles.add_argument("--style-smart", action="store_true",
                           help="Fuse prompt and style with the configured LLM "
-                               "(falls back to plain concat on failure)")
+                               "(falls back to plain concat on failure) "
+                               "(image generation only)")
     g_styles.add_argument("--style-create", metavar="NAME", default=None,
                           help="Create a style from images (needs --style-images)")
     g_styles.add_argument("--style-images", nargs="+", metavar="PATH", default=None,
