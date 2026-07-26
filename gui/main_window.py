@@ -856,6 +856,14 @@ class MainWindow(QMainWindow):
 
         prompt_layout.addLayout(prompt_header_layout)
 
+        # Style picker row (Custom Styles feature)
+        try:
+            from gui.styles.style_picker import StylePickerWidget
+            self.style_picker = StylePickerWidget(self.config, "image")
+            prompt_layout.addWidget(self.style_picker)
+        except Exception as e:  # noqa: BLE001 - picker must never break the tab
+            logger.warning(f"Style picker unavailable: {e}")
+
         self.prompt_edit = QTextEdit()
         self.prompt_edit.setPlaceholderText("Describe what to generate... (Ctrl+Enter to generate)")
         self.prompt_edit.setAcceptRichText(False)
@@ -5754,6 +5762,27 @@ For more detailed information, please refer to the full documentation.
                     "#ffcc00"
                 )
 
+        # Apply selected custom style (spec §5: after original_prompt capture,
+        # so history/sidecars keep the clean prompt).
+        self.last_style_meta = None
+        _picker = getattr(self, "style_picker", None)
+        _style = _picker.current_style() if _picker else None
+        if _style is not None:
+            from core.styles import StyleStore, apply_style_for_surface
+            prompt, _style_kwargs, self.last_style_meta = apply_style_for_surface(
+                prompt, _style, self.current_provider, model,
+                smart=_picker.smart_merge_enabled(), config=self.config,
+                store=StyleStore(),
+                existing_references=kwargs.get("reference_images"))
+            if "reference_images" in _style_kwargs:
+                kwargs["reference_images"] = _style_kwargs["reference_images"]
+            self._append_to_console(
+                f"Style applied: {_style.name}"
+                + (" (smart merge)" if self.last_style_meta["smart_merge_used"] else "")
+                + (f", {self.last_style_meta['exemplars_attached']} exemplar ref(s)"
+                   if self.last_style_meta["exemplars_attached"] else ""),
+                "#66ccff")
+
         # Show status for provider loading
         self.status_bar.showMessage(f"Connecting to {self.current_provider}...")
         self._append_to_console(f"Connecting to {self.current_provider}...", "#66ccff")  # Blue
@@ -6465,6 +6494,9 @@ For more detailed information, please refer to the full documentation.
                 # Legacy single reference (kept for backward compatibility)
                 elif hasattr(self, 'reference_image_path') and self.reference_image_path:
                     meta["reference_image"] = str(self.reference_image_path)
+
+                if getattr(self, "last_style_meta", None):
+                    meta["style_applied"] = self.last_style_meta
 
                 write_image_sidecar(path, meta)
             

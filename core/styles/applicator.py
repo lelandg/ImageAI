@@ -146,3 +146,27 @@ def apply_style(prompt: str, style: Style, provider: str, model: str, *,
                     f"references; applying text only")
 
     return StyledRequest(prompt=styled, extra_kwargs=extra, meta=meta)
+
+
+def apply_style_for_surface(prompt, style, provider, model, *, smart,
+                            config, store, existing_references):
+    """Convenience seam used by GUI surfaces.
+
+    Returns (styled_prompt, extra_kwargs, meta_or_None). style=None is a
+    no-op. Builds the smart-merge completion_fn from config, degrading to
+    plain concat (logged) when the LLM is unavailable.
+    """
+    if style is None:
+        return prompt, {}, None
+    completion_fn = None
+    if smart and config is not None:
+        try:
+            from core.styles.analyzer import build_completion_fn
+            completion_fn, _p, _m = build_completion_fn(config)
+        except Exception as e:  # noqa: BLE001 - degrade, never block generation
+            logger.warning(f"Smart merge unavailable ({e}); plain concat")
+    exemplars = store.resolve_refs(style, exemplars_only=True) if store else []
+    res = apply_style(prompt, style, provider, model, smart=smart,
+                      completion_fn=completion_fn, exemplar_paths=exemplars,
+                      existing_references=existing_references)
+    return res.prompt, res.extra_kwargs, res.meta

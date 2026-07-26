@@ -112,3 +112,46 @@ def test_missing_exemplar_files_degrade_to_text(tmp_path):
                       exemplar_paths=[ghost])
     assert "reference_images" not in res.extra_kwargs
     assert res.meta["exemplars_attached"] == 0
+
+
+from core.styles.applicator import apply_style_for_surface
+
+
+def test_apply_style_for_surface_none_style_is_identity():
+    prompt, kwargs, meta = apply_style_for_surface(
+        "a fox", None, "google", "m", smart=False, config=None,
+        store=None, existing_references=None)
+    assert prompt == "a fox" and kwargs == {} and meta is None
+
+
+def test_apply_style_for_surface_full_path(tmp_path):
+    from core.styles.models import Style
+    from core.styles.store import StyleStore
+    store = StyleStore(base_dir=tmp_path / "styles")
+    s = Style(id="w", name="W", prompt_text="washes")
+    store.save(s)
+    prompt, kwargs, meta = apply_style_for_surface(
+        "a fox", s, "stability", "sd3", smart=False, config=None,
+        store=store, existing_references=None)
+    assert prompt == "a fox. In this style: washes"
+    assert meta["style_id"] == "w"
+
+
+def test_apply_style_for_surface_smart_without_key_degrades(tmp_path):
+    from core.styles.models import Style
+    from core.styles.store import StyleStore
+
+    class NoKeyConfig:
+        def get_api_key(self, provider):
+            return None
+        def get(self, k, d=None):
+            return d
+
+    store = StyleStore(base_dir=tmp_path / "styles")
+    s = Style(id="w", name="W", prompt_text="washes")
+    store.save(s)
+    prompt, kwargs, meta = apply_style_for_surface(
+        "a fox", s, "stability", "sd3", smart=True, config=NoKeyConfig(),
+        store=store, existing_references=None)
+    assert prompt == "a fox. In this style: washes"  # plain fallback
+    assert meta["smart_merge_used"] is False
