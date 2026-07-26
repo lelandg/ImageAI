@@ -361,6 +361,38 @@ def run_cli(args) -> int:
             if getattr(args, "num_images", 1) > 1:
                 kwargs["num_images"] = args.num_images
 
+            # Apply a saved style (Plans/2026-07-26-custom-styles-design.md §5)
+            original_prompt = args.prompt
+            style_meta = None
+            if getattr(args, "style", None):
+                from core.styles import StyleStore, apply_style
+                _store = StyleStore()
+                _style = _store.get_by_name(args.style)
+                if _style is None:
+                    names = ", ".join(s.name for s in _store.list_styles()) or "(none)"
+                    print(f"Error: style not found: {args.style}. Available: {names}")
+                    return 2
+                completion_fn = None
+                if getattr(args, "style_smart", False):
+                    try:
+                        from core.styles.analyzer import build_completion_fn
+                        completion_fn, _p, _m = build_completion_fn(ConfigManager())
+                    except Exception as e:  # noqa: BLE001 - degrade to plain
+                        print(f"Smart merge unavailable ({e}); using plain concat.",
+                              file=sys.stderr)
+                styled = apply_style(
+                    args.prompt, _style, provider, model,
+                    smart=bool(getattr(args, "style_smart", False)),
+                    completion_fn=completion_fn,
+                    exemplar_paths=_store.resolve_refs(_style, exemplars_only=True))
+                args.prompt = styled.prompt
+                if "reference_images" in styled.extra_kwargs:
+                    kwargs["reference_images"] = styled.extra_kwargs["reference_images"]
+                style_meta = styled.meta
+                print(f"Applied style '{_style.name}'"
+                      + (" (smart merge)" if styled.meta["smart_merge_used"] else ""),
+                      file=sys.stderr)
+
             references = getattr(args, "reference", None) or []
             ref_paths = []  # bound when `references` is non-empty; pre-init for narrowing
             mask_path = getattr(args, "mask", None)
@@ -487,7 +519,7 @@ def run_cli(args) -> int:
                         img_path.write_bytes(img_data)
                         print(f"Saved image to {img_path}")
                         meta = {
-                            "prompt": args.prompt,
+                            "prompt": original_prompt,
                             "provider": provider,
                             "model": model,
                             "timestamp": timestamp,
@@ -500,6 +532,8 @@ def run_cli(args) -> int:
                             meta["reference_images"] = [str(p) for p in ref_paths]
                         if mask_path:
                             meta["mask"] = str(mask_path)
+                        if style_meta:
+                            meta["style_applied"] = style_meta
                         sidecar_path = img_path.with_suffix(".png.json")
                         import json
                         sidecar_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
