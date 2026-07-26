@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 
 from core.styles.analyzer import StyleAnalysisError, StyleAnalysisService
-from core.styles.models import Style
+from core.styles.models import Style, StyleDescriptor
 from core.styles.store import StyleStore, EXEMPLAR_DEFAULT_CAP
 
 logger = logging.getLogger("imageai.cli.style")
@@ -64,14 +64,12 @@ def _handle_create(args, config, store: StyleStore) -> int:
                                    model=getattr(args, "style_llm_model", None))
     data = service.derive(paths, progress_cb=_emit)
 
-    from core.styles.models import Style, StyleDescriptor
     style = Style(id=store.new_id(args.style_create), name=args.style_create,
                   descriptor=StyleDescriptor.from_dict(data["descriptor"]),
                   prompt_text=data["prompt_text"],
                   source={"provider": service.provider, "model": service.model,
                           "created": datetime.now().strftime("%Y-%m-%d %H:%M"),
                           "image_count": len(paths)})
-    store.save(style)
     store.add_reference_images(style, paths)
     style.exemplars = style.reference_images[:EXEMPLAR_DEFAULT_CAP]
     store.save(style)
@@ -111,7 +109,7 @@ def run_style_cmd(args, config) -> int:
         if getattr(args, "style_create", None):
             return _handle_create(args, config, store)
 
-        # Tasks 9 extends this router: --style-export/import.
+        # Task 9 extends this router: --style-export/import.
         raise StyleCliError("No style verb matched")
     except (StyleCliError, StyleAnalysisError) as e:
         logger.warning(str(e))

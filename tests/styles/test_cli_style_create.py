@@ -75,3 +75,21 @@ def test_create_analysis_failure_saves_nothing(tmp_path):
             SimpleNamespace())
     assert rc == 2
     assert store.list_styles() == []
+
+
+def test_create_ref_copy_failure_saves_nothing(tmp_path):
+    _mk(tmp_path / "i.png")
+    store = StyleStore(base_dir=tmp_path / "styles")
+    derived = {"descriptor": {k: "v" for k in DESCRIPTOR_KEYS},
+               "prompt_text": "t"}
+    svc = SimpleNamespace(provider="openai", model="m",
+                          derive=lambda paths, progress_cb=None: derived)
+    with patch("cli.commands.style.StyleStore", return_value=store), \
+         patch("cli.commands.style.StyleAnalysisService", return_value=svc), \
+         patch.object(store, "add_reference_images",
+                      side_effect=OSError("disk full")):
+        rc = run_style_cmd(
+            _args("--style-create", "W", "--style-images", str(tmp_path)),
+            SimpleNamespace())
+    assert rc == 3
+    assert store.list_styles() == []
