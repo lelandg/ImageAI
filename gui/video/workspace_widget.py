@@ -48,6 +48,36 @@ from core.llm_models import get_provider_models, get_all_provider_ids, get_provi
 from gui.utils.stderr_suppressor import SuppressStderr
 
 
+def apply_stored_style_to_scenes(scenes, style) -> int:
+    """Apply a stored custom style to scene prompts (text-only; spec §5).
+
+    Skips [Section] markers. Idempotent: a scene whose prompt already carries
+    the style's injection (checked both by re-applying and by a direct text
+    match) is left untouched, so running this twice over the same scenes
+    never accumulates duplicate suffixes. Returns the number of scenes styled.
+    """
+    if style is None:
+        return 0
+    from core.styles import apply_style
+    count = 0
+    for scene in scenes:
+        p = getattr(scene, "prompt", None)
+        if not p:
+            continue
+        stripped = p.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            continue
+        styled = apply_style(p, style, "", "").prompt
+        if styled == p:
+            continue
+        style_text = (style.prompt_text or "").strip()
+        if style_text and style_text in p:
+            continue
+        scene.prompt = styled
+        count += 1
+    return count
+
+
 class ImageHoverPreview(QLabel):
     """A popup label that shows full-size image preview on hover"""
 
@@ -1151,6 +1181,15 @@ class WorkspaceWidget(QWidget):
         self.manage_styles_btn.setToolTip("Manage custom styles")
         self.manage_styles_btn.clicked.connect(self._manage_custom_styles)
         style_layout.addWidget(self.manage_styles_btn)
+
+        # Custom Styles picker (stored styles; text-only, no per-scene smart merge)
+        try:
+            from gui.styles.style_picker import StylePickerWidget
+            self.style_picker = StylePickerWidget(self.config, "video",
+                                                  show_smart=False)
+            style_layout.addWidget(self.style_picker)
+        except Exception as e:
+            self.logger.warning(f"Style picker unavailable: {e}")
 
         # Custom text input (hidden by default, shown when (Custom) is selected)
         self.custom_style_input = QLineEdit()
@@ -2859,7 +2898,15 @@ class WorkspaceWidget(QWidget):
         # Apply prompt style to initial prompts (before LLM enhancement)
         # Note: LLM enhancement will also apply style, but this ensures style is set even without LLM
         prompt_style = self._get_current_style()
-        if prompt_style and prompt_style.lower() != 'none':
+        stored_style = (self.style_picker.current_style()
+                        if hasattr(self, "style_picker") else None)
+        if stored_style is not None:
+            n = apply_stored_style_to_scenes(scenes, stored_style)
+            self.logger.info(f"🎨 Applied stored style '{stored_style.name}' "
+                             f"to {n} scene prompt(s)")
+            self._log_to_console(f"🎨 Style '{stored_style.name}' applied to "
+                                 f"{n} scene(s)", "INFO")
+        elif prompt_style and prompt_style.lower() != 'none':
             self.logger.info(f"🎨 Pre-applying prompt style '{prompt_style}' to initial {len(scenes)} scene prompts...")
             prompt_count = 0
 

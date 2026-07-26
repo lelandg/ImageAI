@@ -1,5 +1,7 @@
 # Custom Styles — Design
 
+**Status:** IMPLEMENTED — PR #35 (v0.41.0), branch feat/custom-styles, 2026-07-26
+
 **Date:** 2026-07-26 10:52
 **Status:** Approved design, pending implementation plan
 **Author:** Claude (brainstormed with Leland)

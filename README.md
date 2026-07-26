@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.40.0**
+**Version 0.41.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **Chameleon Labs Discord - Support, AI Art & Community: [Chameleon Labs Discord](https://discord.gg/chameleonlabs)**
@@ -128,6 +128,7 @@
   - Visual feedback showing which mode is active (green for AR, blue for resolution)
   - **Social Media Sizes Dialog** - Quick access to platform-specific image dimensions for Instagram, Twitter/X, Facebook, LinkedIn, YouTube, TikTok, and more
 - **Quality & Style Options** - Standard/HD quality, style presets for different looks
+- **Custom Styles** - Derive a reusable style from your own reference images (via vision-LLM analysis) and apply it across providers — image generation, video, and layout fill ([full guide](Docs/CustomStyles.md))
 - **Batch Generation** - Generate multiple variations at once
 - **Cost Estimation** - Real-time cost calculation for all providers
 - **Advanced Settings Panel** - Fine-tune generation parameters:

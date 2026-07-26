@@ -24,6 +24,20 @@ def _emit(msg: str) -> None:
     print(msg, file=sys.stderr)
 
 
+def _resolve_style(args):
+    """Resolve --style to a Style or None. Raises VideoCliError on unknown name."""
+    name = getattr(args, "style", None)
+    if not name:
+        return None
+    from core.styles import StyleStore
+    store = StyleStore()
+    style = store.get_by_name(name)
+    if style is None:
+        names = ", ".join(s.name for s in store.list_styles()) or "(none)"
+        raise VideoCliError(f"Style not found: {name}. Available: {names}")
+    return style
+
+
 def _derive_output(args) -> Path:
     """Resolve the output .mp4 path: -o if given, else a slug from the prompt."""
     out = getattr(args, "out", None)
@@ -242,7 +256,14 @@ def run_video_cmd(args) -> int:
         })
         return _report(payload, as_json, code)
 
+    style = None
     try:
+        style = _resolve_style(args)
+        if style is not None:
+            from core.styles import apply_style
+            args.prompt = apply_style(
+                getattr(args, "prompt", None) or "", style, "", "").prompt
+            _emit(f"Applying style '{style.name}' to prompt (text only)")
         if provider == "omni":
             result = _run_omni(args, out_path)
         elif provider == "veo":
@@ -256,5 +277,7 @@ def run_video_cmd(args) -> int:
         return _fail(str(e), 3)
 
     payload = _status_payload(result)
+    if style is not None:
+        payload["style_applied"] = style.id
     _write_sidecar(out_path, payload)
     return _report(payload, as_json, 0 if result["success"] else 1)

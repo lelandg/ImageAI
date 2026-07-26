@@ -291,6 +291,42 @@ model. Wrong provider/flag pairings fail fast with exit code 2.
 Omni does **not** support: video extension (`--extend` is Veo-only), video
 references > 3s, negative-prompt configs, temperature/system instructions.
 
+## Custom styles (`--style*`)
+
+Derive a reusable named style from your own reference images (vision-LLM
+analysis), then apply it text-only or with attached exemplar images across
+image generation, video, and layout fill. Full guide: `Docs/CustomStyles.md`.
+
+```bash
+# Create from a folder/files/globs; prints the new style id on stdout
+python main.py --style-create "Watercolor" --style-images ./refs/watercolor/
+python main.py --style-create "Neon Noir" --style-images shot1.png "refs/noir_*.jpg" \
+    --style-llm-provider openai --style-llm-model gpt-4o
+
+# Manage
+python main.py --style-list
+python main.py --style-show "Watercolor"
+python main.py --style-delete "Watercolor"
+
+# Apply (image gen, video, layout fill)
+python main.py -p "a lighthouse at dusk" --style "Watercolor" -o lighthouse.png
+python main.py -p "a lighthouse at dusk" --style "Watercolor" --style-smart -o lighthouse.png
+python main.py --video -p "waves rolling in" --style "Watercolor" -o waves.mp4
+python main.py --layout-fill comic.json --style "Neon Noir"
+
+# Share
+python main.py --style-export "Watercolor" -o watercolor.zip
+python main.py --style-import watercolor.zip
+```
+
+- Google/OpenAI `gpt-image-*` image generation additionally attaches the
+  style's starred exemplar images as references (after any of your own —
+  yours always win, on limit or when you already have an active reference).
+  Stability AI, Local SD, video, and layout fill are text-only.
+- `--style-smart` (fuse prompt+style via one LLM call, falls back to plain
+  concat on any failure) is image-generation only; ignored elsewhere.
+- Unknown `--style NAME` exits 2 and lists available styles.
+
 ## Publication layout engine (`--layout-*`)
 
 Design a page from a text description, fill its image regions, export to
@@ -431,6 +467,16 @@ Key resolution order: **CLI flag (`-k`/`-K`) > stored config > environment**.
 | `--layout-export` | PROJECT | Render to PDF/PNG (requires `-o`). |
 | `--content-kind` / `--page-size` / `--orientation` / `--dpi` | see layout section | `--layout-design` options. |
 | `--layout-llm-provider` / `--layout-llm-model` | see layout section | Text-LLM override for design. |
+| `--style` | NAME | Apply a saved style (image gen, `--video`, `--layout-fill`). |
+| `--style-smart` | flag | Smart-merge prompt+style via LLM (image gen only; falls back to plain concat). |
+| `--style-create` | NAME | Derive a new style (needs `--style-images`). |
+| `--style-images` | PATH ... (repeatable) | Files/dirs/globs for `--style-create`. |
+| `--style-llm-provider` / `--style-llm-model` | provider / model id | Vision LLM override for `--style-create`. |
+| `--style-list` | flag | List saved styles. |
+| `--style-show` | NAME | Print one style's full JSON record. |
+| `--style-delete` | NAME | Delete a style (and its reference images). |
+| `--style-export` | NAME | Export to a zip (use `-o FILE.zip`). |
+| `--style-import` | FILE | Import a style zip. |
 | `--auth-mode` | `api-key` \| `gcloud` | Google-only (images + Veo; not Omni). |
 | `-k`/`-K`/`-s`/`-t` | — | Key inline / from file / store / test. |
 | `--help-api-key` | flag | API-key setup instructions. |

@@ -36,13 +36,15 @@ def _ratio_value(ratio: str) -> float:
     return int(a) / int(b)
 
 
-def build_requests(document: DocumentSpec, model: str, only_empty: bool = False):
+def build_requests(document: DocumentSpec, model: str, only_empty: bool = False, style=None):
     """Build (requests, skipped_ids) for image regions carrying a prompt.
 
     ``key=region.id``; aspect ratio is snapped to the nearest supported value
     (never a pixel token — repo rule). ``only_empty`` skips already-filled regions.
-    Returns ``(List[BatchRequest], List[str])`` — the second is regions skipped
-    for having no prompt (surfaced to the user).
+    ``style`` (optional ``core.styles.Style``) is applied text-only (provider/model
+    both ``""`` — no reference images) to each region's prompt before the request
+    is built. Returns ``(List[BatchRequest], List[str])`` — the second is regions
+    skipped for having no prompt (surfaced to the user).
     """
     from core.batch_manager import BatchRequest
     requests = []
@@ -56,9 +58,13 @@ def build_requests(document: DocumentSpec, model: str, only_empty: bool = False)
             if not (r.prompt or "").strip():
                 skipped.append(r.id)
                 continue
+            prompt = r.prompt
+            if style is not None:
+                from core.styles import apply_style
+                prompt = apply_style(prompt, style, "", "").prompt
             _, _, w, h = r.bbox
             requests.append(BatchRequest(
-                key=r.id, prompt=r.prompt, model=model,
+                key=r.id, prompt=prompt, model=model,
                 aspect_ratio=nearest_supported_ratio(w, h),
                 width=int(w), height=int(h)))
     return requests, skipped

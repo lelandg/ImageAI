@@ -231,6 +231,15 @@ def run_cli(args) -> int:
         from cli.commands.video import run_video_cmd
         return run_video_cmd(args)
 
+    # Handle style management verbs
+    if (getattr(args, "style_create", None) or getattr(args, "style_list", False)
+            or getattr(args, "style_show", None)
+            or getattr(args, "style_delete", None)
+            or getattr(args, "style_export", None)
+            or getattr(args, "style_import", None)):
+        from cli.commands.style import run_style_cmd
+        return run_style_cmd(args, ConfigManager())
+
     # Validate auth mode for provider
     if provider != "google" and auth_mode == "gcloud":
         print(f"Warning: --auth-mode=gcloud is only supported for Google provider.")
@@ -352,7 +361,52 @@ def run_cli(args) -> int:
             if getattr(args, "num_images", 1) > 1:
                 kwargs["num_images"] = args.num_images
 
+            # Hoisted above the style block: the --reference edit path takes
+            # no style exemplars (text-only styling there), so the style block
+            # needs to know about it before applying the style.
             references = getattr(args, "reference", None) or []
+
+            # Apply a saved style (Plans/2026-07-26-custom-styles-design.md §5)
+            original_prompt = args.prompt
+            style_meta = None
+            if getattr(args, "style", None):
+                from core.styles import StyleStore, apply_style
+                _store = StyleStore()
+                _style = _store.get_by_name(args.style)
+                if _style is None:
+                    names = ", ".join(s.name for s in _store.list_styles()) or "(none)"
+                    print(f"Error: style not found: {args.style}. Available: {names}")
+                    return 2
+                completion_fn = None
+                if getattr(args, "style_smart", False):
+                    try:
+                        from core.styles.analyzer import build_completion_fn
+                        completion_fn, _p, _m = build_completion_fn(ConfigManager())
+                    except Exception as e:  # noqa: BLE001 - degrade to plain
+                        print(f"Smart merge unavailable ({e}); using plain concat.",
+                              file=sys.stderr)
+                # --reference (edit_image) never reads reference_images from
+                # kwargs, and the edit path's semantics are text-only styling
+                # (matching video/layout) -- so drop exemplars on that path.
+                exemplar_paths = _store.resolve_refs(_style, exemplars_only=True)
+                if references:
+                    if exemplar_paths:
+                        print("Style applied as text only (--reference edit "
+                              "path takes no style exemplars).", file=sys.stderr)
+                    exemplar_paths = []
+                styled = apply_style(
+                    args.prompt, _style, provider, model,
+                    smart=bool(getattr(args, "style_smart", False)),
+                    completion_fn=completion_fn,
+                    exemplar_paths=exemplar_paths)
+                args.prompt = styled.prompt
+                if "reference_images" in styled.extra_kwargs:
+                    kwargs["reference_images"] = styled.extra_kwargs["reference_images"]
+                style_meta = styled.meta
+                print(f"Applied style '{_style.name}'"
+                      + (" (smart merge)" if styled.meta["smart_merge_used"] else ""),
+                      file=sys.stderr)
+
             ref_paths = []  # bound when `references` is non-empty; pre-init for narrowing
             mask_path = getattr(args, "mask", None)
             stream_partials = bool(getattr(args, "stream_partials", False))
@@ -374,6 +428,9 @@ def run_cli(args) -> int:
                 if provider != "openai":
                     print("--batch only supported for --provider openai")
                     return 2
+                if style_meta and exemplar_paths:
+                    print("Style applied as text only (--batch submissions take "
+                          "no style exemplars).", file=sys.stderr)
                 # Build a single-request batch from this prompt.
                 req_body = {
                     "model": model,
@@ -478,7 +535,7 @@ def run_cli(args) -> int:
                         img_path.write_bytes(img_data)
                         print(f"Saved image to {img_path}")
                         meta = {
-                            "prompt": args.prompt,
+                            "prompt": original_prompt,
                             "provider": provider,
                             "model": model,
                             "timestamp": timestamp,
@@ -491,6 +548,8 @@ def run_cli(args) -> int:
                             meta["reference_images"] = [str(p) for p in ref_paths]
                         if mask_path:
                             meta["mask"] = str(mask_path)
+                        if style_meta:
+                            meta["style_applied"] = style_meta
                         sidecar_path = img_path.with_suffix(".png.json")
                         import json
                         sidecar_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
