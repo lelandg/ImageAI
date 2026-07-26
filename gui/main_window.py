@@ -5769,11 +5769,17 @@ For more detailed information, please refer to the full documentation.
         _style = _picker.current_style() if _picker else None
         if _style is not None:
             from core.styles import StyleStore, apply_style_for_surface
+            _single_ref_active = bool(kwargs.get("reference_image"))
             prompt, _style_kwargs, self.last_style_meta = apply_style_for_surface(
                 prompt, _style, self.current_provider, model,
                 smart=_picker.smart_merge_enabled(), config=self.config,
                 store=StyleStore(),
-                existing_references=kwargs.get("reference_images"))
+                existing_references=kwargs.get("reference_images"),
+                attach_exemplars=not _single_ref_active)
+            if _single_ref_active and _style.exemplars:
+                self._append_to_console(
+                    "Style applied as text only (active reference image takes priority "
+                    "over style exemplars).", "#ffaa00")
             if "reference_images" in _style_kwargs:
                 kwargs["reference_images"] = _style_kwargs["reference_images"]
             self._append_to_console(

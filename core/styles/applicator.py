@@ -149,12 +149,16 @@ def apply_style(prompt: str, style: Style, provider: str, model: str, *,
 
 
 def apply_style_for_surface(prompt, style, provider, model, *, smart,
-                            config, store, existing_references):
+                            config, store, existing_references,
+                            attach_exemplars=True):
     """Convenience seam used by GUI surfaces.
 
     Returns (styled_prompt, extra_kwargs, meta_or_None). style=None is a
     no-op. Builds the smart-merge completion_fn from config, degrading to
-    plain concat (logged) when the LLM is unavailable.
+    plain concat (logged) when the LLM is unavailable. attach_exemplars=False
+    drops style exemplars (text-only styling) -- used when the caller already
+    has an active reference image occupying the provider's single-reference
+    slot, so the user's own reference isn't displaced.
     """
     if style is None:
         return prompt, {}, None
@@ -165,7 +169,8 @@ def apply_style_for_surface(prompt, style, provider, model, *, smart,
             completion_fn, _p, _m = build_completion_fn(config)
         except Exception as e:  # noqa: BLE001 - degrade, never block generation
             logger.warning(f"Smart merge unavailable ({e}); plain concat")
-    exemplars = store.resolve_refs(style, exemplars_only=True) if store else []
+    exemplars = (store.resolve_refs(style, exemplars_only=True)
+                if (store and attach_exemplars) else [])
     res = apply_style(prompt, style, provider, model, smart=smart,
                       completion_fn=completion_fn, exemplar_paths=exemplars,
                       existing_references=existing_references)

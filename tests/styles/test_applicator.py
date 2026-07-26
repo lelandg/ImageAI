@@ -155,3 +155,23 @@ def test_apply_style_for_surface_smart_without_key_degrades(tmp_path):
         store=store, existing_references=None)
     assert prompt == "a fox. In this style: washes"  # plain fallback
     assert meta["smart_merge_used"] is False
+
+
+def test_apply_style_for_surface_attach_exemplars_off(tmp_path):
+    from core.styles.models import Style
+    from core.styles.store import StyleStore
+    store = StyleStore(base_dir=tmp_path / "styles")
+    s = Style(id="w", name="W", prompt_text="washes")
+    store.save(s)
+    refs = store.style_dir("w") / "refs"
+    refs.mkdir(parents=True)
+    (refs / "0001.jpg").write_bytes(b"X")
+    s.reference_images = ["refs/0001.jpg"]; s.exemplars = ["refs/0001.jpg"]
+    store.save(s)
+    prompt, kwargs, meta = apply_style_for_surface(
+        "a fox", s, "google", "gemini-2.5-flash-image", smart=False,
+        config=None, store=store, existing_references=None,
+        attach_exemplars=False)
+    assert prompt == "a fox. In this style: washes"
+    assert kwargs == {}
+    assert meta["exemplars_attached"] == 0
