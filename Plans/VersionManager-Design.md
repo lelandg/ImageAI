@@ -101,7 +101,7 @@ A global skill at `~/.claude/skills/version-manager/`:
 It operates on repositories from the outside, so it adds no per-repository
 files, nothing to vendor, and nothing to keep in sync. It rides the existing
 `/sync-claude-config` skill to other machines and is mirrored by
-`publish-config-repo`.
+`publish-claude-config`.
 
 Three verbs, all operating on the current repository:
 
