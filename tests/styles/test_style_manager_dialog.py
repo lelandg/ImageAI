@@ -78,6 +78,24 @@ def test_new_and_delete(qapp, store, monkeypatch):
     assert store.get_by_name("Fresh") is None
 
 
+def test_save_auto_selects_exemplars_when_none_starred(qapp, store, tmp_path):
+    from PIL import Image
+    s = store.get("water")
+    imgs = []
+    for i, color in enumerate([(255, 0, 0), (0, 255, 0)]):
+        p = tmp_path / f"a{i}.png"
+        Image.new("RGB", (16, 16), color).save(p)
+        imgs.append(p)
+    store.add_reference_images(s, imgs)
+    store.save(s)
+    dlg = _dialog(store)
+    dlg.style_list.setCurrentRow(0)
+    # Nothing checked in refs_list — Save should auto-select the first N.
+    dlg._save_current()
+    saved = store.get("water")
+    assert saved.exemplars == saved.reference_images[:2]
+
+
 def test_duplicate_preserves_exemplar_identity(qapp, store, tmp_path):
     from PIL import Image
     s = store.get("water")

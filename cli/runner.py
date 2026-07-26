@@ -428,6 +428,9 @@ def run_cli(args) -> int:
                 if provider != "openai":
                     print("--batch only supported for --provider openai")
                     return 2
+                if style_meta and exemplar_paths:
+                    print("Style applied as text only (--batch submissions take "
+                          "no style exemplars).", file=sys.stderr)
                 # Build a single-request batch from this prompt.
                 req_body = {
                     "model": model,

@@ -446,6 +446,7 @@ class ImagenReferenceWidget(QWidget):
     """
 
     # Model-specific reference image limits
+    # Keep in sync with core/styles/applicator.py GOOGLE_REF_LIMITS.
     MODEL_REF_LIMITS = {
         'gemini-2.5-flash-image': 5,            # Standard Nano Banana
         'gemini-3.1-flash-image-preview': 8,    # Nano Banana 2

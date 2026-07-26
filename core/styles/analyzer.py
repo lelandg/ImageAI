@@ -59,8 +59,6 @@ Return ONLY a JSON object with exactly these keys:
 {{{json_shape}, "prompt_text": "..."}}
 </instructions>"""
 
-SMART_MERGE_NOTE = None  # smart merge lives in applicator.py (Task 6)
-
 
 class StyleAnalysisError(Exception):
     """Style derivation failed; message is user-facing."""

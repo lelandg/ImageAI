@@ -21,6 +21,13 @@ MAX_IMPORT_DIM = 2048
 JPEG_QUALITY = 90
 EXEMPLAR_DEFAULT_CAP = 3
 
+_SAFE_REL = re.compile(r"^refs/[A-Za-z0-9._-]+$")
+
+
+def _is_safe_rel(rel: str) -> bool:
+    """True for 'refs/<plain-basename>' entries — no separators, no traversal."""
+    return bool(_SAFE_REL.match(rel)) and "/" not in rel[len("refs/"):] and ".." not in rel
+
 
 class StyleStore:
     """CRUD + reference-image management for styles (PresetLoader-shaped)."""
@@ -152,6 +159,10 @@ class StyleStore:
         return added
 
     def remove_reference_image(self, style: Style, rel_path: str) -> None:
+        if not _is_safe_rel(rel_path):
+            logger.warning(
+                f"Style {style.id}: refusing to remove unsafe reference path {rel_path!r}")
+            return
         p = self.style_dir(style.id) / rel_path
         if p.exists():
             p.unlink()
@@ -164,6 +175,9 @@ class StyleStore:
         base = self.style_dir(style.id)
         out = []
         for rel in rels:
+            if not _is_safe_rel(rel):
+                logger.warning(f"Style {style.id}: skipping unsafe reference path {rel!r}")
+                continue
             p = base / rel
             if p.exists():
                 out.append(p)
@@ -199,6 +213,26 @@ class StyleStore:
                 style = Style.from_dict(data)
                 style.id = self.new_id(style.name)
                 style.is_builtin = False
+
+                safe_refs = []
+                for rel in style.reference_images:
+                    if _is_safe_rel(rel):
+                        safe_refs.append(rel)
+                    else:
+                        logger.warning(
+                            f"Rejected unsafe reference_images entry in imported "
+                            f"style '{style.name}': {rel!r}")
+                style.reference_images = safe_refs
+
+                safe_exemplars = []
+                for rel in style.exemplars:
+                    if _is_safe_rel(rel) and rel in style.reference_images:
+                        safe_exemplars.append(rel)
+                    else:
+                        logger.warning(
+                            f"Rejected unsafe exemplars entry in imported "
+                            f"style '{style.name}': {rel!r}")
+                style.exemplars = safe_exemplars
                 refs_dir = self.style_dir(style.id) / "refs"
                 refs_dir.mkdir(parents=True, exist_ok=True)
                 for info in zf.infolist():

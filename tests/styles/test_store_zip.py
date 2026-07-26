@@ -1,4 +1,6 @@
 """Zip export/import round-trip for StyleStore."""
+import json
+import zipfile
 from pathlib import Path
 
 from PIL import Image
@@ -53,3 +55,42 @@ def test_import_bad_zip_returns_none(tmp_path):
     bad = tmp_path / "bad.zip"
     bad.write_bytes(b"not a zip")
     assert store.import_zip(bad) is None
+
+
+def test_import_zip_rejects_traversal_refs(tmp_path):
+    """A crafted style.json with '../' entries must not escape the style dir."""
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret")
+
+    zip_path = tmp_path / "malicious.zip"
+    style_json = {
+        "id": "evil", "name": "Evil", "prompt_text": "",
+        "reference_images": ["refs/../../../outside.txt", "refs/0001.jpg"],
+        "exemplars": ["refs/../../../outside.txt"],
+    }
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("style.json", json.dumps(style_json))
+        zf.writestr("refs/0001.jpg", b"fake-jpeg-bytes")
+
+    store = StyleStore(base_dir=tmp_path / "styles")
+    imported = store.import_zip(zip_path)
+    assert imported is not None
+    assert imported.reference_images == ["refs/0001.jpg"]
+    assert imported.exemplars == []
+    assert outside.read_text() == "secret"
+
+
+def test_resolve_and_remove_reject_traversal(tmp_path):
+    """A hand-edited styles.json with a traversal rel must be a no-op at use time."""
+    outside = tmp_path / "outside2.txt"
+    outside.write_text("still here")
+
+    store = StyleStore(base_dir=tmp_path / "styles")
+    s = Style(id=store.new_id("Guard"), name="Guard",
+              reference_images=["refs/../../../outside2.txt"],
+              exemplars=["refs/../../../outside2.txt"])
+    store.save(s)
+
+    assert store.resolve_refs(s) == []
+    store.remove_reference_image(s, "refs/../../../outside2.txt")
+    assert outside.read_text() == "still here"

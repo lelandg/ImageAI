@@ -245,7 +245,12 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         s.prompt_text = self.prompt_text_edit.toPlainText().strip()
         s.placement = self.placement_combo.currentText()
         exemplars = self._collect_exemplars()
-        if len(exemplars) > EXEMPLAR_DEFAULT_CAP:
+        if not exemplars and s.reference_images:
+            exemplars = s.reference_images[:EXEMPLAR_DEFAULT_CAP]
+            self.console.log(
+                f"No exemplars starred — auto-selected the first {len(exemplars)}.",
+                "INFO")
+        elif len(exemplars) > EXEMPLAR_DEFAULT_CAP:
             show_warning(self, "Style Manager",
                          f"Only the first {EXEMPLAR_DEFAULT_CAP} checked images "
                          f"are used as exemplars.")
