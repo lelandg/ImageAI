@@ -361,6 +361,11 @@ def run_cli(args) -> int:
             if getattr(args, "num_images", 1) > 1:
                 kwargs["num_images"] = args.num_images
 
+            # Hoisted above the style block: the --reference edit path takes
+            # no style exemplars (text-only styling there), so the style block
+            # needs to know about it before applying the style.
+            references = getattr(args, "reference", None) or []
+
             # Apply a saved style (Plans/2026-07-26-custom-styles-design.md §5)
             original_prompt = args.prompt
             style_meta = None
@@ -380,11 +385,20 @@ def run_cli(args) -> int:
                     except Exception as e:  # noqa: BLE001 - degrade to plain
                         print(f"Smart merge unavailable ({e}); using plain concat.",
                               file=sys.stderr)
+                # --reference (edit_image) never reads reference_images from
+                # kwargs, and the edit path's semantics are text-only styling
+                # (matching video/layout) -- so drop exemplars on that path.
+                exemplar_paths = _store.resolve_refs(_style, exemplars_only=True)
+                if references:
+                    if exemplar_paths:
+                        print("Style applied as text only (--reference edit "
+                              "path takes no style exemplars).", file=sys.stderr)
+                    exemplar_paths = []
                 styled = apply_style(
                     args.prompt, _style, provider, model,
                     smart=bool(getattr(args, "style_smart", False)),
                     completion_fn=completion_fn,
-                    exemplar_paths=_store.resolve_refs(_style, exemplars_only=True))
+                    exemplar_paths=exemplar_paths)
                 args.prompt = styled.prompt
                 if "reference_images" in styled.extra_kwargs:
                     kwargs["reference_images"] = styled.extra_kwargs["reference_images"]
@@ -393,7 +407,6 @@ def run_cli(args) -> int:
                       + (" (smart merge)" if styled.meta["smart_merge_used"] else ""),
                       file=sys.stderr)
 
-            references = getattr(args, "reference", None) or []
             ref_paths = []  # bound when `references` is non-empty; pre-init for narrowing
             mask_path = getattr(args, "mask", None)
             stream_partials = bool(getattr(args, "stream_partials", False))

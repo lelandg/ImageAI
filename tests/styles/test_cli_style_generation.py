@@ -17,12 +17,15 @@ def _fake_provider():
     prov = MagicMock()
     prov.get_default_model.return_value = "fake-model"
     prov.generate.return_value = (["ok"], [b"PNGDATA"])
+    prov.edit_image.return_value = (["ok"], [b"PNGDATA"])
     return prov
 
 
-def _run(tmp_path, *argv):
+def _run(tmp_path, *argv, style=None, setup=None):
     store = StyleStore(base_dir=tmp_path / "styles")
-    store.save(Style(id="water", name="Water", prompt_text="washes"))
+    store.save(style or Style(id="water", name="Water", prompt_text="washes"))
+    if setup:
+        setup(store)
     prov = _fake_provider()
     cfg = MagicMock()
     cfg.get_images_dir.return_value = tmp_path / "out"
@@ -62,3 +65,27 @@ def test_unknown_style_exits_2(tmp_path, capsys):
     rc, _prov, _ = _run(tmp_path, "-p", "a fox", "--style", "Nope")
     assert rc == 2
     assert "Nope" in capsys.readouterr().out
+
+
+def test_style_with_reference_is_text_only(tmp_path):
+    """--reference is the edit path: style exemplars must NOT be attached,
+    only the text merge (matching video/layout semantics, design doc §5)."""
+    def _add_exemplar(store):
+        ex_dir = store.style_dir("water") / "refs"
+        ex_dir.mkdir(parents=True)
+        (ex_dir / "0001.jpg").write_bytes(b"X")
+        s = store.get("water")
+        s.reference_images = ["refs/0001.jpg"]
+        s.exemplars = ["refs/0001.jpg"]
+        store.save(s)
+
+    ref = tmp_path / "user_ref.png"
+    ref.write_bytes(b"R")
+    out_path = tmp_path / "o.png"
+    rc, prov, _ = _run(tmp_path, "-p", "a fox", "--style", "Water",
+                        "--reference", str(ref), "-o", str(out_path),
+                        setup=_add_exemplar)
+    assert rc == 0
+    kwargs = prov.edit_image.call_args.kwargs
+    assert kwargs["prompt"] == "a fox. In this style: washes"
+    assert "reference_images" not in kwargs
