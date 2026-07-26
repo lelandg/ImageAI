@@ -42,7 +42,10 @@ def _collect_images(specs) -> list:
             found.extend(c for c in p.iterdir()
                          if c.suffix.lower() in IMAGE_EXTS)
         elif p.is_file():
-            found.append(p)
+            if p.suffix.lower() in IMAGE_EXTS:
+                found.append(p)
+            else:
+                logger.warning(f"Skipping non-image file: {p}")
         else:
             found.extend(Path(m) for m in globmod.glob(str(p))
                          if Path(m).suffix.lower() in IMAGE_EXTS)

@@ -206,6 +206,10 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         return self.store.get(item.data(Qt.UserRole))
 
     def _on_selected(self, _row: int):
+        # A pending (unsaved) analysis result belongs to whatever style was
+        # selected when analysis finished — switching styles must not let it
+        # get applied to a different style's Save.
+        self._pending_descriptor = None
         s = self._current_style()
         if s is None:
             return
@@ -375,6 +379,10 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
     # ---- analysis ----------------------------------------------------------
 
     def _on_analyze(self):
+        # Clear any stale pending descriptor before starting a new analysis —
+        # if this run fails or the user switches styles before it finishes,
+        # a leftover pending descriptor from a previous style must not survive.
+        self._pending_descriptor = None
         s = self._current_style()
         if s is None:
             show_warning(self, "Style Manager",

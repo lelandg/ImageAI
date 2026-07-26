@@ -57,6 +57,13 @@ def test_import_bad_zip_returns_none(tmp_path):
     assert store.import_zip(bad) is None
 
 
+def _jpeg_bytes(color=(10, 20, 30), size=(16, 16)):
+    import io
+    buf = io.BytesIO()
+    Image.new("RGB", size, color).save(buf, "JPEG")
+    return buf.getvalue()
+
+
 def test_import_zip_rejects_traversal_refs(tmp_path):
     """A crafted style.json with '../' entries must not escape the style dir."""
     outside = tmp_path / "outside.txt"
@@ -70,7 +77,10 @@ def test_import_zip_rejects_traversal_refs(tmp_path):
     }
     with zipfile.ZipFile(zip_path, "w") as zf:
         zf.writestr("style.json", json.dumps(style_json))
-        zf.writestr("refs/0001.jpg", b"fake-jpeg-bytes")
+        # Real image bytes: the hardened importer re-validates every extracted
+        # entry through PIL, so non-image placeholder bytes would (correctly)
+        # get dropped and defeat the point of this traversal-focused test.
+        zf.writestr("refs/0001.jpg", _jpeg_bytes())
 
     store = StyleStore(base_dir=tmp_path / "styles")
     imported = store.import_zip(zip_path)
@@ -78,6 +88,66 @@ def test_import_zip_rejects_traversal_refs(tmp_path):
     assert imported.reference_images == ["refs/0001.jpg"]
     assert imported.exemplars == []
     assert outside.read_text() == "secret"
+
+
+def test_import_zip_ignores_unreferenced_orphan_entry(tmp_path):
+    """A refs/* member not named in reference_images is never extracted."""
+    zip_path = tmp_path / "orphan.zip"
+    style_json = {
+        "id": "x", "name": "Orphan", "prompt_text": "",
+        "reference_images": ["refs/0001.jpg"], "exemplars": [],
+    }
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("style.json", json.dumps(style_json))
+        zf.writestr("refs/0001.jpg", _jpeg_bytes())
+        zf.writestr("refs/junk.jpg", _jpeg_bytes(color=(200, 0, 0)))
+
+    other = StyleStore(base_dir=tmp_path / "orphan_store")
+    imported = other.import_zip(zip_path)
+    assert imported is not None
+    assert imported.reference_images == ["refs/0001.jpg"]
+    assert (other.style_dir(imported.id) / "refs" / "0001.jpg").exists()
+    assert not (other.style_dir(imported.id) / "refs" / "junk.jpg").exists()
+
+
+def test_import_zip_drops_non_image_referenced_entry(tmp_path):
+    """A referenced entry that isn't a real image is dropped, not fatal."""
+    zip_path = tmp_path / "bad_ref.zip"
+    style_json = {
+        "id": "x", "name": "BadRef", "prompt_text": "",
+        "reference_images": ["refs/0001.jpg"], "exemplars": ["refs/0001.jpg"],
+    }
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("style.json", json.dumps(style_json))
+        zf.writestr("refs/0001.jpg", b"not-actually-an-image")
+
+    store = StyleStore(base_dir=tmp_path / "styles")
+    imported = store.import_zip(zip_path)
+    assert imported is not None
+    assert imported.reference_images == []
+    assert imported.exemplars == []
+    assert not (store.style_dir(imported.id) / "refs" / "0001.jpg").exists()
+
+
+def test_import_zip_skips_oversized_entry(tmp_path, monkeypatch):
+    """Per-entry size cap: an entry over MAX_IMPORT_BYTES is skipped."""
+    import core.styles.store as store_mod
+    monkeypatch.setattr(store_mod, "MAX_IMPORT_BYTES", 4)  # smaller than any real image
+
+    zip_path = tmp_path / "big.zip"
+    style_json = {
+        "id": "x", "name": "Big", "prompt_text": "",
+        "reference_images": ["refs/0001.jpg"], "exemplars": [],
+    }
+    with zipfile.ZipFile(zip_path, "w") as zf:
+        zf.writestr("style.json", json.dumps(style_json))
+        zf.writestr("refs/0001.jpg", _jpeg_bytes())
+
+    store = store_mod.StyleStore(base_dir=tmp_path / "styles")
+    imported = store.import_zip(zip_path)
+    assert imported is not None
+    assert imported.reference_images == []
+    assert not (store.style_dir(imported.id) / "refs" / "0001.jpg").exists()
 
 
 def test_resolve_and_remove_reject_traversal(tmp_path):

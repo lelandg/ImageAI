@@ -36,6 +36,22 @@ def test_collect_images_none_raises(tmp_path):
         _collect_images([str(tmp_path / "empty-dir")])
 
 
+def test_collect_images_explicit_non_image_file_ignored(tmp_path, caplog):
+    a = _mk(tmp_path / "a.png")
+    notes = tmp_path / "notes.txt"
+    notes.write_text("x")
+    got = _collect_images([str(a), str(notes)])
+    assert [p.name for p in got] == ["a.png"]
+    assert "notes.txt" in caplog.text
+
+
+def test_collect_images_explicit_non_image_only_raises(tmp_path):
+    notes = tmp_path / "notes.txt"
+    notes.write_text("x")
+    with pytest.raises(StyleCliError, match="No images found"):
+        _collect_images([str(notes)])
+
+
 def test_create_derives_and_saves(tmp_path):
     imgs = [_mk(tmp_path / f"i{n}.png") for n in range(4)]
     store = StyleStore(base_dir=tmp_path / "styles")

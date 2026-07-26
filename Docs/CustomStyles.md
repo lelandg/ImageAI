@@ -133,6 +133,11 @@ python main.py --style-export "Watercolor" -o watercolor.zip
 python main.py --style-import watercolor.zip
 ```
 
+An imported style's prompt text is sent to LLMs/providers on every generation
+that uses it — review a shared style's text (Style Manager) before using it,
+the same way you would review any other text from someone else before running
+it through an AI.
+
 ## Per-provider behavior
 
 | Surface | Text style applied | Exemplar images attached |

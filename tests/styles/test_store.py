@@ -1,6 +1,7 @@
 """Tests for core/styles/store.py — persistence, slugs, image import."""
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from core.styles.models import Style
@@ -109,3 +110,27 @@ def test_add_after_middle_removal_does_not_overwrite(tmp_path):
     assert (store.style_dir(s.id) / "refs" / "0003.jpg").read_bytes() == survivor_bytes
     assert len(set(s.reference_images)) == len(s.reference_images)
     assert "refs/0004.jpg" in s.reference_images
+
+
+def test_style_dir_rejects_unsafe_id(tmp_path):
+    store = StyleStore(base_dir=tmp_path / "styles")
+    with pytest.raises(ValueError):
+        store.style_dir("../..")
+
+
+def test_list_styles_skips_record_with_traversal_id(tmp_path):
+    """A hand-edited styles.json with a path-traversal id must never reach
+    style_dir() via the normal list/get flow."""
+    store = StyleStore(base_dir=tmp_path / "styles")
+    good = Style(id=store.new_id("Good"), name="Good")
+    store.save(good)
+
+    # Hand-edit the index to append a malicious record, bypassing save()'s
+    # normal id assignment (new_id() always produces a safe slug).
+    records = store._read_index()
+    records.append(Style(id="../../evil", name="Evil").to_dict())
+    store._write_index(records)
+
+    styles = store.list_styles()
+    assert [s.id for s in styles] == [good.id]
+    assert store.get("../../evil") is None

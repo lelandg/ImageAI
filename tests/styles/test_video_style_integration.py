@@ -28,3 +28,16 @@ def test_apply_stored_style_none_is_noop():
     scenes = _scenes("a fox")
     assert apply_stored_style_to_scenes(scenes, None) == 0
     assert scenes[0].prompt == "a fox"
+
+
+def test_apply_stored_style_to_scenes_is_idempotent():
+    from gui.video.workspace_widget import apply_stored_style_to_scenes
+    style = Style(id="w", name="W", prompt_text="washes")
+    scenes = _scenes("a fox", "[Chorus]", "a river")
+    first = apply_stored_style_to_scenes(scenes, style)
+    assert first == 2
+    prompts_after_first = [s.prompt for s in scenes]
+
+    second = apply_stored_style_to_scenes(scenes, style)
+    assert second == 0
+    assert [s.prompt for s in scenes] == prompts_after_first

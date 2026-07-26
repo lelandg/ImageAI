@@ -20,8 +20,10 @@ logger = logging.getLogger(__name__)
 MAX_IMPORT_DIM = 2048
 JPEG_QUALITY = 90
 EXEMPLAR_DEFAULT_CAP = 3
+MAX_IMPORT_BYTES = 50 * 1024 * 1024  # per-entry cap for zip-imported images
 
 _SAFE_REL = re.compile(r"^refs/[A-Za-z0-9._-]+$")
+_SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
 def _is_safe_rel(rel: str) -> bool:
@@ -62,9 +64,14 @@ class StyleStore:
         out = []
         for rec in self._read_index():
             try:
-                out.append(Style.from_dict(rec))
+                s = Style.from_dict(rec)
             except (KeyError, TypeError, ValueError) as e:
                 logger.warning(f"Skipping malformed style record: {e}")
+                continue
+            if not _SAFE_ID.match(s.id):
+                logger.warning(f"Skipping style record with unsafe id: {s.id!r}")
+                continue
+            out.append(s)
         return out
 
     def get(self, style_id: str) -> Optional[Style]:
@@ -118,6 +125,8 @@ class StyleStore:
     # ---- reference images ------------------------------------------------
 
     def style_dir(self, style_id: str) -> Path:
+        if not _SAFE_ID.match(style_id):
+            raise ValueError(f"Unsafe style id: {style_id!r}")
         return self.base_dir / style_id
 
     def add_reference_images(self, style: Style, paths: List[Path]) -> List[str]:
@@ -132,13 +141,12 @@ class StyleStore:
         refs_dir.mkdir(parents=True, exist_ok=True)
         # Derive sequence number from actual files on disk, not list length
         existing_nums = []
-        if refs_dir.exists():
-            for f in refs_dir.glob("*.jpg"):
-                try:
-                    num = int(f.stem)
-                    existing_nums.append(num)
-                except ValueError:
-                    pass
+        for f in refs_dir.glob("*.jpg"):
+            try:
+                num = int(f.stem)
+                existing_nums.append(num)
+            except ValueError:
+                pass
         seq = max(existing_nums) if existing_nums else 0
         added: List[str] = []
         for src in paths:
@@ -205,8 +213,19 @@ class StyleStore:
         return True
 
     def import_zip(self, zip_path: Path) -> Optional[Style]:
-        """Import a style zip; assigns a fresh id on collision."""
+        """Import a style zip; assigns a fresh id on collision.
+
+        Hardened against hostile bundles: only zip members whose basename is
+        referenced by the sanitized reference_images list are ever extracted
+        (unreferenced/orphan entries are ignored), oversized entries are
+        skipped, and every extracted image is re-validated and re-encoded
+        through PIL exactly like add_reference_images() -- unreadable bytes
+        never reach disk and are dropped from reference_images/exemplars so
+        the "exemplars is a subset of reference_images" invariant holds.
+        """
+        import io
         import zipfile
+        from PIL import Image
         try:
             with zipfile.ZipFile(zip_path) as zf:
                 data = json.loads(zf.read("style.json").decode("utf-8"))
@@ -233,12 +252,50 @@ class StyleStore:
                             f"Rejected unsafe exemplars entry in imported "
                             f"style '{style.name}': {rel!r}")
                 style.exemplars = safe_exemplars
+
+                wanted = {Path(r).name for r in style.reference_images}
+                members = {
+                    Path(info.filename).name: info for info in zf.infolist()
+                    if info.filename.startswith("refs/") and Path(info.filename).name}
+
                 refs_dir = self.style_dir(style.id) / "refs"
                 refs_dir.mkdir(parents=True, exist_ok=True)
-                for info in zf.infolist():
-                    name = Path(info.filename).name
-                    if info.filename.startswith("refs/") and name:
-                        (refs_dir / name).write_bytes(zf.read(info))
+                written = set()
+                for name in wanted:
+                    info = members.get(name)
+                    if info is None:
+                        logger.warning(
+                            f"Style '{style.name}': referenced image {name!r} "
+                            f"missing from zip; dropping")
+                        continue
+                    if info.file_size > MAX_IMPORT_BYTES:
+                        logger.warning(
+                            f"Style '{style.name}': skipping oversized zip entry "
+                            f"{name!r} ({info.file_size} bytes > "
+                            f"{MAX_IMPORT_BYTES} cap)")
+                        continue
+                    raw = zf.read(info)
+                    try:
+                        with Image.open(io.BytesIO(raw)) as img:
+                            img = img.convert("RGB")
+                            img.thumbnail((MAX_IMPORT_DIM, MAX_IMPORT_DIM))
+                            img.save(refs_dir / name, "JPEG", quality=JPEG_QUALITY)
+                    except (OSError, ValueError) as e:
+                        logger.warning(
+                            f"Style '{style.name}': skipping unreadable image "
+                            f"{name!r} in zip: {e}")
+                        continue
+                    written.add(name)
+
+                for orphan in sorted(set(members) - wanted):
+                    logger.warning(
+                        f"Style '{style.name}': ignoring unreferenced zip "
+                        f"entry refs/{orphan}")
+
+                style.reference_images = [
+                    r for r in style.reference_images if Path(r).name in written]
+                style.exemplars = [
+                    r for r in style.exemplars if Path(r).name in written]
         except (zipfile.BadZipFile, KeyError, json.JSONDecodeError, OSError) as e:
             logger.error(f"Failed to import style zip {zip_path}: {e}")
             return None

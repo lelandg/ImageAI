@@ -51,7 +51,10 @@ from gui.utils.stderr_suppressor import SuppressStderr
 def apply_stored_style_to_scenes(scenes, style) -> int:
     """Apply a stored custom style to scene prompts (text-only; spec §5).
 
-    Skips [Section] markers. Returns the number of scenes styled.
+    Skips [Section] markers. Idempotent: a scene whose prompt already carries
+    the style's injection (checked both by re-applying and by a direct text
+    match) is left untouched, so running this twice over the same scenes
+    never accumulates duplicate suffixes. Returns the number of scenes styled.
     """
     if style is None:
         return 0
@@ -64,7 +67,13 @@ def apply_stored_style_to_scenes(scenes, style) -> int:
         stripped = p.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
             continue
-        scene.prompt = apply_style(p, style, "", "").prompt
+        styled = apply_style(p, style, "", "").prompt
+        if styled == p:
+            continue
+        style_text = (style.prompt_text or "").strip()
+        if style_text and style_text in p:
+            continue
+        scene.prompt = styled
         count += 1
     return count
 

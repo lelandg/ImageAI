@@ -123,3 +123,35 @@ def test_duplicate_preserves_exemplar_identity(qapp, store, tmp_path):
     # POSITION, is what must survive.
     assert all(abs(a - b) <= 2 for a, b in zip(src_pixel, dup_pixel)), (src_pixel, dup_pixel)
     assert dup_pixel[2] > 200 and dup_pixel[0] < 50 and dup_pixel[1] < 50  # blue, not red/green
+
+
+def _row_for(dlg, name):
+    return [dlg.style_list.item(i).text()
+            for i in range(dlg.style_list.count())].index(name)
+
+
+def test_pending_descriptor_does_not_leak_across_styles(qapp, store):
+    """Analyze A, switch to B without saving, Save must not write A's
+    descriptor onto B (regression for PR #35 review item 1)."""
+    store.save(Style(id="clay", name="Clay", prompt_text="clay text"))
+    dlg = _dialog(store)
+    dlg.style_list.setCurrentRow(_row_for(dlg, "Water"))
+    dlg._on_analysis_done({"descriptor": {"summary": "A-derived"},
+                           "prompt_text": "A text"})
+    dlg.style_list.setCurrentRow(_row_for(dlg, "Clay"))
+    dlg._save_current()
+    saved_clay = store.get("clay")
+    assert saved_clay.descriptor.summary == ""
+    assert saved_clay.prompt_text == "clay text"
+
+
+def test_pending_descriptor_persists_when_saved_on_same_style(qapp, store):
+    """Positive path: analyze-then-save on the SAME style still persists."""
+    dlg = _dialog(store)
+    dlg.style_list.setCurrentRow(_row_for(dlg, "Water"))
+    dlg._on_analysis_done({"descriptor": {"summary": "Water-derived"},
+                           "prompt_text": "watery text"})
+    dlg._save_current()
+    saved = store.get("water")
+    assert saved.descriptor.summary == "Water-derived"
+    assert saved.prompt_text == "watery text"
