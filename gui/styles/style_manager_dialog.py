@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 _SPLITTER_KEY = "splitter_state"
 
+# Workers orphaned at dialog close live here until their run() returns,
+# preventing Python GC from destroying a QThread that is still running.
+_ORPHAN_WORKERS = set()
+
 
 class StyleAnalysisWorker(QThread):
     """Runs StyleAnalysisService.derive off the UI thread."""
@@ -368,6 +372,8 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
     def _on_analyze(self):
         s = self._current_style()
         if s is None:
+            show_warning(self, "Style Manager",
+                         "Select or create a style before analyzing.")
             return
         paths = self.store.resolve_refs(s)
         if not paths:
@@ -389,10 +395,13 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.console.separator()
         self.console.log(
             f"Analyzing {len(paths)} image(s) with {service.model}...", "INFO")
-        self._worker = StyleAnalysisWorker(service, paths, parent=self)
+        # No Qt parent: dialog destruction must never cascade into a running
+        # QThread. Lifecycle is managed explicitly (see on_dialog_close).
+        self._worker = StyleAnalysisWorker(service, paths)
         self._worker.progress.connect(lambda m: self.console.log(m, "INFO"))
         self._worker.finished_ok.connect(self._on_analysis_done)
         self._worker.failed.connect(self._on_analysis_failed)
+        self._worker.finished.connect(self._worker.deleteLater)
         self._worker.start()
 
     def _on_analysis_done(self, data: dict):
@@ -414,7 +423,19 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
     # ---- lifecycle -------------------------------------------------------
 
     def on_dialog_close(self):
-        if self._worker is not None and self._worker.isRunning():
-            self._worker.requestInterruption()
-            self._worker.wait(2000)
+        w = self._worker
+        if w is not None and w.isRunning():
+            w.requestInterruption()
+            if not w.wait(2000):
+                # Still running (LLM call in flight): detach it from the UI
+                # and keep it alive until it finishes on its own — the worker
+                # is unparented, so nothing else holds a live reference.
+                for sig in (w.progress, w.finished_ok, w.failed):
+                    try:
+                        sig.disconnect()
+                    except (TypeError, RuntimeError):
+                        pass
+                _ORPHAN_WORKERS.add(w)
+                w.finished.connect(lambda w=w: _ORPHAN_WORKERS.discard(w))
+            self._worker = None
         persist_splitter(self.settings, _SPLITTER_KEY, self.v_splitter)

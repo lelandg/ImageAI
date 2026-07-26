@@ -39,3 +39,24 @@ def test_worker_failure(qapp):
     got = _run_worker(qapp, SimpleNamespace(derive=boom), ["a.png"])
     assert got["ok"] is None
     assert "no key" in got["fail"]
+
+
+def test_worker_orphaning_on_close(qapp):
+    """Dialog close with a slow worker must not leave a dialog-parented
+    running thread. This only exercises the worker's own no-parent contract
+    (constructed the same way _on_analyze does, with no `parent=`) plus
+    start/interrupt/wait; it does not simulate the full dialog close path
+    (that would require driving a real in-flight analysis through a
+    StyleManagerDialog instance, which is out of scope for this fix)."""
+    import time
+    from gui.styles.style_manager_dialog import StyleAnalysisWorker
+
+    slow = SimpleNamespace(derive=lambda paths, progress_cb=None: time.sleep(4) or {})
+    worker = StyleAnalysisWorker(slow, ["x.png"])
+    assert worker.parent() is None  # never dialog-parented
+    worker.start()
+    try:
+        assert worker.isRunning()
+    finally:
+        worker.requestInterruption()
+        worker.wait(6000)
