@@ -1,6 +1,7 @@
 """CLI handlers for the publication layout engine (design / fill / export)."""
 import logging
 import os
+import sys
 from pathlib import Path
 
 from cli.runner import resolve_api_key
@@ -123,6 +124,17 @@ def run_fill_cmd(args, config) -> int:
         print(f"Error: {e}")
         return 2
     model = getattr(args, "model", None) or provider_instance.get_default_model()
+    fill_style = None
+    if getattr(args, "style", None):
+        from core.styles import StyleStore
+        _store = StyleStore()
+        fill_style = _store.get_by_name(args.style)
+        if fill_style is None:
+            names = ", ".join(s.name for s in _store.list_styles()) or "(none)"
+            print(f"Error: style not found: {args.style}. Available: {names}")
+            return 2
+        print(f"Applying style '{fill_style.name}' to region prompts",
+              file=sys.stderr)
     images_dir = Path(config.get_images_dir())
     images_dir.mkdir(parents=True, exist_ok=True)
     stem = src.stem
@@ -135,9 +147,13 @@ def run_fill_cmd(args, config) -> int:
             if not (r.prompt or "").strip():
                 skipped.append(r.id)
                 continue
+            region_prompt = r.prompt
+            if fill_style is not None:
+                from core.styles import apply_style
+                region_prompt = apply_style(region_prompt, fill_style, "", "").prompt
             try:
                 _texts, images = provider_instance.generate(
-                    prompt=r.prompt, model=model,
+                    prompt=region_prompt, model=model,
                     size=_region_size_str(r), n=1)
                 if not images:
                     logger.error("Fill: no image returned for region %s", r.id)
