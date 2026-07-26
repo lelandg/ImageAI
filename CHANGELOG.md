@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2025-12-05
+
+### Changed
+- Bump version to 0.30.0: OpenAI Sora 2 video generation integration
+- Merge branch 'main' of https://github.com/lelandg/ImageAI
+- Expand OpenAI provider and add Sora 2 video integration
+- Merge pull request #2 from lelandg/claude/sora-2-research-notes-01YCzpjRuU2yAx7Fo7ku3HKA
+- Add Sora 2 research notes from ChatGPT
+- Add multi-file attachment support for LLM dialogs
+- Re-enable generate button after safety filter block
+- Improve feedback handling in GoogleProvider
+- Add 'Use Current Image' as reference and improve crop handling
+- Add integration plans and update Google provider
+
+## [0.29.0] - 2025-12-02
+
+### Changed
+- Bump version to 0.29.0: Gemini 3 Pro quality tiers & UI improvements
+- Track last edited field in ResolutionSelector
+- Improve error handling for image generation failures
+- Add logging for API key retrieval and usage
+- Add Nano Banana Pro usage guide and update settings
+
+## [0.5.0] - 2025-08-29
+
+### Changed
+- Add Gemini image generation templates and defaults
+
+## [0.2.0] - 2025-08-29
+
+### Changed
+- Update screenshot and add version to main.py
+- Improve image saving and UI layout in app and CLI
+- Initial commit
+
 ## [0.40.0] - 2026-07-01
 
 ### Added
