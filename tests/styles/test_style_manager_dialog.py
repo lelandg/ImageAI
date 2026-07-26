@@ -76,3 +76,32 @@ def test_new_and_delete(qapp, store, monkeypatch):
                                   for i in range(dlg.style_list.count())].index("Fresh"))
     dlg._on_delete()
     assert store.get_by_name("Fresh") is None
+
+
+def test_duplicate_preserves_exemplar_identity(qapp, store, tmp_path):
+    from PIL import Image
+    s = store.get("water")
+    imgs = []
+    for i, color in enumerate([(255, 0, 0), (0, 255, 0), (0, 0, 255)]):
+        p = tmp_path / f"c{i}.png"
+        Image.new("RGB", (16, 16), color).save(p)
+        imgs.append(p)
+    store.add_reference_images(s, imgs)
+    s.exemplars = [s.reference_images[2]]  # star the LAST ref only
+    store.save(s)
+    dlg = _dialog(store)
+    dlg.style_list.setCurrentRow(0)
+    dlg._on_duplicate()
+    dup = store.get_by_name("Water copy")
+    assert len(dup.exemplars) == 1
+    src_pixel = Image.open(store.style_dir(s.id) / s.reference_images[2]).convert("RGB").getpixel((0, 0))
+    dup_pixel = Image.open(store.style_dir(dup.id) / dup.exemplars[0]).convert("RGB").getpixel((0, 0))
+    # Compare pixel data, not raw bytes: add_reference_images re-encodes to
+    # JPEG on every copy (double re-encode here — the fixture's own copy,
+    # then this duplicate's copy), and byte-for-byte JPEG re-encoding isn't
+    # guaranteed stable. A small tolerance absorbs that lossy rounding while
+    # still failing hard if duplicate() ever copies the wrong (red/green)
+    # source image for this exemplar — the starred IMAGE, not the starred
+    # POSITION, is what must survive.
+    assert all(abs(a - b) <= 2 for a, b in zip(src_pixel, dup_pixel)), (src_pixel, dup_pixel)
+    assert dup_pixel[2] > 200 and dup_pixel[0] < 50 and dup_pixel[1] < 50  # blue, not red/green

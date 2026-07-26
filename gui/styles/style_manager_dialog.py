@@ -248,10 +248,18 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         dup = copy.deepcopy(s)
         dup.id = self.store.new_id(s.name)
         dup.name = f"{s.name} copy"
-        src_refs = self.store.resolve_refs(s)
         dup.reference_images, dup.exemplars = [], []
-        self.store.add_reference_images(dup, src_refs)
-        dup.exemplars = dup.reference_images[:len(s.exemplars)]
+        # Copy refs one at a time and map exemplars by identity (the source
+        # rel path), not by position — a starred image isn't necessarily a
+        # prefix of reference_images, and a missing/unreadable source file
+        # must not shift the mapping for everything after it.
+        for rel in s.reference_images:
+            src = self.store.style_dir(s.id) / rel
+            if not src.exists():
+                continue
+            added = self.store.add_reference_images(dup, [src])
+            if added and rel in s.exemplars:
+                dup.exemplars.append(added[0])
         self.store.save(dup)
         self._load_styles(select_id=dup.id)
 
