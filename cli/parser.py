@@ -286,6 +286,34 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Emit a single machine-readable JSON result on stdout",
     )
 
+    # Styles (custom styles derived from reference images)
+    g_styles = parser.add_argument_group("styles")
+    g_styles.add_argument("--style", metavar="NAME", default=None,
+                          help="Apply a saved style to this generation "
+                               "(works with -p, --video, --layout-fill)")
+    g_styles.add_argument("--style-smart", action="store_true",
+                          help="Fuse prompt and style with the configured LLM "
+                               "(falls back to plain concat on failure)")
+    g_styles.add_argument("--style-create", metavar="NAME", default=None,
+                          help="Create a style from images (needs --style-images)")
+    g_styles.add_argument("--style-images", nargs="+", metavar="PATH", default=None,
+                          help="Images for --style-create: files, dirs, or globs")
+    g_styles.add_argument("--style-llm-provider", default=None,
+                          choices=["openai", "anthropic", "google"],
+                          help="Vision LLM for --style-create (default: configured LLM)")
+    g_styles.add_argument("--style-llm-model", default=None,
+                          help="Vision model id for --style-create (default: registry)")
+    g_styles.add_argument("--style-list", action="store_true",
+                          help="List saved styles")
+    g_styles.add_argument("--style-show", metavar="NAME", default=None,
+                          help="Show one style's full record")
+    g_styles.add_argument("--style-delete", metavar="NAME", default=None,
+                          help="Delete a style")
+    g_styles.add_argument("--style-export", metavar="NAME", default=None,
+                          help="Export a style to a zip (use -o FILE.zip)")
+    g_styles.add_argument("--style-import", metavar="FILE", default=None,
+                          help="Import a style zip")
+
     # Help options
     help_group = parser.add_argument_group("help")
     help_group.add_argument(

@@ -231,6 +231,15 @@ def run_cli(args) -> int:
         from cli.commands.video import run_video_cmd
         return run_video_cmd(args)
 
+    # Handle style management verbs
+    if (getattr(args, "style_create", None) or getattr(args, "style_list", False)
+            or getattr(args, "style_show", None)
+            or getattr(args, "style_delete", None)
+            or getattr(args, "style_export", None)
+            or getattr(args, "style_import", None)):
+        from cli.commands.style import run_style_cmd
+        return run_style_cmd(args, ConfigManager())
+
     # Validate auth mode for provider
     if provider != "google" and auth_mode == "gcloud":
         print(f"Warning: --auth-mode=gcloud is only supported for Google provider.")
