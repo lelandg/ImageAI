@@ -193,3 +193,83 @@ def derive_style_data(paths: List[Path],
     prompt_text = merged.pop("prompt_text")
     emit("Style analysis complete.")
     return {"descriptor": merged, "prompt_text": prompt_text}
+
+
+# ---- transport (real LLM wiring) ----------------------------------------
+
+_PROVIDER_SPECS = {
+    # app provider -> (registry provider, family, static fallback, config-key name)
+    "google": ("gemini", "pro", "gemini-2.5-pro", "google_api_key"),
+    "openai": ("openai", "gpt", "gpt-4o", "openai_api_key"),
+    "anthropic": ("anthropic", "sonnet", "claude-sonnet-4-6", "anthropic_api_key"),
+}
+
+
+def normalize_llm_provider(provider) -> str:
+    p = (provider or "").strip().lower()
+    if p in ("google", "gemini"):
+        return "google"
+    if p in ("anthropic", "claude"):
+        return "anthropic"
+    return "openai"
+
+
+def default_vision_model(provider: str) -> str:
+    from core.llm_models import resolve_model
+    reg, family, static, _ = _PROVIDER_SPECS[normalize_llm_provider(provider)]
+    return resolve_model(reg, family, static_default=static)
+
+
+def build_completion_fn(config, provider=None, model=None):
+    """Build an LLM callable over UnifiedLLMProvider.
+
+    Args:
+        config: ConfigManager (uses get_api_key / get).
+        provider: openai|anthropic|google (default: config 'llm_provider',
+            else openai).
+        model: bare model id (default: registry vision default).
+
+    Returns:
+        (fn, provider, full_model) where fn(messages) -> str.
+
+    Raises:
+        StyleAnalysisError: when no API key is configured for the provider.
+    """
+    provider = normalize_llm_provider(provider or config.get("llm_provider", None))
+    reg, _family, _static, cfg_key = _PROVIDER_SPECS[provider]
+    api_key = config.get_api_key(provider)
+    if not api_key:
+        raise StyleAnalysisError(
+            f"No {provider} API key configured. Set one in Settings (GUI) or "
+            f"with --set-key --provider {provider} (CLI) before creating a style.")
+    model = model or default_vision_model(provider)
+    from core.llm_models import get_provider_prefix
+    prefix = get_provider_prefix(reg) or ""
+    full_model = model if model.startswith(prefix) else f"{prefix}{model}"
+
+    from core.video.prompt_engine import UnifiedLLMProvider
+    llm = UnifiedLLMProvider({cfg_key: api_key})
+
+    def fn(messages):
+        logger.info(f"Style LLM request -> {full_model} "
+                    f"({sum(len(str(m)) for m in messages)} chars)")
+        return llm.analyze_image(messages=messages, model=full_model,
+                                 max_tokens=1500)
+
+    return fn, provider, full_model
+
+
+class StyleAnalysisService:
+    """Real-transport wrapper: derive a style from image paths."""
+
+    def __init__(self, config, provider=None, model=None):
+        self._fn, self.provider, self.model = build_completion_fn(
+            config, provider=provider, model=model)
+
+    def derive(self, paths, progress_cb=None) -> Dict:
+        """Run the map-reduce; both map (vision) and reduce (text) share
+        the same UnifiedLLMProvider callable (it accepts either message
+        shape). Raises StyleAnalysisError per derive_style_data."""
+        return derive_style_data(paths, vision_fn=self._fn,
+                                 completion_fn=self._fn,
+                                 progress_cb=progress_cb)
