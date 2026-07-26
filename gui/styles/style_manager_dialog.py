@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, QSettings
+from PySide6.QtCore import Qt, QSettings, QThread, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QPushButton, QTextEdit, QVBoxLayout, QWidget)
 
 from core.llm_models import get_provider_models
-from core.styles.models import Style
+from core.styles.models import Style, StyleDescriptor
 from core.styles.store import EXEMPLAR_DEFAULT_CAP, StyleStore
 from gui.common.dialog_conventions import (
     DialogCleanupMixin, bind_primary_action, persist_splitter,
@@ -24,6 +24,26 @@ from gui.llm_utils import DialogStatusConsole
 logger = logging.getLogger(__name__)
 
 _SPLITTER_KEY = "splitter_state"
+
+
+class StyleAnalysisWorker(QThread):
+    """Runs StyleAnalysisService.derive off the UI thread."""
+    progress = Signal(str)
+    finished_ok = Signal(dict)
+    failed = Signal(str)
+
+    def __init__(self, service, paths, parent=None):
+        super().__init__(parent)
+        self._service = service
+        self._paths = list(paths)
+
+    def run(self):
+        try:
+            data = self._service.derive(self._paths,
+                                        progress_cb=self.progress.emit)
+            self.finished_ok.emit(data)
+        except Exception as e:  # noqa: BLE001 - report to UI, never crash thread
+            self.failed.emit(str(e))
 
 
 class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
@@ -227,6 +247,10 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
                          f"are used as exemplars.")
             exemplars = exemplars[:EXEMPLAR_DEFAULT_CAP]
         s.exemplars = exemplars
+        pending = getattr(self, "_pending_descriptor", None)
+        if pending:
+            s.descriptor = StyleDescriptor.from_dict(pending)
+            self._pending_descriptor = None
         self.store.save(s)
         self.console.log(f"Saved style '{s.name}'", "SUCCESS")
         self._load_styles(select_id=s.id)
@@ -339,12 +363,58 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         if models:
             self.llm_model_combo.addItems(models)
 
-    # ---- analysis (wired in Task 13) ------------------------------------
+    # ---- analysis ----------------------------------------------------------
 
     def _on_analyze(self):
-        show_warning(self, "Style Manager", "Analysis wiring lands in Task 13.")
+        s = self._current_style()
+        if s is None:
+            return
+        paths = self.store.resolve_refs(s)
+        if not paths:
+            show_warning(self, "Style Manager",
+                         "Add reference images before analyzing.")
+            return
+        from core.styles.analyzer import StyleAnalysisError, StyleAnalysisService
+        try:
+            service = StyleAnalysisService(
+                self.config,
+                provider=self.llm_provider_combo.currentText(),
+                model=self.llm_model_combo.currentText().strip() or None)
+        except StyleAnalysisError as e:
+            show_error(self, "Style Manager", str(e))
+            return
+        if not self.start_operation("analyze"):
+            return
+        self.analyze_btn.setEnabled(False)
+        self.console.separator()
+        self.console.log(
+            f"Analyzing {len(paths)} image(s) with {service.model}...", "INFO")
+        self._worker = StyleAnalysisWorker(service, paths, parent=self)
+        self._worker.progress.connect(lambda m: self.console.log(m, "INFO"))
+        self._worker.finished_ok.connect(self._on_analysis_done)
+        self._worker.failed.connect(self._on_analysis_failed)
+        self._worker.start()
+
+    def _on_analysis_done(self, data: dict):
+        self.end_operation()
+        self.analyze_btn.setEnabled(True)
+        # Non-destructive: show in the editable fields; user must Save.
+        self.prompt_text_edit.setPlainText(data.get("prompt_text", ""))
+        self.descriptor_view.setPlainText(
+            json.dumps(data.get("descriptor", {}), indent=2, ensure_ascii=False))
+        self._pending_descriptor = data.get("descriptor", {})
+        self.console.log("Analysis complete — review, then Save Style.", "SUCCESS")
+
+    def _on_analysis_failed(self, message: str):
+        self.end_operation()
+        self.analyze_btn.setEnabled(True)
+        self.console.log(f"Analysis failed: {message}", "ERROR")
+        show_error(self, "Style Manager", f"Style analysis failed:\n{message}")
 
     # ---- lifecycle -------------------------------------------------------
 
     def on_dialog_close(self):
+        if self._worker is not None and self._worker.isRunning():
+            self._worker.requestInterruption()
+            self._worker.wait(2000)
         persist_splitter(self.settings, _SPLITTER_KEY, self.v_splitter)
