@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
-**Last Updated:** 2026-07-27 09:05
+**Last Updated:** 2026-07-27 09:20
 
 **Goal:** Close every reviewer-adjudicated follow-up from PR #35 (issue #37): robustness (GUI-thread freeze cap, core/gui decoupling, atomic index write, path-safety guards), consistency (provenance shape, cross-surface picker refresh, dialog polish, drag-and-drop), and the two test-coverage gaps.
 
@@ -668,10 +668,10 @@ def test_dialog_close_detaches_running_worker(qapp, store, tmp_path, monkeypatch
 
 ### Task 10: Full suite, version bump, PR, issue bookkeeping
 
-- [ ] **Step 1:** Full suite: `QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest` → must be all green.
-- [ ] **Step 2:** Version bump via the tool (never hand-edit): dry-run `python3 ~/.claude/skills/version-manager/version_tool.py --repo /mnt/d/Documents/Code/GitHub/ImageAI release minor`, write prose notes to a temp file, then `release minor --notes FILE --apply`; commit as the tool directs.
-- [ ] **Step 3:** Update this plan file's checkboxes + push branch; open PR titled `fix: Custom Styles post-merge follow-ups (issue #37)` with a body mapping each issue checkbox to its commit; `Closes #37` deliberately omitted — label `test` and comment instead (close after verification per house rules).
-- [ ] **Step 4:** Comment on issue #37 summarizing what shipped (note the smart-merge fix took the adjudicated "cap retries" candidate; full GenWorker move remains possible later), add label `test`, credit Claude Fable 5.
+- [x] **Step 1:** Full suite: `QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest` → must be all green.
+- [x] **Step 2:** Version bump via the tool (never hand-edit): dry-run `python3 ~/.claude/skills/version-manager/version_tool.py --repo /mnt/d/Documents/Code/GitHub/ImageAI release minor`, write prose notes to a temp file, then `release minor --notes FILE --apply`; commit as the tool directs.
+- [x] **Step 3:** Update this plan file's checkboxes + push branch; open PR titled `fix: Custom Styles post-merge follow-ups (issue #37)` with a body mapping each issue checkbox to its commit; `Closes #37` deliberately omitted — label `test` and comment instead (close after verification per house rules).
+- [x] **Step 4:** Comment on issue #37 summarizing what shipped (note the smart-merge fix took the adjudicated "cap retries" candidate; full GenWorker move remains possible later), add label `test`, credit Claude Fable 5.
 
 ## Self-Review Notes
 
