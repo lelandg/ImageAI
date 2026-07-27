@@ -1,8 +1,8 @@
 # Custom Styles Follow-ups (Issue #37) Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
-**Last Updated:** 2026-07-27 07:23
+**Last Updated:** 2026-07-27 09:05
 
 **Goal:** Close every reviewer-adjudicated follow-up from PR #35 (issue #37): robustness (GUI-thread freeze cap, core/gui decoupling, atomic index write, path-safety guards), consistency (provenance shape, cross-surface picker refresh, dialog polish, drag-and-drop), and the two test-coverage gaps.
 
@@ -34,7 +34,7 @@ Fixes: PySide6-less CLI `--style-create` fails with misleading `No module named 
 **Interfaces:**
 - Produces: `core.llm_parsing.LLMResponseParser` — identical static API (`parse_json_response(content, expected_type)`, `extract_text_prompts`, `create_fallback_prompts`). `gui.llm_utils.LLMResponseParser` keeps working as an alias.
 
-- [ ] **Step 1: Create `core/llm_parsing.py`** — move the `LLMResponseParser` class verbatim from `gui/llm_utils.py:15-124` with module header:
+- [x] **Step 1: Create `core/llm_parsing.py`** — move the `LLMResponseParser` class verbatim from `gui/llm_utils.py:15-124` with module header:
 
 ```python
 """LLM response parsing shared by core pipelines and GUI dialogs.
@@ -55,15 +55,15 @@ class LLMResponseParser:
     ...  # class body verbatim from gui/llm_utils.py:15-124
 ```
 
-- [ ] **Step 2: Slim `gui/llm_utils.py`** — delete the class and the now-unused `import json` / `import re`; add near the top:
+- [x] **Step 2: Slim `gui/llm_utils.py`** — delete the class and the now-unused `import json` / `import re`; add near the top:
 
 ```python
 from core.llm_parsing import LLMResponseParser  # noqa: F401 — back-compat re-export
 ```
 
-- [ ] **Step 3: Repoint the six core import sites** listed above to `from core.llm_parsing import LLMResponseParser` (they are all function-local imports except `core/prompt_enhancer_llm.py:13`, which is top-level).
+- [x] **Step 3: Repoint the six core import sites** listed above to `from core.llm_parsing import LLMResponseParser` (they are all function-local imports except `core/prompt_enhancer_llm.py:13`, which is top-level).
 
-- [ ] **Step 4: Write the failing test** — `tests/styles/test_core_no_gui.py`:
+- [x] **Step 4: Write the failing test** — `tests/styles/test_core_no_gui.py`:
 
 ```python
 """Style pipeline must import and parse without PySide6 (issue #37)."""
@@ -90,8 +90,8 @@ def test_style_pipeline_importable_without_pyside6():
     assert "OK" in out.stdout
 ```
 
-- [ ] **Step 5: Run** `.venv_linux/bin/python -m pytest tests/styles/test_core_no_gui.py -v` → PASS (fails before Step 1-3 with ImportError in stderr). Then the full styles dir → PASS.
-- [ ] **Step 6: Commit** `fix(styles): move LLMResponseParser to core so CLI paths need no PySide6`
+- [x] **Step 5: Run** `.venv_linux/bin/python -m pytest tests/styles/test_core_no_gui.py -v` → PASS (fails before Step 1-3 with ImportError in stderr). Then the full styles dir → PASS.
+- [x] **Step 6: Commit** `fix(styles): move LLMResponseParser to core so CLI paths need no PySide6`
 
 ### Task 2: StyleStore hardening (atomic index write, `_is_safe_rel` fixes, defensive delete)
 
@@ -99,7 +99,7 @@ def test_style_pipeline_importable_without_pyside6():
 - Modify: `core/styles/store.py:29-31` (`_is_safe_rel`), `:56-59` (`_write_index`), `:113-123` (`delete`)
 - Test: `tests/styles/test_store.py`
 
-- [ ] **Step 1: Write failing tests** (append to `tests/styles/test_store.py`):
+- [x] **Step 1: Write failing tests** (append to `tests/styles/test_store.py`):
 
 ```python
 def test_write_index_survives_midwrite_failure(tmp_path, monkeypatch):
@@ -149,8 +149,8 @@ def test_delete_unsafe_id_purges_index_without_touching_disk(tmp_path):
 
 (`test_store.py` already imports `json`, `pytest`, `Style`, `StyleStore` — verify and add missing imports.)
 
-- [ ] **Step 2: Run them** → FAIL (TypeError / corrupted index / ValueError respectively).
-- [ ] **Step 3: Implement.** In `core/styles/store.py` add `import os` and replace the three functions:
+- [x] **Step 2: Run them** → FAIL (TypeError / corrupted index / ValueError respectively).
+- [x] **Step 3: Implement.** In `core/styles/store.py` add `import os` and replace the three functions:
 
 ```python
 def _is_safe_rel(rel) -> bool:
@@ -192,8 +192,8 @@ def _is_safe_rel(rel) -> bool:
         return True
 ```
 
-- [ ] **Step 4: Run** `tests/styles/test_store.py tests/styles/test_store_zip.py -v` → PASS.
-- [ ] **Step 5: Commit** `fix(styles): atomic styles.json write, non-str/dotdot _is_safe_rel fixes, defensive delete`
+- [x] **Step 4: Run** `tests/styles/test_store.py tests/styles/test_store_zip.py -v` → PASS.
+- [x] **Step 5: Commit** `fix(styles): atomic styles.json write, non-str/dotdot _is_safe_rel fixes, defensive delete`
 
 ### Task 3: Cap smart-merge retries on the GUI seam (UI-freeze fix)
 
@@ -206,7 +206,7 @@ Issue-adjudicated candidate: "cap retries for that one call". The freeze is `ana
 **Interfaces:**
 - Produces: `build_completion_fn(config, provider=None, model=None, max_retries=None)`; `analyze_image(..., max_retries: int = 3)`. Defaults preserve current behavior everywhere else.
 
-- [ ] **Step 1: Write failing tests.** Append to `tests/styles/test_analyzer_service.py`:
+- [x] **Step 1: Write failing tests.** Append to `tests/styles/test_analyzer_service.py`:
 
 ```python
 def test_analyze_image_forwards_max_retries(monkeypatch):
@@ -246,8 +246,8 @@ def test_apply_style_for_surface_caps_smart_merge_retries(monkeypatch):
 
 (Adapt `_style()` to however `test_applicator.py` builds a Style; keep its conventions.)
 
-- [ ] **Step 2: Run** → FAIL (unexpected kwarg `max_retries`).
-- [ ] **Step 3: Implement.** `analyze_image`: add `max_retries: int = 3` to the signature and pass `max_retries=max_retries` in the `_retry_with_backoff(...)` call (replacing the literal `3`). `build_completion_fn`: add `max_retries=None` param; inside `fn`:
+- [x] **Step 2: Run** → FAIL (unexpected kwarg `max_retries`).
+- [x] **Step 3: Implement.** `analyze_image`: add `max_retries: int = 3` to the signature and pass `max_retries=max_retries` in the `_retry_with_backoff(...)` call (replacing the literal `3`). `build_completion_fn`: add `max_retries=None` param; inside `fn`:
 
 ```python
     def fn(messages):
@@ -263,8 +263,8 @@ def test_apply_style_for_surface_caps_smart_merge_retries(monkeypatch):
 `apply_style_for_surface`: change the build call to
 `build_completion_fn(config, max_retries=0)` with a comment: runs on the GUI thread — one transient failure degrades to plain concat instead of freezing the UI for the ~14s retry backoff.
 
-- [ ] **Step 4: Run** `tests/styles/ -v` → PASS.
-- [ ] **Step 5: Commit** `fix(styles): cap GUI smart-merge to a single LLM attempt (no 14s backoff freeze)`
+- [x] **Step 4: Run** `tests/styles/ -v` → PASS.
+- [x] **Step 5: Commit** `fix(styles): cap GUI smart-merge to a single LLM attempt (no 14s backoff freeze)`
 
 ### Task 4: Unify `style_applied` provenance shape (video CLI → dict)
 
@@ -273,7 +273,7 @@ def test_apply_style_for_surface_caps_smart_merge_retries(monkeypatch):
 - Modify: `Docs/CustomStyles.md:181` area
 - Test: `tests/styles/test_cli_style_video.py:109-126`
 
-- [ ] **Step 1: Update the two tests** — in `test_run_video_cmd_adds_style_applied_to_payload` replace the assert with:
+- [x] **Step 1: Update the two tests** — in `test_run_video_cmd_adds_style_applied_to_payload` replace the assert with:
 
 ```python
     assert data["style_applied"]["style_id"] == "water"
@@ -283,7 +283,7 @@ def test_apply_style_for_surface_caps_smart_merge_retries(monkeypatch):
 
 (`test_run_video_cmd_no_style_omits_style_applied` stays as-is.) Run → FAIL (payload is the bare string `"water"`).
 
-- [ ] **Step 2: Implement** in `cli/commands/video.py`: initialize `style_meta = None` next to `style = None`; in the style branch capture the full result:
+- [x] **Step 2: Implement** in `cli/commands/video.py`: initialize `style_meta = None` next to `style = None`; in the style branch capture the full result:
 
 ```python
         style = _resolve_style(args)
@@ -298,9 +298,9 @@ def test_apply_style_for_surface_caps_smart_merge_retries(monkeypatch):
 
 and at payload time replace `payload["style_applied"] = style.id` with `payload["style_applied"] = style_meta` (guard stays `if style is not None:`).
 
-- [ ] **Step 3: Update `Docs/CustomStyles.md`** provenance paragraph: state that image sidecars **and** `--video` CLI sidecars record the same `style_applied` block (id/name, smart-merge flag, exemplar counts).
-- [ ] **Step 4: Run** `tests/styles/test_cli_style_video.py -v` → PASS.
-- [ ] **Step 5: Commit** `fix(cli): video sidecar style_applied uses the same dict shape as image sidecars`
+- [x] **Step 3: Update `Docs/CustomStyles.md`** provenance paragraph: state that image sidecars **and** `--video` CLI sidecars record the same `style_applied` block (id/name, smart-merge flag, exemplar counts).
+- [x] **Step 4: Run** `tests/styles/test_cli_style_video.py -v` → PASS.
+- [x] **Step 5: Commit** `fix(cli): video sidecar style_applied uses the same dict shape as image sidecars`
 
 ### Task 5: `_is_safe_rel` guards in Style Manager thumbnail + duplicate paths
 
@@ -308,7 +308,7 @@ and at payload time replace `payload["style_applied"] = style.id` with `payload[
 - Modify: `gui/styles/style_manager_dialog.py:222-233` (`_on_selected`), `:293-299` (`_on_duplicate`)
 - Test: `tests/styles/test_style_manager_dialog.py`
 
-- [ ] **Step 1: Write failing test:**
+- [x] **Step 1: Write failing test:**
 
 ```python
 def test_unsafe_ref_entries_are_skipped_in_ui(qapp, store):
@@ -323,8 +323,8 @@ def test_unsafe_ref_entries_are_skipped_in_ui(qapp, store):
     assert dup.reference_images == []
 ```
 
-- [ ] **Step 2: Run** → FAIL (`TypeError` from `base / 7` or the unsafe item appears).
-- [ ] **Step 3: Implement.** Add `_is_safe_rel` to the `from core.styles.store import ...` line. In `_on_selected`'s loop over `s.reference_images` insert first:
+- [x] **Step 2: Run** → FAIL (`TypeError` from `base / 7` or the unsafe item appears).
+- [x] **Step 3: Implement.** Add `_is_safe_rel` to the `from core.styles.store import ...` line. In `_on_selected`'s loop over `s.reference_images` insert first:
 
 ```python
         for rel in s.reference_images:
@@ -336,7 +336,7 @@ def test_unsafe_ref_entries_are_skipped_in_ui(qapp, store):
 
 In `_on_duplicate`'s loop, same guard before `src = self.store.style_dir(s.id) / rel`.
 
-- [ ] **Step 4: Run dialog tests** → PASS. **Step 5: Commit** `fix(gui): style manager skips unsafe reference paths in thumbnail/duplicate paths`
+- [x] **Step 4: Run dialog tests** → PASS. **Step 5: Commit** `fix(gui): style manager skips unsafe reference paths in thumbnail/duplicate paths`
 
 ### Task 6: Cross-surface picker refresh when the Style Manager closes
 
@@ -344,7 +344,7 @@ In `_on_duplicate`'s loop, same guard before `src = self.store.style_dir(s.id) /
 - Modify: `gui/styles/style_picker.py`
 - Test: `tests/styles/test_style_picker.py`
 
-- [ ] **Step 1: Write failing test** (reuse the file's `FakeConfig`; import `Style`, `StyleStore`):
+- [x] **Step 1: Write failing test** (reuse the file's `FakeConfig`; import `Style`, `StyleStore`):
 
 ```python
 def test_manager_close_refreshes_all_pickers(qapp, tmp_path, monkeypatch):
@@ -366,8 +366,8 @@ def test_manager_close_refreshes_all_pickers(qapp, tmp_path, monkeypatch):
     assert b.combo.findData("fresh") >= 0   # the OTHER picker refreshed too
 ```
 
-- [ ] **Step 2: Run** → FAIL (`b` still lacks "fresh").
-- [ ] **Step 3: Implement** in `style_picker.py`: add `import weakref`; module-level `_PICKERS = weakref.WeakSet()`; in `__init__` (before the final `self.refresh()`): `_PICKERS.add(self)`; replace `_open_manager`'s tail:
+- [x] **Step 2: Run** → FAIL (`b` still lacks "fresh").
+- [x] **Step 3: Implement** in `style_picker.py`: add `import weakref`; module-level `_PICKERS = weakref.WeakSet()`; in `__init__` (before the final `self.refresh()`): `_PICKERS.add(self)`; replace `_open_manager`'s tail:
 
 ```python
     def _open_manager(self) -> None:
@@ -381,7 +381,7 @@ def test_manager_close_refreshes_all_pickers(qapp, tmp_path, monkeypatch):
                 pass          # underlying C++ widget already deleted
 ```
 
-- [ ] **Step 4: Run** `tests/styles/test_style_picker.py -v` → PASS. **Step 5: Commit** `feat(gui): refresh style pickers on every surface when the Style Manager closes`
+- [x] **Step 4: Run** `tests/styles/test_style_picker.py -v` → PASS. **Step 5: Commit** `feat(gui): refresh style pickers on every surface when the Style Manager closes`
 
 ### Task 7: Dialog polish (design §6): list thumbnails, geometry + LLM-combo persistence, GUI `source` provenance
 
@@ -389,7 +389,7 @@ def test_manager_close_refreshes_all_pickers(qapp, tmp_path, monkeypatch):
 - Modify: `gui/styles/style_manager_dialog.py` (`__init__`, `_build_ui`, `_load_styles`, `_on_selected`, `_on_analyze`, `_on_analysis_done`, `_save_current`, `on_dialog_close`)
 - Test: `tests/styles/test_style_manager_dialog.py`
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
 
 ```python
 def test_style_list_shows_exemplar_thumbnail(qapp, store, tmp_path):
@@ -426,8 +426,8 @@ def test_gui_analysis_populates_source_on_save(qapp, store):
     assert src["image_count"] == 2 and src["created"]
 ```
 
-- [ ] **Step 2: Run** → FAIL.
-- [ ] **Step 3: Implement:**
+- [x] **Step 2: Run** → FAIL.
+- [x] **Step 3: Implement:**
   - Imports: add `QSize` to the `PySide6.QtCore` import; add `from datetime import datetime`.
   - `_build_ui`: after creating `self.style_list` add `self.style_list.setIconSize(QSize(48, 48))`.
   - `_load_styles` loop, after `item = QListWidgetItem(s.name)`:
@@ -475,7 +475,7 @@ def test_gui_analysis_populates_source_on_save(qapp, store):
                 self._pending_source = None
 ```
 
-- [ ] **Step 4: Run dialog tests** → PASS. **Step 5: Commit** `feat(gui): style manager polish — list thumbnails, geometry/LLM persistence, source provenance`
+- [x] **Step 4: Run dialog tests** → PASS. **Step 5: Commit** `feat(gui): style manager polish — list thumbnails, geometry/LLM persistence, source provenance`
 
 ### Task 8: Drag-and-drop onto the refs grid
 
@@ -483,7 +483,7 @@ def test_gui_analysis_populates_source_on_save(qapp, store):
 - Modify: `gui/styles/style_manager_dialog.py` (new `_RefsListWidget` + helper; `_build_ui` uses it; `_on_add_folder` reuses the ext set)
 - Test: `tests/styles/test_style_manager_dialog.py`
 
-- [ ] **Step 1: Write failing tests:**
+- [x] **Step 1: Write failing tests:**
 
 ```python
 def test_image_paths_from_mime_filters_to_local_images(qapp, tmp_path):
@@ -507,8 +507,8 @@ def test_refs_grid_accepts_drops_and_adds(qapp, store, tmp_path):
     assert store.get("water").reference_images  # image landed in the store
 ```
 
-- [ ] **Step 2: Run** → FAIL (no `_image_paths_from_mime` / `files_dropped`).
-- [ ] **Step 3: Implement.** Module-level, above the dialog class:
+- [x] **Step 2: Run** → FAIL (no `_image_paths_from_mime` / `files_dropped`).
+- [x] **Step 3: Implement.** Module-level, above the dialog class:
 
 ```python
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
@@ -559,14 +559,14 @@ class _RefsListWidget(QListWidget):
 
 In `_build_ui`: `self.refs_list = _RefsListWidget()`; in the wiring block: `self.refs_list.files_dropped.connect(self._add_paths)`. `_on_add_folder`: replace its inline `exts = {...}` with `_IMAGE_EXTS`.
 
-- [ ] **Step 4: Run dialog tests** → PASS. **Step 5: Commit** `feat(gui): drag-and-drop image files onto the Style Manager refs grid`
+- [x] **Step 4: Run dialog tests** → PASS. **Step 5: Commit** `feat(gui): drag-and-drop image files onto the Style Manager refs grid`
 
 ### Task 9: Coverage gaps — `--batch --style`, live Analyze click, orphan detach on real close
 
 **Files:**
 - Test: `tests/styles/test_cli_style_generation.py`, `tests/styles/test_style_manager_dialog.py`
 
-- [ ] **Step 1: `--batch` + `--style` test.** In `_fake_provider()` add `prov.submit_batch_job.return_value = "job-123"`. Append:
+- [x] **Step 1: `--batch` + `--style` test.** In `_fake_provider()` add `prov.submit_batch_job.return_value = "job-123"`. Append:
 
 ```python
 def test_batch_with_style_is_text_only(tmp_path, capsys):
@@ -589,7 +589,7 @@ def test_batch_with_style_is_text_only(tmp_path, capsys):
     assert "text only" in capsys.readouterr().err
 ```
 
-- [ ] **Step 2: Live Analyze-click + orphan tests.** Append to `test_style_manager_dialog.py`:
+- [x] **Step 2: Live Analyze-click + orphan tests.** Append to `test_style_manager_dialog.py`:
 
 ```python
 class _FakeService:
@@ -663,8 +663,8 @@ def test_dialog_close_detaches_running_worker(qapp, store, tmp_path, monkeypatch
     assert _wait_until(qapp, lambda: w not in smd._ORPHAN_WORKERS)
 ```
 
-- [ ] **Step 3: Run** the two files → PASS (Task 7 must land first for `_analysis_source`).
-- [ ] **Step 4: Commit** `test(styles): cover --batch --style, live Analyze flow, and orphan-worker detach`
+- [x] **Step 3: Run** the two files → PASS (Task 7 must land first for `_analysis_source`).
+- [x] **Step 4: Commit** `test(styles): cover --batch --style, live Analyze flow, and orphan-worker detach`
 
 ### Task 10: Full suite, version bump, PR, issue bookkeeping
 
