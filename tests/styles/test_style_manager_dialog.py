@@ -203,3 +203,24 @@ def test_gui_analysis_populates_source_on_save(qapp, store):
     src = store.get("water").source
     assert src["provider"] == "openai" and src["model"] == "gpt-test"
     assert src["image_count"] == 2 and src["created"]
+
+
+def test_image_paths_from_mime_filters_to_local_images(qapp, tmp_path):
+    from PySide6.QtCore import QMimeData, QUrl
+    from gui.styles.style_manager_dialog import _image_paths_from_mime
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(tmp_path / "a.png")),
+                  QUrl.fromLocalFile(str(tmp_path / "b.txt")),
+                  QUrl("https://example.com/c.jpg")])
+    assert _image_paths_from_mime(mime) == [tmp_path / "a.png"]
+
+
+def test_refs_grid_accepts_drops_and_adds(qapp, store, tmp_path):
+    from PIL import Image
+    p = tmp_path / "d.png"
+    Image.new("RGB", (16, 16), (0, 0, 255)).save(p)
+    dlg = _dialog(store)
+    dlg.style_list.setCurrentRow(0)
+    assert dlg.refs_list.acceptDrops()
+    dlg.refs_list.files_dropped.emit([p])   # wiring under test
+    assert store.get("water").reference_images  # image landed in the store

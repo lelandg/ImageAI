@@ -30,6 +30,51 @@ _SPLITTER_KEY = "splitter_state"
 # preventing Python GC from destroying a QThread that is still running.
 _ORPHAN_WORKERS = set()
 
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+
+def _image_paths_from_mime(mime) -> List[Path]:
+    """Local image files in a drag payload, order preserved."""
+    if not mime.hasUrls():
+        return []
+    out = []
+    for url in mime.urls():
+        if not url.isLocalFile():
+            continue
+        p = Path(url.toLocalFile())
+        if p.suffix.lower() in _IMAGE_EXTS:
+            out.append(p)
+    return out
+
+
+class _RefsListWidget(QListWidget):
+    """Refs grid that accepts image-file drops from the OS file manager."""
+    files_dropped = Signal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if _image_paths_from_mime(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if _image_paths_from_mime(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        paths = _image_paths_from_mime(event.mimeData())
+        if paths:
+            event.acceptProposedAction()
+            self.files_dropped.emit(paths)
+        else:
+            super().dropEvent(event)
+
 
 class StyleAnalysisWorker(QThread):
     """Runs StyleAnalysisService.derive off the UI thread."""
@@ -126,7 +171,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         right_l.addWidget(QLabel(
             f"Reference images (check up to {EXEMPLAR_DEFAULT_CAP} as exemplars "
             f"sent to image-capable providers):"))
-        self.refs_list = QListWidget()
+        self.refs_list = _RefsListWidget()
         self.refs_list.setViewMode(QListView.IconMode)
         self.refs_list.setIconSize(QPixmap(96, 96).size())
         self.refs_list.setResizeMode(QListView.Adjust)
@@ -194,6 +239,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.export_btn.clicked.connect(self._on_export)
         self.add_files_btn.clicked.connect(self._on_add_files)
         self.add_folder_btn.clicked.connect(self._on_add_folder)
+        self.refs_list.files_dropped.connect(self._add_paths)
         self.remove_ref_btn.clicked.connect(self._on_remove_ref)
         self.save_btn.clicked.connect(self._save_current)
         self.analyze_btn.clicked.connect(self._on_analyze)
@@ -378,9 +424,8 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         d = QFileDialog.getExistingDirectory(self, "Add Folder of Images")
         if not d:
             return
-        exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
         self._add_paths([p for p in sorted(Path(d).iterdir())
-                         if p.suffix.lower() in exts])
+                         if p.suffix.lower() in _IMAGE_EXTS])
 
     def _add_paths(self, paths):
         s = self._current_style()
