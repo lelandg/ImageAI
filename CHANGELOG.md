@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-07-27
+
+### Added
+- Style Manager polish: the style list now shows each style's exemplar as a thumbnail, drag-and-drop image files straight onto the reference grid, and the dialog remembers its size and your vision LLM provider/model between sessions.
+- Styles analyzed in the GUI now record their provenance (which LLM, when, from how many images), matching CLI-created styles.
+- Creating or editing a style now refreshes the style picker on every surface (Generate tab, video workspace), not just the one that opened the manager.
+
+### Fixed
+- Smart merge no longer freezes the GUI for up to ~14 seconds when the LLM is flaky — it makes a single attempt and falls back to plain concatenation immediately.
+- `--style-create` works without PySide6 installed: the LLM response parser moved into `core`, so CLI-only environments no longer die with a misleading "No module named 'PySide6'".
+- `styles.json` is written atomically (temp file + rename), so a crash mid-save can no longer truncate the index of all styles.
+- Hardened handling of malformed or hostile style records: non-string reference entries no longer raise, filenames containing ".." (e.g. `a..b.jpg`) are accepted while traversal is still rejected, deleting a record with an unsafe id cleans the index without touching the filesystem, and the manager dialog skips unsafe paths in its thumbnail and duplicate flows.
+- Closing the Style Manager while an analysis is running no longer leaks the app-wide input blocker (which could spam errors and eventually crash the app).
+- The `--video` CLI sidecar now records `style_applied` as the same structured block image sidecars use (id, name, smart-merge flag, exemplar counts) instead of a bare id string.
+
+### Changed
+- Test coverage for the remaining Custom Styles gaps: `--batch --style` submissions, the live Analyze flow through a real worker thread, and orphan-worker detach on dialog close (issue #37).
+
 ## [0.41.0] - 2026-07-26
 
 ### Added
