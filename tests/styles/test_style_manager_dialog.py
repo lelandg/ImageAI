@@ -20,8 +20,19 @@ class FakeConfig(dict):
 
 @pytest.fixture
 def qapp():
+    from PySide6.QtCore import QCoreApplication, QEvent
     from PySide6.QtWidgets import QApplication
-    yield QApplication.instance() or QApplication([])
+    import gc
+    app = QApplication.instance() or QApplication([])
+    yield app
+    # Collect this test's abandoned dialog at a safe point. Every dialog is
+    # a reference cycle (child QObjects/slots hold the dialog), and letting
+    # the cyclic GC free one mid-event-pump in a LATER test destroys a
+    # QDialog from inside Qt event delivery — an intermittent segfault.
+    app.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    app.processEvents()
+    gc.collect()
 
 
 @pytest.fixture
@@ -224,3 +235,106 @@ def test_refs_grid_accepts_drops_and_adds(qapp, store, tmp_path):
     assert dlg.refs_list.acceptDrops()
     dlg.refs_list.files_dropped.emit([p])   # wiring under test
     assert store.get("water").reference_images  # image landed in the store
+
+
+# ---- issue #37 coverage: live Analyze flow + orphan-worker detach ----------
+
+class _FakeService:
+    provider = "openai"
+    model = "gpt-test"
+
+    def __init__(self, config, provider=None, model=None):
+        pass
+
+    def derive(self, paths, progress_cb=None):
+        if progress_cb:
+            progress_cb("chunk 1/1")
+        return {"descriptor": {"summary": "derived"},
+                "prompt_text": "derived text"}
+
+
+def _wait_until(qapp, predicate, timeout_s=8.0):
+    import time
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+def _seed_ref(store, tmp_path, color=(255, 0, 0)):
+    from PIL import Image
+    s = store.get("water")
+    p = tmp_path / "ref.png"
+    Image.new("RGB", (16, 16), color).save(p)
+    store.add_reference_images(s, [p])
+    store.save(s)
+
+
+def _dispose(qapp, dlg):
+    """Deterministically destroy a dialog + its worker inside the test.
+
+    The Analyze path connects worker signals to lambdas that close over the
+    dialog (dlg -> worker -> lambda -> dlg cycle). Left to the cyclic GC,
+    that cycle can be collected mid-event-pump in a LATER test, destroying
+    the QDialog from inside Qt event delivery — an intermittent segfault.
+    Dispose at a safe point instead: flush pending queued signals, run the
+    deferred deletes (processEvents alone never handles DeferredDelete),
+    then collect the cycle."""
+    import gc
+    from PySide6.QtCore import QCoreApplication, QEvent
+    dlg.close()
+    dlg.deleteLater()
+    qapp.processEvents()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    qapp.processEvents()
+    gc.collect()
+
+
+def test_analyze_click_end_to_end(qapp, store, tmp_path, monkeypatch):
+    """Real button click -> real QThread worker -> UI updated on completion."""
+    _seed_ref(store, tmp_path)
+    monkeypatch.setattr("core.styles.analyzer.StyleAnalysisService", _FakeService)
+    dlg = _dialog(store)
+    dlg.style_list.setCurrentRow(0)
+    dlg.analyze_btn.click()
+    w = dlg._worker
+    assert _wait_until(qapp, lambda: getattr(dlg, "_pending_descriptor", None))
+    assert dlg.prompt_text_edit.toPlainText() == "derived text"
+    assert dlg.analyze_btn.isEnabled()
+    assert dlg._analysis_source["model"] == "gpt-test"
+    assert dlg._pending_source["provider"] == "openai"
+    assert w.wait(8000)
+    _dispose(qapp, dlg)
+
+
+def test_dialog_close_detaches_running_worker(qapp, store, tmp_path, monkeypatch):
+    """Real close with an in-flight analysis exercises the _ORPHAN_WORKERS
+    detach branch (issue #37 coverage item)."""
+    import time
+    from gui.styles import style_manager_dialog as smd
+
+    class _SlowService(_FakeService):
+        def derive(self, paths, progress_cb=None):
+            time.sleep(3.0)      # outlives on_dialog_close's 2s wait
+            return {"descriptor": {}, "prompt_text": ""}
+
+    _seed_ref(store, tmp_path, color=(0, 255, 0))
+    monkeypatch.setattr("core.styles.analyzer.StyleAnalysisService", _SlowService)
+    dlg = _dialog(store)
+    dlg.style_list.setCurrentRow(0)
+    dlg.analyze_btn.click()
+    w = dlg._worker
+    assert w is not None and w.isRunning()
+    dlg.reject()                             # DialogCleanupMixin -> on_dialog_close
+    assert w in smd._ORPHAN_WORKERS          # detached, kept alive
+    assert dlg._worker is None
+    # The app-level input blocker must be gone: leaving it installed after
+    # the dialog dies filters every event through a dead dialog (crash).
+    assert dlg._input_blocker is None
+    assert not dlg.is_operation_running()
+    assert w.wait(8000)                      # worker finishes on its own
+    assert _wait_until(qapp, lambda: w not in smd._ORPHAN_WORKERS)
+    _dispose(qapp, dlg)

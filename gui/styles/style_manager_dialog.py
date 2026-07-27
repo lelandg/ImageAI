@@ -537,6 +537,12 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
                 _ORPHAN_WORKERS.add(w)
                 w.finished.connect(lambda w=w: _ORPHAN_WORKERS.discard(w))
             self._worker = None
+        # The orphan path disconnects finished_ok/failed, so end_operation()
+        # will never fire from a signal — remove the app-level input blocker
+        # here or it outlives the dialog and filters every event through a
+        # dead widget (AttributeError spam, eventual crash).
+        if self.is_operation_running():
+            self.end_operation()
         persist_splitter(self.settings, _SPLITTER_KEY, self.v_splitter)
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("llm_provider", self.llm_provider_combo.currentText())
