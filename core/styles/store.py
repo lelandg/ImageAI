@@ -23,16 +23,19 @@ JPEG_QUALITY = 90
 EXEMPLAR_DEFAULT_CAP = 3
 MAX_IMPORT_BYTES = 50 * 1024 * 1024  # per-entry cap for zip-imported images
 
-_SAFE_REL = re.compile(r"^refs/[A-Za-z0-9._-]+$")
-_SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+# \Z, not $: $ would also match before a trailing newline ("refs/a.jpg\n").
+_SAFE_REL = re.compile(r"^refs/[A-Za-z0-9._-]+\Z")
+_SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9-]*\Z")
 
 
-def _is_safe_rel(rel) -> bool:
+def is_safe_rel(rel) -> bool:
     """True for 'refs/<plain-basename>' entries — no separators, no traversal.
 
-    Accepts only str (malformed index records may hold ints/lists). '..' is
-    fine INSIDE a filename (refs/a..b.jpg); only a whole-segment '.'/'..' is
-    traversal, and the regex already rejects further separators.
+    Public: the Style Manager UI applies the same check before touching
+    reference paths. Accepts only str (malformed index records may hold
+    ints/lists). '..' is fine INSIDE a filename (refs/a..b.jpg); only a
+    whole-segment '.'/'..' is traversal, and the regex already rejects
+    further separators.
     """
     if not isinstance(rel, str) or not _SAFE_REL.match(rel):
         return False
@@ -64,8 +67,12 @@ class StyleStore:
     def _write_index(self, records: List[dict]) -> None:
         self.base_dir.mkdir(parents=True, exist_ok=True)
         tmp = self.index_path.parent / (self.index_path.name + ".tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump({"styles": records}, f, indent=2, ensure_ascii=False)
+        try:
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"styles": records}, f, indent=2, ensure_ascii=False)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
         os.replace(tmp, self.index_path)  # atomic: never a half-written index
 
     # ---- CRUD ------------------------------------------------------------
@@ -181,7 +188,7 @@ class StyleStore:
         return added
 
     def remove_reference_image(self, style: Style, rel_path: str) -> None:
-        if not _is_safe_rel(rel_path):
+        if not is_safe_rel(rel_path):
             logger.warning(
                 f"Style {style.id}: refusing to remove unsafe reference path {rel_path!r}")
             return
@@ -197,7 +204,7 @@ class StyleStore:
         base = self.style_dir(style.id)
         out = []
         for rel in rels:
-            if not _is_safe_rel(rel):
+            if not is_safe_rel(rel):
                 logger.warning(f"Style {style.id}: skipping unsafe reference path {rel!r}")
                 continue
             p = base / rel
@@ -249,7 +256,7 @@ class StyleStore:
 
                 safe_refs = []
                 for rel in style.reference_images:
-                    if _is_safe_rel(rel):
+                    if is_safe_rel(rel):
                         safe_refs.append(rel)
                     else:
                         logger.warning(
@@ -259,7 +266,7 @@ class StyleStore:
 
                 safe_exemplars = []
                 for rel in style.exemplars:
-                    if _is_safe_rel(rel) and rel in style.reference_images:
+                    if is_safe_rel(rel) and rel in style.reference_images:
                         safe_exemplars.append(rel)
                     else:
                         logger.warning(

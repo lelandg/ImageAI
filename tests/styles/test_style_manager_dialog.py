@@ -194,6 +194,22 @@ def test_style_list_shows_exemplar_thumbnail(qapp, store, tmp_path):
     assert not dlg.style_list.item(0).icon().isNull()
 
 
+def test_style_list_thumbnail_falls_back_past_missing_ref(qapp, store, tmp_path):
+    """First ref missing on disk -> icon comes from the next existing one."""
+    from PIL import Image
+    s = store.get("water")
+    imgs = []
+    for i in range(2):
+        p = tmp_path / f"f{i}.png"
+        Image.new("RGB", (16, 16), (0, 255, 0)).save(p)
+        imgs.append(p)
+    store.add_reference_images(s, imgs)
+    store.save(s)
+    (store.style_dir(s.id) / s.reference_images[0]).unlink()
+    dlg = _dialog(store)
+    assert not dlg.style_list.item(0).icon().isNull()
+
+
 def test_llm_combo_and_geometry_persist(qapp, store):
     dlg = _dialog(store)
     dlg.llm_provider_combo.setCurrentText("anthropic")
@@ -219,9 +235,13 @@ def test_gui_analysis_populates_source_on_save(qapp, store):
 def test_image_paths_from_mime_filters_to_local_images(qapp, tmp_path):
     from PySide6.QtCore import QMimeData, QUrl
     from gui.styles.style_manager_dialog import _image_paths_from_mime
+    (tmp_path / "a.png").write_bytes(b"x")
+    (tmp_path / "b.txt").write_bytes(b"x")
+    (tmp_path / "dir.png").mkdir()          # directory with image-like name
     mime = QMimeData()
     mime.setUrls([QUrl.fromLocalFile(str(tmp_path / "a.png")),
                   QUrl.fromLocalFile(str(tmp_path / "b.txt")),
+                  QUrl.fromLocalFile(str(tmp_path / "dir.png")),
                   QUrl("https://example.com/c.jpg")])
     assert _image_paths_from_mime(mime) == [tmp_path / "a.png"]
 

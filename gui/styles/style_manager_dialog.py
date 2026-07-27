@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from core.llm_models import get_provider_models
 from core.styles.models import Style, StyleDescriptor
-from core.styles.store import EXEMPLAR_DEFAULT_CAP, StyleStore, _is_safe_rel
+from core.styles.store import EXEMPLAR_DEFAULT_CAP, StyleStore, is_safe_rel
 from gui.common.dialog_conventions import (
     DialogCleanupMixin, bind_primary_action, persist_splitter,
     restore_splitter, set_default_button, standard_splitter)
@@ -42,7 +42,7 @@ def _image_paths_from_mime(mime) -> List[Path]:
         if not url.isLocalFile():
             continue
         p = Path(url.toLocalFile())
-        if p.suffix.lower() in _IMAGE_EXTS:
+        if p.suffix.lower() in _IMAGE_EXTS and p.is_file():
             out.append(p)
     return out
 
@@ -252,12 +252,13 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.style_list.clear()
         for s in self.store.list_styles():
             item = QListWidgetItem(s.name)
-            rels = s.exemplars or s.reference_images
-            if rels and _is_safe_rel(rels[0]):
-                p = self.store.style_dir(s.id) / rels[0]
-                if p.exists():
-                    item.setIcon(QIcon(QPixmap(str(p)).scaled(
-                        48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
+            base = self.store.style_dir(s.id)
+            icon_src = next(
+                (base / rel for rel in (s.exemplars or s.reference_images)
+                 if is_safe_rel(rel) and (base / rel).exists()), None)
+            if icon_src is not None:
+                item.setIcon(QIcon(QPixmap(str(icon_src)).scaled(
+                    48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
             item.setData(Qt.UserRole, s.id)
             self.style_list.addItem(item)
             if select_id and s.id == select_id:
@@ -289,7 +290,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.refs_list.clear()
         base = self.store.style_dir(s.id)
         for rel in s.reference_images:
-            if not _is_safe_rel(rel):
+            if not is_safe_rel(rel):
                 logger.warning(f"Style {s.id}: skipping unsafe reference "
                                f"path {rel!r} in UI")
                 continue
@@ -365,7 +366,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         # prefix of reference_images, and a missing/unreadable source file
         # must not shift the mapping for everything after it.
         for rel in s.reference_images:
-            if not _is_safe_rel(rel):
+            if not is_safe_rel(rel):
                 logger.warning(f"Style {s.id}: skipping unsafe reference "
                                f"path {rel!r} in duplicate")
                 continue

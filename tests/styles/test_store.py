@@ -148,21 +148,31 @@ def test_write_index_survives_midwrite_failure(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         store.save(Style(id="b", name="B"))
     assert store.index_path.read_text() == original  # old index intact
+    assert not list(tmp_path.glob("*.tmp"))          # failed write cleaned up
 
 
 def test_is_safe_rel_non_string_entries():
-    from core.styles.store import _is_safe_rel
-    assert _is_safe_rel(None) is False
-    assert _is_safe_rel(7) is False
-    assert _is_safe_rel(["refs/a.jpg"]) is False
+    from core.styles.store import is_safe_rel
+    assert is_safe_rel(None) is False
+    assert is_safe_rel(7) is False
+    assert is_safe_rel(["refs/a.jpg"]) is False
 
 
 def test_is_safe_rel_allows_dotdot_inside_filename():
-    from core.styles.store import _is_safe_rel
-    assert _is_safe_rel("refs/a..b.jpg") is True     # legit filename
-    assert _is_safe_rel("refs/..") is False          # traversal
-    assert _is_safe_rel("refs/.") is False
-    assert _is_safe_rel("refs/../x.jpg") is False    # separator: regex rejects
+    from core.styles.store import is_safe_rel
+    assert is_safe_rel("refs/a..b.jpg") is True     # legit filename
+    assert is_safe_rel("refs/..") is False          # traversal
+    assert is_safe_rel("refs/.") is False
+    assert is_safe_rel("refs/../x.jpg") is False    # separator: regex rejects
+
+
+def test_safety_regexes_reject_trailing_newline(tmp_path):
+    # re's $ matches before a trailing newline; the anchors must be \Z
+    from core.styles.store import is_safe_rel
+    assert is_safe_rel("refs/a.jpg\n") is False
+    store = StyleStore(base_dir=tmp_path)
+    with pytest.raises(ValueError):
+        store.style_dir("water\n")
 
 
 def test_resolve_refs_skips_non_string_entries(tmp_path):
