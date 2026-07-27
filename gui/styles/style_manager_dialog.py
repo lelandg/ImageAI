@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 
 from core.llm_models import get_provider_models
 from core.styles.models import Style, StyleDescriptor
-from core.styles.store import EXEMPLAR_DEFAULT_CAP, StyleStore
+from core.styles.store import EXEMPLAR_DEFAULT_CAP, StyleStore, _is_safe_rel
 from gui.common.dialog_conventions import (
     DialogCleanupMixin, bind_primary_action, persist_splitter,
     restore_splitter, set_default_button, standard_splitter)
@@ -222,6 +222,10 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.refs_list.clear()
         base = self.store.style_dir(s.id)
         for rel in s.reference_images:
+            if not _is_safe_rel(rel):
+                logger.warning(f"Style {s.id}: skipping unsafe reference "
+                               f"path {rel!r} in UI")
+                continue
             item = QListWidgetItem(Path(rel).name)
             item.setData(Qt.UserRole, rel)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
@@ -291,6 +295,10 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         # prefix of reference_images, and a missing/unreadable source file
         # must not shift the mapping for everything after it.
         for rel in s.reference_images:
+            if not _is_safe_rel(rel):
+                logger.warning(f"Style {s.id}: skipping unsafe reference "
+                               f"path {rel!r} in duplicate")
+                continue
             src = self.store.style_dir(s.id) / rel
             if not src.exists():
                 continue

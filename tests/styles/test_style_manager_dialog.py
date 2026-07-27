@@ -155,3 +155,17 @@ def test_pending_descriptor_persists_when_saved_on_same_style(qapp, store):
     saved = store.get("water")
     assert saved.descriptor.summary == "Water-derived"
     assert saved.prompt_text == "watery text"
+
+
+def test_unsafe_ref_entries_are_skipped_in_ui(qapp, store):
+    """Hostile/malformed reference_images entries must not crash the
+    thumbnail or duplicate paths (issue #37)."""
+    s = store.get("water")
+    s.reference_images = ["../../evil.jpg", 7]
+    store.save(s)
+    dlg = _dialog(store)
+    dlg.style_list.setCurrentRow(0)          # must not raise
+    assert dlg.refs_list.count() == 0        # unsafe entries never listed
+    dlg._on_duplicate()                      # must not raise / copy them
+    dup = store.get_by_name("Water copy")
+    assert dup.reference_images == []
