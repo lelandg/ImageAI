@@ -169,3 +169,37 @@ def test_unsafe_ref_entries_are_skipped_in_ui(qapp, store):
     dlg._on_duplicate()                      # must not raise / copy them
     dup = store.get_by_name("Water copy")
     assert dup.reference_images == []
+
+
+def test_style_list_shows_exemplar_thumbnail(qapp, store, tmp_path):
+    from PIL import Image
+    s = store.get("water")
+    p = tmp_path / "t.png"
+    Image.new("RGB", (16, 16), (255, 0, 0)).save(p)
+    store.add_reference_images(s, [p])
+    s.exemplars = list(s.reference_images)
+    store.save(s)
+    dlg = _dialog(store)
+    assert not dlg.style_list.item(0).icon().isNull()
+
+
+def test_llm_combo_and_geometry_persist(qapp, store):
+    dlg = _dialog(store)
+    dlg.llm_provider_combo.setCurrentText("anthropic")
+    dlg.llm_model_combo.setCurrentText("claude-test")
+    dlg.reject()                       # real exit path -> on_dialog_close
+    dlg2 = _dialog(store)
+    assert dlg2.llm_provider_combo.currentText() == "anthropic"
+    assert dlg2.llm_model_combo.currentText() == "claude-test"
+
+
+def test_gui_analysis_populates_source_on_save(qapp, store):
+    dlg = _dialog(store)
+    dlg.style_list.setCurrentRow(0)
+    dlg._analysis_source = {"provider": "openai", "model": "gpt-test",
+                            "image_count": 2}
+    dlg._on_analysis_done({"descriptor": {"summary": "x"}, "prompt_text": "t"})
+    dlg._save_current()
+    src = store.get("water").source
+    assert src["provider"] == "openai" and src["model"] == "gpt-test"
+    assert src["image_count"] == 2 and src["created"]

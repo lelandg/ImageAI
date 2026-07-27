@@ -2,10 +2,11 @@
 import copy
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, QSettings, QThread, Signal
+from PySide6.QtCore import QSize, Qt, QSettings, QThread, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
@@ -62,6 +63,18 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.setWindowTitle("Style Manager")
         self.resize(980, 680)
         self._build_ui()
+        geo = self.settings.value("geometry")
+        if geo is not None:
+            self.restoreGeometry(geo)
+        # Restore provider first (repopulates the model combo), then model.
+        saved_provider = self.settings.value("llm_provider")
+        if saved_provider:
+            idx = self.llm_provider_combo.findText(saved_provider)
+            if idx >= 0:
+                self.llm_provider_combo.setCurrentIndex(idx)
+        saved_model = self.settings.value("llm_model")
+        if saved_model:
+            self.llm_model_combo.setCurrentText(saved_model)
         # init_operation_guard runs after UI construction so it can pick up
         # self.status_console (an alias for self.console — see _build_ui).
         self.init_operation_guard()
@@ -81,6 +94,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         left = QWidget()
         left_l = QVBoxLayout(left)
         self.style_list = QListWidget()
+        self.style_list.setIconSize(QSize(48, 48))
         left_l.addWidget(self.style_list)
         row1 = QHBoxLayout()
         self.new_btn = QPushButton("New")
@@ -192,6 +206,12 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.style_list.clear()
         for s in self.store.list_styles():
             item = QListWidgetItem(s.name)
+            rels = s.exemplars or s.reference_images
+            if rels and _is_safe_rel(rels[0]):
+                p = self.store.style_dir(s.id) / rels[0]
+                if p.exists():
+                    item.setIcon(QIcon(QPixmap(str(p)).scaled(
+                        48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
             item.setData(Qt.UserRole, s.id)
             self.style_list.addItem(item)
             if select_id and s.id == select_id:
@@ -210,6 +230,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         # selected when analysis finished — switching styles must not let it
         # get applied to a different style's Save.
         self._pending_descriptor = None
+        self._pending_source = None
         s = self._current_style()
         if s is None:
             return
@@ -268,6 +289,9 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         if pending:
             s.descriptor = StyleDescriptor.from_dict(pending)
             self._pending_descriptor = None
+            if getattr(self, "_pending_source", None):
+                s.source = self._pending_source
+                self._pending_source = None
         self.store.save(s)
         self.console.log(f"Saved style '{s.name}'", "SUCCESS")
         self._load_styles(select_id=s.id)
@@ -391,6 +415,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         # if this run fails or the user switches styles before it finishes,
         # a leftover pending descriptor from a previous style must not survive.
         self._pending_descriptor = None
+        self._pending_source = None
         s = self._current_style()
         if s is None:
             show_warning(self, "Style Manager",
@@ -412,6 +437,10 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
             return
         if not self.start_operation("analyze"):
             return
+        # Recorded into the style's `source` when this analysis is Saved.
+        self._analysis_source = {"provider": service.provider,
+                                 "model": service.model,
+                                 "image_count": len(paths)}
         self.analyze_btn.setEnabled(False)
         self.console.separator()
         self.console.log(
@@ -433,6 +462,10 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.descriptor_view.setPlainText(
             json.dumps(data.get("descriptor", {}), indent=2, ensure_ascii=False))
         self._pending_descriptor = data.get("descriptor", {})
+        src = getattr(self, "_analysis_source", None)
+        self._pending_source = (
+            {**src, "created": datetime.now().strftime("%Y-%m-%d %H:%M")}
+            if src else None)
         self.console.log("Analysis complete — review, then Save Style.", "SUCCESS")
 
     def _on_analysis_failed(self, message: str):
@@ -460,3 +493,6 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
                 w.finished.connect(lambda w=w: _ORPHAN_WORKERS.discard(w))
             self._worker = None
         persist_splitter(self.settings, _SPLITTER_KEY, self.v_splitter)
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("llm_provider", self.llm_provider_combo.currentText())
+        self.settings.setValue("llm_model", self.llm_model_combo.currentText())
