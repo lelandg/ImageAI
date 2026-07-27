@@ -80,3 +80,26 @@ def test_refresh_keeps_selection_when_possible(qapp, store):
     store.save(Style(id="extra", name="Extra"))
     w.refresh()
     assert w.current_style().id == "neon"
+
+
+def test_manager_close_refreshes_all_pickers(qapp, store, monkeypatch):
+    """Closing the Style Manager refreshes EVERY surface's picker, not just
+    the one that opened it (issue #37)."""
+    from gui.styles.style_picker import StylePickerWidget
+    a = _picker(qapp, store)
+    b = StylePickerWidget(FakeConfig(), "video")
+    b.set_store(store)
+    b.refresh()
+
+    class FakeDlg:
+        def __init__(self, config, store=None, parent=None):
+            self._s = store
+
+        def exec(self):
+            self._s.save(Style(id="fresh", name="Fresh"))
+
+    monkeypatch.setattr(
+        "gui.styles.style_manager_dialog.StyleManagerDialog", FakeDlg)
+    a._open_manager()
+    assert a.combo.findData("fresh") >= 0
+    assert b.combo.findData("fresh") >= 0   # the OTHER picker refreshed too

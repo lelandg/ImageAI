@@ -4,6 +4,7 @@ Dropped into the Generate tab, video workspace, and (via the Generate tab)
 layout fill. Selection and smart-merge state persist per surface.
 """
 import logging
+import weakref
 from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
@@ -14,6 +15,10 @@ from core.styles.models import Style
 from core.styles.store import StyleStore
 
 logger = logging.getLogger(__name__)
+
+# Every live picker, across all surfaces — so closing the Style Manager can
+# refresh them all, not just the picker that opened it (issue #37).
+_PICKERS = weakref.WeakSet()
 
 
 class StylePickerWidget(QWidget):
@@ -47,6 +52,7 @@ class StylePickerWidget(QWidget):
 
         self.manage_btn.clicked.connect(self._open_manager)
         self.combo.currentIndexChanged.connect(self._on_changed)
+        _PICKERS.add(self)
         self.refresh()
 
     # -- store injection for tests / shared instances ----------------------
@@ -92,4 +98,8 @@ class StylePickerWidget(QWidget):
         from gui.styles.style_manager_dialog import StyleManagerDialog
         dlg = StyleManagerDialog(self.config, store=self._store, parent=self)
         dlg.exec()
-        self.refresh()
+        for w in list(_PICKERS):
+            try:
+                w.refresh()   # every surface's picker, not just the opener
+            except RuntimeError:
+                pass          # underlying C++ widget already deleted
