@@ -92,7 +92,7 @@ def build_chunk_messages(paths: List[Path]) -> List[Dict]:
 
 def parse_descriptor(content: str) -> Optional[Dict[str, str]]:
     """Parse an LLM reply into a descriptor dict (keys filtered/defaulted)."""
-    from gui.llm_utils import LLMResponseParser
+    from core.llm_parsing import LLMResponseParser
     data = LLMResponseParser.parse_json_response(content or "", expected_type=dict)
     if not isinstance(data, dict):
         return None
@@ -130,7 +130,7 @@ def merge_descriptors(descs: List[Dict[str, str]],
     try:
         reply = completion_fn([{"role": "user", "content": prompt}])
         logger.info(f"Style merge response ({len(reply or '')} chars): {reply}")
-        from gui.llm_utils import LLMResponseParser
+        from core.llm_parsing import LLMResponseParser
         data = LLMResponseParser.parse_json_response(reply or "", expected_type=dict)
     except Exception as e:  # noqa: BLE001 - fall back, never crash the reduce
         logger.warning(f"Style merge LLM call failed: {e}")

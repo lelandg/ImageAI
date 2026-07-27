@@ -86,7 +86,7 @@ def _smart_merge(prompt: str, style: Style,
         logger.info(f"Smart-merge request for style '{style.name}'")
         reply = completion_fn([{"role": "user", "content": payload}])
         logger.info(f"Smart-merge response ({len(reply or '')} chars): {reply}")
-        from gui.llm_utils import LLMResponseParser
+        from core.llm_parsing import LLMResponseParser
         data = LLMResponseParser.parse_json_response(reply or "", expected_type=dict)
         if isinstance(data, dict):
             merged = str(data.get("prompt") or "").strip()

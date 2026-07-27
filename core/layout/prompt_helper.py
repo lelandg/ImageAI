@@ -110,7 +110,7 @@ def parse_prompt_response(content: str) -> str:
     """
     if not content or not content.strip():
         return ""
-    from gui.llm_utils import LLMResponseParser
+    from core.llm_parsing import LLMResponseParser
     data = LLMResponseParser.parse_json_response(content, expected_type=dict)
     if isinstance(data, dict):
         p = data.get("prompt")

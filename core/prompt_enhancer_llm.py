@@ -10,7 +10,7 @@ from pathlib import Path
 
 from core.prompt_enhancer import PromptEnhancer, EnhancementLevel
 from core.llm_models import resolve_model
-from gui.llm_utils import LLMResponseParser
+from core.llm_parsing import LLMResponseParser
 
 
 class PromptEnhancerLLM:
