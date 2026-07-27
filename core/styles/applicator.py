@@ -166,7 +166,9 @@ def apply_style_for_surface(prompt, style, provider, model, *, smart,
     if smart and config is not None:
         try:
             from core.styles.analyzer import build_completion_fn
-            completion_fn, _p, _m = build_completion_fn(config)
+            # Runs on the GUI thread: one transient failure degrades to plain
+            # concat instead of freezing the UI for the ~14s retry backoff.
+            completion_fn, _p, _m = build_completion_fn(config, max_retries=0)
         except Exception as e:  # noqa: BLE001 - degrade, never block generation
             logger.warning(f"Smart merge unavailable ({e}); plain concat")
     exemplars = (store.resolve_refs(style, exemplars_only=True)

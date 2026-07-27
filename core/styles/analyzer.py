@@ -218,7 +218,7 @@ def default_vision_model(provider: str) -> str:
     return resolve_model(reg, family, static_default=static)
 
 
-def build_completion_fn(config, provider=None, model=None):
+def build_completion_fn(config, provider=None, model=None, max_retries=None):
     """Build an LLM callable over UnifiedLLMProvider.
 
     Args:
@@ -226,6 +226,9 @@ def build_completion_fn(config, provider=None, model=None):
         provider: openai|anthropic|google (default: config 'llm_provider',
             else openai).
         model: bare model id (default: registry vision default).
+        max_retries: transient-error retry cap for each call (None = the
+            transport default; GUI-thread callers pass 0 to avoid blocking
+            on the exponential backoff).
 
     Returns:
         (fn, provider, full_model) where fn(messages) -> str.
@@ -251,8 +254,11 @@ def build_completion_fn(config, provider=None, model=None):
     def fn(messages):
         logger.info(f"Style LLM request -> {full_model} "
                     f"({sum(len(str(m)) for m in messages)} chars)")
-        return llm.analyze_image(messages=messages, model=full_model,
-                                 max_tokens=1500)
+        call_kwargs = {"messages": messages, "model": full_model,
+                       "max_tokens": 1500}
+        if max_retries is not None:
+            call_kwargs["max_retries"] = max_retries
+        return llm.analyze_image(**call_kwargs)
 
     return fn, provider, full_model
 
