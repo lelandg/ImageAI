@@ -8,6 +8,7 @@ live in the repo (unlike data/prompts/custom_presets.json).
 """
 import json
 import logging
+import os
 import re
 import shutil
 from pathlib import Path
@@ -26,9 +27,16 @@ _SAFE_REL = re.compile(r"^refs/[A-Za-z0-9._-]+$")
 _SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 
-def _is_safe_rel(rel: str) -> bool:
-    """True for 'refs/<plain-basename>' entries — no separators, no traversal."""
-    return bool(_SAFE_REL.match(rel)) and "/" not in rel[len("refs/"):] and ".." not in rel
+def _is_safe_rel(rel) -> bool:
+    """True for 'refs/<plain-basename>' entries — no separators, no traversal.
+
+    Accepts only str (malformed index records may hold ints/lists). '..' is
+    fine INSIDE a filename (refs/a..b.jpg); only a whole-segment '.'/'..' is
+    traversal, and the regex already rejects further separators.
+    """
+    if not isinstance(rel, str) or not _SAFE_REL.match(rel):
+        return False
+    return rel[len("refs/"):] not in (".", "..")
 
 
 class StyleStore:
@@ -55,8 +63,10 @@ class StyleStore:
 
     def _write_index(self, records: List[dict]) -> None:
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        with open(self.index_path, "w", encoding="utf-8") as f:
+        tmp = self.index_path.parent / (self.index_path.name + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump({"styles": records}, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, self.index_path)  # atomic: never a half-written index
 
     # ---- CRUD ------------------------------------------------------------
 
@@ -116,6 +126,10 @@ class StyleStore:
         if len(kept) == len(records):
             return False
         self._write_index(kept)
+        if not isinstance(style_id, str) or not _SAFE_ID.match(style_id):
+            logger.warning(f"Deleted malformed style record {style_id!r} from "
+                           f"index; unsafe id, no directory removed")
+            return True
         d = self.style_dir(style_id)
         if d.exists():
             shutil.rmtree(d, ignore_errors=True)
