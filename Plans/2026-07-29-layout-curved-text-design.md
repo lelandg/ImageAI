@@ -1,7 +1,7 @@
 # Curved Text for Layout Overlays — Design
 
 **Date:** 2026-07-29
-**Status:** Approved (Leland, 2026-07-29)
+**Status:** Implemented
 **Branch:** `feat/layout-curved-text`
 
 ## Goal
@@ -90,13 +90,17 @@ is `caption`/`sfx`), render curved text and skip the balloon body entirely.
   `text_path = None` (text falls back to the straight block at `anchor`);
   the path is kept in the undo snapshot but not in the model.
 - **Edit:** `OverlayEditor` (`gui/layout/overlay_editor.py`) grows three
-  `_HandleItem`s (start, bow, end) built the same way
-  `geometry_editor.edit_points_for_region` builds region handles — an
-  `_EditPoint(x, y, is_control, apply)` per point writing back into
-  `text_path`. Drag updates the rendered path item live (refresh-suspended,
-  like region editing); release commits via validate → snapshot_and_refresh.
-- Inspector shows numeric X/Y for the three points plus the outline
-  controls, following the existing overlay-inspector patterns.
+  `_OvHandle`s (`tp0` start, `tpc` bow, `tp1` end), added alongside the
+  existing body/tail handles. Dragging a handle updates its own position
+  live and writes the new coordinate into `ov.text_path` immediately, but
+  the scene refresh is suspended for the duration of the drag (matching the
+  existing overlay/geometry editor UX) — so the rendered curved-text item
+  itself does not redraw until mouse release, when `commit()` re-enables
+  refresh, validates the path, and calls `snapshot_and_refresh`. Numeric X/Y
+  spinboxes for the three points were dropped in favor of this drag-handle +
+  hand-editable-JSON combination.
+- Inspector shows the "Curve text" toggle plus the outline controls,
+  following the existing overlay-inspector patterns.
 
 ## AI designer & CLI
 

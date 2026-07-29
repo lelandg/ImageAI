@@ -407,6 +407,44 @@ Text-LLM provider/model for `--layout-design` are overridable with
 `--layout-llm-provider` / `--layout-llm-model` (default: the configured layout
 provider).
 
+### Curved text (text_path)
+
+A comic-text overlay (in the project JSON's `page.overlays[]`) can bend its
+text along an arc instead of sitting on a straight baseline. Add a
+`text_path` key holding an SVG-style `"M x y Q cx cy x y"` string — a single
+move to the start point, then one quadratic Bézier to the end point
+(`cx cy` is the control point that bows the curve):
+
+```json
+{
+  "id": "t1",
+  "kind": "caption",
+  "text": "NOBODY IS",
+  "anchor": [500, 300],
+  "text_path": "M 150 320 Q 500 220 850 320",
+  "text_style": {
+    "family": ["DejaVu Serif"],
+    "size_px": 96,
+    "color": "#F2D48A",
+    "align": "center",
+    "outline_px": 3.0,
+    "outline_color": "#3A2410"
+  }
+}
+```
+
+`text_path` is only honored on **caption** and **sfx** overlays (speech and
+thought balloons ignore it and render straight text as usual). `outline_px`
+/ `outline_color` on `text_style` draw a glyph outline — set independently of
+curving, but most useful together since curved captions/SFX usually sit
+directly over the artwork.
+
+In the GUI, select an overlay in the **Layout** tab's inspector and check
+**Curve text** (caption/SFX only) to attach a default arc; check **Edit on
+canvas** to drag its three handles — start, control, end — directly on the
+page. The **Outline** row next to it sets `outline_px`/`outline_color` on the
+same overlay.
+
 ---
 
 ## Keys, auth & testing
