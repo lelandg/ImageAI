@@ -6,6 +6,8 @@ from typing import List, Dict, Optional, Tuple, Callable
 
 from core.layout.models import Region, Overlay
 from core.layout import schema
+from core.layout.svg_path import svg_to_segments
+from core.layout.text_path import validate_text_path
 
 logger = logging.getLogger("imageai.layout.designer")
 
@@ -59,6 +61,9 @@ def build_messages(content_kind: str, page_px: Tuple[int, int], user_text: str,
         f'        "anchor_region": string, "anchor_offset": [fx,fy] (0..1 within region),\n'
         f'        "tail_to_region": string,            // tail points at that region center\n'
         f'        "anchor": [x,y], "tail_target": [x,y], // raw-pixel alternative\n'
+        f'        "rotation": number (degrees clockwise),\n'
+        f'        "text_path": "M x y Q cx cy x y",     // caption/sfx only: text follows\n'
+        f"        //   this single quadratic Bézier (page pixels) — arched titles/SFX\n"
         f'        "role": string }} ]\n'
         f'  }}\n'
         f"All coordinates MUST be within the page ({pw} x {ph}). Prefer \"rect\" for simple\n"
@@ -176,10 +181,28 @@ def _build_overlay(od: Dict, regions_by_id: Dict, page_px: Tuple[int, int], idx:
         z = int(od.get("z", 0))
     except (TypeError, ValueError):
         z = 0
+    text_path = None
+    tp_raw = od.get("text_path")
+    if isinstance(tp_raw, str) and tp_raw.strip():
+        if kind in ("caption", "sfx"):
+            segs = svg_to_segments(tp_raw)
+            problems = validate_text_path(segs)
+            if problems:
+                logger.warning("Designer overlay %r: invalid text_path %r dropped: %s",
+                               od.get("id"), tp_raw, "; ".join(problems))
+            else:
+                text_path = segs
+        else:
+            logger.warning("Designer overlay %r: text_path only applies to caption/sfx; ignored",
+                           od.get("id"))
+    try:
+        rotation = float(od.get("rotation", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        rotation = 0.0
     return Overlay(
         id=od.get("id", f"ov{idx + 1}"), kind=kind, text=str(od.get("text", "")),
         anchor=anchor, anchor_mode=anchor_mode, tail_target=tail,
-        z=z, role=od.get("role", ""),
+        z=z, role=od.get("role", ""), rotation=rotation, text_path=text_path,
     )
 
 
