@@ -629,16 +629,28 @@ class LayoutTab(QWidget):
         if ov is None or ov.kind not in ("caption", "sfx"):
             return False
         if on and not getattr(ov, "text_path", None):
+            from dataclasses import replace
             from PySide6.QtGui import QFontMetricsF
-            from core.layout.qt_renderer import _overlay_as_styleable, _overlay_font
+            from core.layout.qt_renderer import overlay_as_styleable, overlay_font
             from core.layout.styles import effective_text_style
             from core.layout.text_path import default_text_path
+            from core.layout.models import TextStyle
             role = ov.role or ("caption" if ov.kind == "caption" else "sfx")
             style = self.document.style if self.document else None
-            ts = effective_text_style(_overlay_as_styleable(ov, role), style)
-            fm = QFontMetricsF(_overlay_font(ts))
+            had_explicit_style = ov.text_style is not None
+            ts = effective_text_style(overlay_as_styleable(ov, role), style)
+            fm = QFontMetricsF(overlay_font(ts))
             chord = max(120.0, fm.horizontalAdvance(ov.text or "Text") * 1.15)
             ov.text_path = default_text_path(ov.anchor, chord)
+            # Role-derived styles default to align="left" (TextStyle's field
+            # default), which leaves the arc's tail empty for curved text. If
+            # the overlay had no explicit text_style, materialize a copy of
+            # the effective style and center it — but never touch an align
+            # the user (or the style) already set explicitly.
+            if not had_explicit_style:
+                ov.text_style = replace(ts) if ts is not None else TextStyle(family=["DejaVu Sans"])
+                if ov.text_style.align in (None, "left"):
+                    ov.text_style.align = "center"
             self.snapshot_and_refresh(f"curve overlay text: {overlay_id}")
         elif not on and getattr(ov, "text_path", None):
             ov.text_path = None
@@ -649,20 +661,27 @@ class LayoutTab(QWidget):
         ov = self._find_overlay(overlay_id)
         if ov is None:
             return False
+        new_px = float(px)
+        new_color = color or "#000000"
+        cur_px = float(getattr(ov.text_style, "outline_px", 0.0) or 0.0) if ov.text_style else 0.0
+        cur_color = ((getattr(ov.text_style, "outline_color", "#000000") or "#000000")
+                     if ov.text_style else "#000000")
+        if new_px == cur_px and new_color == cur_color:
+            return True  # no-op: don't pollute undo history with an unchanged value
         if ov.text_style is None:
             from dataclasses import replace
-            from core.layout.qt_renderer import _overlay_as_styleable
+            from core.layout.qt_renderer import overlay_as_styleable
             from core.layout.styles import effective_text_style
             role = ov.role or ("caption" if ov.kind == "caption" else "sfx")
             style = self.document.style if self.document else None
-            eff = effective_text_style(_overlay_as_styleable(ov, role), style)
+            eff = effective_text_style(overlay_as_styleable(ov, role), style)
             if eff is not None:
                 ov.text_style = replace(eff)
             else:
                 from core.layout.models import TextStyle
                 ov.text_style = TextStyle(family=["DejaVu Sans"])
-        ov.text_style.outline_px = float(px)
-        ov.text_style.outline_color = color or "#000000"
+        ov.text_style.outline_px = new_px
+        ov.text_style.outline_color = new_color
         self.snapshot_and_refresh(f"overlay outline: {overlay_id}")
         return True
 

@@ -435,15 +435,16 @@ move to the start point, then one quadratic Bézier to the end point
 
 `text_path` is only honored on **caption** and **sfx** overlays (speech and
 thought balloons ignore it and render straight text as usual). `outline_px`
-/ `outline_color` on `text_style` draw a glyph outline — set independently of
-curving, but most useful together since curved captions/SFX usually sit
-directly over the artwork.
+/ `outline_color` on `text_style` draw a glyph outline, but in this version
+they are applied only to curved (`text_path`) overlays — straight overlay
+text ignores them entirely.
 
 In the GUI, select an overlay in the **Layout** tab's inspector and check
 **Curve text** (caption/SFX only) to attach a default arc; check **Edit on
 canvas** to drag its three handles — start, control, end — directly on the
 page. The **Outline** row next to it sets `outline_px`/`outline_color` on the
-same overlay.
+same overlay, and is only enabled while **Curve text** is checked, matching
+the renderer's curved-only support.
 
 ---
 

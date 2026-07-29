@@ -281,11 +281,15 @@ class _OverlayStyleable:
         self.role = role
 
 
-def _overlay_as_styleable(ov, role):
+def overlay_as_styleable(ov, role):
     return _OverlayStyleable(ov.text_style, role)
 
 
-def _overlay_font(ts) -> QFont:
+# Back-compat alias for any internal/test callers still using the old name.
+_overlay_as_styleable = overlay_as_styleable
+
+
+def overlay_font(ts) -> QFont:
     """Font for overlay text; first family present in Qt's font DB wins.
 
     Falls back to the first listed family (Qt substitutes) when none match,
@@ -302,6 +306,10 @@ def _overlay_font(ts) -> QFont:
     if ts and ts.weight in ("bold", "black", "semibold"):
         font.setBold(True)
     return font
+
+
+# Back-compat alias for any internal/test callers still using the old name.
+_overlay_font = overlay_font
 
 
 def _point_angle_at(path: QPainterPath, dist: float):
@@ -352,7 +360,7 @@ def _add_curved_text_overlay(scene: QGraphicsScene, ov, ts, base_z: float) -> No
     One QGraphicsPathItem: brush = text color, pen = TextStyle outline. No
     balloon body. Same item serves canvas, PNG, and PDF.
     """
-    font = _overlay_font(ts)
+    font = overlay_font(ts)
     curve = segments_to_painter_path(ov.text_path)
     glyphs = _curved_text_glyphs(ov.text or "", font, ts, curve)
     if glyphs.isEmpty():
@@ -393,7 +401,7 @@ def _add_overlay(scene: QGraphicsScene, ov, project_style, base_z: float) -> Non
         "speech": "dialogue", "thought": "dialogue",
         "caption": "caption", "sfx": "sfx",
     }.get(ov.kind, "dialogue")
-    ts = effective_text_style(_overlay_as_styleable(ov, role), project_style)
+    ts = effective_text_style(overlay_as_styleable(ov, role), project_style)
 
     # Text-on-a-curve: caption/sfx with a valid text_path bypass the balloon
     # body entirely; invalid paths log and fall through to the straight block.
@@ -408,7 +416,7 @@ def _add_overlay(scene: QGraphicsScene, ov, project_style, base_z: float) -> Non
 
     # Build font from resolved text style — size via setPixelSize (PIXELS),
     # matching _add_text_region so overlay and region text render at the same scale.
-    font = _overlay_font(ts)
+    font = overlay_font(ts)
 
     # Size the body from the text item's OWN layout (QTextDocument), not
     # QFontMetricsF: the two wrap differently and the document adds margins,
