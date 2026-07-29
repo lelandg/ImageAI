@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-07-29
+
+### Added
+- **Curved text for layout overlays** — caption and SFX overlay text can now follow an editable curve (a single quadratic Bézier), rendered per-glyph along the arc identically on the GUI canvas, PNG, and PDF export. Stored in the project JSON as an SVG d-string (`"text_path": "M x y Q cx cy x y"`); old projects are unaffected and forward files degrade gracefully to straight text.
+- **Text outlines** for curved text: new `TextStyle.outline_px` / `outline_color` draw a stroke around the glyph fill — the classic gold-with-dark-outline book-cover look.
+- **GUI curve editing**: a "Curve text" toggle in the overlay inspector seeds a gentle arc sized to the text; with "Edit on canvas" enabled, drag the two end handles and the amber bow handle to reshape it. Outline width/color controls sit alongside.
+- **AI designer support**: the layout designer LLM can author `text_path` (and now passes `rotation` through) on caption/sfx overlays.
+
+### Changed
+- Overlay font resolution now honors the `family` list as a true fallback chain (first family installed wins) instead of always taking the first entry.
+- `letter_spacing` is honored for curved text.
+
+### Fixed
+- Role-styled curved text seeded from the GUI is centered on its arc instead of inheriting the roles' left alignment.
+- Repeated no-op edits in the outline controls no longer pile up undo snapshots.
+
 ## [0.42.0] - 2026-07-27
 
 ### Added
