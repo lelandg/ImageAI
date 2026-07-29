@@ -135,6 +135,8 @@ class LayoutTab(QWidget):
         self.overlay_inspector.rotationChanged.connect(self._set_overlay_rotation)
         self.overlay_inspector.overlaySelected.connect(self._on_overlay_selected)
         self.overlay_inspector.editToggled.connect(self._on_overlay_edit_toggled)
+        self.overlay_inspector.curveToggled.connect(self._set_overlay_curve)
+        self.overlay_inspector.outlineChanged.connect(self._set_overlay_outline)
         dock_col.addWidget(self.overlay_inspector)
 
         self.inspector = ContentInspector(self.config)
@@ -620,6 +622,48 @@ class LayoutTab(QWidget):
             return False
         ov.rotation = float(deg)
         self.snapshot_and_refresh(f"rotate overlay: {overlay_id}")
+        return True
+
+    def _set_overlay_curve(self, overlay_id: str, on: bool) -> bool:
+        ov = self._find_overlay(overlay_id)
+        if ov is None or ov.kind not in ("caption", "sfx"):
+            return False
+        if on and not getattr(ov, "text_path", None):
+            from PySide6.QtGui import QFontMetricsF
+            from core.layout.qt_renderer import _overlay_as_styleable, _overlay_font
+            from core.layout.styles import effective_text_style
+            from core.layout.text_path import default_text_path
+            role = ov.role or ("caption" if ov.kind == "caption" else "sfx")
+            style = self.document.style if self.document else None
+            ts = effective_text_style(_overlay_as_styleable(ov, role), style)
+            fm = QFontMetricsF(_overlay_font(ts))
+            chord = max(120.0, fm.horizontalAdvance(ov.text or "Text") * 1.15)
+            ov.text_path = default_text_path(ov.anchor, chord)
+            self.snapshot_and_refresh(f"curve overlay text: {overlay_id}")
+        elif not on and getattr(ov, "text_path", None):
+            ov.text_path = None
+            self.snapshot_and_refresh(f"uncurve overlay text: {overlay_id}")
+        return True
+
+    def _set_overlay_outline(self, overlay_id: str, px: float, color: str) -> bool:
+        ov = self._find_overlay(overlay_id)
+        if ov is None:
+            return False
+        if ov.text_style is None:
+            from dataclasses import replace
+            from core.layout.qt_renderer import _overlay_as_styleable
+            from core.layout.styles import effective_text_style
+            role = ov.role or ("caption" if ov.kind == "caption" else "sfx")
+            style = self.document.style if self.document else None
+            eff = effective_text_style(_overlay_as_styleable(ov, role), style)
+            if eff is not None:
+                ov.text_style = replace(eff)
+            else:
+                from core.layout.models import TextStyle
+                ov.text_style = TextStyle(family=["DejaVu Sans"])
+        ov.text_style.outline_px = float(px)
+        ov.text_style.outline_color = color or "#000000"
+        self.snapshot_and_refresh(f"overlay outline: {overlay_id}")
         return True
 
     def _on_overlay_selected(self, overlay_id: str):
