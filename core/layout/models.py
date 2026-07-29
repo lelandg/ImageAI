@@ -49,6 +49,9 @@ class TextStyle:
     align: Literal["left", "center", "right", "justify"] = "left"
     wrap: Literal["word", "char"] = "word"
     letter_spacing: float = 0.0  # Additional spacing in pixels
+    # Glyph outline, applied by the curved-text renderer (0 = no outline).
+    outline_px: float = 0.0
+    outline_color: str = "#000000"
 
 
 @dataclass
@@ -158,6 +161,9 @@ class Overlay:
     text_style: Optional[TextStyle] = None
     style: OverlayStyle = field(default_factory=OverlayStyle)
     rotation: float = 0.0  # degrees clockwise about the anchor (SFX & balloons)
+    # Optional text-on-a-curve baseline: exactly [move, quad] in page pixels.
+    # Honored for caption/sfx kinds; None = normal straight block at `anchor`.
+    text_path: Optional[List["PathSegment"]] = None
 
 
 @dataclass

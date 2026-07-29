@@ -10,10 +10,12 @@ from PySide6.QtGui import (
 from PySide6.QtCore import QPointF, QRectF, Qt, QSizeF, QMarginsF
 
 import logging
+import math
 
 from core.layout.models import PageSpec, Region, DocumentSpec
 from core.layout.styles import effective_text_style
 from core.layout.geometry import validate_segments
+from core.layout.text_path import glyph_offsets, validate_text_path
 
 logger = logging.getLogger(__name__)
 
@@ -279,8 +281,107 @@ class _OverlayStyleable:
         self.role = role
 
 
-def _overlay_as_styleable(ov, role):
+def overlay_as_styleable(ov, role):
     return _OverlayStyleable(ov.text_style, role)
+
+
+# Back-compat alias for any internal/test callers still using the old name.
+_overlay_as_styleable = overlay_as_styleable
+
+
+def overlay_font(ts) -> QFont:
+    """Font for overlay text; first family present in Qt's font DB wins.
+
+    Falls back to the first listed family (Qt substitutes) when none match,
+    and to DejaVu Sans when no style/family is given.
+    """
+    from PySide6.QtGui import QFontDatabase
+    font = QFont()
+    fams = list(ts.family) if ts and ts.family else ["DejaVu Sans"]
+    available = set(QFontDatabase.families())
+    font.setFamily(next((f for f in fams if f in available), fams[0]))
+    font.setPixelSize(ts.size_px if ts and ts.size_px else 16)
+    if ts and ts.italic:
+        font.setItalic(True)
+    if ts and ts.weight in ("bold", "black", "semibold"):
+        font.setBold(True)
+    return font
+
+
+# Back-compat alias for any internal/test callers still using the old name.
+_overlay_font = overlay_font
+
+
+def _point_angle_at(path: QPainterPath, dist: float):
+    """(point, tangent angle°) at arc length ``dist``, extrapolating past the ends.
+
+    Qt angles are CCW-positive in a y-down space, so the tangent direction is
+    (cos a, -sin a); overflowing glyphs continue straight along the exit tangent
+    instead of piling up on the endpoint.
+    """
+    length = path.length()
+    if 0.0 <= dist <= length:
+        t = path.percentAtLength(dist)
+        return path.pointAtPercent(t), path.angleAtPercent(t)
+    edge = 0.0 if dist < 0.0 else 1.0
+    p = path.pointAtPercent(edge)
+    ang = path.angleAtPercent(edge)
+    over = dist if dist < 0.0 else dist - length
+    rad = math.radians(ang)
+    return QPointF(p.x() + over * math.cos(rad), p.y() - over * math.sin(rad)), ang
+
+
+def _curved_text_glyphs(text: str, font: QFont, ts, curve: QPainterPath) -> QPainterPath:
+    """One combined outline path: each glyph's advance midpoint sits on the curve,
+    rotated to the local tangent. Spaces consume arc length but add no outline."""
+    from PySide6.QtGui import QFontMetricsF, QTransform
+    fm = QFontMetricsF(font)
+    spacing = float(getattr(ts, "letter_spacing", 0.0) or 0.0) if ts else 0.0
+    advances = [fm.horizontalAdvance(ch) for ch in text]
+    align = ts.align if ts and ts.align else "center"
+    offsets = glyph_offsets(advances, curve.length(), align, spacing)
+    out = QPainterPath()
+    for ch, adv, dist in zip(text, advances, offsets):
+        if ch.isspace():
+            continue
+        pos, ang = _point_angle_at(curve, dist)
+        tr = QTransform()
+        tr.translate(pos.x(), pos.y())
+        tr.rotate(-ang)
+        glyph = QPainterPath()
+        glyph.addText(-adv / 2.0, 0.0, font, ch)
+        out.addPath(tr.map(glyph))
+    return out
+
+
+def _add_curved_text_overlay(scene: QGraphicsScene, ov, ts, base_z: float) -> None:
+    """Render a caption/sfx overlay whose text follows ov.text_path.
+
+    One QGraphicsPathItem: brush = text color, pen = TextStyle outline. No
+    balloon body. Same item serves canvas, PNG, and PDF.
+    """
+    font = overlay_font(ts)
+    curve = segments_to_painter_path(ov.text_path)
+    glyphs = _curved_text_glyphs(ov.text or "", font, ts, curve)
+    if glyphs.isEmpty():
+        return
+    item = QGraphicsPathItem(glyphs)
+    item.setBrush(QBrush(QColor(ts.color if ts and ts.color else "#111111")))
+    outline_px = float(getattr(ts, "outline_px", 0.0) or 0.0) if ts else 0.0
+    if outline_px > 0:
+        outline_color = (getattr(ts, "outline_color", "#000000") or "#000000")
+        pen = QPen(QColor(outline_color), outline_px)
+        pen.setJoinStyle(Qt.RoundJoin)  # avoid miter spikes on glyph corners
+        item.setPen(pen)
+    else:
+        item.setPen(QPen(Qt.NoPen))
+    item.setZValue(base_z + ov.z + 0.1)
+    rot = getattr(ov, "rotation", 0.0) or 0.0
+    if rot:
+        item.setTransformOriginPoint(QPointF(ov.anchor[0], ov.anchor[1]))
+        item.setRotation(rot)
+    item.setData(0, ov.id)
+    scene.addItem(item)
 
 
 def _add_overlay(scene: QGraphicsScene, ov, project_style, base_z: float) -> None:
@@ -300,17 +401,22 @@ def _add_overlay(scene: QGraphicsScene, ov, project_style, base_z: float) -> Non
         "speech": "dialogue", "thought": "dialogue",
         "caption": "caption", "sfx": "sfx",
     }.get(ov.kind, "dialogue")
-    ts = effective_text_style(_overlay_as_styleable(ov, role), project_style)
+    ts = effective_text_style(overlay_as_styleable(ov, role), project_style)
+
+    # Text-on-a-curve: caption/sfx with a valid text_path bypass the balloon
+    # body entirely; invalid paths log and fall through to the straight block.
+    tp = getattr(ov, "text_path", None)
+    if tp and ov.kind in ("caption", "sfx"):
+        issues = validate_text_path(tp)
+        if not issues:
+            _add_curved_text_overlay(scene, ov, ts, base_z)
+            return
+        logger.warning("Overlay %s: invalid text_path ignored: %s",
+                       ov.id, "; ".join(issues))
 
     # Build font from resolved text style — size via setPixelSize (PIXELS),
     # matching _add_text_region so overlay and region text render at the same scale.
-    font = QFont()
-    font.setFamily(ts.family[0] if ts and ts.family else "DejaVu Sans")
-    font.setPixelSize(ts.size_px if ts and ts.size_px else 16)
-    if ts and ts.italic:
-        font.setItalic(True)
-    if ts and ts.weight in ("bold", "black", "semibold"):
-        font.setBold(True)
+    font = overlay_font(ts)
 
     # Size the body from the text item's OWN layout (QTextDocument), not
     # QFontMetricsF: the two wrap differently and the document adds margins,

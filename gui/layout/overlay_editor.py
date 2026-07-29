@@ -10,8 +10,15 @@ from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsItem
 from PySide6.QtGui import QBrush, QPen, QColor
 from PySide6.QtCore import QRectF
 
+from core.layout.models import PathSegment
+
 _HANDLE_R = 6.0
 _SNAP_RADIUS = 40.0  # px: tail snaps to a region center within this distance
+
+_HANDLE_COLORS = {
+    "body": "#2D7DD2", "tail": "#E84A5F",
+    "tp0": "#39A96B", "tp1": "#39A96B", "tpc": "#F6B93B",
+}
 
 
 class _OvHandle(QGraphicsEllipseItem):
@@ -83,6 +90,10 @@ class OverlayEditor:
         self._add_handle("body", ov.anchor)
         if ov.tail_target is not None:
             self._add_handle("tail", ov.tail_target)
+        if getattr(ov, "text_path", None):
+            self._add_handle("tp0", ov.text_path[0].pts[0])
+            self._add_handle("tpc", ov.text_path[1].pts[0])
+            self._add_handle("tp1", ov.text_path[1].pts[1])
 
     def _add_handle(self, kind: str, pos):
         scene = self._canvas.scene()
@@ -90,7 +101,7 @@ class OverlayEditor:
         h.setRect(QRectF(-_HANDLE_R, -_HANDLE_R, 2 * _HANDLE_R, 2 * _HANDLE_R))
         h.setPos(pos[0], pos[1])
         h.setZValue(1_000_000)
-        h.setBrush(QBrush(QColor("#E84A5F") if kind == "tail" else QColor("#2D7DD2")))
+        h.setBrush(QBrush(QColor(_HANDLE_COLORS.get(kind, "#2D7DD2"))))
         h.setPen(QPen(QColor("#FFFFFF"), 1.5))
         scene.addItem(h)
         self._handles.append(h)
@@ -100,7 +111,10 @@ class OverlayEditor:
         if ov is None:
             self._pre = None
             return
-        self._pre = (ov.anchor, ov.tail_target)
+        tp = getattr(ov, "text_path", None)
+        tp_copy = ([PathSegment(type=s.type, pts=[tuple(p) for p in s.pts]) for s in tp]
+                   if tp else None)
+        self._pre = (ov.anchor, ov.tail_target, tp_copy)
         self._tab.set_refresh_suspended(True)
 
     def move_handle(self, kind: str, x: float, y: float) -> None:
@@ -111,6 +125,13 @@ class OverlayEditor:
             ov.anchor = (x, y)
         elif kind == "tail":
             ov.tail_target = (x, y)
+        elif kind in ("tp0", "tpc", "tp1") and getattr(ov, "text_path", None):
+            if kind == "tp0":
+                ov.text_path[0].pts[0] = (x, y)
+            elif kind == "tpc":
+                ov.text_path[1].pts[0] = (x, y)
+            else:
+                ov.text_path[1].pts[1] = (x, y)
 
     def commit(self) -> None:
         self._tab.set_refresh_suspended(False)
@@ -129,5 +150,11 @@ class OverlayEditor:
                 dy = center[1] - ov.tail_target[1]
                 if (dx * dx + dy * dy) ** 0.5 <= _SNAP_RADIUS:
                     ov.tail_target = center
+        if getattr(ov, "text_path", None):
+            from core.layout.text_path import validate_text_path
+            if validate_text_path(ov.text_path):
+                # Invalid mid-drag geometry: restore the pre-drag snapshot.
+                if self._pre is not None and len(self._pre) == 3 and self._pre[2]:
+                    ov.text_path = self._pre[2]
         self._pre = None
         self._tab.snapshot_and_refresh(f"edit overlay: {ov.id}")

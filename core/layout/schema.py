@@ -1,4 +1,5 @@
 """Serialization, normalization, and validation for layout documents."""
+import logging
 from dataclasses import asdict, replace, fields
 from typing import Dict, List, Tuple
 
@@ -7,6 +8,10 @@ from core.layout.models import (
     migrate_legacy_blocks, TextBlock, ImageBlock, PathSegment,
     Overlay, OverlayStyle,
 )
+from core.layout.svg_path import segments_to_svg, svg_to_segments
+from core.layout.text_path import validate_text_path
+
+logger = logging.getLogger(__name__)
 
 
 def _filtered(cls, d: Dict) -> Dict:
@@ -63,6 +68,8 @@ OVERLAY_JSON_SCHEMA: Dict = {
         "role": {"type": "string"},
         "text_style": {"type": ["object", "null"]},
         "style": {"type": "object"},
+        "rotation": {"type": "number"},
+        "text_path": {"type": "string"},
     },
 }
 
@@ -126,6 +133,8 @@ def overlay_to_dict(ov: Overlay) -> Dict:
         "text_style": _style_to_dict(ov.text_style),
         "style": _overlay_style_to_dict(ov.style),
     }
+    if ov.text_path:
+        d["text_path"] = segments_to_svg(ov.text_path)
     return d
 
 
@@ -133,6 +142,16 @@ def overlay_from_dict(d: Dict) -> Overlay:
     anchor_raw = d["anchor"]
     tt = d.get("tail_target")
     ts = d.get("text_style")
+    text_path = None
+    tp_raw = d.get("text_path")
+    if tp_raw:
+        segs = svg_to_segments(str(tp_raw))
+        problems = validate_text_path(segs)
+        if problems:
+            logger.warning("Overlay %r: invalid text_path %r dropped: %s",
+                           d.get("id"), tp_raw, "; ".join(problems))
+        else:
+            text_path = segs
     return Overlay(
         id=d["id"], kind=d["kind"], text=d.get("text", ""),
         anchor=(float(anchor_raw[0]), float(anchor_raw[1])),
@@ -142,6 +161,7 @@ def overlay_from_dict(d: Dict) -> Overlay:
         text_style=TextStyle(**_filtered(TextStyle, ts)) if ts else None,
         style=_overlay_style_from_dict(d.get("style") or {}),
         rotation=float(d.get("rotation", 0.0) or 0.0),
+        text_path=text_path,
     )
 
 
