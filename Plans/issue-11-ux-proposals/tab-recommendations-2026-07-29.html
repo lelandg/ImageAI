@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tab-by-Tab UX Recommendations | ImageAI UX Proposals</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Albert+Sans:ital,wght@0,300..800;1,300..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0A0E27;
+    --bg-2: #0D1130;
+    --card: #10152f;
+    --edge: #1E2449;
+    --edge-2: #1A4060;
+    --text: #F4F6FF;
+    --text-soft: #9CA3AF;
+    --text-faint: #6B7280;
+    --accent: #00D4FF;
+    --accent-2: #0099CC;
+    --accent-ink: #05233a;
+    --warn: #FFC107;
+    --danger: #F44336;
+    --ok: #4CAF50;
+    --dot: rgba(244,246,255,0.035);
+    --glow: rgba(0,212,255,0.10);
+    --shadow: rgba(0,0,0,0.45);
+    --sel-tint: rgba(0,212,255,0.10);
+    --mono: 'IBM Plex Mono', monospace;
+    color-scheme: dark;
+  }
+  [data-theme="light"] {
+    --bg: #f6f4ee;
+    --bg-2: #edeade;
+    --card: #fffdf7;
+    --edge: #d9d3c4;
+    --edge-2: #bcd4dd;
+    --text: #16202b;
+    --text-soft: #46525e;
+    --text-faint: #7b8590;
+    --accent: #006e8f;
+    --accent-2: #5aa5bd;
+    --accent-ink: #ffffff;
+    --warn: #9a6a06;
+    --danger: #b03a2e;
+    --ok: #2e7d32;
+    --dot: rgba(22,32,43,0.05);
+    --glow: rgba(0,153,204,0.10);
+    --shadow: rgba(22,32,43,0.12);
+    --sel-tint: rgba(0,110,143,0.08);
+    color-scheme: light;
+  }
+  :root, [data-theme="light"] {
+    --app-navy: #0A0E27;
+    --app-navy-lt: #1A1E3F;
+    --app-navy-dk: #050711;
+    --app-input: #0D1130;
+    --app-cyan: #00D4FF;
+    --app-text: #FFFFFF;
+    --app-text-2: #9CA3AF;
+    --app-edge: #1A4060;
+    --app-green: #4CAF50;
+    --app-amber: #FFC107;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Albert Sans', sans-serif;
+    font-size: 17px;
+    line-height: 1.66;
+    transition: background-color 0.35s ease, color 0.35s ease;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(ellipse 60% 40% at 50% -5%, var(--glow), transparent 60%),
+      radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0);
+    background-size: auto, 28px 28px;
+  }
+  .sheet { max-width: 980px; margin: 0 auto; padding: 0 28px 170px; position: relative; z-index: 1; }
+
+  header.masthead { padding: 52px 0 32px; }
+  .kicker {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--accent); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    margin-bottom: 26px;
+  }
+  .kicker .brand::before { content: "◆ "; color: var(--warn); }
+  .kicker a { color: var(--accent); text-decoration: none; }
+  .kicker a:hover { text-decoration: underline; }
+  .kicker-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .theme-toggle {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em;
+    background: var(--card); border: 1px solid var(--edge); border-radius: 99px;
+    color: var(--text-soft); padding: 3px 12px; cursor: pointer;
+    transition: border-color 0.2s ease, color 0.2s ease;
+  }
+  .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  h1 {
+    font-family: 'Fraunces', serif; font-weight: 850;
+    font-size: clamp(36px, 6.4vw, 64px); line-height: 1.05; letter-spacing: -0.015em;
+  }
+  h1 em { font-style: italic; font-weight: 460; color: var(--accent); }
+  .dek { margin-top: 20px; font-size: clamp(17px, 2.2vw, 20px); font-weight: 330; color: var(--text-soft); max-width: 720px; }
+  .dek strong { color: var(--text); }
+
+  section { margin-top: 72px; }
+  .sec-head { display: flex; align-items: baseline; gap: 18px; border-bottom: 2px solid var(--edge); padding-bottom: 12px; margin-bottom: 26px; }
+  .sec-head h2 { font-family: 'Fraunces', serif; font-weight: 800; font-size: clamp(24px, 3.6vw, 34px); }
+  .sec-head .no { font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: 0.15em; }
+  h3.sub { font-family: 'Fraunces', serif; font-weight: 740; font-size: 21px; margin: 34px 0 12px; }
+  section > p, .prose p { max-width: 760px; color: var(--text-soft); margin-bottom: 16px; }
+  section p strong, section li strong { color: var(--text); }
+  section a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-2); }
+  section a:hover { border-bottom-color: var(--accent); }
+  code.t { font-family: var(--mono); font-size: 0.86em; background: var(--bg-2); border: 1px solid var(--edge); border-radius: 4px; padding: 1px 6px; color: var(--accent); }
+  ul.plain { max-width: 760px; color: var(--text-soft); padding-left: 22px; margin-bottom: 16px; }
+  ul.plain li { margin-bottom: 8px; }
+  sup.cite a { font-family: var(--mono); font-size: 11px; color: var(--accent); border-bottom: none; }
+
+  .notice {
+    background: var(--card); border: 1px solid var(--edge-2); border-left: 3px solid var(--warn);
+    border-radius: 6px; padding: 14px 18px; margin: 22px 0; max-width: 760px;
+    font-size: 15px; color: var(--text-soft);
+  }
+  .notice strong { color: var(--text); }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 30px 0 6px; }
+  @media (max-width: 760px) { .stats { grid-template-columns: 1fr 1fr; } }
+  .stat { background: var(--card); border: 1px solid var(--edge); border-radius: 6px; padding: 16px 18px; }
+  .stat .n { font-family: 'Fraunces', serif; font-weight: 800; font-size: 30px; color: var(--accent); line-height: 1.1; }
+  .stat .l { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); margin-top: 6px; }
+
+  .cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 26px; }
+  @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--edge); border-radius: 6px; padding: 20px 22px; }
+  .card h3 { font-family: 'Fraunces', serif; font-size: 18px; font-weight: 720; margin-bottom: 8px; color: var(--text); }
+  .card p { font-size: 15px; color: var(--text-soft); }
+
+  .pull {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 480;
+    font-size: clamp(20px, 2.8vw, 26px); line-height: 1.35;
+    border-left: 3px solid var(--accent); padding-left: 24px; margin: 34px 0; max-width: 680px;
+  }
+
+  .wire-wrap { position: relative; margin: 28px 0 10px; }
+  .appwin {
+    background: var(--app-navy); border: 1px solid var(--app-edge); border-radius: 10px;
+    box-shadow: 0 18px 50px var(--shadow); overflow: hidden;
+    font-family: 'Albert Sans', sans-serif; color: var(--app-text);
+  }
+  .appwin .titlebar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    background: var(--app-navy-dk); border-bottom: 1px solid var(--app-edge);
+    font-size: 12px; color: var(--app-text-2);
+  }
+  .appwin .titlebar .dots { display: flex; gap: 5px; }
+  .appwin .titlebar .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--app-navy-lt); border: 1px solid var(--app-edge); }
+  .appwin .menustrip { display: flex; gap: 16px; padding: 6px 14px; background: var(--app-navy-dk); border-bottom: 1px solid var(--app-edge); font-size: 12px; color: var(--app-text-2); }
+  .appwin .tabstrip { display: flex; gap: 2px; padding: 8px 10px 0; background: var(--app-navy-dk); flex-wrap: wrap; }
+  .appwin .wtab {
+    padding: 5px 14px; font-size: 12.5px; color: var(--app-text-2);
+    background: var(--app-navy); border: 1px solid var(--app-edge); border-bottom: none;
+    border-radius: 6px 6px 0 0;
+  }
+  .appwin .wtab.on { color: var(--app-cyan); border-bottom: 2px solid var(--app-cyan); background: var(--app-navy-lt); }
+  .appwin .wbody { padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--app-navy); }
+  .wrow { display: flex; gap: 10px; }
+  .wcol { display: flex; flex-direction: column; gap: 10px; }
+  .grow { flex: 1 1 0; min-width: 0; }
+  .wpanel {
+    background: var(--app-navy-lt); border: 1px solid var(--app-edge); border-radius: 7px;
+    padding: 10px 12px; font-size: 12.5px; color: var(--app-text-2); position: relative;
+  }
+  .wpanel .ph { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--app-cyan); font-family: var(--mono); margin-bottom: 7px; }
+  .wfield { background: var(--app-input); border: 1px solid var(--app-edge); border-radius: 5px; padding: 6px 9px; font-size: 12px; color: var(--app-text-2); }
+  .wfield.tall { min-height: 64px; display: flex; align-items: flex-start; }
+  .wbtn {
+    display: inline-block; padding: 6px 12px; border-radius: 6px; font-size: 12px;
+    background: transparent; color: var(--app-cyan); border: 1px solid var(--app-cyan);
+  }
+  .wbtn.ghost { color: var(--app-text-2); border-color: var(--app-edge); }
+  .wbtn-primary {
+    display: inline-block; padding: 8px 22px; border-radius: 7px; font-size: 13px; font-weight: 700;
+    background: var(--app-cyan); color: #05233a; border: none;
+    box-shadow: 0 0 18px rgba(0,212,255,0.35);
+  }
+  .wcanvas {
+    background: var(--app-navy-dk); border: 1px dashed var(--app-edge); border-radius: 7px;
+    min-height: 170px; display: flex; align-items: center; justify-content: center;
+    color: var(--app-text-2); font-size: 12.5px; text-align: center; padding: 14px;
+  }
+  .wchips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .wchip { padding: 3px 10px; border-radius: 99px; border: 1px solid var(--app-edge); font-size: 11px; color: var(--app-text-2); }
+  .wchip.on { border-color: var(--app-cyan); color: var(--app-cyan); background: rgba(0,212,255,0.10); }
+  .wthumbs { display: flex; gap: 6px; }
+  .wthumb { width: 44px; height: 44px; border-radius: 5px; background: var(--app-input); border: 1px solid var(--app-edge); }
+  .co {
+    position: absolute; z-index: 3; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--app-cyan); color: #05233a; font-family: var(--mono); font-weight: 600;
+    font-size: 12px; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 3px rgba(0,212,255,0.25);
+  }
+  .legend { max-width: 760px; margin: 18px 0 0; padding: 0; list-style: none; color: var(--text-soft); font-size: 15px; }
+  .legend li { display: flex; gap: 12px; margin-bottom: 10px; align-items: baseline; }
+  .legend .co-ref {
+    flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--accent-ink);
+    font-family: var(--mono); font-weight: 600; font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center;
+    position: relative; top: 3px;
+  }
+  .legend strong { color: var(--text); }
+
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 22px; }
+  @media (max-width: 820px) { .opts { grid-template-columns: 1fr; } }
+  .opt {
+    background: var(--card); border: 1px solid var(--edge); border-radius: 8px; padding: 16px 18px;
+    cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease; position: relative;
+  }
+  .opt:hover { border-color: var(--accent-2); }
+  .opt.sel { border-color: var(--accent); background: var(--sel-tint); }
+  .opt .opt-top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .opt input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; flex: 0 0 auto; }
+  .opt .oid { font-family: var(--mono); font-size: 11px; color: var(--accent); border: 1px solid var(--edge-2); border-radius: 4px; padding: 1px 7px; letter-spacing: 0.06em; }
+  .opt h4 { font-family: 'Albert Sans', sans-serif; font-weight: 700; font-size: 16px; color: var(--text); }
+  .opt p { font-size: 14.5px; color: var(--text-soft); margin: 0 0 10px; }
+  .opt .meta { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em; padding: 2px 9px; border-radius: 99px; border: 1px solid var(--edge); color: var(--text-faint); }
+  .pill.effort-S { color: var(--ok); border-color: var(--ok); }
+  .pill.effort-M { color: var(--warn); border-color: var(--warn); }
+  .pill.effort-L { color: var(--danger); border-color: var(--danger); }
+  .pill.anchor { color: var(--text-faint); }
+
+  .codewrap { position: relative; max-width: 760px; margin: 14px 0 22px; }
+  .codewrap pre {
+    background: var(--bg-2); border: 1px solid var(--edge); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px;
+    line-height: 1.55; color: var(--text);
+  }
+  .copybtn {
+    position: absolute; top: 8px; right: 8px; font-family: var(--mono); font-size: 11px;
+    background: var(--card); color: var(--text-soft); border: 1px solid var(--edge);
+    border-radius: 5px; padding: 3px 10px; cursor: pointer;
+  }
+  .copybtn:hover { border-color: var(--accent); color: var(--accent); }
+
+  #exportBar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+    background: var(--card); border-top: 2px solid var(--edge-2);
+    box-shadow: 0 -8px 30px var(--shadow);
+    padding: 10px 20px;
+  }
+  #exportBar .inner { max-width: 980px; margin: 0 auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  #exportBar .cnt { font-family: var(--mono); font-size: 12.5px; color: var(--text); white-space: nowrap; }
+  #exportBar .cnt b { color: var(--accent); font-size: 15px; }
+  #exportBar label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); }
+  #exportLabel {
+    background: var(--bg-2); border: 1px solid var(--edge); border-radius: 6px; color: var(--text);
+    font-family: 'Albert Sans', sans-serif; font-size: 14px; padding: 6px 10px; min-width: 150px; flex: 1 1 150px;
+  }
+  #exportLabel:focus { outline: none; border-color: var(--accent); }
+  .wgt { display: flex; align-items: center; gap: 8px; }
+  #exportWeight { accent-color: var(--accent); width: 130px; }
+  #weightVal { font-family: var(--mono); font-weight: 600; font-size: 16px; color: var(--accent); min-width: 2ch; text-align: center; }
+  .xbtn {
+    font-family: var(--mono); font-size: 12px; padding: 7px 14px; border-radius: 6px; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); font-weight: 600;
+    white-space: nowrap;
+  }
+  .xbtn.alt { background: transparent; color: var(--accent); }
+  .xbtn.warn { background: transparent; color: var(--text-faint); border-color: var(--edge); }
+  .xbtn:hover { filter: brightness(1.12); }
+  #exportMsg { font-family: var(--mono); font-size: 11.5px; color: var(--ok); min-width: 0; }
+
+  .agg textarea {
+    width: 100%; min-height: 130px; background: var(--bg-2); border: 1px solid var(--edge);
+    border-radius: 8px; color: var(--text); font-family: var(--mono); font-size: 12.5px; padding: 12px;
+  }
+  .agg textarea:focus { outline: none; border-color: var(--accent); }
+  .agg .aggrow { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+  .agg .aggmsg { font-family: var(--mono); font-size: 12px; color: var(--text-faint); }
+  table.rank { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 14px; }
+  table.rank th {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent); text-align: left; padding: 8px 10px; border-bottom: 2px solid var(--edge-2);
+  }
+  table.rank td { padding: 8px 10px; border-bottom: 1px solid var(--edge); color: var(--text-soft); }
+  table.rank td.idcell { font-family: var(--mono); font-size: 12px; color: var(--accent); white-space: nowrap; }
+  table.rank td.num { font-family: var(--mono); text-align: center; }
+  table.rank tr.top td { background: var(--sel-tint); color: var(--text); }
+
+  footer {
+    margin-top: 90px; padding-top: 22px; border-top: 2px solid var(--edge);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+    font-family: var(--mono); font-size: 12px; color: var(--text-faint);
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  header.masthead, section, footer { animation: rise 0.7s cubic-bezier(0.22,1,0.36,1) both; }
+  section:nth-of-type(1){animation-delay:.08s} section:nth-of-type(2){animation-delay:.14s}
+  section:nth-of-type(3){animation-delay:.2s} section:nth-of-type(4){animation-delay:.26s}
+  section:nth-of-type(5){animation-delay:.3s} section:nth-of-type(6){animation-delay:.34s}
+  section:nth-of-type(7){animation-delay:.38s} section:nth-of-type(8){animation-delay:.42s}
+</style>
+<script>
+(function(){
+  var t;
+  try { t = localStorage.getItem('cl.docs.theme'); } catch(e) {}
+  if (t !== 'light' && t !== 'dark') {
+    t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
+</head>
+<body>
+<div class="sheet">
+
+  <header class="masthead">
+    <div class="kicker">
+      <span class="brand">Chameleon Labs — ImageAI UX Proposal 3/3</span>
+      <span class="kicker-right">
+        <a href="https://github.com/lelandg/ImageAI/issues/11">Issue #11</a>
+        <a href="https://chameleonlabs.ai">chameleonlabs.ai</a>
+        <a href="https://discord.gg/chameleonlabs">Discord</a>
+        <span>July 29, 2026</span>
+        <button class="theme-toggle" id="themeToggle" aria-label="Toggle light/dark theme">☾ dark</button>
+      </span>
+    </div>
+    <h1>Tab-by-tab recommendations, <em>weighted by you.</em></h1>
+    <p class="dek">Every card below is a concrete, code-anchored change to the Image, Video, or Layout tab (plus app-wide moves). <strong>Select the ones you want, set a weight from 1–10, and export</strong> — export as many differently-weighted bundles as you like; the aggregator at the bottom merges them into a single ranked backlog. Weight 10 = top choice.</p>
+  </header>
+
+  <section>
+    <div class="sec-head"><span class="no">01 /</span><h2>How to use this page</h2></div>
+    <p><strong>1. Click cards to select them.</strong> Selections persist in your browser between visits. <strong>2. Label the bundle and pick a weight</strong> in the bottom bar (10 = "this is my top choice", 1 = "nice to have"). <strong>3. Export</strong> — Copy JSON, Download, or Copy MD. Repeat with different selections and weights as often as you like; the companion pages (<a href="dzine-informed-workspace-2026-07-29.html">Dzine-informed</a>, <a href="renderzero-informed-workspace-2026-07-29.html">RenderZero-informed</a>) export the same option IDs, so their bundles merge here too.</p>
+    <p>When you're done, paste all exports into <a href="#aggregate">the aggregator</a> below — it ranks options by best weight, then total weight, then how many exports include them. Save the JSON files somewhere like:</p>
+    <div class="codewrap"><pre>D:\Documents\Code\GitHub\ImageAI\Plans\issue-11-ux-proposals\exports\</pre></div>
+    <div class="notice"><strong>These are proposals, not replicas.</strong> Per the investigation on issue #11, no third-party UI is copied here — competitor products were researched for <em>features and transferable patterns only</em> (see <a href="#sources">Sources</a>). All mockups are original ImageAI designs in the existing Maestro theme. Dzine and RenderZero names/trademarks belong to their owners.</div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="no">02 /</span><h2>Where the complexity lives today</h2></div>
+    <p>The reporter's words were "extremely complex and techy / non user friendly." That perception traces to specific, verified structure (all anchors from the 2026-07-29 checkout):</p>
+    <div class="stats">
+      <div class="stat"><div class="n">8</div><div class="l">top-level tabs</div></div>
+      <div class="stat"><div class="n">10</div><div class="l">equal buttons, one row</div></div>
+      <div class="stat"><div class="n">13</div><div class="l">storyboard columns</div></div>
+      <div class="stat"><div class="n">0</div><div class="l">onboarding screens</div></div>
+    </div>
+    <p style="margin-top:22px">The Image tab greets a new user with two provider/model dropdown rows <em>before</em> the prompt box (<code class="t">gui/main_window.py:763-826</code>), the prompt itself gets 80px of an 880px splitter (<code class="t">:1484</code>), and <strong>Generate</strong> is the sixth of ten identical buttons (<code class="t">:894-946</code>). The Video workspace opens with an LLM provider panel on top and three expanded settings accordions beside a 13-column table (<code class="t">gui/video/workspace_widget.py:863, :1578</code>). The Layout tab has an 11-button toolbar and six untitled stacked panels (<code class="t">gui/layout/layout_tab.py:59-170</code>) — while its template gallery exists in code but isn't mounted in the tab at all (<code class="t">gui/layout/template_selector.py:151</code>). There is no first-run flow anywhere (repo-wide grep, zero hits).</p>
+
+    <h3 class="sub">Today's Image tab, schematically</h3>
+    <div class="wire-wrap">
+      <div class="appwin" aria-label="Wireframe of the current Image tab">
+        <div class="titlebar"><span class="dots"><i></i><i></i><i></i></span><span>ImageAI — current Image tab (schematic)</span></div>
+        <div class="menustrip"><span>File</span><span>Tools</span><span>Help</span><span>Generate</span></div>
+        <div class="tabstrip">
+          <span class="wtab on">🎨 Image</span><span class="wtab">📝 Templates</span><span class="wtab">🎬 Video</span><span class="wtab">📖 Layout</span><span class="wtab">⚙️ Settings</span><span class="wtab">❓ Help</span><span class="wtab">📜 History</span><span class="wtab">🗂️ Batch</span>
+        </div>
+        <div class="wbody">
+          <div class="wpanel"><span class="co" style="top:-11px;left:-11px">1</span>
+            <div class="wrow"><span class="wfield grow">LLM Provider: OpenAI ▾</span><span class="wfield grow">Model: gpt-5.2-chat-latest ▾</span></div>
+            <div class="wrow" style="margin-top:6px"><span class="wfield grow">Image Provider: Google Gemini ▾</span><span class="wfield grow">Model: gemini-2.5-flash-image ▾</span></div>
+          </div>
+          <div class="wpanel"><span class="co" style="top:-11px;left:-11px">2</span>
+            <div class="ph">Prompt (80px tall by default)</div>
+            <div class="wfield">Describe what to generate…</div>
+          </div>
+          <div class="wpanel"><span class="co" style="top:-11px;left:-11px">3</span>
+            <div class="wchips">
+              <span class="wchip">Generate Prompts</span><span class="wchip">Enhance</span><span class="wchip">Ask About Files</span><span class="wchip">Ask About Prompt</span><span class="wchip">Prompt Builder</span><span class="wchip on">Generate</span><span class="wchip">Examples</span><span class="wchip">Show Original</span><span class="wchip">Save</span><span class="wchip">Copy</span>
+            </div>
+          </div>
+          <div class="wrow">
+            <div class="wpanel grow">▶ Image Settings <span style="opacity:.6">(collapsed)</span></div>
+            <div class="wpanel grow">▶ Reference Images <span style="opacity:.6">(collapsed)</span></div>
+          </div>
+          <div class="wcanvas">output canvas — blank on first launch, no guidance</div>
+        </div>
+      </div>
+    </div>
+    <ul class="legend">
+      <li><span class="co-ref">1</span><span><strong>Jargon first.</strong> Four provider/model dropdowns are the first thing a new user must parse.</span></li>
+      <li><span class="co-ref">2</span><span><strong>The core input is cramped</strong> — 80 of 880 splitter pixels.</span></li>
+      <li><span class="co-ref">3</span><span><strong>No hierarchy.</strong> Generate sits sixth in a row of ten identically-styled buttons.</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="no">03 /</span><h2>App-wide options</h2></div>
+    <p>These cut across all tabs. They're where most of the "techy" feeling dies.</p>
+    <div class="opts">
+      <div class="opt" data-opt-id="GLB-01" data-opt-title="Simple / Advanced UI mode" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-01</span><h4>Simple / Advanced UI mode</h4></div>
+        <p>A persisted <code class="t">ui_mode</code> setting (View → Simple Mode). Simple hides the LLM provider/model row, the Templates/Layout/Batch Jobs tabs, and collapses all disclosure sections. Widgets are hidden, never deleted, so nothing breaks. Fresh installs default to Simple; existing installs stay Advanced.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact high</span><span class="pill anchor">main_window.py:601-625 · core/config.py</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-02" data-opt-title="First-run setup wizard" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-02</span><h4>First-run setup wizard</h4></div>
+        <p>On startup with no API key configured: a 2-step dialog — pick a provider → paste key → test call → land on the Image tab in Simple mode. Reuses the key handling that already lives in Settings. Today the app drops straight into the full pro surface.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact high</span><span class="pill anchor">gui/__init__.py:85-86 · settings_widgets.py</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-03" data-opt-title="Primary-action button style" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-03</span><h4>Primary-action button style</h4></div>
+        <p>One <code class="t">primary</code> QSS class in <code class="t">gui/theme.py</code> (cyan fill + glow), applied to exactly one button per surface: <strong>Generate</strong>, <strong>Render Video</strong>, <strong>Fill all regions</strong>. Every screen answers "what do I press?" at a glance.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact high</span><span class="pill anchor">theme.py · main_window.py:917</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-04" data-opt-title="Consolidate AI prompt tools into one menu" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-04</span><h4>One "AI Tools ▾" menu</h4></div>
+        <p>Generate Prompts, Ask About Files, Ask About Prompt, and Prompt Builder fold into a single menu button. Keyboard shortcuts stay via QShortcut; the hint strip updates. The ten-button row becomes four items.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact high</span><span class="pill anchor">main_window.py:894-946</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-05" data-opt-title="Workspace regrouping (8 tabs to 4)" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-05</span><h4>8 tabs → 4 workspaces</h4></div>
+        <p><strong>Create · Video · Layout · Library</strong> (Templates + History + Batch Jobs), with Settings/Help behind a gear. The genuinely studio-like restructure — needs its own design cycle and a tab-index audit before code.</p>
+        <div class="meta"><span class="pill effort-L">effort L</span><span class="pill">impact high</span><span class="pill anchor">main_window.py:601-625</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-06" data-opt-title="Friendly model names" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-06</span><h4>Friendly model names</h4></div>
+        <p>Combos show display names ("Nano Banana Pro") with the raw ID in a tooltip, resolved through the model registry. Raw IDs like <code class="t">gemini-2.5-flash-image</code> are the single widest jargon surface a newcomer sees.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact med</span><span class="pill anchor">main_window.py:793-826</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-07" data-opt-title="Unify project/file semantics" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-07</span><h4>Unify project &amp; save semantics</h4></div>
+        <p>Ctrl+S and the File menu act on <em>video</em> projects only, while Layout has its own New/Open/Save buttons — the same shortcut means different things per tab. Route File actions through the active workspace.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact med</span><span class="pill anchor">main_window.py:683-711 · layout_tab.py:59-96</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-08" data-opt-title="Empty-state guidance" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-08</span><h4>Empty-state guidance</h4></div>
+        <p>Blank canvases become a short numbered "start here" (Image: 1. describe → 2. Generate. Video: 1. New project → 2. paste lyrics → 3. Generate Storyboard). No new windows — just purposeful empty states.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact high</span><span class="pill anchor">main_window.py:1428-1433 · wizard_widget.py:129</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-09" data-opt-title="Provider key deep-links &amp; honest free-tier guidance" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-09</span><h4>Key deep-links &amp; honest billing notes</h4></div>
+        <p>Settings and the first-run wizard link each provider straight to its <strong>key-creation page and its billing page</strong>, with a plain note about which models need paid billing. RenderZero validates the deep-link pattern — and its contradicted "free tier" marketing is the anti-pattern we avoid by being honest.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact high</span><span class="pill">pattern: RenderZero</span><span class="pill anchor">main_window.py:1650 · settings_widgets.py</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-10" data-opt-title="Non-blocking generation queue" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-10</span><h4>Non-blocking generation queue</h4></div>
+        <p>A local queue with per-job progress so generating never blocks the UI — keep working while jobs render. Distinct from the cloud <em>Batch Jobs</em> tab (provider batch APIs); name them clearly apart. RenderZero's render queue proves the pattern in a desktop BYOK app.</p>
+        <div class="meta"><span class="pill effort-L">effort L</span><span class="pill">impact med</span><span class="pill">pattern: RenderZero</span><span class="pill anchor">QThread worker · main_window.py:612-625</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="no">04 /</span><h2>Image tab</h2></div>
+    <p>Goal: a first-time user types a sentence and presses one obvious button. Everything technical is one disclosure away, not in the doorway.</p>
+
+    <div class="wire-wrap">
+      <div class="appwin" aria-label="Wireframe of the proposed Image tab in Simple mode">
+        <div class="titlebar"><span class="dots"><i></i><i></i><i></i></span><span>ImageAI — proposed Image tab (Simple mode)</span></div>
+        <div class="tabstrip">
+          <span class="wtab on">🎨 Image</span><span class="wtab">🎬 Video</span><span class="wtab">📜 History</span><span class="wtab" style="margin-left:auto">⚙️</span>
+        </div>
+        <div class="wbody">
+          <div class="wpanel"><span class="co" style="top:-11px;left:-11px">1</span>
+            <div class="ph">Prompt</div>
+            <div class="wfield tall grow">A watercolor fox reading a book under a maple tree…</div>
+            <div class="wrow" style="margin-top:8px;align-items:center">
+              <span class="wchip on">Style: Watercolor ▾</span>
+              <span class="wchips"><span class="wchip on">1:1</span><span class="wchip">16:9</span><span class="wchip">9:16</span><span class="wchip">4:3</span></span>
+              <span class="grow"></span>
+              <span class="wbtn ghost">Enhance</span><span class="wbtn ghost">AI Tools ▾</span>
+              <span class="wbtn-primary">▶ Generate</span>
+            </div>
+          </div>
+          <div class="wrow">
+            <div class="wcol grow" style="flex:2.2">
+              <div class="wcanvas" style="min-height:200px"><span class="co" style="top:8px;left:8px">2</span>Your image appears here.<br>1. Describe it above &nbsp;·&nbsp; 2. Press Generate</div>
+              <div class="wrow" style="justify-content:flex-end"><span class="wbtn ghost">Show Original</span><span class="wbtn ghost">Save</span><span class="wbtn ghost">Copy</span></div>
+            </div>
+            <div class="wcol grow">
+              <div class="wpanel"><span class="co" style="top:-11px;left:-11px">3</span>▶ Image Settings <div style="opacity:.6;margin-top:4px">provider · model · quality · size — collapsed</div></div>
+              <div class="wpanel">▶ Reference Images</div>
+              <div class="wpanel"><span class="co" style="top:-11px;left:-11px">4</span><div class="ph">Recent</div><div class="wthumbs"><span class="wthumb"></span><span class="wthumb"></span><span class="wthumb"></span><span class="wthumb"></span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="legend">
+      <li><span class="co-ref">1</span><span><strong>Prompt first</strong>, with style + aspect chips inline and one primary Generate (IMG-01, IMG-02, IMG-05).</span></li>
+      <li><span class="co-ref">2</span><span><strong>Empty state teaches</strong> the two-step loop (GLB-08); Save/Copy live on the output they act on (IMG-03).</span></li>
+      <li><span class="co-ref">3</span><span><strong>Provider &amp; model moved into Image Settings</strong> — present, not gone (IMG-01).</span></li>
+      <li><span class="co-ref">4</span><span><strong>Recent strip</strong> keeps results in reach without switching to History (IMG-06).</span></li>
+    </ul>
+
+    <div class="opts">
+      <div class="opt" data-opt-id="IMG-01" data-opt-title="Prompt-first layout" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-01</span><h4>Prompt-first layout</h4></div>
+        <p>Move both provider/model rows into the collapsible <strong>Image Settings</strong> section, so the tab opens with prompt → style → Generate → canvas. The dropdowns stay fully functional — they're just no longer the first thing a person meets. Prompt-first is the verified norm (Midjourney's Imagine bar; Leonardo's top prompt bar), and Midjourney keeps <em>all</em> parameters behind one settings control as persistent defaults.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact high</span><span class="pill anchor">main_window.py:763-826 → :956</span></div>
+      </div>
+      <div class="opt" data-opt-id="IMG-02" data-opt-title="Hero Generate row" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-02</span><h4>Hero Generate row</h4></div>
+        <p>Break the ten-button row: <strong>Generate</strong> (primary, beside the prompt) + Enhance + Examples stay visible; the rest fold into AI Tools (GLB-04). Alt-mnemonics and the shortcut hint strip are updated together.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact high</span><span class="pill anchor">main_window.py:894-946</span></div>
+      </div>
+      <div class="opt" data-opt-id="IMG-03" data-opt-title="Output-adjacent actions" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-03</span><h4>Save/Copy live on the output</h4></div>
+        <p>Save, Copy, and Show Original move to a small toolbar attached to the output canvas — where they act — instead of competing with prompt tools at the top.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact med</span><span class="pill anchor">main_window.py:917-946 · :1428-1433</span></div>
+      </div>
+      <div class="opt" data-opt-id="IMG-04" data-opt-title="Give the prompt real estate" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-04</span><h4>Give the prompt real estate</h4></div>
+        <p>The initial splitter allots the prompt block 80px of 880. Raise the default so the prompt is comfortably 4–6 lines on first launch — the input should look like the main event, because it is.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact med</span><span class="pill anchor">main_window.py:1471 · :1484</span></div>
+      </div>
+      <div class="opt" data-opt-id="IMG-05" data-opt-title="Aspect-ratio chips" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-05</span><h4>Aspect-ratio chips</h4></div>
+        <p>A visual chip row (1:1 · 16:9 · 9:16 · 4:3 · 3:2) in Simple mode instead of raw aspect/resolution fields; the full controls remain in Advanced. Chips map to each provider's supported ratios.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact med</span><span class="pill anchor">main_window.py:996-1109</span></div>
+      </div>
+      <div class="opt" data-opt-id="IMG-06" data-opt-title="Recent-results strip" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-06</span><h4>Recent-results strip</h4></div>
+        <p>A thumbnail strip of the last few generations on the Image tab: click to view, right-click to reuse prompt + settings. The History tab remains the deep browser — mirroring Midjourney's pattern of history <em>in</em> the creation surface in addition to a management view.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact med</span><span class="pill anchor">main_window.py:1428-1466</span></div>
+      </div>
+      <div class="opt" data-opt-id="IMG-07" data-opt-title="Simple-mode parameter hiding" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-07</span><h4>Simple-mode parameter hiding</h4></div>
+        <p>In Simple mode, the Advanced Settings and Midjourney Options groups stay hidden even where the provider supports them (visibility is already provider-driven — this adds the mode condition).</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact med</span><span class="pill anchor">main_window.py:1266-1373</span></div>
+      </div>
+      <div class="opt" data-opt-id="IMG-08" data-opt-title="Provider status chip" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-08</span><h4>Provider status chip</h4></div>
+        <p>A small chip near Generate — "Gemini ✓" or "No key — click to set up" — linking straight to Settings. Key problems surface before generating, not as an error after.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact low</span><span class="pill anchor">main_window.py:793-826 · :1606+</span></div>
+      </div>
+      <div class="opt" data-opt-id="IMG-09" data-opt-title="Conversational edit box" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-09</span><h4>Conversational edit box</h4></div>
+        <p>A one-line input under the output canvas: type "make the sky dusk" and the current image is edited via the provider's image-edit path. The novice tier of editing — the parameter UI stays for experts. Dzine's Chat Editor ("no layers or tools required") proves the pattern; ours gets its own name.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact high</span><span class="pill">pattern: Dzine</span><span class="pill anchor">main_window.py:1428-1433 · providers/google</span></div>
+      </div>
+      <div class="opt" data-opt-id="IMG-10" data-opt-title="Guided prompt builder v2" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-10</span><h4>Guided prompt builder v2</h4></div>
+        <p>Evolve the existing Prompt Builder into numbered steps (Subject → Mood &amp; Light → Lens → Style → Extras) over ImageAI's own preset packs, assembling a <strong>live, hand-editable constructed prompt</strong> with save/load named presets. Structure over minimalism — RenderZero's core UX, rebuilt from our own `data/` catalog.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact high</span><span class="pill">pattern: RenderZero</span><span class="pill anchor">Prompt Builder dialog · data/ presets</span></div>
+      </div>
+      <div class="opt" data-opt-id="IMG-11" data-opt-title="Pre-generation cost estimate" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-11</span><h4>Pre-generation cost estimate</h4></div>
+        <p>A per-image dollar estimate near Generate that updates with model, resolution, and batch size — the Video tab already shows "Est. Cost:"; bring the same honesty to images. Cost anxiety is a real newcomer blocker in BYOK apps.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact med</span><span class="pill">pattern: RenderZero</span><span class="pill anchor">workspace_widget.py:1660-1806 precedent</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="no">05 /</span><h2>Video tab</h2></div>
+    <p>The Video workspace is genuinely a pro tool — the fix isn't to dumb it down but to make its <strong>existing</strong> Workflow Guide the spine and stage the density. A newcomer should meet steps, not thirteen columns.</p>
+    <div class="opts">
+      <div class="opt" data-opt-id="VID-01" data-opt-title="Make the Workflow Guide the spine" data-opt-section="video">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">VID-01</span><h4>Make the Workflow Guide the spine</h4></div>
+        <p>The wizard pane already exists and is visible by default. Strengthen it: numbered steps double as navigation, the current step is highlighted, and its action button always mirrors the next move — including a real "start here" state when no project is loaded.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact high</span><span class="pill anchor">workspace_widget.py:423-452 · wizard_widget.py:129</span></div>
+      </div>
+      <div class="opt" data-opt-id="VID-02" data-opt-title="New-project quick start" data-opt-section="video">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">VID-02</span><h4>New-project quick start</h4></div>
+        <p>One dialog wrapping the first three steps: name → paste lyrics/text (or Load File) → pick style + provider → project is created and storyboard generation starts. It wraps existing calls; no new pipeline.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact high</span><span class="pill anchor">video_project_tab.py:1614+ · workspace_widget.py:833-935</span></div>
+      </div>
+      <div class="opt" data-opt-id="VID-03" data-opt-title="Demote the LLM provider panel" data-opt-section="video">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">VID-03</span><h4>Demote the LLM provider panel</h4></div>
+        <p>The first thing the Video tab shows is a full-width LLM provider/model row. Move it into the Generation Settings disclosure next to the image provider — same controls, sane order.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact med</span><span class="pill anchor">workspace_widget.py:863 · :1105</span></div>
+      </div>
+      <div class="opt" data-opt-id="VID-04" data-opt-title="One primary render action" data-opt-section="video">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">VID-04</span><h4>One primary render action</h4></div>
+        <p>Apply the primary style to <strong>Render Video</strong> and give the disabled state a reason ("add scenes to render") instead of a silently greyed button.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact med</span><span class="pill anchor">workspace_widget.py:1660-1806</span></div>
+      </div>
+      <div class="opt" data-opt-id="VID-05" data-opt-title="Storyboard progressive columns" data-opt-section="video">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">VID-05</span><h4>Storyboard: progressive columns</h4></div>
+        <p>Thirteen columns is the densest surface in the app. Simple mode shows a core set (#, Time, Source, Video Prompt, 🎬); a per-scene detail drawer carries start/end frames, refs, environment, and per-scene prompts. Full table stays in Advanced.</p>
+        <div class="meta"><span class="pill effort-L">effort L</span><span class="pill">impact high</span><span class="pill anchor">workspace_widget.py:1578</span></div>
+      </div>
+      <div class="opt" data-opt-id="VID-06" data-opt-title="Collapse secondary groups by default" data-opt-section="video">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">VID-06</span><h4>Collapse secondary groups by default</h4></div>
+        <p>Input Options, Generation Settings, and Music all start expanded — three open accordions before the storyboard. Start them collapsed (in Simple mode) and persist the state per project.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact med</span><span class="pill anchor">workspace_widget.py:930-935 · :1105 · :1328</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="no">06 /</span><h2>Layout tab</h2></div>
+    <p>The Layout engine is the app's most original feature and its least discoverable. The single biggest unlock is already written: the template gallery just isn't mounted in the tab.</p>
+    <div class="opts">
+      <div class="opt" data-opt-id="LAY-01" data-opt-title="Template-first entry" data-opt-section="layout">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">LAY-01</span><h4>Template-first entry</h4></div>
+        <p><code class="t">TemplateSelector</code> (with category filters: Children's Books, Comics, Magazines, Custom) exists but is only reachable through the document dialog. Mount it as the New-document flow and the canvas empty state — pick a comic/magazine/book layout or Blank, then design.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact high</span><span class="pill anchor">template_selector.py:151 · layout_tab.py:103</span></div>
+      </div>
+      <div class="opt" data-opt-id="LAY-02" data-opt-title="Toolbar consolidation" data-opt-section="layout">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">LAY-02</span><h4>Toolbar consolidation</h4></div>
+        <p>Eleven flat buttons become <strong>File ▾</strong> (New/Open/Save/History), <strong>Export ▾</strong> (PDF/PNG/Template/Bundle in+out), and one primary <strong>Fill all regions</strong>. Lock and Render Position toggles stay put.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact high</span><span class="pill anchor">layout_tab.py:59-96</span></div>
+      </div>
+      <div class="opt" data-opt-id="LAY-03" data-opt-title="Titled, collapsible dock panels" data-opt-section="layout">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">LAY-03</span><h4>Titled, collapsible dock panels</h4></div>
+        <p>The right dock stacks six untitled panels (Page Setup, Designer, Style, Overlays, Content, Geometry). Give each a titled disclosure header and persist open/closed state — the dock becomes scannable.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact med</span><span class="pill anchor">layout_tab.py:120-170</span></div>
+      </div>
+      <div class="opt" data-opt-id="LAY-04" data-opt-title="Design-Fill-Export stepper" data-opt-section="layout">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">LAY-04</span><h4>Design → Fill → Export stepper</h4></div>
+        <p>A slim three-step indicator above the canvas reflecting document state (empty → designed → filled → exported), each step clickable to its action. The Layout workflow becomes legible in one glance.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact med</span><span class="pill anchor">layout_tab.py:56-190 · designer_panel.py:39</span></div>
+      </div>
+      <div class="opt" data-opt-id="LAY-05" data-opt-title="Selection-driven inspector" data-opt-section="layout">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">LAY-05</span><h4>Selection-driven inspector</h4></div>
+        <p>Show page-level panels when nothing is selected; Content/Geometry only when a region is selected; Overlay controls only for overlays. The Qt-native version of a contextual properties panel — the dock shows what matters now.</p>
+        <div class="meta"><span class="pill effort-L">effort L</span><span class="pill">impact high</span><span class="pill anchor">layout_tab.py:120-170 · canvas_widget.py</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="agg" id="aggregate">
+    <div class="sec-head"><span class="no">07 /</span><h2>Aggregate your exports</h2></div>
+    <p>Paste one or more export JSON objects (or a JSON array of them) from any of the three pages. Ranking: <strong>best weight</strong> first (a single 10 beats everything), then <strong>total weight</strong>, then how many exports mention the option.</p>
+    <textarea id="aggInput" placeholder='Paste exports here — e.g. {"schema":"imageai-ux11-export/v1", ...} {"schema":"imageai-ux11-export/v1", ...}'></textarea>
+    <div class="aggrow">
+      <button class="xbtn" id="btnAggregate">Aggregate</button>
+      <button class="xbtn alt" id="btnAggCopy" style="display:none">Copy ranking (MD)</button>
+      <span class="aggmsg" id="aggMsg"></span>
+    </div>
+    <div id="aggResult"></div>
+  </section>
+
+  <section id="sources">
+    <div class="sec-head"><span class="no">08 /</span><h2>Sources &amp; provenance</h2></div>
+    <p>Code anchors were verified against the 2026-07-29 checkout (structure mapped read-only; nothing has been changed yet). The code-level diagnosis builds on the CL Issue Investigator's analysis posted to <a href="https://github.com/lelandg/ImageAI/issues/11">issue #11</a>. Competitor patterns come from a deep-research pass (24 sources fetched, 25 claims adversarially verified with 3 votes each, 19 confirmed) — full cited report: <code class="t">Notes/2026-07-29-issue11-ux-research-report.md</code>. Key primary sources:</p>
+    <ul class="plain">
+      <li><a href="https://www.dzine.ai/">dzine.ai</a> and its <a href="https://www.dzine.ai/blog/from-stylar-to-dzine-our-exciting-next-chapter/">Stylar→Dzine rebrand post</a> — task-first tool organization; Chat Editor ("no layers or tools required").</li>
+      <li><a href="https://renderzerostudio.com/">renderzerostudio.com</a>, the maker's <a href="https://www.youtube.com/watch?v=jH9C9DNyQTo">tutorial video</a>, and its <a href="https://payhip.com/b/40ztO">Payhip</a>/<a href="https://promptgeek-shop.fourthwall.com/products/windows-renderzero-studio-ai-images-and-video">Fourthwall</a> listings — guided prompt builder, render queue, cost estimates, key-gate onboarding (BYOK desktop app, ImageAI's closest comparator).</li>
+      <li><a href="https://docs.midjourney.com/hc/en-us/articles/33390732264589-Creating-on-Web">Midjourney "Creating on Web" docs</a> and the <a href="https://leonardo.ai/news/how-to-use-leonardo-ai">Leonardo.ai guide</a> — prompt-first norm; parameters as persistent defaults; history in the creation feed.</li>
+      <li><a href="https://kie.ai/nano-banana-pro">kie.ai pricing</a> — independent confirmation of RenderZero's displayed cost estimates.</li>
+    </ul>
+    <p>Honesty notes: desktop novice/expert-mode precedents (Blender, Fooocus etc.) and published onboarding evidence produced <strong>no claims that survived verification</strong> — nothing on these pages cites them. Most product claims rest on vendor-authored sources, as-served July 2026.</p>
+    <p class="pull">"Adopt the patterns, not the pixels — the complaint is complexity, not branding."</p>
+  </section>
+
+  <footer>
+    <span>Chameleon Labs LLC · <a href="https://chameleonlabs.ai">chameleonlabs.ai</a> · <a href="https://discord.gg/chameleonlabs">Join our Discord</a></span>
+    <span><a href="dzine-informed-workspace-2026-07-29.html">Dzine-informed proposal</a> · <a href="renderzero-informed-workspace-2026-07-29.html">RenderZero-informed proposal</a></span>
+    <span>Compiled 2026-07-29</span>
+  </footer>
+
+</div>
+
+<div id="exportBar" aria-label="Export selected options">
+  <div class="inner">
+    <span class="cnt"><b id="selCount">0</b> selected</span>
+    <label for="exportLabel">Label</label>
+    <input id="exportLabel" type="text" placeholder="e.g. my top picks" />
+    <span class="wgt">
+      <label for="exportWeight">Weight</label>
+      <input id="exportWeight" type="range" min="1" max="10" step="1" value="5" />
+      <span id="weightVal">5</span>
+    </span>
+    <button class="xbtn" id="btnCopyJson">Copy JSON</button>
+    <button class="xbtn alt" id="btnDownloadJson">Download</button>
+    <button class="xbtn alt" id="btnCopyMd">Copy MD</button>
+    <button class="xbtn warn" id="btnClearSel">Clear</button>
+    <span id="exportMsg"></span>
+  </div>
+</div>
+
+<script>
+window.UX_PAGE = { id: 'tab-recommendations', title: 'Tab-by-Tab UX Recommendations' };
+
+(function(){
+  'use strict';
+  var LS_KEY = 'imageai.ux11.' + UX_PAGE.id;
+
+  var btn = document.getElementById('themeToggle');
+  function syncTheme(){
+    btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀ light' : '☾ dark';
+  }
+  btn.addEventListener('click', function(){
+    var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('cl.docs.theme', next); } catch(e) {}
+    syncTheme();
+  });
+  syncTheme();
+
+  function copyText(text, done){
+    function fallback(){
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch(e) {}
+      document.body.removeChild(ta);
+      done(ok);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function(){ done(true); }, fallback);
+    } else { fallback(); }
+  }
+
+  document.querySelectorAll('.codewrap').forEach(function(w){
+    var b = document.createElement('button');
+    b.className = 'copybtn'; b.type = 'button'; b.textContent = 'copy';
+    b.addEventListener('click', function(){
+      var pre = w.querySelector('pre');
+      copyText(pre ? pre.innerText : '', function(ok){
+        b.textContent = ok ? 'copied ✓' : 'copy failed';
+        setTimeout(function(){ b.textContent = 'copy'; }, 1600);
+      });
+    });
+    w.appendChild(b);
+  });
+
+  var opts = Array.prototype.slice.call(document.querySelectorAll('.opt'));
+  var state = { sel: {}, weight: 5, label: '' };
+  try {
+    var saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+    if (saved && typeof saved === 'object') {
+      state.sel = saved.sel || {};
+      state.weight = saved.weight || 5;
+      state.label = saved.label || '';
+    }
+  } catch(e) {}
+
+  var selCount = document.getElementById('selCount');
+  var labelInput = document.getElementById('exportLabel');
+  var weightInput = document.getElementById('exportWeight');
+  var weightVal = document.getElementById('weightVal');
+  var msg = document.getElementById('exportMsg');
+
+  function persist(){
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch(e) {}
+  }
+  function flash(text, ok){
+    msg.textContent = text;
+    msg.style.color = ok ? 'var(--ok)' : 'var(--danger)';
+    setTimeout(function(){ if (msg.textContent === text) msg.textContent = ''; }, 2400);
+  }
+  function syncCards(){
+    var n = 0;
+    opts.forEach(function(card){
+      var id = card.getAttribute('data-opt-id');
+      var on = !!state.sel[id];
+      if (on) n++;
+      card.classList.toggle('sel', on);
+      var cb = card.querySelector('input[type="checkbox"]');
+      if (cb) cb.checked = on;
+      card.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    selCount.textContent = String(n);
+  }
+  opts.forEach(function(card){
+    card.setAttribute('role', 'button');
+    card.setAttribute('tabindex', '0');
+    function toggle(){
+      var id = card.getAttribute('data-opt-id');
+      if (state.sel[id]) delete state.sel[id]; else state.sel[id] = true;
+      persist(); syncCards();
+    }
+    card.addEventListener('click', function(ev){
+      if (ev.target.tagName === 'A') return;
+      toggle();
+      if (ev.target.tagName === 'INPUT') ev.target.blur();
+    });
+    card.addEventListener('keydown', function(ev){
+      if (ev.key === ' ' || ev.key === 'Enter') { ev.preventDefault(); toggle(); }
+    });
+  });
+
+  labelInput.value = state.label;
+  weightInput.value = String(state.weight);
+  weightVal.textContent = String(state.weight);
+  labelInput.addEventListener('input', function(){ state.label = labelInput.value; persist(); });
+  weightInput.addEventListener('input', function(){
+    state.weight = parseInt(weightInput.value, 10) || 5;
+    weightVal.textContent = String(state.weight);
+    persist();
+  });
+
+  function selectedOptions(){
+    return opts.filter(function(c){ return state.sel[c.getAttribute('data-opt-id')]; })
+      .map(function(c){
+        return {
+          id: c.getAttribute('data-opt-id'),
+          title: c.getAttribute('data-opt-title') || '',
+          section: c.getAttribute('data-opt-section') || ''
+        };
+      });
+  }
+  function buildExport(){
+    return {
+      schema: 'imageai-ux11-export/v1',
+      issue: 11,
+      page: UX_PAGE.id,
+      pageTitle: UX_PAGE.title,
+      label: state.label || '',
+      weight: state.weight,
+      exportedAt: new Date().toISOString(),
+      selections: selectedOptions()
+    };
+  }
+  function requireSelection(){
+    if (selectedOptions().length === 0) { flash('nothing selected', false); return false; }
+    return true;
+  }
+
+  document.getElementById('btnCopyJson').addEventListener('click', function(){
+    if (!requireSelection()) return;
+    copyText(JSON.stringify(buildExport(), null, 2), function(ok){
+      flash(ok ? 'JSON copied ✓' : 'copy failed — use Download', ok);
+    });
+  });
+  document.getElementById('btnDownloadJson').addEventListener('click', function(){
+    if (!requireSelection()) return;
+    var data = buildExport();
+    var slug = (data.label || 'export').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'export';
+    var name = 'imageai-ux11-' + UX_PAGE.id + '-w' + data.weight + '-' + slug + '.json';
+    var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 5000);
+    flash('downloaded ' + name, true);
+  });
+  document.getElementById('btnCopyMd').addEventListener('click', function(){
+    if (!requireSelection()) return;
+    var d = buildExport();
+    var lines = [
+      '# ImageAI UX export — ' + d.pageTitle,
+      '',
+      '- **Weight:** ' + d.weight + '/10' + (d.label ? '  ·  **Label:** ' + d.label : ''),
+      '- **Page:** ' + d.page + '  ·  **Exported:** ' + d.exportedAt,
+      ''
+    ];
+    d.selections.forEach(function(s){ lines.push('- `' + s.id + '` — ' + s.title); });
+    copyText(lines.join('\n'), function(ok){ flash(ok ? 'Markdown copied ✓' : 'copy failed', ok); });
+  });
+  document.getElementById('btnClearSel').addEventListener('click', function(){
+    state.sel = {}; persist(); syncCards(); flash('selection cleared', true);
+  });
+
+  syncCards();
+
+  var aggInput = document.getElementById('aggInput');
+  if (aggInput) {
+    var aggMsg = document.getElementById('aggMsg');
+    var aggOut = document.getElementById('aggResult');
+    var aggCopy = document.getElementById('btnAggCopy');
+    var lastRanked = null;
+
+    function parseExports(text){
+      text = (text || '').trim();
+      if (!text) return { exports: [], errors: ['nothing pasted'] };
+      var objs = [], errors = [];
+      try {
+        var whole = JSON.parse(text);
+        objs = Array.isArray(whole) ? whole : [whole];
+      } catch(e) {
+        var depth = 0, start = -1, inStr = false, esc = false;
+        for (var i = 0; i < text.length; i++) {
+          var ch = text[i];
+          if (inStr) {
+            if (esc) esc = false;
+            else if (ch === '\\') esc = true;
+            else if (ch === '"') inStr = false;
+            continue;
+          }
+          if (ch === '"') { inStr = true; continue; }
+          if (ch === '{') { if (depth === 0) start = i; depth++; }
+          else if (ch === '}') {
+            depth--;
+            if (depth === 0 && start >= 0) {
+              try { objs.push(JSON.parse(text.slice(start, i + 1))); }
+              catch(e2) { errors.push('unparseable object near char ' + start); }
+              start = -1;
+            }
+          }
+        }
+        if (depth !== 0) errors.push('unbalanced braces — check the paste');
+      }
+      var valid = [];
+      objs.forEach(function(o, idx){
+        if (o && o.schema === 'imageai-ux11-export/v1' && Array.isArray(o.selections)) valid.push(o);
+        else errors.push('item ' + (idx + 1) + ' is not an imageai-ux11-export/v1 object');
+      });
+      return { exports: valid, errors: errors };
+    }
+
+    function aggregate(exportsArr){
+      var byId = {};
+      exportsArr.forEach(function(ex){
+        var w = Math.max(1, Math.min(10, parseInt(ex.weight, 10) || 1));
+        ex.selections.forEach(function(s){
+          if (!s || !s.id) return;
+          var e = byId[s.id] || (byId[s.id] = { id: s.id, title: s.title || '', best: 0, total: 0, hits: 0, pages: {} });
+          e.best = Math.max(e.best, w);
+          e.total += w;
+          e.hits += 1;
+          if (!e.title && s.title) e.title = s.title;
+          e.pages[ex.page || '?'] = true;
+        });
+      });
+      var rows = Object.keys(byId).map(function(k){ return byId[k]; });
+      rows.sort(function(a, b){
+        return (b.best - a.best) || (b.total - a.total) || (b.hits - a.hits) || (a.id < b.id ? -1 : 1);
+      });
+      return rows;
+    }
+
+    document.getElementById('btnAggregate').addEventListener('click', function(){
+      var res = parseExports(aggInput.value);
+      if (!res.exports.length) {
+        aggMsg.textContent = res.errors.join(' · ') || 'no valid exports found';
+        aggOut.innerHTML = ''; lastRanked = null; aggCopy.style.display = 'none';
+        return;
+      }
+      var rows = aggregate(res.exports);
+      lastRanked = rows;
+      aggMsg.textContent = res.exports.length + ' export(s), ' + rows.length + ' distinct option(s)'
+        + (res.errors.length ? ' · skipped: ' + res.errors.join('; ') : '');
+      var html = '<table class="rank"><thead><tr><th>#</th><th>Option</th><th>Title</th><th>Best wt</th><th>Total</th><th>Exports</th><th>Pages</th></tr></thead><tbody>';
+      rows.forEach(function(r, i){
+        var topCls = (i === 0 || r.best === 10) ? ' class="top"' : '';
+        html += '<tr' + topCls + '><td class="num">' + (i + 1) + '</td><td class="idcell">' + r.id + '</td><td>'
+          + String(r.title).replace(/[<>&]/g, function(c){ return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; })
+          + '</td><td class="num">' + r.best + '</td><td class="num">' + r.total + '</td><td class="num">' + r.hits
+          + '</td><td>' + Object.keys(r.pages).join(', ') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      aggOut.innerHTML = html;
+      aggCopy.style.display = '';
+    });
+
+    aggCopy.addEventListener('click', function(){
+      if (!lastRanked) return;
+      var lines = ['# ImageAI UX11 — aggregated ranking', '', '| # | Option | Title | Best | Total | Exports |', '|---|--------|-------|------|-------|---------|'];
+      lastRanked.forEach(function(r, i){
+        lines.push('| ' + (i + 1) + ' | `' + r.id + '` | ' + r.title + ' | ' + r.best + ' | ' + r.total + ' | ' + r.hits + ' |');
+      });
+      copyText(lines.join('\n'), function(ok){
+        aggMsg.textContent = ok ? 'ranking copied as Markdown ✓' : 'copy failed';
+      });
+    });
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RenderZero-Informed Workspace Proposal | ImageAI UX Proposals</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=Albert+Sans:ital,wght@0,300..800;1,300..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0A0E27;
+    --bg-2: #0D1130;
+    --card: #10152f;
+    --edge: #1E2449;
+    --edge-2: #1A4060;
+    --text: #F4F6FF;
+    --text-soft: #9CA3AF;
+    --text-faint: #6B7280;
+    --accent: #00D4FF;
+    --accent-2: #0099CC;
+    --accent-ink: #05233a;
+    --warn: #FFC107;
+    --danger: #F44336;
+    --ok: #4CAF50;
+    --dot: rgba(244,246,255,0.035);
+    --glow: rgba(0,212,255,0.10);
+    --shadow: rgba(0,0,0,0.45);
+    --sel-tint: rgba(0,212,255,0.10);
+    --mono: 'IBM Plex Mono', monospace;
+    color-scheme: dark;
+  }
+  [data-theme="light"] {
+    --bg: #f6f4ee;
+    --bg-2: #edeade;
+    --card: #fffdf7;
+    --edge: #d9d3c4;
+    --edge-2: #bcd4dd;
+    --text: #16202b;
+    --text-soft: #46525e;
+    --text-faint: #7b8590;
+    --accent: #006e8f;
+    --accent-2: #5aa5bd;
+    --accent-ink: #ffffff;
+    --warn: #9a6a06;
+    --danger: #b03a2e;
+    --ok: #2e7d32;
+    --dot: rgba(22,32,43,0.05);
+    --glow: rgba(0,153,204,0.10);
+    --shadow: rgba(22,32,43,0.12);
+    --sel-tint: rgba(0,110,143,0.08);
+    color-scheme: light;
+  }
+  :root, [data-theme="light"] {
+    --app-navy: #0A0E27;
+    --app-navy-lt: #1A1E3F;
+    --app-navy-dk: #050711;
+    --app-input: #0D1130;
+    --app-cyan: #00D4FF;
+    --app-text: #FFFFFF;
+    --app-text-2: #9CA3AF;
+    --app-edge: #1A4060;
+    --app-green: #4CAF50;
+    --app-amber: #FFC107;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Albert Sans', sans-serif;
+    font-size: 17px;
+    line-height: 1.66;
+    transition: background-color 0.35s ease, color 0.35s ease;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(ellipse 60% 40% at 50% -5%, var(--glow), transparent 60%),
+      radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0);
+    background-size: auto, 28px 28px;
+  }
+  .sheet { max-width: 980px; margin: 0 auto; padding: 0 28px 170px; position: relative; z-index: 1; }
+
+  header.masthead { padding: 52px 0 32px; }
+  .kicker {
+    font-family: var(--mono); font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--accent); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
+    margin-bottom: 26px;
+  }
+  .kicker .brand::before { content: "◆ "; color: var(--warn); }
+  .kicker a { color: var(--accent); text-decoration: none; }
+  .kicker a:hover { text-decoration: underline; }
+  .kicker-right { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  .theme-toggle {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em;
+    background: var(--card); border: 1px solid var(--edge); border-radius: 99px;
+    color: var(--text-soft); padding: 3px 12px; cursor: pointer;
+    transition: border-color 0.2s ease, color 0.2s ease;
+  }
+  .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  h1 {
+    font-family: 'Fraunces', serif; font-weight: 850;
+    font-size: clamp(36px, 6.4vw, 64px); line-height: 1.05; letter-spacing: -0.015em;
+  }
+  h1 em { font-style: italic; font-weight: 460; color: var(--accent); }
+  .dek { margin-top: 20px; font-size: clamp(17px, 2.2vw, 20px); font-weight: 330; color: var(--text-soft); max-width: 720px; }
+  .dek strong { color: var(--text); }
+
+  section { margin-top: 72px; }
+  .sec-head { display: flex; align-items: baseline; gap: 18px; border-bottom: 2px solid var(--edge); padding-bottom: 12px; margin-bottom: 26px; }
+  .sec-head h2 { font-family: 'Fraunces', serif; font-weight: 800; font-size: clamp(24px, 3.6vw, 34px); }
+  .sec-head .no { font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: 0.15em; }
+  h3.sub { font-family: 'Fraunces', serif; font-weight: 740; font-size: 21px; margin: 34px 0 12px; }
+  section > p, .prose p { max-width: 760px; color: var(--text-soft); margin-bottom: 16px; }
+  section p strong, section li strong { color: var(--text); }
+  section a { color: var(--accent); text-decoration: none; border-bottom: 1px solid var(--accent-2); }
+  section a:hover { border-bottom-color: var(--accent); }
+  code.t { font-family: var(--mono); font-size: 0.86em; background: var(--bg-2); border: 1px solid var(--edge); border-radius: 4px; padding: 1px 6px; color: var(--accent); }
+  ul.plain { max-width: 760px; color: var(--text-soft); padding-left: 22px; margin-bottom: 16px; }
+  ul.plain li { margin-bottom: 8px; }
+  sup.cite a { font-family: var(--mono); font-size: 11px; color: var(--accent); border-bottom: none; }
+
+  .notice {
+    background: var(--card); border: 1px solid var(--edge-2); border-left: 3px solid var(--warn);
+    border-radius: 6px; padding: 14px 18px; margin: 22px 0; max-width: 760px;
+    font-size: 15px; color: var(--text-soft);
+  }
+  .notice strong { color: var(--text); }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 30px 0 6px; }
+  @media (max-width: 760px) { .stats { grid-template-columns: 1fr 1fr; } }
+  .stat { background: var(--card); border: 1px solid var(--edge); border-radius: 6px; padding: 16px 18px; }
+  .stat .n { font-family: 'Fraunces', serif; font-weight: 800; font-size: 30px; color: var(--accent); line-height: 1.1; }
+  .stat .l { font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); margin-top: 6px; }
+
+  .cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 26px; }
+  @media (max-width: 760px) { .cards { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--edge); border-radius: 6px; padding: 20px 22px; }
+  .card h3 { font-family: 'Fraunces', serif; font-size: 18px; font-weight: 720; margin-bottom: 8px; color: var(--text); }
+  .card p { font-size: 15px; color: var(--text-soft); }
+  .card .src { font-family: var(--mono); font-size: 11px; color: var(--text-faint); display: block; margin-top: 10px; }
+
+  .pull {
+    font-family: 'Fraunces', serif; font-style: italic; font-weight: 480;
+    font-size: clamp(20px, 2.8vw, 26px); line-height: 1.35;
+    border-left: 3px solid var(--accent); padding-left: 24px; margin: 34px 0; max-width: 680px;
+  }
+
+  .wire-wrap { position: relative; margin: 28px 0 10px; }
+  .appwin {
+    background: var(--app-navy); border: 1px solid var(--app-edge); border-radius: 10px;
+    box-shadow: 0 18px 50px var(--shadow); overflow: hidden;
+    font-family: 'Albert Sans', sans-serif; color: var(--app-text);
+  }
+  .appwin .titlebar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px;
+    background: var(--app-navy-dk); border-bottom: 1px solid var(--app-edge);
+    font-size: 12px; color: var(--app-text-2);
+  }
+  .appwin .titlebar .dots { display: flex; gap: 5px; }
+  .appwin .titlebar .dots i { width: 9px; height: 9px; border-radius: 50%; background: var(--app-navy-lt); border: 1px solid var(--app-edge); }
+  .appwin .menustrip { display: flex; gap: 16px; padding: 6px 14px; background: var(--app-navy-dk); border-bottom: 1px solid var(--app-edge); font-size: 12px; color: var(--app-text-2); }
+  .appwin .tabstrip { display: flex; gap: 2px; padding: 8px 10px 0; background: var(--app-navy-dk); flex-wrap: wrap; }
+  .appwin .wtab {
+    padding: 5px 14px; font-size: 12.5px; color: var(--app-text-2);
+    background: var(--app-navy); border: 1px solid var(--app-edge); border-bottom: none;
+    border-radius: 6px 6px 0 0;
+  }
+  .appwin .wtab.on { color: var(--app-cyan); border-bottom: 2px solid var(--app-cyan); background: var(--app-navy-lt); }
+  .appwin .wbody { padding: 14px; display: flex; flex-direction: column; gap: 10px; background: var(--app-navy); }
+  .wrow { display: flex; gap: 10px; }
+  .wcol { display: flex; flex-direction: column; gap: 10px; }
+  .grow { flex: 1 1 0; min-width: 0; }
+  .wpanel {
+    background: var(--app-navy-lt); border: 1px solid var(--app-edge); border-radius: 7px;
+    padding: 10px 12px; font-size: 12.5px; color: var(--app-text-2); position: relative;
+  }
+  .wpanel .ph { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--app-cyan); font-family: var(--mono); margin-bottom: 7px; }
+  .wfield { background: var(--app-input); border: 1px solid var(--app-edge); border-radius: 5px; padding: 6px 9px; font-size: 12px; color: var(--app-text-2); }
+  .wfield.tall { min-height: 64px; display: flex; align-items: flex-start; }
+  .wbtn {
+    display: inline-block; padding: 6px 12px; border-radius: 6px; font-size: 12px;
+    background: transparent; color: var(--app-cyan); border: 1px solid var(--app-cyan);
+  }
+  .wbtn.ghost { color: var(--app-text-2); border-color: var(--app-edge); }
+  .wbtn-primary {
+    display: inline-block; padding: 8px 22px; border-radius: 7px; font-size: 13px; font-weight: 700;
+    background: var(--app-cyan); color: #05233a; border: none;
+    box-shadow: 0 0 18px rgba(0,212,255,0.35);
+  }
+  .wcanvas {
+    background: var(--app-navy-dk); border: 1px dashed var(--app-edge); border-radius: 7px;
+    min-height: 170px; display: flex; align-items: center; justify-content: center;
+    color: var(--app-text-2); font-size: 12.5px; text-align: center; padding: 14px;
+  }
+  .wchips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .wchip { padding: 3px 10px; border-radius: 99px; border: 1px solid var(--app-edge); font-size: 11px; color: var(--app-text-2); }
+  .wchip.on { border-color: var(--app-cyan); color: var(--app-cyan); background: rgba(0,212,255,0.10); }
+  .wthumbs { display: flex; gap: 6px; }
+  .wthumb { width: 44px; height: 44px; border-radius: 5px; background: var(--app-input); border: 1px solid var(--app-edge); }
+  .co {
+    position: absolute; z-index: 3; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--app-cyan); color: #05233a; font-family: var(--mono); font-weight: 600;
+    font-size: 12px; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 3px rgba(0,212,255,0.25);
+  }
+  .legend { max-width: 760px; margin: 18px 0 0; padding: 0; list-style: none; color: var(--text-soft); font-size: 15px; }
+  .legend li { display: flex; gap: 12px; margin-bottom: 10px; align-items: baseline; }
+  .legend .co-ref {
+    flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: var(--accent-ink);
+    font-family: var(--mono); font-weight: 600; font-size: 11.5px; display: inline-flex; align-items: center; justify-content: center;
+    position: relative; top: 3px;
+  }
+  .legend strong { color: var(--text); }
+
+  .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 22px; }
+  @media (max-width: 820px) { .opts { grid-template-columns: 1fr; } }
+  .opt {
+    background: var(--card); border: 1px solid var(--edge); border-radius: 8px; padding: 16px 18px;
+    cursor: pointer; transition: border-color 0.15s ease, background 0.15s ease; position: relative;
+  }
+  .opt:hover { border-color: var(--accent-2); }
+  .opt.sel { border-color: var(--accent); background: var(--sel-tint); }
+  .opt .opt-top { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .opt input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; flex: 0 0 auto; }
+  .opt .oid { font-family: var(--mono); font-size: 11px; color: var(--accent); border: 1px solid var(--edge-2); border-radius: 4px; padding: 1px 7px; letter-spacing: 0.06em; }
+  .opt h4 { font-family: 'Albert Sans', sans-serif; font-weight: 700; font-size: 16px; color: var(--text); }
+  .opt p { font-size: 14.5px; color: var(--text-soft); margin: 0 0 10px; }
+  .opt .meta { display: flex; gap: 8px; flex-wrap: wrap; }
+  .pill { font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.05em; padding: 2px 9px; border-radius: 99px; border: 1px solid var(--edge); color: var(--text-faint); }
+  .pill.effort-S { color: var(--ok); border-color: var(--ok); }
+  .pill.effort-M { color: var(--warn); border-color: var(--warn); }
+  .pill.effort-L { color: var(--danger); border-color: var(--danger); }
+  .pill.anchor { color: var(--text-faint); }
+
+  .codewrap { position: relative; max-width: 760px; margin: 14px 0 22px; }
+  .codewrap pre {
+    background: var(--bg-2); border: 1px solid var(--edge); border-radius: 8px;
+    padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 13px;
+    line-height: 1.55; color: var(--text);
+  }
+  .copybtn {
+    position: absolute; top: 8px; right: 8px; font-family: var(--mono); font-size: 11px;
+    background: var(--card); color: var(--text-soft); border: 1px solid var(--edge);
+    border-radius: 5px; padding: 3px 10px; cursor: pointer;
+  }
+  .copybtn:hover { border-color: var(--accent); color: var(--accent); }
+
+  #exportBar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 50;
+    background: var(--card); border-top: 2px solid var(--edge-2);
+    box-shadow: 0 -8px 30px var(--shadow);
+    padding: 10px 20px;
+  }
+  #exportBar .inner { max-width: 980px; margin: 0 auto; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  #exportBar .cnt { font-family: var(--mono); font-size: 12.5px; color: var(--text); white-space: nowrap; }
+  #exportBar .cnt b { color: var(--accent); font-size: 15px; }
+  #exportBar label { font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-faint); }
+  #exportLabel {
+    background: var(--bg-2); border: 1px solid var(--edge); border-radius: 6px; color: var(--text);
+    font-family: 'Albert Sans', sans-serif; font-size: 14px; padding: 6px 10px; min-width: 150px; flex: 1 1 150px;
+  }
+  #exportLabel:focus { outline: none; border-color: var(--accent); }
+  .wgt { display: flex; align-items: center; gap: 8px; }
+  #exportWeight { accent-color: var(--accent); width: 130px; }
+  #weightVal { font-family: var(--mono); font-weight: 600; font-size: 16px; color: var(--accent); min-width: 2ch; text-align: center; }
+  .xbtn {
+    font-family: var(--mono); font-size: 12px; padding: 7px 14px; border-radius: 6px; cursor: pointer;
+    background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); font-weight: 600;
+    white-space: nowrap;
+  }
+  .xbtn.alt { background: transparent; color: var(--accent); }
+  .xbtn.warn { background: transparent; color: var(--text-faint); border-color: var(--edge); }
+  .xbtn:hover { filter: brightness(1.12); }
+  #exportMsg { font-family: var(--mono); font-size: 11.5px; color: var(--ok); min-width: 0; }
+
+  .agg textarea {
+    width: 100%; min-height: 130px; background: var(--bg-2); border: 1px solid var(--edge);
+    border-radius: 8px; color: var(--text); font-family: var(--mono); font-size: 12.5px; padding: 12px;
+  }
+  .agg textarea:focus { outline: none; border-color: var(--accent); }
+  .agg .aggrow { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; align-items: center; }
+  .agg .aggmsg { font-family: var(--mono); font-size: 12px; color: var(--text-faint); }
+  table.rank { width: 100%; border-collapse: collapse; margin-top: 18px; font-size: 14px; }
+  table.rank th {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--accent); text-align: left; padding: 8px 10px; border-bottom: 2px solid var(--edge-2);
+  }
+  table.rank td { padding: 8px 10px; border-bottom: 1px solid var(--edge); color: var(--text-soft); }
+  table.rank td.idcell { font-family: var(--mono); font-size: 12px; color: var(--accent); white-space: nowrap; }
+  table.rank td.num { font-family: var(--mono); text-align: center; }
+  table.rank tr.top td { background: var(--sel-tint); color: var(--text); }
+
+  footer {
+    margin-top: 90px; padding-top: 22px; border-top: 2px solid var(--edge);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+    font-family: var(--mono); font-size: 12px; color: var(--text-faint);
+  }
+  footer a { color: var(--accent); text-decoration: none; }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+  header.masthead, section, footer { animation: rise 0.7s cubic-bezier(0.22,1,0.36,1) both; }
+  section:nth-of-type(1){animation-delay:.08s} section:nth-of-type(2){animation-delay:.14s}
+  section:nth-of-type(3){animation-delay:.2s} section:nth-of-type(4){animation-delay:.26s}
+  section:nth-of-type(5){animation-delay:.3s} section:nth-of-type(6){animation-delay:.34s}
+</style>
+<script>
+(function(){
+  var t;
+  try { t = localStorage.getItem('cl.docs.theme'); } catch(e) {}
+  if (t !== 'light' && t !== 'dark') {
+    t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  document.documentElement.setAttribute('data-theme', t);
+})();
+</script>
+</head>
+<body>
+<div class="sheet">
+
+  <header class="masthead">
+    <div class="kicker">
+      <span class="brand">Chameleon Labs — ImageAI UX Proposal 2/3</span>
+      <span class="kicker-right">
+        <a href="https://github.com/lelandg/ImageAI/issues/11">Issue #11</a>
+        <a href="https://chameleonlabs.ai">chameleonlabs.ai</a>
+        <a href="https://discord.gg/chameleonlabs">Discord</a>
+        <span>July 29, 2026</span>
+        <button class="theme-toggle" id="themeToggle" aria-label="Toggle light/dark theme">☾ dark</button>
+      </span>
+    </div>
+    <h1>The desktop comparator: <em>guided, not gutted.</em></h1>
+    <p class="dek">RenderZero AI Studio is the closest true comparator to ImageAI — a lifetime-license <strong>desktop app on the same bring-your-own-API-key model</strong>. Its lesson isn't minimalism; it's structure: guided prompt building, visible costs, and a queue that never blocks. This page turns those verified patterns into original ImageAI proposals. <strong>Select cards, set a weight 1–10, export</strong> — bundles merge with the other two pages in the aggregator.</p>
+  </header>
+
+  <section>
+    <div class="sec-head"><span class="no">01 /</span><h2>What RenderZero actually is</h2></div>
+    <p><strong>RenderZero (AI) Studio</strong> (<a href="https://renderzerostudio.com/">renderzerostudio.com</a>) is a paid lifetime-license desktop application for Mac &amp; Windows (site metadata also lists Linux), created and sold by the author of the <a href="https://www.youtube.com/watch?v=jH9C9DNyQTo">PromptGeek YouTube channel</a> — the product was formerly named "Nano Banana Pro Prompt Builder." It targets AI UGC ads, video ads, and cinematic visuals, and sells for roughly <strong>$10–$30 depending on storefront</strong> ($15 in the site's own metadata, $9.99 on <a href="https://payhip.com/b/40ztO">Payhip</a>, $29.99 on <a href="https://promptgeek-shop.fourthwall.com/products/windows-renderzero-studio-ai-images-and-video">Fourthwall</a>).</p>
+    <p>Its business model is the interesting part: <strong>bring your own API key</strong>, one-time fee, no subscriptions, no hosted credits — marketed head-on against subscription lock-in ("Stop Renting AI Tools. Own Your Studio.") and as paying "wholesale" API rates, with optional free local generation via ComfyUI and Google Gemini positioned as the default key. That is <em>exactly</em> ImageAI's category — proof the BYO-key desktop model can be framed as a selling point rather than a burden.</p>
+    <div class="notice"><strong>Source honesty:</strong> these findings rest on vendor marketing pages and the maker's own tutorial video — fine for "what the product does in its own UI," but promotional in tone. Its homepage structured data even carries implausible review counts, so every marketing claim here was verified skeptically and the adversarial-review process discarded several that failed (see the <a href="https://github.com/lelandg/ImageAI/issues/11">issue</a> and <code class="t">Notes/2026-07-29-issue11-ux-research-report.md</code>).</div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="no">02 /</span><h2>Five verified patterns — and one pitfall</h2></div>
+    <p class="pull">"Describe images like a director, photographer and art director — not a random prompt gambler."</p>
+    <p>That line from RenderZero's own <a href="https://payhip.com/b/40ztO">store listing</a> captures its whole approach: reduce <em>perceived</em> complexity through structure, not by removing capability.</p>
+    <div class="cards">
+      <div class="card"><h3>1 · Guided prompt construction</h3><p>A numbered builder (Subject &amp; Framing → Lighting &amp; Mood → Camera Gear → Style &amp; Aesthetics → Elements) over big curated photography-metaphor libraries — 25 shot types, 43 lighting setups, 49 camera bodies, 30 film stocks, ~90–99 photographer styles, 110 movie looks, ~44 filters (counts drift across versions). Choices assemble live into a visible "constructed prompt" box; combos save as named presets; the final prompt is hand-editable (editing locks it, Reset unlocks). Zero raw CFG/seed/sampler/steps anywhere in its marketing.<span class="src">tutorial + payhip + fourthwall listings</span></p></div>
+      <div class="card"><h3>2 · Non-blocking render queue</h3><p>Generations queue into a Render Queue tab with progress tracking — "it's going to queue and generate while we get on with other stuff." The user never waits staring at a spinner.<span class="src">maker's tutorial + renderzerostudio.com</span></p></div>
+      <div class="card"><h3>3 · Cost before commit</h3><p>An estimated per-image dollar cost shows <em>before</em> queuing and updates with resolution — verified $0.09 at 1K/2K vs $0.12 at 4K for Nano Banana Pro via Kie.ai, matching <a href="https://kie.ai/nano-banana-pro">Kie's published prices</a>. Cost anxiety is a real barrier in BYO-key tools; showing the number removes it.<span class="src">tutorial + kie.ai pricing</span></p></div>
+      <div class="card"><h3>4 · Capability-aware controls</h3><p>"When a model doesn't have an option, it will gray that out." Honest caveat: in the one demoed case (Grok Imagine + 21:9) the app actually <em>silently auto-switched</em> to 1:1 — ImageAI should do the explicit disable-plus-tooltip, never the silent switch.<span class="src">maker's tutorial</span></p></div>
+      <div class="card"><h3>5 · Key-gate onboarding</h3><p>At least one API key is required before any generation, and the key-setup panel deep-links to each provider's key-creation page <em>and</em> its billing/top-up page — "click on get your API key. It'll open a new tab… into the API keys section of their website."<span class="src">maker's tutorial</span></p></div>
+      <div class="card"><h3>⚠ The free-tier overpromise</h3><p>Marketing sells Google AI Studio's "generous free tier" as the on-ramp — while the maker's own tutorial admits the app "does not work with the free tier API key" for the demoed paid image models (paid billing required; a ~$300 new-account Google Cloud credit softens it; one backend even needs a $9.90/mo subscription). <strong>ImageAI's wizard must set key/billing expectations honestly.</strong><span class="src">tutorial vs fourthwall marketing</span></p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="no">03 /</span><h2>An original ImageAI take: the guided-generate surface</h2></div>
+    <p>Not RenderZero's layout — an ImageAI arrangement of the same functional patterns, in the existing Maestro theme, using ImageAI's own preset data (<code class="t">data/</code> prompt presets, Custom Styles). The builder categories below are deliberately ImageAI's own, not theirs.</p>
+    <div class="wire-wrap">
+      <div class="appwin" aria-label="Wireframe of a proposed guided-generate surface">
+        <div class="titlebar"><span class="dots"><i></i><i></i><i></i></span><span>ImageAI — proposed guided generate (concept)</span></div>
+        <div class="tabstrip">
+          <span class="wtab on">🎨 Image</span><span class="wtab">🎬 Video</span><span class="wtab">📜 History</span><span class="wtab" style="margin-left:auto">⚙️</span>
+        </div>
+        <div class="wbody">
+          <div class="wrow">
+            <div class="wcol" style="flex:1.1">
+              <div class="wpanel"><span class="co" style="top:-11px;left:-11px">1</span>
+                <div class="ph">Prompt builder</div>
+                <div class="wchips" style="flex-direction:column;align-items:stretch;gap:5px">
+                  <span class="wchip on">1 · Subject</span>
+                  <span class="wchip">2 · Mood &amp; Light</span>
+                  <span class="wchip">3 · Lens</span>
+                  <span class="wchip">4 · Style</span>
+                  <span class="wchip">5 · Extras</span>
+                </div>
+              </div>
+              <div class="wpanel">
+                <div class="ph">My presets</div>
+                <div class="wchips"><span class="wchip">Golden hour</span><span class="wchip">Film noir</span><span class="wchip">Product shot</span></div>
+              </div>
+            </div>
+            <div class="wcol grow" style="flex:2.4">
+              <div class="wpanel"><span class="co" style="top:-11px;left:-11px">2</span>
+                <div class="ph">Constructed prompt (editable)</div>
+                <div class="wfield tall">A red fox in tall grass, golden-hour backlight, 85&nbsp;mm portrait lens, watercolor style…</div>
+                <div class="wrow" style="margin-top:8px;align-items:center">
+                  <span class="wchip on"><span class="co" style="position:static;display:inline-flex;width:18px;height:18px;font-size:10px;margin-right:6px">3</span>≈ $0.04 / image</span>
+                  <span class="grow"></span>
+                  <span class="wbtn ghost">Save preset</span>
+                  <span class="wbtn-primary">▶ Generate</span>
+                </div>
+              </div>
+              <div class="wpanel"><span class="co" style="top:-11px;left:-11px">4</span>
+                <div class="ph">Queue</div>
+                <div class="wrow"><span class="wfield grow">fox-portrait &nbsp;▓▓▓▓▓▓░░ 68%</span><span class="wfield grow">village-night &nbsp;⏳ queued</span></div>
+              </div>
+              <div class="wcanvas" style="min-height:120px">latest result appears here — you keep working while jobs run</div>
+            </div>
+          </div>
+          <div class="wrow">
+            <div class="wpanel grow"><span class="co" style="top:-11px;left:-11px">5</span>Keys: <span style="color:var(--app-green)">Gemini ✓</span> &nbsp;·&nbsp; OpenAI — <span style="color:var(--app-cyan)">add key</span> &nbsp;·&nbsp; Stability — <span style="color:var(--app-cyan)">add key</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <ul class="legend">
+      <li><span class="co-ref">1</span><span><strong>Numbered builder steps</strong> over ImageAI's own preset libraries — the existing Prompt Builder, evolved (IMG-10).</span></li>
+      <li><span class="co-ref">2</span><span><strong>Live constructed prompt</strong>, always visible and hand-editable — the user learns prompting by watching it assemble (IMG-10).</span></li>
+      <li><span class="co-ref">3</span><span><strong>Cost before commit</strong> — estimate updates with model/resolution/batch (IMG-11).</span></li>
+      <li><span class="co-ref">4</span><span><strong>Local generation queue</strong> with progress; the UI never blocks (GLB-10).</span></li>
+      <li><span class="co-ref">5</span><span><strong>Key status at a glance</strong> with deep links to fix gaps (IMG-08, GLB-09).</span></li>
+    </ul>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="no">04 /</span><h2>Pick what ImageAI should adopt</h2></div>
+    <p>Same canonical IDs as the other pages — exports merge in the <a href="tab-recommendations-2026-07-29.html#aggregate">aggregator</a>.</p>
+    <div class="opts">
+      <div class="opt" data-opt-id="IMG-10" data-opt-title="Guided prompt builder v2" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-10</span><h4>Guided prompt builder v2</h4></div>
+        <p>Evolve the existing Prompt Builder into numbered steps over preset libraries (drawn from <code class="t">data/</code> and Custom Styles) feeding a live, hand-editable constructed-prompt box, with named save/load presets. Structure over minimalism — the verified RenderZero lesson.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact high</span><span class="pill anchor">main_window.py:714-733 · Prompt Builder dialog · data/</span></div>
+      </div>
+      <div class="opt" data-opt-id="IMG-11" data-opt-title="Pre-generation cost estimate" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-11</span><h4>Pre-generation cost estimate</h4></div>
+        <p>A per-image dollar estimate near Generate that updates with model, resolution, and batch size. The Video tab already shows "Est. Cost: --"; bring the same honesty to images. Kills the silent-spend fear that makes BYO-key tools feel hostile.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact med</span><span class="pill anchor">workspace_widget.py:1660-1806 (precedent)</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-09" data-opt-title="Provider key deep-links &amp; honest free-tier guidance" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-09</span><h4>Key deep-links &amp; honest free-tier guidance</h4></div>
+        <p>Settings and the first-run wizard link each provider straight to its key-creation page <em>and</em> its billing page, with a plain note about which models need paid billing. The verified anti-pattern to avoid: promising a free tier that the flagship models don't actually honor.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact high</span><span class="pill anchor">main_window.py:1650 · settings_widgets.py</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-10" data-opt-title="Non-blocking generation queue" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-10</span><h4>Non-blocking generation queue</h4></div>
+        <p>A local queue with per-job progress so image generations never block the UI — distinct from (and complementary to) the cloud <em>Batch Jobs</em> tab, which should keep its own name to avoid confusion.</p>
+        <div class="meta"><span class="pill effort-L">effort L</span><span class="pill">impact med</span><span class="pill anchor">main_window.py QThread worker · :612-625</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-02" data-opt-title="First-run setup wizard" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-02</span><h4>First-run setup wizard</h4></div>
+        <p>On first launch with no key configured: pick a provider → paste key → test call → land on the Image tab ready to generate. RenderZero verifies the gate + deep-link mechanics; the wizard shape is ImageAI's own (its own first-run flow was not verifiable).</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact high</span><span class="pill anchor">gui/__init__.py:85-86 · settings_widgets.py</span></div>
+      </div>
+      <div class="opt" data-opt-id="IMG-08" data-opt-title="Provider status chip" data-opt-section="image">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">IMG-08</span><h4>Provider status chip</h4></div>
+        <p>A small chip near Generate — "Gemini ✓" or "No key — click to set up" — linking straight to Settings. Key problems surface before generating, not as an error after.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact low</span><span class="pill anchor">main_window.py:793-826 · :1606+</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-01" data-opt-title="Simple / Advanced UI mode" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-01</span><h4>Simple / Advanced UI mode</h4></div>
+        <p>A persisted <code class="t">ui_mode</code> (View → Simple Mode). RenderZero exposes zero raw model parameters and still serves pros — evidence that a parameter-free Simple default loses nobody, as long as Advanced stays one toggle away.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact high</span><span class="pill anchor">main_window.py:601-625 · core/config.py</span></div>
+      </div>
+      <div class="opt" data-opt-id="GLB-06" data-opt-title="Friendly model names" data-opt-section="global">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">GLB-06</span><h4>Friendly model names</h4></div>
+        <p>Display names ("Nano Banana Pro") with raw IDs in tooltips, resolved via the model registry. RenderZero and Dzine both market models by friendly names, never raw ID strings.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact med</span><span class="pill anchor">main_window.py:793-826</span></div>
+      </div>
+      <div class="opt" data-opt-id="VID-02" data-opt-title="New-project quick start" data-opt-section="video">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">VID-02</span><h4>New-project quick start</h4></div>
+        <p>One dialog wrapping the first three Video steps: name → paste lyrics/text → pick style + provider → storyboard generation starts. The guided-flow principle applied to ImageAI's most workflow-heavy tab.</p>
+        <div class="meta"><span class="pill effort-M">effort M</span><span class="pill">impact high</span><span class="pill anchor">video_project_tab.py:1614+ · workspace_widget.py:833-935</span></div>
+      </div>
+      <div class="opt" data-opt-id="VID-04" data-opt-title="One primary render action" data-opt-section="video">
+        <div class="opt-top"><input type="checkbox" tabindex="-1"><span class="oid">VID-04</span><h4>One primary render action</h4></div>
+        <p>Primary styling on <strong>Render Video</strong> plus a reason on the disabled state ("add scenes to render"). Pair with a queue-style progress readout so renders feel non-blocking too.</p>
+        <div class="meta"><span class="pill effort-S">effort S</span><span class="pill">impact med</span><span class="pill anchor">workspace_widget.py:1660-1806</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><span class="no">05 /</span><h2>What NOT to copy</h2></div>
+    <ul class="plain">
+      <li><strong>The free-tier overpromise — lead pitfall.</strong> Do not market "start free with Gemini" unless the models ImageAI defaults to genuinely work on a free-tier key. Verify current Gemini free-tier viability first (open question in the research report); otherwise say plainly "most cloud models require a paid key; local Stable Diffusion is the free path."</li>
+      <li><strong>Their builder taxonomy and preset libraries.</strong> The category names and the curated 25/43/49/30/99/110 preset collections are RenderZero's editorial work. ImageAI builds its own steps and libraries from its existing <code class="t">data/</code> presets and Custom Styles — same pattern, original content.</li>
+      <li><strong>Marketing theater.</strong> Inflated structured-data ratings and drifting storefront prices are anti-patterns, not patterns.</li>
+      <li><strong>Silent capability switches.</strong> The demoed aspect-ratio auto-switch (21:9 → 1:1 without telling the user) is exactly what ImageAI should <em>not</em> do — disable the option and explain why instead.</li>
+      <li><strong>Naming collision.</strong> A local generation queue must not be called "Batch" — ImageAI already has a cloud Batch Jobs tab; two things named batch would recreate the confusion this issue is about.</li>
+    </ul>
+  </section>
+
+  <section id="sources">
+    <div class="sec-head"><span class="no">06 /</span><h2>Sources</h2></div>
+    <ul class="plain">
+      <li>1 · <a href="https://renderzerostudio.com/">renderzerostudio.com</a> — official site (title, JSON-LD, feature lists)</li>
+      <li>2 · <a href="https://www.youtube.com/watch?v=jH9C9DNyQTo">PromptGeek — RenderZero Studio tutorial</a> — maker's own install/usage walkthrough (key gate, builder steps, queue, costs, free-tier admission)</li>
+      <li>3 · <a href="https://payhip.com/b/40ztO">Payhip listing (Mac)</a> — preset counts, "Stop Renting AI Tools" positioning</li>
+      <li>4 · <a href="https://promptgeek-shop.fourthwall.com/products/windows-renderzero-studio-ai-images-and-video">Fourthwall listing (Windows v3.5)</a> — live prompt construction, libraries, Gemini free-tier marketing</li>
+      <li>5 · <a href="https://kie.ai/nano-banana-pro">kie.ai/nano-banana-pro</a> — independent price corroboration for the cost-estimate finding</li>
+    </ul>
+    <p>Full adversarially-verified findings, caveats, and open questions: <code class="t">Notes/2026-07-29-issue11-ux-research-report.md</code>. All claims are as-served July 2026; these products iterate quickly.</p>
+  </section>
+
+  <footer>
+    <span>Chameleon Labs LLC · <a href="https://chameleonlabs.ai">chameleonlabs.ai</a> · <a href="https://discord.gg/chameleonlabs">Join our Discord</a></span>
+    <span><a href="dzine-informed-workspace-2026-07-29.html">Dzine-informed proposal</a> · <a href="tab-recommendations-2026-07-29.html">Tab-by-tab recommendations</a></span>
+    <span>Compiled 2026-07-29</span>
+  </footer>
+
+</div>
+
+<div id="exportBar" aria-label="Export selected options">
+  <div class="inner">
+    <span class="cnt"><b id="selCount">0</b> selected</span>
+    <label for="exportLabel">Label</label>
+    <input id="exportLabel" type="text" placeholder="e.g. my top picks" />
+    <span class="wgt">
+      <label for="exportWeight">Weight</label>
+      <input id="exportWeight" type="range" min="1" max="10" step="1" value="5" />
+      <span id="weightVal">5</span>
+    </span>
+    <button class="xbtn" id="btnCopyJson">Copy JSON</button>
+    <button class="xbtn alt" id="btnDownloadJson">Download</button>
+    <button class="xbtn alt" id="btnCopyMd">Copy MD</button>
+    <button class="xbtn warn" id="btnClearSel">Clear</button>
+    <span id="exportMsg"></span>
+  </div>
+</div>
+
+<script>
+window.UX_PAGE = { id: 'renderzero-informed', title: 'RenderZero-Informed Workspace Proposal' };
+
+(function(){
+  'use strict';
+  var LS_KEY = 'imageai.ux11.' + UX_PAGE.id;
+
+  var btn = document.getElementById('themeToggle');
+  function syncTheme(){
+    btn.textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀ light' : '☾ dark';
+  }
+  btn.addEventListener('click', function(){
+    var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    document.documentElement.setAttribute('data-theme', next);
+    try { localStorage.setItem('cl.docs.theme', next); } catch(e) {}
+    syncTheme();
+  });
+  syncTheme();
+
+  function copyText(text, done){
+    function fallback(){
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = false;
+      try { ok = document.execCommand('copy'); } catch(e) {}
+      document.body.removeChild(ta);
+      done(ok);
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function(){ done(true); }, fallback);
+    } else { fallback(); }
+  }
+
+  document.querySelectorAll('.codewrap').forEach(function(w){
+    var b = document.createElement('button');
+    b.className = 'copybtn'; b.type = 'button'; b.textContent = 'copy';
+    b.addEventListener('click', function(){
+      var pre = w.querySelector('pre');
+      copyText(pre ? pre.innerText : '', function(ok){
+        b.textContent = ok ? 'copied ✓' : 'copy failed';
+        setTimeout(function(){ b.textContent = 'copy'; }, 1600);
+      });
+    });
+    w.appendChild(b);
+  });
+
+  var opts = Array.prototype.slice.call(document.querySelectorAll('.opt'));
+  var state = { sel: {}, weight: 5, label: '' };
+  try {
+    var saved = JSON.parse(localStorage.getItem(LS_KEY) || 'null');
+    if (saved && typeof saved === 'object') {
+      state.sel = saved.sel || {};
+      state.weight = saved.weight || 5;
+      state.label = saved.label || '';
+    }
+  } catch(e) {}
+
+  var selCount = document.getElementById('selCount');
+  var labelInput = document.getElementById('exportLabel');
+  var weightInput = document.getElementById('exportWeight');
+  var weightVal = document.getElementById('weightVal');
+  var msg = document.getElementById('exportMsg');
+
+  function persist(){
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch(e) {}
+  }
+  function flash(text, ok){
+    msg.textContent = text;
+    msg.style.color = ok ? 'var(--ok)' : 'var(--danger)';
+    setTimeout(function(){ if (msg.textContent === text) msg.textContent = ''; }, 2400);
+  }
+  function syncCards(){
+    var n = 0;
+    opts.forEach(function(card){
+      var id = card.getAttribute('data-opt-id');
+      var on = !!state.sel[id];
+      if (on) n++;
+      card.classList.toggle('sel', on);
+      var cb = card.querySelector('input[type="checkbox"]');
+      if (cb) cb.checked = on;
+      card.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    selCount.textContent = String(n);
+  }
+  opts.forEach(function(card){
+    card.setAttribute('role', 'button');
+    card.setAttribute('tabindex', '0');
+    function toggle(){
+      var id = card.getAttribute('data-opt-id');
+      if (state.sel[id]) delete state.sel[id]; else state.sel[id] = true;
+      persist(); syncCards();
+    }
+    card.addEventListener('click', function(ev){
+      if (ev.target.tagName === 'A') return;
+      toggle();
+      if (ev.target.tagName === 'INPUT') ev.target.blur();
+    });
+    card.addEventListener('keydown', function(ev){
+      if (ev.key === ' ' || ev.key === 'Enter') { ev.preventDefault(); toggle(); }
+    });
+  });
+
+  labelInput.value = state.label;
+  weightInput.value = String(state.weight);
+  weightVal.textContent = String(state.weight);
+  labelInput.addEventListener('input', function(){ state.label = labelInput.value; persist(); });
+  weightInput.addEventListener('input', function(){
+    state.weight = parseInt(weightInput.value, 10) || 5;
+    weightVal.textContent = String(state.weight);
+    persist();
+  });
+
+  function selectedOptions(){
+    return opts.filter(function(c){ return state.sel[c.getAttribute('data-opt-id')]; })
+      .map(function(c){
+        return {
+          id: c.getAttribute('data-opt-id'),
+          title: c.getAttribute('data-opt-title') || '',
+          section: c.getAttribute('data-opt-section') || ''
+        };
+      });
+  }
+  function buildExport(){
+    return {
+      schema: 'imageai-ux11-export/v1',
+      issue: 11,
+      page: UX_PAGE.id,
+      pageTitle: UX_PAGE.title,
+      label: state.label || '',
+      weight: state.weight,
+      exportedAt: new Date().toISOString(),
+      selections: selectedOptions()
+    };
+  }
+  function requireSelection(){
+    if (selectedOptions().length === 0) { flash('nothing selected', false); return false; }
+    return true;
+  }
+
+  document.getElementById('btnCopyJson').addEventListener('click', function(){
+    if (!requireSelection()) return;
+    copyText(JSON.stringify(buildExport(), null, 2), function(ok){
+      flash(ok ? 'JSON copied ✓' : 'copy failed — use Download', ok);
+    });
+  });
+  document.getElementById('btnDownloadJson').addEventListener('click', function(){
+    if (!requireSelection()) return;
+    var data = buildExport();
+    var slug = (data.label || 'export').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'export';
+    var name = 'imageai-ux11-' + UX_PAGE.id + '-w' + data.weight + '-' + slug + '.json';
+    var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(a.href); }, 5000);
+    flash('downloaded ' + name, true);
+  });
+  document.getElementById('btnCopyMd').addEventListener('click', function(){
+    if (!requireSelection()) return;
+    var d = buildExport();
+    var lines = [
+      '# ImageAI UX export — ' + d.pageTitle,
+      '',
+      '- **Weight:** ' + d.weight + '/10' + (d.label ? '  ·  **Label:** ' + d.label : ''),
+      '- **Page:** ' + d.page + '  ·  **Exported:** ' + d.exportedAt,
+      ''
+    ];
+    d.selections.forEach(function(s){ lines.push('- `' + s.id + '` — ' + s.title); });
+    copyText(lines.join('\n'), function(ok){ flash(ok ? 'Markdown copied ✓' : 'copy failed', ok); });
+  });
+  document.getElementById('btnClearSel').addEventListener('click', function(){
+    state.sel = {}; persist(); syncCards(); flash('selection cleared', true);
+  });
+
+  syncCards();
+
+  var aggInput = document.getElementById('aggInput');
+  if (aggInput) {
+    var aggMsg = document.getElementById('aggMsg');
+    var aggOut = document.getElementById('aggResult');
+    var aggCopy = document.getElementById('btnAggCopy');
+    var lastRanked = null;
+
+    function parseExports(text){
+      text = (text || '').trim();
+      if (!text) return { exports: [], errors: ['nothing pasted'] };
+      var objs = [], errors = [];
+      try {
+        var whole = JSON.parse(text);
+        objs = Array.isArray(whole) ? whole : [whole];
+      } catch(e) {
+        var depth = 0, start = -1, inStr = false, esc = false;
+        for (var i = 0; i < text.length; i++) {
+          var ch = text[i];
+          if (inStr) {
+            if (esc) esc = false;
+            else if (ch === '\\') esc = true;
+            else if (ch === '"') inStr = false;
+            continue;
+          }
+          if (ch === '"') { inStr = true; continue; }
+          if (ch === '{') { if (depth === 0) start = i; depth++; }
+          else if (ch === '}') {
+            depth--;
+            if (depth === 0 && start >= 0) {
+              try { objs.push(JSON.parse(text.slice(start, i + 1))); }
+              catch(e2) { errors.push('unparseable object near char ' + start); }
+              start = -1;
+            }
+          }
+        }
+        if (depth !== 0) errors.push('unbalanced braces — check the paste');
+      }
+      var valid = [];
+      objs.forEach(function(o, idx){
+        if (o && o.schema === 'imageai-ux11-export/v1' && Array.isArray(o.selections)) valid.push(o);
+        else errors.push('item ' + (idx + 1) + ' is not an imageai-ux11-export/v1 object');
+      });
+      return { exports: valid, errors: errors };
+    }
+
+    function aggregate(exportsArr){
+      var byId = {};
+      exportsArr.forEach(function(ex){
+        var w = Math.max(1, Math.min(10, parseInt(ex.weight, 10) || 1));
+        ex.selections.forEach(function(s){
+          if (!s || !s.id) return;
+          var e = byId[s.id] || (byId[s.id] = { id: s.id, title: s.title || '', best: 0, total: 0, hits: 0, pages: {} });
+          e.best = Math.max(e.best, w);
+          e.total += w;
+          e.hits += 1;
+          if (!e.title && s.title) e.title = s.title;
+          e.pages[ex.page || '?'] = true;
+        });
+      });
+      var rows = Object.keys(byId).map(function(k){ return byId[k]; });
+      rows.sort(function(a, b){
+        return (b.best - a.best) || (b.total - a.total) || (b.hits - a.hits) || (a.id < b.id ? -1 : 1);
+      });
+      return rows;
+    }
+
+    document.getElementById('btnAggregate').addEventListener('click', function(){
+      var res = parseExports(aggInput.value);
+      if (!res.exports.length) {
+        aggMsg.textContent = res.errors.join(' · ') || 'no valid exports found';
+        aggOut.innerHTML = ''; lastRanked = null; aggCopy.style.display = 'none';
+        return;
+      }
+      var rows = aggregate(res.exports);
+      lastRanked = rows;
+      aggMsg.textContent = res.exports.length + ' export(s), ' + rows.length + ' distinct option(s)'
+        + (res.errors.length ? ' · skipped: ' + res.errors.join('; ') : '');
+      var html = '<table class="rank"><thead><tr><th>#</th><th>Option</th><th>Title</th><th>Best wt</th><th>Total</th><th>Exports</th><th>Pages</th></tr></thead><tbody>';
+      rows.forEach(function(r, i){
+        var topCls = (i === 0 || r.best === 10) ? ' class="top"' : '';
+        html += '<tr' + topCls + '><td class="num">' + (i + 1) + '</td><td class="idcell">' + r.id + '</td><td>'
+          + String(r.title).replace(/[<>&]/g, function(c){ return { '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]; })
+          + '</td><td class="num">' + r.best + '</td><td class="num">' + r.total + '</td><td class="num">' + r.hits
+          + '</td><td>' + Object.keys(r.pages).join(', ') + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      aggOut.innerHTML = html;
+      aggCopy.style.display = '';
+    });
+
+    aggCopy.addEventListener('click', function(){
+      if (!lastRanked) return;
+      var lines = ['# ImageAI UX11 — aggregated ranking', '', '| # | Option | Title | Best | Total | Exports |', '|---|--------|-------|------|-------|---------|'];
+      lastRanked.forEach(function(r, i){
+        lines.push('| ' + (i + 1) + ' | `' + r.id + '` | ' + r.title + ' | ' + r.best + ' | ' + r.total + ' | ' + r.hits + ' |');
+      });
+      copyText(lines.join('\n'), function(ok){
+        aggMsg.textContent = ok ? 'ranking copied as Markdown ✓' : 'copy failed';
+      });
+    });
+  }
+})();
+</script>
+</body>
+</html>
