@@ -134,3 +134,62 @@ def test_list_styles_skips_record_with_traversal_id(tmp_path):
     styles = store.list_styles()
     assert [s.id for s in styles] == [good.id]
     assert store.get("../../evil") is None
+
+
+# ---- issue #37 hardening: atomic writes, _is_safe_rel, defensive delete ----
+
+def test_write_index_survives_midwrite_failure(tmp_path, monkeypatch):
+    import json
+    store = StyleStore(base_dir=tmp_path)
+    store.save(Style(id="a", name="A"))
+    original = store.index_path.read_text()
+    monkeypatch.setattr("core.styles.store.json.dump",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+    with pytest.raises(OSError):
+        store.save(Style(id="b", name="B"))
+    assert store.index_path.read_text() == original  # old index intact
+    assert not list(tmp_path.glob("*.tmp"))          # failed write cleaned up
+
+
+def test_is_safe_rel_non_string_entries():
+    from core.styles.store import is_safe_rel
+    assert is_safe_rel(None) is False
+    assert is_safe_rel(7) is False
+    assert is_safe_rel(["refs/a.jpg"]) is False
+
+
+def test_is_safe_rel_allows_dotdot_inside_filename():
+    from core.styles.store import is_safe_rel
+    assert is_safe_rel("refs/a..b.jpg") is True     # legit filename
+    assert is_safe_rel("refs/..") is False          # traversal
+    assert is_safe_rel("refs/.") is False
+    assert is_safe_rel("refs/../x.jpg") is False    # separator: regex rejects
+
+
+def test_safety_regexes_reject_trailing_newline(tmp_path):
+    # re's $ matches before a trailing newline; the anchors must be \Z
+    from core.styles.store import is_safe_rel
+    assert is_safe_rel("refs/a.jpg\n") is False
+    store = StyleStore(base_dir=tmp_path)
+    with pytest.raises(ValueError):
+        store.style_dir("water\n")
+
+
+def test_resolve_refs_skips_non_string_entries(tmp_path):
+    store = StyleStore(base_dir=tmp_path)
+    s = Style(id="a", name="A", reference_images=[7, "refs/0001.jpg"])
+    assert store.resolve_refs(s) == []  # no TypeError; both skipped/missing
+
+
+def test_delete_unsafe_id_purges_index_without_touching_disk(tmp_path):
+    import json
+    store = StyleStore(base_dir=tmp_path)
+    store.save(Style(id="good", name="Good"))
+    # inject a malformed record with a traversal id directly into the index
+    raw = json.loads(store.index_path.read_text())
+    raw["styles"].append({"id": "../evil", "name": "Evil"})
+    store.index_path.write_text(json.dumps(raw))
+    assert store.delete("../evil") is True        # no ValueError
+    assert store.get("good") is not None
+    ids = [r["id"] for r in json.loads(store.index_path.read_text())["styles"]]
+    assert "../evil" not in ids

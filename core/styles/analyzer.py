@@ -92,7 +92,7 @@ def build_chunk_messages(paths: List[Path]) -> List[Dict]:
 
 def parse_descriptor(content: str) -> Optional[Dict[str, str]]:
     """Parse an LLM reply into a descriptor dict (keys filtered/defaulted)."""
-    from gui.llm_utils import LLMResponseParser
+    from core.llm_parsing import LLMResponseParser
     data = LLMResponseParser.parse_json_response(content or "", expected_type=dict)
     if not isinstance(data, dict):
         return None
@@ -130,7 +130,7 @@ def merge_descriptors(descs: List[Dict[str, str]],
     try:
         reply = completion_fn([{"role": "user", "content": prompt}])
         logger.info(f"Style merge response ({len(reply or '')} chars): {reply}")
-        from gui.llm_utils import LLMResponseParser
+        from core.llm_parsing import LLMResponseParser
         data = LLMResponseParser.parse_json_response(reply or "", expected_type=dict)
     except Exception as e:  # noqa: BLE001 - fall back, never crash the reduce
         logger.warning(f"Style merge LLM call failed: {e}")
@@ -218,7 +218,7 @@ def default_vision_model(provider: str) -> str:
     return resolve_model(reg, family, static_default=static)
 
 
-def build_completion_fn(config, provider=None, model=None):
+def build_completion_fn(config, provider=None, model=None, max_retries=None):
     """Build an LLM callable over UnifiedLLMProvider.
 
     Args:
@@ -226,6 +226,9 @@ def build_completion_fn(config, provider=None, model=None):
         provider: openai|anthropic|google (default: config 'llm_provider',
             else openai).
         model: bare model id (default: registry vision default).
+        max_retries: transient-error retry cap for each call (None = the
+            transport default; GUI-thread callers pass 0 to avoid blocking
+            on the exponential backoff).
 
     Returns:
         (fn, provider, full_model) where fn(messages) -> str.
@@ -251,8 +254,11 @@ def build_completion_fn(config, provider=None, model=None):
     def fn(messages):
         logger.info(f"Style LLM request -> {full_model} "
                     f"({sum(len(str(m)) for m in messages)} chars)")
-        return llm.analyze_image(messages=messages, model=full_model,
-                                 max_tokens=1500)
+        call_kwargs = {"messages": messages, "model": full_model,
+                       "max_tokens": 1500}
+        if max_retries is not None:
+            call_kwargs["max_retries"] = max_retries
+        return llm.analyze_image(**call_kwargs)
 
     return fn, provider, full_model
 

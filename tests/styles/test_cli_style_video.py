@@ -114,7 +114,10 @@ def test_run_video_cmd_adds_style_applied_to_payload(tmp_path):
         rc = run_video_cmd(_ns(out=str(out), style="Water"))
     assert rc == 0
     data = json.loads(out.with_suffix(".json").read_text())
-    assert data["style_applied"] == "water"
+    # Unified provenance shape (issue #37): same dict as image sidecars.
+    assert data["style_applied"]["style_id"] == "water"
+    assert data["style_applied"]["smart_merge_used"] is False
+    assert data["style_applied"]["exemplars_attached"] == 0
 
 
 def test_run_video_cmd_no_style_omits_style_applied(tmp_path):

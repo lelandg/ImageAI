@@ -18,6 +18,7 @@ def _fake_provider():
     prov.get_default_model.return_value = "fake-model"
     prov.generate.return_value = (["ok"], [b"PNGDATA"])
     prov.edit_image.return_value = (["ok"], [b"PNGDATA"])
+    prov.submit_batch_job.return_value = "job-123"
     return prov
 
 
@@ -89,3 +90,24 @@ def test_style_with_reference_is_text_only(tmp_path):
     kwargs = prov.edit_image.call_args.kwargs
     assert kwargs["prompt"] == "a fox. In this style: washes"
     assert "reference_images" not in kwargs
+
+
+def test_batch_with_style_is_text_only(tmp_path, capsys):
+    """--batch submits the STYLED prompt; exemplars are intentionally
+    dropped with a stderr notice (issue #37 coverage item)."""
+    def _add_exemplar(store):
+        ex_dir = store.style_dir("water") / "refs"
+        ex_dir.mkdir(parents=True)
+        (ex_dir / "0001.jpg").write_bytes(b"X")
+        s = store.get("water")
+        s.reference_images = ["refs/0001.jpg"]
+        s.exemplars = ["refs/0001.jpg"]
+        store.save(s)
+
+    rc, prov, _ = _run(tmp_path, "--provider", "openai", "-p", "a fox",
+                       "--style", "Water", "--batch", setup=_add_exemplar)
+    assert rc == 0
+    (reqs,) = prov.submit_batch_job.call_args.args
+    assert reqs[0]["prompt"] == "a fox. In this style: washes"
+    assert "reference_images" not in reqs[0]
+    assert "text only" in capsys.readouterr().err

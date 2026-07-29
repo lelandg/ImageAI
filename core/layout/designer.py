@@ -235,7 +235,7 @@ def _normalize_region_dict(rd: Dict) -> Dict:
 
 
 def parse_response(content: str, page_px: Tuple[int, int]) -> DesignerResult:
-    from gui.llm_utils import LLMResponseParser
+    from core.llm_parsing import LLMResponseParser
     data = LLMResponseParser.parse_json_response(content, expected_type=dict)
     if not isinstance(data, dict):
         logger.warning("Designer: unparseable response, using fallback")

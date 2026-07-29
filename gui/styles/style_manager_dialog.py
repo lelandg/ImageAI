@@ -2,10 +2,11 @@
 import copy
 import json
 import logging
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, QSettings, QThread, Signal
+from PySide6.QtCore import QSize, Qt, QSettings, QThread, Signal
 from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel,
@@ -14,7 +15,7 @@ from PySide6.QtWidgets import (
 
 from core.llm_models import get_provider_models
 from core.styles.models import Style, StyleDescriptor
-from core.styles.store import EXEMPLAR_DEFAULT_CAP, StyleStore
+from core.styles.store import EXEMPLAR_DEFAULT_CAP, StyleStore, is_safe_rel
 from gui.common.dialog_conventions import (
     DialogCleanupMixin, bind_primary_action, persist_splitter,
     restore_splitter, set_default_button, standard_splitter)
@@ -28,6 +29,51 @@ _SPLITTER_KEY = "splitter_state"
 # Workers orphaned at dialog close live here until their run() returns,
 # preventing Python GC from destroying a QThread that is still running.
 _ORPHAN_WORKERS = set()
+
+_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+
+
+def _image_paths_from_mime(mime) -> List[Path]:
+    """Local image files in a drag payload, order preserved."""
+    if not mime.hasUrls():
+        return []
+    out = []
+    for url in mime.urls():
+        if not url.isLocalFile():
+            continue
+        p = Path(url.toLocalFile())
+        if p.suffix.lower() in _IMAGE_EXTS and p.is_file():
+            out.append(p)
+    return out
+
+
+class _RefsListWidget(QListWidget):
+    """Refs grid that accepts image-file drops from the OS file manager."""
+    files_dropped = Signal(list)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAcceptDrops(True)
+
+    def dragEnterEvent(self, event):
+        if _image_paths_from_mime(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event):
+        if _image_paths_from_mime(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            super().dragMoveEvent(event)
+
+    def dropEvent(self, event):
+        paths = _image_paths_from_mime(event.mimeData())
+        if paths:
+            event.acceptProposedAction()
+            self.files_dropped.emit(paths)
+        else:
+            super().dropEvent(event)
 
 
 class StyleAnalysisWorker(QThread):
@@ -62,6 +108,18 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.setWindowTitle("Style Manager")
         self.resize(980, 680)
         self._build_ui()
+        geo = self.settings.value("geometry")
+        if geo is not None:
+            self.restoreGeometry(geo)
+        # Restore provider first (repopulates the model combo), then model.
+        saved_provider = self.settings.value("llm_provider")
+        if saved_provider:
+            idx = self.llm_provider_combo.findText(saved_provider)
+            if idx >= 0:
+                self.llm_provider_combo.setCurrentIndex(idx)
+        saved_model = self.settings.value("llm_model")
+        if saved_model:
+            self.llm_model_combo.setCurrentText(saved_model)
         # init_operation_guard runs after UI construction so it can pick up
         # self.status_console (an alias for self.console — see _build_ui).
         self.init_operation_guard()
@@ -81,6 +139,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         left = QWidget()
         left_l = QVBoxLayout(left)
         self.style_list = QListWidget()
+        self.style_list.setIconSize(QSize(48, 48))
         left_l.addWidget(self.style_list)
         row1 = QHBoxLayout()
         self.new_btn = QPushButton("New")
@@ -112,7 +171,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         right_l.addWidget(QLabel(
             f"Reference images (check up to {EXEMPLAR_DEFAULT_CAP} as exemplars "
             f"sent to image-capable providers):"))
-        self.refs_list = QListWidget()
+        self.refs_list = _RefsListWidget()
         self.refs_list.setViewMode(QListView.IconMode)
         self.refs_list.setIconSize(QPixmap(96, 96).size())
         self.refs_list.setResizeMode(QListView.Adjust)
@@ -180,6 +239,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.export_btn.clicked.connect(self._on_export)
         self.add_files_btn.clicked.connect(self._on_add_files)
         self.add_folder_btn.clicked.connect(self._on_add_folder)
+        self.refs_list.files_dropped.connect(self._add_paths)
         self.remove_ref_btn.clicked.connect(self._on_remove_ref)
         self.save_btn.clicked.connect(self._save_current)
         self.analyze_btn.clicked.connect(self._on_analyze)
@@ -192,6 +252,13 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.style_list.clear()
         for s in self.store.list_styles():
             item = QListWidgetItem(s.name)
+            base = self.store.style_dir(s.id)
+            icon_src = next(
+                (base / rel for rel in (s.exemplars or s.reference_images)
+                 if is_safe_rel(rel) and (base / rel).exists()), None)
+            if icon_src is not None:
+                item.setIcon(QIcon(QPixmap(str(icon_src)).scaled(
+                    48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)))
             item.setData(Qt.UserRole, s.id)
             self.style_list.addItem(item)
             if select_id and s.id == select_id:
@@ -210,6 +277,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         # selected when analysis finished — switching styles must not let it
         # get applied to a different style's Save.
         self._pending_descriptor = None
+        self._pending_source = None
         s = self._current_style()
         if s is None:
             return
@@ -222,6 +290,10 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.refs_list.clear()
         base = self.store.style_dir(s.id)
         for rel in s.reference_images:
+            if not is_safe_rel(rel):
+                logger.warning(f"Style {s.id}: skipping unsafe reference "
+                               f"path {rel!r} in UI")
+                continue
             item = QListWidgetItem(Path(rel).name)
             item.setData(Qt.UserRole, rel)
             item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
@@ -264,6 +336,9 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         if pending:
             s.descriptor = StyleDescriptor.from_dict(pending)
             self._pending_descriptor = None
+            if getattr(self, "_pending_source", None):
+                s.source = self._pending_source
+                self._pending_source = None
         self.store.save(s)
         self.console.log(f"Saved style '{s.name}'", "SUCCESS")
         self._load_styles(select_id=s.id)
@@ -291,6 +366,10 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         # prefix of reference_images, and a missing/unreadable source file
         # must not shift the mapping for everything after it.
         for rel in s.reference_images:
+            if not is_safe_rel(rel):
+                logger.warning(f"Style {s.id}: skipping unsafe reference "
+                               f"path {rel!r} in duplicate")
+                continue
             src = self.store.style_dir(s.id) / rel
             if not src.exists():
                 continue
@@ -346,9 +425,8 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         d = QFileDialog.getExistingDirectory(self, "Add Folder of Images")
         if not d:
             return
-        exts = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
         self._add_paths([p for p in sorted(Path(d).iterdir())
-                         if p.suffix.lower() in exts])
+                         if p.suffix.lower() in _IMAGE_EXTS])
 
     def _add_paths(self, paths):
         s = self._current_style()
@@ -383,6 +461,7 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         # if this run fails or the user switches styles before it finishes,
         # a leftover pending descriptor from a previous style must not survive.
         self._pending_descriptor = None
+        self._pending_source = None
         s = self._current_style()
         if s is None:
             show_warning(self, "Style Manager",
@@ -404,6 +483,10 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
             return
         if not self.start_operation("analyze"):
             return
+        # Recorded into the style's `source` when this analysis is Saved.
+        self._analysis_source = {"provider": service.provider,
+                                 "model": service.model,
+                                 "image_count": len(paths)}
         self.analyze_btn.setEnabled(False)
         self.console.separator()
         self.console.log(
@@ -425,6 +508,10 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.descriptor_view.setPlainText(
             json.dumps(data.get("descriptor", {}), indent=2, ensure_ascii=False))
         self._pending_descriptor = data.get("descriptor", {})
+        src = getattr(self, "_analysis_source", None)
+        self._pending_source = (
+            {**src, "created": datetime.now().strftime("%Y-%m-%d %H:%M")}
+            if src else None)
         self.console.log("Analysis complete — review, then Save Style.", "SUCCESS")
 
     def _on_analysis_failed(self, message: str):
@@ -451,4 +538,13 @@ class StyleManagerDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
                 _ORPHAN_WORKERS.add(w)
                 w.finished.connect(lambda w=w: _ORPHAN_WORKERS.discard(w))
             self._worker = None
+        # The orphan path disconnects finished_ok/failed, so end_operation()
+        # will never fire from a signal — remove the app-level input blocker
+        # here or it outlives the dialog and filters every event through a
+        # dead widget (AttributeError spam, eventual crash).
+        if self.is_operation_running():
+            self.end_operation()
         persist_splitter(self.settings, _SPLITTER_KEY, self.v_splitter)
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("llm_provider", self.llm_provider_combo.currentText())
+        self.settings.setValue("llm_model", self.llm_model_combo.currentText())

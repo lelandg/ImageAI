@@ -257,12 +257,15 @@ def run_video_cmd(args) -> int:
         return _report(payload, as_json, code)
 
     style = None
+    style_meta = None
     try:
         style = _resolve_style(args)
         if style is not None:
             from core.styles import apply_style
-            args.prompt = apply_style(
-                getattr(args, "prompt", None) or "", style, "", "").prompt
+            styled = apply_style(
+                getattr(args, "prompt", None) or "", style, "", "")
+            args.prompt = styled.prompt
+            style_meta = styled.meta
             _emit(f"Applying style '{style.name}' to prompt (text only)")
         if provider == "omni":
             result = _run_omni(args, out_path)
@@ -278,6 +281,8 @@ def run_video_cmd(args) -> int:
 
     payload = _status_payload(result)
     if style is not None:
-        payload["style_applied"] = style.id
+        # Same dict shape as image sidecars (issue #37): style_id/style_name/
+        # smart_merge_used/exemplars_attached/exemplars_dropped.
+        payload["style_applied"] = style_meta
     _write_sidecar(out_path, payload)
     return _report(payload, as_json, 0 if result["success"] else 1)

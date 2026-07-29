@@ -175,3 +175,20 @@ def test_apply_style_for_surface_attach_exemplars_off(tmp_path):
     assert prompt == "a fox. In this style: washes"
     assert kwargs == {}
     assert meta["exemplars_attached"] == 0
+
+
+def test_apply_style_for_surface_caps_smart_merge_retries(monkeypatch):
+    """GUI seam runs on the UI thread: one attempt, no ~14s retry backoff."""
+    from core.styles.applicator import apply_style_for_surface
+    captured = {}
+
+    def fake_build(config, provider=None, model=None, max_retries=None):
+        captured["max_retries"] = max_retries
+        return (lambda messages: '{"prompt": "merged"}'), "openai", "gpt-x"
+
+    monkeypatch.setattr("core.styles.analyzer.build_completion_fn", fake_build)
+    prompt, extra, meta = apply_style_for_surface(
+        "a fox", _style(), "google", "m", smart=True, config=object(),
+        store=None, existing_references=None)
+    assert captured["max_retries"] == 0
+    assert meta["smart_merge_used"] is True and prompt == "merged"

@@ -86,7 +86,7 @@ def _smart_merge(prompt: str, style: Style,
         logger.info(f"Smart-merge request for style '{style.name}'")
         reply = completion_fn([{"role": "user", "content": payload}])
         logger.info(f"Smart-merge response ({len(reply or '')} chars): {reply}")
-        from gui.llm_utils import LLMResponseParser
+        from core.llm_parsing import LLMResponseParser
         data = LLMResponseParser.parse_json_response(reply or "", expected_type=dict)
         if isinstance(data, dict):
             merged = str(data.get("prompt") or "").strip()
@@ -166,7 +166,9 @@ def apply_style_for_surface(prompt, style, provider, model, *, smart,
     if smart and config is not None:
         try:
             from core.styles.analyzer import build_completion_fn
-            completion_fn, _p, _m = build_completion_fn(config)
+            # Runs on the GUI thread: one transient failure degrades to plain
+            # concat instead of freezing the UI for the ~14s retry backoff.
+            completion_fn, _p, _m = build_completion_fn(config, max_retries=0)
         except Exception as e:  # noqa: BLE001 - degrade, never block generation
             logger.warning(f"Smart merge unavailable ({e}); plain concat")
     exemplars = (store.resolve_refs(style, exemplars_only=True)

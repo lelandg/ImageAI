@@ -943,7 +943,8 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
                      max_tokens: int = 1000,
                      reasoning_effort: str = None,
                      response_format: Dict[str, str] = None,
-                     console_callback: Callable = None) -> str:
+                     console_callback: Callable = None,
+                     max_retries: int = 3) -> str:
         """
         Analyze an image using vision-capable models.
         Includes automatic retry with exponential backoff for transient errors.
@@ -956,6 +957,8 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
             reasoning_effort: For GPT-5 models
             response_format: Response format specification
             console_callback: Optional callback for status messages during retries
+            max_retries: Retry attempts for transient errors (0 = single try;
+                GUI-thread callers cap this to avoid blocking on the backoff)
 
         Returns:
             Generated text description
@@ -1008,7 +1011,7 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
             # Use retry with backoff for transient errors (overloaded, rate limits, etc.)
             return self._retry_with_backoff(
                 func=make_llm_call,
-                max_retries=3,
+                max_retries=max_retries,
                 initial_delay=2.0,  # Start with 2 second delay
                 backoff_factor=2.0,  # Double delay each retry (2s, 4s, 8s)
                 console_callback=console_callback

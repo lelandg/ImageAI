@@ -64,3 +64,19 @@ def test_service_derive_end_to_end(tmp_path):
         result = svc.derive([img])
     assert result["prompt_text"]  # deterministic flatten of the single chunk
     assert set(result["descriptor"].keys()) == set(DESCRIPTOR_KEYS)
+
+
+def test_analyze_image_forwards_max_retries(monkeypatch):
+    """analyze_image passes its max_retries through to the retry wrapper."""
+    from core.video.prompt_engine import UnifiedLLMProvider
+    llm = UnifiedLLMProvider({})
+    captured = {}
+
+    def fake_retry(func, max_retries=3, **kw):
+        captured["max_retries"] = max_retries
+        return "ok"
+
+    monkeypatch.setattr(llm, "_retry_with_backoff", fake_retry)
+    out = llm.analyze_image(messages=[{"role": "user", "content": "hi"}],
+                            model="gpt-4o", max_retries=0)
+    assert out == "ok" and captured["max_retries"] == 0

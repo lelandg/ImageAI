@@ -178,12 +178,12 @@ Styles live outside the repo, in your platform's ImageAI user data directory:
 Inside: `styles.json` (the index of all styles) and one `<style-id>/refs/`
 folder per style holding its downscaled reference images.
 
-Every generated image's `.json` sidecar records a `style_applied` block
-(style id/name, whether smart merge was used, how many exemplars were
-attached/dropped) when a style was used — so you can always tell which style
-produced a given image. The **prompt shown in History** is always your
-original, un-styled prompt; the style is provenance metadata, not something
-that rewrites what you typed.
+Every generated image's `.json` sidecar — and every `--video` CLI sidecar —
+records the same `style_applied` block (style id/name, whether smart merge
+was used, how many exemplars were attached/dropped) when a style was used —
+so you can always tell which style produced a given output. The **prompt
+shown in History** is always your original, un-styled prompt; the style is
+provenance metadata, not something that rewrites what you typed.
 
 ## Troubleshooting
 
