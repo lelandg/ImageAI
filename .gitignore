@@ -255,3 +255,5 @@ Notes/fable5-comic/**/*.ogg
 Notes/fable5-comic/**/*.acep
 Notes/fable5-comic/fable5-ace-music/
 Notes/fable5-comic/video/*.json
+
+.playwright-mcp/
