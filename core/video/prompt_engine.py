@@ -392,17 +392,22 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
             api_base = None
         
         try:
-            # Build kwargs for litellm
+            # Build kwargs for litellm with validated/corralled params
+            from core.llm_params import validate_params
+            param_kwargs, _ = validate_params(
+                provider, model_id,
+                {"temperature": temperature, "max_tokens": max_tokens},
+                on_warning=(lambda msg: console_callback(msg, "WARNING"))
+                if console_callback else None)
             kwargs = {
                 "model": model_id,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                "temperature": temperature,
-                "max_tokens": max_tokens
+                **param_kwargs
             }
-            
+
             # Add api_base for LM Studio
             if api_base:
                 kwargs["api_base"] = api_base
@@ -643,15 +648,18 @@ Return one enhanced visual description per line, numbered:
             else:
                 max_tokens = 150 * len(texts)
 
+            from core.llm_params import validate_params
+            param_kwargs, _ = validate_params(
+                provider, model_id,
+                {"temperature": temperature, "max_tokens": max_tokens,
+                 "timeout": 120})  # 2 minute timeout to prevent hanging
             kwargs = {
                 "model": model_id,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": batch_prompt}
                 ],
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "timeout": 120  # 2 minute timeout to prevent hanging
+                **param_kwargs
             }
 
             if api_base:
@@ -878,15 +886,18 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
             # Adjust max_tokens for video prompts (slightly longer than image prompts)
             max_tokens = 200 * len(texts)  # ~200 tokens per video prompt
 
+            from core.llm_params import validate_params
+            param_kwargs, _ = validate_params(
+                provider, model_id,
+                {"temperature": temperature, "max_tokens": max_tokens,
+                 "timeout": 120})
             kwargs = {
                 "model": model_id,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": batch_prompt}
                 ],
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-                "timeout": 120
+                **param_kwargs
             }
 
             if api_base:
@@ -968,23 +979,21 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
             from core.llm_models import resolve_model
             model = resolve_model('openai', 'gpt', static_default='gpt-4o')  # vision-capable
 
-        # Prepare kwargs for litellm
+        # Prepare kwargs for litellm with validated/corralled params
+        from core.llm_params import infer_provider_from_model, validate_params
+        provider = infer_provider_from_model(model)
+        param_kwargs, _ = validate_params(
+            provider, model,
+            {"temperature": temperature, "max_tokens": max_tokens,
+             "reasoning_effort": reasoning_effort,
+             "response_format": response_format},
+            on_warning=(lambda msg: console_callback(msg, "WARNING"))
+            if console_callback else None)
         kwargs = {
             'model': model,
             'messages': messages,
-            'temperature': temperature,
-            'max_tokens': max_tokens
+            **param_kwargs
         }
-
-        # Handle GPT-5 specific parameters
-        if 'gpt-5' in model.lower():
-            # GPT-5 requires temperature=1
-            kwargs['temperature'] = 1.0
-            # Note: reasoning_effort is not yet supported by the API
-            # It's a UI-only parameter for now
-
-        if response_format:
-            kwargs['response_format'] = response_format
 
         # Get appropriate API configuration
         if 'gpt' in model.lower() or 'openai' in model.lower():
@@ -1424,14 +1433,17 @@ Return only the enhanced video prompt."""
                 model_id = f"{prefix}{model}" if prefix else model
                 api_base = None
 
+            from core.llm_params import validate_params
+            param_kwargs, _ = validate_params(
+                provider, model_id,
+                {"temperature": 0.7, "max_tokens": 300})
             kwargs = {
                 "model": model_id,
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                "temperature": 0.7,
-                "max_tokens": 300
+                **param_kwargs
             }
 
             if api_base:

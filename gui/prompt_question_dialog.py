@@ -123,14 +123,22 @@ class QuestionWorker(QObject):
             if self.llm_provider.lower() == "openai":
                 model_name = self.llm_model or "gpt-4"
 
+                # Validate/corral params centrally (drops temperature for
+                # models that reject it, e.g. gpt-5 reasoning models).
+                from core.llm_params import validate_params
+                # Don't specify max_tokens - let model decide
+                validated_params, _ = validate_params(
+                    "openai", model_name, {"temperature": self.temperature},
+                    on_warning=lambda msg: self.log_message.emit(msg, "WARNING")
+                )
+
                 if use_litellm:
                     import litellm
-                    # Don't specify max_tokens - let model decide
                     response = litellm.completion(
                         model=model_name,
                         messages=messages,
-                        temperature=self.temperature,
-                        api_key=self.api_key
+                        api_key=self.api_key,
+                        **validated_params
                     )
                     answer = response.choices[0].message.content
                 else:
@@ -139,7 +147,7 @@ class QuestionWorker(QObject):
                     response = client.chat.completions.create(
                         model=model_name,
                         messages=messages,
-                        temperature=self.temperature
+                        **validated_params
                     )
                     answer = response.choices[0].message.content
 

@@ -101,6 +101,20 @@ def handle_lyrics_to_prompts(args) -> int:
     style_hint = getattr(args, "lyrics_style", None)
     output_file = getattr(args, "lyrics_output", None)
 
+    # Validate LLM params against the chosen model: corral (with a printed
+    # warning) where possible, error out otherwise.
+    from core.llm_params import (LLMParamError, infer_provider_from_model,
+                                 validate_params)
+    try:
+        _, param_warnings = validate_params(
+            infer_provider_from_model(model), model,
+            {"temperature": temperature})
+        for warning in param_warnings:
+            print(f"Warning: {warning}")
+    except LLMParamError as e:
+        print(f"Error: invalid LLM parameter: {e}")
+        return 2
+
     # Get API keys from config
     config = ConfigManager()
     config_dict = {}

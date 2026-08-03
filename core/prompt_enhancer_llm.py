@@ -10,6 +10,7 @@ from pathlib import Path
 
 from core.prompt_enhancer import PromptEnhancer, EnhancementLevel
 from core.llm_models import resolve_model
+from core.llm_params import validate_params
 from core.llm_parsing import LLMResponseParser
 
 
@@ -173,16 +174,12 @@ class PromptEnhancerLLM:
         if provider in provider_prefixes and not model_id.startswith(provider_prefixes[provider]):
             model_id = f"{provider_prefixes[provider]}{model_id}"
 
-        # Determine which token parameter to use
-        # Use max_completion_tokens for newer OpenAI models (GPT-4+, GPT-5), max_tokens for GPT-3.5 and other providers
-        if provider == "openai":
-            if "gpt-3.5" in model_id.lower():
-                token_param = "max_tokens"
-            else:
-                # GPT-4, GPT-5, and newer models use max_completion_tokens
-                token_param = "max_completion_tokens"
-        else:
-            token_param = "max_tokens"
+        # Validate params against what this provider/model actually accepts
+        # (handles max_tokens vs max_completion_tokens renaming, clamping, drops).
+        param_kwargs, _ = validate_params(
+            provider, model_id,
+            {"temperature": temperature, "max_tokens": max_tokens},
+        )
 
         kwargs = {
             "model": model_id,
@@ -190,8 +187,7 @@ class PromptEnhancerLLM:
                 {"role": "system", "content": self.enhancer.SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
-            "temperature": temperature,
-            token_param: max_tokens
+            **param_kwargs
         }
 
         # Check if LLM logging is enabled
@@ -206,8 +202,11 @@ class PromptEnhancerLLM:
         self.logger.info(f"LLM Request to {model_id} (Provider: {provider}):")
         console.info(f"LLM Request to {model_id} (Provider: {provider}):")
 
-        self.logger.info(f"  Token parameter: {token_param} = {kwargs[token_param]}")
-        console.info(f"  Token parameter: {token_param} = {kwargs[token_param]}")
+        token_param = ("max_completion_tokens" if "max_completion_tokens" in kwargs
+                       else "max_tokens")
+        if token_param in kwargs:
+            self.logger.info(f"  Token parameter: {token_param} = {kwargs[token_param]}")
+            console.info(f"  Token parameter: {token_param} = {kwargs[token_param]}")
 
         self.logger.info(f"  Temperature: {temperature}")
         console.info(f"  Temperature: {temperature}")

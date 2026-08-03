@@ -180,7 +180,13 @@ class LLMSyncAssistant:
             api_start = time.time()
             
             model_id = self.model
-            
+
+            from core.llm_params import validate_params
+            param_kwargs, _ = validate_params(
+                'openai', model_id,
+                {'temperature': 0.1,  # Very low temperature for consistent timing
+                 'response_format': {"type": "json_object"}})
+
             self.logger.info(f"Making LLM API call with model: {model_id}")
             response = self.llm_provider.litellm.completion(
                 model=model_id,
@@ -188,8 +194,7 @@ class LLMSyncAssistant:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                temperature=0.1,  # Very low temperature for consistent timing
-                response_format={"type": "json_object"}
+                **param_kwargs
             )
             
             api_elapsed = time.time() - api_start
@@ -399,8 +404,17 @@ class LLMSyncAssistant:
             import time
             api_start = time.time()
 
-            # Get provider prefix - Anthropic doesn't need a prefix for LiteLLM
-            model_id = self.model
+            # Route via the canonical provider prefix (LiteLLM: 'anthropic/<model>')
+            from core.llm_models import get_provider_prefix
+            from core.llm_params import validate_params
+
+            prefix = get_provider_prefix('anthropic')
+            model_id = f"{prefix}{self.model}" if prefix else self.model
+
+            param_kwargs, _ = validate_params(
+                'anthropic', self.model,
+                {'temperature': 0.1,  # Low temperature for consistent timing
+                 'max_tokens': 4000})
 
             self.logger.info(f"Making LLM API call with model: {model_id}")
             response = self.llm_provider.litellm.completion(
@@ -409,8 +423,7 @@ class LLMSyncAssistant:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                temperature=0.1,  # Low temperature for consistent timing
-                max_tokens=4000
+                **param_kwargs
             )
 
             api_elapsed = time.time() - api_start
@@ -634,9 +647,16 @@ class LLMSyncAssistant:
             api_start = time.time()
             
             # Use gemini prefix
-            prefix = self.llm_provider.PROVIDER_PREFIXES.get('gemini', 'gemini/')
+            from core.llm_models import get_provider_prefix
+            from core.llm_params import validate_params
+
+            prefix = get_provider_prefix('gemini')
             model_id = f"{prefix}{self.model}" if prefix else self.model
-            
+
+            param_kwargs, _ = validate_params(
+                'gemini', self.model,
+                {'temperature': 0.1})  # Low temperature for consistent timing
+
             self.logger.info(f"Making LLM API call with model: {model_id}")
             response = self.llm_provider.litellm.completion(
                 model=model_id,
@@ -644,7 +664,7 @@ class LLMSyncAssistant:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                temperature=0.1  # Low temperature for consistent timing
+                **param_kwargs
             )
             
             api_elapsed = time.time() - api_start
@@ -923,14 +943,17 @@ Return JSON with duration_sec for each scene."""
             # Call LLM
             self.logger.debug(f"Sending timing estimation request to {self.provider}")
 
-            # Handle GPT-5's temperature restriction (only supports temperature=1)
-            temperature = 1.0 if self.model and "gpt-5" in self.model.lower() else 0.3
-
+            # Per-model parameter quirks (e.g. GPT-5's fixed temperature) are
+            # corralled by core.llm_params.validate_params in the provider layer.
+            # generate() is an alias of analyze_image(messages=...) — system and
+            # user prompts must be passed as chat messages.
             response = self.llm_provider.generate(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
                 model=self.model,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=temperature,
+                temperature=0.3,
                 max_tokens=2000
             )
 

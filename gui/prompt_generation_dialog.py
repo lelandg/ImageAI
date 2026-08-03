@@ -22,6 +22,7 @@ from .common.dialog_conventions import (
 from .dialog_utils import OperationGuardMixin, guard_operation
 from .history_widget import DialogHistoryWidget
 from core.discord_rpc import discord_rpc, ActivityState
+from core.llm_params import validate_params
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -114,6 +115,12 @@ class LLMWorker(QObject):
                 console.warning("LiteLLM not installed, falling back to direct SDK")
                 use_litellm = False
 
+            def _param_warn(msg: str) -> None:
+                # Surface param corrections in the status console alongside the
+                # file log (core.llm_params already logs via its own logger).
+                console.warning(f"LLM param: {msg}")
+                self.log_message.emit(f"LLM param: {msg}", "WARNING")
+
             # Create the prompt for the LLM
             system_prompt = """You are a creative prompt engineer for AI image generation.
                 Generate creative, detailed prompts based on the user's input.
@@ -129,18 +136,13 @@ class LLMWorker(QObject):
                 model_name = self.llm_model or "gpt-4"
 
                 if use_litellm:
-                    # Use litellm for better compatibility
-                    # Adjust parameters based on model
-                    if "gpt-5" in model_name.lower():
-                        # GPT-5 specific parameters
-                        temp = 1.0  # GPT-5 only supports temperature=1
-                        # Note: reasoning_effort and verbosity are not yet supported by the API
-                        logger.info(f"  Reasoning effort: {self.reasoning_effort} (UI only - not sent to API)")
-                        console.info(f"  Reasoning effort: {self.reasoning_effort} (UI only - not sent to API)")
-                        logger.info(f"  Verbosity: {self.verbosity} (UI only - not sent to API)")
-                        console.info(f"  Verbosity: {self.verbosity} (UI only - not sent to API)")
-                    else:
-                        temp = self.temperature
+                    # Use litellm for better compatibility.
+                    # core.llm_params owns per-model corralling (GPT-5
+                    # temperature lock, max_tokens -> max_completion_tokens).
+                    llm_kwargs, _ = validate_params(
+                        "openai", model_name,
+                        {"temperature": self.temperature, "max_tokens": self.max_tokens},
+                        on_warning=_param_warn)
 
                     request_data = {
                         "model": model_name,
@@ -148,9 +150,10 @@ class LLMWorker(QObject):
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
                         ],
-                        "temperature": temp,
-                        "max_tokens": self.max_tokens  # litellm will handle conversion
+                        **llm_kwargs
                     }
+
+                    token_value = llm_kwargs.get('max_tokens', llm_kwargs.get('max_completion_tokens'))
 
                     logger.info(f"LLM Request - Sending via LiteLLM to OpenAI:")
                     console.info(f"LLM Request - Sending via LiteLLM to OpenAI:")
@@ -158,11 +161,11 @@ class LLMWorker(QObject):
                     logger.info(f"  Model: {model_name}")
                     console.info(f"  Model: {model_name}")
 
-                    logger.info(f"  Temperature: {request_data['temperature']}")
-                    console.info(f"  Temperature: {request_data['temperature']}")
+                    logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
+                    console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
 
-                    logger.info(f"  Max tokens: {request_data['max_tokens']}")
-                    console.info(f"  Max tokens: {request_data['max_tokens']}")
+                    logger.info(f"  Max tokens: {token_value}")
+                    console.info(f"  Max tokens: {token_value}")
 
                     # Clean up multi-line strings for logging
                     clean_system = system_prompt.replace('\n', ' ').strip()
@@ -180,11 +183,15 @@ class LLMWorker(QObject):
                     from openai import OpenAI
                     client = OpenAI(api_key=self.api_key)
 
-                    # Use max_completion_tokens for newer models (gpt-4, gpt-5, etc), max_tokens for gpt-3.5
-                    token_param = "max_completion_tokens" if "gpt-3.5" not in model_name.lower() else "max_tokens"
-
-                    # For gpt-5, use temperature=1 (the only supported value)
-                    temperature = 1.0 if "gpt-5" in model_name.lower() else self.temperature
+                    # core.llm_params picks the right token param name
+                    # (max_completion_tokens for reasoning models) and drops
+                    # temperature where the model rejects it (GPT-5 line).
+                    llm_kwargs, _ = validate_params(
+                        "openai", model_name,
+                        {"temperature": self.temperature, "max_tokens": self.max_tokens},
+                        on_warning=_param_warn)
+                    token_param = ("max_completion_tokens"
+                                   if "max_completion_tokens" in llm_kwargs else "max_tokens")
 
                     request_data = {
                         "model": model_name,
@@ -192,8 +199,7 @@ class LLMWorker(QObject):
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
                         ],
-                        "temperature": temperature,
-                        token_param: self.max_tokens
+                        **llm_kwargs
                     }
 
                     logger.info(f"LLM Request - Sending to OpenAI API:")
@@ -202,11 +208,11 @@ class LLMWorker(QObject):
                     logger.info(f"  Model: {request_data['model']}")
                     console.info(f"  Model: {request_data['model']}")
 
-                    logger.info(f"  Temperature: {request_data['temperature']}")
-                    console.info(f"  Temperature: {request_data['temperature']}")
+                    logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
+                    console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
 
-                    logger.info(f"  Token limit ({token_param}): {request_data[token_param]}")
-                    console.info(f"  Token limit ({token_param}): {request_data[token_param]}")
+                    logger.info(f"  Token limit ({token_param}): {request_data.get(token_param)}")
+                    console.info(f"  Token limit ({token_param}): {request_data.get(token_param)}")
 
                     # Clean up multi-line strings for logging
                     clean_system = system_prompt.replace('\n', ' ').strip()
@@ -355,14 +361,18 @@ class LLMWorker(QObject):
                         else:
                             litellm_model = model_name
 
+                    llm_kwargs, _ = validate_params(
+                        "gemini", model_name,
+                        {"temperature": self.temperature, "max_tokens": self.max_tokens},
+                        on_warning=_param_warn)
+
                     request_data = {
                         "model": litellm_model,
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
                         ],
-                        "temperature": self.temperature,
-                        "max_tokens": self.max_tokens
+                        **llm_kwargs
                     }
 
                     # Only add API key if provided (for API key auth mode)
@@ -381,11 +391,11 @@ class LLMWorker(QObject):
                     logger.info(f"  Model: {request_data['model']}")
                     console.info(f"  Model: {request_data['model']}")
 
-                    logger.info(f"  Temperature: {request_data['temperature']}")
-                    console.info(f"  Temperature: {request_data['temperature']}")
+                    logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
+                    console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
 
-                    logger.info(f"  Max tokens: {request_data['max_tokens']}")
-                    console.info(f"  Max tokens: {request_data['max_tokens']}")
+                    logger.info(f"  Max tokens: {request_data.get('max_tokens')}")
+                    console.info(f"  Max tokens: {request_data.get('max_tokens')}")
 
                     # Clean up multi-line strings for logging
                     clean_system = system_prompt.replace('\n', ' ').strip()
@@ -518,14 +528,19 @@ class LLMWorker(QObject):
                 if use_litellm:
                     # Use litellm with Anthropic provider - must prefix with "anthropic/"
                     litellm_model = f"anthropic/{model_name}"
+                    # core.llm_params drops sampling params the Claude 5-line
+                    # rejects and clamps temperature to 0..1 for older models.
+                    llm_kwargs, _ = validate_params(
+                        "anthropic", model_name,
+                        {"temperature": self.temperature, "max_tokens": self.max_tokens},
+                        on_warning=_param_warn)
                     request_data = {
                         "model": litellm_model,
                         "messages": [
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt}
                         ],
-                        "temperature": self.temperature,
-                        "max_tokens": self.max_tokens,
+                        **llm_kwargs,
                         "api_key": self.api_key  # Pass API key directly to LiteLLM
                     }
 
@@ -535,11 +550,11 @@ class LLMWorker(QObject):
                     logger.info(f"  Model: {litellm_model} (original: {model_name})")
                     console.info(f"  Model: {litellm_model} (original: {model_name})")
 
-                    logger.info(f"  Temperature: {request_data['temperature']}")
-                    console.info(f"  Temperature: {request_data['temperature']}")
+                    logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
+                    console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
 
-                    logger.info(f"  Max tokens: {request_data['max_tokens']}")
-                    console.info(f"  Max tokens: {request_data['max_tokens']}")
+                    logger.info(f"  Max tokens: {request_data.get('max_tokens')}")
+                    console.info(f"  Max tokens: {request_data.get('max_tokens')}")
 
                     # Clean up multi-line strings for logging
                     clean_system = system_prompt.replace('\n', ' ').strip()
@@ -557,14 +572,24 @@ class LLMWorker(QObject):
                     from anthropic import Anthropic
                     client = Anthropic(api_key=self.api_key)
 
+                    # Validate through core.llm_params; the anthropic SDK takes
+                    # the same key names (temperature/max_tokens/top_p/top_k).
+                    llm_kwargs, _ = validate_params(
+                        "anthropic", model_name,
+                        {"temperature": self.temperature, "max_tokens": self.max_tokens},
+                        on_warning=_param_warn)
+                    sdk_params = {k: v for k, v in llm_kwargs.items()
+                                  if k in ("temperature", "max_tokens", "top_p", "top_k")}
+                    # The anthropic SDK requires max_tokens
+                    sdk_params.setdefault("max_tokens", self.max_tokens)
+
                     request_data = {
                         "model": model_name,
                         "messages": [
                             {"role": "user", "content": user_prompt}
                         ],
                         "system": system_prompt,
-                        "temperature": self.temperature,
-                        "max_tokens": self.max_tokens
+                        **sdk_params
                     }
 
                     logger.info(f"LLM Request - Sending to Claude API:")
@@ -573,11 +598,11 @@ class LLMWorker(QObject):
                     logger.info(f"  Model: {request_data['model']}")
                     console.info(f"  Model: {request_data['model']}")
 
-                    logger.info(f"  Temperature: {request_data['temperature']}")
-                    console.info(f"  Temperature: {request_data['temperature']}")
+                    logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
+                    console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
 
-                    logger.info(f"  Max tokens: {request_data['max_tokens']}")
-                    console.info(f"  Max tokens: {request_data['max_tokens']}")
+                    logger.info(f"  Max tokens: {request_data.get('max_tokens')}")
+                    console.info(f"  Max tokens: {request_data.get('max_tokens')}")
 
                     # Clean up multi-line strings for logging
                     clean_system = system_prompt.replace('\n', ' ').strip()
@@ -1169,13 +1194,14 @@ class PromptGenerationDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         if is_gpt5:
             reasoning = self.reasoning_combo.currentText()
             verbosity = self.verbosity_combo.currentText()
-            temperature = 1.0  # GPT-5 only supports temperature=1
             max_tokens = 1500  # Default for GPT-5
         else:
             reasoning = "medium"
             verbosity = "medium"
-            temperature = self.temperature_spin.value()
             max_tokens = self.max_tokens_spin.value()
+        # Pass the user's temperature as-is; core.llm_params corrals it per
+        # model (e.g. drops it for models that only accept the default).
+        temperature = self.temperature_spin.value()
 
         # Ensure sufficient tokens for the requested number of variations
         # Each detailed prompt needs ~150 tokens, plus overhead for JSON formatting

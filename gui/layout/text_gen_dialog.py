@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, QThread, Signal, QSettings
 from core.config import ConfigManager
 from core.layout.models import TextBlock, DocumentSpec
 from core.llm_models import get_provider_models, get_provider_prefix
+from core.llm_params import validate_params
 from core.discord_rpc import discord_rpc, ActivityState
 from gui.llm_utils import DialogStatusConsole, LiteLLMHandler, LLMResponseParser
 from ..common.dialog_conventions import (
@@ -125,11 +126,17 @@ class TextGenerationWorker(QThread):
             self.progress.emit(f"Calling {model}...")
             messages = [{"role": "user", "content": prompt}]
 
-            # Handle temperature parameter compatibility
+            # Validate/corral params centrally (clamps ranges, drops
+            # temperature for models that reject it)
+            validated_params, _ = validate_params(
+                provider_id, model_name, {"temperature": self.temperature},
+                on_warning=self.progress.emit
+            )
+
             completion_kwargs = {
                 "model": model,
                 "messages": messages,
-                "temperature": self.temperature
+                **validated_params
             }
 
             # Only add API key if provided (for API key auth mode)
