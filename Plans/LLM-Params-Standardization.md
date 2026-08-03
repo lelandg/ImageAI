@@ -1,8 +1,14 @@
 # LLM Parameter Standardization
 
-**Status:** In progress
+**Status:** Complete (v0.44.0) — all rollout steps done 2026-08-03
 **Started:** 2026-08-03
 **Branch:** `feat/llm-param-standardization`
+
+> Outcome: 26 unit tests + 19 live boundary tests all green (Anthropic,
+> OpenAI, Gemini); full suite 683 passed. Style-analyzer regression verified
+> live on claude-opus-5 and claude-sonnet-5. Two additional silent bugs fixed
+> beyond the plan: `generate()` keyword mismatch in duration estimation, and
+> missing `anthropic/` prefixes in storyboard/llm-sync paths.
 
 ## Trigger bug (root cause)
 
