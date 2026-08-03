@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.0] - 2026-08-03
+
+### Added
+- Unified LLM parameter validation layer (`core/llm_params.py`): every chat
+  call now populates, validates, and corrals its parameters against curated
+  per-model rules (clamp out-of-range values, drop unsupported ones with a
+  logged warning, error on nonsense). Registry-backed output-token caps and
+  automatic `max_tokens` → `max_completion_tokens` renaming for OpenAI
+  reasoning models.
+- Live API boundary test suite (`tests/test_live_llm_params.py`, pytest
+  marker `live`, gated by `IMAGEAI_LIVE_TESTS=1`) verifying documented
+  parameter limits against the real Anthropic, OpenAI, and Gemini APIs,
+  plus 26 offline unit tests for the rules engine.
+- CLI: `--lyrics-temperature` is validated against the chosen model —
+  corralled values print a warning; invalid values exit with an error.
+
+### Fixed
+- Style analysis no longer fails with an Anthropic 400 ("`temperature` is
+  deprecated for this model") on Claude 5-family models — the layer drops
+  sampling params these models reject (LiteLLM's own table is wrong here,
+  so `drop_params` never protected us).
+- Lyric timing sync: two silent failures that degraded every LLM sync to
+  estimation — a nonexistent `PROVIDER_PREFIXES` attribute (AttributeError
+  swallowed by broad except) and a `generate()` keyword mismatch in
+  duration estimation (TypeError swallowed likewise).
+- Storyboard generation and lyric sync now send the required `anthropic/`
+  route prefix for Claude models instead of bare model IDs.
+
+### Changed
+- Removed all scattered per-model request hacks (GPT-5 `temperature=1.0`
+  forcing and token-param ternaries, duplicated across five dialogs and
+  engines) in favor of the central rules table.
+
 ## [0.43.0] - 2026-07-29
 
 ### Added
