@@ -9,7 +9,8 @@ import logging
 from typing import Optional
 from dataclasses import dataclass
 
-from core.llm_models import resolve_model
+from core.llm_models import get_provider_prefix, resolve_model
+from core.llm_params import normalize_provider, validate_params
 
 
 @dataclass
@@ -96,27 +97,25 @@ Describe a natural ending frame for this scene."""
             # Call LLM provider
             import litellm
 
-            # Prepare model string
-            if provider == 'gemini':
-                model_id = f"gemini/{model}"
-            elif provider == 'openai':
-                model_id = model
-            elif provider == 'anthropic' or provider == 'claude':
-                model_id = model
-            else:
-                model_id = model
+            # Prepare model string (anthropic/gemini need LiteLLM prefixes)
+            provider_id = normalize_provider(provider)
+            prefix = get_provider_prefix(provider_id)
+            model_id = f"{prefix}{model}" if prefix else model
 
             self.logger.info(f"Generating end prompt with {provider}/{model}")
             self.logger.debug(f"Context: start='{context.start_prompt[:50]}...', next='{context.next_start_prompt[:50] if context.next_start_prompt else 'None'}...'")
 
+            llm_kwargs, _ = validate_params(
+                provider_id, model,
+                {"temperature": temperature, "max_tokens": 150}
+            )
             response = litellm.completion(
                 model=model_id,
                 messages=[
                     {"role": "system", "content": self.SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=temperature,
-                max_tokens=150
+                **llm_kwargs
             )
 
             # Extract response text

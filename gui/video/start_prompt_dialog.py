@@ -168,18 +168,24 @@ Generate a detailed visual description suitable for AI image generation."""
         import litellm
         litellm.drop_params = True
 
+        from core.llm_params import build_completion_kwargs
+
         self.logger.info(f"Calling LLM with provider={self.provider}, model={self.model}")
         self.logger.info(f"User prompt: {user_prompt}")
 
-        response = litellm.completion(
-            model=f"{self.provider}/{self.model}",
-            messages=[
+        # Centralized param validation + route prefixing (normalizes provider
+        # display names like 'google'/'claude' to their LiteLLM routes).
+        completion_kwargs = build_completion_kwargs(
+            self.provider,
+            self.model,
+            [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
-            temperature=0.7,
-            api_key=self.api_key
+            {"temperature": 0.7},
+            api_key=self.api_key,
         )
+        response = litellm.completion(**completion_kwargs)
 
         prompt = response.choices[0].message.content.strip()
         self.logger.info(f"Generated prompt: {prompt}")

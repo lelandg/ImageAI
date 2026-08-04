@@ -311,6 +311,7 @@ def run_completion(config, provider: str, model: str, messages: List[Dict],
     """Real LLM call (mirrors TextGenerationWorker). Not unit-tested (network)."""
     from gui.llm_utils import LiteLLMHandler
     from core.llm_models import get_provider_models, get_provider_prefix
+    from core.llm_params import validate_params
     ok, litellm = LiteLLMHandler.setup_litellm(enable_console_logging=True)
     if not ok or litellm is None:
         raise RuntimeError("Failed to initialize LiteLLM")
@@ -331,7 +332,8 @@ def run_completion(config, provider: str, model: str, messages: List[Dict],
     full_model = f"{prefix}{model_name}" if prefix else model_name
     logger.info("Designer LLM request: provider=%s model=%s temperature=%s\nmessages=%s",
                 provider, full_model, temperature, messages)
-    kwargs = {"model": full_model, "messages": messages, "temperature": temperature}
+    param_kwargs, _ = validate_params(pid, full_model, {"temperature": temperature})
+    kwargs = {"model": full_model, "messages": messages, **param_kwargs}
     if api_key:
         kwargs["api_key"] = api_key
     resp = litellm.completion(**kwargs)

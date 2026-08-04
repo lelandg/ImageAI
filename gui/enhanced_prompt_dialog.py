@@ -596,13 +596,14 @@ class EnhancedPromptDialog(QDialog, OperationGuardMixin):
         if is_gpt5:
             reasoning = self.reasoning_combo.currentText()
             verbosity = self.verbosity_combo.currentText()
-            temperature = 1.0  # GPT-5 only supports temperature=1
             max_tokens = 1000  # Default for GPT-5
         else:
             reasoning = "medium"
             verbosity = "medium"
-            temperature = self.temperature_spin.value()
             max_tokens = self.max_tokens_spin.value()
+        # Pass the user's temperature as-is; core.llm_params corrals it per
+        # model (e.g. drops it for models that only accept the default).
+        temperature = self.temperature_spin.value()
 
         self.worker = EnhanceWorker(
             prompt,

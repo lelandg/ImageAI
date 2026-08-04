@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
 from core.llm_models import resolve_model
+from core.llm_params import infer_provider_from_model, validate_params
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -205,6 +206,14 @@ Rules:
             console.info(f"Style: {style_hint}")
 
         try:
+            # Validate params against what this provider/model actually accepts.
+            provider_id = infer_provider_from_model(model)
+            param_kwargs, _ = validate_params(
+                provider_id, model,
+                {"temperature": temperature, "max_tokens": 4096},
+                on_warning=console.warning,
+            )
+
             # Call LLM
             response = self.litellm.completion(
                 model=model,
@@ -212,8 +221,7 @@ Rules:
                     {"role": "system", "content": self.SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt}
                 ],
-                temperature=temperature,
-                max_tokens=4096
+                **param_kwargs
             )
 
             raw_content = response.choices[0].message.content
