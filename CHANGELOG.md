@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.1] - 2026-08-04
+
+### Fixed
+- CLI `--size` now reaches the Google provider: `--size 2160x3840` with Nano Banana Pro selects the 4K tier and the right aspect ratio instead of silently generating a 1K image. The GUI was unaffected.
+- `edit_image` (CLI `--reference` path) on Google now honors sizing via `image_config` (aspect ratio, and the 1K/2K/4K tier on Nano Banana Pro); without an explicit size it keeps following the input image as before.
+- The CLI only forwards `--size`/`--custom-size` when explicitly given, so each provider's own default resolution wins on unsized runs.
+
 ## [0.44.0] - 2026-08-03
 
 ### Added
