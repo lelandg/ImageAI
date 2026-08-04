@@ -83,6 +83,11 @@ class LLMParams:
     @classmethod
     def from_dict(cls, values: Dict[str, Any]) -> "LLMParams":
         known = {f for f in cls.__dataclass_fields__}
+        unknown = set(values) - known
+        if unknown:
+            # A typo here (e.g. 'max_completion_tokens' instead of 'max_tokens')
+            # would otherwise silently drop the caller's constraint.
+            logger.warning(f"ignoring unknown LLM params: {sorted(unknown)}")
         return cls(**{k: v for k, v in values.items() if k in known})
 
 
@@ -103,6 +108,7 @@ class ModelParamRules:
     supports_reasoning_effort: bool = False
     supports_verbosity: bool = False
     supports_response_format: bool = True
+    supports_seed: bool = True
     description: str = ""  # short label used in warnings
 
 
@@ -127,6 +133,7 @@ _FAMILY_RULES: List[_FamilyRule] = [
             top_k_supported=False,
             tokens_param="max_tokens",
             supports_reasoning_effort=False,
+            supports_seed=False,
             description="Claude 5-line (no sampling params)",
         ),
     ),
@@ -141,6 +148,7 @@ _FAMILY_RULES: List[_FamilyRule] = [
             top_k_supported=True,
             temp_top_p_exclusive=True,
             tokens_param="max_tokens",
+            supports_seed=False,
             description="Claude 4.x/3.x (temperature 0-1)",
         ),
     ),
@@ -279,7 +287,9 @@ def _litellm_max_output_tokens(provider_id: str, model_id: str) -> Optional[int]
         import litellm
         prefix = get_provider_prefix(provider_id)
         info = litellm.get_model_info(f"{prefix}{model_id}" if prefix else model_id)
-        return info.get("max_output_tokens") or info.get("max_tokens")
+        # Only trust the explicit output cap: in older LiteLLM table entries
+        # 'max_tokens' means the total context window, not the output ceiling.
+        return info.get("max_output_tokens")
     except Exception:
         return None
 
@@ -450,7 +460,10 @@ def validate_params(
     if params.timeout is not None:
         out["timeout"] = params.timeout
     if params.seed is not None:
-        out["seed"] = params.seed
+        if rules.supports_seed:
+            out["seed"] = params.seed
+        else:
+            corral(f"seed not supported by {model}; dropped")
     if params.stop is not None:
         out["stop"] = params.stop
 
@@ -465,6 +478,7 @@ def build_completion_kwargs(
     *,
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
+    auth_mode: Optional[str] = None,
     strict: bool = False,
     on_warning: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
@@ -473,6 +487,11 @@ def build_completion_kwargs(
     Handles route prefixing per provider (``anthropic/``, ``gemini/`` vs
     ``vertex_ai/`` by auth mode, bare model + ``api_base`` for LM Studio) and
     merges the corralled parameters from :func:`validate_params`.
+
+    Gemini routing: ``auth_mode`` ('api-key' -> ``gemini/``, 'gcloud'/'adc' ->
+    ``vertex_ai/``) wins when given; otherwise the presence of ``api_key``
+    decides (present -> Google AI Studio, absent -> Vertex AI/ADC). Callers
+    relying on the ``GEMINI_API_KEY`` env var must pass ``auth_mode='api-key'``.
     """
     if not model or not str(model).strip():
         raise LLMParamError(f"no model specified for provider {provider!r}")
@@ -480,16 +499,23 @@ def build_completion_kwargs(
     provider_id = normalize_provider(provider)
     model_id = str(model).strip()
 
-    if "/" in model_id:
-        routed_model = model_id  # caller already prefixed — honor it
-    elif provider_id == "gemini":
-        # API-key auth -> Google AI Studio; otherwise gcloud/ADC -> Vertex AI.
-        routed_model = f"gemini/{model_id}" if api_key else f"vertex_ai/{model_id}"
-    elif provider_id == "lmstudio":
-        routed_model = model_id  # OpenAI-compatible local server via api_base
+    if provider_id == "lmstudio":
+        # OpenAI-compatible local server via api_base. Checked before the
+        # route-prefix test: LM Studio model ids often contain slashes
+        # (e.g. 'lmstudio-community/Meta-Llama-3-8B-GGUF') that are not routes.
+        routed_model = model_id
         if api_base is None:
             config = LLM_PROVIDERS.get("lmstudio")
             api_base = config.endpoint if config else None
+    elif any(model_id.startswith(p) for p in _ROUTE_PREFIXES):
+        routed_model = model_id  # caller already prefixed — honor it
+    elif provider_id == "gemini":
+        if auth_mode:
+            use_api_key_route = auth_mode.strip().lower() in ("api-key", "api_key")
+        else:
+            use_api_key_route = bool(api_key)
+        routed_model = (f"gemini/{model_id}" if use_api_key_route
+                        else f"vertex_ai/{model_id}")
     else:
         prefix = get_provider_prefix(provider_id)
         routed_model = f"{prefix}{model_id}" if prefix else model_id

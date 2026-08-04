@@ -38,9 +38,10 @@ _TIMEOUT = 90
 @pytest.fixture(scope="module")
 def litellm_mod():
     litellm = pytest.importorskip("litellm")
+    saved = litellm.drop_params
     litellm.drop_params = False  # raw tests must NOT be silently rescued
     yield litellm
-    litellm.drop_params = True
+    litellm.drop_params = saved
 
 
 @pytest.fixture(scope="module")

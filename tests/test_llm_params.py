@@ -7,6 +7,7 @@ from core.llm_params import (
     LLMParams,
     build_completion_kwargs,
     get_param_rules,
+    infer_provider_from_model,
     normalize_provider,
     strip_route_prefix,
     validate_params,
@@ -223,3 +224,57 @@ def test_build_kwargs_lmstudio_uses_api_base():
 def test_build_kwargs_requires_model():
     with pytest.raises(LLMParamError):
         build_completion_kwargs("openai", "", _MSGS)
+
+
+def test_build_kwargs_lmstudio_slash_model_id():
+    # LM Studio ids often contain slashes that are NOT litellm route prefixes;
+    # api_base must still be wired (PR #40 review, suggestion 1).
+    kwargs = build_completion_kwargs(
+        "lmstudio", "lmstudio-community/Meta-Llama-3-8B-GGUF", _MSGS)
+    assert kwargs["model"] == "lmstudio-community/Meta-Llama-3-8B-GGUF"
+    assert kwargs["api_base"] == "http://localhost:1234/v1"
+
+
+def test_build_kwargs_gemini_auth_mode_overrides_key_presence():
+    # auth_mode wins over api_key presence (PR #40 review, suggestion 2)
+    env_key_route = build_completion_kwargs(
+        "Google", "gemini-2.5-flash", _MSGS, auth_mode="api-key")
+    assert env_key_route["model"] == "gemini/gemini-2.5-flash"
+    forced_vertex = build_completion_kwargs(
+        "Google", "gemini-2.5-flash", _MSGS, api_key="k", auth_mode="gcloud")
+    assert forced_vertex["model"] == "vertex_ai/gemini-2.5-flash"
+
+
+# --- infer_provider_from_model ------------------------------------------------
+
+def test_infer_provider_from_model():
+    assert infer_provider_from_model("anthropic/claude-opus-5") == "anthropic"
+    assert infer_provider_from_model("claude-sonnet-5") == "anthropic"
+    assert infer_provider_from_model("vertex_ai/gemini-2.5-flash") == "gemini"
+    assert infer_provider_from_model("gemini-2.0-flash") == "gemini"
+    assert infer_provider_from_model("gpt-4o") == "openai"
+    assert infer_provider_from_model("o4-mini") == "openai"
+    assert infer_provider_from_model("ollama/llama3.2:latest") == "ollama"
+    # bare local model names fall back to the default provider
+    assert infer_provider_from_model("local-model") == "openai"
+    assert infer_provider_from_model("local-model", default="lmstudio") == "lmstudio"
+
+
+# --- review follow-ups: seed + unknown keys ----------------------------------
+
+def test_seed_dropped_on_anthropic():
+    kwargs, warnings = validate_params(
+        "anthropic", "claude-sonnet-5", LLMParams(seed=42, max_tokens=32))
+    assert "seed" not in kwargs
+    assert warnings
+    kwargs, _ = validate_params("openai", "gpt-4o", LLMParams(seed=42))
+    assert kwargs["seed"] == 42
+
+
+def test_unknown_dict_keys_warn_but_do_not_crash(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="core.llm_params"):
+        kwargs, _ = validate_params(
+            "openai", "gpt-4o", {"temperature": 0.3, "max_completion_tokens": 99})
+    assert kwargs == {"temperature": 0.3}
+    assert any("unknown LLM params" in r.message for r in caplog.records)
