@@ -215,8 +215,15 @@ def run_cli(args) -> int:
     if custom_size and getattr(args, "size", None) is not None:
         print("Error: --custom-size and --size are mutually exclusive (drop --size).")
         return 2
-    # Resolve effective size for the rest of the run.
-    effective_size = custom_size or getattr(args, "size", None) or "1024x1024"
+    # Resolve effective size for the rest of the run. user_size stays None
+    # unless the user explicitly chose a size, so providers can keep their
+    # own defaults (e.g. Google's model-native resolution) when unset.
+    user_size = custom_size or getattr(args, "size", None)
+    effective_size = user_size or "1024x1024"
+    # Splat into generate/edit calls: omit the kwarg entirely when unset so
+    # each provider's own default wins (an explicit size=None would clobber
+    # e.g. OpenAI's "1024x1024" signature default).
+    size_kwargs = {"size": user_size} if user_size else {}
 
     # Handle help for API key setup
     if getattr(args, "help_api_key", False):
@@ -473,8 +480,8 @@ def run_cli(args) -> int:
                     prompt=args.prompt,
                     model=model,
                     mask=mask_bytes,
-                    size=effective_size,
                     n=int(getattr(args, "num_images", 1) or 1),
+                    **size_kwargs,
                     **kwargs,
                 )
             elif stream_partials:
@@ -503,9 +510,9 @@ def run_cli(args) -> int:
                 texts, images = provider_instance.generate(
                     prompt=args.prompt,
                     model=model,
-                    size=effective_size,
                     quality=quality_kw,
                     n=1,
+                    **size_kwargs,
                     **kwargs,
                 )
             else:
@@ -514,9 +521,9 @@ def run_cli(args) -> int:
                 texts, images = provider_instance.generate(
                     prompt=args.prompt,
                     model=model,
-                    size=effective_size,
                     quality=quality_kw,
                     n=int(getattr(args, "num_images", 1) or 1),
+                    **size_kwargs,
                     **kwargs,
                 )
 

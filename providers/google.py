@@ -454,6 +454,52 @@ class GoogleProvider(ImageProvider):
             'error_message': ''
         })
 
+    # Aspect ratios supported by Gemini image models, with decimal values.
+    VALID_ASPECT_RATIOS = [
+        ("1:1", 1.0),
+        ("21:9", 21 / 9),    # 2.33 - ultrawide
+        ("16:9", 16 / 9),    # 1.78 - widescreen
+        ("3:2", 3 / 2),      # 1.5
+        ("4:3", 4 / 3),      # 1.33
+        ("5:4", 5 / 4),      # 1.25
+        ("4:5", 4 / 5),      # 0.8
+        ("3:4", 3 / 4),      # 0.75
+        ("2:3", 2 / 3),      # 0.67
+        ("9:16", 9 / 16),    # 0.5625 - portrait widescreen
+    ]
+
+    @staticmethod
+    def _parse_size(size) -> Optional[Tuple[int, int]]:
+        """Parse a "WxH" size string into (width, height), or None."""
+        if not isinstance(size, str):
+            return None
+        parts = size.lower().replace('×', 'x').split('x')
+        if len(parts) != 2:
+            return None
+        try:
+            width, height = int(parts[0].strip()), int(parts[1].strip())
+        except ValueError:
+            return None
+        if width <= 0 or height <= 0:
+            return None
+        return width, height
+
+    @classmethod
+    def closest_aspect_ratio(cls, width: int, height: int) -> str:
+        """Map dimensions to the closest Gemini-supported aspect ratio."""
+        ratio = width / height
+        return min(cls.VALID_ASPECT_RATIOS, key=lambda x: abs(ratio - x[1]))[0]
+
+    @staticmethod
+    def _nbp_image_size(width: Optional[int], height: Optional[int]) -> str:
+        """Nano Banana Pro output tier ('1K'/'2K'/'4K') for target dimensions."""
+        max_dim = max(width or 1024, height or 1024)
+        if max_dim <= 1024:
+            return '1K'
+        if max_dim <= 2048:
+            return '2K'
+        return '4K'
+
     def generate(
         self,
         prompt: str,
@@ -529,6 +575,14 @@ class GoogleProvider(ImageProvider):
         width = kwargs.get('width')
         height = kwargs.get('height')
         aspect_ratio = kwargs.get('aspect_ratio')
+
+        # The CLI (and API-parity callers) pass size="WxH" like the other
+        # providers; honor it whenever explicit width/height aren't given.
+        if not (width and height):
+            parsed = self._parse_size(kwargs.get('size'))
+            if parsed:
+                width, height = parsed
+                logger.info(f"Parsed size '{kwargs.get('size')}' -> {width}x{height}")
         crop_to_aspect = kwargs.get('crop_to_aspect', False)  # Only crop if explicitly requested
 
         # If aspect_ratio is provided without dimensions, calculate them
@@ -575,22 +629,14 @@ class GoogleProvider(ImageProvider):
         if is_nano_banana_pro:
             # Auto-determine output_quality from requested dimensions
             # This allows users to just set dimensions and get the right quality tier
-            max_dim = max(width or 1024, height or 1024)
-            if max_dim <= 1024:
-                output_quality = '1k'
-                max_output_dim = 1024
-            elif max_dim <= 2048:
-                output_quality = '2k'
-                max_output_dim = 2048
-            else:
-                output_quality = '4k'
-                max_output_dim = 4096
+            quality_max_dims = {'1k': 1024, '2k': 2048, '4k': 4096}
+            output_quality = self._nbp_image_size(width, height).lower()
+            max_output_dim = quality_max_dims[output_quality]
 
             # Allow explicit override if provided
             explicit_quality = kwargs.get('output_quality')
             if explicit_quality:
                 output_quality = explicit_quality.lower()
-                quality_max_dims = {'1k': 1024, '2k': 2048, '4k': 4096}
                 max_output_dim = quality_max_dims.get(output_quality, max_output_dim)
 
             logger.info(f"Nano Banana Pro: {output_quality.upper()} quality tier (max {max_output_dim}px) for {width}x{height}")
@@ -639,24 +685,8 @@ class GoogleProvider(ImageProvider):
         # IMPORTANT: Gemini only supports these aspect ratios:
         # '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'
         if width and height and not aspect_ratio:
-            ratio = width / height
-            # Valid Gemini aspect ratios with their decimal values
-            valid_ratios = [
-                ("1:1", 1.0),
-                ("21:9", 21/9),    # 2.33 - ultrawide
-                ("16:9", 16/9),    # 1.78 - widescreen
-                ("3:2", 3/2),      # 1.5
-                ("4:3", 4/3),      # 1.33
-                ("5:4", 5/4),      # 1.25
-                ("4:5", 4/5),      # 0.8
-                ("3:4", 3/4),      # 0.75
-                ("2:3", 2/3),      # 0.67
-                ("9:16", 9/16),    # 0.5625 - portrait widescreen
-            ]
-            # Find the closest valid aspect ratio
-            closest_ratio = min(valid_ratios, key=lambda x: abs(ratio - x[1]))
-            aspect_ratio = closest_ratio[0]
-            logger.info(f"Mapped {width}x{height} (ratio {ratio:.3f}) to closest valid Gemini aspect ratio: {aspect_ratio} ({closest_ratio[1]:.3f})")
+            aspect_ratio = self.closest_aspect_ratio(width, height)
+            logger.info(f"Mapped {width}x{height} (ratio {width / height:.3f}) to closest valid Gemini aspect ratio: {aspect_ratio}")
 
         # Calculate default dimensions if we have aspect ratio but no dimensions
         # All valid Gemini aspect ratios with max dimension of 1024px
@@ -1818,12 +1848,50 @@ class GoogleProvider(ImageProvider):
         texts: List[str] = []
         images: List[bytes] = []
 
+        # Honor sizing the same way generate() does: explicit width/height
+        # kwargs win, then a "WxH" size string. Without either, keep the
+        # model's default behavior (it follows the input image).
+        width = kwargs.get('width')
+        height = kwargs.get('height')
+        if not (width and height):
+            parsed = self._parse_size(kwargs.get('size'))
+            if parsed:
+                width, height = parsed
+        aspect_ratio = kwargs.get('aspect_ratio')
+        if width and height and not aspect_ratio:
+            aspect_ratio = self.closest_aspect_ratio(width, height)
+
+        config = None
+        image_config_kwargs = {}
+        if aspect_ratio:
+            image_config_kwargs['aspect_ratio'] = aspect_ratio
+        if model and 'gemini-3-pro' in model and width and height:
+            image_config_kwargs['image_size'] = self._nbp_image_size(width, height)
+        if image_config_kwargs:
+            try:
+                from google.genai import types
+                config = types.GenerateContentConfig(
+                    response_modalities=["TEXT", "IMAGE"],
+                    image_config=types.ImageConfig(**image_config_kwargs),
+                )
+                logger.info(f"edit_image: applying image_config {image_config_kwargs}")
+            except Exception as e:
+                logger.warning(f"edit_image: could not build image_config ({e}); using model defaults")
+                config = None
+
         try:
             # Gemini can process images as input
-            response = self.client.models.generate_content(
-                model=model,
-                contents=[prompt, *self._edit_input_parts(image)],
-            )
+            if config:
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=[prompt, *self._edit_input_parts(image)],
+                    config=config,
+                )
+            else:
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=[prompt, *self._edit_input_parts(image)],
+                )
 
             if response and response.candidates:
                 cand = response.candidates[0]
