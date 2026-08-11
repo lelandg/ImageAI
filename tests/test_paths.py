@@ -232,3 +232,42 @@ def test_styles_store_uses_the_images_root(tmp_path, monkeypatch):
     from core.styles.store import StyleStore
 
     assert StyleStore().base_dir == images / "styles"
+
+
+def test_local_sd_cache_uses_the_models_root(tmp_path, monkeypatch):
+    import core.paths as paths_mod
+
+    models = tmp_path / "M"
+    models.mkdir()
+    cfg = _write_config(tmp_path, {"data_roots": {"models": str(models)}})
+    monkeypatch.setattr(paths_mod, "_INSTANCE", paths_mod.DataPaths(config_path=cfg))
+
+    from providers.local_sd import LocalSDProvider
+
+    provider = LocalSDProvider({})
+    assert provider.cache_dir == models / "huggingface"
+
+
+def test_explicit_cache_dir_config_still_wins(tmp_path, monkeypatch):
+    """The pre-existing config key keeps working for anyone who set it."""
+    import core.paths as paths_mod
+
+    models = tmp_path / "M"
+    custom = tmp_path / "custom"
+    for d in (models, custom):
+        d.mkdir()
+    cfg = _write_config(tmp_path, {"data_roots": {"models": str(models)}})
+    monkeypatch.setattr(paths_mod, "_INSTANCE", paths_mod.DataPaths(config_path=cfg))
+
+    from providers.local_sd import LocalSDProvider
+
+    provider = LocalSDProvider({"cache_dir": str(custom)})
+    assert provider.cache_dir == custom
+
+
+def test_character_animator_keeps_the_shared_hub_path():
+    """The shared HuggingFace hub belongs to other tools and must not move."""
+    import pathlib
+
+    text = pathlib.Path("core/character_animator/installer.py").read_text(encoding="utf-8")
+    assert '".cache" / "huggingface"' in text or '.cache/huggingface' in text

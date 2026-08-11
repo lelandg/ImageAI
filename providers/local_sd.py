@@ -119,7 +119,10 @@ class LocalSDProvider(ImageProvider):
         super().__init__(config)
         
         self.model_id = config.get("model", "stabilityai/stable-diffusion-2-1")
-        self.cache_dir = config.get("cache_dir", Path.home() / ".cache" / "huggingface")
+        from core.paths import get_data_paths
+
+        configured = config.get("cache_dir")
+        self.cache_dir = Path(configured) if configured else get_data_paths().huggingface()
         self.device_manager = DeviceManager() if ML_AVAILABLE else None
         self.pipeline = None
         self.current_model = None
