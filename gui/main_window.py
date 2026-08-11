@@ -7595,6 +7595,109 @@ For more detailed information, please refer to the full documentation.
                     # Silently ignore resize errors during rapid resizing
                     pass
     
+    def close_data_handles(self, group):
+        """Release the files this process holds under one storage group.
+
+        The Storage Locations widget calls this before it moves a group.
+        Windows refuses to rename or delete a file that a process still holds
+        open, so every handle this process can release must close first. A
+        handle this process cannot release is logged at warning level. A
+        silent hook hides the cause of a failed move.
+
+        Args:
+            group: the core.paths.Group being moved.
+        """
+        import gc
+        import sys
+
+        from core.paths import Group
+
+        log = getattr(self, "logger", None) or logger
+        try:
+            group = group if isinstance(group, Group) else Group(group)
+        except ValueError:
+            log.error("Unknown storage group %r; no handles were released", group)
+            return
+
+        log.info("Releasing open %s files before the move", group.value)
+
+        # Buffered records must reach disk before the copy reads the files.
+        for handler in list(logging.getLogger().handlers):
+            try:
+                handler.flush()
+            except Exception as exc:
+                log.warning("Could not flush the %s log handler: %s",
+                            type(handler).__name__, exc)
+
+        if group is Group.IMAGES:
+            watcher = getattr(self, "midjourney_watcher", None)
+            if watcher is not None and getattr(watcher, "enabled", False):
+                try:
+                    watcher.set_enabled(False)
+                    self._midjourney_watch_paused = True
+                    log.info("Paused the Midjourney watcher for the move")
+                except Exception as exc:
+                    log.warning("Could not pause the Midjourney watcher: %s", exc)
+
+        elif group is Group.VIDEO:
+            workspace = None
+            if getattr(self, "_video_tab_loaded", False):
+                video_tab = getattr(self, "tab_video", None)
+                workspace = getattr(video_tab, "workspace", None)
+            if workspace is not None and getattr(workspace, "current_project", None):
+                try:
+                    workspace.save_project()
+                    log.info("Saved the open video project before the move")
+                except Exception as exc:
+                    log.warning("Could not save the open video project: %s", exc)
+
+            # EventStore opens a SQLite connection per call and closes it by
+            # reference count. Drop the cached stores, then collect, so no
+            # connection holds events.db open while the file moves.
+            video_tab = getattr(self, "tab_video", None)
+            owners = [video_tab, getattr(video_tab, "history_tab", None), workspace]
+            for owner in owners:
+                if owner is None or getattr(owner, "event_store", None) is None:
+                    continue
+                try:
+                    owner.event_store = None
+                    log.info("Dropped the cached event store on %s",
+                             type(owner).__name__)
+                except Exception as exc:
+                    log.warning("Could not drop the event store on %s: %s",
+                                type(owner).__name__, exc)
+            gc.collect()
+
+        elif group is Group.MODELS:
+            try:
+                from providers import clear_provider_cache
+
+                clear_provider_cache()
+                log.info("Cleared the provider cache to release model weights")
+            except Exception as exc:
+                log.warning("Could not clear the provider cache: %s", exc)
+            gc.collect()
+            torch = sys.modules.get("torch")
+            if torch is not None:
+                try:
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception as exc:
+                    log.warning("Could not empty the CUDA cache: %s", exc)
+                log.warning(
+                    "PyTorch is loaded. Weight files it still maps stay open "
+                    "until ImageAI restarts, so the move may leave copies of "
+                    "them behind."
+                )
+
+        elif group is Group.SETTINGS:
+            # The active log file cannot close here. This process writes to it
+            # for the rest of the session, and every error must reach it.
+            log.warning(
+                "The active log file stays open during the move. It remains "
+                "in the old location until ImageAI restarts."
+            )
+
     def closeEvent(self, event):
         """Save all UI state on close."""
         try:

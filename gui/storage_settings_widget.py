@@ -114,7 +114,12 @@ class StorageSettingsWidget(QGroupBox):
         grid.addWidget(header, 0, 0, 1, 5)
 
         paths = get_data_paths()
-        for index, group in enumerate(Group, start=1):
+        for index, group in enumerate(Group):
+            # Two grid rows per group. The status line needs a row of its own:
+            # a status line placed in the path row renders on top of the path,
+            # the size, and both buttons.
+            main_row = index * 2 + 1
+            status_row = main_row + 1
             name_label = QLabel(GROUP_LABELS[group])
             name_label.setToolTip(GROUP_HINTS[group])
 
@@ -135,18 +140,18 @@ class StorageSettingsWidget(QGroupBox):
             open_button.setToolTip("Show this folder in the file manager")
             open_button.clicked.connect(lambda _c=False, g=group: self._on_open(g))
 
-            grid.addWidget(name_label, index, 0)
-            grid.addWidget(path_label, index, 1)
-            grid.addWidget(size_label, index, 2)
-            grid.addWidget(move_button, index, 3)
-            grid.addWidget(open_button, index, 4)
+            grid.addWidget(name_label, main_row, 0)
+            grid.addWidget(path_label, main_row, 1)
+            grid.addWidget(size_label, main_row, 2)
+            grid.addWidget(move_button, main_row, 3)
+            grid.addWidget(open_button, main_row, 4)
 
             self.rows[group] = StorageRow(
                 name_label, path_label, size_label, status_label,
                 move_button, open_button,
             )
 
-            grid.addWidget(status_label, index, 1, 1, 4)
+            grid.addWidget(status_label, status_row, 1, 1, 4)
             status_label.setVisible(False)
 
         # Surface any root that could not be reached at startup.
@@ -167,8 +172,23 @@ class StorageSettingsWidget(QGroupBox):
             return "No data yet."
         return "\n".join(str(source) for source, _name in sources)
 
+    def _prune_threads(self) -> None:
+        """Drop the workers that already finished.
+
+        Every refresh starts four threads. Without this the list grows for the
+        life of the window and keeps every finished QThread alive.
+        """
+        still_running = []
+        for thread, worker in self._threads:
+            if thread.isFinished():
+                thread.deleteLater()
+            else:
+                still_running.append((thread, worker))
+        self._threads = still_running
+
     def refresh_sizes(self) -> None:
         """Measure every group off the UI thread."""
+        self._prune_threads()
         for group in Group:
             thread = QThread(self)
             worker = _SizeWorker(group)
@@ -245,17 +265,28 @@ class StorageSettingsWidget(QGroupBox):
                 group, dest,
                 progress_cb=progress,
                 cancel=dialog.wasCanceled,
-                pre_move=self._close_open_resources,
+                pre_move=lambda: self._close_open_resources(group),
             )
         finally:
             dialog.close()
 
-    def _close_open_resources(self) -> None:
-        """Ask the main window to release file handles before a move."""
+    def _close_open_resources(self, group: Group) -> None:
+        """Ask the main window to release file handles before a move.
+
+        A missing hook is a defect, not a normal state. Windows refuses to
+        rename or delete a file that this process still holds open, so the
+        move fails later with an unclear error. Log the missing hook here.
+        """
         window = self.window()
         closer = getattr(window, "close_data_handles", None)
-        if callable(closer):
-            closer()
+        if not callable(closer):
+            logger.warning(
+                "No close_data_handles hook on %s; open %s files stay open "
+                "during the move",
+                type(window).__name__, group.value,
+            )
+            return
+        closer(group)
 
     def _offer_restart(self, group: Group, result) -> None:
         box = QMessageBox(self)
@@ -276,13 +307,90 @@ class StorageSettingsWidget(QGroupBox):
             self._restart_application()
 
     @staticmethod
-    def _restart_application() -> None:
+    def _relaunch_command():
+        """Return ``(program, arguments)`` that start this application again."""
         import os
         import sys
 
-        logger.info("Restarting ImageAI after a storage move")
+        if getattr(sys, "frozen", False):
+            return sys.executable, list(sys.argv[1:])
+        script = os.path.abspath(sys.argv[0]) if sys.argv else ""
+        arguments = ([script] if script else []) + list(sys.argv[1:])
+        return sys.executable, arguments
+
+    def _restart_application(self) -> None:
+        """Shut down normally, then start a new instance.
+
+        The relaunch runs from an atexit handler so the close event and the
+        other atexit handlers run first. The close event saves the video
+        project and the UI state, and an atexit handler copies the log file.
+        ``subprocess`` quotes each argument, so a path that contains a space
+        survives on Windows.
+        """
+        import atexit
+        import os
+        import subprocess
+        import sys
+
+        program, arguments = self._relaunch_command()
+        command = [program] + arguments
+        logger.info("Restarting ImageAI after a storage move: %s", command)
+
+        def relaunch() -> None:
+            try:
+                kwargs = {"cwd": os.getcwd(), "close_fds": True}
+                if os.name == "nt":
+                    kwargs["creationflags"] = (
+                        getattr(subprocess, "DETACHED_PROCESS", 0)
+                        | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                    )
+                else:
+                    kwargs["start_new_session"] = True
+                subprocess.Popen(command, **kwargs)
+            except Exception:  # noqa: BLE001 - the old process is exiting
+                logger.exception("Could not restart ImageAI: %s", command)
+                print(
+                    f"Could not restart ImageAI. Start it again with: {command}",
+                    file=sys.stderr,
+                )
+
+        atexit.register(relaunch)
+
+        window = self.window()
+        closer = getattr(window, "close", None)
+        if callable(closer):
+            # close() runs closeEvent: the video autosave and the UI state.
+            closer()
         QApplication.quit()
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+
+    def _update_live_config(self, group: Group, dest: Path) -> None:
+        """Teach the running ConfigManager where the group now lives.
+
+        ``move_group`` already wrote ``data_roots`` to config.json. The main
+        window still holds the dictionary it loaded at startup, and it saves
+        that dictionary when the window closes. Without this update the save
+        drops the new root and the moved data becomes unreachable.
+        """
+        window = self.window()
+        config = getattr(window, "config", None)
+        if config is None:
+            logger.warning(
+                "No live configuration on %s; the new %s root exists only in "
+                "config.json", type(window).__name__, group.value,
+            )
+            return
+
+        try:
+            current = config.get("data_roots", {})
+            roots = dict(current) if isinstance(current, dict) else {}
+            roots[group.value] = str(dest)
+            config.set("data_roots", roots)
+            logger.info("Live configuration now points %s at %s", group.value, dest)
+        except Exception:  # noqa: BLE001 - the data is already moved
+            logger.exception(
+                "Could not update the live configuration for %s; a later save "
+                "may drop the new root %s", group.value, dest,
+            )
 
     def _on_move(self, group: Group) -> None:
         start = self._suggested_dir(group)
@@ -311,6 +419,7 @@ class StorageSettingsWidget(QGroupBox):
             self.refresh_sizes()
             return
 
+        self._update_live_config(group, dest)
         reset_data_paths()
         self.rows[group].path_label.setText(str(dest))
         self.rows[group].path_label.setToolTip(str(dest))
