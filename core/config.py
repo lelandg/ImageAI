@@ -1,9 +1,11 @@
 """Configuration management for ImageAI."""
 
+import copy
 import json
 import logging
 import os
 import platform
+import tempfile
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -12,6 +14,8 @@ from .paths import get_data_paths
 from .security import secure_storage
 
 logger = logging.getLogger(__name__)
+
+_MISSING = object()
 
 
 class ConfigManager:
@@ -35,15 +39,36 @@ class ConfigManager:
         return get_data_paths().config_file().parent
     
     def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from disk."""
+        """Load configuration from disk and record the on-disk baseline."""
         self.config_dir.mkdir(parents=True, exist_ok=True)
 
-        if self.config_path.exists():
-            try:
-                return json.loads(self.config_path.read_text(encoding="utf-8"))
-            except (OSError, IOError, json.JSONDecodeError):
-                return {}
-        return {}
+        loaded = self._read_config_file()
+        # The baseline is what disk held at load time. save() compares against
+        # it to tell a local edit apart from a value this process never touched.
+        self._baseline = copy.deepcopy(loaded)
+        return loaded
+
+    def _read_config_file(self) -> Dict[str, Any]:
+        """Return the parsed config.json, or {} when it is missing or broken."""
+        if not self.config_path.exists():
+            return {}
+        try:
+            data = json.loads(self.config_path.read_text(encoding="utf-8"))
+        except (OSError, IOError, json.JSONDecodeError) as exc:
+            logger.error(
+                "Could not read config.json at %s: %s. "
+                "Keeping the in-memory settings for this session.",
+                self.config_path, exc,
+            )
+            return {}
+        if not isinstance(data, dict):
+            logger.error(
+                "config.json at %s is not a JSON object (found %s). "
+                "Keeping the in-memory settings for this session.",
+                self.config_path, type(data).__name__,
+            )
+            return {}
+        return data
 
     def _normalize_auth_mode(self) -> None:
         """Normalize auth_mode values to internal format."""
@@ -83,13 +108,106 @@ class ConfigManager:
         if migrated:
             self.save()
     
-    def save(self) -> None:
-        """Save current configuration to disk."""
-        self.config_path.write_text(
-            json.dumps(self.config, indent=2),
-            encoding="utf-8"
+    @classmethod
+    def _merge_over_disk(
+        cls,
+        disk: Dict[str, Any],
+        memory: Dict[str, Any],
+        baseline: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Merge the in-memory config over the current on-disk config.
+
+        Another writer — the storage migrator, or a second ImageAI window —
+        can change config.json after this process loaded it. A value this
+        process never edited must therefore come from disk, or the save
+        erases the other writer's work. ``baseline`` is the disk content at
+        load time, so ``memory != baseline`` marks a real local edit.
+        """
+        merged = copy.deepcopy(disk)
+
+        for key, mem_value in memory.items():
+            base_value = baseline.get(key, _MISSING)
+            if key not in merged:
+                merged[key] = copy.deepcopy(mem_value)
+                continue
+            disk_value = merged[key]
+            if isinstance(mem_value, dict) and isinstance(disk_value, dict):
+                # Merge per sub-key: a group the user renamed wins, and a
+                # group only the other writer touched survives.
+                sub_base = base_value if isinstance(base_value, dict) else {}
+                merged[key] = cls._merge_over_disk(disk_value, mem_value, sub_base)
+            elif mem_value == base_value:
+                merged[key] = disk_value  # untouched here; disk is newer
+            else:
+                merged[key] = copy.deepcopy(mem_value)
+
+        # A key this process deleted goes away, unless disk changed it since.
+        for key, base_value in baseline.items():
+            if key in memory:
+                continue
+            if key in merged and merged[key] == base_value:
+                del merged[key]
+
+        return merged
+
+    def _write_config_file(self, data: Dict[str, Any]) -> None:
+        """Write config.json atomically so a crash cannot truncate it."""
+        self.config_path.parent.mkdir(parents=True, exist_ok=True)
+        handle = tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=str(self.config_path.parent),
+            prefix=self.config_path.name + ".",
+            suffix=".tmp",
+            delete=False,
         )
-    
+        tmp_path = Path(handle.name)
+        try:
+            with handle:
+                json.dump(data, handle, indent=2)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_path, self.config_path)
+        except Exception as exc:
+            logger.error(
+                "Could not write config.json at %s: %s. "
+                "The previous file is unchanged.",
+                self.config_path, exc,
+            )
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            raise
+
+    @classmethod
+    def _apply_in_place(cls, target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        """Copy ``source`` into ``target`` without replacing nested dicts.
+
+        Callers hold live references to nested sections — get_layout_config()
+        returns the real dict and the caller mutates it. Rebinding those
+        sections would orphan the caller's reference, so update them in place.
+        """
+        for key in list(target):
+            if key not in source:
+                del target[key]
+        for key, value in source.items():
+            current = target.get(key)
+            if isinstance(current, dict) and isinstance(value, dict):
+                cls._apply_in_place(current, value)
+            else:
+                target[key] = value
+
+    def save(self) -> None:
+        """Merge with the current config.json on disk, then save it."""
+        merged = self._merge_over_disk(
+            self._read_config_file(), self.config, self._baseline
+        )
+        self._write_config_file(merged)
+        # Disk and memory now agree, so the merged result is the new baseline.
+        self._apply_in_place(self.config, merged)
+        self._baseline = copy.deepcopy(merged)
+
     def get(self, key: str, default: Any = None) -> Any:
         """Get configuration value."""
         return self.config.get(key, default)
