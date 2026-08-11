@@ -46,9 +46,15 @@ def test_events_db_uses_video_root(video_root):
 
 def test_no_dot_imageai_references_remain():
     """Nothing may build a path under ~/.imageai any more."""
+    # core/data_migration.py is the one exception: it must name the legacy
+    # ~/.imageai tree to find the data it relocates.
+    exempt = {REPO_ROOT / "core" / "data_migration.py"}
+
     offenders = []
     for directory in ("core", "gui", "cli", "providers"):
         for path in (REPO_ROOT / directory).rglob("*.py"):
+            if path in exempt:
+                continue
             text = path.read_text(encoding="utf-8", errors="replace")
             for lineno, line in enumerate(text.splitlines(), start=1):
                 if '".imageai"' in line or "'.imageai'" in line:
