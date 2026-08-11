@@ -9,24 +9,44 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Callable, Iterable, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, field
+from pathlib import Path, PurePosixPath
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
+from core import config_io
 from core.paths import DataPaths, Group, get_data_paths
 
 logger = logging.getLogger(__name__)
 
 # Directory names that belong to each group, relative to the group root.
+# "cache" is deliberately absent from both Models and Video: one cache
+# directory serves both groups. See CACHE_DIR and CACHE_OWNERS below.
 GROUP_CONTENTS = {
     Group.IMAGES: [
         "generated", "images", "composites", "styles", "Characters",
         "midjourney_web_cache", "midjourney_web_storage",
     ],
     Group.VIDEO: ["video_projects"],
-    Group.MODELS: ["musetalk", "weights", "cache", "huggingface"],
+    Group.MODELS: ["musetalk", "weights", "huggingface"],
     Group.SETTINGS: ["logs", "layout", "template_cache", "templates"],
 }
+
+# The Models root and the Video root default to the same directory, and both
+# groups keep their caches in a "cache" subdirectory of their own root. A move
+# of one group must not carry the other group's cache away, so each cache
+# subdirectory belongs to exactly one group. The names come from
+# DataPaths.model_cache() and DataPaths.video_cache() callers.
+CACHE_DIR = "cache"
+CACHE_OWNERS: Dict[Group, Tuple[str, ...]] = {
+    Group.MODELS: ("ai_visemes",),
+    Group.VIDEO: ("video", "thumbnails", "veo_videos"),
+}
+
+# The destination subdirectory that receives the legacy ~/.imageai tree. That
+# tree holds directories with the same names as the current ones — a
+# ~/.imageai/video_projects beside the app's own video_projects — so it needs a
+# place of its own. A shared name would merge two trees into one silently.
+LEGACY_IMAGEAI_NAME = "legacy_imageai"
 
 # Loose files that move with the Settings group. config.json is deliberately
 # absent: it records where every other group lives, so it can never move.
@@ -41,13 +61,27 @@ class MoveCancelled(Exception):
     """Raised internally when the caller sets the cancel flag."""
 
 
-class ConfigError(Exception):
-    """Raised when config.json cannot be read, parsed, or replaced.
+class _DestinationCollision(Exception):
+    """Raised when an entry appears at a destination name during the move.
 
-    config.json holds the API keys and every other setting. The migrator must
-    never overwrite a file it could not read, so this error aborts the move
-    before any source is deleted.
+    Validation runs before the copy starts, and a large copy runs for many
+    minutes. Another tool, or a second ImageAI window, can create an entry at
+    one of the destination names in that window. The move must abort rather
+    than merge into it, because the cleanup would then delete data this move
+    did not create.
     """
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(str(path))
+        self.path = path
+
+
+# config.json holds the API keys and every other setting. The migrator must
+# never overwrite a file it could not read, so a config failure aborts the move
+# before any source is deleted. core.config_io owns the locked, atomic
+# read-modify-write cycle; this alias keeps the historical name that this
+# module's callers already catch, and it covers read, write and lock failures.
+ConfigError = config_io.ConfigIOError
 
 
 @dataclass
@@ -57,6 +91,9 @@ class MoveResult:
     bytes_moved: int = 0
     used_rename: bool = False
     error: Optional[str] = None
+    # (path_the_data_sits_at_now, path_it_belongs_at) for every directory a
+    # failed rollback could not put back. Empty on every other outcome.
+    stranded: List[Tuple[str, str]] = field(default_factory=list)
 
 
 def legacy_huggingface_dir() -> Path:
@@ -87,12 +124,98 @@ def tree_size(path: Path) -> Tuple[int, int]:
     return (files, total)
 
 
+def _resolved(path: Path) -> Path:
+    """Resolve a path, falling back to the path itself when the OS refuses."""
+    try:
+        return path.resolve()
+    except OSError:
+        return path
+
+
+def _roots_coincide(group: Group, paths: DataPaths) -> bool:
+    """True when the Models root and the Video root are one directory.
+
+    That is the default: both groups resolve to the platform user directory
+    until the user moves one of them.
+    """
+    other = Group.VIDEO if group is Group.MODELS else Group.MODELS
+    return _resolved(paths.root(group)) == _resolved(paths.root(other))
+
+
+def _cache_sources(group: Group, paths: DataPaths) -> List[Tuple[Path, str]]:
+    """List the cache directories that belong to this group.
+
+    When the Models root and the Video root are the same directory, one
+    ``cache`` directory holds both groups' caches. The move then takes only the
+    subdirectories this group owns, so a Models move cannot carry the video
+    render cache away from the path ``DataPaths.video_cache`` still points at.
+    When the two roots differ, the whole ``cache`` directory belongs to this
+    group and moves as one entry.
+    """
+    if group not in CACHE_OWNERS:
+        return []
+    cache = paths.root(group) / CACHE_DIR
+    if not cache.is_dir():
+        return []
+    if not _roots_coincide(group, paths):
+        return [(cache, CACHE_DIR)]
+    entries: List[Tuple[Path, str]] = []
+    for name in CACHE_OWNERS[group]:
+        candidate = cache / name
+        if candidate.exists():
+            entries.append((candidate, f"{CACHE_DIR}/{name}"))
+    return entries
+
+
+def unclaimed_cache_subdirs(group: Group, paths: DataPaths) -> List[Path]:
+    """Cache subdirectories that belong to neither Models nor Video.
+
+    A shared cache directory splits by owner. A subdirectory that no group
+    claims stays behind, so the move reports it and the user can act on it.
+    """
+    if group not in CACHE_OWNERS or not _roots_coincide(group, paths):
+        return []
+    cache = paths.root(group) / CACHE_DIR
+    if not cache.is_dir():
+        return []
+    claimed = set(CACHE_OWNERS[Group.MODELS]) | set(CACHE_OWNERS[Group.VIDEO])
+    try:
+        children = sorted(cache.iterdir())
+    except OSError as exc:
+        logger.warning("Could not list %s: %s", cache, exc)
+        return []
+    return [child for child in children if child.name not in claimed]
+
+
+def duplicate_destination_names(
+    entries: Sequence[Tuple[Path, str]]
+) -> List[str]:
+    """Return the destination names that more than one source would claim.
+
+    Two sources that share a name merge into one directory at the destination.
+    The verification then counts the merged tree once for each source, and a
+    passing count is followed by the deletion of both sources. A name nested
+    inside another name (``cache`` and ``cache/video``) has the same effect, so
+    it counts as a clash too. A move that finds a clash must stop.
+    """
+    parts = [(name, PurePosixPath(name).parts) for _source, name in entries]
+    clashes = set()
+    for index, (name, key) in enumerate(parts):
+        for other_name, other_key in parts[index + 1:]:
+            if key == other_key or key[:len(other_key)] == other_key \
+                    or other_key[:len(key)] == key:
+                clashes.add(name)
+                clashes.add(other_name)
+    return sorted(clashes)
+
+
 def sources_for(group: Group, paths: Optional[DataPaths] = None) -> List[Tuple[Path, str]]:
     """List existing source directories for a group.
 
     Returns ``(absolute_source, name_under_destination)`` pairs. A group may
     span more than one tree: Models spans the app root and the HuggingFace
-    cache, Video spans the app root and ~/.imageai.
+    cache, Video spans the app root and ~/.imageai. Every name in the result is
+    unique, because two sources that share one name would merge silently.
     """
     paths = paths or get_data_paths()
     root = paths.root(group)
@@ -102,6 +225,8 @@ def sources_for(group: Group, paths: Optional[DataPaths] = None) -> List[Tuple[P
         candidate = root / name
         if candidate.exists():
             entries.append((candidate, name))
+
+    entries.extend(_cache_sources(group, paths))
 
     if group is Group.MODELS:
         hf = legacy_huggingface_dir()
@@ -113,7 +238,7 @@ def sources_for(group: Group, paths: Optional[DataPaths] = None) -> List[Tuple[P
         if legacy.exists():
             for child in sorted(legacy.iterdir()):
                 if child.is_dir():
-                    entries.append((child, child.name))
+                    entries.append((child, f"{LEGACY_IMAGEAI_NAME}/{child.name}"))
 
     if group is Group.SETTINGS:
         for filename in SETTINGS_FILES:
@@ -138,6 +263,16 @@ def validate_destination(
 
     if not sources:
         return f"There is no {group.value} data to move."
+
+    clashes = duplicate_destination_names(sources)
+    if clashes:
+        message = (
+            f"Two folders of the {group.value} data would be moved to the same "
+            f"place ({', '.join(clashes)}). Moving them would merge them into "
+            f"one folder, so the move stopped. Rename one of them first."
+        )
+        logger.error("Cannot move %s to %s: %s", group.value, dest, message)
+        return message
 
     try:
         resolved_dest = dest.resolve()
@@ -176,7 +311,13 @@ def validate_destination(
         # A pre-existing entry with a source name would be merged into by the
         # copy. Its files then inflate the verification counts, and the abort
         # cleanup would delete data the move did not create.
-        collisions = sorted({name for _s, name in sources if (dest / name).exists()})
+        # The test is link-aware on purpose. Path.exists() follows a symlink
+        # and returns False for a link whose target is unreachable — the user's
+        # own redirect to an unplugged drive or an offline share. Such a link
+        # would pass this guard and then be unlinked by the cleanup.
+        collisions = sorted(
+            {name for _s, name in sources if os.path.lexists(dest / name)}
+        )
         if collisions:
             listed = ", ".join(collisions[:3])
             if len(collisions) > 3:
@@ -305,59 +446,27 @@ def _read_config(config_path: Path) -> dict:
     A missing file is a fresh install, so it yields an empty document. Every
     other failure raises ConfigError. config.json holds the API keys, and a
     rewrite based on a document the migrator could not read would erase them.
+    ``core.config_io`` owns the parsing and the logging.
     """
-    import json
-
-    if not config_path.exists():
-        return {}
-    try:
-        raw = config_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise ConfigError(f"Could not read {config_path}: {exc}") from exc
-    try:
-        data = json.loads(raw)
-    except ValueError as exc:
-        raise ConfigError(f"Could not parse {config_path}: {exc}") from exc
-    if not isinstance(data, dict):
-        raise ConfigError(f"{config_path} does not hold a JSON object.")
-    roots = data.get("data_roots")
-    if roots is not None and not isinstance(roots, dict):
-        raise ConfigError(f"The 'data_roots' entry in {config_path} is not a JSON object.")
-    return data
+    return config_io.read_config(config_path)
 
 
 def _write_root(paths: DataPaths, group: Group, dest: Path) -> None:
     """Persist the new root to config.json.
 
-    The write goes to a temporary file in the same directory, is flushed and
-    fsynced, and then replaces config.json in one atomic step. A crash during
-    the write therefore cannot truncate the bootstrap file. Raises ConfigError
-    on any failure.
+    The whole read-modify-write cycle runs under the config.json lock in
+    ``core.config_io``. ConfigManager saves the same file from worker threads
+    while a long move runs, so a cycle without that lock loses whichever
+    writer read first. The write itself is atomic: a temporary file in the same
+    directory, flushed, fsynced, then replaced in one step. Raises ConfigError
+    on any failure, and config.json is unchanged in that case.
     """
-    import json
+    def mutate(data: dict) -> dict:
+        roots = data.setdefault("data_roots", {})
+        roots[group.value] = str(dest)
+        return data
 
-    config_path = paths.config_file()
-    data = _read_config(config_path)
-    data.setdefault("data_roots", {})[group.value] = str(dest)
-
-    try:
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise ConfigError(f"Could not create {config_path.parent}: {exc}") from exc
-
-    temp_path = config_path.with_name(f"{config_path.name}.{os.getpid()}.tmp")
-    try:
-        with open(temp_path, "w", encoding="utf-8") as handle:
-            json.dump(data, handle, indent=2)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(str(temp_path), str(config_path))
-    except OSError as exc:
-        try:
-            temp_path.unlink()
-        except OSError:
-            logger.warning("Could not remove the temporary file %s", temp_path)
-        raise ConfigError(f"Could not write {config_path}: {exc}") from exc
+    config_io.update_config(paths.config_file(), mutate)
 
 
 def move_group(
@@ -402,40 +511,82 @@ def move_group(
             return MoveResult(ok=False, error=f"Could not release open files: {exc}")
 
     sources = sources_for(group, paths)
+
+    # Re-check after the pre-move hook: the hook can close files and change the
+    # tree. Two sources that share one destination name merge silently, so the
+    # move stops here rather than at the deletion step.
+    clashes = duplicate_destination_names(sources)
+    if clashes:
+        message = (
+            f"Two folders of the {group.value} data would be moved to the same "
+            f"place ({', '.join(clashes)}). Nothing was changed."
+        )
+        logger.error("Cannot move %s to %s: %s", group.value, dest, message)
+        return MoveResult(ok=False, error=message)
+
+    for leftover in unclaimed_cache_subdirs(group, paths):
+        logger.warning(
+            "The cache folder %s belongs to no data group, so the %s move "
+            "leaves it at %s.", leftover, group.value, leftover.parent,
+        )
+
     _prepare_databases(sources)
 
     files_total = sum(tree_size(s)[0] for s, _n in sources)
     bytes_total = sum(tree_size(s)[1] for s, _n in sources)
-    dest.mkdir(parents=True, exist_ok=True)
 
-    names = [name for _s, name in sources]
+    # Track every directory this move creates under the destination. The
+    # cleanup removes only these, so an entry another process put there while
+    # the copy ran survives an abort.
+    created_dirs: List[Path] = []
+    if not os.path.lexists(dest):
+        created_dirs.append(dest)
+    dest.mkdir(parents=True, exist_ok=True)
 
     # Fast path: a rename within one volume finishes in milliseconds. This
     # matters most for Models, where a cross-volume copy runs for many minutes.
     if all(_same_volume(source, dest) for source, _n in sources):
         renamed: List[Tuple[Path, Path]] = []
-        rename_failed = True
-        try:
-            for source, name in sources:
-                target = dest / name
-                os.rename(str(source), str(target))
-                renamed.append((source, target))
-            rename_failed = False
-        except OSError as exc:
-            logger.warning("Rename failed for %s: %s", group.value, exc)
+        rename_dirs: List[Path] = []
+        rename_error: Optional[OSError] = None
+        collision: Optional[Path] = None
 
-        if not rename_failed:
+        for source, name in sources:
+            target = dest / name
+            if os.path.lexists(target):
+                collision = target
+                break
+            parents = _missing_parents(dest, target)
+            try:
+                for parent in parents:
+                    parent.mkdir(parents=True, exist_ok=True)
+                    rename_dirs.append(parent)
+                os.rename(str(source), str(target))
+            except OSError as exc:
+                rename_error = exc
+                logger.warning("Rename failed for %s: %s", group.value, exc)
+                break
+            renamed.append((source, target))
+
+        if collision is not None:
+            stranded = _rollback_renames(renamed)
+            _remove_created([], rename_dirs + created_dirs)
+            reason = (
+                f"Something else created {collision} while the move was "
+                f"running, so the move stopped."
+            )
+            return _failed(group, dest, reason, stranded,
+                           " Nothing was changed. Move that folder away and try again.")
+
+        if rename_error is None:
             try:
                 _write_root(paths, group, dest)
             except ConfigError as exc:
                 logger.error("Could not record the new %s root: %s", group.value, exc)
-                rollback_error = _rollback_renames(renamed)
-                if rollback_error:
-                    return MoveResult(ok=False, error=rollback_error)
-                return MoveResult(
-                    ok=False,
-                    error=f"{exc} Your data was left where it was.",
-                )
+                stranded = _rollback_renames(renamed)
+                _remove_created([], rename_dirs + created_dirs)
+                return _failed(group, dest, str(exc), stranded,
+                               " Your data was left where it was.")
             _cleanup_empty_legacy_dirs(group)
             logger.info("Moved %s to %s by rename (%d files)", group.value, dest, files_total)
             return MoveResult(ok=True, files_moved=files_total,
@@ -444,34 +595,57 @@ def move_group(
         # Undo the renames that did succeed. Without the rollback, a source
         # already under the destination would be destroyed by the cleanup that
         # a later cancel or copy failure runs.
-        rollback_error = _rollback_renames(renamed)
-        if rollback_error:
-            return MoveResult(ok=False, error=rollback_error)
+        stranded = _rollback_renames(renamed)
+        _remove_created([], rename_dirs)
+        if stranded:
+            return _failed(
+                group, dest,
+                f"The move failed ({rename_error}) and part of it could not be undone.",
+                stranded, "",
+            )
         logger.warning("Rolled back the partial rename of %s; falling back to copy",
                        group.value)
 
     state = {"files": 0, "bytes": 0, "files_total": files_total, "bytes_total": bytes_total}
+    created_entries: List[Path] = []
     try:
         for source, name in sources:
             if _is_cancelled(cancel):
                 raise MoveCancelled()
-            _copy_entry(source, dest / name, state, progress_cb, cancel)
+            target = dest / name
+            if os.path.lexists(target):
+                raise _DestinationCollision(target)
+            for parent in _missing_parents(dest, target):
+                parent.mkdir(parents=True, exist_ok=True)
+                created_dirs.append(parent)
+            created_entries.append(target)
+            _copy_entry(source, target, state, progress_cb, cancel)
     except MoveCancelled:
-        _remove_partial(dest, names)
+        _remove_created(created_entries, created_dirs)
         logger.info("Move of %s cancelled by the user; source left intact", group.value)
         return MoveResult(ok=False, error="Move cancelled. Nothing was changed.")
+    except _DestinationCollision as exc:
+        _remove_created(created_entries, created_dirs)
+        message = (
+            f"Something else created {exc.path} while the move was running, so "
+            f"the move stopped. Nothing was changed. Move that folder away and "
+            f"try again."
+        )
+        logger.error("Aborted the move of %s to %s: %s", group.value, dest, message)
+        return MoveResult(ok=False, error=message)
     except OSError as exc:
-        _remove_partial(dest, names)
+        _remove_created(created_entries, created_dirs)
         logger.exception("Copy failed while moving %s", group.value)
         return MoveResult(ok=False, error=f"Copy failed: {exc}. Nothing was changed.")
 
     # Compare the destination against what the copy loop wrote, not against the
     # pre-scan totals. A source that grows during the move — the log file this
-    # process writes — must not fail a copy that in fact succeeded.
-    copied_files = sum(tree_size(dest / name)[0] for name in names)
-    copied_bytes = sum(tree_size(dest / name)[1] for name in names)
+    # process writes — must not fail a copy that in fact succeeded. Every name
+    # is unique, so each source contributes to the count exactly once.
+    copied_files = sum(tree_size(target)[0] for target in created_entries)
+    copied_bytes = sum(tree_size(target)[1] for target in created_entries)
     if (copied_files, copied_bytes) != (state["files"], state["bytes"]):
-        _remove_partial(dest, names)
+        _remove_created(created_entries, created_dirs)
         message = (
             f"Verification failed: the copy wrote {state['files']} files "
             f"({_human(state['bytes'])}) but the destination holds "
@@ -484,7 +658,7 @@ def move_group(
     try:
         _write_root(paths, group, dest)
     except ConfigError as exc:
-        _remove_partial(dest, names)
+        _remove_created(created_entries, created_dirs)
         logger.error("Could not record the new %s root: %s", group.value, exc)
         return MoveResult(ok=False, error=f"{exc} Your data was left where it was.")
 
@@ -503,43 +677,105 @@ def move_group(
     return MoveResult(ok=True, files_moved=state["files"], bytes_moved=state["bytes"])
 
 
-def _rollback_renames(renamed: Sequence[Tuple[Path, Path]]) -> Optional[str]:
-    """Move renamed entries back to their original locations.
+def _rollback_renames(
+    renamed: Sequence[Tuple[Path, Path]]
+) -> List[Tuple[Path, Path]]:
+    """Move every renamed entry back to its original location.
 
-    Returns None on success, or a user-facing error message that names the
-    directory that still holds the data. The caller must abort on an error:
-    the data has only one copy, and it is not where the application expects it.
+    Returns the ``(where_it_is_now, where_it_belongs)`` pairs that could not be
+    put back. The loop never stops at the first failure: each entry is the only
+    copy of that data, and an entry left at the destination while config.json
+    still points at the old root is data the application reports as missing and
+    then downloads over.
     """
+    stranded: List[Tuple[Path, Path]] = []
     for source, target in reversed(list(renamed)):
         try:
             os.rename(str(target), str(source))
         except OSError as exc:
-            logger.exception("Could not move %s back to %s after a failed rename",
-                             target, source)
-            return (
-                f"The move failed and part of it could not be undone ({exc}). "
-                f"Your data is now in {target}. Move it back to {source} by "
-                f"hand before you start the application again."
+            logger.error(
+                "Could not move %s back to %s after a failed move: %s. "
+                "That folder now holds the only copy of the data.",
+                target, source, exc,
             )
-    return None
+            stranded.append((target, source))
+    return stranded
 
 
-def _remove_partial(dest: Path, names: Iterable[str]) -> None:
-    """Delete only the entries this move created under the destination.
+def _failed(
+    group: Group,
+    dest: Path,
+    reason: str,
+    stranded: Sequence[Tuple[Path, Path]],
+    suffix: str,
+) -> MoveResult:
+    """Build and log the result of a failed move.
 
-    The destination may be a folder the user already owns. Deleting the folder
-    itself, or anything the move did not put there, would destroy unrelated
-    data, so the cleanup removes ``dest / name`` and never ``dest``.
+    Every stranded directory is named, with the place the data sits now and the
+    place it belongs. A message that names only one of them leaves the rest
+    invisible to the user.
     """
-    for name in names:
-        entry = dest / name
+    if not stranded:
+        message = f"{reason}{suffix}"
+        logger.error("Could not move %s to %s: %s", group.value, dest, message)
+        return MoveResult(ok=False, error=message)
+
+    lines = [
+        reason,
+        "These folders hold the only copy of your data and are in the wrong "
+        "place. Move each one back by hand before you start the application "
+        "again:",
+    ]
+    for target, source in stranded:
+        lines.append(f"  {target}  ->  {source}")
+    message = "\n".join(lines)
+    logger.error("Could not move %s to %s: %s", group.value, dest, message)
+    return MoveResult(
+        ok=False,
+        error=message,
+        stranded=[(str(target), str(source)) for target, source in stranded],
+    )
+
+
+def _missing_parents(dest: Path, target: Path) -> List[Path]:
+    """Directories between ``dest`` and ``target`` that do not exist yet.
+
+    A destination name may hold a separator — ``cache/video`` — so the move can
+    have to create an intermediate directory. Only the directories it creates
+    itself may be removed again by the cleanup.
+    """
+    missing: List[Path] = []
+    parent = target.parent
+    while parent != dest and dest in parent.parents:
+        if not os.path.lexists(parent):
+            missing.append(parent)
+        parent = parent.parent
+    return list(reversed(missing))
+
+
+def _remove_created(entries: Sequence[Path], dirs: Sequence[Path]) -> None:
+    """Delete only what this move created under the destination.
+
+    The destination may be a folder the user already owns, and another program
+    can create an entry there while a long copy runs. The cleanup therefore
+    works from a recorded list, never from the source names, and it removes an
+    intermediate directory only when that directory is empty.
+    """
+    for entry in sorted(entries, key=lambda p: len(p.parts), reverse=True):
         try:
             if entry.is_dir() and not entry.is_symlink():
                 shutil.rmtree(entry)
-            elif entry.exists() or entry.is_symlink():
+            elif os.path.lexists(entry):
                 entry.unlink()
         except OSError as exc:
             logger.warning("Could not clean up the partial copy at %s: %s", entry, exc)
+
+    for directory in sorted(dirs, key=lambda p: len(p.parts), reverse=True):
+        try:
+            if directory.is_dir() and not any(directory.iterdir()):
+                directory.rmdir()
+        except OSError as exc:
+            logger.warning("Could not remove the empty folder %s: %s", directory, exc)
 
 
 def _cleanup_empty_legacy_dirs(group: Group) -> None:
