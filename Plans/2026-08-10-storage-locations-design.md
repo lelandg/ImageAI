@@ -1,6 +1,6 @@
 # Configurable Storage Locations — Design
 
-**Date:** 2026-08-10
+**Date:** 2026-08-10 — amended 2026-08-11 after a full path audit
 **Status:** Approved design, not yet implemented
 **Author:** Claude Code (with Leland Green)
 
@@ -10,6 +10,16 @@ ImageAI writes every persistent file under one platform directory. On Windows
 that directory is `%APPDATA%\ImageAI`. The directory holds 8.2 GB on the
 author's machine. The user cannot move any part of it. The roaming profile
 grows without limit, and the user cannot put large output on a second drive.
+
+ImageAI writes to **three** separate trees, not one. A full audit on 2026-08-11
+found the following. The `%APPDATA%` tree is the smallest of the three.
+
+| Tree | Size | Notes |
+|---|---|---|
+| `~/.cache/huggingface` | **67 GB** | Stable Diffusion weights that ImageAI downloads. `models--stabilityai--stable-diffusion-2-1` alone holds 34 GB. |
+| `%APPDATA%\ImageAI` | 8.2 GB | The tree named in the original request. |
+| `~/.imageai` | 327 MB | `cache/` (248 MB) plus a `video_projects/` tree that holds the video events database. |
+| **Total** | **~75.5 GB** | |
 
 Measured breakdown of `C:\Users\aboog\AppData\Roaming\ImageAI` on 2026-08-10:
 
@@ -49,8 +59,8 @@ generated images live in `D:\ImageAI\Images\generated`.
 | Group | Contains | Size today |
 |---|---|---|
 | **Images** | `generated/`, `images/`, `composites/`, `styles/`, `Characters/`, `midjourney_web_cache/`, `midjourney_web_storage/` | 3.85 GB |
-| **Video** | `video_projects/` | 239 MB |
-| **Models** | `musetalk/`, `weights/`, `cache/` | 4.1 GB |
+| **Video** | `video_projects/`, `~/.imageai/cache/{video,thumbnails,veo_videos}`, `~/.imageai/video_projects/events.db` | 566 MB |
+| **Models** | `musetalk/`, `weights/`, `cache/`, the HuggingFace cache | 71.1 GB |
 | **Settings** | `details.jsonl`, `*_history.json`, `*_session.json`, `batch_jobs.json`, `layout/`, `template_cache/`, `logs/` | 77 MB |
 
 Notes on two placements:
@@ -59,6 +69,11 @@ Notes on two placements:
   places `styles/` in Images because the user groups it there.
 - `logs/` moves with Settings. `AGENTS.md` tells an agent to read the log first
   during an investigation. The log path must therefore follow the Settings root.
+- The HuggingFace cache is the largest single item in the application at 67 GB,
+  and it drives most of the reported disk pressure. Section 2.6 covers it.
+- `~/.imageai/` is a second tree outside `%APPDATA%`. The video caches and the
+  video events database live there. Both move with Video, because both belong to
+  video work. Section 2.7 covers the move.
 - `Characters/` holds Character Animator puppet output
   (`gui/character_animator/puppet_wizard.py:930`). The directory holds user
   output, not model weights, so it belongs to Images and not to Models. The
@@ -132,27 +147,111 @@ This is the one asymmetry in the design. The cost is small: the file is 8 KB.
 
 ### 2.4 Call sites to rewrite
 
-The audit on 2026-08-10 found:
+The full audit on 2026-08-11 found four classes of path source. All four change
+to `DataPaths` calls.
 
-- **36 call sites across 19 files** that build paths from `config_dir` or
-  `get_user_data_dir()`. These change to `DataPaths` calls.
-- **10 inline path builders across 7 files** that bypass both helpers and
-  compute the platform directory themselves:
-  - `core/logging_config.py:32`, `core/logging_config.py:146`
-  - `core/video/config.py:107`
-  - `core/video/project_manager.py:35`
-  - `core/video/project_enhancements.py:325`
-  - `core/video/veo_client.py:461`
-  - `core/musetalk_installer.py:59`
-  - `gui/history_widget.py:238`, `gui/history_widget.py:255`
-  - `gui/midjourney_dialog.py:144`
+**Class 1 — resolver-based.** 36 call sites across 19 files build paths from
+`config_dir` or `get_user_data_dir()`.
+
+**Class 2 — inline platform-directory builders.** These bypass both helpers:
+
+- `core/logging_config.py:32`, `core/logging_config.py:146`
+- `core/video/config.py:107`
+- `core/video/project_manager.py:35`
+- `core/video/project_enhancements.py:325`
+- `core/video/veo_client.py:461`
+- `core/musetalk_installer.py:71`
+- `gui/history_widget.py:238`, `gui/history_widget.py:255`
+- `gui/midjourney_dialog.py:143` (uses `QStandardPaths.AppDataLocation`)
+
+**Class 3 — the `~/.imageai` tree.** Seven call sites across four files:
+
+- `core/video/image_generator.py:54` → `~/.imageai/cache/video`
+- `core/video/thumbnail_manager.py:30` → `~/.imageai/cache/thumbnails`
+- `core/video/veo_client.py:917`, `core/video/veo_client.py:987` → `~/.imageai/cache/veo_videos`
+- `gui/video/history_tab.py:195` → `~/.imageai/video_projects/events.db`
+- `gui/video/video_project_tab.py:1827`, `gui/video/video_project_tab.py:2013` → same database
+
+**Class 4 — the HuggingFace cache.** Four call sites, described in section 2.6.
+
+### 2.5 Paths that must NOT move
+
+The rewrite must leave these alone. They belong to other software:
+
+- gcloud SDK and credentials: `core/gcloud_utils.py:46`,
+  `core/gcloud_utils.py:75`, `providers/google.py:408`,
+  `providers/google.py:1511`.
+- System font directories: `core/layout/font_manager.py:85-98`.
+- The bundled ffmpeg search path: `core/video/audio_segmenter.py:40`.
+- The shared HuggingFace hub path in
+  `core/character_animator/installer.py:254`. Section 2.6 explains why this one
+  differs from the Local SD cache.
 
 This layer is most of the implementation work. The buttons are a thin surface
 on top of it.
 
-### 2.5 Bug found during the audit
+### 2.6 The HuggingFace cache
 
-`core/musetalk_installer.py:59` builds its own platform paths and disagrees
+`providers/local_sd.py:122` already reads a `cache_dir` key from the config:
+
+```python
+self.cache_dir = config.get("cache_dir", Path.home() / ".cache" / "huggingface")
+```
+
+Two other call sites ignore that key and hardcode the same default:
+`gui/local_sd_widget.py:68` and `gui/model_browser.py:100`. The mechanism
+therefore exists but works only on one of three paths. A user who set
+`cache_dir` by hand would still see the model browser download to the old
+location.
+
+The fix routes all four download sites through `DataPaths.models() / "huggingface"`:
+
+- `providers/local_sd.py:240`
+- `gui/local_sd_widget.py:44`
+- `gui/model_browser.py:63`
+- `core/model_browser` install flow, wherever it calls `snapshot_download`
+
+Each call already accepts an explicit `cache_dir=` argument, so no environment
+variable is required. The design does **not** set `HF_HOME` or
+`HF_HUB_CACHE`, because those variables affect every HuggingFace tool on the
+machine, not just ImageAI.
+
+**Character Animator is excluded.** `core/character_animator/installer.py:254`
+reads `~/.cache/huggingface/hub` to detect models that other tools already
+downloaded. That path stays fixed, because ImageAI does not own it.
+
+**Existing weights are not re-downloaded.** The Models move relocates the
+current `~/.cache/huggingface` content to the new root, so the 67 GB transfers
+once rather than downloading again.
+
+### 2.7 The `~/.imageai` tree
+
+`~/.imageai` predates the `%APPDATA%` layout and holds two things: video caches
+and a `video_projects/events.db` database. Both move with the Video group.
+
+The database is the only SQLite file in the design. The migrator must confirm
+that no connection is open before it copies the file, and it must copy any
+`-wal` and `-shm` sidecar files alongside it. A copy of a live SQLite database
+without its write-ahead log produces a corrupt destination.
+
+The empty `~/.imageai` directory is removed after a successful move.
+
+### 2.8 Bugs found during the audit
+
+**Hardcoded developer username.** `providers/google.py:1083` and
+`providers/google.py:1292` both contain:
+
+```python
+debug_dir = Path("C:/Users/aboog/AppData/Roaming/ImageAI/generated")
+```
+
+This is the author's own username, shipped in released code. On any other
+Windows machine the write fails or creates a stray `C:\Users\aboog` tree. The
+rewrite replaces both with `DataPaths.images()`. This fix is independent of the
+Move feature and should land first.
+
+**Inconsistent MuseTalk platform paths.**
+`core/musetalk_installer.py:71` builds its own platform paths and disagrees
 with `core/constants.py:140`:
 
 - Windows: uses `Path.home() / "AppData" / "Roaming"` and ignores the `APPDATA`
@@ -182,6 +281,14 @@ def move_group(group, dest, progress_cb, cancel_flag) -> MoveResult
    source size plus a margin (`shutil.disk_usage`).
 2. **Copy the tree.** The function reports progress per file. The function
    checks the cancel flag between files.
+
+   **Same-volume fast path.** The function compares the source volume and the
+   destination volume first. On a match, the function calls `os.rename` and
+   skips steps 2 and 3 entirely. A rename within one volume completes in
+   milliseconds. This matters most for the Models group, where a cross-volume
+   copy of 67 GB runs for many minutes but a same-volume move is instant. On
+   Windows the function compares drive letters. On POSIX the function compares
+   `st_dev`.
 3. **Verify the copy.** File count and total byte size must match. A mismatch or
    a cancel aborts the move. An abort removes the partial destination and
    leaves the source untouched.
@@ -211,10 +318,16 @@ group box with four rows:
 
 ```
 Images    D:\ImageAI\Images                 3.85 GB   [Move…] [Open]
-Video     C:\Users\aboog\AppData\Roaming…   239 MB    [Move…] [Open]
-Models    C:\Users\aboog\AppData\Roaming…   4.10 GB   [Move…] [Open]
+Video     C:\Users\aboog\AppData\Roaming…   566 MB    [Move…] [Open]
+Models    C:\Users\aboog\AppData\Roaming…   71.1 GB   [Move…] [Open]
 Settings  C:\Users\aboog\AppData\Roaming…   77 MB     [Move…] [Open]
 ```
+
+A group can span more than one source tree. Models spans `%APPDATA%\ImageAI`
+and `~/.cache/huggingface`. Video spans `%APPDATA%\ImageAI` and `~/.imageai`.
+The row shows the combined size, and the row shows the new unified root once
+the user moves the group. Until the first move, the row shows
+`Default (2 locations)` with a tooltip that lists both.
 
 - A worker thread computes each size. A walk of 8 GB blocks the UI thread
   otherwise. Each row shows `Calculating…` until its worker returns.
@@ -271,6 +384,18 @@ Unit tests, all against `tmp_path`, no GUI:
 - `DataPaths` falls back to the platform default for one unreachable root, and
   it leaves the other roots and `config.json` unchanged.
 - The MuseTalk installer keeps an existing `~/.cache/imageai` directory on Linux.
+- `move_group` takes the `os.rename` fast path when source and destination share
+  a volume, and it takes the copy path when they do not.
+- `move_group` merges two source trees into one destination root for the Models
+  group and for the Video group.
+- `move_group` copies `events.db` together with its `-wal` and `-shm` sidecars.
+- `move_group` refuses to move the Video group while a database connection is
+  open.
+- `DataPaths.models()` supplies the `cache_dir` argument at all four
+  HuggingFace download sites.
+- `core/character_animator/installer.py` still reads the shared
+  `~/.cache/huggingface/hub` path after the Models group moves.
+- No source file contains the string `C:/Users/aboog`.
 
 One GUI smoke test confirms that the Storage Locations group box constructs.
 This test matches the existing dialog smoke-test pattern.
@@ -280,7 +405,9 @@ This test matches the existing dialog smoke-test pattern.
 | Risk | Mitigation |
 |---|---|
 | A missed call site writes to the old location after a move. | Grep for `config_dir` and `get_user_data_dir()` after the rewrite. The count must reach zero outside `core/paths.py`. |
-| A move of 4 GB takes minutes and looks frozen. | Per-file progress plus a working Cancel button. |
+| A cross-volume move of 67 GB runs for many minutes and looks frozen. | Same-volume moves use `os.rename` and finish instantly. Cross-volume moves show per-file progress, a running byte count, and a working Cancel button. |
+| A copy of a live `events.db` produces a corrupt destination. | Close the connection before the copy. Copy the `-wal` and `-shm` sidecars. Refuse the move while a connection is open. |
+| The HuggingFace cache holds weights that other tools also use. | ImageAI moves only the cache that ImageAI passes as `cache_dir`. The shared hub path that Character Animator reads stays fixed. |
 | Data loss during the delete step. | Verify before delete. Write config before delete. |
 | The Linux MuseTalk default changes and triggers a 4 GB re-download. | The installer detects and keeps an existing `~/.cache/imageai` directory. |
 | A user selects a removable drive that later disappears. | The resolver falls back to the platform default and logs a warning when a configured root is unreachable at startup. The application warns the user in the Settings tab. |
