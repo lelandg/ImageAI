@@ -606,7 +606,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_help, "❓ Help")
         self.tabs.addTab(self.tab_history, "📜 History")  # Always add history tab
 
-        # Batch Jobs tab — lists OpenAI Batch API submissions from BATCH_JOBS_PATH.
+        # Batch Jobs tab — lists OpenAI Batch API submissions from the ledger.
         from PySide6.QtWidgets import QTableWidget, QPushButton as _PB, QVBoxLayout as _VBL, QWidget as _W, QHBoxLayout as _HBL
         self.tab_batch_jobs = _W()
         _bjl = _VBL(self.tab_batch_jobs)
@@ -5598,7 +5598,7 @@ For more detailed information, please refer to the full documentation.
 
                         # Import compositor
                         from core.reference.image_compositor import ReferenceImageCompositor
-                        from core.constants import get_user_data_dir
+                        from core.paths import get_data_paths
 
                         # Create compositor
                         compositor = ReferenceImageCompositor(canvas_size=1024)
@@ -5607,7 +5607,7 @@ For more detailed information, please refer to the full documentation.
                         image_paths = [ref.path for ref in references]
 
                         # Create output path for composite
-                        composite_dir = get_user_data_dir() / "composites"
+                        composite_dir = get_data_paths().composites()
                         composite_dir.mkdir(parents=True, exist_ok=True)
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         composite_path = composite_dir / f"composite_{timestamp}.png"
@@ -6761,15 +6761,16 @@ For more detailed information, please refer to the full documentation.
             QMessageBox.warning(self, "Batch", f"Submission failed:\n{e}")
 
     def _refresh_batch_jobs_subtab(self):
-        """Populate the Batch Jobs table from BATCH_JOBS_PATH."""
+        """Populate the Batch Jobs table from the batch-jobs ledger."""
         from PySide6.QtWidgets import QTableWidgetItem, QPushButton
-        from core.constants import BATCH_JOBS_PATH
+        from core.constants import batch_jobs_path
         import json
 
+        ledger = batch_jobs_path()
         entries = []
-        if BATCH_JOBS_PATH.exists():
+        if ledger.exists():
             try:
-                entries = json.loads(BATCH_JOBS_PATH.read_text(encoding="utf-8"))
+                entries = json.loads(ledger.read_text(encoding="utf-8"))
                 if not isinstance(entries, list):
                     entries = []
             except (OSError, IOError, ValueError):
@@ -6980,11 +6981,12 @@ For more detailed information, please refer to the full documentation.
     def _set_app_icon(self):
         """Set the application window icon."""
         from PySide6.QtGui import QIcon
+        from core.paths import get_data_paths
 
         # Try multiple locations for the icon
         icon_paths = [
             Path(__file__).parent.parent / "assets" / "icon.png",  # Project assets
-            self.config.config_dir / "generated" / "ImageAI Logo 01.png",  # Generated
+            get_data_paths().generated() / "ImageAI Logo 01.png",  # Generated
         ]
 
         for icon_path in icon_paths:

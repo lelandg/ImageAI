@@ -189,7 +189,8 @@ class PromptBuilder(QDialog):
         self.settings = QSettings("ImageAI", "PromptBuilder")
 
         # History file
-        self.history_file = self.config.config_dir / "prompt_builder_history.json"
+        from core.paths import get_data_paths
+        self.history_file = get_data_paths().history_file("prompt_builder")
         self.history: List[Dict] = []
 
         # Store original combo box items for filter restoration

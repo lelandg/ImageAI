@@ -14,6 +14,7 @@ from .llm_utils import (
     LLMResponseParser, DialogStatusConsole, LiteLLMHandler
 )
 from .history_widget import DialogHistoryWidget
+from core.paths import get_data_paths
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -920,7 +921,6 @@ class PromptQuestionDialog(QDialog):
             self.config.set('llm_provider', self.llm_provider_combo.currentText())
             self.config.set('llm_model', self.llm_model_combo.currentText())
 
-            from pathlib import Path
             import json
             session = {
                 "prompt": self.prompt_display.toPlainText(),
@@ -934,7 +934,7 @@ class PromptQuestionDialog(QDialog):
                 "reasoning_effort": self.reasoning_combo.currentText() if self.gpt5_params_widget.isVisible() else "medium",
                 "verbosity": self.verbosity_combo.currentText() if self.gpt5_params_widget.isVisible() else "medium"
             }
-            session_file = Path(self.config.config_dir) / "prompt_question_session.json"
+            session_file = get_data_paths().session_file("prompt_question")
             try:
                 with open(session_file, 'w') as f:
                     json.dump(session, f, indent=2)
@@ -944,9 +944,8 @@ class PromptQuestionDialog(QDialog):
     def load_last_session(self):
         """Load the last session state."""
         if self.config:
-            from pathlib import Path
             import json
-            session_file = Path(self.config.config_dir) / "prompt_question_session.json"
+            session_file = get_data_paths().session_file("prompt_question")
             if session_file.exists():
                 try:
                     with open(session_file, 'r') as f:
@@ -1008,7 +1007,6 @@ class PromptQuestionDialog(QDialog):
     def save_to_history(self, prompt, question, answer, error=None):
         """Save question/answer to history."""
         if self.config:
-            from pathlib import Path
             import json
             from datetime import datetime
 
@@ -1024,7 +1022,7 @@ class PromptQuestionDialog(QDialog):
             self.question_history.append(entry)
 
             # Save to file
-            history_file = Path(self.config.config_dir) / "prompt_question_history.json"
+            history_file = get_data_paths().history_file("prompt_question")
             try:
                 with open(history_file, 'w') as f:
                     json.dump(self.question_history, f, indent=2)
@@ -1034,9 +1032,8 @@ class PromptQuestionDialog(QDialog):
     def load_history(self):
         """Load question/answer history."""
         if self.config:
-            from pathlib import Path
             import json
-            history_file = Path(self.config.config_dir) / "prompt_question_history.json"
+            history_file = get_data_paths().history_file("prompt_question")
             if history_file.exists():
                 try:
                     with open(history_file, 'r') as f:

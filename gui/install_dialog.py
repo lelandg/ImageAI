@@ -13,7 +13,6 @@ import sys
 import time
 import logging
 
-from core.constants import get_user_data_dir
 from .common.dialog_conventions import (
     DialogCleanupMixin, bind_primary_action, persist_splitter,
     restore_splitter, set_default_button, standard_splitter,
@@ -321,8 +320,9 @@ class InstallProgressDialog(DialogCleanupMixin, QDialog):
         default_model = "RealESRGAN_x4plus"
         model_info = models[default_model]
 
-        # Set up paths in user data directory
-        weights_dir = get_user_data_dir() / "weights"
+        # Set up paths in the Models data root
+        from core.paths import get_data_paths
+        weights_dir = get_data_paths().weights()
         weights_dir.mkdir(parents=True, exist_ok=True)
         model_path = weights_dir / f"{default_model}.pth"
 

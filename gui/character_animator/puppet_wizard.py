@@ -35,7 +35,6 @@ from core.character_animator.availability import (
 from core.character_animator.models import (
     PuppetStructure, ExportFormat, VisemeSet, EyeBlinkSet,
 )
-from core.constants import get_user_data_dir
 from .install_dialog import PuppetInstallConfirmDialog, PuppetInstallProgressDialog
 from core.discord_rpc import discord_rpc, ActivityState
 
@@ -926,8 +925,9 @@ class ExportPage(QWizardPage):
         if saved_output and Path(saved_output).exists():
             self.output_edit.setText(saved_output)
         else:
-            # Default to Characters subdirectory in user data folder
-            default_output = get_user_data_dir() / "Characters"
+            # Default to the Characters subdirectory of the Images data root
+            from core.paths import get_data_paths
+            default_output = get_data_paths().characters()
             default_output.mkdir(parents=True, exist_ok=True)
             self.output_edit.setText(str(default_output))
 
