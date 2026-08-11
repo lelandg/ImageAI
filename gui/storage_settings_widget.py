@@ -234,21 +234,63 @@ class StorageSettingsWidget(QGroupBox):
             else:
                 logger.warning(message)
 
-    def refresh_status(self) -> None:
-        """Mark every row whose configured root is unreachable."""
+    def _unavailable_now(self) -> Set[Group]:
+        """Return the groups running on the fallback root right now."""
         paths = get_data_paths()
         # Resolve every root first. The resolution itself buffers the
         # warnings, so the drain below must run after it.
         unavailable = self._unavailable_groups(paths)
         self._report_warnings(paths)
+        return unavailable
+
+    def refresh_status(self) -> None:
+        """Mark every row whose configured root is unreachable.
+
+        A group on the fallback root also loses its Move button. The move
+        would read the fallback location as the group's data and write the new
+        folder over the configured one, which erases the only record of the
+        offline volume.
+        """
+        unavailable = self._unavailable_now()
 
         for group, row in self.rows.items():
             if group in unavailable:
-                row.status_label.setText("⚠ Unavailable — using default location")
+                row.status_label.setText(
+                    "⚠ Unavailable — using default location. "
+                    "Move is off until the folder returns."
+                )
                 row.status_label.setVisible(True)
+                row.move_button.setEnabled(False)
+                row.move_button.setToolTip(self._unavailable_reason(group))
             else:
                 row.status_label.setText("")
                 row.status_label.setVisible(False)
+                row.move_button.setEnabled(True)
+                row.move_button.setToolTip(f"Relocate {GROUP_LABELS[group]} data")
+
+    def _unavailable_reason(self, group: Group) -> str:
+        """Explain why a group on the fallback root cannot be moved."""
+        configured = self._configured_roots(get_data_paths()).get(
+            group.value, "the folder recorded in config.json"
+        )
+        return (
+            f"{GROUP_LABELS[group]} is unavailable. ImageAI cannot reach\n"
+            f"{configured}\n"
+            f"and is using the default location instead.\n\n"
+            f"A move now would record the new folder over that path and leave "
+            f"the data on the drive that is offline, with nothing left to say "
+            f"where it is. Reconnect the drive or share first, then move."
+        )
+
+    def _refuse_unavailable(self, group: Group) -> None:
+        """Report a move that this widget must not run."""
+        reason = self._unavailable_reason(group)
+        logger.error(
+            "Refused to move %s: its configured root is unreachable, so the "
+            "move would run from the fallback location. %s",
+            group.value, reason.replace("\n", " "),
+        )
+        QMessageBox.critical(self, "Location unavailable", reason)
 
     def _path_text(self, group: Group) -> str:
         return str(get_data_paths().root(group))
@@ -323,11 +365,13 @@ class StorageSettingsWidget(QGroupBox):
             f"Free at destination: {human_size(free)}\n\n"
             # Two different moves run here, and the dialog must describe the
             # one that will happen. A destination on the same drive takes the
-            # rename fast path: no copy runs, and no verification runs.
-            f"On the same drive ImageAI renames the folders, and the move "
-            f"finishes at once.\n"
-            f"On another drive ImageAI copies the data, verifies every file, "
-            f"and removes the original only after that."
+            # rename fast path: no copy runs, and no check runs. The copy path
+            # compares what arrived against what it read, so the promise stops
+            # at "every file arrived" — it is not a per-file content check.
+            f"On the same drive ImageAI renames the folders. Nothing is "
+            f"copied, and the move finishes at once.\n"
+            f"On another drive ImageAI copies the data, checks that every file "
+            f"arrived, and removes the original only after that check passes."
         )
         box.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
         box.setDefaultButton(QMessageBox.Cancel)
@@ -416,9 +460,27 @@ class StorageSettingsWidget(QGroupBox):
             f"Moved {human_size(result.bytes_moved)} of "
             f"{GROUP_LABELS[group]} data."
         )
-        box.setInformativeText(
-            "Restart ImageAI to use the new location."
-        )
+        # A source the migrator could not remove leaves a second copy of the
+        # data behind, and nothing else on screen would ever mention it.
+        # "Move complete" over a duplicated tree is the one thing the user
+        # cannot discover later: the old folder is no longer referenced.
+        leftovers = list(getattr(result, "stranded", None) or [])
+        informative = "Restart ImageAI to use the new location."
+        if leftovers:
+            listed = "\n".join(f"  {str(left)}" for left, _intended in leftovers)
+            logger.warning(
+                "The %s move left %d folder(s) at the old location: %s",
+                group.value, len(leftovers),
+                ", ".join(str(left) for left, _intended in leftovers),
+            )
+            informative = (
+                "ImageAI could not remove every original folder, so a second "
+                "copy of that data is still in the old location:\n"
+                f"{listed}\n\n"
+                "Check the new location, then delete the old folders "
+                "yourself.\n\n"
+            ) + informative
+        box.setInformativeText(informative)
         restart = box.addButton("Restart Now", QMessageBox.AcceptRole)
         box.addButton("Later", QMessageBox.RejectRole)
         box.exec()
@@ -521,7 +583,21 @@ class StorageSettingsWidget(QGroupBox):
                 "may drop the new root %s", group.value, dest,
             )
 
+    def _refresh_rows(self) -> None:
+        """Re-measure every group and re-check every configured root."""
+        self.refresh_sizes()
+        self.refresh_status()
+
     def _on_move(self, group: Group) -> None:
+        # The button is disabled for a group on the fallback root, and this
+        # check repeats that decision. A drive can go offline between the last
+        # refresh and the click, and a keyboard shortcut reaches the handler
+        # without the button.
+        if group in self._unavailable_now():
+            self._refuse_unavailable(group)
+            self.refresh_status()
+            return
+
         start = self._suggested_dir(group)
         chosen = QFileDialog.getExistingDirectory(
             self, f"Choose a folder for {GROUP_LABELS[group]} data", start
@@ -547,39 +623,17 @@ class StorageSettingsWidget(QGroupBox):
         # Every outcome except a restart must take the handles back, or the
         # Midjourney watcher and the video event stores stay off for the rest
         # of the session.
-        settled = False
         try:
             result = self._run_with_progress(group, dest)
-
-            if not result.ok:
-                logger.error("Move of %s failed: %s", group.value, result.error)
-                # Restore before the modal box. The box blocks until the user
-                # dismisses it, and the app must be usable the moment it closes.
-                self._restore_open_resources(group)
-                settled = True
-                QMessageBox.critical(self, "Move failed", result.error)
-                self.refresh_sizes()
-                self.refresh_status()
-                return
-
-            self._update_live_config(group, dest)
-            reset_data_paths()
-            self.rows[group].path_label.setText(str(dest))
-            self.rows[group].path_label.setToolTip(str(dest))
-            self.refresh_sizes()
-            self.refresh_status()
-            self.move_completed.emit(group.value)
-            # ``_offer_restart`` either restarts the application, which rebuilds
-            # every handle, or restores the handles itself on the "Later" answer.
-            self._offer_restart(group, result)
-            settled = True
         except Exception as exc:  # noqa: BLE001 - the app must stay usable
+            # Nothing here says the move finished. ``move_group`` rolls its
+            # renames back and keeps its journal, so both folders can hold
+            # part of the group, and the advice below is the right advice.
             logger.exception(
                 "The %s move to %s stopped with an unexpected error",
                 group.value, dest,
             )
             self._restore_open_resources(group)
-            settled = True
             QMessageBox.critical(
                 self, "Move failed",
                 f"The {GROUP_LABELS[group]} move stopped with an unexpected "
@@ -587,8 +641,50 @@ class StorageSettingsWidget(QGroupBox):
                 f"Check both folders before you try the move again. The log "
                 f"file holds the details.",
             )
-            self.refresh_sizes()
-            self.refresh_status()
+            self._refresh_rows()
+            return
+
+        if not result.ok:
+            logger.error("Move of %s failed: %s", group.value, result.error)
+            # Restore before the modal box. The box blocks until the user
+            # dismisses it, and the app must be usable the moment it closes.
+            self._restore_open_resources(group)
+            QMessageBox.critical(self, "Move failed", result.error)
+            self._refresh_rows()
+            return
+
+        # The move itself is over: config.json holds the new root and the
+        # sources are gone. Every failure from here on is a failure to update
+        # this running window, so it must never send the user back to move the
+        # data a second time. A second move would start from the new folder.
+        settled = False
+        try:
+            self._update_live_config(group, dest)
+            reset_data_paths()
+            self.rows[group].path_label.setText(str(dest))
+            self.rows[group].path_label.setToolTip(str(dest))
+            self._refresh_rows()
+            self.move_completed.emit(group.value)
+            # ``_offer_restart`` either restarts the application, which rebuilds
+            # every handle, or restores the handles itself on the "Later" answer.
+            self._offer_restart(group, result)
+            settled = True
+        except Exception as exc:  # noqa: BLE001 - the data is already moved
+            logger.exception(
+                "The %s move to %s finished, but ImageAI could not finish "
+                "updating itself afterwards", group.value, dest,
+            )
+            self._restore_open_resources(group)
+            settled = True
+            QMessageBox.warning(
+                self, "Move finished — restart ImageAI",
+                f"{GROUP_LABELS[group]} data moved to:\n{dest}\n\n"
+                f"ImageAI could not finish updating itself afterwards:\n\n"
+                f"{exc}\n\n"
+                f"The data is in the new folder and config.json records it. "
+                f"Restart ImageAI to use the new location. Do not run this "
+                f"move a second time. The log file holds the details.",
+            )
         finally:
             # A step outside the branches above can still raise. The handles
             # come back on every path that leaves this process running.

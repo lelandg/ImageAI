@@ -32,7 +32,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The confirmation dialog promised a copy and a verification for every move.
   A move within one drive renames the folders instead, which copies nothing and
   verifies nothing. The dialog now describes both moves, so the promise matches
-  the work that runs.
+  the work that runs. It also no longer promises to "verify every file": the
+  copy path checks that every file arrived, which is not a check of the bytes
+  in each file, and the sources are deleted after it passes.
+- Models downloaded from Settings → model browser went to the shared
+  HuggingFace cache in your home folder, whatever the Models location said.
+  That cache stays where it is on purpose, because other HuggingFace tools read
+  it, so every Models move left those downloads behind. The model browser now
+  downloads under the Models root, and a guard test fails the build if any file
+  builds a HuggingFace cache path by hand again.
+- A storage move that finished, and then hit an error while the Settings tab
+  updated itself, was reported as "The move stopped with an unexpected error.
+  Check both folders before you try the move again." By then `config.json` held
+  the new location and the originals were gone, so the advice would have moved
+  the data out of the folder it had just reached. A finished move now says so,
+  names the new folder, and asks for a restart.
+- A group whose folder could not be reached — an unplugged drive, an offline
+  share — still offered its Move button. The move would have run from the
+  default location and written the new folder over the recorded one, which
+  erases the only record of where the offline data is. The button is now
+  disabled for that group, and it explains what to reconnect.
+- A move that could not delete an original folder still reported "Move
+  complete". Windows refuses to delete a file this process holds open, so a
+  second copy of the data stayed on the old drive with nothing to point at it.
+  The completion message now names every folder the move left behind.
+- A `config.json` that could not be read, and a `config.json` that could not be
+  written, were both silent. Startup quarantines an unreadable file, which
+  takes the stored API keys and the recorded storage locations with it, and a
+  failed save drops every setting change of the session. ImageAI now reports
+  each problem once, and names the preserved copy.
 
 ## [0.45.0] - 2026-08-11
 
@@ -41,9 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Images, Video, Models, and Settings data to any folder, so a large model or
   video library no longer has to sit on the system drive. Each row shows the
   current folder and its measured size, measured off the UI thread. A move
-  copies the data, verifies every file, writes the new location to
-  `config.json`, and only then removes the original; a move within one volume
-  takes a rename fast path and finishes in milliseconds. `config.json` itself
+  within one drive renames the folders and finishes at once. A move to another
+  drive copies the data, checks that every file arrived, writes the new
+  location to `config.json`, and removes the original only after that check
+  passes. `config.json` itself
   never moves — it is the anchor that records where everything else lives. The
   machine-wide HuggingFace cache in your home folder never moves either. Other
   HuggingFace tools read that cache, and a move makes them download every model

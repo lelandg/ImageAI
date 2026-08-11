@@ -738,6 +738,11 @@ def test_failure_after_a_successful_move_still_restores(
     monkeypatch.setattr(
         "gui.storage_settings_widget.QMessageBox.critical", lambda *a, **k: None
     )
+    # The failure lands after the move finished, so it reports through
+    # warning(), not through critical().
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.warning", lambda *a, **k: None
+    )
 
     widget._on_move(Group.IMAGES)
 
@@ -796,13 +801,27 @@ def test_confirmation_does_not_promise_a_copy_for_every_move(
 
 
 def test_confirmation_names_both_move_paths(widget, tmp_path, monkeypatch):
-    """The user must learn which move runs: the rename or the verified copy."""
+    """The user must learn which move runs: the rename or the checked copy."""
     text = _confirmation_text(widget, Group.IMAGES, tmp_path / "dest", monkeypatch).lower()
 
     assert "same drive" in text
     assert "renames" in text
     assert "another drive" in text
-    assert "verifies" in text
+    assert "checks that every file arrived" in text
+
+
+def test_confirmation_does_not_promise_a_per_file_content_check(
+    widget, tmp_path, monkeypatch
+):
+    """The copy path compares what arrived, not the bytes of every file.
+
+    "verifies every file" reads as a content check. A storage layer that
+    corrupts bytes passes the real check, and the sources are then deleted, so
+    the wording must not promise more than the check performs.
+    """
+    text = _confirmation_text(widget, Group.IMAGES, tmp_path / "dest", monkeypatch).lower()
+
+    assert "verifies every file" not in text
 
 
 def test_models_hint_says_the_shared_cache_stays(widget):
@@ -1112,3 +1131,446 @@ def test_settings_tab_adds_the_storage_widget_to_its_layout(qapp, tmp_path, monk
         assert layout.indexOf(made) >= 0
     finally:
         _drain_threads(made)
+
+
+# --- ImageAI's own downloads must follow the Models root -------------------
+
+
+def test_model_browser_downloads_follow_the_models_root(qapp, tmp_path, monkeypatch):
+    """Settings → model browser must not download into the shared HF cache.
+
+    The machine-wide ``~/.cache/huggingface`` tree is deliberately outside the
+    Models group, so ImageAI's own downloads have to land under the Models
+    root. A hardcoded override in the main window sent them to the shared
+    cache, where every Models move left them behind.
+    """
+    import types
+
+    from PySide6.QtWidgets import QDialog
+
+    import gui.main_window as main_window_module
+    from core.paths import get_data_paths
+
+    # Path.home() reads $HOME. Keep it inside the temporary tree.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+
+    models = tmp_path / "Models"
+    models.mkdir()
+    cfg = tmp_path / "config.json"
+    cfg.write_text(
+        json.dumps({"data_roots": {"models": str(models)}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(paths_mod, "_INSTANCE", DataPaths(config_path=cfg))
+
+    seen = {}
+
+    class _FakeBrowser:
+        def __init__(self, parent=None, cache_dir=None):
+            seen["cache_dir"] = cache_dir
+
+        def exec(self):
+            return QDialog.Rejected
+
+    monkeypatch.setattr(main_window_module, "ModelBrowserDialog", _FakeBrowser)
+    stub = types.SimpleNamespace(_update_model_list=lambda: None)
+
+    main_window_module.MainWindow._open_model_browser(stub)
+
+    assert "cache_dir" in seen, "the model browser never opened"
+    # The dialog's own default already resolves to the Models root, so an
+    # override is correct only when it names the same folder.
+    chosen = seen["cache_dir"] or get_data_paths().huggingface()
+    assert chosen == models / "huggingface"
+
+
+def test_no_gui_or_provider_file_builds_the_shared_hf_cache_path():
+    """No file may hand-build a HuggingFace cache path.
+
+    A hand-built path bypasses the Models root, so the weights stay behind on
+    every move. ``DataPaths.huggingface()`` is the only correct source.
+    """
+    import pathlib
+    import re
+
+    literal_cache = re.compile(r"\.cache['\"/\\]")
+    home_built = ("path.home()", "expanduser")
+
+    offenders = []
+    for folder in ("gui", "providers"):
+        for path in pathlib.Path(folder).rglob("*.py"):
+            text = path.read_text(encoding="utf-8", errors="replace")
+            for lineno, line in enumerate(text.splitlines(), start=1):
+                lowered = line.lower()
+                if "huggingface" not in lowered:
+                    continue
+                if lowered.lstrip().startswith("#"):
+                    continue  # a comment names the path it must not build
+                if literal_cache.search(lowered) or any(n in lowered for n in home_built):
+                    offenders.append(f"{path}:{lineno}: {line.strip()}")
+    assert not offenders, (
+        "hand-built HuggingFace cache paths (use get_data_paths().huggingface()):\n"
+        + "\n".join(offenders)
+    )
+
+
+# --- a completed move must never be reported as a failed one ---------------
+
+
+def test_post_move_failure_does_not_claim_the_move_stopped(
+    hosted_widget, tmp_path, monkeypatch
+):
+    """config.json already holds the move; the sources are already gone.
+
+    A step after the move can still raise. The message for that case must not
+    tell the user to check both folders and try again, because a second move
+    would run from the new location.
+    """
+    widget, host = hosted_widget
+    _seed_images(tmp_path)
+    chosen = tmp_path / "chosen"
+    chosen.mkdir()
+    host.close_data_handles = lambda group: None
+    host.restore_data_handles = lambda group: None
+    shown = []
+
+    _patch_successful_move(monkeypatch, chosen)
+
+    def boom():
+        raise RuntimeError("the resolver refused to reset")
+
+    monkeypatch.setattr("gui.storage_settings_widget.reset_data_paths", boom)
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.critical",
+        lambda *a, **k: shown.append(a[2]),
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.warning",
+        lambda *a, **k: shown.append(a[2]),
+    )
+
+    widget._on_move(Group.IMAGES)
+
+    assert shown, "the post-move failure was silent"
+    text = shown[0].lower()
+    assert "check both folders" not in text, shown[0]
+    assert "try the move again" not in text, shown[0]
+    assert "moved" in text, shown[0]
+    assert str(chosen).lower() in text, shown[0]
+
+
+def test_post_move_failure_reaches_the_file_logger(
+    hosted_widget, tmp_path, monkeypatch, caplog
+):
+    widget, host = hosted_widget
+    _seed_images(tmp_path)
+    chosen = tmp_path / "chosen"
+    chosen.mkdir()
+    host.close_data_handles = lambda group: None
+    host.restore_data_handles = lambda group: None
+
+    _patch_successful_move(monkeypatch, chosen)
+
+    def boom():
+        raise RuntimeError("the resolver refused to reset")
+
+    monkeypatch.setattr("gui.storage_settings_widget.reset_data_paths", boom)
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.critical", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.warning", lambda *a, **k: None
+    )
+
+    with caplog.at_level(logging.ERROR, logger="gui.storage_settings_widget"):
+        widget._on_move(Group.IMAGES)
+
+    assert any(r.exc_info is not None for r in caplog.records)
+
+
+def test_a_move_that_never_ran_still_says_to_check_both_folders(
+    hosted_widget, tmp_path, monkeypatch
+):
+    """The pre-completion wording must survive the split."""
+    widget, host = hosted_widget
+    _seed_images(tmp_path)
+    host.close_data_handles = lambda group: None
+    host.restore_data_handles = lambda group: None
+    shown = []
+
+    _patch_raising_move(monkeypatch, tmp_path, OSError("destination went away"))
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.critical",
+        lambda *a, **k: shown.append(a[2]),
+    )
+
+    widget._on_move(Group.IMAGES)
+
+    assert shown and "Check both folders" in shown[0]
+
+
+def test_completion_names_the_data_the_move_left_behind(hosted_widget, monkeypatch):
+    """A move that could not delete a source must say where the copy is."""
+    from PySide6.QtWidgets import QMessageBox
+
+    from core.data_migration import MoveResult
+
+    widget, host = hosted_widget
+    host.restore_data_handles = lambda group: None
+    captured = {}
+
+    def fake_exec(box):
+        captured["text"] = box.informativeText()
+        return 0
+
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    monkeypatch.setattr(QMessageBox, "clickedButton", lambda self: None)
+
+    result = MoveResult(
+        ok=True, files_moved=2, bytes_moved=16,
+        stranded=[("/old/settings/logs", "/new/settings/logs")],
+    )
+    widget._offer_restart(Group.SETTINGS, result)
+
+    assert "/old/settings/logs" in captured["text"], captured["text"]
+
+
+# --- a group on the fallback root must not offer a move --------------------
+
+
+def _unavailable_widget(tmp_path, monkeypatch):
+    """A widget whose Images root is configured but unreachable."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(
+        json.dumps({"data_roots": {"images": str(tmp_path / "unplugged" / "Images")}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(paths_mod, "_INSTANCE", DataPaths(config_path=cfg))
+    _sandbox_sources(monkeypatch)
+
+    from gui.storage_settings_widget import StorageSettingsWidget
+
+    return StorageSettingsWidget()
+
+
+def test_unavailable_group_cannot_be_moved(tmp_path, monkeypatch, qapp):
+    """Moving a fallback root erases the only record of the offline volume."""
+    widget = _unavailable_widget(tmp_path, monkeypatch)
+    try:
+        images = widget.rows[Group.IMAGES]
+        assert images.move_button.isEnabled() is False
+        assert "unavailable" in images.move_button.toolTip().lower()
+        for group, row in widget.rows.items():
+            if group is not Group.IMAGES:
+                assert row.move_button.isEnabled() is True, group
+    finally:
+        _drain_threads(widget)
+
+
+def test_move_refuses_while_the_configured_root_is_unavailable(
+    tmp_path, monkeypatch, qapp, caplog
+):
+    """A disabled button is not enough: the handler must refuse as well."""
+    widget = _unavailable_widget(tmp_path, monkeypatch)
+    opened, shown = [], []
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QFileDialog.getExistingDirectory",
+        lambda *a, **k: opened.append(1) or "",
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.critical",
+        lambda *a, **k: shown.append(a[2]),
+    )
+    try:
+        with caplog.at_level(logging.ERROR, logger="gui.storage_settings_widget"):
+            widget._on_move(Group.IMAGES)
+
+        assert not opened, "the folder picker opened for an unreachable root"
+        assert shown, "the refusal was silent"
+        assert "unplugged" in shown[0], shown[0]
+        assert any(r.levelno >= logging.ERROR for r in caplog.records)
+    finally:
+        _drain_threads(widget)
+
+
+def test_a_reachable_group_still_offers_its_move_button(widget):
+    for group, row in widget.rows.items():
+        assert row.move_button.isEnabled() is True, group
+
+
+# --- the app must not hide a config.json it could not read or write --------
+
+
+class _AilingConfig:
+    """A ConfigManager whose load or save failed."""
+
+    def __init__(self, load_error=None, preserved=None, save_error=None, ok=True):
+        self.config = {}
+        self.load_error = load_error
+        self.preserved_config_path = preserved
+        self.last_save_error = save_error
+        self._ok = ok
+
+    def get(self, key, default=None):
+        return self.config.get(key, default)
+
+    def set(self, key, value):
+        self.config[key] = value
+
+    def save(self):
+        return self._ok
+
+
+def _health_stub(config):
+    """A host that runs the real MainWindow methods without a full window.
+
+    MainWindow.__init__ builds every tab, so a test cannot construct one. The
+    class attributes below are the real functions, so the test exercises the
+    shipped code and not a copy of it.
+    """
+    from gui.main_window import MainWindow
+
+    class _ConfigHost:
+        save_config = MainWindow.save_config
+        _check_config_health = MainWindow._check_config_health
+        _report_config_problem = MainWindow._report_config_problem
+
+        def __init__(self, held):
+            self.config = held
+
+    return _ConfigHost(config)
+
+
+def _capture_config_boxes(monkeypatch):
+    shown = []
+    for name in ("warning", "critical", "information"):
+        monkeypatch.setattr(
+            f"gui.main_window.QMessageBox.{name}",
+            lambda *a, **k: shown.append(a[2]),
+        )
+    return shown
+
+
+def test_a_preserved_corrupt_config_is_reported_with_its_copy(qapp, monkeypatch, tmp_path):
+    """A quarantined config.json must not be invisible to the user."""
+    from gui.main_window import MainWindow
+
+    sidecar = tmp_path / "config.json.corrupt-20260811-120000"
+    stub = _health_stub(
+        _AilingConfig(load_error="config.json is not a JSON object.", preserved=sidecar)
+    )
+    shown = _capture_config_boxes(monkeypatch)
+
+    stub._check_config_health()
+
+    assert shown, "a corrupt config.json was preserved without telling the user"
+    assert str(sidecar) in shown[0], shown[0]
+
+
+def test_the_corrupt_config_report_appears_once_per_session(qapp, monkeypatch, tmp_path):
+    from gui.main_window import MainWindow
+
+    stub = _health_stub(
+        _AilingConfig(load_error="broken", preserved=tmp_path / "copy")
+    )
+    shown = _capture_config_boxes(monkeypatch)
+
+    stub._check_config_health()
+    stub._check_config_health()
+
+    assert len(shown) == 1, shown
+
+
+def test_a_corrupt_config_reaches_the_file_logger(qapp, monkeypatch, tmp_path, caplog):
+    from gui.main_window import MainWindow
+
+    stub = _health_stub(
+        _AilingConfig(load_error="broken", preserved=tmp_path / "copy")
+    )
+    _capture_config_boxes(monkeypatch)
+
+    with caplog.at_level(logging.ERROR, logger="gui.main_window"):
+        stub._check_config_health()
+
+    assert any(r.levelno >= logging.ERROR for r in caplog.records)
+
+
+def test_a_failed_save_is_reported_to_the_user(qapp, monkeypatch):
+    """Losing every setting change for the session must never be silent."""
+    from gui.main_window import MainWindow
+
+    config = _AilingConfig(ok=False)
+
+    def failing_save():
+        config.last_save_error = "The settings folder is read only."
+        return False
+
+    config.save = failing_save
+    stub = _health_stub(config)
+    shown = _capture_config_boxes(monkeypatch)
+
+    assert stub.save_config() is False
+    assert shown, "a failed save said nothing"
+    assert "read only" in shown[0], shown[0]
+
+
+def test_a_failed_save_reaches_the_file_logger(qapp, monkeypatch, caplog):
+    from gui.main_window import MainWindow
+
+    config = _AilingConfig(ok=False)
+
+    def failing_save():
+        config.last_save_error = "disk full"
+        return False
+
+    config.save = failing_save
+    stub = _health_stub(config)
+    _capture_config_boxes(monkeypatch)
+
+    with caplog.at_level(logging.ERROR, logger="gui.main_window"):
+        stub.save_config()
+
+    assert any(r.levelno >= logging.ERROR for r in caplog.records)
+
+
+def test_a_save_that_works_says_nothing(qapp, monkeypatch):
+    from gui.main_window import MainWindow
+
+    stub = _health_stub(_AilingConfig(ok=True))
+    shown = _capture_config_boxes(monkeypatch)
+
+    assert stub.save_config() is True
+    assert shown == []
+
+
+def test_a_raising_save_is_reported_and_does_not_escape(qapp, monkeypatch):
+    """save() runs from about forty Qt slots; none of them may abort."""
+    from gui.main_window import MainWindow
+
+    config = _AilingConfig()
+
+    def boom():
+        raise OSError("the settings folder disappeared")
+
+    config.save = boom
+    stub = _health_stub(config)
+    shown = _capture_config_boxes(monkeypatch)
+
+    assert stub.save_config() is False
+    assert shown and "disappeared" in shown[0], shown
+
+
+def test_the_main_window_saves_through_the_reporting_wrapper():
+    """A bare ``self.config.save()`` cannot report its own failure."""
+    import pathlib
+
+    source = pathlib.Path("gui/main_window.py").read_text(encoding="utf-8")
+    offenders = [
+        f"gui/main_window.py:{lineno}: {line.strip()}"
+        for lineno, line in enumerate(source.splitlines(), start=1)
+        if "self.config.save()" in line
+    ]
+    assert not offenders, (
+        "these saves cannot report a failure; call self.save_config():\n"
+        + "\n".join(offenders)
+    )

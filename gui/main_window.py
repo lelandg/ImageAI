@@ -273,10 +273,118 @@ class MainWindow(QMainWindow):
         # Start background Ollama model detection
         self._start_background_ollama_detection()
 
+        # A config.json this session could not read is otherwise invisible:
+        # startup quarantined it, the API keys and the storage locations went
+        # with it, and nothing on screen says so.
+        self._check_config_health()
+        self._start_config_health_timer()
+
         print("Application ready!")
         self.status_bar.showMessage("Ready")
         QApplication.processEvents()
-    
+
+    # -- config.json health -------------------------------------------------
+
+    def save_config(self) -> bool:
+        """Save config.json, and tell the user when the write failed.
+
+        ``ConfigManager.save()`` reports a failed write through its return
+        value and through ``last_save_error``. A caller that reads neither
+        loses every setting change of the session without a sign, so every
+        save in this window goes through this method.
+
+        Returns:
+            True when config.json now holds this session's settings.
+        """
+        config = getattr(self, "config", None)
+        if config is None:
+            logger.error("There is no configuration to save.")
+            return False
+
+        try:
+            saved = config.save()
+        except Exception as exc:  # noqa: BLE001 - a Qt slot must not abort
+            logger.exception("Could not save config.json")
+            self._report_config_problem(
+                "Settings were not saved",
+                f"ImageAI could not save your settings:\n\n{exc}\n\n"
+                f"Every change you make now is lost when ImageAI closes. The "
+                f"log file holds the details.",
+                key=f"save-raised:{exc}",
+            )
+            return False
+
+        self._check_config_health()
+        # A ConfigManager older than the bool return reports success as None.
+        return saved is not False
+
+    def _start_config_health_timer(self) -> None:
+        """Poll for a failed save that another module started.
+
+        Dialogs and tabs outside this window save the same ConfigManager, and
+        this window cannot wrap their calls. ``last_save_error`` stays set
+        after a failed write, so a slow poll turns a silent loss into a
+        message. Each distinct problem is reported once, so the poll costs one
+        attribute read.
+        """
+        try:
+            self._config_health_timer = QTimer(self)
+            self._config_health_timer.setInterval(20000)
+            self._config_health_timer.timeout.connect(self._check_config_health)
+            self._config_health_timer.start()
+        except Exception:  # noqa: BLE001 - the app must still start
+            logger.exception("Could not start the configuration health timer")
+
+    def _check_config_health(self) -> None:
+        """Report a config.json this session could not read or could not write.
+
+        Both failures are silent otherwise. A quarantined config.json takes
+        the API keys and the recorded storage locations with it, and a failed
+        save drops every setting change of the session.
+        """
+        config = getattr(self, "config", None)
+        if config is None:
+            return
+
+        load_error = getattr(config, "load_error", None)
+        if load_error:
+            preserved = getattr(config, "preserved_config_path", None)
+            where = f"A copy of the original is at:\n{preserved}\n\n" if preserved else ""
+            self._report_config_problem(
+                "Settings file could not be read",
+                f"ImageAI could not read config.json:\n\n{load_error}\n\n"
+                f"{where}"
+                f"That copy still holds any stored API key and the folders your "
+                f"data was moved to. ImageAI runs with default settings until "
+                f"you repair the file or restore the copy.",
+                key=f"load:{load_error}",
+            )
+
+        save_error = getattr(config, "last_save_error", None)
+        if save_error:
+            self._report_config_problem(
+                "Settings were not saved",
+                f"ImageAI could not save your settings:\n\n{save_error}\n\n"
+                f"Every change you make now is lost when ImageAI closes.",
+                key=f"save:{save_error}",
+            )
+
+    def _report_config_problem(self, title: str, message: str, key: str) -> None:
+        """Log one configuration problem and show it once per session."""
+        seen = getattr(self, "_reported_config_problems", None)
+        if seen is None:
+            seen = set()
+            self._reported_config_problems = seen
+        if key in seen:
+            return
+        seen.add(key)
+
+        logger.error("%s: %s", title, message.replace("\n", " "))
+        try:
+            parent = self if isinstance(self, QWidget) else None
+            QMessageBox.warning(parent, title, message)
+        except Exception:  # noqa: BLE001 - reporting must never break the app
+            logger.exception("Could not show the configuration warning: %s", title)
 
     def _on_show_all_images_toggled(self, checked: bool):
         """Handle toggle of show all images checkbox."""
@@ -1642,7 +1750,7 @@ class MainWindow(QMainWindow):
             self.provider_combo.setCurrentText(self.current_provider)
             # Save the fallback provider so it persists
             self.config.set("provider", self.current_provider)
-            self.config.save()
+            self.save_config()
         provider_form.addRow("Active Provider:", self.provider_combo)
         providers_layout.addLayout(provider_form)
 
@@ -1882,7 +1990,7 @@ class MainWindow(QMainWindow):
         # Use external browser checkbox
         self.chk_external_browser = QCheckBox("Always use external browser (no embedded view)")
         self.chk_external_browser.setChecked(self.config.get("midjourney_external_browser", False))
-        self.chk_external_browser.toggled.connect(lambda s: (self.config.set("midjourney_external_browser", bool(s)), self.config.save()))
+        self.chk_external_browser.toggled.connect(lambda s: (self.config.set("midjourney_external_browser", bool(s)), self.save_config()))
         midjourney_layout.addWidget(self.chk_external_browser)
 
         # Info text
@@ -1907,7 +2015,7 @@ class MainWindow(QMainWindow):
         # LLM logging option
         self.chk_log_llm = QCheckBox("Log LLM prompts and responses (for debugging)")
         self.chk_log_llm.setChecked(self.config.get("log_llm_interactions", False))
-        self.chk_log_llm.toggled.connect(lambda checked: (self.config.set("log_llm_interactions", checked), self.config.save()))
+        self.chk_log_llm.toggled.connect(lambda checked: (self.config.set("log_llm_interactions", checked), self.save_config()))
         options_layout.addWidget(self.chk_log_llm)
 
         # Auto-copy filename option
@@ -3750,7 +3858,7 @@ For more detailed information, please refer to the full documentation.
         """Perform the actual UI state save."""
         try:
             self._save_ui_state()
-            self.config.save()
+            self.save_config()
         except Exception as e:
             print(f"Error saving UI state: {e}")
 
@@ -3804,7 +3912,7 @@ For more detailed information, please refer to the full documentation.
             # Update the current provider
             self.current_provider = provider_name
             self.config.set("provider", provider_name)
-            self.config.save()
+            self.save_config()
 
             # Update API key for new provider
             self.current_api_key = self.config.get_api_key(provider_name)
@@ -3839,7 +3947,7 @@ For more detailed information, please refer to the full documentation.
             self.current_provider = provider_name
             # Update the config
             self.config.set("provider", provider_name)
-            self.config.save()
+            self.save_config()
 
             # Update API key for new provider
             self.current_api_key = self.config.get_api_key(provider_name)
@@ -4153,7 +4261,7 @@ For more detailed information, please refer to the full documentation.
         """Handle provider change from Settings tab."""
         self.current_provider = provider.lower()
         self.config.set("provider", self.current_provider)
-        self.config.save()
+        self.save_config()
 
         # Update reference image button states
         self._update_use_current_button_state()
@@ -4305,7 +4413,7 @@ For more detailed information, please refer to the full documentation.
         self.current_aspect_ratio = ratio
         # Save to config
         self.config.config['last_aspect_ratio'] = ratio
-        self.config.save()
+        self.save_config()
         # When aspect ratio changes, switch resolution selector to auto mode
         if hasattr(self, 'resolution_selector') and self.resolution_selector:
             self.resolution_selector.set_mode_aspect_ratio()
@@ -4330,7 +4438,7 @@ For more detailed information, please refer to the full documentation.
             if width and height:
                 self.config.config['last_resolution_width'] = width
                 self.config.config['last_resolution_height'] = height
-                self.config.save()
+                self.save_config()
         self._update_cost_estimate()
         self._update_upscaling_visibility()
         # Update the "Will insert" preview to show resolution
@@ -4463,11 +4571,12 @@ For more detailed information, please refer to the full documentation.
             return
             
         try:
-            # Get cache directory from config or use default
-            cache_dir = Path.home() / ".cache" / "huggingface"
-            
-            # Create and show model browser
-            dialog = ModelBrowserDialog(self, cache_dir)
+            # No cache directory goes in here. ModelBrowserDialog resolves its
+            # own default through get_data_paths().huggingface(), which follows
+            # the Models root. The machine-wide ~/.cache/huggingface tree is
+            # deliberately outside the Models group, so an override that names
+            # it would leave every download behind on the next Models move.
+            dialog = ModelBrowserDialog(self)
             result = dialog.exec()
             
             if result == QDialog.Accepted:
@@ -4497,7 +4606,7 @@ For more detailed information, please refer to the full documentation.
             channel = self.discord_channel_edit.text().strip()
             self.config.set("midjourney_discord_server", server)
             self.config.set("midjourney_discord_channel", channel)
-            self.config.save()
+            self.save_config()
             # No dialog; keep it quiet
         except Exception:
             pass
@@ -4505,7 +4614,7 @@ For more detailed information, please refer to the full documentation.
     def _on_midjourney_use_discord_toggled(self, checked: bool):
         """Persist Use Discord setting and update button label."""
         self.config.set("midjourney_use_discord", bool(checked))
-        self.config.save()
+        self.save_config()
         if hasattr(self, 'btn_generate'):
             self._update_generate_button_for_provider(self.current_provider)
 
@@ -4584,7 +4693,7 @@ For more detailed information, please refer to the full documentation.
         self.config.set("midjourney_external_browser", self.chk_external_browser.isChecked())
 
         # Save configuration
-        self.config.save()
+        self.save_config()
 
         # Emit signal to refresh provider combos across the app
         self.api_keys_updated.emit()
@@ -4647,13 +4756,13 @@ For more detailed information, please refer to the full documentation.
         """Toggle auto-copy filename setting."""
         self.auto_copy_filename = checked
         self.config.set("auto_copy_filename", checked)
-        self.config.save()
+        self.save_config()
 
     def _apply_appearance(self):
         """Apply theme setting immediately and persist."""
         use_theme = self.chk_maestro_theme.isChecked()
         self.config.set("ui_maestro_theme", use_theme)
-        self.config.save()
+        self.save_config()
         from PySide6.QtWidgets import QApplication
         _app = QApplication.instance()
         if _app:
@@ -4767,20 +4876,20 @@ For more detailed information, please refer to the full documentation.
             self.config.set("gcloud_auth_validated", False)
             self.config.set("gcloud_project_id", "")
 
-        self.config.save()
+        self.save_config()
 
     def _on_project_id_fetched(self, project_id: str):
         """Handle project ID fetch (runs on main thread via signal)."""
         self.project_id_edit.setText(project_id)
         self.config.set("gcloud_project_id", project_id)
-        self.config.save()
+        self.save_config()
     
     def _authenticate_gcloud(self):
         """Run gcloud auth application-default login."""
         try:
             # Clear any cached validation before authenticating
             self.config.set("gcloud_auth_validated", False)
-            self.config.save()
+            self.save_config()
             
             # Show progress dialog
             msg = QMessageBox(self)
@@ -4827,7 +4936,7 @@ For more detailed information, please refer to the full documentation.
             # User can click "Check Status" button to detect it in background thread
             self.config.set("gcloud_project_id", "")
 
-        self.config.save()
+        self.save_config()
         
         # Update status if we have a project ID
         if project_id:
@@ -4970,7 +5079,7 @@ For more detailed information, please refer to the full documentation.
         self.upscaling_settings = settings
         # Save upscaling settings to config
         self.config.config['upscaling_settings'] = settings
-        self.config.save()
+        self.save_config()
         self._update_cost_estimate()
 
     def _get_target_resolution(self) -> tuple:
@@ -7054,7 +7163,7 @@ For more detailed information, please refer to the full documentation.
         config = self.config.get_discord_config()
         config["enabled"] = enabled
         self.config.set_discord_config(config)
-        self.config.save()
+        self.save_config()
 
         # Enable/disable the RPC manager
         discord_rpc.set_enabled(enabled)
@@ -7090,7 +7199,7 @@ For more detailed information, please refer to the full documentation.
 
         # Save to config
         self.config.set_discord_config(config)
-        self.config.save()
+        self.save_config()
 
         # Update RPC manager configuration
         discord_rpc.configure(
@@ -7833,7 +7942,7 @@ For more detailed information, please refer to the full documentation.
             self._save_ui_state()
 
             # Save config
-            self.config.save()
+            self.save_config()
         except Exception as e:
             logger.error(f"Error saving UI state: {e}")
         
@@ -8364,7 +8473,7 @@ For more detailed information, please refer to the full documentation.
 
         # Save the expansion state when user manually toggles
         self.config.set('image_settings_expanded', is_visible)
-        self.config.save()
+        self.save_config()
 
         # Trigger image resize after layout change
         from PySide6.QtCore import QTimer
@@ -8377,7 +8486,7 @@ For more detailed information, please refer to the full documentation.
 
         # Save the expansion state
         self.config.set('reference_images_expanded', checked)
-        self.config.save()
+        self.save_config()
 
         # Trigger image resize after layout change
         from PySide6.QtCore import QTimer
@@ -8715,7 +8824,7 @@ For more detailed information, please refer to the full documentation.
             'usage': self.ref_usage_edit.text() if hasattr(self, 'ref_usage_edit') else ""
         }
         self.config.set('reference_images', ref_images)
-        self.config.save()
+        self.save_config()
 
     def _clear_reference_image_from_config(self):
         """Remove reference image from settings."""
@@ -8724,7 +8833,7 @@ For more detailed information, please refer to the full documentation.
         if 'image_tab' in ref_images:
             del ref_images['image_tab']
             self.config.set('reference_images', ref_images)
-            self.config.save()
+            self.save_config()
 
     def _load_reference_image_from_config(self):
         """Load reference image from settings."""
@@ -8800,7 +8909,7 @@ For more detailed information, please refer to the full documentation.
 
             # Save to config
             self.config.set('imagen_references', ref_data)
-            self.config.save()
+            self.save_config()
 
             logger.info(f"Saved {len(ref_data)} Imagen references to config")
 
