@@ -338,3 +338,97 @@ def test_a_lock_held_by_another_process_times_out(config_path):
     finally:
         child.kill()
         child.wait(10)
+
+
+# --- the shared data_roots rules --------------------------------------------
+#
+# core/paths.py resolves the storage roots inside setup_logging(), before the
+# logger and before ConfigManager exist. It cannot raise and it cannot log, so
+# it validates the document with these functions instead of a second copy of
+# the rules. Two rule sets is how a document config_io rejected reached Path()
+# in the resolver and killed startup.
+
+
+@pytest.mark.parametrize("document", [
+    ["a", "b"],
+    None,
+    "a string",
+    42,
+    {"data_roots": None},
+    {"data_roots": []},
+    {"data_roots": "somewhere"},
+])
+def test_document_shape_problem_names_every_unusable_document(document):
+    problem = config_io.document_shape_problem(document)
+    assert problem
+    assert "JSON object" in problem
+
+
+@pytest.mark.parametrize("document", [
+    {},
+    {"api_key": "k"},
+    {"data_roots": {}},
+    {"data_roots": {"images": "/somewhere"}},
+])
+def test_document_shape_problem_accepts_a_usable_document(document):
+    assert config_io.document_shape_problem(document) is None
+
+
+def test_read_config_document_uses_the_shared_shape_rules(tmp_path):
+    """The strict reader and the resolver must agree on what is valid."""
+    path = tmp_path / "config.json"
+    path.write_text('{"data_roots": []}', encoding="utf-8")
+
+    with pytest.raises(ConfigReadError) as excinfo:
+        config_io.read_config_document(path)
+
+    assert config_io.document_shape_problem(
+        {"data_roots": []}, path) == str(excinfo.value)
+
+
+def test_data_root_overrides_returns_the_usable_values():
+    overrides, problems = config_io.data_root_overrides(
+        {"data_roots": {"images": "/a", "video": "/b"}}
+    )
+    assert overrides == {"images": "/a", "video": "/b"}
+    assert problems == []
+
+
+def test_data_root_overrides_on_a_document_without_the_entry():
+    overrides, problems = config_io.data_root_overrides({"api_key": "k"})
+    assert overrides == {}
+    assert problems == []
+
+
+@pytest.mark.parametrize("value", [5, ["/a", "/b"], True, None, {}, "", "   "])
+def test_data_root_overrides_drops_every_value_that_is_not_a_path(value):
+    """Path(5) raises. An override must be a non-empty string or nothing."""
+    overrides, problems = config_io.data_root_overrides(
+        {"data_roots": {"images": value}}
+    )
+    assert overrides == {}
+    assert len(problems) == 1
+    assert "images" in problems[0]
+
+
+def test_data_root_overrides_keeps_the_good_values_beside_a_bad_one():
+    overrides, problems = config_io.data_root_overrides(
+        {"data_roots": {"images": 5, "video": "/b"}}
+    )
+    assert overrides == {"video": "/b"}
+    assert len(problems) == 1
+
+
+@pytest.mark.parametrize("document", [["a"], None, 42, {"data_roots": None}])
+def test_data_root_overrides_never_raises_on_a_damaged_document(document):
+    overrides, problems = config_io.data_root_overrides(document)
+    assert overrides == {}
+    assert len(problems) == 1
+
+
+def test_data_root_overrides_names_the_file_when_it_is_given_one(tmp_path):
+    path = tmp_path / "config.json"
+    _overrides, problems = config_io.data_root_overrides(
+        {"data_roots": {"images": 5}}, source=path
+    )
+    assert str(path) in problems[0]

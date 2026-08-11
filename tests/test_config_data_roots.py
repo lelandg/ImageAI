@@ -495,3 +495,199 @@ def test_save_refreshes_the_in_memory_dict_with_the_merged_result(
     manager.save()
 
     assert manager.get("data_roots") == {"models": str(moved)}
+
+
+# --- a config.json the user deleted on purpose ------------------------------
+#
+# A missing file is protected the same way a damaged one is: the whole
+# in-memory document goes back to disk, so a sync client or a backup restore
+# cannot cost the user the API keys. The user who deletes config.json to reset
+# the application or to purge the stored keys gets that same write-back, and
+# nothing on disk tells the two apart. The log line must therefore say plainly
+# what happened, so the user can act on it.
+
+
+def _messages(caplog, level=logging.WARNING) -> str:
+    return " ".join(
+        record.getMessage() for record in caplog.records if record.levelno >= level
+    )
+
+
+def test_a_deleted_config_is_reported_when_the_save_rewrites_it(config_path, caplog):
+    """The rewrite is data-loss protection, and it must not be silent."""
+    _write(config_path, {
+        "providers": {"google": {"api_key": "AIza-SECRET"}},
+        "auth_mode": "api-key",
+    })
+    manager = _manager()
+
+    config_path.unlink()  # the user resets the app, or a sync client removes it
+
+    manager.set("last_prompt", "a cat")
+    with caplog.at_level(logging.WARNING):
+        assert manager.save() is True
+
+    reported = _messages(caplog)
+    assert str(config_path) in reported
+    assert "missing" in reported.lower(), "the message must name the condition"
+    assert "api key" in reported.lower(), "the user must learn the keys came back"
+    assert "close" in reported.lower(), "the message must say how to reset the app"
+    # The protection itself still holds.
+    assert _read(config_path)["providers"] == {"google": {"api_key": "AIza-SECRET"}}
+
+
+def test_an_intact_config_reports_nothing_about_a_missing_file(config_path, caplog):
+    """The warning must mean something, so an ordinary save must not raise it."""
+    manager = _manager()
+    manager.set("provider", "openai")
+
+    with caplog.at_level(logging.WARNING):
+        assert manager.save() is True
+
+    assert "missing" not in _messages(caplog).lower()
+
+
+def test_a_corrupt_config_is_not_reported_as_a_missing_one(config_path, caplog):
+    """A damaged file has its own message and its own sidecar."""
+    manager = _manager()
+    config_path.write_text('{"providers": {"openai": ', encoding="utf-8")
+
+    with caplog.at_level(logging.WARNING):
+        assert manager.save() is True
+
+    reported = _messages(caplog)
+    assert "could not be read" in reported.lower()
+    assert "missing at save time" not in reported.lower()
+
+
+# --- the attributes the GUI reads -------------------------------------------
+#
+# load_error, preserved_config_path and last_save_error are the only report of
+# a quarantined config.json or a save that never reached disk. The GUI surfaces
+# them, so they must hold whatever really happened.
+
+
+def test_a_corrupt_load_sets_the_load_error_and_the_preserved_path(config_path):
+    config_path.write_text('{"providers": ', encoding="utf-8")
+
+    manager = _manager()
+
+    assert manager.load_error, "a load failure must be readable by the caller"
+    assert manager.preserved_config_path is not None
+    assert manager.preserved_config_path.exists()
+    assert manager.last_save_error is None
+
+
+def test_load_error_stays_set_after_a_later_successful_save(config_path):
+    """load_error is the startup fact. A later save does not undo it."""
+    config_path.write_text("{not json", encoding="utf-8")
+    manager = _manager()
+    first = manager.load_error
+
+    assert manager.save() is True
+    assert manager.load_error == first
+    assert manager.last_save_error is None
+
+
+def test_last_save_error_is_cleared_by_the_next_successful_save(
+    config_path, monkeypatch
+):
+    manager = _manager()
+
+    def _boom(*args, **kwargs):
+        raise config_io.ConfigWriteError("read-only file system")
+
+    monkeypatch.setattr(config_io, "write_config", _boom)
+    assert manager.save() is False
+    assert manager.last_save_error
+
+    monkeypatch.undo()
+    assert manager.save() is True
+    assert manager.last_save_error is None
+
+
+def test_save_reports_an_unexpected_failure_instead_of_raising(
+    config_path, monkeypatch, caplog
+):
+    """save() runs from about forty Qt slots. Nothing may escape it."""
+    manager = _manager()
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("something nobody predicted")
+
+    monkeypatch.setattr(type(manager), "_merge_over_disk", staticmethod(_boom))
+
+    with caplog.at_level(logging.ERROR):
+        assert manager.save() is False
+
+    assert manager.last_save_error
+    assert any(record.levelno >= logging.ERROR for record in caplog.records)
+
+
+@pytest.mark.skipif(hasattr(__import__("os"), "geteuid")
+                    and __import__("os").geteuid() == 0,
+                    reason="root ignores the directory mode")
+def test_a_read_only_config_directory_reports_every_lost_save(config_path, caplog):
+    """The session cannot keep a setting, and the caller must be able to say so.
+
+    ``save()`` returns False and sets ``last_save_error`` for every attempt,
+    because the GUI has nothing else to show the user.
+    """
+    import os
+    import stat
+
+    manager = _manager()
+    directory = config_path.parent
+    before = stat.S_IMODE(directory.stat().st_mode)
+    os.chmod(directory, 0o555)
+    try:
+        manager.set("provider", "openai")
+        with caplog.at_level(logging.ERROR):
+            assert manager.save() is False
+        assert manager.last_save_error
+        assert any(record.levelno >= logging.ERROR for record in caplog.records)
+
+        # A second attempt reports the same way; nothing is remembered as done.
+        manager.set("provider", "stability")
+        assert manager.save() is False
+        assert manager.last_save_error
+    finally:
+        os.chmod(directory, before)
+
+
+def test_a_fresh_install_is_not_reported_as_a_deleted_config(tmp_path, monkeypatch,
+                                                             caplog):
+    """The first run writes config.json for the first time. Nothing is lost.
+
+    ``__init__`` normalises auth_mode and saves, and at that point the file
+    does not exist yet. That is not a file anyone removed.
+    """
+    cfg = tmp_path / "fresh" / "config.json"
+    monkeypatch.setattr(paths_mod, "_INSTANCE", DataPaths(config_path=cfg))
+
+    with caplog.at_level(logging.WARNING):
+        manager = _manager()
+        manager.set("provider", "google")
+        assert manager.save() is True
+
+    assert "missing" not in _messages(caplog).lower()
+    assert cfg.exists()
+
+
+def test_a_config_deleted_after_the_first_write_is_still_reported(tmp_path,
+                                                                  monkeypatch,
+                                                                  caplog):
+    """Once this session wrote the file, a later disappearance is an event."""
+    cfg = tmp_path / "fresh" / "config.json"
+    monkeypatch.setattr(paths_mod, "_INSTANCE", DataPaths(config_path=cfg))
+
+    manager = _manager()
+    manager.set("provider", "google")
+    assert manager.save() is True
+
+    cfg.unlink()
+    with caplog.at_level(logging.WARNING):
+        manager.set("provider", "openai")
+        assert manager.save() is True
+
+    assert "missing at save time" in _messages(caplog).lower()

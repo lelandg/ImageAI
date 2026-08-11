@@ -40,6 +40,11 @@ Public API
     Copy an unreadable ``config.json`` to a timestamped sidecar beside it, so a
     later write can never be the only copy. Returns the sidecar path, or
     ``None`` when the copy failed — in which case the caller must not write.
+``data_root_overrides(document)``
+    Validate the ``data_roots`` entry of an already-parsed document and return
+    the usable overrides plus a list of problems. It never raises, so the path
+    resolver can call it before the logger exists. Both readers of
+    ``data_roots`` share these rules from here; a second copy of them drifts.
 """
 
 from __future__ import annotations
@@ -53,9 +58,12 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
+
+#: The key in config.json that records where each data group lives.
+DATA_ROOTS_KEY = "data_roots"
 
 # A save runs at application shutdown. A wait longer than this means another
 # writer is stuck, and a stuck shutdown looks like a hang to the user.
@@ -294,25 +302,81 @@ def read_config_document(config_path: PathLike) -> Optional[Dict[str, Any]]:
         logger.error(message)
         raise ConfigReadError(message) from exc
 
-    if not isinstance(data, dict):
-        message = f"{path} does not hold a JSON object (found {type(data).__name__})."
-        logger.error(message)
-        raise ConfigReadError(message)
-
-    # An absent entry is valid: no group was ever moved. An entry that is
-    # present must be an object. A JSON null is not one — a writer that
-    # mutates data_roots in place fails on it, and by then the move has
-    # already renamed the directories.
-    if "data_roots" in data and not isinstance(data["data_roots"], dict):
-        found = type(data["data_roots"]).__name__
-        message = (
-            f"The 'data_roots' entry in {path} is not a JSON object "
-            f"(found {found})."
-        )
-        logger.error(message)
-        raise ConfigReadError(message)
+    problem = document_shape_problem(data, path)
+    if problem is not None:
+        logger.error(problem)
+        raise ConfigReadError(problem)
 
     return data
+
+
+# --- shared shape rules -----------------------------------------------------
+# core/paths.py resolves the data roots inside setup_logging(), before the
+# logger and before ConfigManager exist, so it cannot raise and it cannot log.
+# It reads config.json with these same rules instead of its own copy: two
+# readers with two rule sets is how a document that one accepted and the other
+# rejected reached Path() and killed startup.
+
+
+def document_shape_problem(data: Any, source: Optional[PathLike] = None) -> Optional[str]:
+    """Return why the parsed document is unusable, or ``None`` when it is fine.
+
+    The whole document must be a JSON object, and a ``data_roots`` entry that
+    is present must be a JSON object too. An absent ``data_roots`` is valid: no
+    group was ever moved. A JSON null is not an object — a writer that mutates
+    ``data_roots`` in place fails on it, and by then the move has already
+    renamed the directories.
+    """
+    subject = str(source) if source is not None else "config.json"
+    where = f" in {source}" if source is not None else " in config.json"
+    if not isinstance(data, dict):
+        return (
+            f"{subject} does not hold a JSON object "
+            f"(found {type(data).__name__})."
+        )
+    if DATA_ROOTS_KEY in data and not isinstance(data[DATA_ROOTS_KEY], dict):
+        found = type(data[DATA_ROOTS_KEY]).__name__
+        return (
+            f"The '{DATA_ROOTS_KEY}' entry{where} is not a JSON object "
+            f"(found {found})."
+        )
+    return None
+
+
+def data_root_overrides(
+    document: Any, source: Optional[PathLike] = None
+) -> Tuple[Dict[str, str], List[str]]:
+    """Return the usable per-group storage overrides and the problems found.
+
+    An override must be a non-empty string: it becomes a ``Path``, and
+    ``Path(5)`` raises. Anything else is dropped and reported, so one unusable
+    value costs the user that one group and not the whole document.
+
+    This function never raises and never logs. The caller decides what to do
+    with the problem list — ``core.paths`` buffers it for the logger, which
+    does not exist yet at the time of the call.
+    """
+    problems: List[str] = []
+
+    shape = document_shape_problem(document, source)
+    if shape is not None:
+        return {}, [shape]
+
+    roots = document.get(DATA_ROOTS_KEY)
+    if not isinstance(roots, dict):  # absent; the shape check passed already
+        return {}, problems
+
+    where = f" in {source}" if source is not None else " in config.json"
+    overrides: Dict[str, str] = {}
+    for name, value in roots.items():
+        if isinstance(value, str) and value.strip():
+            overrides[str(name)] = value
+            continue
+        problems.append(
+            f"The storage location recorded for '{name}'{where} is not a "
+            f"usable path (found {type(value).__name__}: {value!r})."
+        )
+    return overrides, problems
 
 
 def _fsync_directory(directory: Path) -> None:

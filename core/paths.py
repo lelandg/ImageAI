@@ -9,6 +9,16 @@ IMPORTANT: this module must not import ``core.logging_config`` or
 so this module runs before the logger exists. Errors here go into a deferred
 buffer that the logger drains once it starts. See ``drain_warnings``.
 
+``core.config_io`` is the one exception, and it is deliberate. It is standalone
+stdlib-only code, and it owns the rules that say what a valid ``config.json``
+document and a valid ``data_roots`` entry look like. This module used to parse
+the file itself with laxer rules, so a document that ``config_io`` rejected —
+a JSON array, a ``null``, a numeric override — reached ``Path()`` here and
+raised out of ``setup_logging``. The application then could not start at all,
+and the interrupted-move recovery, which builds the same singleton, never ran.
+Whatever ``config.json`` holds, this module warns and uses the platform
+defaults. It never raises.
+
 The logger starts after the Settings root resolves but before the Images,
 Video and Models roots resolve. A warning about one of those three roots would
 therefore sit in the buffer for the rest of the run, because only the logger
@@ -19,12 +29,13 @@ its handlers. Every later warning then goes straight to the log and to stderr.
 
 from __future__ import annotations
 
-import json
 import os
 import platform
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional
+
+from . import config_io
 
 APP_NAME = "ImageAI"  # duplicated from core.constants to avoid the import cycle
 
@@ -85,19 +96,36 @@ class DataPaths:
 
     # -- configuration -----------------------------------------------------
 
-    def _read_overrides(self) -> Dict[str, Any]:
-        if not self._config_path.exists():
-            return {}
+    def _read_overrides(self) -> Dict[str, str]:
+        """Return the per-group overrides config.json records.
+
+        Every failure ends in the same place: a warning and an empty override
+        map, which means every group keeps the platform default. A damaged
+        config.json must never stop the application from starting, because
+        this runs inside ``setup_logging`` before anything can catch it.
+        """
         try:
-            data = json.loads(self._config_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
+            document = config_io.read_config_document(self._config_path)
+        except config_io.ConfigReadError as exc:
+            # The message already names the file and the reason.
+            self._warn(f"{exc} Using default storage locations.")
+            return {}
+        except Exception as exc:  # noqa: BLE001 - startup must survive anything
             self._warn(
-                f"Could not read config.json at {self._config_path}: {exc}. "
-                f"Using default storage locations."
+                f"Could not read config.json at {self._config_path}: "
+                f"{type(exc).__name__}: {exc}. Using default storage locations."
             )
             return {}
-        roots = data.get("data_roots")
-        return roots if isinstance(roots, dict) else {}
+
+        if document is None:
+            return {}  # fresh install: no file, no overrides, no warning
+
+        overrides, problems = config_io.data_root_overrides(
+            document, source=self._config_path,
+        )
+        for problem in problems:
+            self._warn(f"{problem} Using the default location instead.")
+        return overrides
 
     # -- roots -------------------------------------------------------------
 
@@ -119,7 +147,7 @@ class DataPaths:
         if not configured:
             resolved = default
         else:
-            candidate = Path(configured)
+            candidate = Path(str(configured))
             if self._is_reachable(candidate):
                 resolved = candidate
             else:
@@ -140,8 +168,15 @@ class DataPaths:
         drive that the user unplugged, or a network share that went offline,
         both produce this condition. The resolver then falls back to the
         platform default for that group and records a warning.
+
+        A path the operating system refuses to look at is unreachable too:
+        ``os.access`` raises ValueError on an embedded NUL byte, and a broken
+        mount raises OSError. Neither may escape into startup.
         """
-        return path.is_dir() and os.access(path, os.W_OK)
+        try:
+            return path.is_dir() and os.access(path, os.W_OK)
+        except (OSError, ValueError):
+            return False
 
     def _warn(self, message: str) -> None:
         """Record a warning and deliver it to the sink when one is installed.

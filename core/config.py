@@ -26,8 +26,31 @@ _MISSING = object()
 
 
 class ConfigManager:
-    """Manages application configuration and persistence."""
-    
+    """Manages application configuration and persistence.
+
+    Three public attributes report a config.json that did not behave. Nothing
+    else records these failures, so the GUI and the CLI read them to tell the
+    user. Every one of them is also logged at error level when it is set.
+
+    ``load_error``
+        The reason config.json could not be read at startup, or ``None``. It
+        describes the load and nothing else, so it stays set for the life of
+        the object even after a later save writes a good file. A caller that
+        wants "is the file healthy now" must look at ``last_save_error``.
+    ``preserved_config_path``
+        Where the unreadable config.json was copied to, or ``None`` when no
+        copy was ever needed. The copy still holds the stored API keys and the
+        recorded data locations, so this is the path the user must repair
+        from. It is set at load time and at save time, and one damaged file
+        produces one sidecar, not one per save.
+    ``last_save_error``
+        The reason the most recent :meth:`save` did not reach disk, or
+        ``None`` when it did. :meth:`save` clears it on entry and sets it on
+        every failure, so it always describes the latest attempt. ``save``
+        returns ``False`` for exactly the same failures, and it never raises:
+        it runs from about forty Qt slots and from ``__init__``.
+    """
+
     def __init__(self):
         """Initialize configuration manager."""
         self.config_dir = self._get_config_dir()
@@ -41,6 +64,10 @@ class ConfigManager:
         # sidecar on every save.
         self.preserved_config_path: Optional[Path] = None
         self._preserved_bytes: Optional[bytes] = None
+        # True once a config.json is known to exist: it was there at load
+        # time, or this manager wrote one. A missing file means "fresh
+        # install" before that point and "someone removed it" after it.
+        self._config_written = False
         self.config = self._load_config()
 
         if self.load_error is None:
@@ -74,12 +101,20 @@ class ConfigManager:
                          self.config_dir, exc)
 
         try:
-            loaded = self._read_config_file()
+            document = config_io.read_config_document(self.config_path)
+            # A file that is not there is a fresh install, not a loss. save()
+            # needs the difference: the same missing file means "nobody ever
+            # wrote one" here and "someone removed it" after the first write.
+            self._config_written = document is not None
+            loaded = {} if document is None else document
         except ConfigReadError as exc:
             # The application must still start. The original stays on disk: a
             # copy goes beside it now, and __init__ skips every step that
             # would write this session's empty document over it.
             self.load_error = str(exc)
+            # The file is there; it is only unreadable. A save that finds it
+            # gone later is a removal, not a first write.
+            self._config_written = True
             self._preserve_unreadable_config(exc)
             logger.error(
                 "%s The application starts with default settings for this "
@@ -91,15 +126,6 @@ class ConfigManager:
         # it to tell a local edit apart from a value this process never touched.
         self._baseline = copy.deepcopy(loaded)
         return loaded
-
-    def _read_config_file(self) -> Dict[str, Any]:
-        """Return the parsed config.json, or {} when the file is missing.
-
-        Raises ConfigReadError when the file exists but cannot be read or
-        parsed. An unreadable file still holds the API keys and the data_roots
-        entry, so no caller may treat it as an empty document.
-        """
-        return config_io.read_config(self.config_path)
 
     def _normalize_auth_mode(self) -> None:
         """Normalize auth_mode values to internal format."""
@@ -237,6 +263,7 @@ class ConfigManager:
         self.last_save_error = None
         try:
             with config_io.config_lock(self.config_path):
+                damaged = False
                 try:
                     disk = config_io.read_config_document(self.config_path)
                 except ConfigReadError as exc:
@@ -244,12 +271,15 @@ class ConfigManager:
                         self.last_save_error = str(exc)
                         return False
                     disk = None
+                    damaged = True
                 if disk is None:
                     # There is no readable document on disk: the file is gone
                     # or damaged. That is not a writer that deleted every key,
                     # and this process still holds the whole document, so the
                     # merge runs over the baseline it loaded. A merge over {}
                     # would drop every key this session did not edit.
+                    if not damaged and self._config_written:
+                        self._report_missing_config()
                     merged = self._merge_over_disk(
                         copy.deepcopy(self._baseline), self.config, self._baseline,
                     )
@@ -265,11 +295,50 @@ class ConfigManager:
             logger.error("Could not save config.json: %s Your settings for this "
                          "session were not written.", exc)
             return False
+        except Exception as exc:  # noqa: BLE001 - nothing may escape save()
+            # save() runs from about forty Qt slots and from __init__. An
+            # exception that escapes aborts a slot halfway or stops the
+            # application from starting, so an unforeseen failure reports
+            # itself the same way a write failure does.
+            self.last_save_error = f"{type(exc).__name__}: {exc}"
+            logger.exception(
+                "Could not save config.json at %s. Your settings for this "
+                "session were not written.", self.config_path,
+            )
+            return False
 
         # Disk and memory now agree, so the merged result is the new baseline.
         self._apply_in_place(self.config, merged)
         self._baseline = copy.deepcopy(merged)
+        self._config_written = True
         return True
+
+    def _report_missing_config(self) -> None:
+        """Report that config.json was gone when this save ran.
+
+        The save writes the whole in-memory document back, including any API
+        key stored in the file. That is the right answer for disk damage, a
+        sync client, or a backup restore: the file is not a writer's decision,
+        so the deletion means nothing about any key.
+
+        It is the wrong answer for the user who deleted config.json on purpose
+        to reset the application or to remove the stored keys, and the two
+        cannot be told apart. The filesystem gives no signal that separates
+        ``rm config.json`` from a failed replace or an unmounted directory, and
+        a running ImageAI still holds the whole document in memory either way.
+        The event therefore has to be reported instead of guessed at, with the
+        one instruction that does work: close the application first.
+        """
+        logger.warning(
+            "config.json at %s was missing at save time, so ImageAI rewrote "
+            "the whole document it held in memory, including any API key "
+            "stored in that file and the recorded storage locations. This "
+            "protects you from a deleted or damaged file. If you removed "
+            "config.json on purpose to reset ImageAI or to remove the stored "
+            "API keys, the removal did not take effect: close ImageAI first, "
+            "then delete %s.",
+            self.config_path, self.config_path,
+        )
 
     def _preserve_unreadable_config(self, error: ConfigReadError) -> bool:
         """Copy an unreadable config.json aside before a save replaces it.

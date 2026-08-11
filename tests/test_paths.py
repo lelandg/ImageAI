@@ -238,11 +238,21 @@ def test_paths_module_imports_no_logging_or_config():
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             imported.update(a.name for a in node.names)
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            imported.add(node.module)
+        elif isinstance(node, ast.ImportFrom):
+            if node.module:
+                imported.add(node.module)
+            # ``from . import config`` names the module in the alias, not in
+            # node.module, so the alias has to be checked too.
+            if node.level:
+                imported.update("." * node.level + a.name for a in node.names)
 
     assert not any("logging_config" in name for name in imported)
     assert not any(name in ("core.config", ".config") for name in imported)
+    # core.config_io is the one allowed dependency: standalone, stdlib only,
+    # and the owner of the config.json validation rules this module needs.
+    assert imported & {"core.config_io", ".config_io"}, (
+        "core/paths.py must share the config.json rules with core.config_io"
+    )
 
 
 def test_logger_uses_the_settings_root(tmp_path, monkeypatch):
@@ -419,3 +429,105 @@ def test_character_animator_keeps_the_shared_hub_path():
 
     text = pathlib.Path("core/character_animator/installer.py").read_text(encoding="utf-8")
     assert '".cache" / "huggingface"' in text or '.cache/huggingface' in text
+
+
+# --- a damaged config.json must never stop the application ------------------
+#
+# DataPaths runs inside setup_logging(), before ConfigManager and before the
+# interrupted-move recovery exist. An exception out of the constructor or out
+# of root() therefore kills the process at startup, and it also kills
+# recover_interrupted_move(), which builds the same singleton.
+
+BAD_DOCUMENTS = [
+    ('["a", "b"]', "a JSON array as the whole document"),
+    ("null", "a JSON null as the whole document"),
+    ('"a string"', "a JSON string as the whole document"),
+    ("42", "a JSON number as the whole document"),
+    ('{"data_roots": null}', "a null data_roots entry"),
+    ('{"data_roots": []}', "an array data_roots entry"),
+    ('{"data_roots": "somewhere"}', "a string data_roots entry"),
+    ('{"data_roots": {"images": 5}}', "a number override"),
+    ('{"data_roots": {"images": ["/a", "/b"]}}', "an array override"),
+    ('{"data_roots": {"images": true}}', "a boolean override"),
+    ('{"data_roots": {"images": null}}', "a null override"),
+    ('{"data_roots": {"images": {}}}', "an object override"),
+    ('{"data_roots": {"images": ""}}', "an empty override"),
+    ('{"data_roots": {"images": "   "}}', "a blank override"),
+    ('{"data_roots": {"images": "/ok", "video": 5}}', "one bad override of two"),
+    ("", "an empty file"),
+    ('{"api_key": "k", "data_ro', "a truncated file"),
+]
+
+
+@pytest.mark.parametrize("payload,label", BAD_DOCUMENTS)
+def test_a_damaged_config_never_raises_out_of_the_resolver(tmp_path, payload, label):
+    """Every group must resolve, whatever config.json holds."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(payload, encoding="utf-8")
+
+    dp = DataPaths(config_path=cfg)
+    for group in Group:
+        assert dp.root(group).is_absolute(), label
+
+
+@pytest.mark.parametrize("payload,label", BAD_DOCUMENTS)
+def test_a_damaged_config_falls_back_to_the_default_and_warns(tmp_path, payload, label):
+    """The fallback is the platform default, and the user is told about it."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(payload, encoding="utf-8")
+
+    dp = DataPaths(config_path=cfg)
+    assert dp.root(Group.IMAGES) == tmp_path, label
+
+    warnings = dp.drain_warnings()
+    assert warnings, f"{label} must be reported"
+    assert any("config.json" in w or "data_roots" in w for w in warnings), label
+
+
+def test_one_bad_override_does_not_discard_the_good_one(tmp_path):
+    """A single unusable value must not cost the user every other root."""
+    good = tmp_path / "good-video"
+    good.mkdir()
+    cfg = tmp_path / "config.json"
+    cfg.write_text(
+        json.dumps({"data_roots": {"images": 5, "video": str(good)}}),
+        encoding="utf-8",
+    )
+
+    dp = DataPaths(config_path=cfg)
+    assert dp.root(Group.VIDEO) == good
+    assert dp.root(Group.IMAGES) == tmp_path
+    assert any("images" in w for w in dp.drain_warnings())
+
+
+def test_an_override_with_a_null_byte_falls_back(tmp_path):
+    """os.access raises ValueError on an embedded NUL; root() must not."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(
+        json.dumps({"data_roots": {"images": "/tmp/bad" + chr(0) + "name"}}),
+        encoding="utf-8",
+    )
+
+    dp = DataPaths(config_path=cfg)
+    assert dp.root(Group.IMAGES) == tmp_path
+    assert dp.drain_warnings()
+
+
+def test_a_damaged_config_still_lets_the_move_recovery_run(tmp_path, monkeypatch):
+    """main.py calls recover_interrupted_move() with no argument.
+
+    The call builds the DataPaths singleton. A constructor that raises on a
+    damaged config.json is swallowed by main.py, so the move journal survives
+    and the interrupted move is never repaired.
+    """
+    import core.paths as paths_mod
+
+    cfg_dir = tmp_path / "ImageAI"
+    cfg_dir.mkdir()
+    (cfg_dir / "config.json").write_text('["clobbered"]', encoding="utf-8")
+    monkeypatch.setattr(paths_mod, "platform_default_dir", lambda: cfg_dir)
+
+    import core.data_migration as dm
+
+    assert paths_mod.get_data_paths().root(Group.MODELS) == cfg_dir
+    dm.recover_interrupted_move()  # must not raise
