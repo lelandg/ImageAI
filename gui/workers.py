@@ -128,7 +128,7 @@ class StreamingGenWorker(QObject):
 
 
 class BatchJobsLoaderWorker(QObject):
-    """Loads BATCH_JOBS_PATH and emits the entries as a list."""
+    """Loads the batch-jobs ledger and emits the entries as a list."""
     loaded = Signal(list)
     error = Signal(str)
 
@@ -138,11 +138,12 @@ class BatchJobsLoaderWorker(QObject):
     def run(self):
         import json
         try:
-            from core.constants import BATCH_JOBS_PATH
+            from core.constants import batch_jobs_path
+            ledger = batch_jobs_path()
             entries = []
-            if BATCH_JOBS_PATH.exists():
+            if ledger.exists():
                 try:
-                    entries = json.loads(BATCH_JOBS_PATH.read_text(encoding="utf-8"))
+                    entries = json.loads(ledger.read_text(encoding="utf-8"))
                     if not isinstance(entries, list):
                         entries = []
                 except (OSError, IOError, ValueError):

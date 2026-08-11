@@ -1333,7 +1333,7 @@ class OpenAIProvider(ImageProvider):
         completion_window: str = "24h",
         metadata: Optional[Dict[str, str]] = None,
     ) -> str:
-        """Submit a Batch API job and persist a record to BATCH_JOBS_PATH.
+        """Submit a Batch API job and persist a record to the batch-jobs ledger.
 
         Args:
             requests: List of request bodies, each conforming to the chosen endpoint.
@@ -1347,8 +1347,9 @@ class OpenAIProvider(ImageProvider):
         """
         import json, time, uuid, logging
         from datetime import datetime, timezone
-        from core.constants import BATCH_JOBS_PATH
+        from core.constants import batch_jobs_path
 
+        ledger = batch_jobs_path()
         self._ensure_client()
         logger = logging.getLogger(__name__)
 
@@ -1398,19 +1399,19 @@ class OpenAIProvider(ImageProvider):
             "status": "submitted",
         }
         try:
-            BATCH_JOBS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            ledger.parent.mkdir(parents=True, exist_ok=True)
             existing = []
-            if BATCH_JOBS_PATH.exists():
+            if ledger.exists():
                 try:
-                    existing = json.loads(BATCH_JOBS_PATH.read_text(encoding="utf-8"))
+                    existing = json.loads(ledger.read_text(encoding="utf-8"))
                     if not isinstance(existing, list):
                         existing = []
                 except (OSError, IOError, ValueError):
                     existing = []
             existing.append(record)
-            BATCH_JOBS_PATH.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+            ledger.write_text(json.dumps(existing, indent=2), encoding="utf-8")
         except (OSError, IOError) as e:
-            logger.warning(f"Could not persist batch record to {BATCH_JOBS_PATH}: {e}")
+            logger.warning(f"Could not persist batch record to {ledger}: {e}")
 
         logger.info(f"Submitted batch job {job_id} ({len(requests)} requests, endpoint={endpoint})")
         return job_id
