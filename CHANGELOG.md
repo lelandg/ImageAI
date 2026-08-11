@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.45.0] - 2026-08-11
+
+### Added
+- **Configurable storage locations.** Four Move buttons in Settings relocate
+  Images, Video, Models, and Settings data to any folder, so a large model or
+  video library no longer has to sit on the system drive. Each row shows the
+  current folder and its measured size, measured off the UI thread. A move
+  copies the data, verifies every file, writes the new location to
+  `config.json`, and only then removes the original; a move within one volume
+  takes a rename fast path and finishes in milliseconds. `config.json` itself
+  never moves — it is the anchor that records where everything else lives.
+- A single path resolver (`core/paths.py`) now owns every data location.
+  `get_data_paths()` returns the resolver, and a guard test fails the build if
+  any module builds a data path by hand again.
+
+### Fixed
+- The Google provider wrote its debug dumps to a hardcoded developer home
+  directory, so on every other machine the dumps went to a path that did not
+  exist.
+- MuseTalk resolved its install directory with its own platform rules: it
+  ignored `%APPDATA%` on Windows and disagreed with every other subsystem on
+  Linux. It now uses the shared Models location.
+
+### Changed
+- The log directory, HuggingFace model cache, video projects and caches, style
+  and layout data, history and session files, and the batch-job ledger all
+  resolve through the new path layer. A fresh install writes exactly where it
+  wrote before.
+- An unreachable storage root — an unplugged drive, an offline share — falls
+  back to the default location, logs a warning, and flags the row in Settings.
+  The configured path takes effect again as soon as the location returns,
+  because the fallback is never written to disk.
+
 ## [0.44.1] - 2026-08-04
 
 ### Fixed
