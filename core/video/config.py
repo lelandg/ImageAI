@@ -99,17 +99,11 @@ class VideoConfig:
         
         # Determine config file location
         if config_file is None:
-            import platform
-            system = platform.system()
-            
-            if system == "Windows":
-                import os
-                config_dir = Path(os.environ.get('APPDATA', '')) / 'ImageAI'
-            elif system == "Darwin":  # macOS
-                config_dir = Path.home() / 'Library' / 'Application Support' / 'ImageAI'
-            else:  # Linux and others
-                config_dir = Path.home() / '.config' / 'ImageAI'
-            
+            from core.paths import get_data_paths
+
+            # video_config.json is a settings file, so it lives in the Settings
+            # group, not the Video group.
+            config_dir = get_data_paths().settings_root()
             config_file = config_dir / 'video_config.json'
         
         self.config_file = config_file

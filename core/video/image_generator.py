@@ -51,7 +51,9 @@ class ImageGenerator:
             event_store: Event store for tracking generation history
         """
         self.config = config
-        self.cache_dir = cache_dir or Path.home() / ".imageai" / "cache" / "video"
+        from core.paths import get_data_paths
+
+        self.cache_dir = Path(cache_dir) if cache_dir else get_data_paths().video_cache("video")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.event_store = event_store
         self.logger = logging.getLogger(__name__)

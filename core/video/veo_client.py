@@ -457,8 +457,9 @@ class VeoClient:
                                 debug_filename = f"DEBUG_VEO_REF_CANVAS_{idx+1}_{timestamp}.png"
                                 # Get output directory from config
                                 from core.config import ConfigManager
+                                from core.paths import get_data_paths
                                 config_mgr = ConfigManager()
-                                output_dir = Path(config_mgr.get('output_dir', Path.home() / 'AppData' / 'Roaming' / 'ImageAI' / 'generated'))
+                                output_dir = Path(config_mgr.get('output_dir') or get_data_paths().generated())
                                 debug_path = output_dir / debug_filename
                                 canvas.save(debug_path, 'PNG')
                                 self.logger.info(f"Saved composed canvas for debugging: {debug_path}")
@@ -914,7 +915,8 @@ class VeoClient:
         """
         try:
             # Create cache directory
-            cache_dir = Path.home() / ".imageai" / "cache" / "veo_videos"
+            from core.paths import get_data_paths
+            cache_dir = get_data_paths().video_cache("veo_videos")
             cache_dir.mkdir(parents=True, exist_ok=True)
 
             # Generate filename from URL hash
@@ -984,7 +986,8 @@ class VeoClient:
         """
         try:
             # Create cache directory
-            cache_dir = Path.home() / ".imageai" / "cache" / "veo_videos"
+            from core.paths import get_data_paths
+            cache_dir = get_data_paths().video_cache("veo_videos")
             cache_dir.mkdir(parents=True, exist_ok=True)
 
             # Generate filename from hash of video bytes

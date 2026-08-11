@@ -192,7 +192,8 @@ class HistoryTab(QWidget):
     def init_event_store(self):
         """Initialize event store connection"""
         try:
-            db_path = Path.home() / ".imageai" / "video_projects" / "events.db"
+            from core.paths import get_data_paths
+            db_path = get_data_paths().video_events_db()
             self.event_store = EventStore(db_path)
             
             if self.project_id:
