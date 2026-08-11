@@ -120,6 +120,29 @@ def main():
         from core.logging_config import setup_logging
         log_file = setup_logging()
 
+        # A storage move renames one directory at a time and records the new
+        # location in config.json only after the last rename. A power loss in
+        # that window leaves the data at the destination and config.json naming
+        # the old root. core.data_migration writes a journal beside config.json
+        # to cover that window, so this call finishes or undoes the move.
+        #
+        # It runs after setup_logging so that every message reaches the file
+        # logger, and it costs one lexists() call when no move was interrupted.
+        # A failure here must never stop the application, so nothing escapes.
+        # The module is imported under a private name because "logging" becomes
+        # a local name further down this function.
+        import logging as _startup_logging
+        try:
+            from core.data_migration import recover_interrupted_move
+            _recovery = recover_interrupted_move()
+            if _recovery:
+                _startup_logging.getLogger(__name__).warning(_recovery)
+                _orig_print(f"\n{_recovery}\n")
+        except Exception:
+            _startup_logging.getLogger(__name__).exception(
+                "Could not check for an interrupted storage move"
+            )
+
         # Set up exception handling
         import logging, threading
 

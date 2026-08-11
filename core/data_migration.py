@@ -6,15 +6,17 @@ Headless by design: this module imports no Qt. The GUI drives it through
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
+import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from core import config_io
-from core.paths import DataPaths, Group, get_data_paths
+from core.paths import DataPaths, Group, get_data_paths, reset_data_paths
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +36,15 @@ GROUP_CONTENTS = {
 # The Models root and the Video root default to the same directory, and both
 # groups keep their caches in a "cache" subdirectory of their own root. A move
 # of one group must not carry the other group's cache away, so each cache
-# subdirectory belongs to exactly one group. The names come from
-# DataPaths.model_cache() and DataPaths.video_cache() callers.
+# subdirectory belongs to exactly one group and a move takes only the
+# subdirectories its group owns. The rule holds whether or not the two roots
+# coincide: a rule that changed with the roots let a subdirectory that the
+# first move reported as left behind travel silently with the second move.
+#
+# Every name here is a literal argument of DataPaths.model_cache() or
+# DataPaths.video_cache() somewhere in the tree, and
+# tests/migration/test_data_migration.py pins that correspondence. A new cache
+# name that no group owns is data that every move leaves behind.
 CACHE_DIR = "cache"
 CACHE_OWNERS: Dict[Group, Tuple[str, ...]] = {
     Group.MODELS: ("ai_visemes",),
@@ -55,6 +64,13 @@ SETTINGS_GLOBS = ("*_history.json", "*_session.json", "*_history.backup_*.json")
 
 # Safety margin above the measured source size, in bytes.
 FREE_SPACE_MARGIN = 256 * 1024 * 1024
+
+# The journal that covers the window between the first rename and the config
+# write. It sits beside config.json, which never moves, so a move cannot carry
+# its own journal away. The name matches no SETTINGS_GLOBS pattern, so a later
+# Settings move never picks it up as a source.
+MOVE_INTENT_SUFFIX = ".move-intent"
+INTENT_VERSION = 1
 
 
 class MoveCancelled(Exception):
@@ -96,18 +112,21 @@ class MoveResult:
     stranded: List[Tuple[str, str]] = field(default_factory=list)
 
 
-def legacy_huggingface_dir() -> Path:
-    """The pre-move HuggingFace cache location."""
-    return Path.home() / ".cache" / "huggingface"
-
-
 def legacy_dot_imageai_dir() -> Path:
     """The pre-move ~/.imageai tree."""
     return Path.home() / ".imageai"
 
 
 def tree_size(path: Path) -> Tuple[int, int]:
-    """Return ``(file_count, total_bytes)`` for a directory tree."""
+    """Return ``(file_count, total_bytes)`` for a directory tree.
+
+    Symbolic links count for nothing, on either side of a move. The move copies
+    a link as a link, so the link's target contributes no bytes to the
+    destination; counting the target here would make the free-space estimate
+    and the post-copy verification disagree with what the copy actually wrote.
+    """
+    if path.is_symlink():
+        return (0, 0)
     if not path.exists():
         return (0, 0)
     if path.is_file():
@@ -115,6 +134,8 @@ def tree_size(path: Path) -> Tuple[int, int]:
     files = 0
     total = 0
     for entry in path.rglob("*"):
+        if entry.is_symlink():
+            continue
         if entry.is_file():
             files += 1
             try:
@@ -132,37 +153,27 @@ def _resolved(path: Path) -> Path:
         return path
 
 
-def _roots_coincide(group: Group, paths: DataPaths) -> bool:
-    """True when the Models root and the Video root are one directory.
-
-    That is the default: both groups resolve to the platform user directory
-    until the user moves one of them.
-    """
-    other = Group.VIDEO if group is Group.MODELS else Group.MODELS
-    return _resolved(paths.root(group)) == _resolved(paths.root(other))
-
-
 def _cache_sources(group: Group, paths: DataPaths) -> List[Tuple[Path, str]]:
     """List the cache directories that belong to this group.
 
-    When the Models root and the Video root are the same directory, one
-    ``cache`` directory holds both groups' caches. The move then takes only the
-    subdirectories this group owns, so a Models move cannot carry the video
-    render cache away from the path ``DataPaths.video_cache`` still points at.
-    When the two roots differ, the whole ``cache`` directory belongs to this
-    group and moves as one entry.
+    A move takes only the cache subdirectories its group owns, always. The
+    Models root and the Video root coincide by default, and one ``cache``
+    directory then holds both groups' caches, so a Models move must not carry
+    the video render cache away from the path ``DataPaths.video_cache`` still
+    points at. The same rule applies once the two roots differ: a rule that
+    handed the whole directory to one group as soon as the roots differed let a
+    subdirectory that the first move had reported as left behind travel
+    silently with the second move.
     """
     if group not in CACHE_OWNERS:
         return []
     cache = paths.root(group) / CACHE_DIR
     if not cache.is_dir():
         return []
-    if not _roots_coincide(group, paths):
-        return [(cache, CACHE_DIR)]
     entries: List[Tuple[Path, str]] = []
     for name in CACHE_OWNERS[group]:
         candidate = cache / name
-        if candidate.exists():
+        if os.path.lexists(candidate):
             entries.append((candidate, f"{CACHE_DIR}/{name}"))
     return entries
 
@@ -170,10 +181,11 @@ def _cache_sources(group: Group, paths: DataPaths) -> List[Tuple[Path, str]]:
 def unclaimed_cache_subdirs(group: Group, paths: DataPaths) -> List[Path]:
     """Cache subdirectories that belong to neither Models nor Video.
 
-    A shared cache directory splits by owner. A subdirectory that no group
-    claims stays behind, so the move reports it and the user can act on it.
+    The cache directory splits by owner. A subdirectory that no group claims
+    stays behind, so every move that touches the directory reports it and the
+    user can act on it.
     """
-    if group not in CACHE_OWNERS or not _roots_coincide(group, paths):
+    if group not in CACHE_OWNERS:
         return []
     cache = paths.root(group) / CACHE_DIR
     if not cache.is_dir():
@@ -185,6 +197,33 @@ def unclaimed_cache_subdirs(group: Group, paths: DataPaths) -> List[Path]:
         logger.warning("Could not list %s: %s", cache, exc)
         return []
     return [child for child in children if child.name not in claimed]
+
+
+def _configured_roots(group: Group, paths: DataPaths) -> Dict[str, Path]:
+    """The roots the user has moved, for every group except this one.
+
+    Only a root that config.json names counts. Every group defaults to the
+    directory that holds config.json, so a rule based on the resolved roots
+    would reject any destination under that directory and block the first move
+    of every group. A configured root is different: the user put data there on
+    purpose, and a destination that nests inside it, or that contains it, makes
+    one group's move carry another group's data away.
+    """
+    try:
+        data = config_io.read_config(paths.config_file())
+    except config_io.ConfigIOError:
+        # move_group reports an unreadable config.json with its own message and
+        # stops before it touches anything.
+        return {}
+    roots = data.get("data_roots")
+    if not isinstance(roots, dict):
+        return {}
+    configured: Dict[str, Path] = {}
+    for name, value in roots.items():
+        if name == group.value or not isinstance(value, str) or not value:
+            continue
+        configured[name] = Path(value)
+    return configured
 
 
 def duplicate_destination_names(
@@ -213,9 +252,18 @@ def sources_for(group: Group, paths: Optional[DataPaths] = None) -> List[Tuple[P
     """List existing source directories for a group.
 
     Returns ``(absolute_source, name_under_destination)`` pairs. A group may
-    span more than one tree: Models spans the app root and the HuggingFace
-    cache, Video spans the app root and ~/.imageai. Every name in the result is
-    unique, because two sources that share one name would merge silently.
+    span more than one tree: Video spans the app root and ~/.imageai. Every
+    name in the result is unique, because two sources that share one name would
+    merge silently.
+
+    ``~/.cache/huggingface`` is deliberately absent from the Models group. That
+    directory is the machine-wide HuggingFace hub cache, shared with every
+    other transformers or diffusers tool on the machine, and ImageAI sets
+    neither HF_HOME nor HUGGINGFACE_HUB_CACHE, so moving it would make those
+    tools re-download their models. ImageAI passes an explicit ``cache_dir`` at
+    each of its own download sites, and that directory is
+    ``DataPaths.huggingface()`` under the Models root, so ImageAI's own weights
+    still travel with the group.
     """
     paths = paths or get_data_paths()
     root = paths.root(group)
@@ -223,27 +271,22 @@ def sources_for(group: Group, paths: Optional[DataPaths] = None) -> List[Tuple[P
 
     for name in GROUP_CONTENTS[group]:
         candidate = root / name
-        if candidate.exists():
+        if os.path.lexists(candidate):
             entries.append((candidate, name))
 
     entries.extend(_cache_sources(group, paths))
-
-    if group is Group.MODELS:
-        hf = legacy_huggingface_dir()
-        if hf.exists() and not any(name == "huggingface" for _s, name in entries):
-            entries.append((hf, "huggingface"))
 
     if group is Group.VIDEO:
         legacy = legacy_dot_imageai_dir()
         if legacy.exists():
             for child in sorted(legacy.iterdir()):
-                if child.is_dir():
+                if child.is_dir() or child.is_symlink():
                     entries.append((child, f"{LEGACY_IMAGEAI_NAME}/{child.name}"))
 
     if group is Group.SETTINGS:
         for filename in SETTINGS_FILES:
             candidate = root / filename
-            if candidate.exists():
+            if os.path.lexists(candidate):
                 entries.append((candidate, filename))
         for pattern in SETTINGS_GLOBS:
             for candidate in sorted(root.glob(pattern)):
@@ -289,7 +332,7 @@ def validate_destination(
         return "The destination is the same as the current location."
 
     for source, _name in sources:
-        resolved_source = source.resolve()
+        resolved_source = _resolved(source)
         if resolved_dest == resolved_source:
             return "The destination is the same as the current location."
         if resolved_source in resolved_dest.parents:
@@ -297,6 +340,43 @@ def validate_destination(
                 f"The destination is inside the folder being moved "
                 f"({resolved_source}). Choose a folder outside it."
             )
+
+    # No group's data may nest inside another group's root. A Video root under
+    # the Images root travels away inside the Images tree at the next Images
+    # move, and config.json still names the old path afterwards. Two groups
+    # that share one root are fine: that is the default arrangement.
+    for other, other_root in _configured_roots(group, paths).items():
+        resolved_other = _resolved(other_root)
+        if resolved_other == resolved_dest:
+            continue
+        if resolved_other in resolved_dest.parents:
+            return (
+                f"The destination is inside the folder that holds the {other} "
+                f"data ({resolved_other}). A later {other} move would carry "
+                f"the {group.value} data away with it. Choose a folder outside "
+                f"it."
+            )
+        if resolved_dest in resolved_other.parents:
+            return (
+                f"The destination folder holds the {other} data "
+                f"({resolved_other}). A later {group.value} move would carry "
+                f"the {other} data away with it. Choose a folder outside it."
+            )
+
+    # The destination has to be a directory. An existing file, and a symlink
+    # whose target is unreachable, both reach mkdir() as a FileExistsError, so
+    # they are reported here instead.
+    if os.path.lexists(dest) and not dest.is_dir():
+        if dest.is_symlink():
+            try:
+                target = os.readlink(str(dest))
+            except OSError:
+                target = "an unreadable target"
+            return (
+                f"{dest} is a link that points nowhere ({target}). "
+                f"Choose a folder that exists."
+            )
+        return f"{dest} is a file, not a folder. Choose a folder."
 
     if not dest.exists():
         parent = dest.parent
@@ -355,16 +435,21 @@ def _human(num_bytes: int) -> str:
 
 
 def _same_volume(source: Path, dest: Path) -> bool:
-    """True when both paths live on the same filesystem volume."""
+    """True when both paths live on the same filesystem volume.
+
+    The source is measured without following a link. A rename moves the link
+    itself, so the volume that matters is the one the link sits on, not the one
+    its target sits on.
+    """
     probe = dest
     while not probe.exists() and probe != probe.parent:
         probe = probe.parent
     try:
         if os.name == "nt":
-            a = os.path.splitdrive(str(source.resolve()))[0].lower()
+            a = os.path.splitdrive(os.path.abspath(str(source)))[0].lower()
             b = os.path.splitdrive(str(probe.resolve()))[0].lower()
             return bool(a) and a == b
-        return source.stat().st_dev == probe.stat().st_dev
+        return os.lstat(str(source)).st_dev == probe.stat().st_dev
     except OSError:
         return False
 
@@ -405,14 +490,69 @@ def _prepare_databases(sources: List[Tuple[Path, str]]) -> None:
             _checkpoint_sqlite(source)
 
 
+def _copy_link(source: Path, target: Path, state: dict, progress_cb) -> None:
+    """Recreate a symbolic link at the destination.
+
+    The link is the data, not the bytes it points at. Following it would copy a
+    file the user deliberately kept outside the group into the group's tree,
+    and a link whose target is unreachable would raise FileNotFoundError and
+    abort the whole move — one dead link in a Models tree would then block
+    every cross-volume move of that group, permanently.
+
+    ``tree_size`` skips links on both sides, so a recreated link adds nothing
+    to either counter and the verification still balances.
+    """
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        link_target = os.readlink(str(source))
+    except OSError as exc:
+        logger.warning("Could not read the link %s: %s. It was skipped.", source, exc)
+        return
+
+    try:
+        os.symlink(link_target, str(target),
+                   target_is_directory=os.path.isdir(str(source)))
+        return
+    except OSError as exc:
+        logger.warning(
+            "Could not recreate the link %s -> %s at %s: %s",
+            source, link_target, target, exc,
+        )
+
+    # Windows refuses to create a link without the privilege. Copy what the
+    # link points at instead, and count those bytes, so the verification still
+    # balances. A link that points nowhere holds no data at all.
+    if not os.path.exists(str(source)):
+        logger.warning(
+            "Skipped the link %s -> %s: it points nowhere, so it holds no data.",
+            source, link_target,
+        )
+        return
+    if os.path.isdir(str(source)):
+        shutil.copytree(str(source), str(target), symlinks=True, dirs_exist_ok=True)
+        files, size = tree_size(target)
+    else:
+        shutil.copy2(str(source), str(target))
+        files, size = (1, target.stat().st_size)
+    state["files"] += files
+    state["bytes"] += size
+    if progress_cb:
+        progress_cb(state["files"], state["files_total"],
+                    state["bytes"], state["bytes_total"], str(source))
+
+
 def _copy_entry(source: Path, target: Path, state: dict, progress_cb, cancel) -> None:
-    """Copy one file or directory tree, reporting progress per file.
+    """Copy one file, directory tree, or symbolic link, reporting per file.
 
     The counters measure the bytes that landed in the destination, not the
     bytes the source holds now. A live file — the log file this process writes
     — can grow between the copy and the measurement, and a source-side count
     would then disagree with the destination for a copy that in fact succeeded.
     """
+    if source.is_symlink():
+        _copy_link(source, target, state, progress_cb)
+        return
+
     if source.is_file():
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
@@ -428,6 +568,11 @@ def _copy_entry(source: Path, target: Path, state: dict, progress_cb, cancel) ->
             raise MoveCancelled()
         relative = entry.relative_to(source)
         destination = target / relative
+        # The link test comes first: a link to a directory answers is_dir()
+        # with True, and mkdir() would replace it with an empty real folder.
+        if entry.is_symlink():
+            _copy_link(entry, destination, state, progress_cb)
+            continue
         if entry.is_dir():
             destination.mkdir(parents=True, exist_ok=True)
             continue
@@ -467,6 +612,241 @@ def _write_root(paths: DataPaths, group: Group, dest: Path) -> None:
         return data
 
     config_io.update_config(paths.config_file(), mutate)
+
+
+def intent_file_path(paths: Optional[DataPaths] = None) -> Path:
+    """The journal that records a rename move in progress.
+
+    It sits beside config.json. config.json never moves — it records where
+    every other directory lives — so the journal cannot be carried away by the
+    move it describes. A journal inside a group's own tree would travel to the
+    destination with that tree and the next start would never find it.
+    """
+    paths = paths or get_data_paths()
+    config = paths.config_file()
+    return config.with_name(config.name + MOVE_INTENT_SUFFIX)
+
+
+def _write_intent(
+    paths: DataPaths,
+    group: Group,
+    dest: Path,
+    entries: Sequence[Tuple[Path, Path]],
+) -> Path:
+    """Record a rename move before the first rename runs.
+
+    ``os.rename`` commits each directory one at a time, and config.json is
+    written only after the last one. A power loss in that window leaves every
+    directory at the destination and config.json naming the old root, and
+    without this record nothing on disk says so: the next start resolves the
+    group to an empty default and reports no warning. The record closes that
+    window, and ``recover_interrupted_move`` acts on it at the next start.
+
+    Raises ConfigError when the record cannot be written. A move that cannot be
+    journalled must not start, because an interruption would then be
+    undetectable — and a configuration directory that refuses this write would
+    refuse the config.json update at the end of the move anyway.
+    """
+    record = {
+        "version": INTENT_VERSION,
+        "group": group.value,
+        "dest": str(dest),
+        "config_file": str(paths.config_file()),
+        "entries": [[str(source), str(target)] for source, target in entries],
+        "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "pid": os.getpid(),
+    }
+    path = intent_file_path(paths)
+    config_io.write_config(path, record)
+    logger.info("Recorded the %s move to %s in %s", group.value, dest, path)
+    return path
+
+
+def _clear_intent(path: Path) -> None:
+    """Remove the journal once config.json names the new root.
+
+    A journal left behind is not dangerous: the next recovery finds every
+    directory at the destination and config.json already naming it, and clears
+    the record without touching anything. The failure is still logged.
+    """
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError as exc:
+        logger.warning("Could not remove the completed move journal %s: %s", path, exc)
+
+
+def _read_intent(path: Path) -> Optional[dict]:
+    """Parse the journal, or return None when it holds nothing usable."""
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.error("Could not read the move journal %s: %s", path, exc)
+        return None
+    try:
+        record = json.loads(raw)
+    except ValueError as exc:
+        logger.error("Could not parse the move journal %s: %s", path, exc)
+        return None
+    if not isinstance(record, dict):
+        logger.error("The move journal %s does not hold a JSON object.", path)
+        return None
+    try:
+        Group(record["group"])
+        if not isinstance(record["dest"], str) or not record["dest"]:
+            raise ValueError("dest is not a path")
+        entries = record["entries"]
+        if not isinstance(entries, list):
+            raise TypeError("entries is not a list")
+        for pair in entries:
+            if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+                raise ValueError("an entry is not a (source, target) pair")
+            if not all(isinstance(item, str) and item for item in pair):
+                raise ValueError("an entry names something that is not a path")
+    except (KeyError, TypeError, ValueError) as exc:
+        logger.error("The move journal %s is incomplete: %s", path, exc)
+        return None
+    return record
+
+
+def recover_interrupted_move(paths: Optional[DataPaths] = None) -> Optional[str]:
+    """Finish or undo a rename move that a crash interrupted. Startup calls it.
+
+    Returns a one-line summary when it acted, or None when there was nothing to
+    do. The check costs one ``lexists`` call on the usual path, so it never
+    delays a normal start, and every failure is logged rather than raised: a
+    recovery problem must not stop the application.
+
+    Two outcomes are possible.
+
+    * Every directory sits at the destination. The move finished on disk, and
+      only the config.json write was lost, so the recovery writes the new root
+      and the user keeps the move.
+    * Some directories sit at the destination and some at the source. The move
+      is half done, so the recovery renames the moved ones back and leaves
+      config.json alone. A journal it could not act on stays on disk, so the
+      next start tries again and the user has the evidence.
+    """
+    paths = paths or get_data_paths()
+    path = intent_file_path(paths)
+    if not os.path.lexists(path):
+        return None
+
+    logger.warning("Found an interrupted storage move recorded in %s", path)
+    record = _read_intent(path)
+    if record is None:
+        _clear_intent(path)
+        message = (
+            f"An interrupted storage move was recorded in {path}, but the "
+            f"record could not be read. Check your data folders by hand. The "
+            f"unreadable record was removed."
+        )
+        logger.error(message)
+        return message
+
+    group = Group(record["group"])
+    dest = Path(record["dest"])
+    entries = [(Path(source), Path(target)) for source, target in record["entries"]]
+
+    at_dest = [(s, t) for s, t in entries
+               if os.path.lexists(t) and not os.path.lexists(s)]
+    still_home = [(s, t) for s, t in entries if os.path.lexists(s)]
+
+    if not at_dest:
+        _clear_intent(path)
+        if still_home:
+            message = (
+                f"A {group.value} storage move to {dest} was interrupted before "
+                f"it moved anything. Your data is unchanged."
+            )
+            logger.warning(message)
+        else:
+            message = (
+                f"A {group.value} storage move to {dest} was interrupted, and "
+                f"none of its folders are at either location. Check {dest} and "
+                f"{paths.root(group)} by hand."
+            )
+            logger.error(message)
+        return message
+
+    if len(at_dest) == len(entries):
+        try:
+            current = config_io.read_config(paths.config_file())
+        except config_io.ConfigIOError as exc:
+            message = (
+                f"A {group.value} storage move to {dest} finished, but "
+                f"config.json could not be read to record it: {exc} The data "
+                f"is at {dest}. Repair config.json and start again."
+            )
+            logger.error(message)
+            return message
+
+        already = (current.get("data_roots") or {}).get(group.value)
+        if already == str(dest):
+            _clear_intent(path)
+            message = (
+                f"A {group.value} storage move to {dest} had already been "
+                f"recorded. Nothing needed repair."
+            )
+            logger.info(message)
+            return message
+
+        try:
+            _write_root(paths, group, dest)
+        except ConfigError as exc:
+            message = (
+                f"A {group.value} storage move to {dest} finished, but the new "
+                f"location could not be recorded: {exc} The data is at {dest}. "
+                f"The record was kept at {path} for the next start."
+            )
+            logger.error(message)
+            return message
+
+        _clear_intent(path)
+        reset_data_paths()
+        message = (
+            f"Finished an interrupted {group.value} storage move: the data is "
+            f"at {dest}, and that location is now recorded. Restart the "
+            f"application if anything still reads the old location."
+        )
+        logger.warning(message)
+        return message
+
+    # A half-done move. Put back what crossed, and leave config.json alone.
+    failed: List[Tuple[Path, Path]] = []
+    for source, target in reversed(at_dest):
+        try:
+            os.rename(str(target), str(source))
+            logger.warning("Moved %s back to %s after an interrupted move.",
+                           target, source)
+        except OSError as exc:
+            logger.error(
+                "Could not move %s back to %s after an interrupted move: %s. "
+                "That folder holds the only copy of the data.",
+                target, source, exc,
+            )
+            failed.append((target, source))
+
+    if failed:
+        listed = "; ".join(f"{target} -> {source}" for target, source in failed)
+        message = (
+            f"A {group.value} storage move to {dest} was interrupted. These "
+            f"folders could not be put back and hold the only copy of your "
+            f"data: {listed}. Move each one back by hand. The record was kept "
+            f"at {path}."
+        )
+        logger.error(message)
+        return message
+
+    _clear_intent(path)
+    message = (
+        f"A {group.value} storage move to {dest} was interrupted part way, so "
+        f"the {len(at_dest)} folder(s) that had moved were put back. Your data "
+        f"is where it was."
+    )
+    logger.warning(message)
+    return message
 
 
 def move_group(
@@ -541,7 +921,16 @@ def move_group(
     created_dirs: List[Path] = []
     if not os.path.lexists(dest):
         created_dirs.append(dest)
-    dest.mkdir(parents=True, exist_ok=True)
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # validate_destination rejects a destination that is a file or a dead
+        # link. This guard catches the same shapes when another program creates
+        # one between the check and here, and it reports them as a result
+        # rather than as an exception out of move_group.
+        message = f"Could not create the folder {dest}: {exc}. Nothing was changed."
+        logger.error("Cannot move %s to %s: %s", group.value, dest, message)
+        return MoveResult(ok=False, error=message)
 
     # Fast path: a rename within one volume finishes in milliseconds. This
     # matters most for Models, where a cross-volume copy runs for many minutes.
@@ -550,8 +939,45 @@ def move_group(
         rename_dirs: List[Path] = []
         rename_error: Optional[OSError] = None
         collision: Optional[Path] = None
+        cancelled = False
+
+        # One journal covers one move. A second move that overwrote the record
+        # would destroy the only description of the first one, so a record that
+        # is still on disk stops this move instead.
+        existing = intent_file_path(paths)
+        if os.path.lexists(existing):
+            message = (
+                f"An earlier storage move was interrupted and has not been "
+                f"repaired yet ({existing}). Restart the application to repair "
+                f"it, then try again. Nothing was changed."
+            )
+            logger.error("Cannot move %s to %s: %s", group.value, dest, message)
+            _remove_created([], created_dirs)
+            return MoveResult(ok=False, error=message)
+
+        # Journal the move before the first rename commits. See _write_intent:
+        # without the record, a crash before the config.json write leaves the
+        # data at the destination with nothing on disk to say so.
+        try:
+            intent = _write_intent(
+                paths, group, dest, [(source, dest / name) for source, name in sources]
+            )
+        except ConfigError as exc:
+            message = (
+                f"Could not record the move before starting it: {exc} "
+                f"Nothing was changed."
+            )
+            logger.error("Cannot move %s to %s: %s", group.value, dest, message)
+            _remove_created([], created_dirs)
+            return MoveResult(ok=False, error=message)
 
         for source, name in sources:
+            # Cancel is checked per entry. A same-volume move used to run to
+            # completion after the user pressed Cancel, and the dialog then
+            # reported "Move complete".
+            if _is_cancelled(cancel):
+                cancelled = True
+                break
             target = dest / name
             if os.path.lexists(target):
                 collision = target
@@ -568,25 +994,53 @@ def move_group(
                 break
             renamed.append((source, target))
 
-        if collision is not None:
+        # A rollback that stranded a directory leaves the group split across
+        # two places. The journal describes exactly that split, so it stays on
+        # disk and the recovery at the next start retries the rename that
+        # failed here. A rollback that put everything back needs no record.
+        def _undo(reason: str, suffix: str) -> MoveResult:
             stranded = _rollback_renames(renamed)
+            if not stranded:
+                _clear_intent(intent)
+            else:
+                logger.error(
+                    "Kept the move journal %s: %d folder(s) could not be put "
+                    "back, and the next start retries them.", intent, len(stranded),
+                )
             _remove_created([], rename_dirs + created_dirs)
-            reason = (
+            return _failed(group, dest, reason, stranded, suffix)
+
+        if cancelled:
+            if not renamed:
+                _clear_intent(intent)
+                _remove_created([], rename_dirs + created_dirs)
+                logger.info("Move of %s cancelled by the user; source left intact",
+                            group.value)
+                return MoveResult(ok=False,
+                                  error="Move cancelled. Nothing was changed.")
+            result = _undo("The move was cancelled.",
+                           " Nothing was changed.")
+            if not result.stranded:
+                logger.info("Move of %s cancelled by the user; source left intact",
+                            group.value)
+                return MoveResult(ok=False,
+                                  error="Move cancelled. Nothing was changed.")
+            return result
+
+        if collision is not None:
+            return _undo(
                 f"Something else created {collision} while the move was "
-                f"running, so the move stopped."
+                f"running, so the move stopped.",
+                " Nothing was changed. Move that folder away and try again.",
             )
-            return _failed(group, dest, reason, stranded,
-                           " Nothing was changed. Move that folder away and try again.")
 
         if rename_error is None:
             try:
                 _write_root(paths, group, dest)
             except ConfigError as exc:
                 logger.error("Could not record the new %s root: %s", group.value, exc)
-                stranded = _rollback_renames(renamed)
-                _remove_created([], rename_dirs + created_dirs)
-                return _failed(group, dest, str(exc), stranded,
-                               " Your data was left where it was.")
+                return _undo(str(exc), " Your data was left where it was.")
+            _clear_intent(intent)
             _cleanup_empty_legacy_dirs(group)
             logger.info("Moved %s to %s by rename (%d files)", group.value, dest, files_total)
             return MoveResult(ok=True, files_moved=files_total,
@@ -596,13 +1050,22 @@ def move_group(
         # already under the destination would be destroyed by the cleanup that
         # a later cancel or copy failure runs.
         stranded = _rollback_renames(renamed)
-        _remove_created([], rename_dirs)
         if stranded:
+            logger.error(
+                "Kept the move journal %s: %d folder(s) could not be put back, "
+                "and the next start retries them.", intent, len(stranded),
+            )
+            _remove_created([], rename_dirs + created_dirs)
             return _failed(
                 group, dest,
                 f"The move failed ({rename_error}) and part of it could not be undone.",
                 stranded, "",
             )
+        # The copy path takes over. It never renames, so the journal has
+        # nothing left to describe, and the destination directory stays because
+        # the copy reuses it.
+        _clear_intent(intent)
+        _remove_created([], rename_dirs)
         logger.warning("Rolled back the partial rename of %s; falling back to copy",
                        group.value)
 
@@ -664,7 +1127,13 @@ def move_group(
 
     for source, _name in sources:
         try:
-            if source.is_dir():
+            # The link test comes first. shutil.rmtree refuses to remove a link
+            # to a directory, so a source that was a symlink used to survive
+            # the move: the copy reported success and the old location stayed
+            # in place, invisible, holding a second copy of the data.
+            if source.is_symlink():
+                source.unlink()
+            elif source.is_dir():
                 shutil.rmtree(source)
             else:
                 source.unlink()
