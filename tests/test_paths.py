@@ -9,14 +9,17 @@ from core.paths import (
     Group,
     get_data_paths,
     reset_data_paths,
+    set_warning_sink,
 )
 
 
 @pytest.fixture(autouse=True)
 def _reset():
     reset_data_paths()
+    set_warning_sink(None)
     yield
     reset_data_paths()
+    set_warning_sink(None)
 
 
 def _write_config(tmp_path, payload):
@@ -86,6 +89,77 @@ def test_drain_warnings_empties_the_buffer(tmp_path):
 
     assert dp.drain_warnings()
     assert dp.drain_warnings() == []
+
+
+def test_warning_after_sink_install_reaches_the_sink(tmp_path):
+    """A root resolved after startup must not land in a buffer nobody reads."""
+    missing = tmp_path / "offline_share"
+    cfg = _write_config(tmp_path, {"data_roots": {"images": str(missing)}})
+    dp = DataPaths(config_path=cfg)
+
+    received = []
+    set_warning_sink(received.append)
+    dp.root(Group.IMAGES)
+
+    assert len(received) == 1
+    assert str(missing) in received[0]
+    assert "images" in received[0].lower()
+
+
+def test_warnings_buffered_before_the_sink_are_still_drained(tmp_path):
+    """core.paths resolves the Settings root before the logger exists."""
+    missing = tmp_path / "offline_share"
+    cfg = _write_config(tmp_path, {"data_roots": {"images": str(missing)}})
+    dp = DataPaths(config_path=cfg)
+    dp.root(Group.IMAGES)
+
+    received = []
+    set_warning_sink(received.append)
+
+    drained = dp.drain_warnings()
+    assert len(drained) == 1
+    assert str(missing) in drained[0]
+    assert received == []
+
+
+def test_installing_a_sink_twice_does_not_duplicate_delivery(tmp_path):
+    missing = tmp_path / "offline_share"
+    cfg = _write_config(tmp_path, {"data_roots": {"images": str(missing)}})
+    dp = DataPaths(config_path=cfg)
+
+    received = []
+    set_warning_sink(received.append)
+    set_warning_sink(received.append)
+    dp.root(Group.IMAGES)
+
+    assert len(received) == 1
+
+
+def test_a_broken_sink_leaves_the_warning_in_the_buffer(tmp_path):
+    """Path resolution must survive a sink that raises."""
+    def _explode(_message):
+        raise RuntimeError("sink is broken")
+
+    missing = tmp_path / "offline_share"
+    cfg = _write_config(tmp_path, {"data_roots": {"images": str(missing)}})
+    dp = DataPaths(config_path=cfg)
+
+    set_warning_sink(_explode)
+    assert dp.root(Group.IMAGES) == tmp_path
+    assert any(str(missing) in w for w in dp.drain_warnings())
+
+
+def test_a_reachable_root_raises_no_warning(tmp_path):
+    dest = tmp_path / "elsewhere"
+    dest.mkdir()
+    cfg = _write_config(tmp_path, {"data_roots": {"images": str(dest)}})
+    dp = DataPaths(config_path=cfg)
+
+    received = []
+    set_warning_sink(received.append)
+    dp.root(Group.IMAGES)
+
+    assert received == []
 
 
 def test_missing_config_file_uses_defaults(tmp_path):
@@ -187,6 +261,80 @@ def test_logger_uses_the_settings_root(tmp_path, monkeypatch):
         log_file = setup_logging(log_level=logging.INFO, log_to_file=True)
         assert log_file is not None
         assert Path(log_file).parent == dest / "logs"
+    finally:
+        logging.getLogger().handlers.clear()
+
+
+def test_sink_delivery_keeps_the_message_for_the_gui_widget(tmp_path):
+    """The Storage Locations widget drains the buffer to mark unavailable rows."""
+    missing = tmp_path / "offline_share"
+    cfg = _write_config(tmp_path, {"data_roots": {"images": str(missing)}})
+    dp = DataPaths(config_path=cfg)
+
+    received = []
+    set_warning_sink(received.append)
+    dp.root(Group.IMAGES)
+
+    assert len(received) == 1
+    assert any("'images'" in w for w in dp.drain_warnings())
+
+
+def test_setup_logging_installs_the_sink_for_later_roots(tmp_path, monkeypatch, capsys):
+    """A CLI run resolves Images, Video and Models after the logger starts.
+
+    Without the sink the fallback warning stays in the buffer, so the user gets
+    a silent fallback. Design section 8 requires one visible line per root.
+    """
+    import logging
+
+    import core.paths as paths_mod
+    from core.logging_config import setup_logging
+
+    settings = tmp_path / "settings_root"
+    settings.mkdir()
+    missing = tmp_path / "offline_share"
+    cfg = _write_config(tmp_path, {"data_roots": {
+        "settings": str(settings), "images": str(missing),
+    }})
+
+    dp = paths_mod.DataPaths(config_path=cfg)
+    monkeypatch.setattr(paths_mod, "_INSTANCE", dp)
+    try:
+        log_file = setup_logging(log_level=logging.INFO, log_to_file=True)
+        capsys.readouterr()  # discard the startup banner
+
+        assert dp.root(Group.IMAGES) == tmp_path
+
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+
+        stderr = capsys.readouterr().err
+        assert str(missing) in stderr, "the CLI user must see the fallback"
+        assert str(missing) in Path(log_file).read_text(encoding="utf-8")
+    finally:
+        logging.getLogger().handlers.clear()
+
+
+def test_setup_logging_reports_roots_resolved_before_it_started(tmp_path, monkeypatch, capsys):
+    """The Settings root resolves before the logger exists, so it is buffered."""
+    import logging
+
+    import core.paths as paths_mod
+    from core.logging_config import setup_logging
+
+    missing = tmp_path / "offline_share"
+    cfg = _write_config(tmp_path, {"data_roots": {"settings": str(missing)}})
+
+    dp = paths_mod.DataPaths(config_path=cfg)
+    monkeypatch.setattr(paths_mod, "_INSTANCE", dp)
+    try:
+        log_file = setup_logging(log_level=logging.INFO, log_to_file=True)
+        for handler in logging.getLogger().handlers:
+            handler.flush()
+
+        stderr = capsys.readouterr().err
+        assert str(missing) in stderr
+        assert str(missing) in Path(log_file).read_text(encoding="utf-8")
     finally:
         logging.getLogger().handlers.clear()
 

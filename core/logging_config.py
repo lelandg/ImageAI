@@ -14,6 +14,35 @@ import shutil
 import warnings
 
 
+def _report_storage_warnings(root_logger, data_paths, set_warning_sink):
+    """Route storage-location warnings to the log file and to stderr.
+
+    ``core.paths`` resolves the Settings root before this logger exists, so it
+    buffers that warning. This function drains the buffer first. It then
+    installs itself as the sink for later warnings. The Images, Video and
+    Models roots resolve after startup, and a CLI run has no other reader for
+    the buffer, so without the sink the user would get a silent fallback.
+
+    Args:
+        root_logger: The configured root logger.
+        data_paths: The DataPaths singleton that holds the buffer.
+        set_warning_sink: ``core.paths.set_warning_sink``.
+    """
+    for message in data_paths.drain_warnings():
+        root_logger.warning(message)
+
+    def _emit(message):
+        # The root logger holds a stderr console handler at WARNING level and
+        # the file handler, so one call reaches both destinations.
+        try:
+            root_logger.warning(message)
+        except Exception:
+            # Never let a logging failure stop path resolution.
+            print(f"WARNING - {message}", file=sys.stderr)
+
+    set_warning_sink(_emit)
+
+
 def setup_logging(log_level=logging.INFO, log_to_file=True):
     """
     Set up comprehensive logging for the entire application.
@@ -27,7 +56,7 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
     """
     # Resolve the log directory through the single path resolver. This import
     # is safe here: core.paths deliberately has no logging dependency.
-    from core.paths import get_data_paths
+    from core.paths import get_data_paths, set_warning_sink
 
     data_paths = get_data_paths()
     log_dir = data_paths.logs()
@@ -82,11 +111,11 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
         root_logger.info(f"Log file: {log_file}")
         root_logger.info("=" * 60)
 
-        # core.paths runs before the logger exists, so it buffers its own warnings.
-        # Emit them now that handlers are attached.
-        for message in data_paths.drain_warnings():
-            root_logger.warning(message)
+    # Both handlers are attached now, so storage warnings can reach the user.
+    # The console handler writes to stderr, which keeps stdout clean for --json.
+    _report_storage_warnings(root_logger, data_paths, set_warning_sink)
 
+    if log_to_file:
         # Optional: Log GUI/Qt environment if available
         try:
             import PySide6  # type: ignore

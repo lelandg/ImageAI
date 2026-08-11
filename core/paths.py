@@ -8,6 +8,13 @@ IMPORTANT: this module must not import ``core.logging_config`` or
 ``core.config``. The file logger asks this module where the log directory is,
 so this module runs before the logger exists. Errors here go into a deferred
 buffer that the logger drains once it starts. See ``drain_warnings``.
+
+The logger starts after the Settings root resolves but before the Images,
+Video and Models roots resolve. A warning about one of those three roots would
+therefore sit in the buffer for the rest of the run, because only the logger
+and the GUI Storage Locations widget ever drain it. To close that gap the
+logger installs a warning sink with ``set_warning_sink`` as soon as it attaches
+its handlers. Every later warning then goes straight to the log and to stderr.
 """
 
 from __future__ import annotations
@@ -17,9 +24,29 @@ import os
 import platform
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 APP_NAME = "ImageAI"  # duplicated from core.constants to avoid the import cycle
+
+WarningSink = Callable[[str], None]
+
+_WARNING_SINK: Optional[WarningSink] = None
+
+
+def set_warning_sink(sink: Optional[WarningSink]) -> None:
+    """Install the process-wide destination for storage warnings.
+
+    ``core.logging_config.setup_logging`` calls this once its handlers exist.
+    A warning raised after that point goes to the sink at once, so a CLI run
+    prints it to stderr and writes it to the log file. A warning raised before
+    that point stays in the per-instance buffer that ``drain_warnings``
+    returns, and the logger drains that buffer at startup.
+
+    The sink is one slot, not a list. Two installs replace each other, so one
+    warning reaches the sink one time. Pass ``None`` to remove the sink.
+    """
+    global _WARNING_SINK
+    _WARNING_SINK = sink
 
 
 class Group(str, Enum):
@@ -64,7 +91,7 @@ class DataPaths:
         try:
             data = json.loads(self._config_path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
-            self._warnings.append(
+            self._warn(
                 f"Could not read config.json at {self._config_path}: {exc}. "
                 f"Using default storage locations."
             )
@@ -96,7 +123,7 @@ class DataPaths:
             if self._is_reachable(candidate):
                 resolved = candidate
             else:
-                self._warnings.append(
+                self._warn(
                     f"Storage location for '{group.value}' is unavailable: "
                     f"{candidate}. Using the default location instead: {default}"
                 )
@@ -115,6 +142,24 @@ class DataPaths:
         platform default for that group and records a warning.
         """
         return path.is_dir() and os.access(path, os.W_OK)
+
+    def _warn(self, message: str) -> None:
+        """Record a warning and deliver it to the sink when one is installed.
+
+        The message always stays in the buffer. The GUI Storage Locations
+        widget drains the buffer to mark the affected rows, so the buffer must
+        keep the message even when the sink already reported it.
+        """
+        self._warnings.append(message)
+        sink = _WARNING_SINK
+        if sink is None:
+            return
+        try:
+            sink(message)
+        except Exception:
+            # A broken sink must never stop path resolution. The message stays
+            # in the buffer, so drain_warnings can still report it.
+            pass
 
     def drain_warnings(self) -> List[str]:
         """Return buffered warnings and clear the buffer."""
