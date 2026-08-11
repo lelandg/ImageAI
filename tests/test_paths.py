@@ -189,3 +189,46 @@ def test_logger_uses_the_settings_root(tmp_path, monkeypatch):
         assert Path(log_file).parent == dest / "logs"
     finally:
         logging.getLogger().handlers.clear()
+
+
+def test_musetalk_keeps_legacy_linux_cache(tmp_path, monkeypatch):
+    """An existing ~/.cache/imageai/musetalk must not trigger a 4 GB re-download."""
+    import core.paths as paths_mod
+    from core.musetalk_installer import get_musetalk_model_path
+
+    legacy = tmp_path / ".cache" / "imageai" / "musetalk"
+    legacy.mkdir(parents=True)
+    (legacy / "musetalk").mkdir()
+
+    cfg = _write_config(tmp_path, {})
+    monkeypatch.setattr(paths_mod, "_INSTANCE", paths_mod.DataPaths(config_path=cfg))
+    monkeypatch.setattr(paths_mod.Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr("core.musetalk_installer.Path.home", staticmethod(lambda: tmp_path))
+
+    assert get_musetalk_model_path() == legacy
+
+
+def test_musetalk_uses_models_root_when_no_legacy_dir(tmp_path, monkeypatch):
+    import core.paths as paths_mod
+    from core.musetalk_installer import get_musetalk_model_path
+
+    models = tmp_path / "M"
+    models.mkdir()
+    cfg = _write_config(tmp_path, {"data_roots": {"models": str(models)}})
+    monkeypatch.setattr(paths_mod, "_INSTANCE", paths_mod.DataPaths(config_path=cfg))
+    monkeypatch.setattr("core.musetalk_installer.Path.home", staticmethod(lambda: tmp_path))
+
+    assert get_musetalk_model_path() == models / "musetalk"
+
+
+def test_styles_store_uses_the_images_root(tmp_path, monkeypatch):
+    import core.paths as paths_mod
+
+    images = tmp_path / "I"
+    images.mkdir()
+    cfg = _write_config(tmp_path, {"data_roots": {"images": str(images)}})
+    monkeypatch.setattr(paths_mod, "_INSTANCE", paths_mod.DataPaths(config_path=cfg))
+
+    from core.styles.store import StyleStore
+
+    assert StyleStore().base_dir == images / "styles"

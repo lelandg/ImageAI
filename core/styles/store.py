@@ -3,7 +3,7 @@
 Layout (per Plans/2026-07-26-custom-styles-design.md §3):
     <base_dir>/styles.json      index: {"styles": [record, ...]}
     <base_dir>/<id>/refs/*.jpg  copied, downscaled source images
-base_dir defaults to get_user_data_dir()/"styles" — personal artifacts never
+base_dir defaults to the Images root's "styles" directory — personal artifacts never
 live in the repo (unlike data/prompts/custom_presets.json).
 """
 import json
@@ -47,8 +47,8 @@ class StyleStore:
 
     def __init__(self, base_dir: Optional[Path] = None):
         if base_dir is None:
-            from core.constants import get_user_data_dir
-            base_dir = get_user_data_dir() / "styles"
+            from core.paths import get_data_paths
+            base_dir = get_data_paths().styles()
         self.base_dir = Path(base_dir)
         self.index_path = self.base_dir / "styles.json"
 

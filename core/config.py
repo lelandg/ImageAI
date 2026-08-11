@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 from .constants import APP_NAME, PROVIDER_KEY_URLS
+from .paths import get_data_paths
 from .security import secure_storage
 
 logger = logging.getLogger(__name__)
@@ -19,8 +20,8 @@ class ConfigManager:
     def __init__(self):
         """Initialize configuration manager."""
         self.config_dir = self._get_config_dir()
-        self.config_path = self.config_dir / "config.json"
-        self.details_path = self.config_dir / "details.jsonl"
+        self.config_path = get_data_paths().config_file()
+        self.details_path = get_data_paths().details()
         self.config = self._load_config()
 
         # Normalize auth_mode on load (handle legacy display values)
@@ -30,18 +31,8 @@ class ConfigManager:
         self._migrate_api_keys()
     
     def _get_config_dir(self) -> Path:
-        """Get platform-specific configuration directory."""
-        system = platform.system()
-        home = Path.home()
-        
-        if system == "Windows":
-            base = Path(os.getenv("APPDATA", home / "AppData" / "Roaming"))
-            return base / APP_NAME
-        elif system == "Darwin":  # macOS
-            return home / "Library" / "Application Support" / APP_NAME
-        else:  # Linux/Unix
-            base = Path(os.getenv("XDG_CONFIG_HOME", home / ".config"))
-            return base / APP_NAME
+        """Get the directory that holds config.json. This directory never moves."""
+        return get_data_paths().config_file().parent
     
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from disk."""
@@ -231,7 +222,7 @@ class ConfigManager:
     
     def get_images_dir(self) -> Path:
         """Get directory for saved images."""
-        images_dir = self.config_dir / "images"
+        images_dir = get_data_paths().images()
         images_dir.mkdir(parents=True, exist_ok=True)
         return images_dir
 
@@ -265,7 +256,7 @@ class ConfigManager:
                 return parent / "templates" / "layouts"
 
         # Fallback to config directory
-        templates_dir = self.config_dir / "templates" / "layouts"
+        templates_dir = get_data_paths().settings_root() / "templates" / "layouts"
         templates_dir.mkdir(parents=True, exist_ok=True)
         return templates_dir
 

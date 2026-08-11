@@ -19,7 +19,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from PIL import Image
 
-from core.constants import get_user_data_dir
+from core.paths import get_data_paths
 from .models import SegmentationResult, FacialRegion
 from .constants import (
     POSE_LANDMARK_INDICES,
@@ -105,7 +105,7 @@ class BodyPartSegmenter:
 
             # Use default model path if not specified
             if self.model_path is None:
-                self.model_path = get_user_data_dir() / "weights" / "character_animator" / "sam2_hiera_large.pt"
+                self.model_path = get_data_paths().weights() / "character_animator" / "sam2_hiera_large.pt"
 
             if not self.model_path.exists():
                 logger.debug(f"SAM 2 model not found at {self.model_path}")

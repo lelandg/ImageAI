@@ -138,24 +138,17 @@ DISCORD_ASSETS = {
 
 
 def get_user_data_dir() -> Path:
-    """Get platform-specific user data directory for ImageAI.
+    """Deprecated. Use ``core.paths.get_data_paths()`` directly.
 
-    Returns:
-        Path to the user data directory where configuration, logs, and generated
-        images are stored.
+    Retained so external scripts keep working. Returns the Settings root.
     """
-    system = platform.system()
-    home = Path.home()
+    from core.paths import get_data_paths
 
-    if system == "Windows":
-        base = Path(os.getenv("APPDATA", home / "AppData" / "Roaming"))
-        return base / APP_NAME
-    elif system == "Darwin":  # macOS
-        return home / "Library" / "Application Support" / APP_NAME
-    else:  # Linux/Unix
-        base = Path(os.getenv("XDG_CONFIG_HOME", home / ".config"))
-        return base / APP_NAME
+    return get_data_paths().settings_root()
 
 
-# Persistent ledger for OpenAI Batch API jobs (one entry per submission).
-BATCH_JOBS_PATH = get_user_data_dir() / "batch_jobs.json"
+def batch_jobs_path() -> Path:
+    """Path of the OpenAI Batch API job ledger."""
+    from core.paths import get_data_paths
+
+    return get_data_paths().batch_jobs()

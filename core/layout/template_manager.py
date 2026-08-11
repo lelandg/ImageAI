@@ -183,9 +183,9 @@ class TemplatePreviewGenerator:
     """Generates preview thumbnails for templates"""
 
     def __init__(self, cache_dir: Optional[Path] = None):
-        config = ConfigManager()
         if cache_dir is None:
-            cache_dir = config.config_dir / "template_cache"
+            from core.paths import get_data_paths
+            cache_dir = get_data_paths().template_cache()
 
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
