@@ -1472,3 +1472,483 @@ def test_a_rolled_back_rename_clears_the_journal(tmp_path, paths, monkeypatch):
     assert not _intent_file(paths).exists()
     assert (tmp_path / "generated" / "f.bin").exists()
     assert (tmp_path / "images" / "f.bin").exists()
+
+
+# -- Round 5 -----------------------------------------------------------------
+# The journal has to work for the Settings group, which is the one group whose
+# contents startup re-creates, and it has to survive two windows.
+
+import ast  # noqa: E402 - grouped with the tests it serves
+import platform  # noqa: E402
+import shutil  # noqa: E402
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+import time  # noqa: E402
+
+import core.data_migration as migration  # noqa: E402
+from core.data_migration import (  # noqa: E402
+    _clear_intent,
+    unreachable_configured_root,
+)
+
+
+def _settings_tree(root, extra=True):
+    """The Settings group as a real installation holds it."""
+    (root / "logs").mkdir(parents=True, exist_ok=True)
+    (root / "logs" / "imageai_20260101.log").write_text("a year of logs\n",
+                                                        encoding="utf-8")
+    if extra:
+        (root / "layout").mkdir(parents=True, exist_ok=True)
+        (root / "layout" / "project.json").write_text("{}", encoding="utf-8")
+        (root / "details.jsonl").write_text('{"prompt": "x"}\n', encoding="utf-8")
+
+
+def test_recovery_keeps_a_settings_move_whose_log_directory_was_recreated(
+    tmp_path, paths, monkeypatch
+):
+    """setup_logging re-creates the log directory from the old root.
+
+    The recovery used to read that empty directory as "the data never moved",
+    take the half-done branch, and rename the folders that had moved back —
+    while the moved log file stayed at the destination, unreferenced.
+    """
+    _settings_tree(tmp_path)
+    dest = tmp_path / "NewSettings"
+    power_loss = _crash_after_the_renames(monkeypatch)
+    with pytest.raises(power_loss):
+        move_group(Group.SETTINGS, dest, paths=paths)
+    monkeypatch.undo()
+
+    # What setup_logging() does before the recovery runs on an unfixed startup.
+    (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+    fresh = DataPaths(config_path=paths.config_file())
+    summary = recover_interrupted_move(fresh)
+
+    assert summary
+    assert "unchanged" not in summary
+    assert _read_roots(fresh)["settings"] == str(dest)
+    assert (dest / "logs" / "imageai_20260101.log").exists()
+    assert (dest / "layout" / "project.json").exists()
+    assert (dest / "details.jsonl").exists()
+    assert not _intent_file(fresh).exists()
+
+
+def test_recovery_of_a_settings_move_that_moved_only_the_log_directory(
+    tmp_path, paths, monkeypatch
+):
+    """With logs as the only source, the recovery used to report a lie.
+
+    It said "interrupted before it moved anything. Your data is unchanged",
+    deleted the journal, and left the data at the destination for ever.
+    """
+    _settings_tree(tmp_path, extra=False)
+    dest = tmp_path / "NewSettings"
+    power_loss = _crash_after_the_renames(monkeypatch)
+    with pytest.raises(power_loss):
+        move_group(Group.SETTINGS, dest, paths=paths)
+    monkeypatch.undo()
+
+    (tmp_path / "logs").mkdir(parents=True, exist_ok=True)
+
+    fresh = DataPaths(config_path=paths.config_file())
+    summary = recover_interrupted_move(fresh)
+
+    assert summary and "unchanged" not in summary
+    assert _read_roots(fresh)["settings"] == str(dest)
+    assert (dest / "logs" / "imageai_20260101.log").exists()
+    assert not _intent_file(fresh).exists()
+
+
+def test_recovery_puts_a_half_done_settings_move_back_over_a_recreated_source(
+    tmp_path, paths
+):
+    """The rollback has to replace the empty directory startup created."""
+    _settings_tree(tmp_path)
+    dest = tmp_path / "NewSettings"
+    dest.mkdir()
+    os.rename(str(tmp_path / "logs"), str(dest / "logs"))
+    _intent_file(paths).write_text(json.dumps({
+        "version": 1,
+        "group": "settings",
+        "dest": str(dest),
+        "entries": [
+            [str(tmp_path / "logs"), str(dest / "logs")],
+            [str(tmp_path / "layout"), str(dest / "layout")],
+        ],
+        "moved": [0],
+    }), encoding="utf-8")
+    # setup_logging() re-created the source of the entry that did move.
+    (tmp_path / "logs").mkdir()
+
+    summary = recover_interrupted_move(paths)
+
+    assert summary
+    assert (tmp_path / "logs" / "imageai_20260101.log").exists()
+    assert not os.path.lexists(str(dest / "logs"))
+    assert "settings" not in _read_roots(paths)
+    assert not _intent_file(paths).exists()
+
+
+def test_recovery_reads_an_empty_source_beside_a_full_target_as_moved(
+    tmp_path, paths
+):
+    """A journal without the rename marks still must not undo a real move.
+
+    An installation that crashed before this fix shipped has a journal with no
+    marks in it. An empty source directory beside a target that holds data can
+    only be a directory something re-created, because a rename never leaves the
+    source behind.
+    """
+    _settings_tree(tmp_path, extra=False)
+    dest = tmp_path / "NewSettings"
+    dest.mkdir()
+    os.rename(str(tmp_path / "logs"), str(dest / "logs"))
+    _intent_file(paths).write_text(json.dumps({
+        "version": 1,
+        "group": "settings",
+        "dest": str(dest),
+        "entries": [[str(tmp_path / "logs"), str(dest / "logs")]],
+    }), encoding="utf-8")
+    (tmp_path / "logs").mkdir()
+
+    summary = recover_interrupted_move(paths)
+
+    assert summary and "unchanged" not in summary
+    assert _read_roots(paths)["settings"] == str(dest)
+    assert (dest / "logs" / "imageai_20260101.log").exists()
+
+
+def test_the_journal_records_each_rename_as_it_commits(tmp_path, paths, monkeypatch):
+    _populate(tmp_path, ["generated", "images"], size=64)
+    seen = {}
+    real = _write_root
+
+    def spy(paths_arg, group, dest):
+        seen["record"] = json.loads(
+            _intent_file(paths_arg).read_text(encoding="utf-8")
+        )
+        return real(paths_arg, group, dest)
+
+    monkeypatch.setattr("core.data_migration._write_root", spy)
+
+    result = move_group(Group.IMAGES, tmp_path / "dest", paths=paths)
+
+    assert result.ok, result.error
+    assert sorted(seen["record"]["moved"]) == [0, 1]
+
+
+def test_main_recovers_before_it_sets_up_logging():
+    """setup_logging re-creates the old Settings root, so it must run second."""
+    source = (Path(__file__).resolve().parents[2] / "main.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    main_fn = next(n for n in tree.body
+                   if isinstance(n, ast.FunctionDef) and n.name == "main")
+
+    def call_lines(name):
+        return [node.lineno for node in ast.walk(main_fn)
+                if isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name) and node.func.id == name]
+
+    recovery = call_lines("recover_interrupted_move")
+    logging_setup = call_lines("setup_logging")
+
+    assert recovery, "main() never calls recover_interrupted_move"
+    assert logging_setup, "main() never calls setup_logging"
+    assert max(recovery) < min(logging_setup), (
+        "setup_logging runs before the recovery, so it re-creates the old "
+        "Settings root and the recovery then undoes a move that succeeded"
+    )
+
+
+def test_the_startup_recovery_message_goes_to_stderr_exactly_once():
+    """stdout belongs to the CLI --json document, and the recovery already logs."""
+    source = (Path(__file__).resolve().parents[2] / "main.py").read_text(
+        encoding="utf-8"
+    )
+    tree = ast.parse(source)
+    main_fn = next(n for n in tree.body
+                   if isinstance(n, ast.FunctionDef) and n.name == "main")
+
+    def mentions_recovery(node):
+        return any(isinstance(inner, ast.Name) and inner.id == "_recovery"
+                   for inner in ast.walk(node))
+
+    printed = []
+    relogged = []
+    for node in ast.walk(main_fn):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        if not any(mentions_recovery(arg) for arg in node.args):
+            continue
+        name = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+        if name in ("print", "_orig_print", "_deferred_print"):
+            printed.append(node)
+        elif name in ("warning", "error", "info", "exception", "debug"):
+            relogged.append(node)
+
+    assert printed, "main() never reports the recovery message to the user"
+    for node in printed:
+        streams = [kw.value for kw in node.keywords if kw.arg == "file"]
+        assert streams, "the recovery message still goes to stdout"
+        for stream in streams:
+            assert isinstance(stream, ast.Attribute) and stream.attr == "stderr"
+    assert not relogged, (
+        "recover_interrupted_move already logs its own message; main() must "
+        "not log it a second time"
+    )
+
+
+def test_a_second_move_cannot_overwrite_the_journal_of_a_running_move(
+    tmp_path, paths, monkeypatch
+):
+    """Two windows, one journal slot.
+
+    Both moves used to pass the ``lexists`` guard before either wrote a
+    journal. The second record replaced the first, and the second move's
+    cleanup then deleted the only description of the first one.
+    """
+    _populate(tmp_path, ["generated"], size=64)
+    _populate(tmp_path, ["weights"], size=64)
+    dest_images = tmp_path / "DestImages"
+    dest_models = tmp_path / "DestModels"
+    results = {}
+    real_write_intent = migration._write_intent
+
+    def write_intent(paths_arg, group, dest, entries):
+        if group is not Group.IMAGES:
+            return real_write_intent(paths_arg, group, dest, entries)
+
+        # The second window starts while this one holds the config.json lock.
+        def second_window():
+            results["models"] = move_group(
+                Group.MODELS, dest_models,
+                paths=DataPaths(config_path=paths.config_file()),
+            )
+
+        thread = threading.Thread(target=second_window)
+        thread.start()
+        results["thread"] = thread
+        # Long enough for the second window to reach the guard. Without the
+        # lock it writes its own journal here.
+        time.sleep(0.3)
+        return real_write_intent(paths_arg, group, dest, entries)
+
+    monkeypatch.setattr("core.data_migration._write_intent", write_intent)
+
+    images = move_group(Group.IMAGES, dest_images, paths=paths)
+    results["thread"].join(20)
+
+    assert images.ok, images.error
+    assert (dest_images / "generated" / "f.bin").exists()
+    assert _read_roots(paths)["images"] == str(dest_images)
+
+    models = results["models"]
+    assert not models.ok, "the second window overwrote the first one's journal"
+    assert "interrupted" in models.error.lower()
+    assert (tmp_path / "weights" / "f.bin").exists()
+    assert "models" not in _read_roots(paths)
+
+
+def test_clearing_a_journal_that_another_move_owns_leaves_it_alone(
+    tmp_path, paths, caplog
+):
+    path = _intent_file(paths)
+    path.write_text(json.dumps({
+        "version": 1,
+        "group": "images",
+        "dest": str(tmp_path / "dest"),
+        "entries": [],
+        "token": "aaaa",
+    }), encoding="utf-8")
+
+    with caplog.at_level(logging.ERROR, logger="core.data_migration"):
+        _clear_intent(path, "bbbb")
+
+    assert path.exists(), "one move deleted another move's journal"
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+    _clear_intent(path, "aaaa")
+    assert not path.exists()
+
+
+def test_recovery_leaves_a_journal_whose_process_is_still_running(
+    tmp_path, paths, caplog
+):
+    """A second window must not finish a move the first window is still running."""
+    holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        _populate(tmp_path, ["generated"], size=64)
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        os.rename(str(tmp_path / "generated"), str(dest / "generated"))
+        _intent_file(paths).write_text(json.dumps({
+            "version": 1,
+            "group": "images",
+            "dest": str(dest),
+            "entries": [[str(tmp_path / "generated"), str(dest / "generated")]],
+            "moved": [0],
+            "pid": holder.pid,
+            "host": platform.node(),
+        }), encoding="utf-8")
+
+        with caplog.at_level(logging.WARNING, logger="core.data_migration"):
+            summary = recover_interrupted_move(paths)
+
+        assert summary is None
+        assert _intent_file(paths).exists()
+        assert "images" not in _read_roots(paths)
+        assert (dest / "generated" / "f.bin").exists()
+        assert [r for r in caplog.records if str(holder.pid) in r.getMessage()]
+    finally:
+        holder.kill()
+        holder.wait()
+
+
+def test_recovery_repairs_a_journal_whose_process_has_exited(tmp_path, paths):
+    holder = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    holder.kill()
+    holder.wait()
+
+    _populate(tmp_path, ["generated"], size=64)
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    os.rename(str(tmp_path / "generated"), str(dest / "generated"))
+    _intent_file(paths).write_text(json.dumps({
+        "version": 1,
+        "group": "images",
+        "dest": str(dest),
+        "entries": [[str(tmp_path / "generated"), str(dest / "generated")]],
+        "moved": [0],
+        "pid": holder.pid,
+        "host": platform.node(),
+    }), encoding="utf-8")
+
+    summary = recover_interrupted_move(paths)
+
+    assert summary
+    assert _read_roots(paths)["images"] == str(dest)
+    assert not _intent_file(paths).exists()
+
+
+def test_a_source_that_could_not_be_deleted_is_reported_as_left_behind(
+    tmp_path, paths, monkeypatch, caplog
+):
+    """The normal Windows outcome: the open log file blocks the delete."""
+    _settings_tree(tmp_path, extra=False)
+    (tmp_path / "layout").mkdir()
+    (tmp_path / "layout" / "x.json").write_text("{}", encoding="utf-8")
+    dest = tmp_path / "D"
+    monkeypatch.setattr("core.data_migration._same_volume", lambda _s, _d: False)
+
+    real_rmtree = shutil.rmtree
+
+    def refuse(path, *args, **kwargs):
+        if Path(path).name == "logs":
+            raise OSError(13, "The process cannot access the file because it "
+                              "is being used by another process")
+        return real_rmtree(path, *args, **kwargs)
+
+    monkeypatch.setattr("core.data_migration.shutil.rmtree", refuse)
+
+    with caplog.at_level(logging.ERROR, logger="core.data_migration"):
+        result = move_group(Group.SETTINGS, dest, paths=paths)
+
+    assert result.ok, result.error
+    assert result.stranded == [(str(tmp_path / "logs"), str(dest / "logs"))]
+    assert (dest / "logs" / "imageai_20260101.log").exists()
+    assert (tmp_path / "logs" / "imageai_20260101.log").exists()
+    assert not (tmp_path / "layout").exists()
+    logged = "\n".join(r.getMessage() for r in caplog.records)
+    assert str(tmp_path / "logs") in logged
+
+
+def test_a_move_is_refused_while_the_group_runs_on_a_fallback_root(tmp_path):
+    """config.json is the only record of an offline root, so it must survive."""
+    offline = tmp_path / "media" / "usb" / "Images"
+    own = _paths_with_roots(tmp_path, {"images": offline})
+    _populate(tmp_path, ["generated"], size=64)
+
+    assert unreachable_configured_root(Group.IMAGES, own) == offline
+
+    error = validate_destination(Group.IMAGES, tmp_path / "Pictures", own)
+    assert error and str(offline) in error
+
+    result = move_group(Group.IMAGES, tmp_path / "Pictures", paths=own)
+
+    assert not result.ok
+    assert str(offline) in result.error
+    assert _read_roots(own)["images"] == str(offline)
+    assert (tmp_path / "generated" / "f.bin").exists()
+    assert not (tmp_path / "Pictures").exists()
+
+
+def test_a_reachable_configured_root_still_allows_a_move(tmp_path):
+    live = tmp_path / "Live"
+    live.mkdir()
+    _populate(live, ["generated"], size=64)
+    own = _paths_with_roots(tmp_path, {"images": live})
+
+    assert unreachable_configured_root(Group.IMAGES, own) is None
+    assert validate_destination(Group.IMAGES, tmp_path / "dest", own) is None
+
+
+def test_verification_fails_when_a_destination_file_changed_after_the_copy(
+    tmp_path, paths, monkeypatch
+):
+    """Two files change by equal and opposite amounts, so the totals still agree.
+
+    The old check compared one file count and one byte total, both measured at
+    the destination, so a rewrite that kept the totals passed and the sources
+    were then deleted.
+    """
+    (tmp_path / "generated").mkdir()
+    (tmp_path / "generated" / "a.bin").write_bytes(b"a" * 64)
+    (tmp_path / "generated" / "b.bin").write_bytes(b"b" * 64)
+    dest = tmp_path / "dest"
+    monkeypatch.setattr("core.data_migration._same_volume", lambda _s, _d: False)
+
+    real_copy_entry = migration._copy_entry
+
+    def copy_then_tamper(source, target, state, progress_cb, cancel):
+        real_copy_entry(source, target, state, progress_cb, cancel)
+        (target / "a.bin").write_bytes(b"a" * 32)
+        (target / "b.bin").write_bytes(b"b" * 96)
+
+    monkeypatch.setattr("core.data_migration._copy_entry", copy_then_tamper)
+
+    result = move_group(Group.IMAGES, dest, paths=paths)
+
+    assert not result.ok
+    assert "verification failed" in result.error.lower()
+    assert (tmp_path / "generated" / "a.bin").read_bytes() == b"a" * 64
+    assert (tmp_path / "generated" / "b.bin").read_bytes() == b"b" * 64
+    assert "images" not in _read_roots(paths)
+    assert not os.path.lexists(str(dest / "generated"))
+
+
+def test_a_short_copy_stops_the_move_before_any_source_is_deleted(
+    tmp_path, paths, monkeypatch
+):
+    """A copy that lost the tail of a file used to verify and pass."""
+    _populate(tmp_path, ["generated"], size=64)
+    dest = tmp_path / "dest"
+    monkeypatch.setattr("core.data_migration._same_volume", lambda _s, _d: False)
+
+    real_copy2 = shutil.copy2
+
+    def short_copy(src, dst, *args, **kwargs):
+        out = real_copy2(src, dst, *args, **kwargs)
+        Path(dst).write_bytes(Path(src).read_bytes()[:8])
+        return out
+
+    monkeypatch.setattr("core.data_migration.shutil.copy2", short_copy)
+
+    result = move_group(Group.IMAGES, dest, paths=paths)
+
+    assert not result.ok
+    assert "8 bytes" in result.error
+    assert (tmp_path / "generated" / "f.bin").read_bytes() == b"x" * 64
+    assert "images" not in _read_roots(paths)

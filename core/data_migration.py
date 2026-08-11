@@ -9,8 +9,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import platform
 import shutil
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Callable, Dict, List, Optional, Sequence, Tuple
@@ -72,6 +74,13 @@ FREE_SPACE_MARGIN = 256 * 1024 * 1024
 MOVE_INTENT_SUFFIX = ".move-intent"
 INTENT_VERSION = 1
 
+# A journal whose owning process is still alive describes a move that is still
+# running, so the recovery leaves it alone. A process identifier is reused after
+# a reboot, and an unrelated process that inherits the recorded number would
+# block the repair for ever, so a journal older than this age is repaired
+# whatever the identifier says.
+INTENT_STALE_SECONDS = 7 * 24 * 60 * 60
+
 
 class MoveCancelled(Exception):
     """Raised internally when the caller sets the cancel flag."""
@@ -107,8 +116,17 @@ class MoveResult:
     bytes_moved: int = 0
     used_rename: bool = False
     error: Optional[str] = None
-    # (path_the_data_sits_at_now, path_it_belongs_at) for every directory a
-    # failed rollback could not put back. Empty on every other outcome.
+    # Every path this move left in a place the user has to act on, as
+    # (path_on_disk_now, the_path_it_relates_to). Two outcomes fill it.
+    #
+    # * ``ok=False``: a rollback could not put a directory back, so the pair is
+    #   (where the data sits now, where it belongs). The data is in the wrong
+    #   place and the application cannot see it.
+    # * ``ok=True``: the copy succeeded and config.json names the destination,
+    #   but the old copy could not be deleted, so the pair is (the leftover
+    #   source, the destination copy that is now in use). This is the normal
+    #   Windows outcome for a file this process still holds open. The data is
+    #   safe; a full duplicate tree stays behind until the user removes it.
     stranded: List[Tuple[str, str]] = field(default_factory=list)
 
 
@@ -296,12 +314,60 @@ def sources_for(group: Group, paths: Optional[DataPaths] = None) -> List[Tuple[P
     return entries
 
 
+def unreachable_configured_root(
+    group: Group, paths: Optional[DataPaths] = None
+) -> Optional[Path]:
+    """The root config.json names for a group when the group is not using it.
+
+    ``core.paths`` falls back to the default directory when a configured root
+    is unreachable — an unplugged drive, an offline share — and deliberately
+    leaves config.json alone, so the configured path takes effect again as soon
+    as the location returns. config.json is then the only record of where that
+    data lives. Returns the configured path in that state, and None when the
+    group runs on the root config.json names.
+    """
+    paths = paths or get_data_paths()
+    try:
+        data = config_io.read_config(paths.config_file())
+    except config_io.ConfigIOError:
+        # move_group reports an unreadable config.json with its own message.
+        return None
+    roots = data.get("data_roots")
+    if not isinstance(roots, dict):
+        return None
+    configured = roots.get(group.value)
+    if not isinstance(configured, str) or not configured:
+        return None
+    candidate = Path(configured)
+    if _resolved(candidate) == _resolved(paths.root(group)):
+        return None
+    return candidate
+
+
 def validate_destination(
     group: Group, dest: Path, paths: Optional[DataPaths] = None
 ) -> Optional[str]:
     """Return an error message, or None when the destination is usable."""
     paths = paths or get_data_paths()
     dest = Path(dest)
+
+    # The offline-root test comes first. Every later test resolves through the
+    # fallback root, and the move would end by writing the destination into
+    # data_roots — over the only record of the offline location, which would
+    # leave that data unreferenced when the drive comes back.
+    offline = unreachable_configured_root(group, paths)
+    if offline is not None:
+        message = (
+            f"The {group.value} data is recorded at {offline}, and that "
+            f"location is not available now, so the application is using "
+            f"{paths.root(group)} instead. Moving the {group.value} data now "
+            f"would replace the recorded location and leave the data at "
+            f"{offline} with nothing pointing at it. Reconnect that location, "
+            f"or clear it in config.json, and try again."
+        )
+        logger.error("Cannot move %s to %s: %s", group.value, dest, message)
+        return message
+
     sources = sources_for(group, paths)
 
     if not sources:
@@ -531,14 +597,70 @@ def _copy_link(source: Path, target: Path, state: dict, progress_cb) -> None:
     if os.path.isdir(str(source)):
         shutil.copytree(str(source), str(target), symlinks=True, dirs_exist_ok=True)
         files, size = tree_size(target)
+        _record_written_tree(state, target)
     else:
         shutil.copy2(str(source), str(target))
         files, size = (1, target.stat().st_size)
+        _record_written(state, target, size)
     state["files"] += files
     state["bytes"] += size
     if progress_cb:
         progress_cb(state["files"], state["files_total"],
                     state["bytes"], state["bytes_total"], str(source))
+
+
+def _record_written(state: dict, target: Path, size: int) -> None:
+    """Remember the size the copy wrote for one destination file.
+
+    The post-copy verification compares each of these against the file on disk.
+    An aggregate byte total measured at the destination alone can only catch a
+    miscounting loop; a per-file record catches a file that another writer
+    truncated or replaced after the copy wrote it, and it catches a file the
+    copy never wrote at all. It cannot catch a rewrite that keeps the length —
+    that needs a hash of every byte, and the Models group is tens of gigabytes.
+    """
+    state.setdefault("written", []).append((target, size))
+
+
+def _record_written_tree(state: dict, target: Path) -> None:
+    """Record every regular file of a tree the copy wrote in one call."""
+    try:
+        entries = sorted(target.rglob("*"))
+    except OSError as exc:
+        logger.warning("Could not list the copied tree %s to verify it: %s", target, exc)
+        return
+    for entry in entries:
+        if entry.is_symlink() or not entry.is_file():
+            continue
+        try:
+            _record_written(state, entry, entry.stat().st_size)
+        except OSError as exc:
+            logger.warning("Could not measure the copied file %s: %s", entry, exc)
+
+
+def _copy_file(source: Path, target: Path) -> int:
+    """Copy one regular file and return the number of bytes that landed.
+
+    A copy that wrote fewer bytes than the source held when it started is a
+    short write — a full disk that reported no error, a network share that
+    dropped the tail. The move must not delete the source after one of those,
+    so the failure is raised here and the caller aborts the whole move. A
+    source that grew during the copy is not a failure: the copy read to the end
+    of the file as it stood, and the destination is then larger than the size
+    measured first.
+    """
+    try:
+        before = source.stat().st_size
+    except OSError:
+        before = None
+    shutil.copy2(source, target)
+    written = target.stat().st_size
+    if before is not None and written < before:
+        raise OSError(
+            f"the copy of {source} wrote {written} bytes, but the file held "
+            f"{before} bytes when the copy started"
+        )
+    return written
 
 
 def _copy_entry(source: Path, target: Path, state: dict, progress_cb, cancel) -> None:
@@ -555,9 +677,10 @@ def _copy_entry(source: Path, target: Path, state: dict, progress_cb, cancel) ->
 
     if source.is_file():
         target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
+        written = _copy_file(source, target)
+        _record_written(state, target, written)
         state["files"] += 1
-        state["bytes"] += target.stat().st_size
+        state["bytes"] += written
         if progress_cb:
             progress_cb(state["files"], state["files_total"],
                         state["bytes"], state["bytes_total"], str(source))
@@ -577,9 +700,10 @@ def _copy_entry(source: Path, target: Path, state: dict, progress_cb, cancel) ->
             destination.mkdir(parents=True, exist_ok=True)
             continue
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(entry, destination)
+        written = _copy_file(entry, destination)
+        _record_written(state, destination, written)
         state["files"] += 1
-        state["bytes"] += destination.stat().st_size
+        state["bytes"] += written
         if progress_cb:
             progress_cb(state["files"], state["files_total"],
                         state["bytes"], state["bytes_total"], str(entry))
@@ -627,12 +751,65 @@ def intent_file_path(paths: Optional[DataPaths] = None) -> Path:
     return config.with_name(config.name + MOVE_INTENT_SUFFIX)
 
 
+def _process_is_alive(pid) -> bool:
+    """True when a process with this identifier is running on this host.
+
+    The recovery uses it to leave a move that is still running alone. This
+    process itself never counts: a startup recovery runs before any move of
+    this process starts, and treating our own identifier as alive would make a
+    recycled identifier block the repair.
+    """
+    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
+        return False
+    if pid == os.getpid():
+        return False
+
+    if os.name == "nt":  # pragma: no cover - exercised on Windows only
+        # os.kill(pid, 0) terminates the process on Windows, so the query goes
+        # through the API that only reads.
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Another user owns it, so it exists.
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _journal_is_stale(path: Path) -> bool:
+    """True when the journal is too old for its recorded owner to be believed."""
+    try:
+        age = time.time() - path.stat().st_mtime
+    except OSError:
+        return False
+    return age > INTENT_STALE_SECONDS
+
+
 def _write_intent(
     paths: DataPaths,
     group: Group,
     dest: Path,
     entries: Sequence[Tuple[Path, Path]],
-) -> Path:
+) -> Tuple[Path, str]:
     """Record a rename move before the first rename runs.
 
     ``os.rename`` commits each directory one at a time, and config.json is
@@ -646,29 +823,100 @@ def _write_intent(
     journalled must not start, because an interruption would then be
     undetectable — and a configuration directory that refuses this write would
     refuse the config.json update at the end of the move anyway.
+
+    Returns ``(path, token)``. The token names this move, and ``_clear_intent``
+    removes the journal only when the record still carries it: two moves must
+    never delete each other's record.
     """
+    token = uuid.uuid4().hex
     record = {
         "version": INTENT_VERSION,
         "group": group.value,
         "dest": str(dest),
         "config_file": str(paths.config_file()),
         "entries": [[str(source), str(target)] for source, target in entries],
+        # The indices of the entries whose rename has committed. See
+        # _mark_moved: without it, a source directory that startup re-created
+        # makes a completed rename look as if it never ran.
+        "moved": [],
         "started": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "pid": os.getpid(),
+        "host": platform.node(),
+        "token": token,
     }
     path = intent_file_path(paths)
     config_io.write_config(path, record)
     logger.info("Recorded the %s move to %s in %s", group.value, dest, path)
-    return path
+    return (path, token)
 
 
-def _clear_intent(path: Path) -> None:
+def _mark_moved(path: Path, index: int) -> None:
+    """Record that one entry's rename has committed.
+
+    The journal records paths, and the recovery used to read the state of the
+    move off those paths alone: an entry counted as moved only when the target
+    existed and the source did not. Startup re-creates directories — the file
+    logger creates the log directory under the root config.json still names —
+    so a re-created source made a committed rename look as if it never ran, and
+    the recovery then "put back" the entries that really had moved and reported
+    that the data was unchanged. This mark states the fact directly, at the
+    moment the rename makes it true.
+
+    A failure here is logged and the move continues. The recovery still falls
+    back to the shape on disk, which is correct in every case except a source
+    that something re-created.
+    """
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(record, dict):
+            raise ValueError("the journal does not hold a JSON object")
+        moved = record.get("moved")
+        if not isinstance(moved, list):
+            moved = []
+        if index not in moved:
+            moved.append(index)
+        record["moved"] = moved
+        config_io.write_config(path, record)
+    except (OSError, ValueError, config_io.ConfigIOError) as exc:
+        logger.error(
+            "Could not record the completed rename of entry %d in the move "
+            "journal %s: %s", index, path, exc,
+        )
+
+
+def _clear_intent(path: Path, token: Optional[str] = None) -> None:
     """Remove the journal once config.json names the new root.
+
+    ``token`` is the identifier ``_write_intent`` returned for this move. The
+    journal is removed only when the record still carries it, so a move that
+    overlapped another one cannot delete the only description of that other
+    move. Pass None only from the recovery, which has already established that
+    no other process owns the record.
 
     A journal left behind is not dangerous: the next recovery finds every
     directory at the destination and config.json already naming it, and clears
-    the record without touching anything. The failure is still logged.
+    the record without touching anything. Every failure is logged.
     """
+    if token is not None:
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return
+        except (OSError, ValueError) as exc:
+            logger.error(
+                "Could not read the move journal %s before removing it: %s. "
+                "It was left in place.", path, exc,
+            )
+            return
+        found = record.get("token") if isinstance(record, dict) else None
+        if found != token:
+            logger.error(
+                "The move journal %s describes another move, so this move left "
+                "it in place. Restart the application to repair that move.",
+                path,
+            )
+            return
+
     try:
         path.unlink()
     except FileNotFoundError:
@@ -707,7 +955,75 @@ def _read_intent(path: Path) -> Optional[dict]:
     except (KeyError, TypeError, ValueError) as exc:
         logger.error("The move journal %s is incomplete: %s", path, exc)
         return None
+
+    # "moved" arrived after the first version of the journal, so a record
+    # without it is valid and states nothing. A malformed one is dropped rather
+    # than trusted: the recovery then reads the state off the disk, which is
+    # what it did before the mark existed.
+    moved = record.get("moved", [])
+    if not isinstance(moved, list) or not all(
+        isinstance(item, int) and not isinstance(item, bool)
+        and 0 <= item < len(record["entries"]) for item in moved
+    ):
+        logger.error(
+            "The move journal %s records an unusable list of completed "
+            "renames (%r); the recovery reads the folders instead.", path, moved,
+        )
+        moved = []
+    record["moved"] = moved
     return record
+
+
+def _is_empty_dir(path: Path) -> bool:
+    """True when the path is a real directory that holds nothing."""
+    try:
+        if path.is_symlink() or not path.is_dir():
+            return False
+        return not any(path.iterdir())
+    except OSError:
+        return False
+
+
+def _entry_location(source: Path, target: Path, marked_moved: bool) -> str:
+    """Say where one journal entry's data sits: "dest", "source" or "missing".
+
+    The rename mark decides it whenever the move recorded one. Without a mark
+    the shape on disk decides, and an empty source directory beside a target
+    that holds data counts as moved: a rename never leaves the source behind,
+    so an empty directory at the source is something that re-created it —
+    ``setup_logging`` creates the log directory from the root config.json still
+    names. Treating that empty directory as "the data is still home" made the
+    recovery undo a move that had in fact succeeded.
+    """
+    if not os.path.lexists(target):
+        return "source" if os.path.lexists(source) else "missing"
+    if marked_moved or not os.path.lexists(source):
+        return "dest"
+    if _is_empty_dir(source) and not _is_empty_dir(target):
+        return "dest"
+    return "source"
+
+
+def _owner_is_running(record: dict, path: Path) -> bool:
+    """True when the process that wrote this journal is still running.
+
+    A second ImageAI window starts while the first one runs a move. Its
+    recovery would find the journal of that running move, see the directories
+    that have already been renamed, write config.json for a move that has not
+    finished, and delete the record. The owner test stops it: the journal stays
+    on disk, and the move that owns it finishes or is repaired at a later
+    start.
+
+    A process identifier is only meaningful on the host that issued it, and it
+    is reused after a reboot, so the test applies only to a record written on
+    this host and only while the record is recent.
+    """
+    host = record.get("host")
+    if isinstance(host, str) and host and host != platform.node():
+        return False
+    if _journal_is_stale(path):
+        return False
+    return _process_is_alive(record.get("pid"))
 
 
 def recover_interrupted_move(paths: Optional[DataPaths] = None) -> Optional[str]:
@@ -735,6 +1051,13 @@ def recover_interrupted_move(paths: Optional[DataPaths] = None) -> Optional[str]
 
     logger.warning("Found an interrupted storage move recorded in %s", path)
     record = _read_intent(path)
+    if record is not None and _owner_is_running(record, path):
+        logger.warning(
+            "The move recorded in %s belongs to process %s on %s, and that "
+            "process is still running, so this start left the move alone.",
+            path, record.get("pid"), record.get("host"),
+        )
+        return None
     if record is None:
         _clear_intent(path)
         message = (
@@ -749,9 +1072,13 @@ def recover_interrupted_move(paths: Optional[DataPaths] = None) -> Optional[str]
     dest = Path(record["dest"])
     entries = [(Path(source), Path(target)) for source, target in record["entries"]]
 
-    at_dest = [(s, t) for s, t in entries
-               if os.path.lexists(t) and not os.path.lexists(s)]
-    still_home = [(s, t) for s, t in entries if os.path.lexists(s)]
+    moved = set(record.get("moved") or [])
+    located = [
+        (source, target, _entry_location(source, target, index in moved))
+        for index, (source, target) in enumerate(entries)
+    ]
+    at_dest = [(s, t) for s, t, where in located if where == "dest"]
+    still_home = [(s, t) for s, t, where in located if where == "source"]
 
     if not at_dest:
         _clear_intent(path)
@@ -816,6 +1143,21 @@ def recover_interrupted_move(paths: Optional[DataPaths] = None) -> Optional[str]
     # A half-done move. Put back what crossed, and leave config.json alone.
     failed: List[Tuple[Path, Path]] = []
     for source, target in reversed(at_dest):
+        # Startup can re-create the source as an empty directory before the
+        # recovery runs. os.rename refuses to replace an existing directory on
+        # Windows, and the empty directory holds nothing, so it goes first.
+        if _is_empty_dir(source):
+            try:
+                source.rmdir()
+                logger.warning(
+                    "Removed the empty %s that startup re-created, so the "
+                    "interrupted move can put the data back.", source,
+                )
+            except OSError as exc:
+                logger.error(
+                    "Could not remove the empty %s before putting %s back: %s",
+                    source, target, exc,
+                )
         try:
             os.rename(str(target), str(source))
             logger.warning("Moved %s back to %s after an interrupted move.",
@@ -944,24 +1286,37 @@ def move_group(
         # One journal covers one move. A second move that overwrote the record
         # would destroy the only description of the first one, so a record that
         # is still on disk stops this move instead.
+        #
+        # The test and the write share one critical section, under the
+        # config.json lock. Without it, two windows both find no journal, both
+        # write one, and the second record replaces the first — the first
+        # move's data is then unreferenced with nothing on disk to describe it.
+        # The lock covers threads of this process and other processes on the
+        # host, and it is held only for the test and the write, never for the
+        # renames.
         existing = intent_file_path(paths)
-        if os.path.lexists(existing):
-            message = (
-                f"An earlier storage move was interrupted and has not been "
-                f"repaired yet ({existing}). Restart the application to repair "
-                f"it, then try again. Nothing was changed."
-            )
-            logger.error("Cannot move %s to %s: %s", group.value, dest, message)
-            _remove_created([], created_dirs)
-            return MoveResult(ok=False, error=message)
-
-        # Journal the move before the first rename commits. See _write_intent:
-        # without the record, a crash before the config.json write leaves the
-        # data at the destination with nothing on disk to say so.
         try:
-            intent = _write_intent(
-                paths, group, dest, [(source, dest / name) for source, name in sources]
-            )
+            with config_io.config_lock(paths.config_file()):
+                if os.path.lexists(existing):
+                    message = (
+                        f"An earlier storage move was interrupted and has not "
+                        f"been repaired yet ({existing}). Restart the "
+                        f"application to repair it, then try again. Nothing "
+                        f"was changed."
+                    )
+                    logger.error("Cannot move %s to %s: %s",
+                                 group.value, dest, message)
+                    _remove_created([], created_dirs)
+                    return MoveResult(ok=False, error=message)
+
+                # Journal the move before the first rename commits. See
+                # _write_intent: without the record, a crash before the
+                # config.json write leaves the data at the destination with
+                # nothing on disk to say so.
+                intent, intent_token = _write_intent(
+                    paths, group, dest,
+                    [(source, dest / name) for source, name in sources],
+                )
         except ConfigError as exc:
             message = (
                 f"Could not record the move before starting it: {exc} "
@@ -971,7 +1326,7 @@ def move_group(
             _remove_created([], created_dirs)
             return MoveResult(ok=False, error=message)
 
-        for source, name in sources:
+        for index, (source, name) in enumerate(sources):
             # Cancel is checked per entry. A same-volume move used to run to
             # completion after the user pressed Cancel, and the dialog then
             # reported "Move complete".
@@ -993,6 +1348,9 @@ def move_group(
                 logger.warning("Rename failed for %s: %s", group.value, exc)
                 break
             renamed.append((source, target))
+            # The rename has committed, so the journal must say so before the
+            # next one starts. See _mark_moved.
+            _mark_moved(intent, index)
 
         # A rollback that stranded a directory leaves the group split across
         # two places. The journal describes exactly that split, so it stays on
@@ -1001,7 +1359,7 @@ def move_group(
         def _undo(reason: str, suffix: str) -> MoveResult:
             stranded = _rollback_renames(renamed)
             if not stranded:
-                _clear_intent(intent)
+                _clear_intent(intent, intent_token)
             else:
                 logger.error(
                     "Kept the move journal %s: %d folder(s) could not be put "
@@ -1012,7 +1370,7 @@ def move_group(
 
         if cancelled:
             if not renamed:
-                _clear_intent(intent)
+                _clear_intent(intent, intent_token)
                 _remove_created([], rename_dirs + created_dirs)
                 logger.info("Move of %s cancelled by the user; source left intact",
                             group.value)
@@ -1040,7 +1398,7 @@ def move_group(
             except ConfigError as exc:
                 logger.error("Could not record the new %s root: %s", group.value, exc)
                 return _undo(str(exc), " Your data was left where it was.")
-            _clear_intent(intent)
+            _clear_intent(intent, intent_token)
             _cleanup_empty_legacy_dirs(group)
             logger.info("Moved %s to %s by rename (%d files)", group.value, dest, files_total)
             return MoveResult(ok=True, files_moved=files_total,
@@ -1064,12 +1422,13 @@ def move_group(
         # The copy path takes over. It never renames, so the journal has
         # nothing left to describe, and the destination directory stays because
         # the copy reuses it.
-        _clear_intent(intent)
+        _clear_intent(intent, intent_token)
         _remove_created([], rename_dirs)
         logger.warning("Rolled back the partial rename of %s; falling back to copy",
                        group.value)
 
-    state = {"files": 0, "bytes": 0, "files_total": files_total, "bytes_total": bytes_total}
+    state = {"files": 0, "bytes": 0, "files_total": files_total,
+             "bytes_total": bytes_total, "written": []}
     created_entries: List[Path] = []
     try:
         for source, name in sources:
@@ -1101,20 +1460,42 @@ def move_group(
         logger.exception("Copy failed while moving %s", group.value)
         return MoveResult(ok=False, error=f"Copy failed: {exc}. Nothing was changed.")
 
-    # Compare the destination against what the copy loop wrote, not against the
-    # pre-scan totals. A source that grows during the move — the log file this
-    # process writes — must not fail a copy that in fact succeeded. Every name
-    # is unique, so each source contributes to the count exactly once.
+    # Verify twice, and only then delete a source.
+    #
+    # Per file: every file the copy wrote must still be at the destination with
+    # exactly the length the copy wrote, and each of those files was at least as
+    # long as its source when the copy read it (_copy_file raises otherwise).
+    # This catches a short write, a file another writer truncated or replaced
+    # after the copy, and a file that vanished. It does not compare contents: a
+    # rewrite that keeps the length is not detected, because hashing tens of
+    # gigabytes of model weights would take longer than the move.
+    #
+    # In total: the destination must hold no more than the copy wrote. The
+    # counters come from the copy loop, not from the pre-scan totals, because a
+    # source that grows during the move — the log file this process writes —
+    # must not fail a copy that in fact succeeded. Every name is unique, so each
+    # source contributes to the count exactly once.
+    problems = _verify_written(state["written"])
     copied_files = sum(tree_size(target)[0] for target in created_entries)
     copied_bytes = sum(tree_size(target)[1] for target in created_entries)
-    if (copied_files, copied_bytes) != (state["files"], state["bytes"]):
+    if problems or (copied_files, copied_bytes) != (state["files"], state["bytes"]):
         _remove_created(created_entries, created_dirs)
-        message = (
-            f"Verification failed: the copy wrote {state['files']} files "
-            f"({_human(state['bytes'])}) but the destination holds "
-            f"{copied_files} ({_human(copied_bytes)}). "
-            f"Your data was left where it was."
-        )
+        if problems:
+            listed = "; ".join(problems[:5])
+            if len(problems) > 5:
+                listed += f", and {len(problems) - 5} more"
+            message = (
+                f"Verification failed: {len(problems)} file(s) at the "
+                f"destination do not match what the copy wrote ({listed}). "
+                f"Your data was left where it was."
+            )
+        else:
+            message = (
+                f"Verification failed: the copy wrote {state['files']} files "
+                f"({_human(state['bytes'])}) but the destination holds "
+                f"{copied_files} ({_human(copied_bytes)}). "
+                f"Your data was left where it was."
+            )
         logger.error("Verification failed moving %s: %s", group.value, message)
         return MoveResult(ok=False, error=message)
 
@@ -1125,7 +1506,13 @@ def move_group(
         logger.error("Could not record the new %s root: %s", group.value, exc)
         return MoveResult(ok=False, error=f"{exc} Your data was left where it was.")
 
-    for source, _name in sources:
+    # A source the delete step could not remove is a full duplicate tree that
+    # nothing points at. Windows refuses to delete a file this process still
+    # holds open — close_data_handles cannot release the active log file or
+    # PyTorch-mapped weights — so this is the normal outcome there, not an edge
+    # case. The move did succeed, and the result says where every leftover is.
+    leftovers: List[Tuple[str, str]] = []
+    for source, name in sources:
         try:
             # The link test comes first. shutil.rmtree refuses to remove a link
             # to a directory, so a source that was a symlink used to survive
@@ -1138,12 +1525,40 @@ def move_group(
             else:
                 source.unlink()
         except OSError as exc:
-            logger.warning("Could not remove %s after the move: %s", source, exc)
+            logger.error(
+                "Could not remove %s after the move to %s: %s. That copy stays "
+                "on disk and nothing points at it; remove it by hand.",
+                source, dest / name, exc,
+            )
+            leftovers.append((str(source), str(dest / name)))
 
     _cleanup_empty_legacy_dirs(group)
     logger.info("Moved %s to %s (%d files, %s)", group.value, dest,
                 state["files"], _human(state["bytes"]))
-    return MoveResult(ok=True, files_moved=state["files"], bytes_moved=state["bytes"])
+    return MoveResult(ok=True, files_moved=state["files"],
+                      bytes_moved=state["bytes"], stranded=leftovers)
+
+
+def _verify_written(written: Sequence[Tuple[Path, int]]) -> List[str]:
+    """Name every destination file that no longer matches what the copy wrote.
+
+    Each entry is one file and the length the copy gave it. The check re-reads
+    the length now, so it catches a file that disappeared, a file another writer
+    truncated, and a file another writer replaced with one of a different
+    length. It says nothing about the bytes inside a file of the right length.
+    """
+    problems: List[str] = []
+    for target, size in written:
+        try:
+            actual = target.stat().st_size
+        except OSError as exc:
+            problems.append(f"{target} could not be read back ({exc})")
+            continue
+        if actual != size:
+            problems.append(
+                f"{target} holds {actual} bytes, but the copy wrote {size}"
+            )
+    return problems
 
 
 def _rollback_renames(

@@ -116,32 +116,69 @@ def main():
         for args, kwargs in _deferred_messages:
             _orig_print(*args, **kwargs)
 
-        # NOW it's safe to set up logging
-        from core.logging_config import setup_logging
-        log_file = setup_logging()
-
         # A storage move renames one directory at a time and records the new
         # location in config.json only after the last rename. A power loss in
         # that window leaves the data at the destination and config.json naming
         # the old root. core.data_migration writes a journal beside config.json
         # to cover that window, so this call finishes or undoes the move.
         #
-        # It runs after setup_logging so that every message reaches the file
-        # logger, and it costs one lexists() call when no move was interrupted.
-        # A failure here must never stop the application, so nothing escapes.
-        # The module is imported under a private name because "logging" becomes
-        # a local name further down this function.
+        # It runs BEFORE setup_logging. setup_logging asks core.paths where the
+        # log directory is, and during exactly this window config.json still
+        # names the old Settings root, so it re-creates the log directory the
+        # move had already renamed away. The recovery would then read that empty
+        # directory as "the data never moved" and undo a move that succeeded.
+        # Nothing may create a source directory before the recovery runs.
+        #
+        # The file logger does not exist yet, so every record the recovery emits
+        # goes into this buffer and is replayed into the real logger below. No
+        # error path loses its message. A failure here must never stop the
+        # application, so nothing escapes. The logging module is imported under
+        # a private name because "logging" becomes a local name further down
+        # this function.
         import logging as _startup_logging
+
+        class _StartupLogBuffer(_startup_logging.Handler):
+            """Hold log records until the file logger is ready for them."""
+
+            def __init__(self):
+                super().__init__(level=_startup_logging.DEBUG)
+                self.records = []
+
+            def emit(self, record):
+                self.records.append(record)
+
+        _recovery = None
+        _log_buffer = _StartupLogBuffer()
+        _root_logger = _startup_logging.getLogger()
+        _previous_level = _root_logger.level
+        _root_logger.addHandler(_log_buffer)
+        # The root logger defaults to WARNING, which would drop the recovery's
+        # INFO records before they reach the buffer.
+        _root_logger.setLevel(_startup_logging.DEBUG)
         try:
             from core.data_migration import recover_interrupted_move
             _recovery = recover_interrupted_move()
-            if _recovery:
-                _startup_logging.getLogger(__name__).warning(_recovery)
-                _orig_print(f"\n{_recovery}\n")
         except Exception:
             _startup_logging.getLogger(__name__).exception(
                 "Could not check for an interrupted storage move"
             )
+        finally:
+            _root_logger.removeHandler(_log_buffer)
+            _root_logger.setLevel(_previous_level)
+
+        # NOW it's safe to set up logging
+        from core.logging_config import setup_logging
+        log_file = setup_logging()
+
+        # Replay what the recovery logged, now that the handlers exist.
+        for _record in _log_buffer.records:
+            _startup_logging.getLogger(_record.name).handle(_record)
+
+        # The recovery already logged this message. It goes to stderr, never to
+        # stdout: the CLI's --json contract gives stdout to the JSON document
+        # alone.
+        if _recovery:
+            _orig_print(f"\n{_recovery}\n", file=sys.stderr)
 
         # Set up exception handling
         import logging, threading
