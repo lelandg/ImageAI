@@ -25,18 +25,14 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
     Returns:
         Path to log file if logging to file, None otherwise
     """
-    # Determine log directory based on platform
-    system = platform.system()
-    if system == "Windows":
-        import os
-        log_dir = Path(os.environ.get('APPDATA', '')) / 'ImageAI' / 'logs'
-    elif system == "Darwin":  # macOS
-        log_dir = Path.home() / 'Library' / 'Application Support' / 'ImageAI' / 'logs'
-    else:  # Linux
-        log_dir = Path.home() / '.config' / 'ImageAI' / 'logs'
-    
+    # Resolve the log directory through the single path resolver. This import
+    # is safe here: core.paths deliberately has no logging dependency.
+    from core.paths import get_data_paths
+
+    data_paths = get_data_paths()
+    log_dir = data_paths.logs()
     log_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Create timestamp for log file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = log_dir / f"imageai_{timestamp}.log"
@@ -85,6 +81,11 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
         root_logger.info(f"Platform: {platform.platform()}")
         root_logger.info(f"Log file: {log_file}")
         root_logger.info("=" * 60)
+
+        # core.paths runs before the logger exists, so it buffers its own warnings.
+        # Emit them now that handlers are attached.
+        for message in data_paths.drain_warnings():
+            root_logger.warning(message)
 
         # Optional: Log GUI/Qt environment if available
         try:
@@ -140,15 +141,13 @@ def get_error_report_info():
     Returns:
         Dictionary with system info and recent log location
     """
-    system = platform.system()
-    if system == "Windows":
-        import os
-        log_dir = Path(os.environ.get('APPDATA', '')) / 'ImageAI' / 'logs'
-    elif system == "Darwin":
-        log_dir = Path.home() / 'Library' / 'Application Support' / 'ImageAI' / 'logs'
-    else:
-        log_dir = Path.home() / '.config' / 'ImageAI' / 'logs'
-    
+    # Resolve the log directory through the single path resolver. This import
+    # is safe here: core.paths deliberately has no logging dependency.
+    from core.paths import get_data_paths
+
+    data_paths = get_data_paths()
+    log_dir = data_paths.logs()
+
     # Find most recent log file
     recent_log = None
     if log_dir.exists():

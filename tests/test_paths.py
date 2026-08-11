@@ -1,5 +1,6 @@
 """Unit tests for the DataPaths resolver."""
 import json
+from pathlib import Path
 
 import pytest
 
@@ -168,3 +169,23 @@ def test_paths_module_imports_no_logging_or_config():
 
     assert not any("logging_config" in name for name in imported)
     assert not any(name in ("core.config", ".config") for name in imported)
+
+
+def test_logger_uses_the_settings_root(tmp_path, monkeypatch):
+    """setup_logging must write under DataPaths.logs(), not a hardcoded dir."""
+    import logging
+
+    import core.paths as paths_mod
+    from core.logging_config import setup_logging
+
+    dest = tmp_path / "settings_root"
+    dest.mkdir()
+    cfg = _write_config(tmp_path, {"data_roots": {"settings": str(dest)}})
+
+    monkeypatch.setattr(paths_mod, "_INSTANCE", paths_mod.DataPaths(config_path=cfg))
+    try:
+        log_file = setup_logging(log_level=logging.INFO, log_to_file=True)
+        assert log_file is not None
+        assert Path(log_file).parent == dest / "logs"
+    finally:
+        logging.getLogger().handlers.clear()
