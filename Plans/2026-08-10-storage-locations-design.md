@@ -229,10 +229,14 @@ once rather than downloading again.
 `~/.imageai` predates the `%APPDATA%` layout and holds two things: video caches
 and a `video_projects/events.db` database. Both move with the Video group.
 
-The database is the only SQLite file in the design. The migrator must confirm
-that no connection is open before it copies the file, and it must copy any
-`-wal` and `-shm` sidecar files alongside it. A copy of a live SQLite database
-without its write-ahead log produces a corrupt destination.
+The database is the only SQLite file in the design. The migrator checkpoints
+every database with `PRAGMA wal_checkpoint(TRUNCATE)` before it copies, which
+folds the write-ahead log into the main file. The GUI closes its own
+connections through the `pre_move` hook. Detecting a foreign process's
+connection is not reliably possible, so the design does not attempt it. The
+migrator must also copy any `-wal` and `-shm` sidecar files alongside the
+database. A copy of a live SQLite database without its write-ahead log produces
+a corrupt destination.
 
 The empty `~/.imageai` directory is removed after a successful move.
 
@@ -389,8 +393,9 @@ Unit tests, all against `tmp_path`, no GUI:
 - `move_group` merges two source trees into one destination root for the Models
   group and for the Video group.
 - `move_group` copies `events.db` together with its `-wal` and `-shm` sidecars.
-- `move_group` refuses to move the Video group while a database connection is
-  open.
+- `move_group` runs `PRAGMA wal_checkpoint(TRUNCATE)` on every database before
+  it copies, and it calls the `pre_move` hook so the GUI can close its own
+  connections first.
 - `DataPaths.models()` supplies the `cache_dir` argument at all four
   HuggingFace download sites.
 - `core/character_animator/installer.py` still reads the shared

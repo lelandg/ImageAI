@@ -17,6 +17,9 @@ import this file and add only tool-specific mechanics.
 - On app exit, `./imageai_current.log` and `./imageai_current_project.json` are
   auto-copied to the working directory — **check the log first when
   investigating errors**. Full logs: `logs/` or the platform user dir.
+  The log directory follows the Settings storage root, which the user can move
+  from the Settings tab. Resolve it with `core.paths.get_data_paths().logs()`
+  rather than assuming a platform directory.
 
 ## Environment
 
@@ -62,6 +65,9 @@ import this file and add only tool-specific mechanics.
 - Dialogs that call LLMs get a status console at the bottom (splitter),
   real-time progress, and consistent shortcuts (Ctrl+Enter = primary action,
   Escape = close).
+- Never build a data path by hand. `core/paths.py` owns every location; call
+  `get_data_paths()` and its accessors. A guard test
+  (`tests/test_no_hardcoded_paths.py`) fails the build on new inline paths.
 
 ## Provider gotchas (Gemini image generation)
 
