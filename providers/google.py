@@ -1079,10 +1079,8 @@ class GoogleProvider(ImageProvider):
                                     logger.info(f"DEBUG: Gemini returned {original_format} image with dimensions: {debug_img.size}")
 
                                     # Save raw Gemini output for debugging
-                                    if platform.system() == "Windows":
-                                        debug_dir = Path("C:/Users/aboog/AppData/Roaming/ImageAI/generated")
-                                    else:
-                                        debug_dir = Path.home() / ".config" / "ImageAI" / "generated"
+                                    from core.paths import get_data_paths
+                                    debug_dir = get_data_paths().generated()
 
                                     # Save in original format
                                     ext = original_format.lower()
@@ -1288,10 +1286,8 @@ class GoogleProvider(ImageProvider):
                                     logger.info(f"DEBUG: Gemini returned {original_format} image with dimensions: {debug_img.size}")
 
                                     # Save raw Gemini output for debugging
-                                    if platform.system() == "Windows":
-                                        debug_dir = Path("C:/Users/aboog/AppData/Roaming/ImageAI/generated")
-                                    else:
-                                        debug_dir = Path.home() / ".config" / "ImageAI" / "generated"
+                                    from core.paths import get_data_paths
+                                    debug_dir = get_data_paths().generated()
 
                                     # Save in original format
                                     ext = original_format.lower()
