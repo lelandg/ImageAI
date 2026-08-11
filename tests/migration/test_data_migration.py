@@ -1952,3 +1952,56 @@ def test_a_short_copy_stops_the_move_before_any_source_is_deleted(
     assert "8 bytes" in result.error
     assert (tmp_path / "generated" / "f.bin").read_bytes() == b"x" * 64
     assert "images" not in _read_roots(paths)
+
+
+# --- Round-6 findings: files the migrator did not know about ----------------
+# The adversarial pass found two real directories and one real file that no
+# group claimed, so a move left them behind at the old root with nothing
+# pointing at them. Each one is a settled fact about where the app writes, so
+# each gets a test that names the writer.
+
+
+def test_video_config_travels_with_the_settings_group(paths, tmp_path):
+    """core/video/config.py reads video_config.json from settings_root().
+
+    A Settings move that left it behind reverted every video setting to its
+    default, including the user's chosen video-projects folder.
+    """
+    (tmp_path / "video_config.json").write_text("{}", encoding="utf-8")
+    names = [name for _source, name in sources_for(Group.SETTINGS, paths)]
+    assert "video_config.json" in names
+
+
+def test_the_font_directory_travels_with_the_images_group(paths, tmp_path):
+    """gui/font_generator/font_wizard.py writes fonts to <Images root>/Fonts."""
+    (tmp_path / "Fonts").mkdir()
+    names = [name for _source, name in sources_for(Group.IMAGES, paths)]
+    assert "Fonts" in names
+
+
+def test_a_journal_this_start_cannot_read_is_kept_for_the_next_one(
+    paths, tmp_path, monkeypatch, caplog
+):
+    """A read failure is transient; a parse failure is not.
+
+    The journal is the only record that an interrupted move happened. Deleting
+    it because one start could not open the file destroys exactly the evidence
+    it exists to hold.
+    """
+    from core import data_migration as migration
+
+    journal = migration.intent_file_path(paths)
+    journal.write_text(json.dumps({"group": "images", "dest": str(tmp_path)}),
+                       encoding="utf-8")
+
+    def _refuse(*_args, **_kwargs):
+        raise PermissionError("in use by another process")
+
+    monkeypatch.setattr(Path, "read_text", _refuse)
+
+    with caplog.at_level(logging.ERROR):
+        message = migration.recover_interrupted_move(paths)
+
+    assert journal.exists(), "a journal that could not be read must survive"
+    assert message is not None and "next start" in message
+    assert caplog.records, "the failure must reach the file logger"

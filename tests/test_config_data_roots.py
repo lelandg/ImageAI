@@ -691,3 +691,28 @@ def test_a_config_deleted_after_the_first_write_is_still_reported(tmp_path,
         assert manager.save() is True
 
     assert "missing at save time" in _messages(caplog).lower()
+
+
+def test_one_damaged_file_makes_one_sidecar_across_managers(config_path):
+    """ConfigManager is constructed in about a dozen places.
+
+    Each GUI worker run, each provider call and each CLI command builds one, so
+    a per-instance record of what was already copied aside minted a fresh
+    timestamped sidecar per construction and buried the first copy under
+    identical ones.
+    """
+    # The record is keyed by config path, and this fixture gives every test its
+    # own throw-away one, so no reset is needed to isolate this test.
+    config_path.write_text("{not json", encoding="utf-8")
+
+    first = _manager()
+    second = _manager()
+    third = _manager()
+
+    sidecars = sorted(config_path.parent.glob("config.json.corrupt-*"))
+    assert len(sidecars) == 1, f"one damaged file, one copy; got {sidecars}"
+    # Every manager still reports where the copy is, so the GUI can name it.
+    assert first.preserved_config_path == sidecars[0]
+    assert second.preserved_config_path == sidecars[0]
+    assert third.preserved_config_path == sidecars[0]
+    assert sidecars[0].read_text(encoding="utf-8") == "{not json"

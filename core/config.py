@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 
 _MISSING = object()
 
+# Which damaged config.json bytes already have a sidecar, keyed by config path.
+# This is module level, not per instance: ConfigManager is constructed in about
+# a dozen places (each GUI worker run, each provider call, each CLI command), so
+# a per-instance record minted a fresh timestamped sidecar per construction and
+# buried the first copy under identical ones.
+_PRESERVED: Dict[str, tuple] = {}
+
 
 class ConfigManager:
     """Manages application configuration and persistence.
@@ -59,11 +66,10 @@ class ConfigManager:
         # Set by a failed load or a failed save, so a caller can report them.
         self.load_error: Optional[str] = None
         self.last_save_error: Optional[str] = None
-        # Where an unreadable config.json was copied to, and the bytes that
-        # were copied. The bytes stop one damaged file from making a new
-        # sidecar on every save.
+        # Where an unreadable config.json was copied to. The bytes that were
+        # copied live in the module-level _PRESERVED, so one damaged file makes
+        # one sidecar however many managers this process builds.
         self.preserved_config_path: Optional[Path] = None
-        self._preserved_bytes: Optional[bytes] = None
         # True once a config.json is known to exist: it was there at load
         # time, or this manager wrote one. A missing file means "fresh
         # install" before that point and "someone removed it" after it.
@@ -353,9 +359,9 @@ class ConfigManager:
         except OSError:
             current = None
 
-        if (self.preserved_config_path is not None
-                and current is not None
-                and current == self._preserved_bytes):
+        seen = _PRESERVED.get(str(self.config_path))
+        if seen is not None and current is not None and current == seen[0]:
+            self.preserved_config_path = seen[1]
             # The same damaged file, already copied aside. One sidecar per
             # save would bury the first copy under identical ones.
             logger.error(
@@ -376,7 +382,7 @@ class ConfigManager:
             return False
 
         self.preserved_config_path = sidecar
-        self._preserved_bytes = current
+        _PRESERVED[str(self.config_path)] = (current, sidecar)
         logger.error(
             "config.json at %s could not be read: %s A copy of the original is "
             "at %s. It still holds any stored API key and the recorded data "

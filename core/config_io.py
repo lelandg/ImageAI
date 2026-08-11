@@ -297,7 +297,10 @@ def read_config_document(config_path: PathLike) -> Optional[Dict[str, Any]]:
 
     try:
         data = json.loads(raw)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
+        # RecursionError, not ValueError: json.loads recurses once per nesting
+        # level, so a deeply nested document exhausts the stack instead of
+        # failing to parse. Uncaught, it stopped the application from starting.
         message = f"Could not parse {path}: {exc}"
         logger.error(message)
         raise ConfigReadError(message) from exc

@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 GROUP_CONTENTS = {
     Group.IMAGES: [
         "generated", "images", "composites", "styles", "Characters",
-        "midjourney_web_cache", "midjourney_web_storage",
+        "Fonts", "midjourney_web_cache", "midjourney_web_storage",
     ],
     Group.VIDEO: ["video_projects"],
     Group.MODELS: ["musetalk", "weights", "huggingface"],
@@ -61,7 +61,7 @@ LEGACY_IMAGEAI_NAME = "legacy_imageai"
 
 # Loose files that move with the Settings group. config.json is deliberately
 # absent: it records where every other group lives, so it can never move.
-SETTINGS_FILES = ("details.jsonl", "batch_jobs.json")
+SETTINGS_FILES = ("details.jsonl", "batch_jobs.json", "video_config.json")
 SETTINGS_GLOBS = ("*_history.json", "*_session.json", "*_history.backup_*.json")
 
 # Safety margin above the measured source size, in bytes.
@@ -930,8 +930,12 @@ def _read_intent(path: Path) -> Optional[dict]:
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
+        # Not the same as a corrupt record. A sharing violation, an antivirus
+        # scan or a dropped mount is transient, and the journal is the only
+        # record that the move happened at all, so it must survive. The caller
+        # tells these apart: a corrupt record is removed, this one is kept.
         logger.error("Could not read the move journal %s: %s", path, exc)
-        return None
+        raise
     try:
         record = json.loads(raw)
     except ValueError as exc:
@@ -1050,7 +1054,19 @@ def recover_interrupted_move(paths: Optional[DataPaths] = None) -> Optional[str]
         return None
 
     logger.warning("Found an interrupted storage move recorded in %s", path)
-    record = _read_intent(path)
+    try:
+        record = _read_intent(path)
+    except OSError as exc:
+        # The record is there and may be perfectly good; this start could not
+        # read it. Keep it, so the next start can. Removing it here would
+        # destroy the only evidence of the move the journal exists to record.
+        message = (
+            f"An interrupted storage move is recorded in {path}, but this "
+            f"start could not read the record: {exc}. It was left in place for "
+            f"the next start. Your data was not touched."
+        )
+        logger.error(message)
+        return message
     if record is not None and _owner_is_running(record, path):
         logger.warning(
             "The move recorded in %s belongs to process %s on %s, and that "

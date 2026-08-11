@@ -432,3 +432,16 @@ def test_data_root_overrides_names_the_file_when_it_is_given_one(tmp_path):
         {"data_roots": {"images": 5}}, source=path
     )
     assert str(path) in problems[0]
+
+
+def test_a_deeply_nested_document_is_a_read_error_not_a_crash(tmp_path):
+    """json.loads recurses once per nesting level and raises RecursionError.
+
+    RecursionError is not a ValueError, so it escaped every handler and stopped
+    the application from starting at all.
+    """
+    cfg = tmp_path / "config.json"
+    cfg.write_text("[" * 60000 + "]" * 60000, encoding="utf-8")
+
+    with pytest.raises(config_io.ConfigReadError):
+        config_io.read_config(cfg)
