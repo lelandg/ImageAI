@@ -35,7 +35,14 @@ GROUP_LABELS = {
 GROUP_HINTS = {
     Group.IMAGES: "Generated images, composites, styles, Midjourney cache",
     Group.VIDEO: "Video projects, render caches, the events database",
-    Group.MODELS: "MuseTalk, Character Animator weights, Stable Diffusion models",
+    # The machine-wide HuggingFace cache is shared with every other
+    # HuggingFace tool on this computer. ImageAI leaves it alone, because a
+    # move makes those tools download every model again.
+    Group.MODELS: (
+        "MuseTalk, Character Animator weights, Stable Diffusion models, and "
+        "ImageAI's own HuggingFace downloads. The shared HuggingFace cache in "
+        "your home folder stays where it is."
+    ),
     Group.SETTINGS: "Logs, history, layout templates (config.json always stays put)",
 }
 
@@ -314,7 +321,13 @@ class StorageSettingsWidget(QGroupBox):
             f"To:    {dest}\n\n"
             f"Size to move:      {human_size(total)}\n"
             f"Free at destination: {human_size(free)}\n\n"
-            f"ImageAI copies the data, verifies it, then removes the original."
+            # Two different moves run here, and the dialog must describe the
+            # one that will happen. A destination on the same drive takes the
+            # rename fast path: no copy runs, and no verification runs.
+            f"On the same drive ImageAI renames the folders, and the move "
+            f"finishes at once.\n"
+            f"On another drive ImageAI copies the data, verifies every file, "
+            f"and removes the original only after that."
         )
         box.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
         box.setDefaultButton(QMessageBox.Cancel)
@@ -527,23 +540,57 @@ class StorageSettingsWidget(QGroupBox):
         if not self._confirm(group, dest, total):
             return
 
-        result = self._run_with_progress(group, dest)
+        # ``move_group`` releases this process's handles through ``pre_move``
+        # and can then leave by exception: it creates the destination outside
+        # every try block, and the copy loop catches only OSError, so a Qt
+        # error raised through the progress callback passes straight through.
+        # Every outcome except a restart must take the handles back, or the
+        # Midjourney watcher and the video event stores stay off for the rest
+        # of the session.
+        settled = False
+        try:
+            result = self._run_with_progress(group, dest)
 
-        if not result.ok:
-            logger.error("Move of %s failed: %s", group.value, result.error)
-            # Restore before the modal box. The box blocks until the user
-            # dismisses it, and the app must be usable the moment it closes.
-            self._restore_open_resources(group)
-            QMessageBox.critical(self, "Move failed", result.error)
+            if not result.ok:
+                logger.error("Move of %s failed: %s", group.value, result.error)
+                # Restore before the modal box. The box blocks until the user
+                # dismisses it, and the app must be usable the moment it closes.
+                self._restore_open_resources(group)
+                settled = True
+                QMessageBox.critical(self, "Move failed", result.error)
+                self.refresh_sizes()
+                self.refresh_status()
+                return
+
+            self._update_live_config(group, dest)
+            reset_data_paths()
+            self.rows[group].path_label.setText(str(dest))
+            self.rows[group].path_label.setToolTip(str(dest))
             self.refresh_sizes()
             self.refresh_status()
-            return
-
-        self._update_live_config(group, dest)
-        reset_data_paths()
-        self.rows[group].path_label.setText(str(dest))
-        self.rows[group].path_label.setToolTip(str(dest))
-        self.refresh_sizes()
-        self.refresh_status()
-        self.move_completed.emit(group.value)
-        self._offer_restart(group, result)
+            self.move_completed.emit(group.value)
+            # ``_offer_restart`` either restarts the application, which rebuilds
+            # every handle, or restores the handles itself on the "Later" answer.
+            self._offer_restart(group, result)
+            settled = True
+        except Exception as exc:  # noqa: BLE001 - the app must stay usable
+            logger.exception(
+                "The %s move to %s stopped with an unexpected error",
+                group.value, dest,
+            )
+            self._restore_open_resources(group)
+            settled = True
+            QMessageBox.critical(
+                self, "Move failed",
+                f"The {GROUP_LABELS[group]} move stopped with an unexpected "
+                f"error:\n\n{exc}\n\n"
+                f"Check both folders before you try the move again. The log "
+                f"file holds the details.",
+            )
+            self.refresh_sizes()
+            self.refresh_status()
+        finally:
+            # A step outside the branches above can still raise. The handles
+            # come back on every path that leaves this process running.
+            if not settled:
+                self._restore_open_resources(group)

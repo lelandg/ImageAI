@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warning it raised was already gone by the time the tab read it. Each row now
   compares the configured root with the root in use, which works for all four
   groups.
+- A storage move that ended in an unexpected error — a destination that was
+  unplugged after the check, a progress dialog Qt tore down mid-copy — left the
+  released file handles released, showed no message, and wrote the failure only
+  to the crash log. The move now reports the error in a dialog and takes the
+  handles back, so the app stays usable.
+- The confirmation dialog promised a copy and a verification for every move.
+  A move within one drive renames the folders instead, which copies nothing and
+  verifies nothing. The dialog now describes both moves, so the promise matches
+  the work that runs.
 
 ## [0.45.0] - 2026-08-11
 
@@ -35,7 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   copies the data, verifies every file, writes the new location to
   `config.json`, and only then removes the original; a move within one volume
   takes a rename fast path and finishes in milliseconds. `config.json` itself
-  never moves — it is the anchor that records where everything else lives.
+  never moves — it is the anchor that records where everything else lives. The
+  machine-wide HuggingFace cache in your home folder never moves either. Other
+  HuggingFace tools read that cache, and a move makes them download every model
+  again.
 - A single path resolver (`core/paths.py`) now owns every data location.
   `get_data_paths()` returns the resolver, and a guard test fails the build if
   any module builds a data path by hand again.
@@ -49,10 +61,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Linux. It now uses the shared Models location.
 
 ### Changed
-- The log directory, HuggingFace model cache, video projects and caches, style
-  and layout data, history and session files, and the batch-job ledger all
-  resolve through the new path layer. A fresh install writes exactly where it
-  wrote before.
+- The log directory, ImageAI's own HuggingFace download folder, video projects
+  and caches, style and layout data, history and session files, and the
+  batch-job ledger all resolve through the new path layer. A fresh install
+  writes exactly where it wrote before.
 - An unreachable storage root — an unplugged drive, an offline share — falls
   back to the default location, logs a warning, and marks that group's row in
   the Settings tab as unavailable. The configured path takes effect again as

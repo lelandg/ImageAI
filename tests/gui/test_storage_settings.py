@@ -609,6 +609,210 @@ def test_cancelled_move_restores_the_released_handles(hosted_widget, tmp_path, m
     assert restored == [Group.IMAGES]
 
 
+def _patch_raising_move(monkeypatch, tmp_path, error):
+    """Drive _on_move into a move_group call that raises instead of returning.
+
+    ``move_group`` creates the destination directory outside every ``try``, and
+    the copy loop only catches ``OSError``. A destination that disappears after
+    validation, and a Qt error raised through the progress callback, both leave
+    the migrator by exception — after ``pre_move`` already released the handles.
+    """
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QFileDialog.getExistingDirectory",
+        lambda *a, **k: str(tmp_path / "chosen"),
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._confirm", lambda *a, **k: True
+    )
+
+    def boom(self, group, dest):
+        self._close_open_resources(group)
+        raise error
+
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._run_with_progress", boom
+    )
+
+
+def test_move_that_raises_restores_the_released_handles(
+    hosted_widget, tmp_path, monkeypatch, caplog
+):
+    """An exception must not leave the watcher off and the History tab empty."""
+    widget, host = hosted_widget
+    _seed_images(tmp_path)
+    released, restored, shown = [], [], []
+    host.close_data_handles = released.append
+    host.restore_data_handles = restored.append
+
+    _patch_raising_move(monkeypatch, tmp_path, OSError("destination went away"))
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.critical",
+        lambda *a, **k: shown.append(a[2]),
+    )
+
+    with caplog.at_level(logging.ERROR, logger="gui.storage_settings_widget"):
+        widget._on_move(Group.IMAGES)
+
+    assert released == [Group.IMAGES]
+    assert restored == [Group.IMAGES]
+
+
+def test_move_that_raises_shows_an_error_dialog(hosted_widget, tmp_path, monkeypatch):
+    """The user must see the failure, not a silent excepthook entry."""
+    widget, host = hosted_widget
+    _seed_images(tmp_path)
+    host.close_data_handles = lambda group: None
+    host.restore_data_handles = lambda group: None
+    shown = []
+
+    _patch_raising_move(monkeypatch, tmp_path, RuntimeError("progress dialog is gone"))
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.critical",
+        lambda *a, **k: shown.append(a[2]),
+    )
+
+    widget._on_move(Group.IMAGES)
+
+    assert shown, "the raised move showed no error dialog"
+    assert "progress dialog is gone" in shown[0]
+
+
+def test_move_that_raises_reaches_the_file_logger(hosted_widget, tmp_path, monkeypatch, caplog):
+    """Every error path must reach the log with its traceback."""
+    widget, host = hosted_widget
+    _seed_images(tmp_path)
+    host.close_data_handles = lambda group: None
+    host.restore_data_handles = lambda group: None
+
+    _patch_raising_move(monkeypatch, tmp_path, OSError("no such device"))
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.critical", lambda *a, **k: None
+    )
+
+    with caplog.at_level(logging.ERROR, logger="gui.storage_settings_widget"):
+        widget._on_move(Group.IMAGES)
+
+    logged = [
+        r for r in caplog.records
+        if r.levelno >= logging.ERROR and r.exc_info is not None
+    ]
+    assert logged, [r.message for r in caplog.records]
+
+
+def test_failure_after_a_successful_move_still_restores(
+    hosted_widget, tmp_path, monkeypatch
+):
+    """A step after the move can raise; the handles must still come back."""
+    from core.data_migration import MoveResult
+
+    widget, host = hosted_widget
+    _seed_images(tmp_path)
+    chosen = tmp_path / "chosen"
+    chosen.mkdir()
+    released, restored = [], []
+    host.close_data_handles = released.append
+    host.restore_data_handles = restored.append
+
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QFileDialog.getExistingDirectory",
+        lambda *a, **k: str(chosen),
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._confirm", lambda *a, **k: True
+    )
+
+    def fake_run(self, group, dest):
+        self._close_open_resources(group)
+        return MoveResult(ok=True, files_moved=1, bytes_moved=16)
+
+    def raising_offer(self, group, result):
+        raise RuntimeError("the restart prompt could not open")
+
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._run_with_progress", fake_run
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._offer_restart", raising_offer
+    )
+    monkeypatch.setattr("gui.storage_settings_widget.reset_data_paths", lambda: None)
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.critical", lambda *a, **k: None
+    )
+
+    widget._on_move(Group.IMAGES)
+
+    assert released == [Group.IMAGES]
+    assert restored == [Group.IMAGES]
+
+
+def test_successful_move_restores_only_once(hosted_widget, tmp_path, monkeypatch):
+    """The "Later" branch restores; the guard must not restore a second time."""
+    from core.data_migration import MoveResult
+
+    widget, host = hosted_widget
+    _seed_images(tmp_path)
+    chosen = tmp_path / "chosen"
+    chosen.mkdir()
+    restored = []
+    host.close_data_handles = lambda group: None
+    host.restore_data_handles = restored.append
+
+    _patch_successful_move(monkeypatch, chosen)
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._offer_restart",
+        lambda self, group, result: self._restore_open_resources(group),
+    )
+
+    widget._on_move(Group.IMAGES)
+
+    assert restored == [Group.IMAGES]
+
+
+# --- the confirmation must describe the move that actually runs ------------
+
+
+def _confirmation_text(widget, group, dest, monkeypatch):
+    """Return the informative text of the confirmation box, then cancel it."""
+    from PySide6.QtWidgets import QMessageBox
+
+    captured = {}
+
+    def fake_exec(box):
+        captured["text"] = box.informativeText()
+        return QMessageBox.Cancel
+
+    monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+    widget._confirm(group, dest, 4096)
+    return captured["text"]
+
+
+def test_confirmation_does_not_promise_a_copy_for_every_move(
+    widget, tmp_path, monkeypatch
+):
+    """A same-volume move renames. It never copies and never verifies."""
+    text = _confirmation_text(widget, Group.IMAGES, tmp_path / "dest", monkeypatch)
+
+    assert "ImageAI copies the data, verifies it, then removes the original." not in text
+
+
+def test_confirmation_names_both_move_paths(widget, tmp_path, monkeypatch):
+    """The user must learn which move runs: the rename or the verified copy."""
+    text = _confirmation_text(widget, Group.IMAGES, tmp_path / "dest", monkeypatch).lower()
+
+    assert "same drive" in text
+    assert "renames" in text
+    assert "another drive" in text
+    assert "verifies" in text
+
+
+def test_models_hint_says_the_shared_cache_stays(widget):
+    """Moving Models must not claim it relocates the machine-wide HF cache."""
+    hint = widget.rows[Group.MODELS].name_label.toolTip().lower()
+
+    assert "huggingface" in hint
+    assert "stays" in hint
+
+
 def _click_restart_button(monkeypatch, label):
     """Drive the restart prompt as if the user pressed one named button."""
     from PySide6.QtWidgets import QMessageBox
@@ -821,22 +1025,90 @@ def test_refresh_prunes_finished_size_workers(widget, qapp):
     assert len(widget._threads) <= before
 
 
-def test_restart_does_not_use_execv(qapp):
-    """os.execv skips closeEvent and mis-quotes Windows paths with spaces."""
-    import inspect
+def test_restart_closes_the_window_before_it_starts_a_new_process(
+    hosted_widget, monkeypatch
+):
+    """os.execv would skip closeEvent and never return; a relaunch must not.
 
-    from gui.storage_settings_widget import StorageSettingsWidget
+    The close event saves the video project and the UI state, so the new
+    process must start only after the old one finishes its shutdown.
+    """
+    import atexit
+    import subprocess
+    import sys
 
-    source = inspect.getsource(StorageSettingsWidget._restart_application)
-    assert "execv" not in source
+    from PySide6.QtWidgets import QApplication
+
+    widget, host = hosted_widget
+    events = []
+    registered = []
+    started = []
+
+    host.close = lambda: events.append("close")
+    monkeypatch.setattr(atexit, "register", lambda fn: registered.append(fn) or fn)
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: started.append(cmd))
+    monkeypatch.setattr(QApplication, "quit", lambda *a: events.append("quit"))
+
+    widget._restart_application()
+
+    # execv replaces the process, so nothing below this line would ever run.
+    assert events == ["close", "quit"]
+    assert registered, "no relaunch was registered with atexit"
+    assert not started, "the new process started before the shutdown finished"
+
+    registered[0]()
+
+    assert started and started[0][0] == sys.executable
 
 
-def test_main_window_exposes_the_storage_widget(qapp, monkeypatch):
-    """The Settings tab must actually contain the widget."""
-    import inspect
+def test_relaunch_failure_is_logged_and_reported(hosted_widget, monkeypatch, capsys, caplog):
+    """A relaunch that cannot start must reach the log and the terminal."""
+    import atexit
+    import subprocess
+
+    from PySide6.QtWidgets import QApplication
+
+    widget, host = hosted_widget
+    registered = []
+    host.close = lambda: None
+    monkeypatch.setattr(atexit, "register", lambda fn: registered.append(fn) or fn)
+    monkeypatch.setattr(QApplication, "quit", lambda *a: None)
+
+    def refuse(cmd, **kw):
+        raise OSError("Permission denied")
+
+    monkeypatch.setattr(subprocess, "Popen", refuse)
+
+    widget._restart_application()
+    with caplog.at_level(logging.ERROR, logger="gui.storage_settings_widget"):
+        registered[0]()
+
+    assert any(r.exc_info is not None for r in caplog.records)
+    assert "Could not restart ImageAI" in capsys.readouterr().err
+
+
+def test_settings_tab_adds_the_storage_widget_to_its_layout(qapp, tmp_path, monkeypatch):
+    """The Settings tab must hold the widget, and the window must keep it."""
+    import types
+
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
 
     from gui.main_window import MainWindow
+    from gui.storage_settings_widget import StorageSettingsWidget
 
-    source = inspect.getsource(MainWindow._init_settings_tab)
-    assert "StorageSettingsWidget" in source
-    assert "storage_settings" in source
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({}), encoding="utf-8")
+    monkeypatch.setattr(paths_mod, "_INSTANCE", DataPaths(config_path=cfg))
+    _sandbox_sources(monkeypatch)
+
+    parent = QWidget()
+    layout = QVBoxLayout(parent)
+    stub = types.SimpleNamespace()
+
+    made = MainWindow._add_storage_settings(stub, layout, parent)
+    try:
+        assert isinstance(made, StorageSettingsWidget)
+        assert stub.storage_settings is made
+        assert layout.indexOf(made) >= 0
+    finally:
+        _drain_threads(made)

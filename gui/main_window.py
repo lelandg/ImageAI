@@ -1779,10 +1779,7 @@ class MainWindow(QMainWindow):
         v.addWidget(gcloud_group)
 
         # === STORAGE LOCATIONS ===
-        from gui.storage_settings_widget import StorageSettingsWidget
-
-        self.storage_settings = StorageSettingsWidget(self.tab_settings)
-        v.addWidget(self.storage_settings)
+        self._add_storage_settings(v, self.tab_settings)
 
         # === MIDJOURNEY SETTINGS ===
         midjourney_group = QGroupBox("Midjourney Settings")
@@ -7595,6 +7592,26 @@ For more detailed information, please refer to the full documentation.
                     # Silently ignore resize errors during rapid resizing
                     pass
     
+    def _add_storage_settings(self, layout, parent):
+        """Build the Storage Locations widget and add it to the Settings tab.
+
+        The widget lets the user relocate each data group. A test can call this
+        method with its own layout and parent, which no full window build
+        allows.
+
+        Args:
+            layout: the Settings-tab layout that receives the widget.
+            parent: the widget that owns the new widget.
+
+        Returns:
+            The StorageSettingsWidget this method created.
+        """
+        from gui.storage_settings_widget import StorageSettingsWidget
+
+        self.storage_settings = StorageSettingsWidget(parent)
+        layout.addWidget(self.storage_settings)
+        return self.storage_settings
+
     def close_data_handles(self, group):
         """Release the files this process holds under one storage group.
 
