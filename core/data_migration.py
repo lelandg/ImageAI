@@ -190,3 +190,219 @@ def _human(num_bytes: int) -> str:
             return f"{value:.1f} {unit}" if unit != "B" else f"{int(value)} B"
         value /= 1024
     return f"{value:.1f} TB"
+
+
+def _same_volume(source: Path, dest: Path) -> bool:
+    """True when both paths live on the same filesystem volume."""
+    probe = dest
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    try:
+        if os.name == "nt":
+            a = os.path.splitdrive(str(source.resolve()))[0].lower()
+            b = os.path.splitdrive(str(probe.resolve()))[0].lower()
+            return bool(a) and a == b
+        return source.stat().st_dev == probe.stat().st_dev
+    except OSError:
+        return False
+
+
+def _is_cancelled(cancel) -> bool:
+    if cancel is None:
+        return False
+    if hasattr(cancel, "is_set"):
+        return bool(cancel.is_set())
+    return bool(cancel())
+
+
+def _checkpoint_sqlite(db_path: Path) -> None:
+    """Fold a SQLite write-ahead log into the main database file.
+
+    A copy of a WAL-mode database without its -wal file loses recent commits.
+    Checkpointing first makes the single main file self-contained.
+    """
+    import sqlite3
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        try:
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            conn.commit()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        logger.warning("Could not checkpoint %s before moving it: %s", db_path, exc)
+
+
+def _prepare_databases(sources: List[Tuple[Path, str]]) -> None:
+    for source, _name in sources:
+        if source.is_dir():
+            for db in source.rglob("*.db"):
+                _checkpoint_sqlite(db)
+        elif source.suffix == ".db":
+            _checkpoint_sqlite(source)
+
+
+def _copy_entry(source: Path, target: Path, state: dict, progress_cb, cancel) -> None:
+    """Copy one file or directory tree, reporting progress per file."""
+    if source.is_file():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+        state["files"] += 1
+        state["bytes"] += source.stat().st_size
+        if progress_cb:
+            progress_cb(state["files"], state["files_total"],
+                        state["bytes"], state["bytes_total"], str(source))
+        return
+
+    for entry in sorted(source.rglob("*")):
+        if _is_cancelled(cancel):
+            raise MoveCancelled()
+        relative = entry.relative_to(source)
+        destination = target / relative
+        if entry.is_dir():
+            destination.mkdir(parents=True, exist_ok=True)
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(entry, destination)
+        state["files"] += 1
+        try:
+            state["bytes"] += entry.stat().st_size
+        except OSError:
+            pass
+        if progress_cb:
+            progress_cb(state["files"], state["files_total"],
+                        state["bytes"], state["bytes_total"], str(entry))
+
+
+def _write_root(paths: DataPaths, group: Group, dest: Path) -> None:
+    """Persist the new root to config.json and flush it to disk."""
+    import json
+
+    config_path = paths.config_file()
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    data.setdefault("data_roots", {})[group.value] = str(dest)
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def move_group(
+    group: Group,
+    dest: Path,
+    paths: Optional[DataPaths] = None,
+    progress_cb: Optional[Callable[..., None]] = None,
+    cancel=None,
+    pre_move: Optional[Callable[[], None]] = None,
+) -> MoveResult:
+    """Relocate a group's data to ``dest`` and record the new root.
+
+    Order matters: verify the copy, then write the config, then delete the
+    source. A crash between the config write and the delete leaves a working
+    application plus a stale copy. The reverse order can destroy the only copy.
+    """
+    paths = paths or get_data_paths()
+    dest = Path(dest)
+
+    error = validate_destination(group, dest, paths)
+    if error:
+        logger.error("Cannot move %s to %s: %s", group.value, dest, error)
+        return MoveResult(ok=False, error=error)
+
+    if pre_move is not None:
+        try:
+            pre_move()
+        except Exception as exc:  # noqa: BLE001 - reported to the user
+            logger.exception("Pre-move hook failed for %s", group.value)
+            return MoveResult(ok=False, error=f"Could not release open files: {exc}")
+
+    sources = sources_for(group, paths)
+    _prepare_databases(sources)
+
+    files_total = sum(tree_size(s)[0] for s, _n in sources)
+    bytes_total = sum(tree_size(s)[1] for s, _n in sources)
+    dest.mkdir(parents=True, exist_ok=True)
+
+    # Fast path: a rename within one volume finishes in milliseconds. This
+    # matters most for Models, where a cross-volume copy runs for many minutes.
+    if all(_same_volume(source, dest) for source, _n in sources):
+        try:
+            for source, name in sources:
+                os.rename(str(source), str(dest / name))
+            _write_root(paths, group, dest)
+            _cleanup_empty_legacy_dirs(group)
+            logger.info("Moved %s to %s by rename (%d files)", group.value, dest, files_total)
+            return MoveResult(ok=True, files_moved=files_total,
+                              bytes_moved=bytes_total, used_rename=True)
+        except OSError as exc:
+            logger.warning("Rename failed for %s, falling back to copy: %s", group.value, exc)
+
+    state = {"files": 0, "bytes": 0, "files_total": files_total, "bytes_total": bytes_total}
+    try:
+        for source, name in sources:
+            if _is_cancelled(cancel):
+                raise MoveCancelled()
+            _copy_entry(source, dest / name, state, progress_cb, cancel)
+    except MoveCancelled:
+        _remove_partial(dest)
+        logger.info("Move of %s cancelled by the user; source left intact", group.value)
+        return MoveResult(ok=False, error="Move cancelled. Nothing was changed.")
+    except OSError as exc:
+        _remove_partial(dest)
+        logger.exception("Copy failed while moving %s", group.value)
+        return MoveResult(ok=False, error=f"Copy failed: {exc}. Nothing was changed.")
+
+    copied_files = sum(tree_size(dest / name)[0] for _s, name in sources)
+    copied_bytes = sum(tree_size(dest / name)[1] for _s, name in sources)
+    if (copied_files, copied_bytes) != (files_total, bytes_total):
+        _remove_partial(dest)
+        message = (
+            f"Verification failed: expected {files_total} files "
+            f"({_human(bytes_total)}) but found {copied_files} "
+            f"({_human(copied_bytes)}). Your data was left where it was."
+        )
+        logger.error("Verification failed moving %s: %s", group.value, message)
+        return MoveResult(ok=False, error=message)
+
+    _write_root(paths, group, dest)
+
+    for source, _name in sources:
+        try:
+            if source.is_dir():
+                shutil.rmtree(source)
+            else:
+                source.unlink()
+        except OSError as exc:
+            logger.warning("Could not remove %s after the move: %s", source, exc)
+
+    _cleanup_empty_legacy_dirs(group)
+    logger.info("Moved %s to %s (%d files, %s)", group.value, dest,
+                files_total, _human(bytes_total))
+    return MoveResult(ok=True, files_moved=files_total, bytes_moved=bytes_total)
+
+
+def _remove_partial(dest: Path) -> None:
+    """Delete a partially written destination after an abort."""
+    try:
+        if dest.exists():
+            shutil.rmtree(dest)
+    except OSError as exc:
+        logger.warning("Could not clean up the partial copy at %s: %s", dest, exc)
+
+
+def _cleanup_empty_legacy_dirs(group: Group) -> None:
+    """Remove ~/.imageai once the Video move has emptied it."""
+    if group is not Group.VIDEO:
+        return
+    legacy = legacy_dot_imageai_dir()
+    try:
+        if legacy.is_dir() and not any(legacy.iterdir()):
+            legacy.rmdir()
+    except OSError as exc:
+        logger.debug("Could not remove the empty %s: %s", legacy, exc)
