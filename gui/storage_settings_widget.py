@@ -9,14 +9,18 @@ from typing import Dict, Optional
 
 from PySide6.QtCore import QObject, QStandardPaths, Qt, QThread, Signal
 from PySide6.QtWidgets import (
+    QApplication,
+    QFileDialog,
     QGridLayout,
     QGroupBox,
     QLabel,
+    QMessageBox,
+    QProgressDialog,
     QPushButton,
 )
 
-from core.data_migration import sources_for, tree_size
-from core.paths import Group, get_data_paths
+from core.data_migration import move_group, sources_for, tree_size, validate_destination
+from core.paths import Group, get_data_paths, reset_data_paths
 
 logger = logging.getLogger(__name__)
 
@@ -188,6 +192,128 @@ class StorageSettingsWidget(QGroupBox):
         target.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
 
+    def _suggested_dir(self, group: Group) -> str:
+        base = QStandardPaths.writableLocation(PICKER_ROOTS[group])
+        return str(Path(base) / "ImageAI" / GROUP_LABELS[group])
+
+    def _confirm(self, group: Group, dest: Path, total: int) -> bool:
+        import shutil
+
+        probe = dest if dest.exists() else dest.parent
+        try:
+            free = shutil.disk_usage(probe).free
+        except OSError:
+            free = 0
+
+        box = QMessageBox(self)
+        box.setWindowTitle(f"Move {GROUP_LABELS[group]} data")
+        box.setIcon(QMessageBox.Question)
+        box.setText(f"Move {GROUP_LABELS[group]} data to a new location?")
+        box.setInformativeText(
+            f"From:  {get_data_paths().root(group)}\n"
+            f"To:    {dest}\n\n"
+            f"Size to move:      {human_size(total)}\n"
+            f"Free at destination: {human_size(free)}\n\n"
+            f"ImageAI copies the data, verifies it, then removes the original."
+        )
+        box.setStandardButtons(QMessageBox.Ok | QMessageBox.Cancel)
+        box.setDefaultButton(QMessageBox.Cancel)
+        return box.exec() == QMessageBox.Ok
+
+    def _run_with_progress(self, group: Group, dest: Path):
+        dialog = QProgressDialog(
+            f"Moving {GROUP_LABELS[group]} data…", "Cancel", 0, 100, self
+        )
+        dialog.setWindowModality(Qt.WindowModal)
+        dialog.setMinimumDuration(0)
+        dialog.setAutoClose(False)
+        dialog.setValue(0)
+
+        def progress(files_done, files_total, bytes_done, bytes_total, current):
+            percent = int(bytes_done * 100 / bytes_total) if bytes_total else 0
+            dialog.setValue(min(percent, 100))
+            dialog.setLabelText(
+                f"Moving {GROUP_LABELS[group]} data…\n"
+                f"{files_done} of {files_total} files "
+                f"({human_size(bytes_done)} of {human_size(bytes_total)})\n"
+                f"{Path(current).name}"
+            )
+            QApplication.processEvents()
+
+        try:
+            return move_group(
+                group, dest,
+                progress_cb=progress,
+                cancel=dialog.wasCanceled,
+                pre_move=self._close_open_resources,
+            )
+        finally:
+            dialog.close()
+
+    def _close_open_resources(self) -> None:
+        """Ask the main window to release file handles before a move."""
+        window = self.window()
+        closer = getattr(window, "close_data_handles", None)
+        if callable(closer):
+            closer()
+
+    def _offer_restart(self, group: Group, result) -> None:
+        box = QMessageBox(self)
+        box.setWindowTitle("Move complete")
+        box.setIcon(QMessageBox.Information)
+        box.setText(
+            f"Moved {human_size(result.bytes_moved)} of "
+            f"{GROUP_LABELS[group]} data."
+        )
+        box.setInformativeText(
+            "Restart ImageAI to use the new location."
+        )
+        restart = box.addButton("Restart Now", QMessageBox.AcceptRole)
+        box.addButton("Later", QMessageBox.RejectRole)
+        box.exec()
+
+        if box.clickedButton() is restart:
+            self._restart_application()
+
+    @staticmethod
+    def _restart_application() -> None:
+        import os
+        import sys
+
+        logger.info("Restarting ImageAI after a storage move")
+        QApplication.quit()
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+
     def _on_move(self, group: Group) -> None:
-        """Filled in by Task 11."""
-        raise NotImplementedError
+        start = self._suggested_dir(group)
+        chosen = QFileDialog.getExistingDirectory(
+            self, f"Choose a folder for {GROUP_LABELS[group]} data", start
+        )
+        if not chosen:
+            return
+
+        dest = Path(chosen)
+        error = validate_destination(group, dest)
+        if error:
+            logger.error("Rejected destination %s for %s: %s", dest, group.value, error)
+            QMessageBox.critical(self, "Cannot use that folder", error)
+            return
+
+        total = sum(tree_size(source)[1] for source, _name in sources_for(group))
+        if not self._confirm(group, dest, total):
+            return
+
+        result = self._run_with_progress(group, dest)
+
+        if not result.ok:
+            logger.error("Move of %s failed: %s", group.value, result.error)
+            QMessageBox.critical(self, "Move failed", result.error)
+            self.refresh_sizes()
+            return
+
+        reset_data_paths()
+        self.rows[group].path_label.setText(str(dest))
+        self.rows[group].path_label.setToolTip(str(dest))
+        self.refresh_sizes()
+        self.move_completed.emit(group.value)
+        self._offer_restart(group, result)

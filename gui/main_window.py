@@ -1778,6 +1778,12 @@ class MainWindow(QMainWindow):
         gcloud_layout.addWidget(self.gcloud_help_widget)
         v.addWidget(gcloud_group)
 
+        # === STORAGE LOCATIONS ===
+        from gui.storage_settings_widget import StorageSettingsWidget
+
+        self.storage_settings = StorageSettingsWidget(self.tab_settings)
+        v.addWidget(self.storage_settings)
+
         # === MIDJOURNEY SETTINGS ===
         midjourney_group = QGroupBox("Midjourney Settings")
         midjourney_layout = QVBoxLayout(midjourney_group)

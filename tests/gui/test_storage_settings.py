@@ -61,3 +61,117 @@ def test_unreachable_root_shows_a_warning(tmp_path, monkeypatch, qapp):
 
     widget = StorageSettingsWidget()
     assert "Unavailable" in widget.rows[Group.IMAGES].status_label.text()
+
+
+def _seed_images(tmp_path):
+    """Give the Images group one real source tree so validation can pass."""
+    source = tmp_path / "generated"
+    source.mkdir(exist_ok=True)
+    (source / "one.png").write_bytes(b"x" * 16)
+    return source
+
+
+def test_move_calls_the_migrator_with_the_chosen_directory(widget, tmp_path, monkeypatch):
+    from core.data_migration import MoveResult
+
+    _seed_images(tmp_path)
+    chosen = tmp_path / "chosen"
+    chosen.mkdir()
+    calls = {}
+
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QFileDialog.getExistingDirectory",
+        lambda *a, **k: str(chosen),
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._confirm", lambda *a, **k: True
+    )
+    def fake_run(self, group, dest):
+        calls["args"] = (group, dest)
+        return MoveResult(ok=True, files_moved=1, bytes_moved=10)
+
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._run_with_progress", fake_run
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._offer_restart", lambda *a, **k: None
+    )
+    # Keep the temporary DataPaths in place: a real reset would point the
+    # refresh at the developer's own data directories.
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.reset_data_paths", lambda: None
+    )
+
+    widget._on_move(Group.IMAGES)
+    assert calls["args"] == (Group.IMAGES, chosen)
+
+
+def test_cancelled_picker_does_nothing(widget, monkeypatch):
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QFileDialog.getExistingDirectory",
+        lambda *a, **k: "",
+    )
+    called = []
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._run_with_progress",
+        lambda *a, **k: called.append(1),
+    )
+    widget._on_move(Group.IMAGES)
+    assert not called
+
+
+def test_failed_move_shows_the_error(widget, tmp_path, monkeypatch):
+    from core.data_migration import MoveResult
+
+    _seed_images(tmp_path)
+    shown = []
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QFileDialog.getExistingDirectory",
+        lambda *a, **k: str(tmp_path / "chosen"),
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._confirm", lambda *a, **k: True
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._run_with_progress",
+        lambda *a, **k: MoveResult(ok=False, error="Not enough free space."),
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.critical",
+        lambda *a, **k: shown.append(a[2]),
+    )
+
+    widget._on_move(Group.IMAGES)
+    assert shown and "free space" in shown[0]
+
+
+def test_rejected_destination_is_reported(widget, tmp_path, monkeypatch):
+    """A destination the migrator refuses never reaches the move step."""
+    shown = []
+    called = []
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QFileDialog.getExistingDirectory",
+        lambda *a, **k: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._run_with_progress",
+        lambda *a, **k: called.append(1),
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.critical",
+        lambda *a, **k: shown.append(a[2]),
+    )
+
+    widget._on_move(Group.IMAGES)
+    assert shown and not called
+
+
+def test_main_window_exposes_the_storage_widget(qapp, monkeypatch):
+    """The Settings tab must actually contain the widget."""
+    import inspect
+
+    from gui.main_window import MainWindow
+
+    source = inspect.getsource(MainWindow._init_settings_tab)
+    assert "StorageSettingsWidget" in source
+    assert "storage_settings" in source
