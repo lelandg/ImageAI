@@ -7,12 +7,13 @@ ignored sizing entirely.
 """
 
 import io
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
+import core.paths as paths_mod
+from core.paths import DataPaths
 from providers.google import GoogleProvider
 
 
@@ -33,8 +34,14 @@ def _fake_response(png: bytes) -> SimpleNamespace:
 
 @pytest.fixture
 def provider(tmp_path, monkeypatch):
-    # Keep the provider's DEBUG_RAW_GEMINI_* writes out of the real home dir.
-    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    # generate() and edit_image() both save a DEBUG_RAW_GEMINI_* image under
+    # get_data_paths().generated(). That call returns a process-wide singleton,
+    # so patching Path.home here did nothing once an earlier test had built the
+    # singleton against the real user directory — the suite wrote a file into
+    # ~/.config/ImageAI/generated on every run. Replace the singleton instead.
+    cfg = tmp_path / "config.json"
+    cfg.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(paths_mod, "_INSTANCE", DataPaths(config_path=cfg))
     monkeypatch.setattr("providers.google.rate_limiter", MagicMock())
     p = GoogleProvider({"api_key": "test-key", "auth_mode": "api-key"})
     p.client = MagicMock()
@@ -97,6 +104,21 @@ class TestGenerateSizeKwarg:
         cfg = provider.client.models.generate_content.call_args.kwargs["config"]
         assert cfg.image_config.image_size == "4K"
         assert cfg.image_config.aspect_ratio == "9:16"
+
+
+class TestDebugImageLocation:
+    def test_the_debug_image_follows_the_configured_images_root(
+        self, provider, tmp_path
+    ):
+        """generate() saves DEBUG_RAW_GEMINI_* under the Images root.
+
+        The write must go through get_data_paths(), so a user who moved the
+        Images group keeps it there — and the test suite keeps it out of the
+        developer's real user directory.
+        """
+        provider.generate(prompt="a test", model="gemini-2.5-flash-image")
+        written = list((tmp_path / "generated").glob("DEBUG_RAW_GEMINI_*"))
+        assert written, "no debug image was written under the configured root"
 
 
 class TestEditImageSizing:

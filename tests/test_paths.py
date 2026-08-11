@@ -227,6 +227,22 @@ def test_reset_data_paths_clears_the_singleton():
     assert get_data_paths() is not first
 
 
+def test_the_suite_never_resolves_into_the_real_user_directory(
+    _sandboxed_user_data_dir,
+):
+    """The singleton these tests build must stay inside the session sandbox.
+
+    Two tests above build the singleton with no config path. Without the
+    session fixture in tests/conftest.py they resolve it against the
+    developer's real user directory, and every later test that writes through
+    get_data_paths() writes there — providers/google.py saved a
+    DEBUG_RAW_GEMINI_* image into ~/.config/ImageAI/generated on each run.
+    A rebuild after reset_data_paths() must land in the sandbox too.
+    """
+    reset_data_paths()
+    assert get_data_paths().generated() == _sandboxed_user_data_dir / "generated"
+
+
 def test_paths_module_imports_no_logging_or_config():
     """core/paths.py must stay importable before the logger exists."""
     import ast
