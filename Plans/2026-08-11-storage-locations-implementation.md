@@ -61,7 +61,7 @@ The design doc's section 6 says `move_group` must "refuse to move the Video grou
   - `class DataPaths` with `root(group: Group) -> Path`, `drain_warnings() -> list[str]`, and the accessors listed in Step 3.
   - `get_data_paths() -> DataPaths` (module singleton), `reset_data_paths() -> None` (test hook).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/test_paths.py`:
 
@@ -238,12 +238,12 @@ def test_paths_module_imports_no_logging_or_config():
     assert not any(name in ("core.config", ".config") for name in imported)
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `python3 -m pytest tests/test_paths.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'core.paths'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `core/paths.py`:
 
@@ -474,17 +474,17 @@ def reset_data_paths() -> None:
     _INSTANCE = None
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `python3 -m pytest tests/test_paths.py -v`
 Expected: PASS, 15 tests.
 
-- [ ] **Step 5: Run the full suite**
+- [x] **Step 5: Run the full suite**
 
 Run: `python3 -m pytest`
 Expected: PASS. Nothing imports `core/paths.py` yet, so the count rises by 15 with no failures.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add core/paths.py tests/test_paths.py
@@ -505,7 +505,7 @@ git commit -m "feat(paths): add DataPaths resolver for relocatable data groups"
 
 This ships a real bug fix independent of the Move feature: released code writes to `C:/Users/aboog/...`, the author's own machine.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/test_no_hardcoded_paths.py`:
 
@@ -532,12 +532,12 @@ def test_no_hardcoded_user_profile_paths():
     assert not offenders, "Hardcoded user-profile paths found:\n" + "\n".join(offenders)
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python3 -m pytest tests/test_no_hardcoded_paths.py -v`
 Expected: FAIL, listing `providers/google.py:1083` and `providers/google.py:1292`.
 
-- [ ] **Step 3: Fix both call sites**
+- [x] **Step 3: Fix both call sites**
 
 In `providers/google.py`, both blocks currently read:
 
@@ -555,17 +555,17 @@ Replace each with:
                                     debug_dir = get_data_paths().generated()
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `python3 -m pytest tests/test_no_hardcoded_paths.py -v`
 Expected: PASS.
 
-- [ ] **Step 5: Run the full suite**
+- [x] **Step 5: Run the full suite**
 
 Run: `python3 -m pytest`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add providers/google.py tests/test_no_hardcoded_paths.py
@@ -587,7 +587,7 @@ git commit -m "fix(google): remove hardcoded developer path from debug dumps"
 
 The logger is the first consumer and the ordering constraint that shaped Task 1. It must drain the deferred warning buffer as soon as handlers exist.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_paths.py`:
 
@@ -614,12 +614,12 @@ def test_logger_uses_the_settings_root(tmp_path, monkeypatch):
 
 Add `from pathlib import Path` to the imports at the top of `tests/test_paths.py`.
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python3 -m pytest tests/test_paths.py::test_logger_uses_the_settings_root -v`
 Expected: FAIL — the log file lands under the real `%APPDATA%`/`~/.config` directory, not `dest`.
 
-- [ ] **Step 3: Rewrite both log-directory blocks**
+- [x] **Step 3: Rewrite both log-directory blocks**
 
 In `core/logging_config.py`, replace the block at lines 27-37:
 
@@ -651,7 +651,7 @@ with:
 
 Apply the identical replacement to the second block at lines 141-151.
 
-- [ ] **Step 4: Drain the deferred warnings**
+- [x] **Step 4: Drain the deferred warnings**
 
 In `setup_logging`, immediately after the file handler is attached to
 `root_logger` and before the function returns, add:
@@ -663,17 +663,17 @@ In `setup_logging`, immediately after the file handler is attached to
         root_logger.warning(message)
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `python3 -m pytest tests/test_paths.py -v`
 Expected: PASS, 16 tests.
 
-- [ ] **Step 6: Verify the app still starts and logs**
+- [x] **Step 6: Verify the app still starts and logs**
 
 Run: `python3 main.py --help`
 Expected: the CLI help prints, and a fresh `imageai_*.log` appears under the settings root's `logs/` directory.
 
-- [ ] **Step 7: Run the full suite and commit**
+- [x] **Step 7: Run the full suite and commit**
 
 ```bash
 python3 -m pytest
@@ -714,7 +714,7 @@ Apply this exact mapping:
 
 Leave `core/character_animator/installer.py:254` (`~/.cache/huggingface/hub`) exactly as it is — it reads a cache that other tools own.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/test_paths.py`:
 
@@ -762,12 +762,12 @@ def test_styles_store_uses_the_images_root(tmp_path, monkeypatch):
     assert StyleStore().base_dir == images / "styles"
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `python3 -m pytest tests/test_paths.py -k "musetalk or styles_store" -v`
 Expected: FAIL — the legacy check does not exist and the store still uses `get_user_data_dir()`.
 
-- [ ] **Step 3: Apply the mapping table**
+- [x] **Step 3: Apply the mapping table**
 
 Work through every row above. For `core/constants.py`, replace the whole body of `get_user_data_dir` and delete the module-level constant:
 
@@ -802,7 +802,7 @@ grep -rn "BATCH_JOBS_PATH" --include=*.py .
 Replace each `BATCH_JOBS_PATH` reference with a `batch_jobs_path()` call and fix
 the import on the same line.
 
-- [ ] **Step 4: Add the MuseTalk legacy-directory check**
+- [x] **Step 4: Add the MuseTalk legacy-directory check**
 
 Replace the body of `get_musetalk_model_path` in `core/musetalk_installer.py`:
 
@@ -821,12 +821,12 @@ def get_musetalk_model_path() -> Path:
     return get_data_paths().musetalk()
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `python3 -m pytest tests/test_paths.py -v`
 Expected: PASS, 19 tests.
 
-- [ ] **Step 6: Verify no `core/` straggler remains**
+- [x] **Step 6: Verify no `core/` straggler remains**
 
 Run:
 
@@ -836,7 +836,7 @@ grep -rn "get_user_data_dir()\|config_dir /" --include=*.py core/ | grep -v "cor
 
 Expected: no output.
 
-- [ ] **Step 7: Run the full suite and commit**
+- [x] **Step 7: Run the full suite and commit**
 
 ```bash
 python3 -m pytest
@@ -872,7 +872,7 @@ Apply this exact mapping:
 | `gui/video/video_project_tab.py:1827` | same | `get_data_paths().video_events_db()` |
 | `gui/video/video_project_tab.py:2013` | same | `get_data_paths().video_events_db()` |
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/video/test_video_paths.py`:
 
@@ -938,13 +938,13 @@ Adjust the constructor calls if `VideoProjectManager`, `ThumbnailManager`, or
 `VideoImageGenerator` require arguments — read each `__init__` first and pass
 the minimum needed.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `python3 -m pytest tests/video/test_video_paths.py -v`
 Expected: FAIL — paths still resolve to the real home directory, and the
 straggler test lists seven `~/.imageai` sites.
 
-- [ ] **Step 3: Apply the mapping table**
+- [x] **Step 3: Apply the mapping table**
 
 Work through all eleven rows. Each replacement follows the same shape — delete
 the platform branch or the `Path.home()` expression and call the resolver:
@@ -955,12 +955,12 @@ from core.paths import get_data_paths
 base_dir = get_data_paths().video_projects()
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `python3 -m pytest tests/video/test_video_paths.py -v`
 Expected: PASS, 5 tests.
 
-- [ ] **Step 5: Run the full suite and commit**
+- [x] **Step 5: Run the full suite and commit**
 
 ```bash
 python3 -m pytest
@@ -1006,7 +1006,7 @@ grep -n "config_dir\|get_user_data_dir()" gui/font_generator/font_wizard.py gui/
 
 Then map each to the accessor matching its group: font output and layout output are user artifacts under Images; caches and history files are under Settings.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/gui/test_gui_paths.py`:
 
@@ -1063,13 +1063,13 @@ def test_no_gui_module_builds_a_platform_dir():
 twice. Extract it as part of Step 3 so both the load path and the save path
 share one implementation.
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `python3 -m pytest tests/gui/test_gui_paths.py -v`
 Expected: FAIL — `HistoryWidget` has no `_history_path`, and the sweep lists the
 `gui/history_widget.py` and `gui/midjourney_dialog.py` sites.
 
-- [ ] **Step 3: Extract `HistoryWidget._history_path` and apply the mapping**
+- [x] **Step 3: Extract `HistoryWidget._history_path` and apply the mapping**
 
 In `gui/history_widget.py`, add:
 
@@ -1085,12 +1085,12 @@ Replace both inline blocks (the load at line 236 and the save at line 253) with
 a call to `self._history_path()`. Then work through the rest of the mapping
 table.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `python3 -m pytest tests/gui/test_gui_paths.py -v`
 Expected: PASS, 2 tests.
 
-- [ ] **Step 5: Run the full suite and commit**
+- [x] **Step 5: Run the full suite and commit**
 
 ```bash
 python3 -m pytest
@@ -1118,7 +1118,7 @@ and `from_pretrained`, so no environment variable is involved. Do NOT set
 Leave `core/character_animator/installer.py:254` alone. It reads
 `~/.cache/huggingface/hub` to detect models other tools downloaded.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_paths.py`:
 
@@ -1162,12 +1162,12 @@ def test_character_animator_keeps_the_shared_hub_path():
     assert '".cache" / "huggingface"' in text or '.cache/huggingface' in text
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `python3 -m pytest tests/test_paths.py -k "cache" -v`
 Expected: FAIL — all three sites still default to `~/.cache/huggingface`.
 
-- [ ] **Step 3: Rewrite the three defaults**
+- [x] **Step 3: Rewrite the three defaults**
 
 `providers/local_sd.py:122`:
 
@@ -1194,12 +1194,12 @@ Expected: FAIL — all three sites still default to `~/.cache/huggingface`.
         self.cache_dir = cache_dir or get_data_paths().huggingface()
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `python3 -m pytest tests/test_paths.py -v`
 Expected: PASS, 22 tests.
 
-- [ ] **Step 5: Run the full suite and commit**
+- [x] **Step 5: Run the full suite and commit**
 
 ```bash
 python3 -m pytest
@@ -1224,7 +1224,7 @@ git commit -m "refactor(models): route HuggingFace cache through the Models root
   - `validate_destination(group: Group, dest: Path, paths: DataPaths) -> Optional[str]` — returns an error message, or `None` when valid.
   - `tree_size(path: Path) -> tuple[int, int]` — `(file_count, total_bytes)`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Create `tests/migration/test_data_migration.py`:
 
@@ -1334,12 +1334,12 @@ def test_validate_accepts_a_good_destination(tmp_path, paths):
     assert validate_destination(Group.IMAGES, dest, paths) is None
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `python3 -m pytest tests/migration/test_data_migration.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'core.data_migration'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `core/data_migration.py`:
 
@@ -1529,12 +1529,12 @@ def _human(num_bytes: int) -> str:
     return f"{value:.1f} TB"
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `python3 -m pytest tests/migration/test_data_migration.py -v`
 Expected: PASS, 10 tests.
 
-- [ ] **Step 5: Run the full suite and commit**
+- [x] **Step 5: Run the full suite and commit**
 
 ```bash
 python3 -m pytest
@@ -1559,7 +1559,7 @@ the config, then delete. A crash between the config write and the delete leaves
 a working application with a stale copy — recoverable. The reverse order can
 destroy the only copy.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/migration/test_data_migration.py`:
 
@@ -1685,12 +1685,12 @@ def test_pre_move_hook_runs_before_any_copy(tmp_path, paths):
     assert calls == ["closed"]
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `python3 -m pytest tests/migration/test_data_migration.py -v`
 Expected: FAIL — `ImportError: cannot import name 'move_group'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Append to `core/data_migration.py`:
 
@@ -1911,12 +1911,12 @@ def _cleanup_empty_legacy_dirs(group: Group) -> None:
         logger.debug("Could not remove the empty %s: %s", legacy, exc)
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `python3 -m pytest tests/migration/test_data_migration.py -v`
 Expected: PASS, 19 tests.
 
-- [ ] **Step 5: Run the full suite and commit**
+- [x] **Step 5: Run the full suite and commit**
 
 ```bash
 python3 -m pytest
@@ -1936,7 +1936,7 @@ git commit -m "feat(migration): relocate groups with verify-before-delete orderi
 - Consumes: `Group`, `get_data_paths`, `reset_data_paths` from Task 1; `sources_for`, `tree_size`, `validate_destination`, `move_group`, `MoveResult` from Tasks 8-9.
 - Produces: `class StorageSettingsWidget(QGroupBox)` with `rows: dict[Group, StorageRow]`, method `refresh_sizes()`, and signal `move_completed = Signal(str)` carrying the group value.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/gui/test_storage_settings.py`:
 
@@ -1994,12 +1994,12 @@ def test_unreachable_root_shows_a_warning(tmp_path, monkeypatch, qapp):
     assert "Unavailable" in widget.rows[Group.IMAGES].status_label.text()
 ```
 
-- [ ] **Step 2: Run the test to verify it fails**
+- [x] **Step 2: Run the test to verify it fails**
 
 Run: `python3 -m pytest tests/gui/test_storage_settings.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'gui.storage_settings_widget'`
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 Create `gui/storage_settings_widget.py`:
 
@@ -2192,12 +2192,12 @@ class StorageSettingsWidget(QGroupBox):
         raise NotImplementedError
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `python3 -m pytest tests/gui/test_storage_settings.py -v`
 Expected: PASS, 5 tests.
 
-- [ ] **Step 5: Run the full suite and commit**
+- [x] **Step 5: Run the full suite and commit**
 
 ```bash
 python3 -m pytest
@@ -2218,7 +2218,7 @@ git commit -m "feat(gui): add Storage Locations widget with async size probes"
 - Consumes: `move_group`, `validate_destination`, `MoveResult` from Tasks 8-9; `StorageSettingsWidget` from Task 10.
 - Produces: `StorageSettingsWidget._on_move` implemented; `MainWindow.storage_settings` attribute.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/gui/test_storage_settings.py`:
 
@@ -2299,12 +2299,12 @@ def test_main_window_exposes_the_storage_widget(qapp, monkeypatch):
     assert "storage_settings" in source
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `python3 -m pytest tests/gui/test_storage_settings.py -v`
 Expected: FAIL — `_on_move` raises `NotImplementedError` and `_init_settings_tab` has no reference.
 
-- [ ] **Step 3: Implement the move flow**
+- [x] **Step 3: Implement the move flow**
 
 Add these imports to the top of `gui/storage_settings_widget.py`:
 
@@ -2454,7 +2454,7 @@ Replace the `_on_move` stub with:
         self._offer_restart(group, result)
 ```
 
-- [ ] **Step 4: Wire the widget into the Settings tab**
+- [x] **Step 4: Wire the widget into the Settings tab**
 
 In `gui/main_window.py`, inside `_init_settings_tab`, immediately before the
 `# === MIDJOURNEY SETTINGS ===` block at line 1781, insert:
@@ -2467,12 +2467,12 @@ In `gui/main_window.py`, inside `_init_settings_tab`, immediately before the
         v.addWidget(self.storage_settings)
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `python3 -m pytest tests/gui/test_storage_settings.py -v`
 Expected: PASS, 9 tests.
 
-- [ ] **Step 6: Verify by hand**
+- [x] **Step 6: Verify by hand**
 
 Leland runs this from PowerShell with `.venv`, because the move dialogs need a
 real display:
@@ -2486,7 +2486,7 @@ resolve from `Calculating…` to real values; `Open` opens the folder; `Move…`
 starts at `Pictures\ImageAI\Images` for the Images row; picking the current
 location is rejected with a clear message.
 
-- [ ] **Step 7: Run the full suite and commit**
+- [x] **Step 7: Run the full suite and commit**
 
 ```bash
 python3 -m pytest
@@ -2509,7 +2509,7 @@ git commit -m "feat(gui): wire Storage Locations move flow into the Settings tab
 The design doc's top risk is a missed call site that keeps writing to the old
 location. This task turns that risk into a test.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Append to `tests/test_no_hardcoded_paths.py`:
 
@@ -2575,24 +2575,24 @@ def test_get_user_data_dir_has_no_remaining_callers():
     )
 ```
 
-- [ ] **Step 2: Run the tests to see what remains**
+- [x] **Step 2: Run the tests to see what remains**
 
 Run: `python3 -m pytest tests/test_no_hardcoded_paths.py -v`
 Expected: FAIL or PASS depending on what Tasks 4-7 missed. Treat every reported
 line as work to finish.
 
-- [ ] **Step 3: Fix each offender**
+- [x] **Step 3: Fix each offender**
 
 For each reported line, either route it through `DataPaths`, or — if it truly
 belongs to other software — add a precise pattern to `ALLOWED_PATTERNS` with a
 comment saying why. Do not broaden a pattern to silence an unrelated line.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `python3 -m pytest tests/test_no_hardcoded_paths.py -v`
 Expected: PASS, 3 tests.
 
-- [ ] **Step 5: Run the full suite and commit**
+- [x] **Step 5: Run the full suite and commit**
 
 ```bash
 python3 -m pytest
@@ -2614,7 +2614,7 @@ git commit -m "test(paths): guard against straggler data-path call sites"
 - Consumes: the completed feature.
 - Produces: a released v0.45.0.
 
-- [ ] **Step 1: Correct the design doc's SQLite requirement**
+- [x] **Step 1: Correct the design doc's SQLite requirement**
 
 In `Plans/2026-08-10-storage-locations-design.md`, replace this testing bullet:
 
@@ -2641,7 +2641,7 @@ closes its own connections through the `pre_move` hook. Detecting a foreign
 process's connection is not reliably possible, so the design does not attempt it.
 ```
 
-- [ ] **Step 2: Update AGENTS.md**
+- [x] **Step 2: Update AGENTS.md**
 
 The "Navigation & debugging" section tells agents where the log lives. Append to
 that bullet:
@@ -2660,7 +2660,7 @@ Add to "Hard project rules":
   (`tests/test_no_hardcoded_paths.py`) fails the build on new inline paths.
 ```
 
-- [ ] **Step 3: Regenerate the CodeMap**
+- [x] **Step 3: Regenerate the CodeMap**
 
 Run the `update-code-map` skill, or:
 
@@ -2671,12 +2671,12 @@ python3 tools/generate_code_map.py
 Confirm `Docs/CodeMap.md` now lists `core/paths.py`, `core/data_migration.py`,
 and `gui/storage_settings_widget.py` with accurate line numbers.
 
-- [ ] **Step 4: Run the full suite one last time**
+- [x] **Step 4: Run the full suite one last time**
 
 Run: `python3 -m pytest`
 Expected: PASS. Record the total count for the changelog.
 
-- [ ] **Step 5: Cut the release**
+- [x] **Step 5: Cut the release**
 
 This is a feature, so it is a minor bump: 0.44.1 → 0.45.0. Dry-run first:
 
@@ -2701,12 +2701,14 @@ bug fixes:
 > debug dumps, and MuseTalk's platform paths, which ignored `%APPDATA%` on
 > Windows and disagreed with every other subsystem on Linux.
 
-- [ ] **Step 6: Review before pushing**
+- [x] **Step 6: Review before pushing**
 
 Per the house rule, the local review runs before `git push`, not after. Run the
 `code-reviewer` agent over the branch, then reconcile its findings.
 
-- [ ] **Step 7: Commit and open the PR**
+- [ ] **Step 7: Commit and open the PR** — committed; the push and the PR wait
+      on the maintainer. See `Docs/Storage-Locations-Known-Issues.md` for what
+      five adversarial rounds left open.
 
 ```bash
 git add -A
