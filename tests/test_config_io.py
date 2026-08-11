@@ -85,6 +85,65 @@ def test_non_object_data_roots_raises(config_path):
         config_io.read_config(config_path)
 
 
+def test_null_data_roots_raises(config_path, caplog):
+    """An explicit JSON null is not a valid data_roots document.
+
+    A move reads the document, mutates ``data_roots`` and writes it back. A
+    null passes a "wrong type" check written as ``is not None``, and the
+    mutation then fails with a TypeError after every rename already ran.
+    """
+    config_path.write_text(json.dumps({"data_roots": None}), encoding="utf-8")
+
+    with caplog.at_level(logging.ERROR, logger="core.config_io"):
+        with pytest.raises(ConfigReadError):
+            config_io.read_config(config_path)
+
+    assert caplog.records, "an invalid data_roots entry must reach the logger"
+
+
+def test_absent_data_roots_is_valid(config_path):
+    """Only an entry that is present and not an object is a failure."""
+    config_path.write_text(json.dumps({"provider": "google"}), encoding="utf-8")
+
+    assert config_io.read_config(config_path) == {"provider": "google"}
+
+
+def test_update_refuses_a_null_data_roots_document(config_path):
+    """The move must abort before it renames anything."""
+    original = json.dumps({"data_roots": None})
+    config_path.write_text(original, encoding="utf-8")
+
+    def mutate(data):
+        data["data_roots"]["video"] = "/somewhere"
+
+    with pytest.raises(ConfigReadError):
+        config_io.update_config(config_path, mutate)
+
+    assert config_path.read_text(encoding="utf-8") == original
+
+
+# --- read_config_document ---------------------------------------------------
+
+
+def test_read_document_reports_a_missing_file_as_none(config_path):
+    """A caller that merges needs "no document" apart from "empty document"."""
+    assert config_io.read_config_document(config_path) is None
+
+
+def test_read_document_returns_an_empty_document_as_a_dict(config_path):
+    """A file another writer emptied is a real document, not a missing one."""
+    config_path.write_text("{}", encoding="utf-8")
+
+    assert config_io.read_config_document(config_path) == {}
+
+
+def test_read_document_raises_for_an_unreadable_file(config_path):
+    config_path.write_text("{ broken", encoding="utf-8")
+
+    with pytest.raises(ConfigReadError):
+        config_io.read_config_document(config_path)
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission semantics")
 @pytest.mark.skipif(os.geteuid() == 0, reason="root ignores the permission bits")
 def test_unreadable_config_raises(config_path):

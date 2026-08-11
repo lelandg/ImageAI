@@ -190,8 +190,13 @@ def test_missing_config_is_still_a_fresh_install(tmp_path, monkeypatch):
     assert not list(cfg.parent.glob("config.json.corrupt-*"))
 
 
-def test_failed_write_leaves_the_previous_file_intact(config_path, monkeypatch):
-    """A crash mid-write must not truncate config.json."""
+def test_failed_write_leaves_the_previous_file_intact(config_path, monkeypatch, caplog):
+    """A crash mid-write must not truncate config.json, and must not raise.
+
+    ``save()`` runs from Qt slots and from ``__init__``. A write failure that
+    escapes aborts the slot halfway or stops the application from starting, so
+    it is logged and reported through the return value instead.
+    """
     manager = _manager()
     manager.set("provider", "openai")
     manager.save()
@@ -202,11 +207,176 @@ def test_failed_write_leaves_the_previous_file_intact(config_path, monkeypatch):
 
     monkeypatch.setattr(config_io.json, "dump", _boom)
     manager.set("provider", "stability")
-    with pytest.raises(config_io.ConfigWriteError):
-        manager.save()
+    with caplog.at_level(logging.ERROR):
+        assert manager.save() is False
 
     assert config_path.read_text(encoding="utf-8") == before
     assert not list(config_path.parent.glob("*.tmp*")), "temp file left behind"
+    assert any(record.levelno >= logging.ERROR for record in caplog.records), (
+        "a failed write must reach the logger"
+    )
+    assert manager.last_save_error, "the failure must be readable by the caller"
+
+
+def test_save_reports_a_lock_timeout_the_same_way(config_path, monkeypatch, caplog):
+    """The lock failure and the write failure must behave alike."""
+    manager = _manager()
+    manager.set("provider", "openai")
+
+    def _boom(*args, **kwargs):
+        raise config_io.ConfigLockError("another writer holds it")
+
+    monkeypatch.setattr(config_io, "config_lock", _boom)
+
+    with caplog.at_level(logging.ERROR):
+        assert manager.save() is False
+
+    assert manager.last_save_error
+    assert any(record.levelno >= logging.ERROR for record in caplog.records)
+
+
+def test_a_successful_save_reports_success(config_path):
+    manager = _manager()
+    manager.set("provider", "openai")
+
+    assert manager.save() is True
+    assert manager.last_save_error is None
+
+
+def test_construction_survives_a_config_directory_it_cannot_write(
+    config_path, monkeypatch, caplog
+):
+    """A readable but unwritable config directory must not stop startup.
+
+    ``__init__`` normalises ``auth_mode`` and migrates legacy API keys, and
+    both call ``save()``. A write failure there used to kill the application
+    before its first window opened.
+    """
+    _write(config_path, {"auth_mode": "API Key", "google_api_key": "AIza-LEGACY"})
+
+    def _boom(*args, **kwargs):
+        raise config_io.ConfigWriteError("read-only file system")
+
+    monkeypatch.setattr(config_io, "write_config", _boom)
+
+    with caplog.at_level(logging.ERROR):
+        manager = _manager()
+
+    assert manager.get("auth_mode") == "api-key"
+    assert any(record.levelno >= logging.ERROR for record in caplog.records), (
+        "a failed write during startup must reach the logger"
+    )
+
+
+def test_save_keeps_every_key_when_config_json_was_deleted(config_path, tmp_path):
+    """A sync client or a backup restore can remove config.json mid-session.
+
+    A missing file is not a writer that deleted every key. This process still
+    holds the whole document, so the save must write it back whole.
+    """
+    _write(config_path, {
+        "providers": {"google": {"api_key": "AIza-SECRET"}},
+        "data_roots": {"models": str(tmp_path / "models")},
+        "auth_mode": "api-key",
+    })
+    manager = _manager()
+
+    config_path.unlink()
+
+    manager.set("last_prompt", "a cat")
+    assert manager.save() is True
+
+    result = _read(config_path)
+    assert result["providers"] == {"google": {"api_key": "AIza-SECRET"}}
+    assert result["data_roots"] == {"models": str(tmp_path / "models")}
+    assert result["auth_mode"] == "api-key"
+    assert result["last_prompt"] == "a cat"
+    # The live dict must keep them too, or no later save can recover them.
+    assert manager.get_api_key("google") == "AIza-SECRET"
+
+
+def test_save_keeps_every_key_when_config_json_was_corrupted(config_path, tmp_path,
+                                                             caplog):
+    """The sidecar holds the damaged bytes; the intact copy in memory wins."""
+    _write(config_path, {
+        "providers": {"openai": {"api_key": "sk-SECRET"}},
+        "data_roots": {"images": str(tmp_path / "images")},
+        "auth_mode": "api-key",
+    })
+    manager = _manager()
+
+    corrupt = '{"providers": {"openai": {"api_ke'
+    config_path.write_text(corrupt, encoding="utf-8")
+
+    manager.set("last_prompt", "a dog")
+    with caplog.at_level(logging.ERROR):
+        assert manager.save() is True
+
+    result = _read(config_path)
+    assert result["providers"] == {"openai": {"api_key": "sk-SECRET"}}
+    assert result["data_roots"] == {"images": str(tmp_path / "images")}
+    assert result["last_prompt"] == "a dog"
+
+    sidecars = sorted(config_path.parent.glob("config.json.corrupt-*"))
+    assert len(sidecars) == 1
+    assert sidecars[0].read_text(encoding="utf-8") == corrupt
+
+
+def test_corrupt_config_is_not_rewritten_at_startup(config_path, caplog):
+    """Constructing ConfigManager is all main.py does before the first window.
+
+    A failed load must not normalise, migrate or save anything, because each
+    of those writes an empty document over the file that still holds the API
+    keys and the recorded data locations.
+    """
+    whole = json.dumps({
+        "providers": {"google": {"api_key": "AIza-SECRET"}},
+        "data_roots": {"models": "/mnt/big/ImageAI/models"},
+        "auth_mode": "api-key",
+    }, indent=2)
+    truncated = whole[: len(whole) // 2]
+    config_path.write_text(truncated, encoding="utf-8")
+
+    with caplog.at_level(logging.ERROR):
+        manager = _manager()
+
+    assert config_path.read_text(encoding="utf-8") == truncated, (
+        "startup must leave a config.json it could not read untouched"
+    )
+
+    sidecars = sorted(config_path.parent.glob("config.json.corrupt-*"))
+    assert len(sidecars) == 1, "the original must be preserved at startup"
+    assert sidecars[0].read_text(encoding="utf-8") == truncated
+    assert manager.preserved_config_path == sidecars[0]
+
+    messages = [record.getMessage() for record in caplog.records
+                if record.levelno >= logging.ERROR]
+    assert any(sidecars[0].name in message for message in messages), (
+        "the log must name the preserved copy so the user can recover the keys"
+    )
+
+
+def test_startup_on_a_corrupt_config_does_not_migrate_legacy_keys(config_path):
+    """A migration on a fresh empty document would write that document out."""
+    config_path.write_text('{"google_api_key": "AIza-LEGACY", ', encoding="utf-8")
+
+    manager = _manager()
+
+    assert manager.load_error, "the failed load must be recorded"
+    assert config_path.read_text(encoding="utf-8") == (
+        '{"google_api_key": "AIza-LEGACY", '
+    )
+
+
+def test_a_second_save_reuses_the_first_sidecar(config_path):
+    """Unchanged damaged bytes must not pile up one sidecar per save."""
+    config_path.write_text('{"providers": {"google": ', encoding="utf-8")
+
+    manager = _manager()
+    manager.set("last_prompt", "a cat")
+    manager.save()
+
+    assert len(sorted(config_path.parent.glob("config.json.corrupt-*"))) == 1
 
 
 def test_save_serialises_against_a_concurrent_config_io_writer(
@@ -226,7 +396,7 @@ def test_save_serialises_against_a_concurrent_config_io_writer(
 
     inside_save = threading.Event()
     slowed = []
-    real_read = config_io.read_config
+    real_read = config_io.read_config_document
 
     def slow_read(path, *args, **kwargs):
         data = real_read(path, *args, **kwargs)
@@ -238,7 +408,7 @@ def test_save_serialises_against_a_concurrent_config_io_writer(
             time.sleep(0.4)
         return data
 
-    monkeypatch.setattr(config_io, "read_config", slow_read)
+    monkeypatch.setattr(config_io, "read_config_document", slow_read)
 
     def migrator():
         assert inside_save.wait(10)

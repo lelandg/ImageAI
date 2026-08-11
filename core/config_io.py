@@ -19,6 +19,11 @@ Public API
     Parse the file. A missing file returns ``{}`` — that is a fresh install.
     Every other failure raises :class:`ConfigReadError`. The caller must never
     treat an unreadable file as an empty one.
+``read_config_document(path)``
+    The same parse, but a missing file returns ``None``. A caller that merges
+    its own document over the disk one needs "there is no document" apart from
+    "the document is empty": an empty file is a writer that removed every key,
+    while a missing file is no statement about any key at all.
 ``write_config(path, data)``
     Write the whole document atomically: a temporary file in the same
     directory, flushed, fsynced, then ``os.replace``. Raises
@@ -253,11 +258,26 @@ def read_config(config_path: PathLike) -> Dict[str, Any]:
     working. Every other failure raises :class:`ConfigReadError`, so no caller
     can mistake an unreadable file for an empty one.
     """
+    document = read_config_document(config_path)
+    if document is None:
+        return {}
+    return document
+
+
+def read_config_document(config_path: PathLike) -> Optional[Dict[str, Any]]:
+    """Return the parsed config.json, or ``None`` when the file is missing.
+
+    A merging caller must tell two states apart. A file that holds ``{}`` is a
+    writer that removed every key, and those deletions must stick. A file that
+    is not there says nothing about any key, and the caller keeps what it
+    already holds. Every failure other than "not there" raises
+    :class:`ConfigReadError`.
+    """
     path = Path(config_path)
     try:
         raw = path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return {}
+        return None
     except UnicodeDecodeError as exc:
         message = f"Could not decode {path} as UTF-8: {exc}"
         logger.error(message)
@@ -279,9 +299,16 @@ def read_config(config_path: PathLike) -> Dict[str, Any]:
         logger.error(message)
         raise ConfigReadError(message)
 
-    roots = data.get("data_roots")
-    if roots is not None and not isinstance(roots, dict):
-        message = f"The 'data_roots' entry in {path} is not a JSON object."
+    # An absent entry is valid: no group was ever moved. An entry that is
+    # present must be an object. A JSON null is not one — a writer that
+    # mutates data_roots in place fails on it, and by then the move has
+    # already renamed the directories.
+    if "data_roots" in data and not isinstance(data["data_roots"], dict):
+        found = type(data["data_roots"]).__name__
+        message = (
+            f"The 'data_roots' entry in {path} is not a JSON object "
+            f"(found {found})."
+        )
         logger.error(message)
         raise ConfigReadError(message)
 
