@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- A storage move that failed, that the user cancelled, or that the user
+  answered "Later" to left the running app degraded. The move releases open
+  file handles before it starts, and nothing took them back: the Midjourney
+  watcher stayed off, the video History tab loaded nothing, and "Create
+  Restore Point" failed with a raw `NoneType` message for the rest of the
+  session. Every path that keeps this process running now restores what it
+  released, so "Nothing was changed" is true for in-process state as well as
+  for the files on disk. The History tab also reopens its events database on
+  the next access.
+- An unreachable storage root found after startup was written to the log
+  twice, once by the path resolver and once again by the Settings tab.
+- The Settings row in Storage Locations could never show its "Unavailable"
+  marker. The Settings root resolves before the Settings tab exists, so the
+  warning it raised was already gone by the time the tab read it. Each row now
+  compares the configured root with the root in use, which works for all four
+  groups.
+
 ## [0.45.0] - 2026-08-11
 
 ### Added
@@ -36,9 +54,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   resolve through the new path layer. A fresh install writes exactly where it
   wrote before.
 - An unreachable storage root — an unplugged drive, an offline share — falls
-  back to the default location, logs a warning, and flags the row in Settings.
-  The configured path takes effect again as soon as the location returns,
-  because the fallback is never written to disk.
+  back to the default location, logs a warning, and marks that group's row in
+  the Settings tab as unavailable. The configured path takes effect again as
+  soon as the location returns, because the fallback is never written to disk.
 
 ## [0.44.1] - 2026-08-04
 

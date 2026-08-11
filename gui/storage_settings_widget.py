@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Set
 
 from PySide6.QtCore import QObject, QStandardPaths, Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -113,7 +114,6 @@ class StorageSettingsWidget(QGroupBox):
         header.setWordWrap(True)
         grid.addWidget(header, 0, 0, 1, 5)
 
-        paths = get_data_paths()
         for index, group in enumerate(Group):
             # Two grid rows per group. The status line needs a row of its own:
             # a status line placed in the path row renders on top of the path,
@@ -154,14 +154,94 @@ class StorageSettingsWidget(QGroupBox):
             grid.addWidget(status_label, status_row, 1, 1, 4)
             status_label.setVisible(False)
 
-        # Surface any root that could not be reached at startup.
+        self.refresh_status()
+
+    # -- unreachable roots -------------------------------------------------
+
+    def _configured_roots(self, paths) -> Dict[str, str]:
+        """Return the ``data_roots`` mapping written in config.json.
+
+        The widget reads the file itself. ``DataPaths`` keeps its copy
+        private, and the live ConfigManager may hold a root this process set
+        after the resolver cached its answer.
+        """
+        config_file = paths.config_file()
+        try:
+            if not config_file.exists():
+                return {}
+            data = json.loads(config_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            logger.exception(
+                "Could not read %s, so the Storage rows cannot show which "
+                "roots are unreachable", config_file,
+            )
+            return {}
+        roots = data.get("data_roots")
+        if not isinstance(roots, dict):
+            return {}
+        return {key: value for key, value in roots.items() if isinstance(value, str)}
+
+    def _unavailable_groups(self, paths) -> Set[Group]:
+        """Return the groups whose configured root could not be reached.
+
+        The resolver's warning buffer cannot answer this. The Settings root
+        resolves inside ``setup_logging``, and that drain empties the buffer
+        long before this widget is built, so the Settings row would never show
+        its marker. Compare the configured root against the resolved root
+        instead. The two differ only when the resolver fell back to the
+        default location.
+        """
+        configured = self._configured_roots(paths)
+        unavailable: Set[Group] = set()
+        for group in Group:
+            raw = configured.get(group.value)
+            if not raw:
+                continue
+            try:
+                if Path(raw).resolve() != paths.root(group).resolve():
+                    unavailable.add(group)
+            except OSError:
+                logger.exception(
+                    "Could not compare the configured %s root %s with the "
+                    "resolved root; marking the row unavailable",
+                    group.value, raw,
+                )
+                unavailable.add(group)
+        return unavailable
+
+    def _report_warnings(self, paths) -> None:
+        """Drain the resolver's buffer without logging a message twice.
+
+        ``core.paths`` keeps every message in its buffer after it hands the
+        message to the logging sink, so this widget can still mark the row.
+        The sink already wrote that message to the log file and to stderr.
+        Log here only when no sink is installed, because the widget is then
+        the one reader the message has.
+        """
+        import core.paths as paths_module
+
+        sink_installed = getattr(paths_module, "_WARNING_SINK", None) is not None
         for message in paths.drain_warnings():
-            logger.warning(message)
-            for group in Group:
-                if f"'{group.value}'" in message:
-                    row = self.rows[group]
-                    row.status_label.setText("⚠ Unavailable — using default location")
-                    row.status_label.setVisible(True)
+            if sink_installed:
+                logger.debug("Storage warning already reported by the sink: %s", message)
+            else:
+                logger.warning(message)
+
+    def refresh_status(self) -> None:
+        """Mark every row whose configured root is unreachable."""
+        paths = get_data_paths()
+        # Resolve every root first. The resolution itself buffers the
+        # warnings, so the drain below must run after it.
+        unavailable = self._unavailable_groups(paths)
+        self._report_warnings(paths)
+
+        for group, row in self.rows.items():
+            if group in unavailable:
+                row.status_label.setText("⚠ Unavailable — using default location")
+                row.status_label.setVisible(True)
+            else:
+                row.status_label.setText("")
+                row.status_label.setVisible(False)
 
     def _path_text(self, group: Group) -> str:
         return str(get_data_paths().root(group))
@@ -288,6 +368,33 @@ class StorageSettingsWidget(QGroupBox):
             return
         closer(group)
 
+    def _restore_open_resources(self, group: Group) -> None:
+        """Ask the main window to take back the handles it released.
+
+        ``pre_move`` releases handles before the copy starts. The copy can
+        fail, the user can cancel, and the user can keep working after a
+        successful move. Each of those paths leaves this process running, so
+        the handles must come back. Without the restore the Midjourney watcher
+        stays off and the video History tab loads nothing for the rest of the
+        session.
+        """
+        window = self.window()
+        restorer = getattr(window, "restore_data_handles", None)
+        if not callable(restorer):
+            logger.warning(
+                "No restore_data_handles hook on %s; the %s handles this "
+                "process released stay released until ImageAI restarts",
+                type(window).__name__, group.value,
+            )
+            return
+        try:
+            restorer(group)
+        except Exception:  # noqa: BLE001 - the app must stay usable
+            logger.exception(
+                "Could not restore the %s handles; restart ImageAI to recover",
+                group.value,
+            )
+
     def _offer_restart(self, group: Group, result) -> None:
         box = QMessageBox(self)
         box.setWindowTitle("Move complete")
@@ -305,6 +412,15 @@ class StorageSettingsWidget(QGroupBox):
 
         if box.clickedButton() is restart:
             self._restart_application()
+            return
+
+        # The user keeps working in this process. Every handle the move
+        # released must come back, or the session stays degraded.
+        logger.info(
+            "The user chose Later after the %s move; restoring the released "
+            "handles", group.value,
+        )
+        self._restore_open_resources(group)
 
     @staticmethod
     def _relaunch_command():
@@ -415,8 +531,12 @@ class StorageSettingsWidget(QGroupBox):
 
         if not result.ok:
             logger.error("Move of %s failed: %s", group.value, result.error)
+            # Restore before the modal box. The box blocks until the user
+            # dismisses it, and the app must be usable the moment it closes.
+            self._restore_open_resources(group)
             QMessageBox.critical(self, "Move failed", result.error)
             self.refresh_sizes()
+            self.refresh_status()
             return
 
         self._update_live_config(group, dest)
@@ -424,5 +544,6 @@ class StorageSettingsWidget(QGroupBox):
         self.rows[group].path_label.setText(str(dest))
         self.rows[group].path_label.setToolTip(str(dest))
         self.refresh_sizes()
+        self.refresh_status()
         self.move_completed.emit(group.value)
         self._offer_restart(group, result)

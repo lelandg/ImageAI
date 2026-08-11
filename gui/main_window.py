@@ -7604,6 +7604,9 @@ For more detailed information, please refer to the full documentation.
         handle this process cannot release is logged at warning level. A
         silent hook hides the cause of a failed move.
 
+        Every release here must be reversible. ``restore_data_handles`` undoes
+        them when the move does not end in a restart.
+
         Args:
             group: the core.paths.Group being moved.
         """
@@ -7696,6 +7699,86 @@ For more detailed information, please refer to the full documentation.
             log.warning(
                 "The active log file stays open during the move. It remains "
                 "in the old location until ImageAI restarts."
+            )
+
+    def restore_data_handles(self, group):
+        """Take back the handles ``close_data_handles`` released.
+
+        ``close_data_handles`` runs before every move. Three paths then leave
+        this process running: the move fails, the user cancels the move, and
+        the user answers "Later" to the restart prompt. Without this method the
+        Midjourney watcher stays off, the video History tab loads nothing, and
+        "Create Restore Point" fails for the rest of the session. Each release
+        therefore has a matching restore here.
+
+        A resource this method cannot rebuild is logged at warning level, so
+        the log names what still needs a restart.
+
+        Args:
+            group: the core.paths.Group whose handles were released.
+        """
+        from core.paths import Group
+
+        log = getattr(self, "logger", None) or logger
+        try:
+            group = group if isinstance(group, Group) else Group(group)
+        except ValueError:
+            log.error("Unknown storage group %r; no handles were restored", group)
+            return
+
+        log.info("Restoring the %s handles this process released", group.value)
+
+        if group is Group.IMAGES:
+            if not getattr(self, "_midjourney_watch_paused", False):
+                return
+            watcher = getattr(self, "midjourney_watcher", None)
+            if watcher is None:
+                log.warning(
+                    "The Midjourney watcher is gone; it stays off until "
+                    "ImageAI restarts"
+                )
+            else:
+                try:
+                    watcher.set_enabled(True)
+                    log.info("Re-enabled the Midjourney watcher after the move")
+                except Exception as exc:
+                    log.warning(
+                        "Could not re-enable the Midjourney watcher: %s. It "
+                        "stays off until ImageAI restarts", exc
+                    )
+            # Clear the flag either way. A second restore must not report a
+            # pause that no longer applies.
+            self._midjourney_watch_paused = False
+
+        elif group is Group.VIDEO:
+            video_tab = getattr(self, "tab_video", None)
+            workspace = None
+            if getattr(self, "_video_tab_loaded", False):
+                workspace = getattr(video_tab, "workspace", None)
+            owners = [video_tab, getattr(video_tab, "history_tab", None), workspace]
+            for owner in owners:
+                if owner is None or getattr(owner, "event_store", None) is not None:
+                    continue
+                rebuild = getattr(owner, "init_event_store", None)
+                if not callable(rebuild):
+                    continue
+                try:
+                    rebuild()
+                    log.info("Rebuilt the event store on %s",
+                             type(owner).__name__)
+                except Exception as exc:
+                    log.warning("Could not rebuild the event store on %s: %s",
+                                type(owner).__name__, exc)
+
+        elif group is Group.MODELS:
+            # The provider cache and the CUDA cache both refill on the next
+            # request, so there is nothing to rebuild here.
+            log.info("Model caches refill on the next request")
+
+        elif group is Group.SETTINGS:
+            log.info(
+                "The log file never closed, so the Settings group has nothing "
+                "to restore"
             )
 
     def closeEvent(self, event):

@@ -377,17 +377,421 @@ def test_main_window_implements_close_data_handles(qapp):
     MainWindow.close_data_handles(stub, Group.MODELS)
 
 
-def test_unreleasable_resource_is_logged_at_warning(qapp, caplog):
-    """A handle this process keeps open must be named in the log."""
+def test_unreleasable_settings_log_file_is_named(qapp, caplog):
+    """The Settings branch must name the log file it cannot close."""
     import types
 
     from gui.main_window import MainWindow
 
-    stub = types.SimpleNamespace()
     with caplog.at_level(logging.WARNING):
-        MainWindow.close_data_handles(stub, Group.SETTINGS)
+        MainWindow.close_data_handles(types.SimpleNamespace(), Group.SETTINGS)
 
-    assert any(record.levelno >= logging.WARNING for record in caplog.records)
+    warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("log file" in message for message in warnings), warnings
+
+
+def test_unreleasable_torch_weights_are_named(qapp, caplog, monkeypatch):
+    """A loaded PyTorch keeps weight files mapped; the log must say so."""
+    import sys
+    import types
+
+    from gui.main_window import MainWindow
+
+    fake_torch = types.SimpleNamespace(
+        cuda=types.SimpleNamespace(is_available=lambda: False)
+    )
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+
+    with caplog.at_level(logging.WARNING):
+        MainWindow.close_data_handles(types.SimpleNamespace(), Group.MODELS)
+
+    warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("PyTorch" in message for message in warnings), warnings
+
+
+def test_watcher_that_refuses_to_pause_is_named(qapp, caplog):
+    """A handle this process cannot release must name the owner."""
+    import types
+
+    from gui.main_window import MainWindow
+
+    class _StubbornWatcher:
+        enabled = True
+
+        def set_enabled(self, value):
+            raise RuntimeError("watcher busy")
+
+    stub = types.SimpleNamespace(midjourney_watcher=_StubbornWatcher())
+    with caplog.at_level(logging.WARNING):
+        MainWindow.close_data_handles(stub, Group.IMAGES)
+
+    warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("Midjourney watcher" in message for message in warnings), warnings
+
+
+def test_unreleasable_video_event_store_is_named(qapp, caplog):
+    """An event store that refuses to drop must be named in the log."""
+    import types
+
+    from gui.main_window import MainWindow
+
+    class _StuckOwner:
+        def __init__(self):
+            object.__setattr__(self, "event_store", object())
+
+        def __setattr__(self, name, value):
+            raise RuntimeError("attribute is read only")
+
+    stub = types.SimpleNamespace(
+        _video_tab_loaded=True,
+        tab_video=types.SimpleNamespace(
+            event_store=None, history_tab=_StuckOwner(), workspace=None
+        ),
+    )
+    with caplog.at_level(logging.WARNING):
+        MainWindow.close_data_handles(stub, Group.VIDEO)
+
+    warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+    assert any("event store" in message for message in warnings), warnings
+
+
+# --- releasing handles must be reversible ---------------------------------
+
+
+class _FakeWatcher:
+    """Stand-in for the Midjourney download watcher."""
+
+    def __init__(self, enabled=True):
+        self.enabled = bool(enabled)
+
+    def set_enabled(self, value):
+        self.enabled = bool(value)
+
+
+class _FakeHistoryTab:
+    """Stand-in for gui.video.history_tab.HistoryTab."""
+
+    def __init__(self):
+        self.event_store = object()
+        self.rebuilds = 0
+
+    def init_event_store(self):
+        self.rebuilds += 1
+        self.event_store = object()
+
+
+def _window_stub():
+    """A main-window stand-in that owns every releasable resource."""
+    import types
+
+    history_tab = _FakeHistoryTab()
+    workspace = types.SimpleNamespace(current_project=None)
+    video_tab = types.SimpleNamespace(
+        event_store=None, history_tab=history_tab, workspace=workspace
+    )
+    return types.SimpleNamespace(
+        midjourney_watcher=_FakeWatcher(),
+        tab_video=video_tab,
+        _video_tab_loaded=True,
+    )
+
+
+def test_main_window_implements_restore_data_handles(qapp):
+    from gui.main_window import MainWindow
+
+    assert callable(getattr(MainWindow, "restore_data_handles", None))
+
+
+def test_restore_re_enables_the_midjourney_watcher(qapp):
+    """A failed move must not leave the watcher off for the session."""
+    from gui.main_window import MainWindow
+
+    stub = _window_stub()
+    MainWindow.close_data_handles(stub, Group.IMAGES)
+    assert stub.midjourney_watcher.enabled is False
+
+    MainWindow.restore_data_handles(stub, Group.IMAGES)
+
+    assert stub.midjourney_watcher.enabled is True
+    assert getattr(stub, "_midjourney_watch_paused", False) is False
+
+
+def test_restore_rebuilds_the_video_event_store(qapp):
+    """The History tab must load events again after a failed move."""
+    from gui.main_window import MainWindow
+
+    stub = _window_stub()
+    MainWindow.close_data_handles(stub, Group.VIDEO)
+    assert stub.tab_video.history_tab.event_store is None
+
+    MainWindow.restore_data_handles(stub, Group.VIDEO)
+
+    assert stub.tab_video.history_tab.event_store is not None
+    assert stub.tab_video.history_tab.rebuilds == 1
+
+
+def test_restore_of_an_unknown_group_is_logged(qapp, caplog):
+    from gui.main_window import MainWindow
+
+    with caplog.at_level(logging.ERROR):
+        MainWindow.restore_data_handles(_window_stub(), "not-a-group")
+
+    assert any(r.levelno >= logging.ERROR for r in caplog.records)
+
+
+def test_failed_move_restores_the_released_handles(hosted_widget, tmp_path, monkeypatch):
+    """A move that fails must leave the app as usable as it was."""
+    from core.data_migration import MoveResult
+
+    widget, host = hosted_widget
+    _seed_images(tmp_path)
+    released, restored = [], []
+    host.close_data_handles = released.append
+    host.restore_data_handles = restored.append
+
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QFileDialog.getExistingDirectory",
+        lambda *a, **k: str(tmp_path / "chosen"),
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._confirm", lambda *a, **k: True
+    )
+
+    def fake_run(self, group, dest):
+        self._close_open_resources(group)
+        return MoveResult(ok=False, error="Copy failed: No space left on device.")
+
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._run_with_progress", fake_run
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.critical", lambda *a, **k: None
+    )
+
+    widget._on_move(Group.IMAGES)
+
+    assert released == [Group.IMAGES]
+    assert restored == [Group.IMAGES]
+
+
+def test_cancelled_move_restores_the_released_handles(hosted_widget, tmp_path, monkeypatch):
+    """"Nothing was changed" must also be true for in-process state."""
+    from core.data_migration import MoveResult
+
+    widget, host = hosted_widget
+    _seed_images(tmp_path)
+    released, restored = [], []
+    host.close_data_handles = released.append
+    host.restore_data_handles = restored.append
+
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QFileDialog.getExistingDirectory",
+        lambda *a, **k: str(tmp_path / "chosen"),
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._confirm", lambda *a, **k: True
+    )
+
+    def fake_run(self, group, dest):
+        self._close_open_resources(group)
+        return MoveResult(ok=False, error="Move cancelled. Nothing was changed.")
+
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._run_with_progress", fake_run
+    )
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.QMessageBox.critical", lambda *a, **k: None
+    )
+
+    widget._on_move(Group.IMAGES)
+
+    assert released == [Group.IMAGES]
+    assert restored == [Group.IMAGES]
+
+
+def _click_restart_button(monkeypatch, label):
+    """Drive the restart prompt as if the user pressed one named button."""
+    from PySide6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(QMessageBox, "exec", lambda self: 0)
+    monkeypatch.setattr(
+        QMessageBox,
+        "clickedButton",
+        lambda self: next(
+            (b for b in self.buttons() if b.text().replace("&", "") == label), None
+        ),
+    )
+
+
+def test_later_choice_restores_the_released_handles(hosted_widget, monkeypatch):
+    """A successful move the user does not restart after must still recover."""
+    from core.data_migration import MoveResult
+
+    widget, host = hosted_widget
+    restored = []
+    host.restore_data_handles = restored.append
+    _click_restart_button(monkeypatch, "Later")
+
+    widget._offer_restart(Group.VIDEO, MoveResult(ok=True, files_moved=1, bytes_moved=16))
+
+    assert restored == [Group.VIDEO]
+
+
+def test_restart_choice_does_not_restore_the_handles(hosted_widget, monkeypatch):
+    """A restart rebuilds everything, so no restore runs before it."""
+    from core.data_migration import MoveResult
+
+    widget, host = hosted_widget
+    restored, restarts = [], []
+    host.restore_data_handles = restored.append
+    monkeypatch.setattr(
+        "gui.storage_settings_widget.StorageSettingsWidget._restart_application",
+        lambda self: restarts.append(1),
+    )
+    _click_restart_button(monkeypatch, "Restart Now")
+
+    widget._offer_restart(Group.VIDEO, MoveResult(ok=True, files_moved=1, bytes_moved=16))
+
+    assert restarts == [1]
+    assert restored == []
+
+
+def test_missing_restore_hook_is_logged(hosted_widget, caplog):
+    """A window without the hook must say so; silence hides the defect."""
+    widget, host = hosted_widget
+    assert not hasattr(host, "restore_data_handles")
+
+    with caplog.at_level(logging.WARNING, logger="gui.storage_settings_widget"):
+        widget._restore_open_resources(Group.VIDEO)
+
+    assert any("restore_data_handles" in r.message for r in caplog.records)
+
+
+def test_restore_hook_failure_is_logged(hosted_widget, caplog):
+    widget, host = hosted_widget
+
+    def boom(group):
+        raise RuntimeError("restore failed")
+
+    host.restore_data_handles = boom
+
+    with caplog.at_level(logging.ERROR, logger="gui.storage_settings_widget"):
+        widget._restore_open_resources(Group.VIDEO)
+
+    assert any(r.levelno >= logging.ERROR for r in caplog.records)
+
+
+def test_history_tab_reopens_a_released_event_store(qapp, tmp_path, monkeypatch):
+    """The History tab must rebuild its store on the next access."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(json.dumps({}), encoding="utf-8")
+    monkeypatch.setattr(paths_mod, "_INSTANCE", DataPaths(config_path=cfg))
+
+    from gui.video.history_tab import HistoryTab
+
+    tab = HistoryTab()
+    try:
+        assert tab.event_store is not None
+        tab.event_store = None  # what close_data_handles does before a move
+
+        assert tab.ensure_event_store() is not None
+        assert tab.event_store is not None
+    finally:
+        tab.deleteLater()
+
+
+# --- unreachable-root reporting -------------------------------------------
+
+
+def test_unreachable_root_warning_is_not_logged_twice(tmp_path, monkeypatch, qapp, caplog):
+    """The logging sink already wrote it; the widget must not repeat it."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(
+        json.dumps({"data_roots": {"images": str(tmp_path / "gone")}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(paths_mod, "_INSTANCE", DataPaths(config_path=cfg))
+    _sandbox_sources(monkeypatch)
+
+    delivered = []
+    monkeypatch.setattr(paths_mod, "_WARNING_SINK", delivered.append)
+
+    from gui.storage_settings_widget import StorageSettingsWidget
+
+    with caplog.at_level(logging.WARNING, logger="gui.storage_settings_widget"):
+        widget = StorageSettingsWidget()
+    try:
+        assert sum("images" in m for m in delivered) == 1, delivered
+        repeats = [r.message for r in caplog.records if "unavailable" in r.message.lower()]
+        assert repeats == [], repeats
+        assert "Unavailable" in widget.rows[Group.IMAGES].status_label.text()
+    finally:
+        _drain_threads(widget)
+
+
+def test_unreachable_root_is_logged_when_no_sink_listens(tmp_path, monkeypatch, qapp, caplog):
+    """Without a sink the widget is the only reader; it must log."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(
+        json.dumps({"data_roots": {"images": str(tmp_path / "gone")}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(paths_mod, "_INSTANCE", DataPaths(config_path=cfg))
+    _sandbox_sources(monkeypatch)
+    monkeypatch.setattr(paths_mod, "_WARNING_SINK", None)
+
+    from gui.storage_settings_widget import StorageSettingsWidget
+
+    with caplog.at_level(logging.WARNING, logger="gui.storage_settings_widget"):
+        widget = StorageSettingsWidget()
+    try:
+        assert any("unavailable" in r.message.lower() for r in caplog.records)
+    finally:
+        _drain_threads(widget)
+
+
+def test_unreachable_settings_root_flags_its_row(tmp_path, monkeypatch, qapp):
+    """The Settings root resolves before the widget exists; the row must know."""
+    cfg = tmp_path / "config.json"
+    cfg.write_text(
+        json.dumps({"data_roots": {"settings": str(tmp_path / "offline")}}),
+        encoding="utf-8",
+    )
+    paths = DataPaths(config_path=cfg)
+    monkeypatch.setattr(paths_mod, "_INSTANCE", paths)
+    _sandbox_sources(monkeypatch)
+
+    # setup_logging resolves the Settings root and empties the buffer long
+    # before the Settings tab is built. Reproduce that here.
+    paths.root(Group.SETTINGS)
+    assert paths.drain_warnings()
+
+    from gui.storage_settings_widget import StorageSettingsWidget
+
+    widget = StorageSettingsWidget()
+    try:
+        assert "Unavailable" in widget.rows[Group.SETTINGS].status_label.text()
+    finally:
+        _drain_threads(widget)
+
+
+def test_reachable_roots_carry_no_marker(tmp_path, monkeypatch, qapp):
+    good = tmp_path / "good"
+    good.mkdir()
+    cfg = tmp_path / "config.json"
+    cfg.write_text(
+        json.dumps({"data_roots": {"images": str(good)}}), encoding="utf-8"
+    )
+    monkeypatch.setattr(paths_mod, "_INSTANCE", DataPaths(config_path=cfg))
+    _sandbox_sources(monkeypatch)
+
+    from gui.storage_settings_widget import StorageSettingsWidget
+
+    widget = StorageSettingsWidget()
+    try:
+        for group, row in widget.rows.items():
+            assert row.status_label.text() == "", group
+            assert row.status_label.isVisible() is False, group
+    finally:
+        _drain_threads(widget)
 
 
 def test_status_label_does_not_share_a_cell_with_the_path(widget):
