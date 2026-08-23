@@ -714,24 +714,6 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_help, "❓ Help")
         self.tabs.addTab(self.tab_history, "📜 History")  # Always add history tab
 
-        # Batch Jobs tab — lists OpenAI Batch API submissions from the ledger.
-        from PySide6.QtWidgets import QTableWidget, QPushButton as _PB, QVBoxLayout as _VBL, QWidget as _W, QHBoxLayout as _HBL
-        self.tab_batch_jobs = _W()
-        _bjl = _VBL(self.tab_batch_jobs)
-        self.batch_jobs_table = QTableWidget(0, 6)
-        self.batch_jobs_table.setHorizontalHeaderLabels([
-            "Job ID", "Model", "Submitted", "Requests", "Status", "Actions",
-        ])
-        self.batch_jobs_table.horizontalHeader().setStretchLastSection(True)
-        _bjl.addWidget(self.batch_jobs_table)
-        _ctrls = _HBL()
-        self.btn_batch_refresh = _PB("Refresh")
-        self.btn_batch_refresh.clicked.connect(self._refresh_batch_jobs_subtab)
-        _ctrls.addWidget(self.btn_batch_refresh)
-        _ctrls.addStretch()
-        _bjl.addLayout(_ctrls)
-        self.tabs.addTab(self.tab_batch_jobs, "🗂️ Batch Jobs")
-
         self._init_generate_tab()
         self._init_templates_tab()
         self._init_settings_tab()
@@ -850,17 +832,6 @@ class MainWindow(QMainWindow):
         act_report_error = QAction("How to &Report Errors", self)
         act_report_error.triggered.connect(self._show_error_reporting)
         help_menu.addAction(act_report_error)
-
-        # --- Generate menu ---
-        # 'Ge&nerate' (Alt+N): '&Generate' would collide with the Generate button's Alt+G
-        gen_menu = mb.addMenu("Ge&nerate")
-        self.action_submit_batch = QAction("Submit as Batch Job…", self)
-        self.action_submit_batch.setToolTip(
-            "Send the current prompt to the OpenAI Batch API "
-            "(50% discount, async — results in up to 24h)."
-        )
-        self.action_submit_batch.triggered.connect(self._submit_current_as_batch)
-        gen_menu.addAction(self.action_submit_batch)
 
     def _init_generate_tab(self):
         """Initialize the Generate tab."""
@@ -6827,92 +6798,6 @@ For more detailed information, please refer to the full documentation.
             except Exception as e:
                 logger.error(f"Error saving image: {e}")
                 QMessageBox.critical(self, APP_NAME, f"Error saving image:\n{e}")
-
-    def _submit_current_as_batch(self):
-        """Spawn a small dialog confirming Batch submission, then submit."""
-        from PySide6.QtWidgets import QMessageBox
-        if self.current_provider.lower() != "openai":
-            QMessageBox.information(self, "Batch", "Batch API is only available for the OpenAI provider.")
-            return
-        prompt = self.prompt_text.toPlainText().strip() if hasattr(self, 'prompt_text') else ""
-        if not prompt:
-            QMessageBox.information(self, "Batch", "Enter a prompt first.")
-            return
-        model = self.model_combo.currentData() or self.model_combo.currentText()
-        n = int(getattr(self, 'num_images_spin', None).value()) if hasattr(self, 'num_images_spin') else 1
-        confirm = QMessageBox.question(
-            self,
-            "Submit Batch Job",
-            f"Submit 1 batch request:\n  model: {model}\n  prompt: {prompt[:120]}…\n  n: {n}\n\n"
-            "Batch jobs return within 24 hours at 50% discount. Continue?",
-            QMessageBox.Ok | QMessageBox.Cancel,
-        )
-        if confirm != QMessageBox.Ok:
-            return
-        try:
-            from providers import get_provider
-            provider_instance = get_provider("openai", {"api_key": self.config.get_api_key("openai")})
-            req_body = {"model": model, "prompt": prompt, "n": n}
-            if getattr(self, 'output_format_row', None) is not None and self.output_format_row.isVisible():
-                req_body.update(self.output_format_row.get_settings())
-            if getattr(self, 'moderation_checkbox', None) is not None and self.moderation_checkbox.isVisible():
-                req_body.update(self.moderation_checkbox.get_settings())
-            if hasattr(self, 'quality_selector') and self.quality_selector:
-                qs = self.quality_selector.get_settings()
-                if qs.get("quality") in {"low", "medium", "high", "auto"}:
-                    req_body["quality"] = qs["quality"]
-            if hasattr(self, 'resolution_selector') and self.resolution_selector:
-                cs = getattr(self.resolution_selector, "get_custom_size", lambda: None)()
-                if cs:
-                    req_body["size"] = cs
-            job_id = provider_instance.submit_batch_job([req_body])
-            QMessageBox.information(self, "Batch", f"Submitted job:\n{job_id}\n\nView under the Batch Jobs tab.")
-            if hasattr(self, '_refresh_batch_jobs_subtab'):
-                self._refresh_batch_jobs_subtab()
-        except Exception as e:
-            QMessageBox.warning(self, "Batch", f"Submission failed:\n{e}")
-
-    def _refresh_batch_jobs_subtab(self):
-        """Populate the Batch Jobs table from the batch-jobs ledger."""
-        from PySide6.QtWidgets import QTableWidgetItem, QPushButton
-        from core.constants import batch_jobs_path
-        import json
-
-        ledger = batch_jobs_path()
-        entries = []
-        if ledger.exists():
-            try:
-                entries = json.loads(ledger.read_text(encoding="utf-8"))
-                if not isinstance(entries, list):
-                    entries = []
-            except (OSError, IOError, ValueError):
-                entries = []
-
-        self.batch_jobs_table.setRowCount(len(entries))
-        for row, entry in enumerate(entries):
-            self.batch_jobs_table.setItem(row, 0, QTableWidgetItem(entry.get("job_id", "")))
-            self.batch_jobs_table.setItem(row, 1, QTableWidgetItem(entry.get("model", "")))
-            self.batch_jobs_table.setItem(row, 2, QTableWidgetItem(entry.get("created_at", "")))
-            self.batch_jobs_table.setItem(row, 3, QTableWidgetItem(str(entry.get("request_count", ""))))
-            self.batch_jobs_table.setItem(row, 4, QTableWidgetItem(entry.get("status", "submitted")))
-
-            btn = QPushButton("Check / Download")
-            jid = entry.get("job_id", "")
-            btn.clicked.connect(lambda _checked=False, j=jid: self._check_batch_job_action(j))
-            self.batch_jobs_table.setCellWidget(row, 5, btn)
-
-    def _check_batch_job_action(self, job_id: str):
-        from PySide6.QtWidgets import QMessageBox
-        from providers import get_provider
-        try:
-            provider_instance = get_provider("openai", {"api_key": self.config.get_api_key("openai")})
-            images_dir = self.config.get_images_dir()
-            info = provider_instance.check_batch_job(job_id, output_dir=images_dir)
-            msg = f"Job: {info['job_id']}\nStatus: {info['status']}\nDownloaded: {len(info.get('downloaded', []))} file(s)"
-            QMessageBox.information(self, "Batch Job", msg)
-            self._refresh_batch_jobs_subtab()
-        except Exception as e:
-            QMessageBox.warning(self, "Batch Job", f"Check failed:\n{e}")
 
     def _copy_image_to_clipboard(self):
         """Copy current image to clipboard."""
