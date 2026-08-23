@@ -154,6 +154,13 @@ For context, so none of these is re-litigated:
 - A failed or cancelled move leaving the Midjourney watcher and the video event
   stores dead for the rest of the session.
 - The test suite writing debug images into the developer's real user directory.
+- Video projects losing their media after a move. `project.iaproj.json` stores
+  absolute media paths; the move relocated the files but not the paths, so the
+  GUI showed lyrics and settings without images or clips. `VideoProject.load`
+  now re-anchors every stored media path against the directory the project file
+  sits in (`core/video/project.py`, `tests/video/test_project_reanchor.py`).
+  The heal is lazy and idempotent, so projects broken by an earlier move
+  recover on their next open.
 
 ## Suggested order of work
 
