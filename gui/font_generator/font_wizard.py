@@ -43,7 +43,6 @@ from core.font_generator import (
     PUNCTUATION,
     FONTTOOLS_AVAILABLE,
 )
-from core.constants import get_user_data_dir
 
 logger = logging.getLogger(__name__)
 
@@ -2242,8 +2241,9 @@ class ExportPage(QWizardPage):
         if last_dir:
             default_path = str(Path(last_dir) / default_name)
         else:
-            # Default to Fonts subdirectory in user data folder
-            fonts_dir = get_user_data_dir() / "Fonts"
+            # Default to the Fonts subdirectory of the Images data root
+            from core.paths import Group, get_data_paths
+            fonts_dir = get_data_paths().root(Group.IMAGES) / "Fonts"
             fonts_dir.mkdir(parents=True, exist_ok=True)
             default_path = str(fonts_dir / default_name)
 

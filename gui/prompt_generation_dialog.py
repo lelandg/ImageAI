@@ -4,7 +4,6 @@ import json
 import logging
 from typing import List, Dict, Optional
 from datetime import datetime
-from pathlib import Path
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
@@ -23,6 +22,7 @@ from .dialog_utils import OperationGuardMixin, guard_operation
 from .history_widget import DialogHistoryWidget
 from core.discord_rpc import discord_rpc, ActivityState
 from core.llm_params import validate_params
+from core.paths import get_data_paths
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -1459,7 +1459,7 @@ class PromptGenerationDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
                 "reasoning_effort": self.reasoning_combo.currentText(),
                 "verbosity": self.verbosity_combo.currentText()
             }
-            session_file = Path(self.config.config_dir) / "prompt_gen_session.json"
+            session_file = get_data_paths().session_file("prompt_gen")
             try:
                 with open(session_file, 'w') as f:
                     json.dump(session, f, indent=2)
@@ -1469,7 +1469,7 @@ class PromptGenerationDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
     def load_last_session(self) -> Dict:
         """Load the last session state."""
         if self.config:
-            session_file = Path(self.config.config_dir) / "prompt_gen_session.json"
+            session_file = get_data_paths().session_file("prompt_gen")
             if session_file.exists():
                 try:
                     with open(session_file, 'r') as f:

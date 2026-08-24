@@ -13,7 +13,7 @@ from typing import Dict, List, Optional, Tuple
 import numpy as np
 from PIL import Image
 
-from core.constants import get_user_data_dir
+from core.paths import get_data_paths
 from .models import (
     SegmentationResult,
     FacialRegion,
@@ -55,7 +55,7 @@ class FaceVariantGenerator:
             provider: AI provider to use ("google" or "openai")
             model: Specific model to use (defaults to provider's best option)
         """
-        self.cache_dir = cache_dir or (get_user_data_dir() / "cache" / "ai_visemes")
+        self.cache_dir = cache_dir or get_data_paths().model_cache("ai_visemes")
         self.quality_threshold = quality_threshold
         self.provider = provider
         self.model = model

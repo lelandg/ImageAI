@@ -7,6 +7,114 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-08-24
+
+### Removed
+- Remove the broken Batch Jobs tab and the empty Generate menu from the GUI. Batch work now runs through the CLI (`--layout-fill`, batch prompts). The `imageai-cli` skill docs no longer list the removed GUI entry points.
+
+### Fixed
+- Re-anchor video project media paths after a storage move, so existing projects open with their clips and images intact from the new root.
+- Normalize screenshot asset paths in project files, so screenshots resolve on both Windows and WSL.
+
+### Fixed
+- A storage move that failed, that the user cancelled, or that the user
+  answered "Later" to left the running app degraded. The move releases open
+  file handles before it starts, and nothing took them back: the Midjourney
+  watcher stayed off, the video History tab loaded nothing, and "Create
+  Restore Point" failed with a raw `NoneType` message for the rest of the
+  session. Every path that keeps this process running now restores what it
+  released, so "Nothing was changed" is true for in-process state as well as
+  for the files on disk. The History tab also reopens its events database on
+  the next access.
+- An unreachable storage root found after startup was written to the log
+  twice, once by the path resolver and once again by the Settings tab.
+- The Settings row in Storage Locations could never show its "Unavailable"
+  marker. The Settings root resolves before the Settings tab exists, so the
+  warning it raised was already gone by the time the tab read it. Each row now
+  compares the configured root with the root in use, which works for all four
+  groups.
+- A storage move that ended in an unexpected error — a destination that was
+  unplugged after the check, a progress dialog Qt tore down mid-copy — left the
+  released file handles released, showed no message, and wrote the failure only
+  to the crash log. The move now reports the error in a dialog and takes the
+  handles back, so the app stays usable.
+- The confirmation dialog promised a copy and a verification for every move.
+  A move within one drive renames the folders instead, which copies nothing and
+  verifies nothing. The dialog now describes both moves, so the promise matches
+  the work that runs. It also no longer promises to "verify every file": the
+  copy path checks that every file arrived, which is not a check of the bytes
+  in each file, and the sources are deleted after it passes.
+- Models downloaded from Settings → model browser went to the shared
+  HuggingFace cache in your home folder, whatever the Models location said.
+  That cache stays where it is on purpose, because other HuggingFace tools read
+  it, so every Models move left those downloads behind. The model browser now
+  downloads under the Models root, and a guard test fails the build if any file
+  builds a HuggingFace cache path by hand again.
+- A storage move that finished, and then hit an error while the Settings tab
+  updated itself, was reported as "The move stopped with an unexpected error.
+  Check both folders before you try the move again." By then `config.json` held
+  the new location and the originals were gone, so the advice would have moved
+  the data out of the folder it had just reached. A finished move now says so,
+  names the new folder, and asks for a restart.
+- A group whose folder could not be reached — an unplugged drive, an offline
+  share — still offered its Move button. The move would have run from the
+  default location and written the new folder over the recorded one, which
+  erases the only record of where the offline data is. The button is now
+  disabled for that group, and it explains what to reconnect.
+- A move that could not delete an original folder still reported "Move
+  complete". Windows refuses to delete a file this process holds open, so a
+  second copy of the data stayed on the old drive with nothing to point at it.
+  The completion message now names every folder the move left behind.
+- A `config.json` that could not be read, and a `config.json` that could not be
+  written, were both silent. Startup quarantines an unreadable file, which
+  takes the stored API keys and the recorded storage locations with it, and a
+  failed save drops every setting change of the session. ImageAI now reports
+  each problem once, and names the preserved copy.
+
+## [0.45.0] - 2026-08-11
+
+### Added
+- **Configurable storage locations.** Four Move buttons in Settings relocate
+  Images, Video, Models, and Settings data to any folder, so a large model or
+  video library no longer has to sit on the system drive. Each row shows the
+  current folder and its measured size, measured off the UI thread. A move
+  within one drive renames the folders and finishes at once. A move to another
+  drive copies the data, checks that every file arrived, writes the new
+  location to `config.json`, and removes the original only after that check
+  passes. `config.json` itself
+  never moves — it is the anchor that records where everything else lives. The
+  machine-wide HuggingFace cache in your home folder never moves either. Other
+  HuggingFace tools read that cache, and a move makes them download every model
+  again.
+- A single path resolver (`core/paths.py`) now owns every data location.
+  `get_data_paths()` returns the resolver, and a guard test fails the build if
+  any module builds a data path by hand again.
+
+### Fixed
+- The Google provider wrote its debug dumps to a hardcoded developer home
+  directory, so on every other machine the dumps went to a path that did not
+  exist.
+- MuseTalk resolved its install directory with its own platform rules: it
+  ignored `%APPDATA%` on Windows and disagreed with every other subsystem on
+  Linux. It now uses the shared Models location.
+
+### Changed
+- The log directory, ImageAI's own HuggingFace download folder, video projects
+  and caches, style and layout data, history and session files, and the
+  batch-job ledger all resolve through the new path layer. A fresh install
+  writes exactly where it wrote before.
+- An unreachable storage root — an unplugged drive, an offline share — falls
+  back to the default location, logs a warning, and marks that group's row in
+  the Settings tab as unavailable. The configured path takes effect again as
+  soon as the location returns, because the fallback is never written to disk.
+
+## [0.44.1] - 2026-08-04
+
+### Fixed
+- CLI `--size` now reaches the Google provider: `--size 2160x3840` with Nano Banana Pro selects the 4K tier and the right aspect ratio instead of silently generating a 1K image. The GUI was unaffected.
+- `edit_image` (CLI `--reference` path) on Google now honors sizing via `image_config` (aspect ratio, and the 1K/2K/4K tier on Nano Banana Pro); without an explicit size it keeps following the input image as before.
+- The CLI only forwards `--size`/`--custom-size` when explicitly given, so each provider's own default resolution wins on unsized runs.
+
 ## [0.44.0] - 2026-08-03
 
 ### Added

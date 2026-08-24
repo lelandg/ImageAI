@@ -38,6 +38,40 @@ except ImportError:
     REFERENCE_MANAGER_AVAILABLE = False
 
 
+def _reanchored(path: Optional[Path], project_dir: Optional[Path]) -> Optional[Path]:
+    """Return ``path`` pointed at ``project_dir`` when the stored copy is gone.
+
+    Project files record absolute media paths. A storage move relocates the
+    whole project folder, so those paths keep naming the old root. When the
+    stored path is missing, rebuild its tail under the current project
+    directory and use that only if the file is really there. A path this
+    cannot resolve is returned unchanged, so no information is destroyed.
+    """
+    if path is None or project_dir is None:
+        return path
+    try:
+        if path.exists():
+            return path
+    except OSError:
+        return path
+
+    parts = path.parts
+    # The project folder name (name_timestamp) is the stable anchor. Match it
+    # first; fall back to the tail after video_projects/<old_dir_name>/ so a
+    # renamed project folder still heals.
+    for index, part in enumerate(parts):
+        if part == project_dir.name and index + 1 < len(parts):
+            candidate = project_dir.joinpath(*parts[index + 1:])
+            if candidate.exists():
+                return candidate
+    for index, part in enumerate(parts):
+        if part == "video_projects" and index + 2 < len(parts):
+            candidate = project_dir.joinpath(*parts[index + 2:])
+            if candidate.exists():
+                return candidate
+    return path
+
+
 class VideoProvider(Enum):
     """Available video generation providers"""
     VEO = "veo"
@@ -818,8 +852,66 @@ class VideoProject:
 
         project = cls.from_dict(data)
         project.project_dir = path.parent
+        healed = project.reanchor_media_paths()
+        if healed:
+            logger.info(
+                f"Re-anchored {healed} media path(s) in '{project.name}' to "
+                f"{project.project_dir} (project was moved since last save)"
+            )
 
         return project
+
+    def reanchor_media_paths(self) -> int:
+        """Point stored media paths at the current project directory.
+
+        Returns the number of paths that were re-anchored. Paths that still
+        exist, and paths with no counterpart under the new directory, are
+        left untouched.
+        """
+        count = 0
+
+        def fix(value: Optional[Path]) -> Optional[Path]:
+            nonlocal count
+            new = _reanchored(value, self.project_dir)
+            if new is not value:
+                count += 1
+            return new
+
+        def fix_required(value: Path) -> Path:
+            new = fix(value)
+            return new if new is not None else value
+
+        self.midi_file_path = fix(self.midi_file_path)
+        self.suno_package_path = fix(self.suno_package_path)
+        self.export_path = fix(self.export_path)
+        for track in self.audio_tracks:
+            track.file_path = fix(track.file_path)
+        self.karaoke_generated_files = {
+            key: fix_required(value)
+            for key, value in self.karaoke_generated_files.items()
+        }
+        for ref in self.global_reference_images:
+            ref.path = fix_required(ref.path)
+        for frame in self.extracted_frames:
+            for key in ("path", "video_source"):
+                stored = frame.get(key)
+                if stored:
+                    frame[key] = str(fix_required(Path(stored)))
+
+        for scene in self.scenes:
+            scene.approved_image = fix(scene.approved_image)
+            scene.video_clip = fix(scene.video_clip)
+            scene.first_frame = fix(scene.first_frame)
+            scene.last_frame = fix(scene.last_frame)
+            scene.end_frame = fix(scene.end_frame)
+            for variant in scene.images:
+                variant.path = fix_required(variant.path)
+            for variant in scene.end_frame_images:
+                variant.path = fix_required(variant.path)
+            for ref in scene.reference_images:
+                ref.path = fix_required(ref.path)
+
+        return count
     
     def add_scene(self, source: str, prompt: str = "", duration: float = 8.0) -> Scene:
         """Add a new scene to the project"""

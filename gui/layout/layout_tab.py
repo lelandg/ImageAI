@@ -342,10 +342,12 @@ class LayoutTab(QWidget):
 
     # --- session persistence (reload last layout on startup) ---
     def _session_path(self) -> Optional[Path]:
-        base = getattr(self.config, "config_dir", None) if self.config else None
-        if not base:
+        # Session persistence requires a configured application. A stub config
+        # without a config directory means the tab runs without persistence.
+        if not (getattr(self.config, "config_dir", None) if self.config else None):
             return None
-        return Path(base) / "layout" / "last_session.iaiproj.json"
+        from core.paths import get_data_paths
+        return get_data_paths().layout() / "last_session.iaiproj.json"
 
     def _restore_session_or_new(self):
         path = self._session_path()
@@ -929,7 +931,8 @@ class LayoutTab(QWidget):
         stem = Path(path).stem
         base = getattr(self.config, "config_dir", None) if self.config else None
         if base:
-            return Path(base) / "layout" / "bundles" / stem
+            from core.paths import get_data_paths
+            return get_data_paths().layout() / "bundles" / stem
         return Path(path).parent / f"{stem}_files"
 
     def export_bundle_to(self, path: str):

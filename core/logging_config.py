@@ -14,6 +14,35 @@ import shutil
 import warnings
 
 
+def _report_storage_warnings(root_logger, data_paths, set_warning_sink):
+    """Route storage-location warnings to the log file and to stderr.
+
+    ``core.paths`` resolves the Settings root before this logger exists, so it
+    buffers that warning. This function drains the buffer first. It then
+    installs itself as the sink for later warnings. The Images, Video and
+    Models roots resolve after startup, and a CLI run has no other reader for
+    the buffer, so without the sink the user would get a silent fallback.
+
+    Args:
+        root_logger: The configured root logger.
+        data_paths: The DataPaths singleton that holds the buffer.
+        set_warning_sink: ``core.paths.set_warning_sink``.
+    """
+    for message in data_paths.drain_warnings():
+        root_logger.warning(message)
+
+    def _emit(message):
+        # The root logger holds a stderr console handler at WARNING level and
+        # the file handler, so one call reaches both destinations.
+        try:
+            root_logger.warning(message)
+        except Exception:
+            # Never let a logging failure stop path resolution.
+            print(f"WARNING - {message}", file=sys.stderr)
+
+    set_warning_sink(_emit)
+
+
 def setup_logging(log_level=logging.INFO, log_to_file=True):
     """
     Set up comprehensive logging for the entire application.
@@ -25,18 +54,14 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
     Returns:
         Path to log file if logging to file, None otherwise
     """
-    # Determine log directory based on platform
-    system = platform.system()
-    if system == "Windows":
-        import os
-        log_dir = Path(os.environ.get('APPDATA', '')) / 'ImageAI' / 'logs'
-    elif system == "Darwin":  # macOS
-        log_dir = Path.home() / 'Library' / 'Application Support' / 'ImageAI' / 'logs'
-    else:  # Linux
-        log_dir = Path.home() / '.config' / 'ImageAI' / 'logs'
-    
+    # Resolve the log directory through the single path resolver. This import
+    # is safe here: core.paths deliberately has no logging dependency.
+    from core.paths import get_data_paths, set_warning_sink
+
+    data_paths = get_data_paths()
+    log_dir = data_paths.logs()
     log_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Create timestamp for log file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_file = log_dir / f"imageai_{timestamp}.log"
@@ -86,6 +111,11 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
         root_logger.info(f"Log file: {log_file}")
         root_logger.info("=" * 60)
 
+    # Both handlers are attached now, so storage warnings can reach the user.
+    # The console handler writes to stderr, which keeps stdout clean for --json.
+    _report_storage_warnings(root_logger, data_paths, set_warning_sink)
+
+    if log_to_file:
         # Optional: Log GUI/Qt environment if available
         try:
             import PySide6  # type: ignore
@@ -140,15 +170,13 @@ def get_error_report_info():
     Returns:
         Dictionary with system info and recent log location
     """
-    system = platform.system()
-    if system == "Windows":
-        import os
-        log_dir = Path(os.environ.get('APPDATA', '')) / 'ImageAI' / 'logs'
-    elif system == "Darwin":
-        log_dir = Path.home() / 'Library' / 'Application Support' / 'ImageAI' / 'logs'
-    else:
-        log_dir = Path.home() / '.config' / 'ImageAI' / 'logs'
-    
+    # Resolve the log directory through the single path resolver. This import
+    # is safe here: core.paths deliberately has no logging dependency.
+    from core.paths import get_data_paths
+
+    data_paths = get_data_paths()
+    log_dir = data_paths.logs()
+
     # Find most recent log file
     recent_log = None
     if log_dir.exists():

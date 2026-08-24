@@ -1,8 +1,7 @@
 """Reusable history widget for dialog interactions."""
 
 import json
-import os
-import sys
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Optional
@@ -15,6 +14,9 @@ from PySide6.QtCore import Qt, Signal, QSettings
 from PySide6.QtGui import QPixmap
 
 from .common.dialog_conventions import persist_splitter, restore_splitter, standard_splitter
+
+logger = logging.getLogger(__name__)
+
 
 class DialogHistoryWidget(QWidget):
     """Reusable widget for showing dialog interaction history."""
@@ -227,36 +229,29 @@ class DialogHistoryWidget(QWidget):
         self.save_history()
         self.detail_view.clear()
 
+    def _history_path(self) -> Path:
+        """Path of this dialog's history file."""
+        from core.paths import get_data_paths
+
+        return get_data_paths().history_file(self.dialog_name)
+
     def save_history(self):
         """Save history to settings."""
         # Limit history to 100 most recent items
         if len(self.history) > 100:
             self.history = self.history[:100]
 
-        # Save to file - use platform-specific path
-        if sys.platform == "win32":
-            history_file = Path(os.environ.get('APPDATA', '')) / 'ImageAI' / f'{self.dialog_name}_history.json'
-        elif sys.platform == "darwin":
-            history_file = Path.home() / 'Library' / 'Application Support' / 'ImageAI' / f'{self.dialog_name}_history.json'
-        else:
-            history_file = Path.home() / '.config' / 'ImageAI' / f'{self.dialog_name}_history.json'
-        history_file.parent.mkdir(parents=True, exist_ok=True)
-
+        history_file = self._history_path()
         try:
+            history_file.parent.mkdir(parents=True, exist_ok=True)
             with open(history_file, 'w') as f:
                 json.dump(self.history, f, indent=2)
         except Exception as e:
-            print(f"Failed to save history: {e}")
+            logger.error(f"Failed to save history to {history_file}: {e}")
 
     def load_history(self):
         """Load history from settings."""
-        # Use platform-specific path
-        if sys.platform == "win32":
-            history_file = Path(os.environ.get('APPDATA', '')) / 'ImageAI' / f'{self.dialog_name}_history.json'
-        elif sys.platform == "darwin":
-            history_file = Path.home() / 'Library' / 'Application Support' / 'ImageAI' / f'{self.dialog_name}_history.json'
-        else:
-            history_file = Path.home() / '.config' / 'ImageAI' / f'{self.dialog_name}_history.json'
+        history_file = self._history_path()
 
         if history_file.exists():
             try:
@@ -264,7 +259,7 @@ class DialogHistoryWidget(QWidget):
                     self.history = json.load(f)
                     self.refresh_table()
             except Exception as e:
-                print(f"Failed to load history: {e}")
+                logger.error(f"Failed to load history from {history_file}: {e}")
                 self.history = []
 
     def export_history(self):

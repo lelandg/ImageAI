@@ -15,7 +15,9 @@ class VideoConfig:
     
     DEFAULT_CONFIG = {
         "enabled": True,
-        "video_projects_dir": None,  # Will be set to user config dir / video_projects
+        # None means "follow the Video storage root". Only an explicit user
+        # choice is stored here. See get_projects_dir().
+        "video_projects_dir": None,
         "default_video_provider": "slideshow",  # "slideshow", "veo", or "omni"
         "veo_model": "veo-3.1-generate-001",  # Default Veo model (post June 30 2026 GA)
         "ffmpeg_path": "ffmpeg",  # Auto-detect or user-specified
@@ -99,29 +101,72 @@ class VideoConfig:
         
         # Determine config file location
         if config_file is None:
-            import platform
-            system = platform.system()
-            
-            if system == "Windows":
-                import os
-                config_dir = Path(os.environ.get('APPDATA', '')) / 'ImageAI'
-            elif system == "Darwin":  # macOS
-                config_dir = Path.home() / 'Library' / 'Application Support' / 'ImageAI'
-            else:  # Linux and others
-                config_dir = Path.home() / '.config' / 'ImageAI'
-            
+            from core.paths import get_data_paths
+
+            # video_config.json is a settings file, so it lives in the Settings
+            # group, not the Video group.
+            config_dir = get_data_paths().settings_root()
             config_file = config_dir / 'video_config.json'
         
         self.config_file = config_file
         self.config = copy.deepcopy(self.DEFAULT_CONFIG)
-        
-        # Set dynamic defaults
-        if self.config["video_projects_dir"] is None:
-            self.config["video_projects_dir"] = str(self.config_file.parent / "video_projects")
-        
+
+        # video_projects_dir stays None unless the user chose a directory. The
+        # default resolves through DataPaths at read time, so a Video-group
+        # move takes effect without rewriting this file.
+
         # Load existing config if available
         self.load()
-    
+
+    def _default_projects_dir(self) -> Path:
+        """Return the projects directory under the current Video root."""
+        from core.paths import get_data_paths
+
+        return get_data_paths().video_projects()
+
+    def _auto_projects_dirs(self) -> set:
+        """Return every path that is a derived default, not a user choice.
+
+        Older builds wrote the derived default into video_config.json. That
+        value points at the Settings root, so a Video-only move strands it.
+        Treat those paths as "no choice made" and resolve the default again.
+        """
+        candidates = {
+            self._default_projects_dir(),          # current default
+            self.config_file.parent / "video_projects",  # legacy: Settings root
+        }
+        try:
+            from core.paths import platform_default_dir
+
+            candidates.add(platform_default_dir() / "video_projects")
+        except Exception as exc:  # pragma: no cover - defensive
+            self.logger.error(f"Could not resolve the platform default dir: {exc}")
+        return candidates
+
+    def _normalize_projects_dir(self) -> None:
+        """Drop a saved projects dir that is only a stale derived default."""
+        configured = self.config.get("video_projects_dir")
+        if not configured:
+            self.config["video_projects_dir"] = None
+            return
+
+        try:
+            configured_path = Path(configured)
+        except (TypeError, ValueError) as exc:
+            self.logger.error(
+                f"Invalid video_projects_dir {configured!r}: {exc}. "
+                f"Falling back to the Video storage root."
+            )
+            self.config["video_projects_dir"] = None
+            return
+
+        if configured_path in self._auto_projects_dirs():
+            self.logger.info(
+                f"video_projects_dir '{configured_path}' is a derived default, "
+                f"not a user choice. Resolving it through the Video storage root."
+            )
+            self.config["video_projects_dir"] = None
+
     def _migrate_legacy_models(self) -> None:
         """Rewrite legacy Veo model IDs in self.config to their GA replacements.
 
@@ -178,6 +223,7 @@ class VideoConfig:
             self._deep_merge(self.config, file_config)
 
             self._migrate_legacy_models()
+            self._normalize_projects_dir()
 
             self.logger.info(f"Loaded video config from {self.config_file}")
             return True
@@ -338,8 +384,20 @@ class VideoConfig:
     def get_projects_dir(self) -> Path:
         """
         Get the video projects directory path.
-        
+
+        An explicit user choice wins. Otherwise the path resolves through the
+        Video storage root, so it follows a Video-group move.
+
         Returns:
             Path to video projects directory
         """
-        return Path(self.get("video_projects_dir", str(self.config_file.parent / "video_projects")))
+        configured = self.get("video_projects_dir")
+        if configured:
+            try:
+                return Path(configured)
+            except (TypeError, ValueError) as exc:
+                self.logger.error(
+                    f"Invalid video_projects_dir {configured!r}: {exc}. "
+                    f"Falling back to the Video storage root."
+                )
+        return self._default_projects_dir()

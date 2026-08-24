@@ -1824,7 +1824,8 @@ class VideoProjectTab(QWidget):
             from core.video.event_store import EventStore
             from pathlib import Path
             
-            db_path = Path.home() / ".imageai" / "video_projects" / "events.db"
+            from core.paths import get_data_paths
+            db_path = get_data_paths().video_events_db()
             event_store = EventStore(db_path)
             
             # Rebuild state up to the specified timestamp
@@ -2010,7 +2011,8 @@ class VideoProjectTab(QWidget):
                 from core.video.event_store import EventStore, ProjectEvent, EventType
                 from pathlib import Path
                 
-                db_path = Path.home() / ".imageai" / "video_projects" / "events.db"
+                from core.paths import get_data_paths
+                db_path = get_data_paths().video_events_db()
                 event_store = EventStore(db_path)
                 
                 # Create appropriate event based on operation

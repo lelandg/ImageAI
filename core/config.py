@@ -1,58 +1,137 @@
 """Configuration management for ImageAI."""
 
+import copy
 import json
 import logging
-import os
 import platform
 from pathlib import Path
 from typing import Optional, Dict, Any
 
+from . import config_io
+# Re-exported so a caller of save() can catch the write failure without
+# importing core.config_io itself.
+from .config_io import (  # noqa: F401
+    ConfigIOError,
+    ConfigLockError,
+    ConfigReadError,
+    ConfigWriteError,
+)
 from .constants import APP_NAME, PROVIDER_KEY_URLS
+from .paths import get_data_paths
 from .security import secure_storage
 
 logger = logging.getLogger(__name__)
 
+_MISSING = object()
+
+# Which damaged config.json bytes already have a sidecar, keyed by config path.
+# This is module level, not per instance: ConfigManager is constructed in about
+# a dozen places (each GUI worker run, each provider call, each CLI command), so
+# a per-instance record minted a fresh timestamped sidecar per construction and
+# buried the first copy under identical ones.
+_PRESERVED: Dict[str, tuple] = {}
+
 
 class ConfigManager:
-    """Manages application configuration and persistence."""
-    
+    """Manages application configuration and persistence.
+
+    Three public attributes report a config.json that did not behave. Nothing
+    else records these failures, so the GUI and the CLI read them to tell the
+    user. Every one of them is also logged at error level when it is set.
+
+    ``load_error``
+        The reason config.json could not be read at startup, or ``None``. It
+        describes the load and nothing else, so it stays set for the life of
+        the object even after a later save writes a good file. A caller that
+        wants "is the file healthy now" must look at ``last_save_error``.
+    ``preserved_config_path``
+        Where the unreadable config.json was copied to, or ``None`` when no
+        copy was ever needed. The copy still holds the stored API keys and the
+        recorded data locations, so this is the path the user must repair
+        from. It is set at load time and at save time, and one damaged file
+        produces one sidecar, not one per save.
+    ``last_save_error``
+        The reason the most recent :meth:`save` did not reach disk, or
+        ``None`` when it did. :meth:`save` clears it on entry and sets it on
+        every failure, so it always describes the latest attempt. ``save``
+        returns ``False`` for exactly the same failures, and it never raises:
+        it runs from about forty Qt slots and from ``__init__``.
+    """
+
     def __init__(self):
         """Initialize configuration manager."""
         self.config_dir = self._get_config_dir()
-        self.config_path = self.config_dir / "config.json"
-        self.details_path = self.config_dir / "details.jsonl"
+        self.config_path = get_data_paths().config_file()
+        self.details_path = get_data_paths().details()
+        # Set by a failed load or a failed save, so a caller can report them.
+        self.load_error: Optional[str] = None
+        self.last_save_error: Optional[str] = None
+        # Where an unreadable config.json was copied to. The bytes that were
+        # copied live in the module-level _PRESERVED, so one damaged file makes
+        # one sidecar however many managers this process builds.
+        self.preserved_config_path: Optional[Path] = None
+        # True once a config.json is known to exist: it was there at load
+        # time, or this manager wrote one. A missing file means "fresh
+        # install" before that point and "someone removed it" after it.
+        self._config_written = False
         self.config = self._load_config()
 
-        # Normalize auth_mode on load (handle legacy display values)
-        self._normalize_auth_mode()
+        if self.load_error is None:
+            # Normalize auth_mode on load (handle legacy display values)
+            self._normalize_auth_mode()
 
-        # Migrate legacy API keys to providers structure
-        self._migrate_api_keys()
-    
+            # Migrate legacy API keys to providers structure
+            self._migrate_api_keys()
+        else:
+            # Both steps call save(). config.json could not be read, so this
+            # session holds an empty document, and saving it would replace the
+            # file that still holds the API keys and the data_roots entry.
+            logger.error(
+                "Startup did not normalise auth_mode and did not migrate the "
+                "legacy API keys, because config.json at %s could not be read. "
+                "The file is left as it is. Repair it or restore the preserved "
+                "copy, then restart the application.",
+                self.config_path,
+            )
+
     def _get_config_dir(self) -> Path:
-        """Get platform-specific configuration directory."""
-        system = platform.system()
-        home = Path.home()
-        
-        if system == "Windows":
-            base = Path(os.getenv("APPDATA", home / "AppData" / "Roaming"))
-            return base / APP_NAME
-        elif system == "Darwin":  # macOS
-            return home / "Library" / "Application Support" / APP_NAME
-        else:  # Linux/Unix
-            base = Path(os.getenv("XDG_CONFIG_HOME", home / ".config"))
-            return base / APP_NAME
+        """Get the directory that holds config.json. This directory never moves."""
+        return get_data_paths().config_file().parent
     
     def _load_config(self) -> Dict[str, Any]:
-        """Load configuration from disk."""
-        self.config_dir.mkdir(parents=True, exist_ok=True)
+        """Load configuration from disk and record the on-disk baseline."""
+        try:
+            self.config_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.error("Could not create the config directory %s: %s",
+                         self.config_dir, exc)
 
-        if self.config_path.exists():
-            try:
-                return json.loads(self.config_path.read_text(encoding="utf-8"))
-            except (OSError, IOError, json.JSONDecodeError):
-                return {}
-        return {}
+        try:
+            document = config_io.read_config_document(self.config_path)
+            # A file that is not there is a fresh install, not a loss. save()
+            # needs the difference: the same missing file means "nobody ever
+            # wrote one" here and "someone removed it" after the first write.
+            self._config_written = document is not None
+            loaded = {} if document is None else document
+        except ConfigReadError as exc:
+            # The application must still start. The original stays on disk: a
+            # copy goes beside it now, and __init__ skips every step that
+            # would write this session's empty document over it.
+            self.load_error = str(exc)
+            # The file is there; it is only unreadable. A save that finds it
+            # gone later is a removal, not a first write.
+            self._config_written = True
+            self._preserve_unreadable_config(exc)
+            logger.error(
+                "%s The application starts with default settings for this "
+                "session, and it does not overwrite the file.", exc,
+            )
+            loaded = {}
+
+        # The baseline is what disk held at load time. save() compares against
+        # it to tell a local edit apart from a value this process never touched.
+        self._baseline = copy.deepcopy(loaded)
+        return loaded
 
     def _normalize_auth_mode(self) -> None:
         """Normalize auth_mode values to internal format."""
@@ -92,13 +171,226 @@ class ConfigManager:
         if migrated:
             self.save()
     
-    def save(self) -> None:
-        """Save current configuration to disk."""
-        self.config_path.write_text(
-            json.dumps(self.config, indent=2),
-            encoding="utf-8"
+    @classmethod
+    def _merge_over_disk(
+        cls,
+        disk: Dict[str, Any],
+        memory: Dict[str, Any],
+        baseline: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Merge the in-memory config over the current on-disk config.
+
+        Another writer — the storage migrator, or a second ImageAI window —
+        can change config.json after this process loaded it. A value this
+        process never edited must therefore come from disk, or the save
+        erases the other writer's work. ``baseline`` is the disk content at
+        load time, so ``memory != baseline`` marks a real local edit.
+
+        A key that disk no longer holds follows the same rule. The other writer
+        deleted it, so it returns only when this process edited it. An
+        unconditional write-back would resurrect every setting another writer
+        removed, which is the mirror image of the deletion pass below.
+
+        ``disk`` must be a document a writer really wrote. A file that is gone
+        or damaged is no writer's decision, and save() passes the load-time
+        baseline for it instead — every rule here reads a deletion into a key
+        that is simply not present.
+        """
+        merged = copy.deepcopy(disk)
+
+        for key, mem_value in memory.items():
+            base_value = baseline.get(key, _MISSING)
+            if key not in merged:
+                if base_value is not _MISSING and mem_value == base_value:
+                    continue  # deleted by the other writer; untouched here
+                merged[key] = copy.deepcopy(mem_value)
+                continue
+            disk_value = merged[key]
+            if isinstance(mem_value, dict) and isinstance(disk_value, dict):
+                # Merge per sub-key: a group the user renamed wins, and a
+                # group only the other writer touched survives.
+                sub_base = base_value if isinstance(base_value, dict) else {}
+                merged[key] = cls._merge_over_disk(disk_value, mem_value, sub_base)
+            elif mem_value == base_value:
+                merged[key] = disk_value  # untouched here; disk is newer
+            else:
+                merged[key] = copy.deepcopy(mem_value)
+
+        # A key this process deleted goes away, unless disk changed it since.
+        for key, base_value in baseline.items():
+            if key in memory:
+                continue
+            if key in merged and merged[key] == base_value:
+                del merged[key]
+
+        return merged
+
+    def _write_config_file(self, data: Dict[str, Any]) -> None:
+        """Write config.json atomically so a crash cannot truncate it.
+
+        The lock is re-entrant, so this costs nothing when save() already
+        holds it, and it still protects a caller that writes on its own.
+        """
+        with config_io.config_lock(self.config_path):
+            config_io.write_config(self.config_path, data)
+
+    @classmethod
+    def _apply_in_place(cls, target: Dict[str, Any], source: Dict[str, Any]) -> None:
+        """Copy ``source`` into ``target`` without replacing nested dicts.
+
+        Callers hold live references to nested sections — get_layout_config()
+        returns the real dict and the caller mutates it. Rebinding those
+        sections would orphan the caller's reference, so update them in place.
+        """
+        for key in list(target):
+            if key not in source:
+                del target[key]
+        for key, value in source.items():
+            current = target.get(key)
+            if isinstance(current, dict) and isinstance(value, dict):
+                cls._apply_in_place(current, value)
+            else:
+                target[key] = value
+
+    def save(self) -> bool:
+        """Merge with the current config.json on disk, then save it.
+
+        The lock covers the read and the write together. The storage migrator
+        writes ``data_roots`` to the same file, and worker threads build a
+        ConfigManager while a long move runs, so an unsynchronised
+        read-modify-write drops whichever change finished last.
+
+        Returns True when config.json now holds this session's settings. Every
+        failure is logged and reported through the return value and through
+        ``last_save_error``. save() runs from about forty Qt slots and from
+        ``__init__``, so an exception that escapes aborts a slot halfway or
+        stops the application from starting.
+        """
+        self.last_save_error = None
+        try:
+            with config_io.config_lock(self.config_path):
+                damaged = False
+                try:
+                    disk = config_io.read_config_document(self.config_path)
+                except ConfigReadError as exc:
+                    if not self._preserve_unreadable_config(exc):
+                        self.last_save_error = str(exc)
+                        return False
+                    disk = None
+                    damaged = True
+                if disk is None:
+                    # There is no readable document on disk: the file is gone
+                    # or damaged. That is not a writer that deleted every key,
+                    # and this process still holds the whole document, so the
+                    # merge runs over the baseline it loaded. A merge over {}
+                    # would drop every key this session did not edit.
+                    if not damaged and self._config_written:
+                        self._report_missing_config()
+                    merged = self._merge_over_disk(
+                        copy.deepcopy(self._baseline), self.config, self._baseline,
+                    )
+                else:
+                    merged = self._merge_over_disk(disk, self.config, self._baseline)
+                self._write_config_file(merged)
+        except ConfigIOError as exc:
+            # One handler for the lock timeout and the write failure. Both are
+            # "config.json was not written", and both used to behave
+            # differently: the lock error was logged, the write error escaped
+            # into the caller.
+            self.last_save_error = str(exc)
+            logger.error("Could not save config.json: %s Your settings for this "
+                         "session were not written.", exc)
+            return False
+        except Exception as exc:  # noqa: BLE001 - nothing may escape save()
+            # save() runs from about forty Qt slots and from __init__. An
+            # exception that escapes aborts a slot halfway or stops the
+            # application from starting, so an unforeseen failure reports
+            # itself the same way a write failure does.
+            self.last_save_error = f"{type(exc).__name__}: {exc}"
+            logger.exception(
+                "Could not save config.json at %s. Your settings for this "
+                "session were not written.", self.config_path,
+            )
+            return False
+
+        # Disk and memory now agree, so the merged result is the new baseline.
+        self._apply_in_place(self.config, merged)
+        self._baseline = copy.deepcopy(merged)
+        self._config_written = True
+        return True
+
+    def _report_missing_config(self) -> None:
+        """Report that config.json was gone when this save ran.
+
+        The save writes the whole in-memory document back, including any API
+        key stored in the file. That is the right answer for disk damage, a
+        sync client, or a backup restore: the file is not a writer's decision,
+        so the deletion means nothing about any key.
+
+        It is the wrong answer for the user who deleted config.json on purpose
+        to reset the application or to remove the stored keys, and the two
+        cannot be told apart. The filesystem gives no signal that separates
+        ``rm config.json`` from a failed replace or an unmounted directory, and
+        a running ImageAI still holds the whole document in memory either way.
+        The event therefore has to be reported instead of guessed at, with the
+        one instruction that does work: close the application first.
+        """
+        logger.warning(
+            "config.json at %s was missing at save time, so ImageAI rewrote "
+            "the whole document it held in memory, including any API key "
+            "stored in that file and the recorded storage locations. This "
+            "protects you from a deleted or damaged file. If you removed "
+            "config.json on purpose to reset ImageAI or to remove the stored "
+            "API keys, the removal did not take effect: close ImageAI first, "
+            "then delete %s.",
+            self.config_path, self.config_path,
         )
-    
+
+    def _preserve_unreadable_config(self, error: ConfigReadError) -> bool:
+        """Copy an unreadable config.json aside before a save replaces it.
+
+        config.json holds the API keys and the data_roots entry that points at
+        the relocated data. A read failure must never lead to a silent full
+        overwrite, so the save continues only when a copy of the original
+        exists. Returns True when a copy of the current bytes exists.
+        """
+        try:
+            current = self.config_path.read_bytes()
+        except OSError:
+            current = None
+
+        seen = _PRESERVED.get(str(self.config_path))
+        if seen is not None and current is not None and current == seen[0]:
+            self.preserved_config_path = seen[1]
+            # The same damaged file, already copied aside. One sidecar per
+            # save would bury the first copy under identical ones.
+            logger.error(
+                "config.json at %s is still unreadable: %s A copy of it is "
+                "already at %s.",
+                self.config_path, error, self.preserved_config_path,
+            )
+            return True
+
+        sidecar = config_io.quarantine_unreadable(self.config_path)
+        if sidecar is None:
+            logger.error(
+                "Could not save config.json at %s: %s The file could not be "
+                "copied aside either, so it was left untouched. Repair or "
+                "remove it, then restart the application.",
+                self.config_path, error,
+            )
+            return False
+
+        self.preserved_config_path = sidecar
+        _PRESERVED[str(self.config_path)] = (current, sidecar)
+        logger.error(
+            "config.json at %s could not be read: %s A copy of the original is "
+            "at %s. It still holds any stored API key and the recorded data "
+            "locations. This session's settings replace the unreadable file.",
+            self.config_path, error, sidecar,
+        )
+        return True
+
     def get(self, key: str, default: Any = None) -> Any:
         """Get configuration value."""
         return self.config.get(key, default)
@@ -231,7 +523,7 @@ class ConfigManager:
     
     def get_images_dir(self) -> Path:
         """Get directory for saved images."""
-        images_dir = self.config_dir / "images"
+        images_dir = get_data_paths().images()
         images_dir.mkdir(parents=True, exist_ok=True)
         return images_dir
 
@@ -265,7 +557,7 @@ class ConfigManager:
                 return parent / "templates" / "layouts"
 
         # Fallback to config directory
-        templates_dir = self.config_dir / "templates" / "layouts"
+        templates_dir = get_data_paths().settings_root() / "templates" / "layouts"
         templates_dir.mkdir(parents=True, exist_ok=True)
         return templates_dir
 

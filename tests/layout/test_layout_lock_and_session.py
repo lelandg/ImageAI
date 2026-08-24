@@ -9,13 +9,24 @@ Covers the three requests:
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import pytest
 from PySide6.QtWidgets import (
     QGraphicsItem, QGraphicsRectItem, QGraphicsSimpleTextItem, QGraphicsPixmapItem,
 )
 
+import core.paths as paths_mod
 from core.layout.models import Region, PageSpec
 from core.layout import qt_renderer
 from gui.layout.layout_tab import LayoutTab
+
+
+@pytest.fixture
+def data_root(tmp_path, monkeypatch):
+    """Point DataPaths at tmp_path so sessions never touch the real user dir."""
+    monkeypatch.setattr(
+        paths_mod, "_INSTANCE",
+        paths_mod.DataPaths(config_path=tmp_path / "config.json"))
+    return tmp_path
 
 
 def _page():
@@ -111,7 +122,7 @@ class SessionConfig:
         return "google"
 
 
-def test_lock_toggle_defaults_locked_and_persists(qapp, tmp_path):
+def test_lock_toggle_defaults_locked_and_persists(qapp, tmp_path, data_root):
     cfg = SessionConfig(tmp_path)
     tab = LayoutTab(config=cfg)
     assert tab._locked is True
@@ -127,7 +138,7 @@ def test_lock_toggle_defaults_locked_and_persists(qapp, tmp_path):
     assert tab2.lock_btn.isChecked() is False
 
 
-def test_save_session_then_reload_on_startup(qapp, tmp_path):
+def test_save_session_then_reload_on_startup(qapp, tmp_path, data_root):
     cfg = SessionConfig(tmp_path)
     tab = LayoutTab(config=cfg)
     tab.document.title = "Remembered"

@@ -117,7 +117,6 @@ def get_shared_midjourney_profile():
         try:
             import os
             import platform as _platform
-            from PySide6.QtCore import QStandardPaths
             from PySide6.QtWebEngineCore import QWebEngineProfile
 
             # Create persistent profile (no parent - lives for app lifetime)
@@ -140,9 +139,9 @@ def get_shared_midjourney_profile():
             profile.setHttpAcceptLanguage("en-US,en;q=0.9")
 
             # Persistence
-            app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
-            cache_path = os.path.join(app_data, "midjourney_web_cache")
-            storage_path = os.path.join(app_data, "midjourney_web_storage")
+            from core.paths import get_data_paths
+            cache_path = str(get_data_paths().midjourney_cache())
+            storage_path = str(get_data_paths().midjourney_storage())
             os.makedirs(cache_path, exist_ok=True)
             os.makedirs(storage_path, exist_ok=True)
             profile.setHttpCacheType(QWebEngineProfile.DiskHttpCache)

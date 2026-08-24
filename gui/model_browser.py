@@ -97,7 +97,9 @@ class ModelBrowserDialog(QDialog):
     
     def __init__(self, parent=None, cache_dir: Optional[Path] = None):
         super().__init__(parent)
-        self.cache_dir = cache_dir or (Path.home() / ".cache" / "huggingface")
+        from core.paths import get_data_paths
+
+        self.cache_dir = cache_dir or get_data_paths().huggingface()
         self.downloader = None
         
         self.setWindowTitle("Stable Diffusion Model Browser")

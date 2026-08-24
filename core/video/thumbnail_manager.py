@@ -27,7 +27,9 @@ class ThumbnailManager:
         Args:
             cache_dir: Directory for thumbnail cache
         """
-        self.cache_dir = cache_dir or Path.home() / ".imageai" / "cache" / "thumbnails"
+        from core.paths import get_data_paths
+
+        self.cache_dir = Path(cache_dir) if cache_dir else get_data_paths().video_cache("thumbnails")
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.logger = logging.getLogger(__name__)
     

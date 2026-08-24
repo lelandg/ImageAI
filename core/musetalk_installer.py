@@ -57,24 +57,17 @@ MUSETALK_MODELS = {
 
 
 def get_musetalk_model_path() -> Path:
+    """Return the MuseTalk weights directory.
+
+    Older Linux installs kept weights in ~/.cache/imageai/musetalk. Keep using
+    that directory when it already holds data, so no user re-downloads 4 GB.
     """
-    Get the platform-specific model storage path for MuseTalk.
+    from core.paths import get_data_paths
 
-    Returns:
-        Path to the MuseTalk model directory
-    """
-    import platform
-
-    system = platform.system()
-
-    if system == "Windows":
-        base = Path.home() / "AppData" / "Roaming" / "ImageAI" / "musetalk"
-    elif system == "Darwin":  # macOS
-        base = Path.home() / "Library" / "Application Support" / "ImageAI" / "musetalk"
-    else:  # Linux and others
-        base = Path.home() / ".cache" / "imageai" / "musetalk"
-
-    return base
+    legacy = Path.home() / ".cache" / "imageai" / "musetalk"
+    if legacy.is_dir() and any(legacy.iterdir()):
+        return legacy
+    return get_data_paths().musetalk()
 
 
 def check_musetalk_installed() -> Tuple[bool, str]:

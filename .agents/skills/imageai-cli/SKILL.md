@@ -289,6 +289,6 @@ Key resolution order: **CLI flag (`-k`/`-K`) > stored config > environment**.
 - **Generate tab** — provider + model pickers; for gpt-image-2 the quality buttons
   flip to `Low | Medium | High | Auto`, and output-format / moderation rows appear.
 - **Resolution selector** — "Custom…" opens a W/H dialog with live validation.
-- **Generate → Submit as Batch Job…** — submits via the OpenAI Batch API.
-- **Batch Jobs tab** — lists jobs from `~/.imageai/batch_jobs.json` with Check/Download.
 - **Settings tab** — per-provider API keys and auth mode.
+- The OpenAI Batch API is **CLI-only** (the GUI Batch Jobs tab and Generate menu
+  were removed); jobs are tracked in `~/.imageai/batch_jobs.json`.

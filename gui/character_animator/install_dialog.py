@@ -12,7 +12,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from core.constants import get_user_data_dir
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
@@ -412,8 +411,9 @@ class PuppetInstallProgressDialog(QDialog):
             self.download_next_model()
             return
 
-        # Set up model path in user data directory
-        weights_dir = get_user_data_dir() / "weights" / "character_animator"
+        # Set up model path in the Models data root
+        from core.paths import get_data_paths
+        weights_dir = get_data_paths().weights() / "character_animator"
         weights_dir.mkdir(parents=True, exist_ok=True)
         model_path = weights_dir / model_info.get("filename", f"{model_name}.pt")
 

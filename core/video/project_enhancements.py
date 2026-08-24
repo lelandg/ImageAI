@@ -317,17 +317,11 @@ class EnhancedProjectManager:
         self.logger = logging.getLogger(__name__)
         
         if base_dir is None:
-            # Use platform-specific user directory
-            import platform
-            system = platform.system()
-            
-            if system == "Windows":
-                base_dir = Path(os.environ.get('APPDATA', '')) / 'ImageAI' / 'video_projects'
-            elif system == "Darwin":  # macOS
-                base_dir = Path.home() / 'Library' / 'Application Support' / 'ImageAI' / 'video_projects'
-            else:  # Linux
-                base_dir = Path.home() / '.config' / 'ImageAI' / 'video_projects'
-        
+            from core.paths import get_data_paths
+
+            base_dir = get_data_paths().video_projects()
+
+
         self.base_dir = Path(base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
         

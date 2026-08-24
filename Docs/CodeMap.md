@@ -1,46 +1,46 @@
 # ImageAI — Complete Code Map
 
-*Last Updated: 2026-07-31 09:38:22*
+*Last Updated: 2026-08-11 10:52:37*
 
 Navigation guide for the ImageAI codebase with exact line numbers for classes,
 methods, and key functions. Every `file.py:NNN` reference in this document was
 extracted from the source with a deterministic AST parser and spot-verified
 against the file — no line number here was estimated.
 
-**Scope:** 377 Python files, 135,887 lines, 5,498 symbols (485 classes,
-4,588 functions/methods, 305 module constants).
-**Version:** 0.43.0 (`core/constants.py:9`)
+**Scope:** 393 Python files, 139,336 lines, 5,783 symbols (507 classes,
+4,945 functions/methods, 331 module constants).
+**Version:** 0.45.0 (`core/constants.py:9`)
 
 ## Table of Contents
 
 | Section | Line Number |
 |---------|-------------|
 | [Quick Navigation](#quick-navigation) | 45 |
-| [Visual Architecture Overview](#visual-architecture-overview) | 81 |
-| [Project Structure](#project-structure) | 124 |
-| [CLI & Entry Points](#cli-entry-points) | 185 |
-| [Core Modules](#core-modules) | 552 |
-| [Core Video — Prompt Engine, Project Model & Analysis](#core-video-prompt-engine-project-model-analysis) | 1440 |
-| [Core Video — LLM Sync, Storyboard v2 & Generation Clients](#core-video-llm-sync-storyboard-v2-generation-clients) | 1936 |
-| [Core Video — Storyboard, Veo Client, Rendering & Audio](#core-video-storyboard-veo-client-rendering-audio) | 2374 |
-| [Core — Layout Engine, Styles, Reference & Model Registry](#core-layout-engine-styles-reference-model-registry) | 2852 |
-| [Font Generator (Core + GUI)](#font-generator-core-gui) | 3919 |
-| [Character Animator (Core + GUI)](#character-animator-core-gui) | 4542 |
-| [Providers (AI Backends)](#providers-ai-backends) | 5042 |
-| [GUI — Main Window](#gui-main-window) | 5516 |
-| [GUI — Prompt Building & Settings](#gui-prompt-building-settings) | 5947 |
-| [GUI — Reference Images, Midjourney & Batch](#gui-reference-images-midjourney-batch) | 6459 |
-| [GUI — Supporting Dialogs & Widgets](#gui-supporting-dialogs-widgets) | 6984 |
-| [GUI — Layout Tab, Styles & Common Widgets](#gui-layout-tab-styles-common-widgets) | 7735 |
-| [GUI Video — Workspace Widget](#gui-video-workspace-widget) | 8668 |
-| [GUI Video — Project, Workspace & Reference Dialogs](#gui-video-project-workspace-reference-dialogs) | 8988 |
-| [GUI Video — Reference Library, Lipsync & Prompt Dialogs](#gui-video-reference-library-lipsync-prompt-dialogs) | 9450 |
-| [Scripts, Tools & Standalone Utilities](#scripts-tools-standalone-utilities) | 9873 |
-| [Cross-File Dependencies](#cross-file-dependencies) | 10586 |
-| [Configuration Files](#configuration-files) | 10833 |
-| [Architecture Patterns](#architecture-patterns) | 10867 |
-| [Development Guidelines](#development-guidelines) | 10892 |
-| [Performance Considerations](#performance-considerations) | 10951 |
+| [Visual Architecture Overview](#visual-architecture-overview) | 86 |
+| [Project Structure](#project-structure) | 129 |
+| [CLI & Entry Points](#cli-entry-points) | 193 |
+| [Core Modules](#core-modules) | 560 |
+| [Core Video — Prompt Engine, Project Model & Analysis](#core-video-prompt-engine-project-model-analysis) | 1563 |
+| [Core Video — LLM Sync, Storyboard v2 & Generation Clients](#core-video-llm-sync-storyboard-v2-generation-clients) | 2059 |
+| [Core Video — Storyboard, Veo Client, Rendering & Audio](#core-video-storyboard-veo-client-rendering-audio) | 2497 |
+| [Core — Layout Engine, Styles, Reference & Model Registry](#core-layout-engine-styles-reference-model-registry) | 2975 |
+| [Font Generator (Core + GUI)](#font-generator-core-gui) | 4042 |
+| [Character Animator (Core + GUI)](#character-animator-core-gui) | 4665 |
+| [Providers (AI Backends)](#providers-ai-backends) | 5165 |
+| [GUI — Main Window](#gui-main-window) | 5639 |
+| [GUI — Prompt Building & Settings](#gui-prompt-building-settings) | 6070 |
+| [GUI — Reference Images, Midjourney & Batch](#gui-reference-images-midjourney-batch) | 6646 |
+| [GUI — Supporting Dialogs & Widgets](#gui-supporting-dialogs-widgets) | 7171 |
+| [GUI — Layout Tab, Styles & Common Widgets](#gui-layout-tab-styles-common-widgets) | 7922 |
+| [GUI Video — Workspace Widget](#gui-video-workspace-widget) | 8855 |
+| [GUI Video — Project, Workspace & Reference Dialogs](#gui-video-project-workspace-reference-dialogs) | 9175 |
+| [GUI Video — Reference Library, Lipsync & Prompt Dialogs](#gui-video-reference-library-lipsync-prompt-dialogs) | 9637 |
+| [Scripts, Tools & Standalone Utilities](#scripts-tools-standalone-utilities) | 10060 |
+| [Cross-File Dependencies](#cross-file-dependencies) | 10773 |
+| [Configuration Files](#configuration-files) | 11020 |
+| [Architecture Patterns](#architecture-patterns) | 11054 |
+| [Development Guidelines](#development-guidelines) | 11079 |
+| [Performance Considerations](#performance-considerations) | 11138 |
 
 ## Quick Navigation
 
@@ -67,6 +67,9 @@ against the file — no line number here was estimated.
 | **LiteLLM setup** | `gui/llm_utils.py:89` — `LiteLLMHandler` | Captures LiteLLM internal messages for logging |
 | **Operation guard** | `gui/dialog_utils.py:149` — `OperationGuardMixin` | Blocks concurrent operations in dialogs |
 | **Logging setup** | `core/logging_config.py` | Per-user, platform-independent error logging |
+| **Data path resolution** | `core/paths.py:216` — `get_data_paths()` | The only place a data path comes from. Resolves the Images / Video / Models / Settings groups. Never build a path by hand |
+| **Group relocation** | `core/data_migration.py:296` — `move_group()` | Headless move: validate → copy or rename → verify → commit config → delete |
+| **Storage Locations UI** | `gui/storage_settings_widget.py:93` — `StorageSettingsWidget` | Settings-tab group box with a Move button per group |
 
 ### Debug Artifacts
 
@@ -75,8 +78,10 @@ On application exit these are copied to the working directory:
 - `./imageai_current.log` — the most recent session log (**check this first when investigating errors**)
 - `./imageai_current_project.json` — the last loaded/saved project
 
-Full logs live in `logs/`, or the platform user directory
-(Windows `%APPDATA%\ImageAI\`, Linux `~/.local/share`).
+Full logs live in the log directory, which follows the Settings storage root.
+Resolve it with `core.paths.get_data_paths().logs()`; it defaults to the
+platform user directory (Windows `%APPDATA%\ImageAI\`, Linux
+`~/.config/ImageAI/`) and moves when the user relocates the Settings group.
 
 ## Visual Architecture Overview
 
@@ -126,11 +131,13 @@ Full logs live in `logs/`, or the platform user directory
 ```
 ImageAI/
 ├── main.py                       # Entry point — main() at :89 routes GUI vs CLI
-├── core/                         # Business logic (27 files, 8,458 lines)
+├── core/                         # Business logic (30 files, 9,607 lines)
 │   ├── config.py                 #   ConfigManager, layered API-key resolution
 │   ├── constants.py              #   VERSION and app-wide constants
 │   ├── llm_models.py             #   resolve_model() — runtime model IDs
 │   ├── llm_parsing.py            #   LLMResponseParser
+│   ├── paths.py                  #   get_data_paths() — the one path resolver
+│   ├── data_migration.py         #   move_group() — relocate a data group
 │   ├── video/                    # Video subsystem (34 files, 18,604 lines)
 │   ├── layout/                   # Publication layout engine (29 files, 6,031 lines)
 │   ├── font_generator/           # Font generation (9 files, 5,765 lines)
@@ -138,9 +145,10 @@ ImageAI/
 │   ├── styles/                   # Custom styles (5 files, 873 lines)
 │   ├── reference/                # Reference-image compositing (3 files, 539 lines)
 │   └── model_registry/           # Vendored model-registry client (2 files, 283 lines)
-├── gui/                          # PySide6 interface (37 files, 31,254 lines)
-│   ├── main_window.py            #   MainWindow at :138 — 9,138 lines
+├── gui/                          # PySide6 interface (38 files, 31,613 lines)
+│   ├── main_window.py            #   MainWindow at :138 — 9,146 lines
 │   ├── llm_utils.py              #   Shared LLM dialog helpers
+│   ├── storage_settings_widget.py # StorageSettingsWidget — Move buttons
 │   ├── video/                    # Video UI (25 files, 19,085 lines)
 │   ├── layout/                   # Layout tab UI (20 files, 5,353 lines)
 │   ├── font_generator/           # Font wizard (2 files, 2,406 lines)
@@ -148,9 +156,9 @@ ImageAI/
 │   ├── styles/                   # Style manager UI (3 files, 656 lines)
 │   ├── common/                   # Shared dialog conventions (5 files, 470 lines)
 │   └── utils/                    # GUI utilities (1 file, 91 lines)
-├── cli/                          # Command-line interface (3 files, 901 lines)
+├── cli/                          # Command-line interface (3 files, 922 lines)
 │   └── commands/                 #   video, layout, style subcommands (4 files, 695 lines)
-├── providers/                    # AI backends (10 files, 5,966 lines)
+├── providers/                    # AI backends (10 files, 6,034 lines)
 │   ├── base.py                   #   ImageProvider ABC
 │   ├── google.py                 #   Gemini / Imagen (2,156 lines)
 │   ├── openai.py                 #   gpt-image / DALL·E (1,477 lines)
@@ -164,8 +172,8 @@ ImageAI/
 │   ├── prompts/                  #   presets, artists, styles, moods, colors, lighting, mediums
 │   ├── style_presets/            #   Custom style presets
 │   └── model_capabilities.json   #   Provider/model capability matrix
-├── tests/                        # pytest suite (102 files, 8,207 lines)
-│   ├── layout/ (74)  styles/ (18)  video/ (6)  gui/ (1)  migration/ (2)
+├── tests/                        # pytest suite (111 files, 9,746 lines)
+│   ├── layout/ (74)  styles/ (18)  video/ (7)  gui/ (3)  migration/ (3)
 ├── Docs/                         # Developer & user documentation
 ├── Plans/, Notes/                # Design docs and brainstorming
 └── pytest.ini                    # testpaths=tests (keeps root demo scripts out)
@@ -266,7 +274,7 @@ No classes or functions — imports and `__all__` only.
 ---
 
 ### CLI Runner
-**Path**: `cli/runner.py` - 569 lines
+**Path**: `cli/runner.py` - 590 lines
 **Purpose**: The CLI's main dispatcher. Resolves API keys through the layered precedence chain, routes to sub-command modules (layout / video / style), and implements the image-generation paths in-line: auth test, Batch API submit/status/fetch, style application, reference-image edit, streaming partials, and standard sync generation — including auto-save with JSON metadata sidecars.
 **Language**: Python
 
@@ -290,7 +298,7 @@ No classes or functions — imports and `__all__` only.
 | `resolve_api_key` | 14 | public | `Tuple[Optional[str], str]` | No | Resolves the provider key in priority order CLI arg → key file → `ConfigManager.get_api_key()` → env vars (`GOOGLE_API_KEY`/`GEMINI_API_KEY`, `OPENAI_API_KEY`, `STABILITY_KEY`/`STABILITY_API_KEY`), returning `(key, source)` |
 | `store_api_key` | 64 | public | None | No | Persists a key for a provider via `ConfigManager.set_api_key()` + `save()` |
 | `handle_lyrics_to_prompts` | 71 | public | int | No | Loads a lyrics file, builds a `LyricsToPromptsGenerator` with configured provider keys, generates per-line image prompts (model default via `resolve_model()`), prints them and saves JSON (`--lyrics-output` or `<lyrics>.prompts.json`) |
-| `run_cli` | 184 | public | int | No | Main entry: validates `--size`/`--custom-size` mutual exclusion, handles `--help-api-key`, routes to layout/video/style handlers, `--set-key`, `--test`, batch ops, then the `--prompt` generation pipeline; returns the process exit code |
+| `run_cli` | 198 | public | int | No | Main entry: validates `--size`/`--custom-size` mutual exclusion, handles `--help-api-key`, routes to layout/video/style handlers, `--set-key`, `--test`, batch ops, then the `--prompt` generation pipeline; returns the process exit code |
 
 **Exit-code convention used throughout**: `0` success, `2` user/validation error, `3` auth or generation-service failure, `4` generation/batch failure.
 
@@ -298,7 +306,7 @@ No classes or functions — imports and `__all__` only.
 
 | Function | Line | Description |
 |----------|------|-------------|
-| `on_partial` | 480 | `--stream-partials` callback; writes each partial image as `<stem>.p<idx><ext>` and logs the path to stderr |
+| `on_partial` | 501 | `--stream-partials` callback; writes each partial image as `<stem>.p<idx><ext>` and logs the path to stderr |
 
 ---
 
@@ -559,7 +567,7 @@ Discord presence).
 ---
 
 ### MuseTalk Installer
-**Path**: `core/musetalk_installer.py` - 791 lines
+**Path**: `core/musetalk_installer.py` - 784 lines
 **Purpose**: Detects, installs, and downloads everything MuseTalk lip-sync needs — Python packages (with GPU detection and Windows build workarounds) plus five model-weight bundles — from background `QThread` workers.
 **Language**: Python
 
@@ -572,9 +580,9 @@ Discord presence).
 | Function | Line | Scope | Returns | Async | Description |
 |----------|------|-------|---------|-------|-------------|
 | get_musetalk_model_path | 59 | public | Path | No | Platform-specific model storage path for MuseTalk |
-| check_musetalk_installed | 80 | public | Tuple[bool, str] | No | Report whether packages *and* weights are fully installed |
-| get_musetalk_packages | 132 | public | Tuple[List[str], str] | No | Package list for MuseTalk with GPU-support detection (returns extra pip index URL) |
-| get_musetalk_disk_space_required | 786 | public | float | No | Total disk space (GB) needed for a full MuseTalk install |
+| check_musetalk_installed | 73 | public | Tuple[bool, str] | No | Report whether packages *and* weights are fully installed |
+| get_musetalk_packages | 125 | public | Tuple[List[str], str] | No | Package list for MuseTalk with GPU-support detection (returns extra pip index URL) |
+| get_musetalk_disk_space_required | 779 | public | float | No | Total disk space (GB) needed for a full MuseTalk install |
 
 #### Class: MuseTalkPackageInstaller
 **Line**: 185-474 · **Base**: `QThread`
@@ -583,14 +591,14 @@ Background installer thread emitting progress while pip-installing the MuseTalk 
 ##### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 192 | constructor | - | No | Store package list and optional extra index URL |
-| run | 198 | public | - | No | Drive the whole install, emitting progress/percentage/finished |
-| _install_package | 248 | private | Tuple[bool, str] | No | pip-install one package, with retries and error capture |
-| _ensure_setuptools | 348 | private | Tuple[bool, str] | No | Guarantee setuptools/wheel exist for `--no-build-isolation` builds |
-| _install_with_no_isolation | 372 | private | Tuple[bool, str] | No | Work around packages with broken `setup.py` |
-| _install_xtcocotools_windows | 409 | private | Tuple[bool, str] | No | Install `xtcocotools` on Windows from a prebuilt wheel |
-| stop | 459 | public | - | No | Request cooperative cancellation |
-| _format_duration | 463 | private | str | No | Human-readable elapsed time |
+| __init__ | 185 | constructor | - | No | Store package list and optional extra index URL |
+| run | 191 | public | - | No | Drive the whole install, emitting progress/percentage/finished |
+| _install_package | 241 | private | Tuple[bool, str] | No | pip-install one package, with retries and error capture |
+| _ensure_setuptools | 341 | private | Tuple[bool, str] | No | Guarantee setuptools/wheel exist for `--no-build-isolation` builds |
+| _install_with_no_isolation | 365 | private | Tuple[bool, str] | No | Work around packages with broken `setup.py` |
+| _install_xtcocotools_windows | 402 | private | Tuple[bool, str] | No | Install `xtcocotools` on Windows from a prebuilt wheel |
+| stop | 452 | public | - | No | Request cooperative cancellation |
+| _format_duration | 456 | private | str | No | Human-readable elapsed time |
 
 #### Class: MuseTalkModelDownloader
 **Line**: 477-783 · **Base**: `QThread`
@@ -599,17 +607,17 @@ Background downloader for MuseTalk's model weights, preferring HuggingFace Hub w
 ##### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 484 | constructor | - | No | Initialize download state |
-| run | 489 | public | - | No | Download all required models in sequence |
-| _download_musetalk_model | 542 | private | bool | No | Core MuseTalk model, HF first then direct URL |
-| _download_via_hf_hub | 584 | private | bool | No | Fallback download through `huggingface_hub` |
-| _download_dwpose_model | 621 | private | bool | No | DWPose pose-estimation weights |
-| _download_face_parse_model | 645 | private | bool | No | Face-parsing weights |
-| _download_vae_model | 673 | private | bool | No | Stable Diffusion VAE weights |
-| _download_whisper_model | 714 | private | bool | No | Whisper tiny model for audio alignment |
-| _download_file | 727 | private | bool | No | Generic download with progress tracking |
-| stop | 768 | public | - | No | Request cooperative cancellation |
-| _format_duration | 772 | private | str | No | Human-readable elapsed time |
+| __init__ | 477 | constructor | - | No | Initialize download state |
+| run | 482 | public | - | No | Download all required models in sequence |
+| _download_musetalk_model | 535 | private | bool | No | Core MuseTalk model, HF first then direct URL |
+| _download_via_hf_hub | 577 | private | bool | No | Fallback download through `huggingface_hub` |
+| _download_dwpose_model | 614 | private | bool | No | DWPose pose-estimation weights |
+| _download_face_parse_model | 638 | private | bool | No | Face-parsing weights |
+| _download_vae_model | 666 | private | bool | No | Stable Diffusion VAE weights |
+| _download_whisper_model | 707 | private | bool | No | Whisper tiny model for audio alignment |
+| _download_file | 720 | private | bool | No | Generic download with progress tracking |
+| stop | 761 | public | - | No | Request cooperative cancellation |
+| _format_duration | 765 | private | str | No | Human-readable elapsed time |
 
 ---
 
@@ -761,14 +769,14 @@ Tracks submitted batch jobs and mediates all Batch API calls through an injected
 ---
 
 ### Utilities
-**Path**: `core/utils.py` - 482 lines
+**Path**: `core/utils.py` - 481 lines
 **Purpose**: Cross-cutting helpers — filename sanitization, key-file reading, README/help extraction, image sidecar metadata, auto-save, disk history scanning, and debug-image cleanup.
 **Language**: Python
 
 #### Module-Level Elements
 | Element | Line | Type | Description |
 |---------|------|------|-------------|
-| EXAMPLES | 359 | constant | Demo prompt list used by `find_cached_demo` (local to that function's scope) |
+| EXAMPLES | 358 | constant | Demo prompt list used by `find_cached_demo` (local to that function's scope) |
 
 #### Functions
 | Function | Line | Scope | Returns | Async | Description |
@@ -781,60 +789,60 @@ Tracks submitted batch jobs and mediates all Batch API calls through an injected
 | format_file_size | 144 | public | str | No | Human-readable byte size |
 | parse_image_size | 161 | public | tuple[int, int] | No | Parse `"1024x768"` into `(w, h)` |
 | images_output_dir | 180 | public | Path | No | Directory where generated images auto-save |
-| sidecar_path | 189 | public | Path | No | JSON sidecar path for a given image |
-| write_image_sidecar | 194 | public | None | No | Write prompt/generation metadata beside an image |
-| read_image_sidecar | 224 | public | Optional[dict] | No | Read an image's sidecar metadata |
-| detect_image_extension | 235 | public | str | No | Sniff the image format from raw bytes (defaults to `.png`) |
-| sanitize_stub_from_prompt | 251 | public | str | No | Build a safe filename stub from a prompt |
-| auto_save_images | 281 | public | list | No | Save all generated images to the output dir; return absolute paths |
-| scan_disk_history | 309 | public | list[Path] | No | List generated images sorted newest-first |
-| find_cached_demo | 355 | public | Optional[Path] | No | Reuse a cached demo image when prompt+provider match a sidecar |
-| default_model_for_provider | 391 | public | str | No | Default model ID for a provider |
-| cleanup_debug_images | 399 | public | tuple[int, int] | No | Remove leftover debug images at startup |
+| sidecar_path | 188 | public | Path | No | JSON sidecar path for a given image |
+| write_image_sidecar | 193 | public | None | No | Write prompt/generation metadata beside an image |
+| read_image_sidecar | 223 | public | Optional[dict] | No | Read an image's sidecar metadata |
+| detect_image_extension | 234 | public | str | No | Sniff the image format from raw bytes (defaults to `.png`) |
+| sanitize_stub_from_prompt | 250 | public | str | No | Build a safe filename stub from a prompt |
+| auto_save_images | 280 | public | list | No | Save all generated images to the output dir; return absolute paths |
+| scan_disk_history | 308 | public | list[Path] | No | List generated images sorted newest-first |
+| find_cached_demo | 354 | public | Optional[Path] | No | Reuse a cached demo image when prompt+provider match a sidecar |
+| default_model_for_provider | 390 | public | str | No | Default model ID for a provider |
+| cleanup_debug_images | 398 | public | tuple[int, int] | No | Remove leftover debug images at startup |
 
 ---
 
 ### Lyrics-to-Prompts Generator
-**Path**: `core/lyrics_to_prompts.py` - 436 lines
+**Path**: `core/lyrics_to_prompts.py` - 444 lines
 **Purpose**: Turns song lyrics into one descriptive image prompt per line using an LLM (via LiteLLM), with structured-JSON parsing and a plain-text fallback parser.
 **Language**: Python
 
 #### Data Structures
 | Name | Line | Type | Fields |
 |------|------|------|--------|
-| LyricPrompt | 20 | @dataclass | line, image_prompt |
-| LyricsToPromptsResult | 39 | @dataclass | prompts, raw_response, success, error |
+| LyricPrompt | 21 | @dataclass | line, image_prompt |
+| LyricsToPromptsResult | 40 | @dataclass | prompts, raw_response, success, error |
 
 ##### LyricPrompt methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| to_dict | 25 | public | Dict[str, Any] | No | Serialize to `{line, imagePrompt}` |
-| @classmethod from_dict | 30 | class | 'LyricPrompt' | No | Rehydrate from the JSON schema shape |
+| to_dict | 26 | public | Dict[str, Any] | No | Serialize to `{line, imagePrompt}` |
+| @classmethod from_dict | 31 | class | 'LyricPrompt' | No | Rehydrate from the JSON schema shape |
 
 ##### LyricsToPromptsResult methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| to_dict | 46 | public | Dict[str, Any] | No | Serialize to the guide's JSON schema |
+| to_dict | 47 | public | Dict[str, Any] | No | Serialize to the guide's JSON schema |
 
 #### Class: LyricsToPromptsGenerator
-**Line**: 53-414
+**Line**: 54-422
 Owns the system prompt, LiteLLM setup, provider credential export, generation call, and response parsing.
 
 ##### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 84 | constructor | - | No | Bind a `ConfigManager` and prepare LLM access |
-| _setup_litellm | 96 | private | - | No | Configure LiteLLM when it is importable |
-| _setup_providers | 108 | private | - | No | Export provider API keys as env vars for LiteLLM |
-| generate | 154 | public | LyricsToPromptsResult | No | Generate one image prompt per lyric line |
-| _parse_response | 247 | private | LyricsToPromptsResult | No | Parse structured JSON output (fences tolerated) |
-| _parse_plain_text | 324 | private | LyricsToPromptsResult | No | Fallback parser for non-JSON LLM output |
-| save_to_json | 399 | public | - | No | Persist the result to a JSON file |
+| __init__ | 85 | constructor | - | No | Bind a `ConfigManager` and prepare LLM access |
+| _setup_litellm | 97 | private | - | No | Configure LiteLLM when it is importable |
+| _setup_providers | 109 | private | - | No | Export provider API keys as env vars for LiteLLM |
+| generate | 155 | public | LyricsToPromptsResult | No | Generate one image prompt per lyric line |
+| _parse_response | 255 | private | LyricsToPromptsResult | No | Parse structured JSON output (fences tolerated) |
+| _parse_plain_text | 332 | private | LyricsToPromptsResult | No | Fallback parser for non-JSON LLM output |
+| save_to_json | 407 | public | - | No | Persist the result to a JSON file |
 
 #### Functions
 | Function | Line | Scope | Returns | Async | Description |
 |----------|------|-------|---------|-------|-------------|
-| load_lyrics_from_file | 417 | public | List[str] | No | Read lyrics from a text file into lines |
+| load_lyrics_from_file | 425 | public | List[str] | No | Read lyrics from a text file into lines |
 
 ---
 
@@ -866,68 +874,68 @@ Owns the system prompt, LiteLLM setup, provider credential export, generation ca
 ---
 
 ### Configuration Manager
-**Path**: `core/config.py` - 381 lines
+**Path**: `core/config.py` - 372 lines
 **Purpose**: Platform-aware config persistence and the single authority for API-key resolution, auth modes, layout/Discord settings, and user directories. **Always** read keys via `get_api_key()` rather than the raw config dict.
 **Language**: Python
 
 #### Class: ConfigManager
-**Line**: 16-375
+**Line**: 17-366
 
 ##### Methods — lifecycle & generic access
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 19 | constructor | - | No | Resolve the config dir, load and migrate config |
-| _get_config_dir | 32 | private | Path | No | Platform-specific config directory |
-| _load_config | 46 | private | Dict[str, Any] | No | Read `config.json` from disk |
-| _normalize_auth_mode | 57 | private | None | No | Normalize legacy auth-mode values |
-| _migrate_api_keys | 71 | private | None | No | Migrate top-level legacy keys into `providers` |
-| save | 95 | public | None | No | Persist config to disk |
-| get | 102 | public | Any | No | Generic key lookup with default |
-| set | 106 | public | None | No | Generic key assignment |
+| __init__ | 20 | constructor | - | No | Resolve the config dir, load and migrate config |
+| _get_config_dir | 33 | private | Path | No | Platform-specific config directory |
+| _load_config | 37 | private | Dict[str, Any] | No | Read `config.json` from disk |
+| _normalize_auth_mode | 48 | private | None | No | Normalize legacy auth-mode values |
+| _migrate_api_keys | 62 | private | None | No | Migrate top-level legacy keys into `providers` |
+| save | 86 | public | None | No | Persist config to disk |
+| get | 93 | public | Any | No | Generic key lookup with default |
+| set | 97 | public | None | No | Generic key assignment |
 
 ##### Methods — provider credentials & auth
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| get_provider_config | 110 | public | Dict[str, Any] | No | Per-provider config block |
-| set_provider_config | 115 | public | None | No | Replace a provider's config block |
-| get_api_key | 121 | public | Optional[str] | No | Layered API-key resolution (key file > config > env) |
-| set_api_key | 167 | public | None | No | Store a provider's API key |
-| get_auth_mode | 178 | public | str | No | Auth mode for a provider (api key vs gcloud) |
-| set_auth_mode | 184 | public | None | No | Set a provider's auth mode |
-| get_auth_validated | 189 | public | bool | No | Whether the provider's auth was verified |
-| set_auth_validated | 195 | public | None | No | Record auth-validation status |
-| get_gcloud_project_id | 202 | public | Optional[str] | No | Stored Google Cloud project ID |
-| set_gcloud_project_id | 206 | public | None | No | Persist the Google Cloud project ID |
+| get_provider_config | 101 | public | Dict[str, Any] | No | Per-provider config block |
+| set_provider_config | 106 | public | None | No | Replace a provider's config block |
+| get_api_key | 112 | public | Optional[str] | No | Layered API-key resolution (key file > config > env) |
+| set_api_key | 158 | public | None | No | Store a provider's API key |
+| get_auth_mode | 169 | public | str | No | Auth mode for a provider (api key vs gcloud) |
+| set_auth_mode | 175 | public | None | No | Set a provider's auth mode |
+| get_auth_validated | 180 | public | bool | No | Whether the provider's auth was verified |
+| set_auth_validated | 186 | public | None | No | Record auth-validation status |
+| get_gcloud_project_id | 193 | public | Optional[str] | No | Stored Google Cloud project ID |
+| set_gcloud_project_id | 197 | public | None | No | Persist the Google Cloud project ID |
 
 ##### Methods — records, directories & feature settings
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| save_details_record | 210 | public | None | No | Append a template/details record to history |
-| load_details_records | 218 | public | list | No | Load all template/details records |
-| get_images_dir | 232 | public | Path | No | Directory for saved images |
-| get_layout_config | 240 | public | Dict[str, Any] | No | Layout-module configuration block |
-| set_layout_config | 244 | public | None | No | Replace the layout configuration block |
-| get_templates_dir | 248 | public | Path | No | Layout template directory |
-| get_fonts_dir | 272 | public | Optional[Path] | No | Optional custom-fonts directory |
-| get_layout_export_dpi | 284 | public | int | No | Default DPI for layout exports |
-| set_layout_export_dpi | 289 | public | None | No | Persist layout export DPI |
-| get_layout_llm_provider | 295 | public | str | No | LLM provider for layout text generation |
-| set_layout_llm_provider | 300 | public | None | No | Persist layout LLM provider |
-| get_layout_llm_model | 306 | public | str | No | Last-selected layout designer model |
-| set_layout_llm_model | 311 | public | None | No | Persist layout designer model choice |
-| get_layout_content_kind | 317 | public | str | No | Last-selected designer content kind |
-| set_layout_content_kind | 322 | public | None | No | Persist designer content-kind choice |
-| get_layout_style_role | 328 | public | str | No | Last-viewed style role in the Style panel |
-| set_layout_style_role | 333 | public | None | No | Persist the Style panel's last-viewed role |
-| get_discord_config | 341 | public | Dict[str, Any] | No | Discord Rich Presence configuration |
-| set_discord_config | 363 | public | None | No | Replace the Discord configuration block |
-| get_discord_enabled | 367 | public | bool | No | Whether Rich Presence is enabled |
-| set_discord_enabled | 371 | public | None | No | Enable/disable Rich Presence |
+| save_details_record | 201 | public | None | No | Append a template/details record to history |
+| load_details_records | 209 | public | list | No | Load all template/details records |
+| get_images_dir | 223 | public | Path | No | Directory for saved images |
+| get_layout_config | 231 | public | Dict[str, Any] | No | Layout-module configuration block |
+| set_layout_config | 235 | public | None | No | Replace the layout configuration block |
+| get_templates_dir | 239 | public | Path | No | Layout template directory |
+| get_fonts_dir | 263 | public | Optional[Path] | No | Optional custom-fonts directory |
+| get_layout_export_dpi | 275 | public | int | No | Default DPI for layout exports |
+| set_layout_export_dpi | 280 | public | None | No | Persist layout export DPI |
+| get_layout_llm_provider | 286 | public | str | No | LLM provider for layout text generation |
+| set_layout_llm_provider | 291 | public | None | No | Persist layout LLM provider |
+| get_layout_llm_model | 297 | public | str | No | Last-selected layout designer model |
+| set_layout_llm_model | 302 | public | None | No | Persist layout designer model choice |
+| get_layout_content_kind | 308 | public | str | No | Last-selected designer content kind |
+| set_layout_content_kind | 313 | public | None | No | Persist designer content-kind choice |
+| get_layout_style_role | 319 | public | str | No | Last-viewed style role in the Style panel |
+| set_layout_style_role | 324 | public | None | No | Persist the Style panel's last-viewed role |
+| get_discord_config | 332 | public | Dict[str, Any] | No | Discord Rich Presence configuration |
+| set_discord_config | 354 | public | None | No | Replace the Discord configuration block |
+| get_discord_enabled | 358 | public | bool | No | Whether Rich Presence is enabled |
+| set_discord_enabled | 362 | public | None | No | Enable/disable Rich Presence |
 
 #### Functions
 | Function | Line | Scope | Returns | Async | Description |
 |----------|------|-------|---------|-------|-------------|
-| get_api_key_url | 378 | public | str | No | Documentation URL for obtaining a provider's API key |
+| get_api_key_url | 369 | public | str | No | Documentation URL for obtaining a provider's API key |
 
 ---
 
@@ -961,22 +969,22 @@ Holds the `SYSTEM_PROMPT` template and preset/schema loading logic.
 ---
 
 ### Prompt Enhancer (LLM backend)
-**Path**: `core/prompt_enhancer_llm.py` - 354 lines
+**Path**: `core/prompt_enhancer_llm.py` - 353 lines
 **Purpose**: Executes prompt enhancement against a real LLM through LiteLLM, normalizing plain-text answers into the structured schema and providing a fallback response when the call fails.
 **Language**: Python
 
 #### Class: PromptEnhancerLLM
-**Line**: 16-354
+**Line**: 17-353
 
 ##### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 19 | constructor | - | No | Bind the default LLM provider |
-| enhance_with_llm | 30 | public | Dict[str, Any] | No | Enhance a prompt with a live LLM call (level, aspect, preset, variants) |
-| _call_with_litellm | 142 | private | Dict[str, Any] | No | Perform the LiteLLM completion with per-model parameter quirks |
-| _text_to_structured | 267 | private | Dict[str, Any] | No | Wrap a plain-text enhancement in the structured schema |
-| _create_fallback_response | 315 | private | Dict[str, Any] | No | Build a usable response when the LLM is unavailable |
-| get_enhanced_prompt_for_provider | 333 | public | Optional[str] | No | Extract the provider-specific prompt from enhanced data |
+| __init__ | 20 | constructor | - | No | Bind the default LLM provider |
+| enhance_with_llm | 31 | public | Dict[str, Any] | No | Enhance a prompt with a live LLM call (level, aspect, preset, variants) |
+| _call_with_litellm | 143 | private | Dict[str, Any] | No | Perform the LiteLLM completion with per-model parameter quirks |
+| _text_to_structured | 266 | private | Dict[str, Any] | No | Wrap a plain-text enhancement in the structured schema |
+| _create_fallback_response | 314 | private | Dict[str, Any] | No | Build a usable response when the LLM is unavailable |
+| get_enhanced_prompt_for_provider | 332 | public | Optional[str] | No | Extract the provider-specific prompt from enhanced data |
 
 ---
 
@@ -1268,38 +1276,153 @@ Value object describing a Commons image.
 
 ---
 
-### Logging Configuration
-**Path**: `core/logging_config.py` - 224 lines
-**Purpose**: Sets up application-wide logging (file + console), captures Python warnings, registers an `atexit` hook that copies the session log to `./imageai_current.log`, and provides named-logger and exception-context helpers.
+### Data Paths (single path resolver)
+**Path**: `core/paths.py` - 227 lines
+**Purpose**: The one module that owns every ImageAI data location. It resolves the four relocatable groups — Images, Video, Models, Settings — from optional `data_roots` overrides in `config.json`, and falls back to the platform user directory when a group has no override or its configured root is unreachable. Never build a data path by hand; call `get_data_paths()` and one of its accessors.
 **Language**: Python
+
+**Import rule**: this module must not import `core/logging_config.py` or `core/config.py`. The file logger asks this module where the log directory is, so the resolver runs before the logger exists. Errors go into a deferred buffer that `drain_warnings()` hands to the logger once it starts.
+
+#### Module-Level Elements
+| Element | Line | Type | Description |
+|---------|------|------|-------------|
+| APP_NAME | 22 | constant | `"ImageAI"`, duplicated from `core/constants.py` to avoid the import cycle |
+| _INSTANCE | 213 | constant | Process-wide `DataPaths` singleton, `None` until first use |
 
 #### Functions
 | Function | Line | Scope | Returns | Async | Description |
 |----------|------|-------|---------|-------|-------------|
-| setup_logging | 17 | public | - | No | Configure handlers, levels, warning capture, and exit-copy hook; returns the log path |
-| copy_log_on_exit | 119 | private | - | No | Nested `atexit` callback that copies the log to the working directory |
-| get_error_report_info | 136 | public | - | No | Gather environment/log details for an error report |
+| platform_default_dir | 34 | public | Path | No | Platform user-data directory (`%APPDATA%` / Application Support / `$XDG_CONFIG_HOME`). Never changes |
+| config_file_path | 45 | public | Path | No | `config.json` under the platform default. This file never moves — it is the bootstrap anchor |
+| get_data_paths | 216 | public | DataPaths | No | Return the process-wide singleton, creating it on first call |
+| reset_data_paths | 224 | public | None | No | Drop the singleton; used by tests and after a completed move |
+
+#### Class: Group
+**Line**: 25-31
+`str`-valued `Enum` naming the four relocatable groups: `IMAGES`, `VIDEO`, `MODELS`, `SETTINGS` (values `"images"`, `"video"`, `"models"`, `"settings"` — the keys used in `config.json`).
+
+#### Class: DataPaths
+**Line**: 50-210
+Resolves each group's root, then derives every concrete directory and file from it. Roots are cached per instance, so one unreachable-path warning is emitted per group per process.
+
+##### Methods
+| Method | Line | Type | Returns | Async | Description |
+|--------|------|------|---------|-------|-------------|
+| __init__ | 53 | constructor | None | No | Take an optional `config_path`, read overrides, prime the warning buffer |
+| _read_overrides | 61 | private | Dict[str, Any] | No | Read `data_roots` from `config.json`; a damaged file yields `{}` plus a warning |
+| root | 77 | public | Path | No | Root for one group. Falls back to the default when the override is unset or unreachable, and never rewrites the config, so the configured path resumes when the location returns |
+| _is_reachable | 109 | static | bool | No | True when the path is a writable directory (catches an unplugged drive or an offline share) |
+| drain_warnings | 119 | public | List[str] | No | Return the buffered warnings and clear the buffer; the logger calls this at startup |
+| generated | 126 | public | Path | No | Images root `/generated` |
+| images | 129 | public | Path | No | Images root `/images` |
+| composites | 132 | public | Path | No | Images root `/composites` |
+| styles | 135 | public | Path | No | Images root `/styles` |
+| characters | 138 | public | Path | No | Images root `/Characters` |
+| midjourney_cache | 141 | public | Path | No | Images root `/midjourney_web_cache` |
+| midjourney_storage | 144 | public | Path | No | Images root `/midjourney_web_storage` |
+| video_projects | 149 | public | Path | No | Video root `/video_projects` |
+| video_cache | 152 | public | Path | No | Video root `/cache/<name>` |
+| video_events_db | 155 | public | Path | No | `video_projects/events.db`, the only SQLite database in the design |
+| models | 160 | public | Path | No | The Models root itself |
+| musetalk | 163 | public | Path | No | Models root `/musetalk` |
+| weights | 166 | public | Path | No | Models root `/weights` |
+| model_cache | 169 | public | Path | No | Models root `/cache/<name>` |
+| huggingface | 172 | public | Path | No | Models root `/huggingface`, the `cache_dir` for every HuggingFace download |
+| settings_root | 177 | public | Path | No | The Settings root itself |
+| logs | 180 | public | Path | No | Settings root `/logs` |
+| layout | 183 | public | Path | No | Settings root `/layout` |
+| template_cache | 186 | public | Path | No | Settings root `/template_cache` |
+| history_file | 189 | public | Path | No | Settings root `/<name>_history.json` |
+| session_file | 192 | public | Path | No | Settings root `/<name>_session.json` |
+| batch_jobs | 195 | public | Path | No | Settings root `/batch_jobs.json` |
+| details | 198 | public | Path | No | Settings root `/details.jsonl` |
+| config_file | 203 | public | Path | No | `config.json`. Pinned to the platform default; it records where every other group lives |
+| ensure | 207 | public | Path | No | `mkdir(parents=True, exist_ok=True)` and return the path |
+
+---
+
+### Data Migration (group relocation)
+**Path**: `core/data_migration.py` - 408 lines
+**Purpose**: Headless relocation of one data group to a new root — discover sources, validate the destination, copy or rename, verify, commit the config, then delete. Imports no Qt; `gui/storage_settings_widget.py` drives it and renders progress from the callback.
+**Language**: Python
+
+**Ordering rule**: verify the copy → write `config.json` → delete the source. A crash between the config write and the delete leaves a working application plus a stale copy. The reverse order can destroy the only copy.
+
+#### Module-Level Elements
+| Element | Line | Type | Description |
+|---------|------|------|-------------|
+| GROUP_CONTENTS | 21 | constant | Directory names belonging to each group, relative to the group root |
+| SETTINGS_FILES | 33 | constant | Loose files that move with Settings (`details.jsonl`, `batch_jobs.json`). `config.json` is deliberately absent |
+| SETTINGS_GLOBS | 34 | constant | History/session/backup glob patterns that move with Settings |
+| FREE_SPACE_MARGIN | 37 | constant | 256 MB safety margin above the measured source size |
+
+#### Functions
+| Function | Line | Scope | Returns | Async | Description |
+|----------|------|-------|---------|-------|-------------|
+| legacy_huggingface_dir | 53 | public | Path | No | The pre-move `~/.cache/huggingface` location |
+| legacy_dot_imageai_dir | 58 | public | Path | No | The pre-move `~/.imageai` tree |
+| tree_size | 63 | public | Tuple[int, int] | No | `(file_count, total_bytes)` for a file or directory tree |
+| sources_for | 81 | public | List[Tuple[Path, str]] | No | Existing `(source, name_under_destination)` pairs. Models spans the app root plus the HuggingFace cache; Video spans the app root plus `~/.imageai` |
+| validate_destination | 122 | public | Optional[str] | No | Error message, or `None` when the destination is usable (existence, writability, free space, no self-nesting) |
+| _human | 185 | private | str | No | Format a byte count for a user-facing message |
+| _same_volume | 195 | private | bool | No | True when source and destination share a volume; drives the rename fast path |
+| _is_cancelled | 210 | private | bool | No | Accept either an `Event`-like flag or a callable as the cancel token |
+| _checkpoint_sqlite | 218 | private | None | No | `PRAGMA wal_checkpoint(TRUNCATE)` folds the write-ahead log into the main file so a copy is self-contained |
+| _prepare_databases | 237 | private | None | No | Checkpoint every `*.db` under the sources before the copy starts |
+| _copy_entry | 246 | private | None | No | Copy one file or tree with `shutil.copy2`, reporting progress per file |
+| _write_root | 278 | private | None | No | Persist the new root into `config.json` `data_roots` and `fsync` it |
+| move_group | 296 | public | MoveResult | No | The whole move: validate, run `pre_move`, checkpoint, rename or copy, verify, commit, delete, clean up |
+| _remove_partial | 390 | private | None | No | Delete a partially written destination after a cancel or failure |
+| _cleanup_empty_legacy_dirs | 399 | private | None | No | Remove `~/.imageai` once the Video move has emptied it |
+
+#### Class: MoveCancelled
+**Line**: 40-41
+Internal exception raised when the caller sets the cancel token mid-copy.
+
+#### Class: MoveResult
+**Line**: 45-50
+Dataclass returned by `move_group`: `ok`, `files_moved`, `bytes_moved`, `used_rename`, `error`.
+
+---
+
+### Logging Configuration
+**Path**: `core/logging_config.py` - 223 lines
+**Purpose**: Sets up application-wide logging (file + console), captures Python warnings, registers an `atexit` hook that copies the session log to `./imageai_current.log`, and provides named-logger and exception-context helpers.
+**Language**: Python
+
+The log directory comes from `core.paths.get_data_paths().logs()`, so it follows
+the Settings storage root. The import is deferred and one-directional:
+`core/paths.py` has no logging dependency, so it can run before the logger
+exists. `setup_logging` drains `DataPaths.drain_warnings()` right after the
+handlers attach, which is how an unreachable storage root reaches the log file.
+
+#### Functions
+| Function | Line | Scope | Returns | Async | Description |
+|----------|------|-------|---------|-------|-------------|
+| setup_logging | 17 | public | - | No | Resolve the log dir from `DataPaths`, configure handlers/levels/warning capture and the exit-copy hook, drain buffered path warnings; returns the log path |
+| copy_log_on_exit | 120 | private | - | No | Nested `atexit` callback that copies the log to the working directory |
+| get_error_report_info | 137 | public | - | No | Gather environment/log details for an error report |
 
 #### Class: LogManager
-**Line**: 174-196
+**Line**: 173-195
 Factory for loggers namespaced under `imageai`.
 
 ##### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 182 | constructor | - | No | Initialize the logger cache |
-| get_logger | 186 | public | logging.Logger | No | Get/create a named logger in the `imageai` namespace |
+| __init__ | 181 | constructor | - | No | Initialize the logger cache |
+| get_logger | 185 | public | logging.Logger | No | Get/create a named logger in the `imageai` namespace |
 
 #### Class: ErrorLogger
-**Line**: 199-224
+**Line**: 198-223
 Context manager that logs any exception raised inside the block, with an operation label and optional re-raise.
 
 ##### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 202 | constructor | - | No | Store operation name, logger, and re-raise flag |
-| __enter__ | 213 | public | - | No | Enter the context |
-| __exit__ | 216 | public | - | No | Log the exception and re-raise unless suppressed |
+| __init__ | 201 | constructor | - | No | Store operation name, logger, and re-raise flag |
+| __enter__ | 212 | public | - | No | Enter the context |
+| __exit__ | 215 | public | - | No | Log the exception and re-raise unless suppressed |
 
 ---
 
@@ -1319,8 +1442,8 @@ Context manager that logs any exception raised inside the block, with an operati
 ---
 
 ### Constants
-**Path**: `core/constants.py` - 161 lines
-**Purpose**: Application metadata (including `VERSION`, the primary version definition), provider/model catalogs for the image-generation UI, default sizes and window geometry, template categories, Discord presence constants, and the user-data directory resolver.
+**Path**: `core/constants.py` - 154 lines
+**Purpose**: Application metadata (including `VERSION`, the primary version definition), provider/model catalogs for the image-generation UI, default sizes and window geometry, template categories, Discord presence constants, and two thin path shims that delegate to `core/paths.py`.
 **Language**: Python
 
 #### Module-Level Elements
@@ -1350,12 +1473,12 @@ Context manager that logs any exception raised inside the block, with an operati
 | DISCORD_SERVER_URL | 110 | constant | Discord invite button URL |
 | DISCORD_PRIVACY_LEVELS | 113 | constant | Allowed privacy levels (full / activity_only / minimal) |
 | DISCORD_ASSETS | 123 | constant | Presence image-asset keys |
-| BATCH_JOBS_PATH | 161 | constant | Location of persisted batch-job records |
 
 #### Functions
 | Function | Line | Scope | Returns | Async | Description |
 |----------|------|-------|---------|-------|-------------|
-| get_user_data_dir | 140 | public | Path | No | Platform-specific ImageAI user-data directory |
+| get_user_data_dir | 140 | public | Path | No | Deprecated shim kept for external scripts; returns `DataPaths.settings_root()` |
+| batch_jobs_path | 150 | public | Path | No | Batch-job ledger path from `DataPaths.batch_jobs()` (Settings group) |
 
 ---
 
@@ -1447,7 +1570,7 @@ processing, and cross-scene visual continuity.
 ---
 
 ### PromptEngine / UnifiedLLMProvider
-**Path**: `core/video/prompt_engine.py` - 1466 lines
+**Path**: `core/video/prompt_engine.py` - 1478 lines
 **Purpose**: LLM-backed prompt generation and enhancement — turns plain lyric/scene text into cinematic image and video prompts via LiteLLM, with retry/backoff, batch modes, and Jinja2 templates.
 **Language**: Python
 
@@ -1483,27 +1606,27 @@ Single façade over every LLM backend (OpenAI, Anthropic, Google Gemini, Ollama,
 | _strip_markdown_headers | 250 | private | str | No | Strip `#` headers, bold markers, and bullets from LLM output |
 | _create_smart_fallback | 280 | private | str | No | Build a context-aware fallback prompt when the LLM fails |
 | enhance_prompt | 328 | public | str | No | Enhance one text prompt for image generation in the chosen style |
-| ↳ make_enhance_call | 424 | nested | — | No | Inner closure passed to the retry wrapper by `enhance_prompt` |
-| batch_enhance | 485 | public | List[str] | No | Enhance many prompts, chunking into batched LLM calls |
-| _parse_batch_response | 524 | private | list | No | Parse numbered/enumerated LLM batch output into a list |
-| _batch_enhance_single | 575 | private | List[str] | No | Enhance one chunk of a batch (internal worker) |
-| batch_enhance_for_video | 685 | public | List[str] | No | One-call video enhancement for all scenes: camera movement, motion, temporal progression, lyric timings, and cross-scene flow |
-| analyze_image | 939 | public | str | No | Vision-model image analysis with automatic retry/backoff |
-| ↳ make_llm_call | 1000 | nested | — | No | Inner closure performing the actual vision call under retry |
-| generate | 1024 | public | — | No | Backward-compatible alias for `analyze_image` |
-| _get_system_prompt | 1028 | private | str | No | System prompt text for a given `PromptStyle` |
+| ↳ make_enhance_call | 429 | nested | — | No | Inner closure passed to the retry wrapper by `enhance_prompt` |
+| batch_enhance | 490 | public | List[str] | No | Enhance many prompts, chunking into batched LLM calls |
+| _parse_batch_response | 529 | private | list | No | Parse numbered/enumerated LLM batch output into a list |
+| _batch_enhance_single | 580 | private | List[str] | No | Enhance one chunk of a batch (internal worker) |
+| batch_enhance_for_video | 693 | public | List[str] | No | One-call video enhancement for all scenes: camera movement, motion, temporal progression, lyric timings, and cross-scene flow |
+| analyze_image | 950 | public | str | No | Vision-model image analysis with automatic retry/backoff |
+| ↳ make_llm_call | 1009 | nested | — | No | Inner closure performing the actual vision call under retry |
+| generate | 1033 | public | — | No | Backward-compatible alias for `analyze_image` |
+| _get_system_prompt | 1037 | private | str | No | System prompt text for a given `PromptStyle` |
 
 #### Class: PromptEngine (line 1132)
 Higher-level engine used by the GUI/CLI: owns a `UnifiedLLMProvider` plus a Jinja2 environment (defaults to `templates/video/`), and applies enhancement across `Scene` objects.
 
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 1135 | constructor | None | No | Create/accept an LLM provider and resolve the template directory |
-| enhance_scene_prompts | 1164 | public | List[Scene] | No | Enhance prompts for a list of scenes in batches |
-| apply_template | 1210 | public | str | No | Render a Jinja2 template against a scene plus extra variables |
-| enhance_prompt | 1257 | public | str | No | Delegate single-prompt enhancement to the provider |
-| regenerate_prompt | 1284 | public | str | No | Regenerate one scene's prompt (fresh LLM pass) |
-| enhance_for_video | 1319 | public | str | No | Video-specific enhancement for one scene, using previous-scene context for continuity |
+| __init__ | 1144 | constructor | None | No | Create/accept an LLM provider and resolve the template directory |
+| enhance_scene_prompts | 1173 | public | List[Scene] | No | Enhance prompts for a list of scenes in batches |
+| apply_template | 1219 | public | str | No | Render a Jinja2 template against a scene plus extra variables |
+| enhance_prompt | 1266 | public | str | No | Delegate single-prompt enhancement to the provider |
+| regenerate_prompt | 1293 | public | str | No | Regenerate one scene's prompt (fresh LLM pass) |
+| enhance_for_video | 1328 | public | str | No | Video-specific enhancement for one scene, using previous-scene context for continuity |
 
 ---
 
@@ -1610,7 +1733,7 @@ Root aggregate: metadata, provider/model choices, render options, audio/MIDI/kar
 ---
 
 ### LLM Sync Assistant
-**Path**: `core/video/llm_sync.py` - 626 lines
+**Path**: `core/video/llm_sync.py` - 637 lines
 **Purpose**: LLM-assisted (and heuristic-fallback) timing estimation — distributes lyrics or scene descriptions across a duration, honoring section markers, explicit durations, and MIDI sections.
 **Language**: Python
 
@@ -1632,13 +1755,13 @@ Root aggregate: metadata, provider/model choices, render options, audio/MIDI/kar
 | _detect_section_type | 223 | private | Optional[str] | No | Infer section type from plain line content |
 | _estimate_line_duration | 229 | private | float | No | Weight a line's duration by length/syllable heuristics |
 | estimate_timing_from_descriptions | 246 | public | List[TimedLyric] | No | LLM-estimate realistic per-scene timings when no MIDI exists |
-| estimate_timing_with_explicit | 371 | public | List[TimedLyric] | No | Fill in timings only for scenes lacking explicit durations |
-| sync_with_llm | 455 | public | List[TimedLyric] | No | Full LLM alignment pass over lyrics + audio duration/sections |
+| estimate_timing_with_explicit | 374 | public | List[TimedLyric] | No | Fill in timings only for scenes lacking explicit durations |
+| sync_with_llm | 458 | public | List[TimedLyric] | No | Full LLM alignment pass over lyrics + audio duration/sections |
 
 ---
 
 ### Project Enhancements (Versioning, Variants, Ken Burns)
-**Path**: `core/video/project_enhancements.py` - 522 lines
+**Path**: `core/video/project_enhancements.py` - 516 lines
 **Purpose**: Project-level enhancement layer — directory versioning, per-scene image variants, crop settings, and Ken Burns presets, plus the manager that persists them on disk.
 **Language**: Python
 
@@ -1701,20 +1824,20 @@ Creates and maintains versioned project directories, recent-project tracking, se
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
 | __init__ | 315 | constructor | None | No | Set base directory and load recent-project list |
-| _load_recent_projects | 338 | private | List[Dict[str, Any]] | No | Read the recent-projects index |
-| _save_recent_projects | 348 | private | None | No | Write the recent-projects index |
-| _add_to_recent | 356 | private | None | No | Push a project to the front of the recent list |
-| create_project_directory | 372 | public | Path | No | Create a versioned project folder from settings |
-| _generate_folder_name | 395 | private | str | No | Build folder name per `VersioningMode` |
-| _get_next_version | 417 | private | int | No | Next sequential version number for a base name |
-| _sanitize_filename | 437 | private | str | No | Strip filesystem-hostile characters |
-| save_project_settings | 444 | public | None | No | Persist `ProjectSettings` into the project dir |
-| load_project_settings | 450 | public | ProjectSettings | No | Load settings (defaults when absent) |
-| init_workspace | 459 | public | None | No | Create the workspace file/skeleton for a project |
-| save_scene_variants | 471 | public | None | No | Write a scene's variant set to disk |
-| load_scene_variants | 480 | public | SceneVariants | No | Read a scene's variant set from disk |
-| get_render_filename | 492 | public | Path | No | Compose an output filename from settings + quality |
-| clean_old_drafts | 508 | public | None | No | Prune draft renders beyond `keep_count` |
+| _load_recent_projects | 332 | private | List[Dict[str, Any]] | No | Read the recent-projects index |
+| _save_recent_projects | 342 | private | None | No | Write the recent-projects index |
+| _add_to_recent | 350 | private | None | No | Push a project to the front of the recent list |
+| create_project_directory | 366 | public | Path | No | Create a versioned project folder from settings |
+| _generate_folder_name | 389 | private | str | No | Build folder name per `VersioningMode` |
+| _get_next_version | 411 | private | int | No | Next sequential version number for a base name |
+| _sanitize_filename | 431 | private | str | No | Strip filesystem-hostile characters |
+| save_project_settings | 438 | public | None | No | Persist `ProjectSettings` into the project dir |
+| load_project_settings | 444 | public | ProjectSettings | No | Load settings (defaults when absent) |
+| init_workspace | 453 | public | None | No | Create the workspace file/skeleton for a project |
+| save_scene_variants | 465 | public | None | No | Write a scene's variant set to disk |
+| load_scene_variants | 474 | public | SceneVariants | No | Read a scene's variant set from disk |
+| get_render_filename | 486 | public | Path | No | Compose an output filename from settings + quality |
+| clean_old_drafts | 502 | public | None | No | Prune draft renders beyond `keep_count` |
 
 ---
 
@@ -1830,7 +1953,7 @@ Checks candidate references against Veo 3 requirements using class constants for
 ---
 
 ### Thumbnail Manager
-**Path**: `core/video/thumbnail_manager.py` - 362 lines
+**Path**: `core/video/thumbnail_manager.py` - 364 lines
 **Purpose**: Generates, composites, and caches storyboard thumbnails for scenes (with title overlays, image-count badges, and placeholder/error tiles).
 **Language**: Python
 
@@ -1840,17 +1963,17 @@ Class constants define the default (160×90) and storyboard (320×180) thumbnail
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
 | __init__ | 23 | constructor | None | No | Set up the on-disk thumbnail cache directory |
-| create_thumbnail | 34 | public | bytes | No | Render a thumbnail from raw image bytes, preserving aspect by default |
-| create_scene_thumbnail | 88 | public | bytes | No | Composite a scene tile from multiple images plus title and count badge |
-| get_cached_thumbnail | 176 | public | Optional[bytes] | No | Fetch a cached thumbnail by image hash + size |
-| cache_thumbnail | 200 | public | None | No | Store a rendered thumbnail in the cache |
-| create_thumbnail_with_cache | 220 | public | bytes | No | Cache-aware wrapper around `create_thumbnail` |
-| _create_placeholder_thumbnail | 252 | private | bytes | No | Grey placeholder tile with centered text |
-| _create_error_thumbnail | 279 | private | bytes | No | Error tile used when rendering fails |
-| _add_title_overlay | 283 | private | None | No | Draw the scene title band onto the tile |
-| _add_count_badge | 305 | private | None | No | Draw the "N images" badge onto the tile |
-| clear_cache | 335 | public | None | No | Delete cached thumbnails older than N days |
-| get_cache_size | 354 | public | int | No | Total cache size in bytes |
+| create_thumbnail | 36 | public | bytes | No | Render a thumbnail from raw image bytes, preserving aspect by default |
+| create_scene_thumbnail | 90 | public | bytes | No | Composite a scene tile from multiple images plus title and count badge |
+| get_cached_thumbnail | 178 | public | Optional[bytes] | No | Fetch a cached thumbnail by image hash + size |
+| cache_thumbnail | 202 | public | None | No | Store a rendered thumbnail in the cache |
+| create_thumbnail_with_cache | 222 | public | bytes | No | Cache-aware wrapper around `create_thumbnail` |
+| _create_placeholder_thumbnail | 254 | private | bytes | No | Grey placeholder tile with centered text |
+| _create_error_thumbnail | 281 | private | bytes | No | Error tile used when rendering fails |
+| _add_title_overlay | 285 | private | None | No | Draw the scene title band onto the tile |
+| _add_count_badge | 307 | private | None | No | Draw the "N images" badge onto the tile |
+| clear_cache | 337 | public | None | No | Delete cached thumbnails older than N days |
+| get_cache_size | 356 | public | int | No | Total cache size in bytes |
 
 ---
 
@@ -1942,7 +2065,7 @@ actual images/videos, and the supporting project/FFmpeg/timing infrastructure.
 ---
 
 ### LLM Sync Assistant (v2)
-**Path**: `core/video/llm_sync_v2.py` - 1381 lines
+**Path**: `core/video/llm_sync_v2.py` - 1404 lines
 **Purpose**: Provider-specific LLM synchronization of lyrics to audio timing, with
 estimation fallbacks, fragment re-merging, and instrumental-gap detection.
 **Language**: Python
@@ -1964,29 +2087,29 @@ raising.
 | __init__ | 28 | constructor | None | No | Store provider/model/config; try to build `UnifiedLLMProvider`, warn on ImportError |
 | sync_with_llm | 51 | public | List[TimedLyric] | No | Main entry: logs all sync parameters, dispatches to the openai/gemini/anthropic implementation, falls back to `estimate_lyric_timing` on unavailability or exception |
 | _sync_with_openai | 112 | private | List[TimedLyric] | No | OpenAI GPT-5 path using the "Strict Lyric Timing Contract v1.0" prompt |
-| _sync_with_anthropic | 349 | private | List[TimedLyric] | No | Anthropic Claude path; OpenAI-like JSON contract tailored to Claude |
-| _sync_with_gemini | 484 | private | List[TimedLyric] | No | Gemini path using section-by-section processing (Strict-Lyric-Timing-Gemini) |
-| _parse_lyrics_into_sections | 538 | private | List[Tuple[str, str]] | No | Split lyrics on structural tags (`[Verse 1]`, `[Chorus]`) into (name, text) pairs |
-| _sync_single_section_with_gemini | 575 | private | List[TimedLyric] | No | Time one section against a start offset / end time window |
-| _merge_fragmented_lyrics | 717 | private | List[TimedLyric] | No | Reconcile karaoke-style fragmented and reordered LLM output back onto the original lyric lines |
-| _lyrics_match | 793 | private | bool | No | Fuzzy compare fragment vs. original line, ignoring punctuation/case |
-| _parse_timestamp | 822 | private | float | No | Convert `MM:SS.mmm` to seconds |
-| estimate_timing_from_descriptions | 852 | public | List[TimedLyric] | No | LLM-estimate durations for scene descriptions when no MIDI exists; optionally fit a target duration |
-| estimate_timing_with_explicit | 998 | public | List[TimedLyric] | No | Same, but preserves scenes that already carry explicit durations |
-| estimate_lyric_timing | 1082 | public | List[TimedLyric] | No | Non-LLM estimator driven by total duration plus optional MIDI section markers |
-| _simple_timing_distribution | 1107 | private | List[TimedLyric] | No | Even/weighted distribution when no section info is available |
-| _sync_with_sections | 1153 | private | List[TimedLyric] | No | Align lyric sections to MIDI section time ranges |
-| _parse_lyric_sections | 1196 | private | Dict[str, List[str]] | No | Group lyric lines under their section markers |
-| _is_section_marker | 1230 | private | bool | No | Detect a `[...]` section marker line |
-| _extract_section_type | 1234 | private | str | No | Normalize a marker to a section type |
-| _detect_section_type | 1254 | private | Optional[str] | No | Infer section type from line content |
-| _estimate_line_duration | 1260 | private | float | No | Weight a line's duration by its characteristics (length/syllables) |
-| fill_instrumental_gaps | 1277 | public | List[TimedLyric] | No | Emit synthetic entries for silent/instrumental gaps so the storyboard can create scenes for them |
+| _sync_with_anthropic | 354 | private | List[TimedLyric] | No | Anthropic Claude path; OpenAI-like JSON contract tailored to Claude |
+| _sync_with_gemini | 497 | private | List[TimedLyric] | No | Gemini path using section-by-section processing (Strict-Lyric-Timing-Gemini) |
+| _parse_lyrics_into_sections | 551 | private | List[Tuple[str, str]] | No | Split lyrics on structural tags (`[Verse 1]`, `[Chorus]`) into (name, text) pairs |
+| _sync_single_section_with_gemini | 588 | private | List[TimedLyric] | No | Time one section against a start offset / end time window |
+| _merge_fragmented_lyrics | 737 | private | List[TimedLyric] | No | Reconcile karaoke-style fragmented and reordered LLM output back onto the original lyric lines |
+| _lyrics_match | 813 | private | bool | No | Fuzzy compare fragment vs. original line, ignoring punctuation/case |
+| _parse_timestamp | 842 | private | float | No | Convert `MM:SS.mmm` to seconds |
+| estimate_timing_from_descriptions | 872 | public | List[TimedLyric] | No | LLM-estimate durations for scene descriptions when no MIDI exists; optionally fit a target duration |
+| estimate_timing_with_explicit | 1021 | public | List[TimedLyric] | No | Same, but preserves scenes that already carry explicit durations |
+| estimate_lyric_timing | 1105 | public | List[TimedLyric] | No | Non-LLM estimator driven by total duration plus optional MIDI section markers |
+| _simple_timing_distribution | 1130 | private | List[TimedLyric] | No | Even/weighted distribution when no section info is available |
+| _sync_with_sections | 1176 | private | List[TimedLyric] | No | Align lyric sections to MIDI section time ranges |
+| _parse_lyric_sections | 1219 | private | Dict[str, List[str]] | No | Group lyric lines under their section markers |
+| _is_section_marker | 1253 | private | bool | No | Detect a `[...]` section marker line |
+| _extract_section_type | 1257 | private | str | No | Normalize a marker to a section type |
+| _detect_section_type | 1277 | private | Optional[str] | No | Infer section type from line content |
+| _estimate_line_duration | 1283 | private | float | No | Weight a line's duration by its characteristics (length/syllables) |
+| fill_instrumental_gaps | 1300 | public | List[TimedLyric] | No | Emit synthetic entries for silent/instrumental gaps so the storyboard can create scenes for them |
 
 ---
 
 ### Enhanced Storyboard Generator (v2)
-**Path**: `core/video/storyboard_v2.py` - 1079 lines
+**Path**: `core/video/storyboard_v2.py` - 1075 lines
 **Purpose**: Lyrics-to-scene storyboard generation with provider-specific strategies
 (OpenAI structured JSON vs. Gemini director's treatment), Veo batching, scene
 markers, Whisper/time-tag timing, and reference-image continuity.
@@ -1995,14 +2118,14 @@ markers, Whisper/time-tag timing, and reference-image continuity.
 #### Data Structures
 | Name | Line | Type | Fields |
 |------|------|------|--------|
-| StoryboardApproach | 107 | Enum | STRUCTURED_JSON, DIRECTORS_TREATMENT, HYBRID |
-| SceneSpec | 115 | @dataclass | scene_id, section, start_sec, duration_sec, summary, rationale, continuity, veo_prompt, image_prompts, negatives |
-| StyleGuide | 130 | @dataclass | character: str, setting: str, mood: str, cinematic_style: str |
+| StoryboardApproach | 109 | Enum | STRUCTURED_JSON, DIRECTORS_TREATMENT, HYBRID |
+| SceneSpec | 117 | @dataclass | scene_id, section, start_sec, duration_sec, summary, rationale, continuity, veo_prompt, image_prompts, negatives |
+| StyleGuide | 132 | @dataclass | character: str, setting: str, mood: str, cinematic_style: str |
 
 #### Functions
 | Function | Line | Scope | Returns | Async | Description |
 |----------|------|-------|---------|-------|-------------|
-| parse_scene_markers | 20 | public | Tuple[str, List[Dict[str, str]]] | No | Strip inline markers from lyrics — new `{scene: ...}` / `{camera: ...}` form plus the deprecated `=== NEW SCENE: ... ===` form — returning cleaned text and marker records (`line_index`, `environment`, `group_id`) |
+| parse_scene_markers | 22 | public | Tuple[str, List[Dict[str, str]]] | No | Strip inline markers from lyrics — new `{scene: ...}` / `{camera: ...}` form plus the deprecated `=== NEW SCENE: ... ===` form — returning cleaned text and marker records (`line_index`, `environment`, `group_id`) |
 
 #### Class: EnhancedStoryboardGenerator (line 138)
 Holds the two large class-level prompt templates (`OPENAI_SCENE_PROMPT`,
@@ -2013,21 +2136,21 @@ scene's last frame as a reference image.
 #### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 223 | constructor | None | No | Bind (or create) the `UnifiedLLMProvider`; enable auto reference linking |
-| _batch_scenes_for_veo | 228 | private | List[Dict[str, Any]] | No | Pack consecutive scenes into groups that fit Veo 3.1's max clip duration (default 8.0s) |
-| _generate_veo_batches | 285 | private | Optional[List[Dict]] | No | Ask the LLM for frame-accurate batched video prompts across those groups |
+| __init__ | 225 | constructor | None | No | Bind (or create) the `UnifiedLLMProvider`; enable auto reference linking |
+| _batch_scenes_for_veo | 230 | private | List[Dict[str, Any]] | No | Pack consecutive scenes into groups that fit Veo 3.1's max clip duration (default 8.0s) |
+| _generate_veo_batches | 287 | private | Optional[List[Dict]] | No | Ask the LLM for frame-accurate batched video prompts across those groups |
 | get_approach | 409 | public | StoryboardApproach | No | Pick the strategy enum for a given provider |
 | generate_storyboard | 421 | public | Tuple[Optional[StyleGuide], List[Scene], Optional[List[Dict]]] | No | Top-level entry: chooses approach, generates scenes, applies markers/timing/reference linking, returns style guide + scenes + optional Veo batches |
 | _generate_structured_json | 511 | private | Tuple[Optional[StyleGuide], List[Scene]] | No | OpenAI structured-JSON schema path |
-| _generate_directors_treatment | 597 | private | Tuple[Optional[StyleGuide], List[Scene]] | No | Gemini director's-treatment path producing a style guide plus continuous Veo prompts |
-| _generate_hybrid | 682 | private | Tuple[Optional[StyleGuide], List[Scene]] | No | Simplified hybrid prompt for local/smaller models |
-| _parse_json_response | 752 | private | Optional[Dict] | No | Extract JSON from an LLM reply (handles Markdown fences) |
-| _convert_json_to_scenes | 782 | private | List[Scene] | No | Map parsed JSON scene dicts onto `Scene` objects |
-| _fallback_scene_split | 813 | private | List[Scene] | No | Deterministic split when the LLM fails entirely |
-| _apply_scene_markers | 848 | private | List[Scene] | No | Attach `environment` / `scene_group_id` from parsed markers by matching line content |
-| _apply_whisper_timing | 894 | private | List[Scene] | No | Set precise scene start/end from Whisper word timestamps |
-| _apply_time_tags | 977 | private | List[Scene] | No | Set scene times from `{time: MM:SS}` tags when no Whisper data exists |
-| apply_reference_image_auto_linking | 1041 | public | List[Scene] | No | Chain each scene's `last_frame` into the next scene's first reference image for visual continuity |
+| _generate_directors_treatment | 595 | private | Tuple[Optional[StyleGuide], List[Scene]] | No | Gemini director's-treatment path producing a style guide plus continuous Veo prompts |
+| _generate_hybrid | 678 | private | Tuple[Optional[StyleGuide], List[Scene]] | No | Simplified hybrid prompt for local/smaller models |
+| _parse_json_response | 748 | private | Optional[Dict] | No | Extract JSON from an LLM reply (handles Markdown fences) |
+| _convert_json_to_scenes | 778 | private | List[Scene] | No | Map parsed JSON scene dicts onto `Scene` objects |
+| _fallback_scene_split | 809 | private | List[Scene] | No | Deterministic split when the LLM fails entirely |
+| _apply_scene_markers | 844 | private | List[Scene] | No | Attach `environment` / `scene_group_id` from parsed markers by matching line content |
+| _apply_whisper_timing | 890 | private | List[Scene] | No | Set precise scene start/end from Whisper word timestamps |
+| _apply_time_tags | 973 | private | List[Scene] | No | Set scene times from `{time: MM:SS}` tags when no Whisper data exists |
+| apply_reference_image_auto_linking | 1037 | public | List[Scene] | No | Chain each scene's `last_frame` into the next scene's first reference image for visual continuity |
 
 ---
 
@@ -2162,7 +2285,7 @@ support, and conversational-edit support.
 ---
 
 ### Scene Image Generator
-**Path**: `core/video/image_generator.py` - 474 lines
+**Path**: `core/video/image_generator.py` - 476 lines
 **Purpose**: Batch image generation for storyboard scenes across ImageAI's providers,
 with a thread pool, disk cache, cost estimation, and event-store logging.
 **Language**: Python
@@ -2179,19 +2302,19 @@ a cache directory under `~/.imageai/cache/video`.
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
 | __init__ | 41 | constructor | None | No | Set config, cache dir, optional `EventStore`, and the concurrency executor |
-| generate_batch | 63 | public | List[ImageGenerationResult] | No | Generate N variants per scene across the thread pool for a given provider/model |
-| @staticmethod _clean_prompt_for_generation | 115 | static | str | No | Strip scene numbering and lyric prefixes (`**1.** *lyrics* — description`) down to the description |
-| _generate_scene_images | 151 | private | ImageGenerationResult | No | Single-scene generation: cache lookup, provider call, save, cost/event recording |
-| regenerate_scene | 266 | public | ImageGenerationResult | No | Re-run one scene, optionally preserving already-approved images |
-| _get_api_key | 315 | private | Optional[str] | No | Resolve the provider API key from config |
-| _prepare_generation_params | 331 | private | Dict[str, Any] | No | Translate scene + user kwargs into provider-specific parameters |
-| _add_prompt_variation | 382 | private | str | No | Nudge the prompt per variant index for diversity |
-| _get_cache_key | 396 | private | str | No | Hash prompt + provider + model + params into a cache key |
-| _get_cached_images | 408 | private | List[bytes] | No | Load up to `count` cached images for a key |
-| _cache_images | 424 | private | None | No | Write generated images into the cache |
-| _save_images | 433 | private | List[Path] | No | Persist images into the project directory for a scene |
-| _estimate_cost | 448 | private | float | No | Estimate per-provider/model cost for a count of images |
-| cleanup | 472 | public | None | No | Shut down the executor |
+| generate_batch | 65 | public | List[ImageGenerationResult] | No | Generate N variants per scene across the thread pool for a given provider/model |
+| @staticmethod _clean_prompt_for_generation | 117 | static | str | No | Strip scene numbering and lyric prefixes (`**1.** *lyrics* — description`) down to the description |
+| _generate_scene_images | 153 | private | ImageGenerationResult | No | Single-scene generation: cache lookup, provider call, save, cost/event recording |
+| regenerate_scene | 268 | public | ImageGenerationResult | No | Re-run one scene, optionally preserving already-approved images |
+| _get_api_key | 317 | private | Optional[str] | No | Resolve the provider API key from config |
+| _prepare_generation_params | 333 | private | Dict[str, Any] | No | Translate scene + user kwargs into provider-specific parameters |
+| _add_prompt_variation | 384 | private | str | No | Nudge the prompt per variant index for diversity |
+| _get_cache_key | 398 | private | str | No | Hash prompt + provider + model + params into a cache key |
+| _get_cached_images | 410 | private | List[bytes] | No | Load up to `count` cached images for a key |
+| _cache_images | 426 | private | None | No | Write generated images into the cache |
+| _save_images | 435 | private | List[Path] | No | Persist images into the project directory for a scene |
+| _estimate_cost | 450 | private | float | No | Estimate per-provider/model cost for a count of images |
+| cleanup | 474 | public | None | No | Shut down the executor |
 
 ---
 
@@ -2231,7 +2354,7 @@ default model resolved from the model registry.
 ---
 
 ### Video Project Manager
-**Path**: `core/video/project_manager.py` - 394 lines
+**Path**: `core/video/project_manager.py` - 387 lines
 **Purpose**: Lifecycle and persistence for video projects — create, load, save, list,
 duplicate, export/import archives, and cleanup.
 **Language**: Python
@@ -2242,16 +2365,16 @@ duplicate, export/import archives, and cleanup.
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
 | __init__ | 20 | constructor | None | No | Set the projects base directory (defaults to the platform user config dir) |
-| create_project | 46 | public | VideoProject | No | Create a new project directory and `VideoProject` |
-| load_project | 88 | public | VideoProject | No | Load from a project file or directory |
-| save_project | 115 | public | Path | No | Persist a project, returning the saved file path |
-| list_projects | 146 | public | List[Dict[str, Any]] | No | Enumerate available projects with metadata |
-| delete_project | 183 | public | bool | No | Remove a project and all its files |
-| duplicate_project | 205 | public | VideoProject | No | Deep-copy a project under a new name |
-| export_project | 266 | public | Path | No | Write a portable archive of the project |
-| import_project | 301 | public | VideoProject | No | Restore a project from an archive |
-| get_project_size | 347 | public | int | No | Total project directory size in bytes |
-| cleanup_old_projects | 367 | public | int | No | Delete projects older than `days`; returns the count removed |
+| create_project | 39 | public | VideoProject | No | Create a new project directory and `VideoProject` |
+| load_project | 81 | public | VideoProject | No | Load from a project file or directory |
+| save_project | 108 | public | Path | No | Persist a project, returning the saved file path |
+| list_projects | 139 | public | List[Dict[str, Any]] | No | Enumerate available projects with metadata |
+| delete_project | 176 | public | bool | No | Remove a project and all its files |
+| duplicate_project | 198 | public | VideoProject | No | Deep-copy a project under a new name |
+| export_project | 259 | public | Path | No | Write a portable archive of the project |
+| import_project | 294 | public | VideoProject | No | Restore a project from an archive |
+| get_project_size | 340 | public | int | No | Total project directory size in bytes |
+| cleanup_old_projects | 360 | public | int | No | Delete projects older than `days`; returns the count removed |
 
 ---
 
@@ -2345,7 +2468,7 @@ lyric alignment, and per-scene timing.
 ---
 
 ### End Prompt Generator
-**Path**: `core/video/end_prompt_generator.py` - 173 lines
+**Path**: `core/video/end_prompt_generator.py` - 172 lines
 **Purpose**: LLM generation of end-frame descriptions so Veo 3.1 can animate a smooth
 transition into the next scene.
 **Language**: Python
@@ -2353,7 +2476,7 @@ transition into the next scene.
 #### Data Structures
 | Name | Line | Type | Fields |
 |------|------|------|--------|
-| EndPromptContext | 16 | @dataclass | start_prompt, next_start_prompt (None), duration (6.0), style ('cinematic') |
+| EndPromptContext | 17 | @dataclass | start_prompt, next_start_prompt (None), duration (6.0), style ('cinematic') |
 
 #### Class: EndPromptGenerator (line 24)
 Holds a class-level `SYSTEM_PROMPT` instructing the model to describe the final
@@ -2363,11 +2486,11 @@ animation).
 #### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 36 | constructor | None | No | Accept or construct a `UnifiedLLMProvider` |
-| is_available | 46 | public | bool | No | Whether the LLM provider is usable |
-| generate_end_prompt | 52 | public | Optional[str] | No | Produce the end-frame description for one context |
-| _fallback_prompt | 132 | private | str | No | Simple derived prompt when the LLM fails |
-| batch_generate_end_prompts | 147 | public | list[Optional[str]] | No | Generate end prompts for multiple contexts in one pass |
+| __init__ | 37 | constructor | None | No | Accept or construct a `UnifiedLLMProvider` |
+| is_available | 47 | public | bool | No | Whether the LLM provider is usable |
+| generate_end_prompt | 53 | public | Optional[str] | No | Produce the end-frame description for one context |
+| _fallback_prompt | 131 | private | str | No | Simple derived prompt when the LLM fails |
+| batch_generate_end_prompts | 146 | public | list[Optional[str]] | No | Generate end prompts for multiple contexts in one pass |
 
 ---
 
@@ -2403,7 +2526,7 @@ lyrics/text ──► tag_parser ──► storyboard ──► scene_suggester 
 
 ### Video Configuration
 
-**Path**: `core/video/config.py` - 345 lines
+**Path**: `core/video/config.py` - 339 lines
 **Purpose**: Persistent configuration for all video features — projects directory, default provider (slideshow / veo / omni), FFmpeg path, timing presets, per-model Veo and Omni capability tables, LLM provider settings, and export codec settings. Stored as `video_config.json` in the platform user-config directory.
 **Language**: Python
 
@@ -2414,18 +2537,18 @@ Holds `DEFAULT_CONFIG` (line 16) — the full defaults tree including `timing_pr
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
 | `__init__` | 91 | constructor | None | Resolve the config path per-platform (Windows `%APPDATA%`, macOS Application Support, else `~/.config/ImageAI`), deep-copy defaults, set the dynamic projects dir, then `load()` |
-| `_migrate_legacy_models` | 125 | private | None | Idempotently rewrite legacy `veo-3.0-*` / `veo-2.0-*` IDs to their GA replacements; called from `load()` |
-| `load` | 162 | public | bool | Read the JSON file and deep-merge over defaults, then migrate legacy models; `False` when no file exists or load fails |
-| `save` | 189 | public | bool | Create the parent directory and write the config as indented JSON |
-| `get` | 209 | public | Any | Dot-notation lookup (`"veo_settings.timeout"`) with default fallback |
-| `set` | 231 | public | None | Dot-notation write, creating intermediate dicts as needed |
-| `_deep_merge` | 249 | private | None | Recursive in-place merge of an override dict into a base dict |
-| `validate_ffmpeg` | 263 | public | bool | Delegate to `ffmpeg_utils.ensure_ffmpeg()`; on success record the detected path and source in config and save |
-| `get_veo_model_config` | 290 | public | Dict[str, Any] | Capability dict for a Veo model (duration, fps, resolutions, aspect ratios, audio) |
-| `get_omni_model_config` | 302 | public | Dict[str, Any] | Capability dict for a Gemini Omni model |
-| `is_llm_provider_enabled` | 314 | public | bool | Whether an LLM provider (openai / anthropic / gemini …) is enabled |
-| `get_llm_models` | 326 | public | list | Model list for an LLM provider |
-| `get_projects_dir` | 338 | public | Path | Path to the video projects directory |
+| `_migrate_legacy_models` | 119 | private | None | Idempotently rewrite legacy `veo-3.0-*` / `veo-2.0-*` IDs to their GA replacements; called from `load()` |
+| `load` | 156 | public | bool | Read the JSON file and deep-merge over defaults, then migrate legacy models; `False` when no file exists or load fails |
+| `save` | 183 | public | bool | Create the parent directory and write the config as indented JSON |
+| `get` | 203 | public | Any | Dot-notation lookup (`"veo_settings.timeout"`) with default fallback |
+| `set` | 225 | public | None | Dot-notation write, creating intermediate dicts as needed |
+| `_deep_merge` | 243 | private | None | Recursive in-place merge of an override dict into a base dict |
+| `validate_ffmpeg` | 257 | public | bool | Delegate to `ffmpeg_utils.ensure_ffmpeg()`; on success record the detected path and source in config and save |
+| `get_veo_model_config` | 284 | public | Dict[str, Any] | Capability dict for a Veo model (duration, fps, resolutions, aspect ratios, audio) |
+| `get_omni_model_config` | 296 | public | Dict[str, Any] | Capability dict for a Gemini Omni model |
+| `is_llm_provider_enabled` | 308 | public | bool | Whether an LLM provider (openai / anthropic / gemini …) is enabled |
+| `get_llm_models` | 320 | public | list | Model list for an LLM provider |
+| `get_projects_dir` | 332 | public | Path | Path to the video projects directory |
 
 ---
 
@@ -2613,14 +2736,14 @@ Builds the final `Scene` list, with substantial special handling for `[Instrumen
 
 ### Scene Suggester (LLM)
 
-**Path**: `core/video/scene_suggester.py` - 396 lines
+**Path**: `core/video/scene_suggester.py` - 405 lines
 **Purpose**: Uses an LLM to read lyrics and inject storyboard tags — scene breaks, camera movements, mood, focus — without altering the lyrics themselves. Includes a verification step that confirms the original text was preserved.
 **Language**: Python
 
 #### Data Structures
 | Name | Line | Type | Fields |
 |------|------|------|--------|
-| `SuggestionResult` | 21 | @dataclass | tagged_text, tags_added, scenes_detected, original_preserved, warnings |
+| `SuggestionResult` | 22 | @dataclass | tagged_text, tags_added, scenes_detected, original_preserved, warnings |
 
 #### Class: `SceneSuggester` (line 30)
 Holds `SCENE_ANALYSIS_PROMPT` (line 37), the music-video-director system prompt sent to the LLM.
@@ -2628,27 +2751,27 @@ Holds `SCENE_ANALYSIS_PROMPT` (line 37), the music-video-director system prompt 
 ##### Methods
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| `__init__` | 74 | constructor | None | Store `VideoConfig` and prepare the tag parser |
-| `suggest_scenes` | 85 | public | SuggestionResult | Full flow: build the prompt (with style / tempo / duration context), call the LLM, clean and validate the response, report tags added |
-| `_build_tempo_context` | 175 | private | str | Compose the BPM/duration hint appended to the prompt |
-| `_call_llm` | 206 | private | Optional[str] | Provider/model dispatch and response text extraction, streaming progress to a `console_callback` |
-| `_process_llm_response` | 261 | private | SuggestionResult | Clean, verify, and tally the tagged text returned by the model |
-| `_clean_response` | 310 | private | str | Strip Markdown fences and other LLM formatting artifacts |
-| `_verify_lyrics_preserved` | 324 | private | bool | Compare non-tag content against the original to catch a model that rewrote the lyrics (uses a nested `normalize` helper at line 331) |
-| `has_existing_tags` | 356 | public | bool | Whether the text already carries scene tags |
-| `count_existing_tags` | 360 | public | Dict[str, int] | Tally existing tags by type |
-| `remove_tags` | 364 | public | str | Strip all tags from the text |
+| `__init__` | 75 | constructor | None | Store `VideoConfig` and prepare the tag parser |
+| `suggest_scenes` | 86 | public | SuggestionResult | Full flow: build the prompt (with style / tempo / duration context), call the LLM, clean and validate the response, report tags added |
+| `_build_tempo_context` | 176 | private | str | Compose the BPM/duration hint appended to the prompt |
+| `_call_llm` | 207 | private | Optional[str] | Provider/model dispatch and response text extraction, streaming progress to a `console_callback` |
+| `_process_llm_response` | 270 | private | SuggestionResult | Clean, verify, and tally the tagged text returned by the model |
+| `_clean_response` | 319 | private | str | Strip Markdown fences and other LLM formatting artifacts |
+| `_verify_lyrics_preserved` | 333 | private | bool | Compare non-tag content against the original to catch a model that rewrote the lyrics (uses a nested `normalize` helper at line 331) |
+| `has_existing_tags` | 365 | public | bool | Whether the text already carries scene tags |
+| `count_existing_tags` | 369 | public | Dict[str, int] | Tally existing tags by type |
+| `remove_tags` | 373 | public | str | Strip all tags from the text |
 
 #### Functions
 | Function | Line | Scope | Returns | Description |
 |----------|------|-------|---------|-------------|
-| `suggest_scenes_for_lyrics` | 370 | public | SuggestionResult | Convenience wrapper that constructs a `SceneSuggester` and forwards provider/model/kwargs |
+| `suggest_scenes_for_lyrics` | 379 | public | SuggestionResult | Convenience wrapper that constructs a `SceneSuggester` and forwards provider/model/kwargs |
 
 ---
 
 ### Veo Client
 
-**Path**: `core/video/veo_client.py` - 1162 lines
+**Path**: `core/video/veo_client.py` - 1165 lines
 **Purpose**: Google Veo video-generation client. Supports API-key and Google Cloud ADC authentication, config validation against per-model constraints, async generation with long-poll completion, video extension for multi-clip continuity, batch generation, clip concatenation, and cost estimation.
 **Language**: Python
 
@@ -2656,9 +2779,9 @@ Holds `SCENE_ANALYSIS_PROMPT` (line 37), the music-video-director system prompt 
 | Element | Line | Type | Description |
 |---------|------|------|-------------|
 | GENAI_AVAILABLE | 26 | constant | `True` when the `google.genai` SDK imports |
-| GENAI_AVAILABLE | 28 | constant | `False` fallback in the `ImportError` branch |
+| GENAI_AVAILABLE | 26 | constant | `False` fallback in the `ImportError` branch |
 | GCLOUD_AVAILABLE | 35 | constant | `True` when Google Cloud auth libraries import |
-| GCLOUD_AVAILABLE | 37 | constant | `False` fallback in the `ImportError` branch |
+| GCLOUD_AVAILABLE | 35 | constant | `False` fallback in the `ImportError` branch |
 
 #### Class: `VeoModel` (line 45) — `Enum`
 Production models: `VEO_3_1_GENERATE` (`veo-3.1-generate-001`, 1080p, 8 s clips, reference images, frame interpolation) and `VEO_3_1_FAST` (`veo-3.1-fast-generate-001`, 720p, variable 4-8 s).
@@ -2688,17 +2811,17 @@ Holds `MODEL_CONSTRAINTS` (line 158) — the per-model max/fixed durations, reso
 | `_check_person_generation` | 280 | private | bool | No | Whether person generation is permitted in the detected region |
 | `validate_config` | 289 | public | Tuple[bool, Optional[str]] | No | Check a `VeoGenerationConfig` against `MODEL_CONSTRAINTS`, returning a human-readable reason on failure |
 | `generate_video_async` | 325 | public | VeoGenerationResult | Yes | Main generation path — submit the request (with optional seed image, last frame, and reference images), poll, download, and record metadata |
-| `generate_video` | 611 | public | VeoGenerationResult | No | Blocking wrapper around `generate_video_async` |
-| `extend_video_async` | 629 | public | VeoGenerationResult | Yes | Continue a previous clip using its tail as seed; supports up to 20 extensions (~148 s), noting extended segments render at 720p |
-| `extend_video` | 766 | public | VeoGenerationResult | No | Blocking wrapper around `extend_video_async` |
-| `_poll_for_completion` | 792 | private | Optional[Union[str, bytes]] | Yes | Long-poll the operation per Google's official pattern until a URL or raw bytes are available |
-| `_download_video` | 905 | private | Optional[Path] | Yes | Authenticated download of the finished video to local storage |
-| `_save_video_bytes` | 975 | private | Optional[Path] | Yes | Persist inline video bytes returned by the API |
-| `generate_batch` | 1020 | public | List[VeoGenerationResult] | No | Run several configs with a concurrency cap |
-| `concatenate_clips` | 1052 | public | bool | No | Join generated clips into one file, optionally stripping audio |
-| `estimate_cost` | 1105 | public | float | No | USD estimate per second of generated video (audio doubles the rate on Veo 3.x) |
-| `estimate_cost_formatted` | 1138 | public | str | No | Display string for the cost estimate |
-| `get_model_info` | 1151 | public | Dict[str, Any] | No | Capability/constraint summary for a model |
+| `generate_video` | 612 | public | VeoGenerationResult | No | Blocking wrapper around `generate_video_async` |
+| `extend_video_async` | 630 | public | VeoGenerationResult | Yes | Continue a previous clip using its tail as seed; supports up to 20 extensions (~148 s), noting extended segments render at 720p |
+| `extend_video` | 767 | public | VeoGenerationResult | No | Blocking wrapper around `extend_video_async` |
+| `_poll_for_completion` | 793 | private | Optional[Union[str, bytes]] | Yes | Long-poll the operation per Google's official pattern until a URL or raw bytes are available |
+| `_download_video` | 906 | private | Optional[Path] | Yes | Authenticated download of the finished video to local storage |
+| `_save_video_bytes` | 977 | private | Optional[Path] | Yes | Persist inline video bytes returned by the API |
+| `generate_batch` | 1023 | public | List[VeoGenerationResult] | No | Run several configs with a concurrency cap |
+| `concatenate_clips` | 1055 | public | bool | No | Join generated clips into one file, optionally stripping audio |
+| `estimate_cost` | 1108 | public | float | No | USD estimate per second of generated video (audio doubles the rate on Veo 3.x) |
+| `estimate_cost_formatted` | 1141 | public | str | No | Display string for the cost estimate |
+| `get_model_info` | 1154 | public | Dict[str, Any] | No | Capability/constraint summary for a model |
 
 ---
 
@@ -3079,7 +3202,7 @@ PIL-based engine (`engine.py` + `text_renderer.py` + `image_processor.py` +
 ---
 
 ### designer (AI layout designer)
-**Path**: `core/layout/designer.py` - 342 lines
+**Path**: `core/layout/designer.py` - 344 lines
 **Purpose**: The AI page designer — builds the LLM chat messages, parses the model's JSON layout (regions, tiling presets, comic overlays), and performs the live LiteLLM call.
 **Language**: Python
 
@@ -4400,7 +4523,7 @@ settings prefix.
 #### Module-Level Elements
 | Element | Line | Type | Description |
 |---------|------|------|-------------|
-| SETTINGS_PREFIX | 51 | constant | `"font_generator"` — QSettings namespace for all wizard pages |
+| SETTINGS_PREFIX | 50 | constant | `"font_generator"` — QSettings namespace for all wizard pages |
 
 #### Class: ImageUploadPage (line 54) — Wizard page 0
 Step 1: choose the alphabet image, preview it scaled to fit, and pick the
@@ -4409,19 +4532,19 @@ lowercase / custom).
 
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 59 | constructor | None | No | Initialize page state |
-| init_ui | 67 | public | None | No | Build the upload/preview/charset layout |
-| browse_image | 148 | public | None | No | File dialog for image selection |
-| load_image | 160 | public | None | No | Load and display the chosen image |
-| _scale_preview_to_fit | 196 | private | None | No | Proportionally scale the preview (never crop) |
-| resizeEvent | 215 | public | None | No | Rescale preview on resize |
-| clear_image | 221 | public | None | No | Reset the selection |
-| on_charset_changed | 231 | public | None | No | React to character-set combo changes |
-| get_expected_chars | 235 | public | str | No | Resolve the combo index (0 full … 5 custom) to a character string |
-| isComplete | 260 | public | bool | No | Enable Next only when an image is loaded |
-| initializePage | 263 | public | None | No | Restore saved settings on entry |
-| save_settings | 280 | public | None | No | Persist page state |
-| validatePage | 290 | public | bool | No | Save settings when leaving the page |
+| __init__ | 58 | constructor | None | No | Initialize page state |
+| init_ui | 66 | public | None | No | Build the upload/preview/charset layout |
+| browse_image | 147 | public | None | No | File dialog for image selection |
+| load_image | 159 | public | None | No | Load and display the chosen image |
+| _scale_preview_to_fit | 195 | private | None | No | Proportionally scale the preview (never crop) |
+| resizeEvent | 214 | public | None | No | Rescale preview on resize |
+| clear_image | 220 | public | None | No | Reset the selection |
+| on_charset_changed | 230 | public | None | No | React to character-set combo changes |
+| get_expected_chars | 234 | public | str | No | Resolve the combo index (0 full … 5 custom) to a character string |
+| isComplete | 259 | public | bool | No | Enable Next only when an image is loaded |
+| initializePage | 262 | public | None | No | Restore saved settings on entry |
+| save_settings | 279 | public | None | No | Persist page state |
+| validatePage | 289 | public | bool | No | Save settings when leaving the page |
 
 #### Class: SegmentationPage (line 296) — Wizard page 1
 Step 2: run and preview segmentation, adjust threshold/inversion/method, and
@@ -4429,19 +4552,19 @@ optionally auto-detect the character set or invoke AI-assisted segmentation.
 
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 303 | constructor | None | No | Initialize page state |
-| init_ui | 311 | public | None | No | Build controls and the preview canvas |
-| initializePage | 413 | public | None | No | Restore settings and run an initial segmentation |
-| save_settings | 457 | public | None | No | Persist segmentation settings |
-| on_settings_changed | 467 | public | None | No | Invalidate the preview when controls change |
-| run_segmentation_auto | 474 | public | None | No | Segment with automatic character-set detection |
-| _update_charset_selection | 597 | private | None | No | Push the detected charset back to `ImageUploadPage` |
-| run_segmentation | 628 | public | None | No | Segment with the user's explicit settings |
-| run_segmentation_with_ai | 712 | public | None | No | Re-run segmentation with AI assistance enabled |
-| display_preview | 716 | public | None | No | Show the annotated preview image |
-| _scale_preview_to_fit | 726 | private | None | No | Scale the preview pixmap to the available area |
-| resizeEvent | 743 | public | None | No | Rescale preview on resize |
-| isComplete | 750 | public | bool | No | Enable Next once characters were segmented |
+| __init__ | 302 | constructor | None | No | Initialize page state |
+| init_ui | 310 | public | None | No | Build controls and the preview canvas |
+| initializePage | 412 | public | None | No | Restore settings and run an initial segmentation |
+| save_settings | 456 | public | None | No | Persist segmentation settings |
+| on_settings_changed | 466 | public | None | No | Invalidate the preview when controls change |
+| run_segmentation_auto | 473 | public | None | No | Segment with automatic character-set detection |
+| _update_charset_selection | 596 | private | None | No | Push the detected charset back to `ImageUploadPage` |
+| run_segmentation | 627 | public | None | No | Segment with the user's explicit settings |
+| run_segmentation_with_ai | 711 | public | None | No | Re-run segmentation with AI assistance enabled |
+| display_preview | 715 | public | None | No | Show the annotated preview image |
+| _scale_preview_to_fit | 725 | private | None | No | Scale the preview pixmap to the available area |
+| resizeEvent | 742 | public | None | No | Rescale preview on resize |
+| isComplete | 749 | public | bool | No | Enable Next once characters were segmented |
 
 #### Class: GlyphGenerationWorker (line 754)
 `QThread` worker that runs `GlyphGenerator.generate_multiple()` off the UI
@@ -4449,8 +4572,8 @@ thread. Signals: `progress(int, int, str)`, `finished(list)`, `error(str)`.
 
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 761 | constructor | None | No | Hold generator, target chars, reference glyphs, target height |
-| run | 775 | public | None | No | Generate glyphs, emitting progress/finished/error |
+| __init__ | 760 | constructor | None | No | Hold generator, target chars, reference glyphs, target height |
+| run | 774 | public | None | No | Generate glyphs, emitting progress/finished/error |
 
 #### Class: CharacterMappingPage (line 789) — Wizard page 2
 Step 3: review the segmented glyph grid, relabel cells, select glyphs for AI
@@ -4459,24 +4582,24 @@ missing with the AI image model.
 
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 794 | constructor | None | No | Initialize mapping state |
-| init_ui | 805 | public | None | No | Build the glyph grid, selection controls and action buttons |
-| initializePage | 894 | public | None | No | Populate widgets from the segmentation result |
-| _create_missing_char_widget | 972 | private | QWidget | No | Placeholder tile for a character that wasn't found |
-| _auto_mirror_glyphs | 1003 | private | None | No | Derive missing glyphs by mirroring existing ones (e.g. `\` from `/`) |
-| create_char_widget | 1078 | public | QWidget | No | Selectable tile for one detected character |
-| _update_widget_style | 1131 | private | None | No | Restyle a tile for its selection state |
-| toggle_char_selection | 1144 | public | None | No | Toggle a glyph's inclusion in AI identification |
-| select_all_chars | 1160 | public | None | No | Select every glyph |
-| select_no_chars | 1173 | public | None | No | Clear the selection |
-| on_label_changed | 1181 | public | None | No | Apply a manual label edit to the cell |
-| _refresh_missing_chars | 1202 | private | None | No | Recompute and redisplay the missing-character list |
-| generate_missing_glyphs | 1268 | public | None | No | Launch `GlyphGenerationWorker` for the missing characters |
-| _on_generation_progress | 1360 | private | None | No | Worker progress → status/progress bar |
-| _on_generation_finished | 1377 | private | None | No | Merge generated cells into the segmentation result |
-| _on_generation_error | 1413 | private | None | No | Surface and log generation failures |
-| identify_with_ai | 1424 | public | None | No | Run AI identification over selected or small/ambiguous glyphs |
-| isComplete | 1566 | public | bool | No | Enable Next once mappings are usable |
+| __init__ | 793 | constructor | None | No | Initialize mapping state |
+| init_ui | 804 | public | None | No | Build the glyph grid, selection controls and action buttons |
+| initializePage | 893 | public | None | No | Populate widgets from the segmentation result |
+| _create_missing_char_widget | 971 | private | QWidget | No | Placeholder tile for a character that wasn't found |
+| _auto_mirror_glyphs | 1002 | private | None | No | Derive missing glyphs by mirroring existing ones (e.g. `\` from `/`) |
+| create_char_widget | 1077 | public | QWidget | No | Selectable tile for one detected character |
+| _update_widget_style | 1130 | private | None | No | Restyle a tile for its selection state |
+| toggle_char_selection | 1143 | public | None | No | Toggle a glyph's inclusion in AI identification |
+| select_all_chars | 1159 | public | None | No | Select every glyph |
+| select_no_chars | 1172 | public | None | No | Clear the selection |
+| on_label_changed | 1180 | public | None | No | Apply a manual label edit to the cell |
+| _refresh_missing_chars | 1201 | private | None | No | Recompute and redisplay the missing-character list |
+| generate_missing_glyphs | 1267 | public | None | No | Launch `GlyphGenerationWorker` for the missing characters |
+| _on_generation_progress | 1359 | private | None | No | Worker progress → status/progress bar |
+| _on_generation_finished | 1376 | private | None | No | Merge generated cells into the segmentation result |
+| _on_generation_error | 1412 | private | None | No | Surface and log generation failures |
+| identify_with_ai | 1423 | public | None | No | Run AI identification over selected or small/ambiguous glyphs |
+| isComplete | 1565 | public | bool | No | Enable Next once mappings are usable |
 
 #### Class: FontSettingsPage (line 1572) — Wizard page 3
 Step 4: font metadata (family, style, version, designer, copyright, license) and
@@ -4484,14 +4607,14 @@ vectorization smoothing level.
 
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 1577 | constructor | None | No | Initialize page state |
-| init_ui | 1583 | public | None | No | Build metadata fields and the smoothing slider |
-| on_smoothing_changed | 1675 | public | None | No | Update the smoothing label |
-| get_smoothing_level | 1680 | public | SmoothingLevel | No | Map the slider value to a `SmoothingLevel` |
-| get_font_info | 1691 | public | FontInfo | No | Build a `FontInfo` from the form |
-| isComplete | 1701 | public | bool | No | Require a font family name |
-| initializePage | 1704 | public | None | No | Restore saved metadata |
-| save_settings | 1732 | public | None | No | Persist metadata and smoothing |
+| __init__ | 1576 | constructor | None | No | Initialize page state |
+| init_ui | 1582 | public | None | No | Build metadata fields and the smoothing slider |
+| on_smoothing_changed | 1674 | public | None | No | Update the smoothing label |
+| get_smoothing_level | 1679 | public | SmoothingLevel | No | Map the slider value to a `SmoothingLevel` |
+| get_font_info | 1690 | public | FontInfo | No | Build a `FontInfo` from the form |
+| isComplete | 1700 | public | bool | No | Require a font family name |
+| initializePage | 1703 | public | None | No | Restore saved metadata |
+| save_settings | 1731 | public | None | No | Persist metadata and smoothing |
 
 #### Class: ExportPage (line 1745) — Wizard page 4
 Step 5: vectorize all glyphs, build a temporary font for live preview (with a
@@ -4500,17 +4623,17 @@ final font file.
 
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 1750 | constructor | None | No | Initialize export state |
-| init_ui | 1762 | public | None | No | Build the preview canvas, sample-text field and export controls |
-| initializePage | 1825 | public | None | No | Kick off glyph processing when the page opens |
-| process_glyphs | 1859 | public | None | No | Vectorize every character and build the preview font |
-| _build_preview_font | 1900 | private | None | No | Write a temp font file and register it with Qt's font database |
-| update_preview | 1954 | public | None | No | Re-render the sample using the font or the bitmap fallback |
-| _render_with_font | 1970 | private | None | No | Render sample text with the loaded font, wrapping lines |
-| _render_with_bitmaps | 2039 | private | None | No | Fallback renderer using the original glyph bitmaps (nested helper `get_char_width` at line 2056) |
-| _numpy_to_qimage | 2144 | private | Optional[QImage] | No | Convert a grayscale/RGBA numpy array to `QImage` |
-| _render_glyph | 2163 | private | None | No | Paint one `VectorGlyph`'s paths at a position/scale relative to the baseline |
-| export_font | 2220 | public | None | No | Build and save the final `.ttf`/`.otf` to a user-chosen path |
+| __init__ | 1749 | constructor | None | No | Initialize export state |
+| init_ui | 1761 | public | None | No | Build the preview canvas, sample-text field and export controls |
+| initializePage | 1824 | public | None | No | Kick off glyph processing when the page opens |
+| process_glyphs | 1858 | public | None | No | Vectorize every character and build the preview font |
+| _build_preview_font | 1899 | private | None | No | Write a temp font file and register it with Qt's font database |
+| update_preview | 1953 | public | None | No | Re-render the sample using the font or the bitmap fallback |
+| _render_with_font | 1969 | private | None | No | Render sample text with the loaded font, wrapping lines |
+| _render_with_bitmaps | 2038 | private | None | No | Fallback renderer using the original glyph bitmaps (nested helper `get_char_width` at line 2056) |
+| _numpy_to_qimage | 2143 | private | Optional[QImage] | No | Convert a grayscale/RGBA numpy array to `QImage` |
+| _render_glyph | 2162 | private | None | No | Paint one `VectorGlyph`'s paths at a position/scale relative to the baseline |
+| export_font | 2219 | public | None | No | Build and save the final `.ttf`/`.otf` to a user-chosen path |
 | save_settings | 2319 | public | None | No | Persist export-page state |
 
 #### Class: FontGeneratorWizard (line 2327)
@@ -4885,13 +5008,13 @@ Step 0 — installation status and the "Install AI Components" entry point.
 ##### Methods
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| __init__ | 50 | constructor | None | Sets title/subtitle and builds the UI |
-| init_ui | 56 | public | None | Status group, per-component checklist, capability label, install button |
-| initializePage | 112 | public | None | Refreshes status each time the page is shown |
-| refresh_status | 116 | public | None | Recolors component rows, updates status/capability text and button state |
-| isComplete | 153 | public | bool | Gated by `can_create_puppet()` |
-| on_install_clicked | 158 | public | None | Chains the confirm dialog into the progress dialog |
-| on_installation_complete | 171 | public | None | Re-runs `refresh_status` after install |
+| __init__ | 49 | constructor | None | Sets title/subtitle and builds the UI |
+| init_ui | 55 | public | None | Status group, per-component checklist, capability label, install button |
+| initializePage | 111 | public | None | Refreshes status each time the page is shown |
+| refresh_status | 115 | public | None | Recolors component rows, updates status/capability text and button state |
+| isComplete | 152 | public | bool | Gated by `can_create_puppet()` |
+| on_install_clicked | 157 | public | None | Chains the confirm dialog into the progress dialog |
+| on_installation_complete | 170 | public | None | Re-runs `refresh_status` after install |
 
 #### Class: ImageSelectionPage (line 176)
 Step 1 — pick the source image; remembers the last path in `QSettings("ImageAI", "CharacterAnimator")`. Signal: `image_selected(str)` (line 181).
@@ -4899,12 +5022,12 @@ Step 1 — pick the source image; remembers the last path in `QSettings("ImageAI
 ##### Methods
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| __init__ | 183 | constructor | None | Restores the last used image path if it still exists |
-| init_ui | 196 | public | None | Path field, browse button, preview pane |
-| browse_image | 246 | public | None | File dialog for the source image |
-| on_path_changed | 257 | public | None | Persists the path and refreshes the preview |
-| update_preview | 267 | public | None | Scaled (never cropped) pixmap preview |
-| isComplete | 299 | public | bool | Requires an existing image file |
+| __init__ | 182 | constructor | None | Restores the last used image path if it still exists |
+| init_ui | 195 | public | None | Path field, browse button, preview pane |
+| browse_image | 245 | public | None | File dialog for the source image |
+| on_path_changed | 256 | public | None | Persists the path and refreshes the preview |
+| update_preview | 266 | public | None | Scaled (never cropped) pixmap preview |
+| isComplete | 298 | public | bool | Requires an existing image file |
 
 #### Class: SegmentationPage (line 306)
 Step 2 — runs `DetectionThread` and shows annotated results.
@@ -4912,15 +5035,15 @@ Step 2 — runs `DetectionThread` and shows annotated results.
 ##### Methods
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| __init__ | 311 | constructor | None | Holds the segmentation result and thread handles |
-| init_ui | 319 | public | None | Progress bar, status label, results text, image pane |
-| initializePage | 361 | public | None | Kicks off detection on entry |
-| run_detection | 365 | public | None | Starts `DetectionThread` for the selected image |
-| on_progress | 383 | public | None | Status text + progress bar updates |
-| on_detection_finished | 388 | public | None | Stores results or shows detection-failure guidance |
-| display_results | 405 | public | None | Text summary of detected parts and regions |
-| display_annotated_image | 445 | public | None | Draws colored body-part and mouth bboxes over the image |
-| isComplete | 496 | public | bool | Requires a segmentation result |
+| __init__ | 310 | constructor | None | Holds the segmentation result and thread handles |
+| init_ui | 318 | public | None | Progress bar, status label, results text, image pane |
+| initializePage | 360 | public | None | Kicks off detection on entry |
+| run_detection | 364 | public | None | Starts `DetectionThread` for the selected image |
+| on_progress | 382 | public | None | Status text + progress bar updates |
+| on_detection_finished | 387 | public | None | Stores results or shows detection-failure guidance |
+| display_results | 404 | public | None | Text summary of detected parts and regions |
+| display_annotated_image | 444 | public | None | Draws colored body-part and mouth bboxes over the image |
+| isComplete | 495 | public | bool | Requires a segmentation result |
 
 #### Class: VisemeGenerationPage (line 501)
 Step 3 — provider/model choice, cost + time estimation, and threaded generation. Class tables `MODEL_COSTS` and `MODEL_NAMES` hold per-image pricing and display labels for the Gemini/GPT-Image options.
@@ -4928,19 +5051,19 @@ Step 3 — provider/model choice, cost + time estimation, and threaded generatio
 ##### Methods
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| __init__ | 524 | constructor | None | Holds visemes/blinks, thread handle, and `QSettings` |
-| init_ui | 534 | public | None | Provider/model combos, generation checkboxes, estimates, output console |
-| _on_provider_changed | 637 | private | None | Repopulates the model combo for Google vs OpenAI |
-| _update_cost_estimate | 662 | private | None | Recomputes image count (14 visemes / 2 blinks / 6 eyebrows), cost, and ETA |
-| _get_selected_provider | 699 | private | str | "google" or "openai" |
-| _get_selected_model | 703 | private | str | Model id from the combo's user data |
-| initializePage | 707 | public | None | Resets state and restores the saved provider preference |
-| start_generation | 721 | public | None | Launches `GenerationThread` with the chosen options |
-| on_progress | 769 | public | None | Progress bar + status updates |
-| on_viseme_complete | 775 | public | None | Appends each completed viseme to the console |
-| on_generation_finished | 779 | public | None | Stores the `VisemeSet`/`EyeBlinkSet` and re-enables controls |
-| on_generation_error | 798 | public | None | Classifies rate-limit / API-key / quota errors and suggests remedies |
-| isComplete | 815 | public | bool | Allows continuing when visemes exist or generation was opted out |
+| __init__ | 523 | constructor | None | Holds visemes/blinks, thread handle, and `QSettings` |
+| init_ui | 533 | public | None | Provider/model combos, generation checkboxes, estimates, output console |
+| _on_provider_changed | 636 | private | None | Repopulates the model combo for Google vs OpenAI |
+| _update_cost_estimate | 661 | private | None | Recomputes image count (14 visemes / 2 blinks / 6 eyebrows), cost, and ETA |
+| _get_selected_provider | 698 | private | str | "google" or "openai" |
+| _get_selected_model | 702 | private | str | Model id from the combo's user data |
+| initializePage | 706 | public | None | Resets state and restores the saved provider preference |
+| start_generation | 720 | public | None | Launches `GenerationThread` with the chosen options |
+| on_progress | 768 | public | None | Progress bar + status updates |
+| on_viseme_complete | 774 | public | None | Appends each completed viseme to the console |
+| on_generation_finished | 778 | public | None | Stores the `VisemeSet`/`EyeBlinkSet` and re-enables controls |
+| on_generation_error | 797 | public | None | Classifies rate-limit / API-key / quota errors and suggests remedies |
+| isComplete | 814 | public | bool | Allows continuing when visemes exist or generation was opted out |
 
 #### Class: ExportPage (line 821)
 Step 4 — name, format (PSD / SVG / both), and output folder; settings persist across runs.
@@ -4948,9 +5071,9 @@ Step 4 — name, format (PSD / SVG / both), and output folder; settings persist 
 ##### Methods
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| __init__ | 826 | constructor | None | Builds UI then restores saved settings |
-| init_ui | 834 | public | None | Name field, format combo, output path, export button |
-| _load_settings | 912 | private | None | Restores name/format/output; defaults to `<user data>/Characters` |
+| __init__ | 825 | constructor | None | Builds UI then restores saved settings |
+| init_ui | 833 | public | None | Name field, format combo, output path, export button |
+| _load_settings | 911 | private | None | Restores name/format/output; defaults to `<user data>/Characters` |
 | _save_settings | 934 | private | None | Persists name, format index, and output path |
 | browse_output | 940 | public | None | Output-folder chooser |
 | export_puppet | 948 | public | None | Assembles the `PuppetStructure` and runs the PSD and/or SVG exporter |
@@ -5002,23 +5125,23 @@ Pre-install summary: what gets installed, GPU detection, disk-space check, and e
 
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| __init__ | 51 | constructor | None | Modal dialog setup |
-| init_ui | 58 | public | None | Builds the full summary UI and Install/Cancel buttons |
+| __init__ | 50 | constructor | None | Modal dialog setup |
+| init_ui | 57 | public | None | Builds the full summary UI and Install/Cancel buttons |
 
 #### Class: PuppetInstallProgressDialog (line 192)
 Three-phase progress dialog (packages → models → verification) with elapsed-time display; close is blocked while work is running. Signal: `installation_complete(bool, str)` (line 203).
 
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| __init__ | 205 | constructor | None | Strips the close button, initializes installer/downloader state |
-| init_ui | 227 | public | None | Title, phase label, elapsed timer, progress bar, output console |
-| start_installation | 313 | public | None | Reports GPU status and starts `PackageInstaller` with the right index URL |
-| _time_str | 344 | private | str | `HH:MM:SS` stamp used to prefix log lines |
-| update_elapsed_time | 348 | public | None | Ticks the "Elapsed: m:ss" label |
-| on_progress | 356 | public | None | Appends a message and auto-scrolls the console |
-| on_percentage | 367 | public | None | Updates the progress bar |
-| on_packages_finished | 371 | public | None | Advances to model download, or reports failure and notifies |
-| download_next_model | 390 | public | None | Pops the next model from the queue via `ModelDownloader` |
+| __init__ | 204 | constructor | None | Strips the close button, initializes installer/downloader state |
+| init_ui | 226 | public | None | Title, phase label, elapsed timer, progress bar, output console |
+| start_installation | 312 | public | None | Reports GPU status and starts `PackageInstaller` with the right index URL |
+| _time_str | 343 | private | str | `HH:MM:SS` stamp used to prefix log lines |
+| update_elapsed_time | 347 | public | None | Ticks the "Elapsed: m:ss" label |
+| on_progress | 355 | public | None | Appends a message and auto-scrolls the console |
+| on_percentage | 366 | public | None | Updates the progress bar |
+| on_packages_finished | 370 | public | None | Advances to model download, or reports failure and notifies |
+| download_next_model | 389 | public | None | Pops the next model from the queue via `ModelDownloader` |
 | on_model_downloaded | 428 | public | None | Logs success/warning and advances the queue index |
 | verify_installation | 439 | public | None | Re-runs `check_all_dependencies()` and reports each component (CUDA optional) |
 | on_all_complete | 455 | public | None | Stops the timer, sets final state, emits `installation_complete` |
@@ -5130,7 +5253,7 @@ FutureWarning noise before any backend imports.
 ---
 
 ### Google Gemini Provider
-**Path**: `providers/google.py` - 2156 lines
+**Path**: `providers/google.py` - 2220 lines
 **Purpose**: Google Gemini image generation (Nano Banana / Nano Banana Pro), dual
 authentication (API key or gcloud ADC), multi-turn chat editing sessions, region
 editing, and Veo video generation.
@@ -5169,30 +5292,30 @@ MIME lookup).
 | `_init_gcloud_client` | 323 | private | None | No | Construct the Vertex/ADC client; `raise_on_error` controls hard-fail vs silent probe |
 | `_get_gcloud_project_id` | 397 | private | `Optional[str]` | No | Read the active project from the gcloud config file (Linux/snap/Windows paths), falling back to `gcloud config get-value project` |
 | `get_model_auth_requirements` | 437 | public | `Dict[str, Any]` | No | Look the model up in `MODEL_AUTH_REQUIREMENTS` |
-| `generate` | 457 | public | `Tuple[List[str], List[bytes]]` | No | Main generation path (~980 lines): client re-init on auth change, legacy-model aliasing, `check_model_auth`, rate limiting, `image_config` aspect ratio, retries on `NO_IMAGE`, optional aspect cropping/scaling |
-| `validate_auth` | 1442 | public | `Tuple[bool, str]` | No | gcloud check, or a minimal `generate_content` probe for API keys |
-| `_check_gcloud_auth` | 1464 | private | `Tuple[bool, str]` | No | Cached-then-live gcloud/ADC credential check with project ID |
-| `_check_crop_edges_uniform` | 1525 | private | `bool` | No | Color-variance test on the crop margins — uniform edges auto-crop, varied content defers to the crop dialog |
-| `get_models` | 1597 | public | `Dict[str, str]` | No | Image models only (Gemini 3 Pro Image, 3.1 Flash Image, 2.5 Flash Image), newest first |
-| `get_models_with_details` | 1611 | public | `Dict[str, Dict[str, str]]` | No | Adds nickname, description, `requires_gcloud`, and max resolution for UI display |
-| `resolve_model_alias` | 1672 | public | `str` | No | Map a legacy Imagen/Vertex ID to its GA equivalent (pass-through otherwise) |
-| `get_default_model` | 1680 | public | `str` | No | `gemini-2.5-flash-image` |
-| `get_models_for_auth` | 1684 | public | `Dict[str, str]` | No | Filter the model list by `"api-key"` vs `"gcloud"` |
-| `_format_model_display` | 1709 | private | `str` | No | Compose the combo-box label from name + nickname |
-| `is_model_available` | 1733 | public | `Tuple[bool, Optional[str]]` | No | Availability check against configured API key / gcloud credentials |
-| `get_api_key_url` | 1766 | public | `str` | No | `https://aistudio.google.com/apikey` |
-| `get_supported_features` | 1770 | public | `List[str]` | No | `["generate", "edit", "compose"]` |
-| `@classmethod _edit_input_parts` | 1784 | class | `List[dict]` | No | Normalize bytes / path / list-of-either into `inline_data` parts for multi-reference compose |
-| `edit_image` | 1806 | public | `Tuple[List[str], List[bytes]]` | No | Prompt-driven edit/compose over one or more reference images |
-| `edit_image_region` | 1843 | public | `Tuple[List[str], List[bytes]]` | No | Edit a bbox region, optionally reusing the chat session for style consistency across regions (visemes) |
-| `start_edit_session` | 1952 | public | `bool` | No | Seed a conversational session with the base character image + style context |
-| `reset_edit_session` | 2023 | public | None | No | Clear `_last_chat_session` when switching characters |
-| `generate_video` | 2033 | public | `Tuple[Optional[Path], Dict[str, Any]]` | No | Veo 3 / Veo 3.1 video generation from a start frame (plus optional end frame), duration snapping, aspect ratio |
+| `generate` | 503 | public | `Tuple[List[str], List[bytes]]` | No | Main generation path (~980 lines): client re-init on auth change, legacy-model aliasing, `check_model_auth`, rate limiting, `image_config` aspect ratio, retries on `NO_IMAGE`, optional aspect cropping/scaling |
+| `validate_auth` | 1468 | public | `Tuple[bool, str]` | No | gcloud check, or a minimal `generate_content` probe for API keys |
+| `_check_gcloud_auth` | 1490 | private | `Tuple[bool, str]` | No | Cached-then-live gcloud/ADC credential check with project ID |
+| `_check_crop_edges_uniform` | 1551 | private | `bool` | No | Color-variance test on the crop margins — uniform edges auto-crop, varied content defers to the crop dialog |
+| `get_models` | 1623 | public | `Dict[str, str]` | No | Image models only (Gemini 3 Pro Image, 3.1 Flash Image, 2.5 Flash Image), newest first |
+| `get_models_with_details` | 1637 | public | `Dict[str, Dict[str, str]]` | No | Adds nickname, description, `requires_gcloud`, and max resolution for UI display |
+| `resolve_model_alias` | 1698 | public | `str` | No | Map a legacy Imagen/Vertex ID to its GA equivalent (pass-through otherwise) |
+| `get_default_model` | 1706 | public | `str` | No | `gemini-2.5-flash-image` |
+| `get_models_for_auth` | 1710 | public | `Dict[str, str]` | No | Filter the model list by `"api-key"` vs `"gcloud"` |
+| `_format_model_display` | 1735 | private | `str` | No | Compose the combo-box label from name + nickname |
+| `is_model_available` | 1759 | public | `Tuple[bool, Optional[str]]` | No | Availability check against configured API key / gcloud credentials |
+| `get_api_key_url` | 1792 | public | `str` | No | `https://aistudio.google.com/apikey` |
+| `get_supported_features` | 1796 | public | `List[str]` | No | `["generate", "edit", "compose"]` |
+| `@classmethod _edit_input_parts` | 1810 | class | `List[dict]` | No | Normalize bytes / path / list-of-either into `inline_data` parts for multi-reference compose |
+| `edit_image` | 1832 | public | `Tuple[List[str], List[bytes]]` | No | Prompt-driven edit/compose over one or more reference images |
+| `edit_image_region` | 1907 | public | `Tuple[List[str], List[bytes]]` | No | Edit a bbox region, optionally reusing the chat session for style consistency across regions (visemes) |
+| `start_edit_session` | 2016 | public | `bool` | No | Seed a conversational session with the base character image + style context |
+| `reset_edit_session` | 2087 | public | None | No | Clear `_last_chat_session` when switching characters |
+| `generate_video` | 2097 | public | `Tuple[Optional[Path], Dict[str, Any]]` | No | Veo 3 / Veo 3.1 video generation from a start frame (plus optional end frame), duration snapping, aspect ratio |
 
 ---
 
 ### OpenAI Provider
-**Path**: `providers/openai.py` - 1477 lines
+**Path**: `providers/openai.py` - 1478 lines
 **Purpose**: OpenAI image generation (gpt-image-2 / 1.5 / 1 / 1-mini, DALL·E 3 / 2),
 including streaming partials, masked region edits, viseme batches, and the Batch API.
 **Language**: Python
@@ -5238,12 +5361,12 @@ Client is created lazily by `_ensure_client` with `max_retries=2` and a long
 | `edit_image_region` | 1124 | public | `Tuple[List[str], List[bytes]]` | No | Masked region edit driven by `_create_alpha_mask` plus optional style context |
 | `generate_viseme_batch` | 1273 | public | `Dict[str, Tuple[List[str], List[bytes]]]` | No | Generate every viseme for a character mouth bbox, reporting progress per viseme |
 | `submit_batch_job` | 1329 | public | `str` | No | Submit an OpenAI Batch API job and persist a record to `BATCH_JOBS_PATH`; returns the batch ID |
-| `check_batch_job` | 1418 | public | `dict` | No | Poll a batch job and, when complete, download images + JSON sidecars to an output directory |
+| `check_batch_job` | 1419 | public | `dict` | No | Poll a batch job and, when complete, download images + JSON sidecars to an output directory |
 
 ---
 
 ### Local Stable Diffusion Provider
-**Path**: `providers/local_sd.py` - 491 lines
+**Path**: `providers/local_sd.py` - 494 lines
 **Purpose**: On-device generation with Hugging Face Diffusers — device/dtype
 detection, VRAM-aware memory optimizations, and txt2img / img2img / inpaint.
 **Language**: Python
@@ -5276,15 +5399,15 @@ reloads (and frees) the pipeline rather than stacking them in VRAM.
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
 | `__init__` | 112 | constructor | None | No | Reads model ID + HF cache dir, builds a `DeviceManager`, resolves offload/slicing defaults |
-| `get_models` | 133 | public | `Dict[str, str]` | No | Merges `ModelInfo.POPULAR_MODELS` with what is actually installed in the HF cache |
-| `get_default_model` | 163 | public | `str` | No | Default checkpoint (`stabilityai/stable-diffusion-2-1`) |
-| `get_supported_features` | 172 | public | `List[str]` | No | generate / edit / inpaint |
-| `get_api_key_url` | 181 | public | `str` | No | Hugging Face model hub URL (no key required) |
-| `validate_auth` | 190 | public | `Tuple[bool, str]` | No | Reports whether the ML dependency stack is installed rather than checking a key |
-| `_load_pipeline` | 209 | private | pipeline | No | Load/switch the SD or SDXL pipeline, applying offload, attention slicing, and dtype |
-| `generate` | 270 | public | `Tuple[List[str], List[bytes]]` | No | txt2img with steps/guidance/seed/size kwargs |
-| `edit_image` | 362 | public | `Tuple[List[str], List[bytes]]` | No | img2img from an input image plus strength |
-| `inpaint` | 452 | public | `Tuple[List[str], List[bytes]]` | No | Masked inpainting (white = region to repaint) |
+| `get_models` | 136 | public | `Dict[str, str]` | No | Merges `ModelInfo.POPULAR_MODELS` with what is actually installed in the HF cache |
+| `get_default_model` | 166 | public | `str` | No | Default checkpoint (`stabilityai/stable-diffusion-2-1`) |
+| `get_supported_features` | 175 | public | `List[str]` | No | generate / edit / inpaint |
+| `get_api_key_url` | 184 | public | `str` | No | Hugging Face model hub URL (no key required) |
+| `validate_auth` | 193 | public | `Tuple[bool, str]` | No | Reports whether the ML dependency stack is installed rather than checking a key |
+| `_load_pipeline` | 212 | private | pipeline | No | Load/switch the SD or SDXL pipeline, applying offload, attention slicing, and dtype |
+| `generate` | 273 | public | `Tuple[List[str], List[bytes]]` | No | txt2img with steps/guidance/seed/size kwargs |
+| `edit_image` | 365 | public | `Tuple[List[str], List[bytes]]` | No | img2img from an input image plus strength |
+| `inpaint` | 455 | public | `Tuple[List[str], List[bytes]]` | No | Masked inpainting (white = region to repaint) |
 
 ---
 
@@ -5516,7 +5639,7 @@ guarded by `_models_loaded`.
 ## GUI — Main Window
 
 ### MainWindow (application shell)
-**Path**: `gui/main_window.py` - 9138 lines
+**Path**: `gui/main_window.py` - 9146 lines
 **Purpose**: The PySide6 application shell. Builds and owns every top-level tab (Image/Generate, Templates, Video, Layout, Settings, Help, History, Batch Jobs), the menu bar and status bar; drives the image-generation pipeline through a `QThread` worker; manages provider/model/LLM selection, reference images, upscaling and resolution logic; persists all UI state to `ConfigManager`; and hosts auxiliary integrations (Google Cloud auth, Midjourney watcher, Discord Rich Presence, Layout cross-tab handoff).
 **Language**: Python
 
@@ -6154,9 +6277,73 @@ Stateless helper with class-level pricing tables `NBP_PRICING` (1K/2K $0.134,
 
 ---
 
+### Storage Settings Widget
+
+**Path**: `gui/storage_settings_widget.py` - 319 lines
+**Purpose**: The "Storage Locations" group box on the Settings tab. It shows the current root and measured size of each data group, and gives each group a Move button that drives `core/data_migration.move_group`. Embedded by `gui/main_window.py`.
+**Language**: Python
+
+Sizes are measured off the UI thread, one `QThread` per group, because a Models
+tree of many gigabytes would otherwise freeze the window. The move itself runs
+on the UI thread behind a modal `QProgressDialog`; the dialog's `wasCanceled`
+is passed straight to `move_group` as the cancel token. After a successful move
+the widget calls `reset_data_paths()`, refreshes the row, emits
+`move_completed`, and offers a restart.
+
+#### Module-Level Elements
+| Element | Line | Type | Description |
+|---------|------|------|-------------|
+| GROUP_LABELS | 27 | constant | Display name for each `Group` |
+| GROUP_HINTS | 34 | constant | Tooltip describing what each group holds |
+| PICKER_ROOTS | 46 | constant | `QStandardPaths` start location for each group's folder picker. Models and Settings start at Home, never at the application-data directory the user is trying to move away from |
+
+#### Functions
+| Function | Line | Scope | Returns | Async | Description |
+|----------|------|-------|---------|-------|-------------|
+| human_size | 54 | public | str | No | Format a byte count for the size column |
+
+#### Class: StorageRow
+**Line**: 64-70
+Dataclass holding the six widgets of one group's row: name, path, size, status, Move, Open.
+
+#### Class: _SizeWorker
+**Line**: 73-90
+Walks one group's trees off the UI thread. `finished` is `Signal(str, "qint64")` — a plain `int` maps to a 4-byte C int and any group over 2 GB overflows it.
+
+##### Methods
+| Method | Line | Type | Returns | Async | Description |
+|--------|------|------|---------|-------|-------------|
+| __init__ | 80 | constructor | None | No | Store the group to measure |
+| run | 84 | public | None | No | Sum `tree_size` over `sources_for`; emits `-1` and logs on any failure so a probe never crashes the UI |
+
+#### Class: StorageSettingsWidget
+**Line**: 93-319
+`QGroupBox` titled "Storage Locations". Signal: `move_completed(str)` carrying the moved group's value.
+
+##### Methods
+| Method | Line | Type | Returns | Async | Description |
+|--------|------|------|---------|-------|-------------|
+| __init__ | 98 | constructor | None | No | Build the grid and start the first size probe |
+| _build_ui | 105 | private | None | No | Lay out one row per group, then surface any unreachable root from `DataPaths.drain_warnings()` |
+| _path_text | 161 | private | str | No | Current root of a group |
+| _path_tooltip | 164 | private | str | No | The concrete source trees behind a row |
+| refresh_sizes | 170 | public | None | No | Start one `_SizeWorker` thread per group |
+| _on_size_ready | 183 | private | None | No | Write the measured size, or "unknown" on a probe failure |
+| _on_open | 187 | private | None | No | Reveal the group's folder in the file manager |
+| _suggested_dir | 195 | private | str | No | Starting folder for the picker, from `PICKER_ROOTS` |
+| _confirm | 199 | private | bool | No | Confirmation box naming source, destination, size to move, and free space |
+| _run_with_progress | 223 | private | MoveResult | No | Run `move_group` behind a modal progress dialog with per-file progress |
+| progress | 232 | nested | None | No | Progress callback: percent by bytes, plus a files/bytes/current-file label |
+| _close_open_resources | 253 | private | None | No | The `pre_move` hook; asks the main window's `close_data_handles()` to release file handles |
+| _offer_restart | 260 | private | None | No | Report the moved size and offer "Restart Now" / "Later" |
+| _restart_application | 279 | static | None | No | Log, quit Qt, and `os.execv` the same interpreter and argv |
+| _on_move | 287 | private | None | No | Full flow: pick a folder, validate, confirm, move, reset the resolver, refresh, emit, offer restart. Every rejection and failure is logged and shown |
+
+---
+
 ### Prompt Builder
 
-**Path**: `gui/prompt_builder.py` - 1838 lines
+**Path**: `gui/prompt_builder.py` - 1839 lines
 **Purpose**: Non-LLM, data-driven prompt composer. Combines subject, transformation, style, medium, background, pose, purpose, technique, artist, lighting, and mood into a comma-joined prompt, with style presets, semantic tag search, exclusions, history, and JSON import/export. Opened from `gui/main_window.py:9066` (`_open_character_prompt_builder`).
 **Language**: Python
 
@@ -6184,63 +6371,63 @@ Modal form for saving the current builder state as a reusable custom preset.
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
 | `__init__` | 179 | constructor | None | Create loaders lazily, wire the search debounce timer, restore geometry |
-| `_load_all_data` | 212 | private | None | One-shot load of prompt data, presets, tag index, and history on first show |
-| `_populate_combo_boxes` | 242 | private | None | Fill style/medium/artist/lighting/mood combos (sorted, signals blocked) |
-| `_populate_presets` | 281 | private | None | Fill the preset combo, ordered by popularity |
-| `_init_ui` | 313 | private | None | Assemble the tab widget and dialog buttons |
-| `_create_builder_tab` | 334 | private | QWidget | Build the field grid, special-instruction checkboxes, preview, and action buttons |
-| `_create_history_tab` | 561 | private | QWidget | Build the history list, detail pane, and history actions |
-| `_create_combo` | 618 | private | QComboBox | Helper producing an editable combo seeded with items |
-| `_get_all_combos` | 626 | private | list | All eleven field combos, for bulk clear/save/restore |
-| `_process_exclusions` | 642 | private | str | Turn `"hands, text"` into `"no hands, no text"` |
-| `_on_subject_changed` | 661 | private | None | Auto-populate exclusions for known subjects (e.g. headshots) |
-| `_update_preview` | 681 | private | None | Rebuild the ordered, comma-joined prompt preview |
-| `_load_example` | 753 | private | None | Seed the fields with the built-in caricature example |
-| `_clear_all` | 769 | private | None | Reset every field and checkbox |
-| `_use_prompt` | 778 | private | None | Emit `prompt_generated` and accept the dialog |
-| `_save_to_history` | 791 | private | None | Append the current prompt to history with confirmation |
-| `_save_to_history_silent` | 832 | private | None | Same, without user feedback (used on accept) |
-| `_show_history_details` | 871 | private | None | Render the selected history entry in the detail pane |
-| `_load_from_history` | 899 | private | None | Load a history entry on double-click |
-| `_load_selected_history` | 908 | private | None | Load the currently selected entry |
-| `_delete_history_item` | 914 | private | None | Delete the selected entry and re-save |
-| `_clear_all_history` | 934 | private | None | Clear the entire history after confirmation |
-| `_create_preset_panel` | 954 | private | QGroupBox | "🎨 Style Presets" selector plus Save-custom button |
-| `_create_search_panel` | 1006 | private | QGroupBox | "🔍 Smart Search" bar, auto-filter checkbox, results label, clear button |
-| `_on_preset_selected` | 1087 | private | None | Apply a preset (index 0 is the placeholder) |
-| `_load_preset` | 1123 | private | None | Push a preset's settings into the fields |
-| `_on_save_custom_preset` | 1136 | private | None | Show `SavePresetDialog` and persist the current state |
-| `_apply_settings` | 1211 | private | None | Restore all combos, exclusions, notes, and checkboxes from a settings dict |
-| `_update_history_list` | 1233 | private | None | Rebuild the history list widget |
-| `_export` | 1252 | private | None | Ask whether to export the current prompt or all history |
-| `_export_current` | 1296 | private | None | Write the current prompt + settings to JSON |
-| `_export_all_history` | 1343 | private | None | Write the full history to JSON |
-| `_import_prompt` | 1376 | private | None | Load a prompt/settings JSON file back into the builder |
-| `_load_history` | 1438 | private | None | Read `prompt_builder_history.json` |
-| `_save_history` | 1451 | private | None | Write `prompt_builder_history.json` |
-| `_restore_geometry` | 1464 | private | None | Restore window geometry from `QSettings` |
-| `_restore_builder_state` | 1475 | private | None | Restore combo selections and search state from the last session |
-| `_save_geometry` | 1534 | private | None | Persist window geometry |
-| `_save_builder_state` | 1539 | private | None | Persist combo selections and search state |
-| `keyPressEvent` | 1568 | override | None | Ctrl+Enter uses the prompt |
-| `_save_combo_items` | 1577 | private | None | Snapshot original combo contents so search filters can be undone |
-| `_on_search_text_changed` | 1597 | private | None | Debounce typing when auto-filter is on |
-| `_on_auto_filter_changed` | 1622 | private | None | Toggle live filtering vs. manual search |
-| `_on_search_enter_pressed` | 1644 | private | None | Run a search immediately on Enter |
-| `_trigger_manual_search` | 1648 | private | None | Run a search from the Search button |
-| `_execute_search` | 1658 | private | None | Debounce-timer callback that dispatches `_perform_search` |
-| `_perform_search` | 1664 | private | None | Query `TagSearcher.search_by_category` and filter artist/style/medium/lighting/mood combos to the matches |
-| `_clear_search_filters` | 1765 | private | None | Restore the full combo contents from the snapshot |
-| `showEvent` | 1815 | override | None | Trigger first-show data loading |
-| `closeEvent` | 1822 | override | None | Save geometry and builder state |
-| `accept` | 1828 | override | None | Save state, then accept |
-| `reject` | 1834 | override | None | Save state, then reject |
+| `_load_all_data` | 213 | private | None | One-shot load of prompt data, presets, tag index, and history on first show |
+| `_populate_combo_boxes` | 243 | private | None | Fill style/medium/artist/lighting/mood combos (sorted, signals blocked) |
+| `_populate_presets` | 282 | private | None | Fill the preset combo, ordered by popularity |
+| `_init_ui` | 314 | private | None | Assemble the tab widget and dialog buttons |
+| `_create_builder_tab` | 335 | private | QWidget | Build the field grid, special-instruction checkboxes, preview, and action buttons |
+| `_create_history_tab` | 562 | private | QWidget | Build the history list, detail pane, and history actions |
+| `_create_combo` | 619 | private | QComboBox | Helper producing an editable combo seeded with items |
+| `_get_all_combos` | 627 | private | list | All eleven field combos, for bulk clear/save/restore |
+| `_process_exclusions` | 643 | private | str | Turn `"hands, text"` into `"no hands, no text"` |
+| `_on_subject_changed` | 662 | private | None | Auto-populate exclusions for known subjects (e.g. headshots) |
+| `_update_preview` | 682 | private | None | Rebuild the ordered, comma-joined prompt preview |
+| `_load_example` | 754 | private | None | Seed the fields with the built-in caricature example |
+| `_clear_all` | 770 | private | None | Reset every field and checkbox |
+| `_use_prompt` | 779 | private | None | Emit `prompt_generated` and accept the dialog |
+| `_save_to_history` | 792 | private | None | Append the current prompt to history with confirmation |
+| `_save_to_history_silent` | 833 | private | None | Same, without user feedback (used on accept) |
+| `_show_history_details` | 872 | private | None | Render the selected history entry in the detail pane |
+| `_load_from_history` | 900 | private | None | Load a history entry on double-click |
+| `_load_selected_history` | 909 | private | None | Load the currently selected entry |
+| `_delete_history_item` | 915 | private | None | Delete the selected entry and re-save |
+| `_clear_all_history` | 935 | private | None | Clear the entire history after confirmation |
+| `_create_preset_panel` | 955 | private | QGroupBox | "🎨 Style Presets" selector plus Save-custom button |
+| `_create_search_panel` | 1007 | private | QGroupBox | "🔍 Smart Search" bar, auto-filter checkbox, results label, clear button |
+| `_on_preset_selected` | 1088 | private | None | Apply a preset (index 0 is the placeholder) |
+| `_load_preset` | 1124 | private | None | Push a preset's settings into the fields |
+| `_on_save_custom_preset` | 1137 | private | None | Show `SavePresetDialog` and persist the current state |
+| `_apply_settings` | 1212 | private | None | Restore all combos, exclusions, notes, and checkboxes from a settings dict |
+| `_update_history_list` | 1234 | private | None | Rebuild the history list widget |
+| `_export` | 1253 | private | None | Ask whether to export the current prompt or all history |
+| `_export_current` | 1297 | private | None | Write the current prompt + settings to JSON |
+| `_export_all_history` | 1344 | private | None | Write the full history to JSON |
+| `_import_prompt` | 1377 | private | None | Load a prompt/settings JSON file back into the builder |
+| `_load_history` | 1439 | private | None | Read `prompt_builder_history.json` |
+| `_save_history` | 1452 | private | None | Write `prompt_builder_history.json` |
+| `_restore_geometry` | 1465 | private | None | Restore window geometry from `QSettings` |
+| `_restore_builder_state` | 1476 | private | None | Restore combo selections and search state from the last session |
+| `_save_geometry` | 1535 | private | None | Persist window geometry |
+| `_save_builder_state` | 1540 | private | None | Persist combo selections and search state |
+| `keyPressEvent` | 1569 | override | None | Ctrl+Enter uses the prompt |
+| `_save_combo_items` | 1578 | private | None | Snapshot original combo contents so search filters can be undone |
+| `_on_search_text_changed` | 1598 | private | None | Debounce typing when auto-filter is on |
+| `_on_auto_filter_changed` | 1623 | private | None | Toggle live filtering vs. manual search |
+| `_on_search_enter_pressed` | 1645 | private | None | Run a search immediately on Enter |
+| `_trigger_manual_search` | 1649 | private | None | Run a search from the Search button |
+| `_execute_search` | 1659 | private | None | Debounce-timer callback that dispatches `_perform_search` |
+| `_perform_search` | 1665 | private | None | Query `TagSearcher.search_by_category` and filter artist/style/medium/lighting/mood combos to the matches |
+| `_clear_search_filters` | 1766 | private | None | Restore the full combo contents from the snapshot |
+| `showEvent` | 1816 | override | None | Trigger first-show data loading |
+| `closeEvent` | 1823 | override | None | Save geometry and builder state |
+| `accept` | 1829 | override | None | Save state, then accept |
+| `reject` | 1835 | override | None | Save state, then reject |
 
 ---
 
 ### Prompt Generation Dialog
 
-**Path**: `gui/prompt_generation_dialog.py` - 1581 lines
+**Path**: `gui/prompt_generation_dialog.py` - 1607 lines
 **Purpose**: "AI Prompt Generator" — turns a free-form idea into N LLM-generated prompt variations on a background thread, with a Generate/Stop button, status console, history tab, and session restore. Imported by `gui/main_window.py:79`.
 **Language**: Python
 
@@ -6251,62 +6438,62 @@ initialized with `block_all_input=False` so the Generate→Stop button stays
 clickable mid-run. Session state uses `QSettings("ImageAI",
 "PromptGenerationDialog")`, and Discord Rich Presence is updated on show.
 
-#### LLMWorker (line 30)
+#### LLMWorker (line 31)
 
 `QObject` worker moved onto a `QThread`. Signals: `finished(list)`,
 `error(str)`, `progress(str)`, `log_message(str, str)`.
 
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| `__init__` | 37 | constructor | None | Capture operation, input text, variation count, provider/model/key, temperature, max tokens, reasoning effort, verbosity |
-| `stop` | 54 | public | None | Set the cooperative stop flag |
-| `run` | 58 | public | None | Log the full request to file + console loggers, call LiteLLM (falling back to native SDKs), parse the response into prompt variations, emit results or errors |
+| `__init__` | 38 | constructor | None | Capture operation, input text, variation count, provider/model/key, temperature, max tokens, reasoning effort, verbosity |
+| `stop` | 55 | public | None | Set the cooperative stop flag |
+| `run` | 59 | public | None | Log the full request to file + console loggers, call LiteLLM (falling back to native SDKs), parse the response into prompt variations, emit results or errors |
 
 ##### LiteLLMConsoleHandler (line 90, nested in `LLMWorker.run`)
 
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| `emit` | 91 | override | None | Mirror LiteLLM's internal log records into the app's `console` logger |
+| `emit` | 92 | override | None | Mirror LiteLLM's internal log records into the app's `console` logger |
 
-#### PromptGenerationDialog (line 704)
+#### PromptGenerationDialog (line 729)
 
 `DialogCleanupMixin, QDialog, OperationGuardMixin`; signal
 `promptSelected(str)`.
 
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| `__init__` | 709 | constructor | None | Load last session, restore geometry, build UI, init the operation guard, load LLM settings |
-| `init_ui` | 737 | public | None | Build the Generate/History tabs, idea input, variation count, LLM controls, results list, and status console inside vertical splitters |
-| `load_llm_settings` | 980 | public | None | Read LLM provider/model/params from `ConfigManager` |
-| `update_llm_models` | 1016 | public | None | Repopulate the model combo for the chosen LLM provider |
-| `on_model_changed` | 1031 | public | None | Show/hide GPT-5-specific parameters (reasoning effort, verbosity) |
-| `_on_generate_clicked` | 1041 | private | None | Dispatcher: Generate when idle, Stop while running |
-| `_cancel_generation` | 1048 | private | None | Cancel an in-flight request at the user's request |
-| `_reset_generate_button` | 1055 | private | None | Restore the button after a run or a Stop |
-| `generate_prompts` | 1062 | public | None | Validate input, resolve auth mode and per-provider API key via `config.get_api_key()`, spin up `LLMWorker` on a `QThread` |
-| `on_generation_finished` | 1209 | public | None | Populate the results list, retarget the primary action to OK, save the session |
-| `on_generation_error` | 1260 | public | None | Surface the error in the console and a message box |
-| `on_generation_progress` | 1272 | public | None | Append progress text to the status console |
-| `on_log_message` | 1276 | public | None | Route worker log messages to the status console |
-| `cleanup_thread` | 1280 | public | None | Quit and dispose of the worker thread |
-| `on_selection_changed` | 1289 | public | None | Enable/disable OK as the selection changes |
-| `on_item_double_clicked` | 1295 | public | None | Accept the double-clicked prompt |
-| `load_history_item` | 1301 | public | None | Restore inputs and results from a history entry |
-| `accept_selection` | 1356 | public | None | Emit `promptSelected`, record history, and accept |
-| `save_last_session` | 1413 | public | None | Persist idea text, settings, and results |
-| `load_last_session` | 1443 | public | dict | Read the persisted session payload |
-| `restore_last_session` | 1455 | public | None | Repopulate the dialog from the saved session |
-| `save_settings` | 1524 | public | None | Save window geometry and splitter states |
-| `restore_settings` | 1536 | public | None | Restore window geometry and splitter states |
-| `showEvent` | 1542 | override | None | Update Discord presence on show |
-| `_stop_worker` | 1550 | private | None | Stop the worker and wait briefly for its thread |
-| `on_dialog_close` | 1576 | public | None | `DialogCleanupMixin` hook run on every exit path (OK, Cancel, Escape, X) |
+| `__init__` | 734 | constructor | None | Load last session, restore geometry, build UI, init the operation guard, load LLM settings |
+| `init_ui` | 762 | public | None | Build the Generate/History tabs, idea input, variation count, LLM controls, results list, and status console inside vertical splitters |
+| `load_llm_settings` | 1005 | public | None | Read LLM provider/model/params from `ConfigManager` |
+| `update_llm_models` | 1041 | public | None | Repopulate the model combo for the chosen LLM provider |
+| `on_model_changed` | 1056 | public | None | Show/hide GPT-5-specific parameters (reasoning effort, verbosity) |
+| `_on_generate_clicked` | 1066 | private | None | Dispatcher: Generate when idle, Stop while running |
+| `_cancel_generation` | 1073 | private | None | Cancel an in-flight request at the user's request |
+| `_reset_generate_button` | 1080 | private | None | Restore the button after a run or a Stop |
+| `generate_prompts` | 1087 | public | None | Validate input, resolve auth mode and per-provider API key via `config.get_api_key()`, spin up `LLMWorker` on a `QThread` |
+| `on_generation_finished` | 1235 | public | None | Populate the results list, retarget the primary action to OK, save the session |
+| `on_generation_error` | 1286 | public | None | Surface the error in the console and a message box |
+| `on_generation_progress` | 1298 | public | None | Append progress text to the status console |
+| `on_log_message` | 1302 | public | None | Route worker log messages to the status console |
+| `cleanup_thread` | 1306 | public | None | Quit and dispose of the worker thread |
+| `on_selection_changed` | 1315 | public | None | Enable/disable OK as the selection changes |
+| `on_item_double_clicked` | 1321 | public | None | Accept the double-clicked prompt |
+| `load_history_item` | 1327 | public | None | Restore inputs and results from a history entry |
+| `accept_selection` | 1382 | public | None | Emit `promptSelected`, record history, and accept |
+| `save_last_session` | 1439 | public | None | Persist idea text, settings, and results |
+| `load_last_session` | 1469 | public | dict | Read the persisted session payload |
+| `restore_last_session` | 1481 | public | None | Repopulate the dialog from the saved session |
+| `save_settings` | 1550 | public | None | Save window geometry and splitter states |
+| `restore_settings` | 1562 | public | None | Restore window geometry and splitter states |
+| `showEvent` | 1568 | override | None | Update Discord presence on show |
+| `_stop_worker` | 1576 | private | None | Stop the worker and wait briefly for its thread |
+| `on_dialog_close` | 1602 | public | None | `DialogCleanupMixin` hook run on every exit path (OK, Cancel, Escape, X) |
 
 ---
 
 ### Prompt Question Dialog (current)
 
-**Path**: `gui/prompt_question_dialog.py` - 941 lines
+**Path**: `gui/prompt_question_dialog.py` - 949 lines
 **Purpose**: "Ask AI Anything" / "Ask About Prompt" — a multi-turn conversational dialog that answers questions about the current prompt (or general questions when no prompt is supplied), with quick-question presets, an editable prompt pane, conversation history, and a status console. Imported by `gui/main_window.py:80`; instantiated at `gui/main_window.py:4906`.
 **Language**: Python
 
@@ -6326,88 +6513,88 @@ Signals: `finished(str)`, `error(str)`, `progress(str)`,
 | `stop` | 45 | public | None | Set the cooperative stop flag |
 | `run` | 49 | public | None | Build the message list from the conversation history, call the LLM, log request/response, emit the answer |
 
-#### PromptQuestionDialog (line 201)
+#### PromptQuestionDialog (line 209)
 
 `QDialog, OperationGuardMixin`. Window title switches between "Ask About Prompt"
 and "Ask AI Anything" depending on whether a prompt was passed in.
 
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| `__init__` | 204 | constructor | None | Seed conversation state, restore geometry, build UI, init the input-blocking guard |
-| `init_ui` | 234 | public | None | Assemble the Conversation and History tabs plus the Close button |
-| `create_conversation_tab` | 260 | public | QWidget | Build the editable prompt pane, quick-question combo, question box, answer view, LLM controls, and status console in a splitter |
-| `update_quick_questions` | 451 | public | None | Swap the preset question list depending on whether a prompt is present |
-| `toggle_prompt_edit` | 493 | public | None | Enter/leave prompt edit mode |
-| `clear_prompt` | 511 | public | None | Empty the prompt field |
-| `reset_prompt` | 527 | public | None | Restore the prompt passed in by the caller |
-| `on_prompt_changed` | 537 | public | None | Track edits and refresh quick questions |
-| `on_quick_question_selected` | 544 | public | None | Copy the chosen preset into the question box |
-| `setup_shortcuts` | 549 | public | None | Bind Ctrl+Enter (ask) and Escape |
-| `handle_escape` | 563 | public | None | Escape exits edit mode first, then closes the dialog |
-| `ask_question` | 575 | public | None | Resolve the API key, start `QuestionWorker` on a `QThread` (guarded against re-entry) |
-| `on_answer_received` | 677 | public | None | Append the turn to the conversation, render the answer, save history |
-| `on_error` | 721 | public | None | Log and display the failure |
-| `clear_conversation` | 733 | public | None | Reset the multi-turn history |
-| `load_history_item` | 739 | public | None | Restore a saved Q&A into the conversation view |
-| `load_llm_settings` | 773 | public | None | Read LLM provider/model/params from config |
-| `update_llm_models` | 806 | public | None | Repopulate the model combo for the provider |
-| `on_model_changed` | 819 | public | None | Show/hide model-specific parameter controls |
-| `save_dialog_settings` | 834 | public | None | Persist dialog-specific choices (provider, model, temperature, …) |
-| `restore_dialog_settings` | 854 | public | None | Restore those choices |
-| `save_settings` | 886 | public | None | Save window geometry |
-| `restore_settings` | 890 | public | None | Restore window geometry |
-| `reject` | 896 | override | None | Save settings before closing |
-| `showEvent` | 902 | override | None | Update Discord presence on show |
-| `closeEvent` | 910 | override | None | Stop the worker, save settings, clean up |
+| `__init__` | 212 | constructor | None | Seed conversation state, restore geometry, build UI, init the input-blocking guard |
+| `init_ui` | 242 | public | None | Assemble the Conversation and History tabs plus the Close button |
+| `create_conversation_tab` | 268 | public | QWidget | Build the editable prompt pane, quick-question combo, question box, answer view, LLM controls, and status console in a splitter |
+| `update_quick_questions` | 459 | public | None | Swap the preset question list depending on whether a prompt is present |
+| `toggle_prompt_edit` | 501 | public | None | Enter/leave prompt edit mode |
+| `clear_prompt` | 519 | public | None | Empty the prompt field |
+| `reset_prompt` | 535 | public | None | Restore the prompt passed in by the caller |
+| `on_prompt_changed` | 545 | public | None | Track edits and refresh quick questions |
+| `on_quick_question_selected` | 552 | public | None | Copy the chosen preset into the question box |
+| `setup_shortcuts` | 557 | public | None | Bind Ctrl+Enter (ask) and Escape |
+| `handle_escape` | 571 | public | None | Escape exits edit mode first, then closes the dialog |
+| `ask_question` | 583 | public | None | Resolve the API key, start `QuestionWorker` on a `QThread` (guarded against re-entry) |
+| `on_answer_received` | 685 | public | None | Append the turn to the conversation, render the answer, save history |
+| `on_error` | 729 | public | None | Log and display the failure |
+| `clear_conversation` | 741 | public | None | Reset the multi-turn history |
+| `load_history_item` | 747 | public | None | Restore a saved Q&A into the conversation view |
+| `load_llm_settings` | 781 | public | None | Read LLM provider/model/params from config |
+| `update_llm_models` | 814 | public | None | Repopulate the model combo for the provider |
+| `on_model_changed` | 827 | public | None | Show/hide model-specific parameter controls |
+| `save_dialog_settings` | 842 | public | None | Persist dialog-specific choices (provider, model, temperature, …) |
+| `restore_dialog_settings` | 862 | public | None | Restore those choices |
+| `save_settings` | 894 | public | None | Save window geometry |
+| `restore_settings` | 898 | public | None | Restore window geometry |
+| `reject` | 904 | override | None | Save settings before closing |
+| `showEvent` | 910 | override | None | Update Discord presence on show |
+| `closeEvent` | 918 | override | None | Stop the worker, save settings, clean up |
 
 ---
 
 ### Prompt Question Dialog (legacy)
 
-**Path**: `gui/prompt_question_dialog_old.py` - 1080 lines
+**Path**: `gui/prompt_question_dialog_old.py` - 1077 lines
 **Purpose**: Superseded single-turn version of the Ask-About-Prompt dialog, kept for reference. **Not imported anywhere** — `gui/main_window.py:80` imports `PromptQuestionDialog` from `gui/prompt_question_dialog.py` instead. Differences from the current version: one question/answer round trip (no `conversation_history`), no `OperationGuardMixin`, hand-rolled JSON history/session files instead of `DialogHistoryWidget` persistence, and a `QuestionWorker` without a `stop()` method.
 **Language**: Python
 
-#### QuestionWorker (line 22)
+#### QuestionWorker (line 23)
 
 Signals: `finished(str)`, `error(str)`, `progress(str)`, `log_message(str, str)`.
 
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| `__init__` | 29 | constructor | None | Capture prompt, question, provider/model/key, temperature, reasoning effort, verbosity |
-| `run` | 42 | public | None | Call the LLM (LiteLLM first, native SDK fallback), log request/response, emit the answer |
+| `__init__` | 30 | constructor | None | Capture prompt, question, provider/model/key, temperature, reasoning effort, verbosity |
+| `run` | 43 | public | None | Call the LLM (LiteLLM first, native SDK fallback), log request/response, emit the answer |
 
-#### PromptQuestionDialog (line 522)
+#### PromptQuestionDialog (line 523)
 
 | Method | Line | Type | Returns | Description |
 |--------|------|------|---------|-------------|
-| `__init__` | 525 | constructor | None | Load last session and question history, restore geometry, build UI |
-| `init_ui` | 546 | public | None | Build the prompt view, predefined-question combo, question box, answer view, and status console in a splitter |
-| `setup_shortcuts` | 721 | public | None | Bind Ctrl+Enter and Escape |
-| `load_llm_settings` | 731 | public | None | Read LLM provider/model/params from config |
-| `update_llm_models` | 755 | public | None | Repopulate the model combo for the provider |
-| `on_model_changed` | 770 | public | None | Show/hide GPT-5-specific parameters |
-| `on_predefined_selected` | 779 | public | None | Copy a predefined question into the question box |
-| `ask_question` | 784 | public | None | Resolve the API key and run `QuestionWorker` on a `QThread` |
-| `on_answer_received` | 882 | public | None | Render the answer and save it to history |
-| `on_error` | 896 | public | None | Log and display the failure |
-| `on_log_message` | 903 | public | None | Route worker logs to the status console |
-| `cleanup_thread` | 907 | public | None | Quit and dispose of the worker thread |
-| `save_last_session` | 916 | public | None | Persist the last question/answer pair |
+| `__init__` | 526 | constructor | None | Load last session and question history, restore geometry, build UI |
+| `init_ui` | 547 | public | None | Build the prompt view, predefined-question combo, question box, answer view, and status console in a splitter |
+| `setup_shortcuts` | 722 | public | None | Bind Ctrl+Enter and Escape |
+| `load_llm_settings` | 732 | public | None | Read LLM provider/model/params from config |
+| `update_llm_models` | 756 | public | None | Repopulate the model combo for the provider |
+| `on_model_changed` | 771 | public | None | Show/hide GPT-5-specific parameters |
+| `on_predefined_selected` | 780 | public | None | Copy a predefined question into the question box |
+| `ask_question` | 785 | public | None | Resolve the API key and run `QuestionWorker` on a `QThread` |
+| `on_answer_received` | 883 | public | None | Render the answer and save it to history |
+| `on_error` | 897 | public | None | Log and display the failure |
+| `on_log_message` | 904 | public | None | Route worker logs to the status console |
+| `cleanup_thread` | 908 | public | None | Quit and dispose of the worker thread |
+| `save_last_session` | 917 | public | None | Persist the last question/answer pair |
 | `load_last_session` | 944 | public | dict | Read the persisted session |
-| `restore_last_session` | 958 | public | None | Repopulate the dialog from the saved session |
-| `save_to_history` | 1008 | public | None | Append a question/answer (or error) to the JSON history |
-| `load_history` | 1034 | public | list | Read the question/answer history file |
-| `save_settings` | 1048 | public | None | Save window geometry and splitter state |
-| `restore_settings` | 1056 | public | None | Restore window geometry and splitter state |
-| `reject` | 1062 | override | None | Save settings before closing |
-| `closeEvent` | 1068 | override | None | Clean up the thread and save settings |
+| `restore_last_session` | 957 | public | None | Repopulate the dialog from the saved session |
+| `save_to_history` | 1007 | public | None | Append a question/answer (or error) to the JSON history |
+| `load_history` | 1032 | public | list | Read the question/answer history file |
+| `save_settings` | 1045 | public | None | Save window geometry and splitter state |
+| `restore_settings` | 1053 | public | None | Restore window geometry and splitter state |
+| `reject` | 1059 | override | None | Save settings before closing |
+| `closeEvent` | 1065 | override | None | Clean up the thread and save settings |
 
 ---
 
 ### Enhanced Prompt Dialog
 
-**Path**: `gui/enhanced_prompt_dialog.py` - 867 lines
+**Path**: `gui/enhanced_prompt_dialog.py` - 868 lines
 **Purpose**: "Enhance Prompt with AI" — sends the current prompt to an LLM for rewriting at a chosen `EnhancementLevel` (from `core.prompt_enhancer`), optionally with a style preset and tuned for the target image provider. Shows original vs. enhanced side by side, keeps a history tab, and emits the accepted result. Opened from `gui/main_window.py:4871`.
 **Language**: Python
 
@@ -6440,19 +6627,19 @@ Signal: `promptEnhanced(str)`.
 | `update_llm_models` | 471 | public | None | Repopulate the model combo for the provider |
 | `on_model_changed` | 485 | public | None | Show/hide GPT-5-specific parameters |
 | `enhance_prompt` | 496 | public | None | Resolve the API key and run `EnhanceWorker` on a `QThread` (guarded against re-entry) |
-| `on_enhancement_finished` | 634 | public | None | Display the enhanced prompt, enable Accept, save to history |
-| `on_enhancement_error` | 663 | public | None | Log and display the failure |
-| `on_log_message` | 673 | public | None | Route worker logs to the status console |
-| `cleanup_thread` | 677 | public | None | Quit and dispose of the worker thread |
-| `accept_selection` | 686 | public | None | Emit `promptEnhanced` with the accepted text and close |
-| `load_history_item` | 708 | public | None | Restore an earlier enhancement on double-click |
-| `reject` | 745 | override | None | Save settings before closing |
-| `save_settings` | 751 | public | None | Save window geometry and splitter state |
-| `restore_settings` | 759 | public | None | Restore window geometry |
-| `save_dialog_settings` | 765 | public | None | Persist application-wide dialog choices (level, style, LLM params) |
-| `restore_dialog_settings` | 786 | public | None | Restore those choices |
-| `showEvent` | 826 | override | None | Update Discord presence on show |
-| `closeEvent` | 834 | override | None | Stop the worker, save settings, clean up |
+| `on_enhancement_finished` | 635 | public | None | Display the enhanced prompt, enable Accept, save to history |
+| `on_enhancement_error` | 664 | public | None | Log and display the failure |
+| `on_log_message` | 674 | public | None | Route worker logs to the status console |
+| `cleanup_thread` | 678 | public | None | Quit and dispose of the worker thread |
+| `accept_selection` | 687 | public | None | Emit `promptEnhanced` with the accepted text and close |
+| `load_history_item` | 709 | public | None | Restore an earlier enhancement on double-click |
+| `reject` | 746 | override | None | Save settings before closing |
+| `save_settings` | 752 | public | None | Save window geometry and splitter state |
+| `restore_settings` | 760 | public | None | Restore window geometry |
+| `save_dialog_settings` | 766 | public | None | Persist application-wide dialog choices (level, style, LLM params) |
+| `restore_dialog_settings` | 787 | public | None | Restore those choices |
+| `showEvent` | 827 | override | None | Update Discord presence on show |
+| `closeEvent` | 835 | override | None | Stop the worker, save settings, clean up |
 
 ---
 
@@ -6777,7 +6964,7 @@ Dialog wrapping the refinement loop and conversation history.
 ---
 
 ### MidjourneyWebDialog
-**Path**: `gui/midjourney_dialog.py` - 1129 lines
+**Path**: `gui/midjourney_dialog.py` - 1128 lines
 **Purpose**: Embedded QtWebEngine view of the Midjourney web interface with a shared persistent profile (cookies/login), Discord auth popups, download interception, and import of downloaded images back into ImageAI.
 **Language**: Python
 
@@ -6785,12 +6972,12 @@ Dialog wrapping the refinement loop and conversation history.
 | Element | Line | Type | Description |
 |---------|------|------|-------------|
 | WEBENGINE_CORE | 23 | constant | True when `PySide6.QtWebEngineCore` imported successfully |
-| WEBENGINE_CORE | 25 | constant | False fallback assignment when the import fails |
+| WEBENGINE_CORE | 23 | constant | False fallback assignment when the import fails |
 | WEBENGINE_ENHANCED | 30 | constant | True when the enhanced WebEngine widgets are available |
-| WEBENGINE_ENHANCED | 32 | constant | False fallback assignment when the import fails |
+| WEBENGINE_ENHANCED | 30 | constant | False fallback assignment when the import fails |
 | _SHARED_MIDJOURNEY_PROFILE | 39 | constant | Module-global cached `QWebEngineProfile` (initially None) |
 | _ACTIVE_STATUS_CONSOLE | 44 | constant | Status console of the most recently opened dialog, for download feedback |
-| _SHARED_MIDJOURNEY_PROFILE | 160 | constant | Re-assignment inside `get_shared_midjourney_profile` caching the created profile |
+| _SHARED_MIDJOURNEY_PROFILE | 39 | constant | Re-assignment inside `get_shared_midjourney_profile` caching the created profile |
 
 #### Functions
 | Function | Line | Scope | Returns | Async | Description |
@@ -6805,52 +6992,52 @@ Dialog wrapping the refinement loop and conversation history.
 ##### Signals
 | Signal | Line | Payload | Description |
 |--------|------|---------|-------------|
-| imageGenerated | 171 | str | Path of an imported Midjourney image |
-| sessionStarted | 172 | str, str | Session start (prompt, command) |
-| sessionEnded | 173 | — | Session finished/dialog closed |
+| imageGenerated | 170 | str | Path of an imported Midjourney image |
+| sessionStarted | 171 | str, str | Session start (prompt, command) |
+| sessionEnded | 172 | — | Session finished/dialog closed |
 
 ##### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 175 | constructor | None | No | Take web URL, slash command, prompt and parent |
-| _suppress_qt_warnings | 205 | private | None | No | Install a log filter for noisy Qt WebEngine warnings |
-| _extract_prompt_from_command | 249 | private | str | No | Strip flags to recover the prompt text from a slash command |
-| setup_ui | 259 | public | None | No | Build instructions pane, toolbar, web view and status console |
-| _configure_web_view | 445 | private | None | No | Attach the shared profile, request/cookie logging, custom page and permissions |
-| load_url | 669 | public | None | No | Navigate to the Midjourney web interface |
-| copy_command | 680 | public | None | No | Copy the slash command to the clipboard |
-| open_in_browser | 695 | public | None | No | Open Midjourney in the system browser |
-| _open_discord_login_popup | 703 | private | None | No | Host Discord login in an embedded popup sharing the profile |
-| _import_downloaded_images | 741 | private | None | No | Scan Downloads for matching images and import them (auto or prompted) |
-| _post_load_check | 895 | private | None | No | Detect blank/404 pages after load and soft-reload |
-| _inspect | 916 | nested | None | No | JS result callback inside `_post_load_check` |
-| _reset_session | 942 | private | None | No | Clear cookies/cache for the profile and reload (Cloudflare/login recovery) |
-| _handle_popup_url | 964 | private | None | No | Route a popup URL to embedded or external handling |
-| _open_external_auth | 973 | private | None | No | Send an auth URL to the system browser |
-| _register_popup | 983 | private | None | No | Track an open `_AuthPopupDialog` |
-| on_image_ready | 991 | public | None | No | Handle the user signalling that an image is ready |
-| on_dialog_close | 1006 | public | None | No | Cleanup for every exit path (accept, Escape, title-bar X) |
+| __init__ | 174 | constructor | None | No | Take web URL, slash command, prompt and parent |
+| _suppress_qt_warnings | 204 | private | None | No | Install a log filter for noisy Qt WebEngine warnings |
+| _extract_prompt_from_command | 248 | private | str | No | Strip flags to recover the prompt text from a slash command |
+| setup_ui | 258 | public | None | No | Build instructions pane, toolbar, web view and status console |
+| _configure_web_view | 444 | private | None | No | Attach the shared profile, request/cookie logging, custom page and permissions |
+| load_url | 668 | public | None | No | Navigate to the Midjourney web interface |
+| copy_command | 679 | public | None | No | Copy the slash command to the clipboard |
+| open_in_browser | 694 | public | None | No | Open Midjourney in the system browser |
+| _open_discord_login_popup | 702 | private | None | No | Host Discord login in an embedded popup sharing the profile |
+| _import_downloaded_images | 740 | private | None | No | Scan Downloads for matching images and import them (auto or prompted) |
+| _post_load_check | 894 | private | None | No | Detect blank/404 pages after load and soft-reload |
+| _inspect | 915 | nested | None | No | JS result callback inside `_post_load_check` |
+| _reset_session | 941 | private | None | No | Clear cookies/cache for the profile and reload (Cloudflare/login recovery) |
+| _handle_popup_url | 963 | private | None | No | Route a popup URL to embedded or external handling |
+| _open_external_auth | 972 | private | None | No | Send an auth URL to the system browser |
+| _register_popup | 982 | private | None | No | Track an open `_AuthPopupDialog` |
+| on_image_ready | 990 | public | None | No | Handle the user signalling that an image is ready |
+| on_dialog_close | 1005 | public | None | No | Cleanup for every exit path (accept, Escape, title-bar X) |
 
 ##### Nested Classes
 | Class | Line | Parent | Description |
 |-------|------|--------|-------------|
-| QtWarningFilter | 222 | MidjourneyWebDialog._suppress_qt_warnings | Logging filter; `filter` at line 223 drops known-noisy WebEngine records |
-| _RequestLogger | 481 | MidjourneyWebDialog._configure_web_view | `QWebEngineUrlRequestInterceptor`; `interceptRequest` at line 482 debug-logs method + URL |
-| _LoggingWebPage | 509 | MidjourneyWebDialog._configure_web_view | `QWebEnginePage` subclass with JS-console logging and popup/auth support |
+| QtWarningFilter | 221 | MidjourneyWebDialog._suppress_qt_warnings | Logging filter; `filter` at line 223 drops known-noisy WebEngine records |
+| _RequestLogger | 480 | MidjourneyWebDialog._configure_web_view | `QWebEngineUrlRequestInterceptor`; `interceptRequest` at line 482 debug-logs method + URL |
+| _LoggingWebPage | 508 | MidjourneyWebDialog._configure_web_view | `QWebEnginePage` subclass with JS-console logging and popup/auth support |
 
 ##### _LoggingWebPage Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 510 | constructor | None | No | Bind profile, parent and owning dialog |
-| javaScriptConsoleMessage | 514 | public | None | No | Forward page JS console output to the logger |
-| acceptNavigationRequest | 522 | public | bool | No | Intercept auth/external navigations |
-| createWindow | 548 | public | QWebEnginePage | No | Create an embedded popup page for `window.open` |
+| __init__ | 174 | constructor | None | No | Bind profile, parent and owning dialog |
+| javaScriptConsoleMessage | 513 | public | None | No | Forward page JS console output to the logger |
+| acceptNavigationRequest | 521 | public | bool | No | Intercept auth/external navigations |
+| createWindow | 547 | public | QWebEnginePage | No | Create an embedded popup page for `window.open` |
 
 ##### Other Nested Helpers
 | Helper | Line | Enclosing Method | Description |
 |--------|------|------------------|-------------|
-| _cookie_name | 498 | _configure_web_view | Safely decode a cookie name for debug logging |
-| _on_feature | 575 | _configure_web_view | Grant/deny WebEngine feature permission requests |
+| _cookie_name | 497 | _configure_web_view | Safely decode a cookie name for debug logging |
+| _on_feature | 574 | _configure_web_view | Grant/deny WebEngine feature permission requests |
 
 #### Class: _AuthPopupDialog (line 1043)
 Small dialog hosting popup auth windows in-app, sharing the same `QWebEngineProfile` so cookies propagate back to the main view.
@@ -6858,9 +7045,9 @@ Small dialog hosting popup auth windows in-app, sharing the same `QWebEngineProf
 ##### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 1050 | constructor | None | No | Wrap the supplied page in a web view sized for auth |
-| _on_url | 1090 | private | None | No | Watch URL changes and close once auth completes |
-| page | 1128 | public | QWebEnginePage | No | Accessor for the hosted page |
+| __init__ | 1049 | constructor | None | No | Wrap the supplied page in a web view sized for auth |
+| _on_url | 1089 | private | None | No | Watch URL changes and close once auth completes |
+| page | 1127 | public | QWebEnginePage | No | Accessor for the hosted page |
 
 ---
 
@@ -6941,8 +7128,8 @@ Pre-install confirmation showing package list, disk-space and GPU status.
 ##### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 34 | constructor | None | No | Build the confirmation dialog |
-| init_ui | 41 | public | None | No | Compose explanation text, requirements and Install/Cancel buttons |
+| __init__ | 33 | constructor | None | No | Build the confirmation dialog |
+| init_ui | 40 | public | None | No | Compose explanation text, requirements and Install/Cancel buttons |
 
 #### Class: InstallProgressDialog (line 133)
 Runs the install, streams progress, then downloads the default model.
@@ -6950,19 +7137,19 @@ Runs the install, streams progress, then downloads the default model.
 ##### Signals
 | Signal | Line | Payload | Description |
 |--------|------|---------|-------------|
-| installation_complete | 136 | bool, str | Success flag + summary message |
+| installation_complete | 135 | bool, str | Success flag + summary message |
 
 ##### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 138 | constructor | None | No | Init timers, installer/downloader handles and state |
-| init_ui | 158 | public | None | No | Build progress bar, elapsed-time label and status console |
-| start_installation | 245 | public | None | No | Detect GPU, pick packages/index URL, start `PackageInstaller` thread |
-| update_elapsed_time | 271 | public | None | No | Tick the elapsed-time readout |
-| on_progress | 279 | public | None | No | Append a timestamped progress line |
-| on_percentage | 284 | public | None | No | Update the progress bar value |
-| on_installation_finished | 288 | public | None | No | Handle install success/failure and chain to model download |
-| download_model | 314 | public | None | No | Start `ModelDownloader` for the default Real-ESRGAN weights |
+| __init__ | 137 | constructor | None | No | Init timers, installer/downloader handles and state |
+| init_ui | 157 | public | None | No | Build progress bar, elapsed-time label and status console |
+| start_installation | 244 | public | None | No | Detect GPU, pick packages/index URL, start `PackageInstaller` thread |
+| update_elapsed_time | 270 | public | None | No | Tick the elapsed-time readout |
+| on_progress | 278 | public | None | No | Append a timestamped progress line |
+| on_percentage | 283 | public | None | No | Update the progress bar value |
+| on_installation_finished | 287 | public | None | No | Handle install success/failure and chain to model download |
+| download_model | 313 | public | None | No | Start `ModelDownloader` for the default Real-ESRGAN weights |
 | on_download_finished | 338 | public | None | No | Finish up, emit `installation_complete`, notify the user |
 | show_notification | 376 | public | None | No | Show a system-tray notification when available |
 | restart_application | 406 | public | None | No | Relaunch ImageAI via `QProcess` |
@@ -7091,7 +7278,7 @@ importable in isolation and used from multiple tabs.
 
 ### LocalSDWidget
 
-**Path**: `gui/local_sd_widget.py` - 474 lines
+**Path**: `gui/local_sd_widget.py` - 476 lines
 **Purpose**: Settings-tab widget for managing local Stable Diffusion models — listing installed models, downloading new ones from Hugging Face, and managing the HF auth token.
 **Language**: Python
 
@@ -7109,25 +7296,25 @@ importable in isolation and used from multiple tabs.
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
 | __init__ | 66 | constructor | None | No | Resolves HF cache dir, checks auth, refreshes model list |
-| _init_ui | 74 | private | None | No | Model combo, install list, download controls, token box |
-| _populate_model_combo | 212 | private | None | No | Fills the combo from `providers.model_info` |
-| _refresh_models | 232 | private | None | No | Rescans the cache for installed models |
-| _download_selected | 260 | private | None | No | Downloads the model chosen in the combo |
-| _download_custom | 280 | private | None | No | Downloads an arbitrary user-entered model id |
-| _start_download | 296 | private | None | No | Launches `ModelDownloadThread` and wires signals |
-| _on_download_status | 341 | private | None | No | Appends a status line |
-| _on_download_finished | 345 | private | None | No | Refreshes the list and emits `models_changed` |
-| get_installed_models | 359 | public | list | No | Returns the currently detected installed models |
-| _check_hf_auth | 363 | private | None | No | Detects whether a Hugging Face token is present |
-| _open_hf_token_page | 394 | private | None | No | Opens the HF token page in a browser |
-| _logout_huggingface | 404 | private | None | No | Clears the stored HF credentials |
-| _save_token | 428 | private | None | No | Persists a newly entered HF token |
+| _init_ui | 76 | private | None | No | Model combo, install list, download controls, token box |
+| _populate_model_combo | 214 | private | None | No | Fills the combo from `providers.model_info` |
+| _refresh_models | 234 | private | None | No | Rescans the cache for installed models |
+| _download_selected | 262 | private | None | No | Downloads the model chosen in the combo |
+| _download_custom | 282 | private | None | No | Downloads an arbitrary user-entered model id |
+| _start_download | 298 | private | None | No | Launches `ModelDownloadThread` and wires signals |
+| _on_download_status | 343 | private | None | No | Appends a status line |
+| _on_download_finished | 347 | private | None | No | Refreshes the list and emits `models_changed` |
+| get_installed_models | 361 | public | list | No | Returns the currently detected installed models |
+| _check_hf_auth | 365 | private | None | No | Detects whether a Hugging Face token is present |
+| _open_hf_token_page | 396 | private | None | No | Opens the HF token page in a browser |
+| _logout_huggingface | 406 | private | None | No | Clears the stored HF credentials |
+| _save_token | 430 | private | None | No | Persists a newly entered HF token |
 
 ---
 
 ### ModelBrowserDialog
 
-**Path**: `gui/model_browser.py` - 447 lines
+**Path**: `gui/model_browser.py` - 449 lines
 **Purpose**: Full-screen browser for Stable Diffusion models — popular-model catalog, installed models, and custom model-id entry, each with download progress.
 **Language**: Python
 
@@ -7147,19 +7334,19 @@ importable in isolation and used from multiple tabs.
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
 | __init__ | 98 | constructor | None | No | Resolves cache dir, builds UI, loads the model catalog |
-| _init_ui | 110 | private | None | No | Tab widget, detail pane, progress bar, buttons |
-| _create_popular_models_tab | 182 | private | QWidget | No | Curated model list with a filter box |
-| _create_installed_models_tab | 232 | private | QWidget | No | Models already present in the cache |
-| _create_custom_model_tab | 252 | private | QWidget | No | Free-form Hugging Face model-id entry |
-| _load_models | 287 | private | None | No | Populates the popular-models list |
-| _load_installed_models | 308 | private | None | No | Scans the cache directory |
-| _filter_models | 322 | private | None | No | Live text filter over the popular list |
-| _on_model_selected | 341 | private | None | No | Shows description/size/requirements for the selection |
-| _download_selected | 369 | private | None | No | Downloads the highlighted catalog model |
-| _download_custom | 379 | private | None | No | Downloads the custom-entered model id |
-| _start_download | 393 | private | None | No | Starts `ModelDownloader` and wires progress |
-| _cancel_download | 425 | private | None | No | Stops the running downloader |
-| _on_download_finished | 431 | private | None | No | Refreshes lists and reports success/failure |
+| _init_ui | 112 | private | None | No | Tab widget, detail pane, progress bar, buttons |
+| _create_popular_models_tab | 184 | private | QWidget | No | Curated model list with a filter box |
+| _create_installed_models_tab | 234 | private | QWidget | No | Models already present in the cache |
+| _create_custom_model_tab | 254 | private | QWidget | No | Free-form Hugging Face model-id entry |
+| _load_models | 289 | private | None | No | Populates the popular-models list |
+| _load_installed_models | 310 | private | None | No | Scans the cache directory |
+| _filter_models | 324 | private | None | No | Live text filter over the popular list |
+| _on_model_selected | 343 | private | None | No | Shows description/size/requirements for the selection |
+| _download_selected | 371 | private | None | No | Downloads the highlighted catalog model |
+| _download_custom | 381 | private | None | No | Downloads the custom-entered model id |
+| _start_download | 395 | private | None | No | Starts `ModelDownloader` and wires progress |
+| _cancel_download | 427 | private | None | No | Stops the running downloader |
+| _on_download_finished | 433 | private | None | No | Refreshes lists and reports success/failure |
 
 ---
 
@@ -7428,28 +7615,28 @@ importable in isolation and used from multiple tabs.
 
 ### DialogHistoryWidget
 
-**Path**: `gui/history_widget.py` - 295 lines
+**Path**: `gui/history_widget.py` - 290 lines
 **Purpose**: Reusable per-dialog interaction history — a table of past LLM inputs/responses with preview, persistence to disk, and export, embeddable in any dialog that calls an LLM.
 **Language**: Python
 
 #### Classes
 
-**`DialogHistoryWidget`** (line 19) — namespaced by `dialog_name` so each dialog keeps its own history file and QSettings. Signals: `itemSelected(dict)`, `itemDoubleClicked(dict)`. Uses `common.dialog_conventions` splitter helpers.
+**`DialogHistoryWidget`** (line 21) — namespaced by `dialog_name` so each dialog keeps its own history file and QSettings. Signals: `itemSelected(dict)`, `itemDoubleClicked(dict)`. Uses `common.dialog_conventions` splitter helpers.
 
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 25 | constructor | None | No | Sets the dialog namespace, QSettings, and empty history |
-| init_ui | 33 | public | None | No | Table + preview pane in a standard persisted splitter |
-| add_entry | 115 | public | None | No | Appends an input/response pair with provider, model, metadata |
-| refresh_table | 133 | public | None | No | Rebuilds table rows from the history list |
-| _on_selection_changed | 186 | private | None | No | Shows the selected entry in the preview and emits `itemSelected` |
-| _on_item_double_clicked | 205 | private | None | No | Emits `itemDoubleClicked` for reuse of a past entry |
-| clear_history | 212 | public | None | No | Confirms, then empties history and file |
-| save_history | 230 | public | None | No | Writes the history JSON to disk |
-| load_history | 251 | public | None | No | Reads the history JSON back |
-| export_history | 270 | public | None | No | Saves history to a user-chosen file |
-| get_latest_entry | 289 | public | Optional[dict] | No | Most recent entry |
-| get_history | 293 | public | list | No | Full history list |
+| __init__ | 27 | constructor | None | No | Sets the dialog namespace, QSettings, and empty history |
+| init_ui | 35 | public | None | No | Table + preview pane in a standard persisted splitter |
+| add_entry | 117 | public | None | No | Appends an input/response pair with provider, model, metadata |
+| refresh_table | 135 | public | None | No | Rebuilds table rows from the history list |
+| _on_selection_changed | 188 | private | None | No | Shows the selected entry in the preview and emits `itemSelected` |
+| _on_item_double_clicked | 207 | private | None | No | Emits `itemDoubleClicked` for reuse of a past entry |
+| clear_history | 214 | public | None | No | Confirms, then empties history and file |
+| save_history | 238 | public | None | No | Writes the history JSON to disk |
+| load_history | 252 | public | None | No | Reads the history JSON back |
+| export_history | 265 | public | None | No | Saves history to a user-chosen file |
+| get_latest_entry | 284 | public | Optional[dict] | No | Most recent entry |
+| get_history | 288 | public | list | No | Full history list |
 
 ---
 
@@ -7532,7 +7719,7 @@ importable in isolation and used from multiple tabs.
 
 ### workers
 
-**Path**: `gui/workers.py` - 270 lines
+**Path**: `gui/workers.py` - 271 lines
 **Purpose**: QObject worker classes moved onto QThreads for every blocking GUI operation — image generation (batch and streaming), batch-job loading, progressive history loading, and Ollama detection.
 **Language**: Python
 
@@ -7560,20 +7747,20 @@ importable in isolation and used from multiple tabs.
 | __init__ | 135 | constructor | None | No | No arguments |
 | run | 138 | public | None | No | Reads the batch-jobs JSON and emits the entries |
 
-**`HistoryLoaderWorker`** (line 155) — progressive history metadata loader. Signals: `progress(int, int)`, `batch_loaded(list)`, `finished()`, `error(str)`.
+**`HistoryLoaderWorker`** (line 156) — progressive history metadata loader. Signals: `progress(int, int)`, `batch_loaded(list)`, `finished()`, `error(str)`.
 
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 163 | constructor | None | No | Takes history paths, a start index, and a batch size (default 25) |
-| stop | 170 | public | None | No | Requests cooperative cancellation |
-| run | 174 | public | None | No | Reads sidecar metadata in batches, emitting each batch |
+| __init__ | 164 | constructor | None | No | Takes history paths, a start index, and a batch size (default 25) |
+| stop | 171 | public | None | No | Requests cooperative cancellation |
+| run | 175 | public | None | No | Reads sidecar metadata in batches, emitting each batch |
 
-**`OllamaDetectionWorker`** (line 242) — probes a local Ollama endpoint without blocking startup. Signals: `models_detected(list)`, `no_ollama()`, `finished()`, `error(str)`.
+**`OllamaDetectionWorker`** (line 243) — probes a local Ollama endpoint without blocking startup. Signals: `models_detected(list)`, `no_ollama()`, `finished()`, `error(str)`.
 
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| __init__ | 250 | constructor | None | No | Defaults the endpoint to `http://localhost:11434` |
-| run | 254 | public | None | No | Queries the endpoint and emits detected models or `no_ollama` |
+| __init__ | 251 | constructor | None | No | Defaults the endpoint to `http://localhost:11434` |
+| run | 255 | public | None | No | Queries the endpoint and emits detected models or `no_ollama` |
 
 ---
 
@@ -7739,7 +7926,7 @@ The publication **layout engine's** PySide6 front end (`gui/layout/`), the **Cus
 ---
 
 ### LayoutTab
-**Path**: `gui/layout/layout_tab.py` - 1031 lines
+**Path**: `gui/layout/layout_tab.py` - 1034 lines
 **Purpose**: The Layout tab itself — toolbar, page setup, canvas, designer panel, inspectors, and the single owner of all document mutation, history snapshots, project/template/bundle I/O, and PDF/PNG export.
 **Language**: Python
 
@@ -7775,75 +7962,75 @@ Key instance state set in `__init__` (line 40): `config`, `document: DocumentSpe
 | `_on_lock_toggled` | 326 | private | None | No | Apply, persist and re-render on lock change |
 | `_persist_locked` | 332 | private | None | No | Best-effort write of the lock flag to the layout config |
 | `_session_path` | 344 | private | Optional[Path] | No | `<config_dir>/layout/last_session.iaiproj.json` |
-| `_restore_session_or_new` | 350 | private | None | No | Reload the last session on startup; a corrupt session falls back to a new document |
-| `save_session` | 363 | public | None | No | Persist the current document as the session file |
-| `_find_region` | 381 | private | Optional[Region] | No | Look up a region on page 0 by id |
-| `_current_page` | 391 | private | Optional[PageSpec] | No | Page 0 of the current document |
-| `_region_index` | 396 | private | Optional[int] | No | Index of a region within page 0 |
-| `_apply_delete` | 405 | private | bool | No | Delete a region (clearing the shape editor first) and snapshot |
-| `_apply_knife` | 417 | private | bool | No | Split a region along a cut line via `region_ops.split_region`; reports a miss in the status bar |
-| `_apply_merge` | 433 | private | bool | No | Merge two adjacent regions via `region_ops.merge_regions`; reports non-adjacency |
-| `_on_region_delete_requested` | 453 | private | None | No | Inspector delete → `_apply_delete` |
-| `_on_region_knife_toggled` | 456 | private | None | No | Arm/disarm the knife tool on the canvas |
-| `_on_canvas_knife_line` | 469 | private | None | No | Two canvas clicks became a cut line → apply the split and disarm |
-| `_on_region_merge_toggled` | 476 | private | None | No | Arm/disarm merge mode with the given region as base |
-| `_on_canvas_merge_target` | 485 | private | None | No | Clicked region becomes the merge partner |
-| `_reset_region_tools` | 492 | private | None | No | Disarm knife/merge and uncheck inspector toggles without re-emitting |
-| `_on_region_selected` | 504 | private | None | No | Feed the content + geometry inspectors with the region and its resolved text style |
-| `_on_region_edit_shape_toggled` | 515 | private | None | No | Enter/leave manual geometry editing for a region |
-| `_on_region_content_changed` | 518 | private | None | No | Inspector content edit → `set_region_content` |
-| `_on_region_text_style_changed` | 521 | private | None | No | Apply a chosen font family/size to a text region |
-| `_on_region_bleed_toggled` | 538 | private | None | No | Toggle full-bleed on a region and snapshot |
-| `_on_region_borderless_toggled` | 547 | private | None | No | Toggle the panel stroke (uses `_DEFAULT_STROKE_PX`) and snapshot |
-| `_on_region_z_changed` | 559 | private | None | No | Change a region's z-order and snapshot |
-| `_new_overlay_id` | 574 | private | str | No | Next free `ovN` id on the page |
-| `_add_overlay` | 581 | private | bool | No | Add a speech/thought/caption/SFX overlay centered on the page (speech/thought get a tail) |
-| `_find_overlay` | 597 | private | Optional[Overlay] | No | Look up an overlay by id |
-| `_delete_overlay` | 606 | private | bool | No | Remove an overlay and snapshot |
-| `_set_overlay_rotation` | 619 | private | bool | No | Set overlay rotation in degrees |
-| `_set_overlay_curve` | 627 | private | bool | No | Turn text-on-a-curve on/off for caption/SFX overlays; materializes a default arc and centers the alignment |
-| `_set_overlay_outline` | 660 | private | bool | No | Set outline width/color on the overlay's text style; no-ops on unchanged values so undo history stays clean |
-| `_on_overlay_selected` | 688 | private | None | No | Sync the overlay inspector selection and leave edit mode |
-| `_on_overlay_edit_toggled` | 692 | private | None | No | Enter/leave overlay handle editing |
-| `set_region_content` | 695 | public | None | No | Programmatic API: set a region's `image_ref` or `text` and re-render |
-| `_on_region_prompt_changed` | 711 | private | None | No | Persist an edited image prompt on the region (metadata only, no re-render) |
-| `_on_region_prompt_suggest` | 719 | private | None | No | Inspector "Suggest with AI" → `suggest_region_prompt` |
-| `_on_region_send_to_image` | 722 | private | None | No | Persist the prompt and emit `sendToImageRequested` with the region's pixel size |
-| `_collect_fill_payloads` | 735 | private | list[dict] | No | Ordered payloads for every page-0 image region carrying a prompt |
-| `_on_fill_all_clicked` | 748 | private | None | No | Layout-complete mode: emit `fillAllRequested` for sequential filling |
-| `suggest_region_prompt` | 758 | public | None | No | Draft an image prompt from the project theme via `PromptSuggestWorker`; an injected `completion_fn` runs synchronously (tests), production wraps `designer.run_completion` |
-| `_on_prompt_suggested` | 791 | private | None | No | Store the suggestion on the region, push it into the inspector, log to the designer console |
-| `_on_prompt_failed` | 806 | private | None | No | Re-enable Suggest, force the console open, log the error |
-| `save_project_to` | 814 | public | None | No | Programmatic save via `project_io.save_project` |
-| `open_project_from` | 818 | public | None | No | Load a project, adopt it, sync page setup, refresh |
-| `export_pdf_to` | 823 | public | None | No | `qt_renderer.export_document_pdf` |
-| `export_png_to` | 827 | public | None | No | `qt_renderer.save_page_png` for page 0 with the project style |
-| `_on_design_clicked` | 836 | private | None | No | Kick off the AI designer with the prompt text and current regions |
-| `_on_layout_proposed` | 846 | private | None | No | Designer result → `apply_designer_result` |
-| `apply_designer_result` | 850 | public | None | No | Adopt proposed regions/overlays, switch the default style on a content-kind change, reposition stranded overlays on a regions-only redesign, snapshot |
-| `restore_snapshot` | 878 | public | None | No | Restore a history snapshot and branch the timeline from it |
-| `_open_history` | 886 | private | None | No | Open `HistoryWindow` wired to `restore_snapshot` |
-| `apply_style` | 891 | public | None | No | Apply a `ProjectStyle`, marking it user-modified so the designer won't overwrite it |
-| `export_template_to` | 898 | public | None | No | `template_io.export_template` |
-| `import_template_from` | 904 | public | None | No | `template_io.import_template` then adopt + refresh |
-| `_bundle_font_resolver` | 910 | private | Optional[Callable] | No | Lazily build/cache a `FontManager` resolver; failure degrades to by-name font records |
-| `_bundle_extract_dir` | 928 | private | Path | No | Where an imported `.iaibundle` is unpacked (`<config_dir>/layout/bundles/<stem>`) |
-| `export_bundle_to` | 935 | public | None | No | `bundle_io.export_bundle` (project + images + fonts); surfaces manifest warning counts |
-| `import_bundle_from` | 945 | public | None | No | Unpack a bundle, adopt the document, sync page setup |
-| `_export_bundle_dialog` | 951 | private | None | No | `.iaibundle` save dialog |
-| `_import_bundle_dialog` | 960 | private | None | No | `.iaibundle` open dialog |
-| `_report_error` | 970 | private | None | No | Repo rule: log with traceback, set the status bar, show a `QMessageBox` — and never crash while reporting |
-| `_export_template_dialog` | 980 | private | None | No | `.iailayout.json` save dialog |
-| `_import_template_dialog` | 989 | private | None | No | `.iailayout.json` open dialog |
-| `_save_dialog` | 999 | private | None | No | `.iaiproj.json` save dialog |
-| `_open_dialog` | 1007 | private | None | No | Project open dialog (`*.iaiproj.json *.layout.json`) |
-| `_export_dialog` | 1016 | private | None | No | PDF export dialog |
-| `_export_png_dialog` | 1024 | private | None | No | PNG export dialog |
+| `_restore_session_or_new` | 352 | private | None | No | Reload the last session on startup; a corrupt session falls back to a new document |
+| `save_session` | 365 | public | None | No | Persist the current document as the session file |
+| `_find_region` | 383 | private | Optional[Region] | No | Look up a region on page 0 by id |
+| `_current_page` | 393 | private | Optional[PageSpec] | No | Page 0 of the current document |
+| `_region_index` | 398 | private | Optional[int] | No | Index of a region within page 0 |
+| `_apply_delete` | 407 | private | bool | No | Delete a region (clearing the shape editor first) and snapshot |
+| `_apply_knife` | 419 | private | bool | No | Split a region along a cut line via `region_ops.split_region`; reports a miss in the status bar |
+| `_apply_merge` | 435 | private | bool | No | Merge two adjacent regions via `region_ops.merge_regions`; reports non-adjacency |
+| `_on_region_delete_requested` | 455 | private | None | No | Inspector delete → `_apply_delete` |
+| `_on_region_knife_toggled` | 458 | private | None | No | Arm/disarm the knife tool on the canvas |
+| `_on_canvas_knife_line` | 471 | private | None | No | Two canvas clicks became a cut line → apply the split and disarm |
+| `_on_region_merge_toggled` | 478 | private | None | No | Arm/disarm merge mode with the given region as base |
+| `_on_canvas_merge_target` | 487 | private | None | No | Clicked region becomes the merge partner |
+| `_reset_region_tools` | 494 | private | None | No | Disarm knife/merge and uncheck inspector toggles without re-emitting |
+| `_on_region_selected` | 506 | private | None | No | Feed the content + geometry inspectors with the region and its resolved text style |
+| `_on_region_edit_shape_toggled` | 517 | private | None | No | Enter/leave manual geometry editing for a region |
+| `_on_region_content_changed` | 520 | private | None | No | Inspector content edit → `set_region_content` |
+| `_on_region_text_style_changed` | 523 | private | None | No | Apply a chosen font family/size to a text region |
+| `_on_region_bleed_toggled` | 540 | private | None | No | Toggle full-bleed on a region and snapshot |
+| `_on_region_borderless_toggled` | 549 | private | None | No | Toggle the panel stroke (uses `_DEFAULT_STROKE_PX`) and snapshot |
+| `_on_region_z_changed` | 561 | private | None | No | Change a region's z-order and snapshot |
+| `_new_overlay_id` | 576 | private | str | No | Next free `ovN` id on the page |
+| `_add_overlay` | 583 | private | bool | No | Add a speech/thought/caption/SFX overlay centered on the page (speech/thought get a tail) |
+| `_find_overlay` | 599 | private | Optional[Overlay] | No | Look up an overlay by id |
+| `_delete_overlay` | 608 | private | bool | No | Remove an overlay and snapshot |
+| `_set_overlay_rotation` | 621 | private | bool | No | Set overlay rotation in degrees |
+| `_set_overlay_curve` | 629 | private | bool | No | Turn text-on-a-curve on/off for caption/SFX overlays; materializes a default arc and centers the alignment |
+| `_set_overlay_outline` | 662 | private | bool | No | Set outline width/color on the overlay's text style; no-ops on unchanged values so undo history stays clean |
+| `_on_overlay_selected` | 690 | private | None | No | Sync the overlay inspector selection and leave edit mode |
+| `_on_overlay_edit_toggled` | 694 | private | None | No | Enter/leave overlay handle editing |
+| `set_region_content` | 697 | public | None | No | Programmatic API: set a region's `image_ref` or `text` and re-render |
+| `_on_region_prompt_changed` | 713 | private | None | No | Persist an edited image prompt on the region (metadata only, no re-render) |
+| `_on_region_prompt_suggest` | 721 | private | None | No | Inspector "Suggest with AI" → `suggest_region_prompt` |
+| `_on_region_send_to_image` | 724 | private | None | No | Persist the prompt and emit `sendToImageRequested` with the region's pixel size |
+| `_collect_fill_payloads` | 737 | private | list[dict] | No | Ordered payloads for every page-0 image region carrying a prompt |
+| `_on_fill_all_clicked` | 750 | private | None | No | Layout-complete mode: emit `fillAllRequested` for sequential filling |
+| `suggest_region_prompt` | 760 | public | None | No | Draft an image prompt from the project theme via `PromptSuggestWorker`; an injected `completion_fn` runs synchronously (tests), production wraps `designer.run_completion` |
+| `_on_prompt_suggested` | 793 | private | None | No | Store the suggestion on the region, push it into the inspector, log to the designer console |
+| `_on_prompt_failed` | 808 | private | None | No | Re-enable Suggest, force the console open, log the error |
+| `save_project_to` | 816 | public | None | No | Programmatic save via `project_io.save_project` |
+| `open_project_from` | 820 | public | None | No | Load a project, adopt it, sync page setup, refresh |
+| `export_pdf_to` | 825 | public | None | No | `qt_renderer.export_document_pdf` |
+| `export_png_to` | 829 | public | None | No | `qt_renderer.save_page_png` for page 0 with the project style |
+| `_on_design_clicked` | 838 | private | None | No | Kick off the AI designer with the prompt text and current regions |
+| `_on_layout_proposed` | 848 | private | None | No | Designer result → `apply_designer_result` |
+| `apply_designer_result` | 852 | public | None | No | Adopt proposed regions/overlays, switch the default style on a content-kind change, reposition stranded overlays on a regions-only redesign, snapshot |
+| `restore_snapshot` | 880 | public | None | No | Restore a history snapshot and branch the timeline from it |
+| `_open_history` | 888 | private | None | No | Open `HistoryWindow` wired to `restore_snapshot` |
+| `apply_style` | 893 | public | None | No | Apply a `ProjectStyle`, marking it user-modified so the designer won't overwrite it |
+| `export_template_to` | 900 | public | None | No | `template_io.export_template` |
+| `import_template_from` | 906 | public | None | No | `template_io.import_template` then adopt + refresh |
+| `_bundle_font_resolver` | 912 | private | Optional[Callable] | No | Lazily build/cache a `FontManager` resolver; failure degrades to by-name font records |
+| `_bundle_extract_dir` | 930 | private | Path | No | Where an imported `.iaibundle` is unpacked (`<config_dir>/layout/bundles/<stem>`) |
+| `export_bundle_to` | 938 | public | None | No | `bundle_io.export_bundle` (project + images + fonts); surfaces manifest warning counts |
+| `import_bundle_from` | 948 | public | None | No | Unpack a bundle, adopt the document, sync page setup |
+| `_export_bundle_dialog` | 954 | private | None | No | `.iaibundle` save dialog |
+| `_import_bundle_dialog` | 963 | private | None | No | `.iaibundle` open dialog |
+| `_report_error` | 973 | private | None | No | Repo rule: log with traceback, set the status bar, show a `QMessageBox` — and never crash while reporting |
+| `_export_template_dialog` | 983 | private | None | No | `.iailayout.json` save dialog |
+| `_import_template_dialog` | 992 | private | None | No | `.iailayout.json` open dialog |
+| `_save_dialog` | 1002 | private | None | No | `.iaiproj.json` save dialog |
+| `_open_dialog` | 1010 | private | None | No | Project open dialog (`*.iaiproj.json *.layout.json`) |
+| `_export_dialog` | 1019 | private | None | No | PDF export dialog |
+| `_export_png_dialog` | 1027 | private | None | No | PNG export dialog |
 
 ---
 
 ### Text Generation Dialog
-**Path**: `gui/layout/text_gen_dialog.py` - 669 lines
+**Path**: `gui/layout/text_gen_dialog.py` - 676 lines
 **Purpose**: LLM-driven text generation for a layout text block, with per-template-category prompt builders and a status console.
 **Language**: Python
 
@@ -7855,13 +8042,13 @@ Off-thread LLM call. Signals: `finished(str)`, `error(str)`, `progress(str)`.
 ###### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| `__init__` | 36 | constructor | None | No | Capture config, block context, custom prompt, temperature, provider, model |
-| `run` | 48 | public | None | No | Set up LiteLLM, resolve provider/auth mode/API key (Google `api-key` vs `gcloud`), call the model, emit the text |
-| `_build_prompt` | 172 | private | str | No | Dispatch to the category-specific prompt builder (or the custom prompt) |
-| `_build_children_book_prompt` | 208 | private | str | No | Children's-book page prose prompt |
-| `_build_comic_prompt` | 254 | private | str | No | Comic panel/dialogue prompt |
-| `_build_magazine_prompt` | 308 | private | str | No | Magazine article/pull-quote prompt |
-| `_build_generic_prompt` | 364 | private | str | No | Fallback prompt for uncategorized templates |
+| `__init__` | 37 | constructor | None | No | Capture config, block context, custom prompt, temperature, provider, model |
+| `run` | 49 | public | None | No | Set up LiteLLM, resolve provider/auth mode/API key (Google `api-key` vs `gcloud`), call the model, emit the text |
+| `_build_prompt` | 179 | private | str | No | Dispatch to the category-specific prompt builder (or the custom prompt) |
+| `_build_children_book_prompt` | 215 | private | str | No | Children's-book page prose prompt |
+| `_build_comic_prompt` | 261 | private | str | No | Comic panel/dialogue prompt |
+| `_build_magazine_prompt` | 315 | private | str | No | Magazine article/pull-quote prompt |
+| `_build_generic_prompt` | 371 | private | str | No | Fallback prompt for uncategorized templates |
 
 ##### `TextGenerationDialog` (DialogCleanupMixin, QDialog) — line 383
 Dialog wrapper: settings row, custom-prompt toggle, generated-text editor, and a `DialogStatusConsole` below a persisted splitter.
@@ -7869,19 +8056,19 @@ Dialog wrapper: settings row, custom-prompt toggle, generated-text editor, and a
 ###### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| `__init__` | 386 | constructor | None | No | Capture block/document/template context, provider/model, build UI, load settings |
-| `init_ui` | 420 | public | None | No | Splitter layout, editor, console, primary action + default button binding |
-| `_create_top_section` | 467 | private | QWidget | No | Provider/model/temperature controls and the custom-prompt box |
-| `_on_custom_prompt_toggled` | 539 | private | None | No | Enable/disable the custom-prompt editor |
-| `load_settings` | 543 | public | None | No | Restore QSettings (geometry, splitter, provider/model) |
-| `save_settings` | 550 | public | None | No | Persist those settings |
-| `generate` | 556 | public | None | No | Primary action: start the worker, disabling re-entry |
-| `_on_progress` | 607 | private | None | No | Log worker progress to the console |
-| `_on_finished` | 611 | private | None | No | Put generated text in the editor and log it |
-| `_on_error` | 625 | private | None | No | Surface and log a generation failure |
-| `get_generated_text` | 630 | public | str | No | The accepted text, for the caller to apply |
-| `showEvent` | 636 | public | None | No | Reset cleanup state / restore geometry on show |
-| `on_dialog_close` | 644 | public | None | No | `DialogCleanupMixin` hook: stop the worker and save settings on every exit path |
+| `__init__` | 393 | constructor | None | No | Capture block/document/template context, provider/model, build UI, load settings |
+| `init_ui` | 427 | public | None | No | Splitter layout, editor, console, primary action + default button binding |
+| `_create_top_section` | 474 | private | QWidget | No | Provider/model/temperature controls and the custom-prompt box |
+| `_on_custom_prompt_toggled` | 546 | private | None | No | Enable/disable the custom-prompt editor |
+| `load_settings` | 550 | public | None | No | Restore QSettings (geometry, splitter, provider/model) |
+| `save_settings` | 557 | public | None | No | Persist those settings |
+| `generate` | 563 | public | None | No | Primary action: start the worker, disabling re-entry |
+| `_on_progress` | 614 | private | None | No | Log worker progress to the console |
+| `_on_finished` | 618 | private | None | No | Put generated text in the editor and log it |
+| `_on_error` | 632 | private | None | No | Surface and log a generation failure |
+| `get_generated_text` | 637 | public | str | No | The accepted text, for the caller to apply |
+| `showEvent` | 643 | public | None | No | Reset cleanup state / restore geometry on show |
+| `on_dialog_close` | 651 | public | None | No | `DialogCleanupMixin` hook: stop the worker and save settings on every exit path |
 
 ---
 
@@ -8992,7 +9179,7 @@ The `gui/video/` package holds the PySide6 front end for the lyric/MIDI-synced v
 ---
 
 ### VideoProjectTab
-**Path**: `gui/video/video_project_tab.py` - 2167 lines
+**Path**: `gui/video/video_project_tab.py` - 2169 lines
 **Purpose**: Top-level "Video" tab. Hosts the Workspace / History / References sub-tabs, owns the `VideoGenerationThread` that runs every long-running operation (storyboard, prompt enhancement, image generation, Veo/Omni clip generation, FFmpeg render), and marshals results back onto the GUI thread.
 **Language**: Python
 
@@ -9025,7 +9212,7 @@ The `gui/video/` package holds the PySide6 front end for the lyric/MIDI-synced v
 | `_render_with_ffmpeg` | 1482 | private | None | No | Slideshow render through `FFmpegRenderer` with `RenderSettings` (1920x1080, 24 fps, Ken Burns, transitions); output goes to `<project_dir>/<name>_<timestamp>.mp4` |
 | `progress_callback` | 1506 | nested | None | No | Local closure inside `_render_with_ffmpeg` that forwards renderer percent/status to `progress_update` |
 | `_render_with_veo` | 1523 | private | None | No | Concatenates Veo-generated clips with correct trimming via `FFmpegRenderer` |
-| `progress_callback` | 1545 | nested | None | No | Same forwarding closure for the Veo render path |
+| `progress_callback` | 1506 | nested | None | No | Same forwarding closure for the Veo render path |
 | `_preview_video` | 1562 | private | None | No | Preview render — delegates to `_render_video()` |
 | `cancel` | 1567 | public | None | No | Sets the `cancelled` flag polled by the long-running loops |
 
@@ -9054,14 +9241,14 @@ The `gui/video/` package holds the PySide6 front end for the lyric/MIDI-synced v
 | `on_project_changed` | 1779 | public | None | No | Adopts the workspace's project and re-points the history tab and reference library at it |
 | `on_generation_requested` | 1789 | public | None | No | Entry point for all generation: validates that a project exists (auto-creating one for `generate_storyboard`), constructs and starts a `VideoGenerationThread`, and shows the progress bar |
 | `on_restore_requested` | 1820 | public | None | No | Rebuilds project state from `EventStore` up to a timestamp, reloads the workspace UI, and switches to the Workspace tab |
-| `@Slot on_progress_update` | 1855 | slot | None | No | Updates the workspace progress bar / status label and mirrors the message into the status console |
-| `@Slot on_scene_complete` | 1863 | slot | None | No | Per-scene completion: reads the image sidecar via `read_image_sidecar()` and adds the result to history without hijacking the lower preview panel |
-| `@Slot on_generation_complete` | 1979 | slot | None | No | Hides progress, tears the thread down safely (`wait()` + `deleteLater()`), saves the project, appends a `ProjectEvent` to the event store, or shows a generation error via the dialog manager |
-| `on_references_changed` | 2046 | public | None | No | Refreshes the workspace when the reference library changes |
-| `on_lipsync_finished` | 2053 | public | None | No | Logs and reports a completed lip-sync render |
-| `on_lipsync_failed` | 2062 | public | None | No | Logs and reports a lip-sync failure |
-| `send_video_to_lipsync` | 2071 | public | None | No | Loads a clip into `LipSyncWidget` and switches to the Lip-Sync tab if it is visible |
-| `generate_reference_image_sync` | 2086 | public | Optional[Path] | No | Blocking single-image generation for the reference wizard; forces 1:1 aspect, uses `gemini-2.5-flash-image`, optionally passes a PIL reference image |
+| `@Slot on_progress_update` | 1856 | slot | None | No | Updates the workspace progress bar / status label and mirrors the message into the status console |
+| `@Slot on_scene_complete` | 1864 | slot | None | No | Per-scene completion: reads the image sidecar via `read_image_sidecar()` and adds the result to history without hijacking the lower preview panel |
+| `@Slot on_generation_complete` | 1980 | slot | None | No | Hides progress, tears the thread down safely (`wait()` + `deleteLater()`), saves the project, appends a `ProjectEvent` to the event store, or shows a generation error via the dialog manager |
+| `on_references_changed` | 2048 | public | None | No | Refreshes the workspace when the reference library changes |
+| `on_lipsync_finished` | 2055 | public | None | No | Logs and reports a completed lip-sync render |
+| `on_lipsync_failed` | 2064 | public | None | No | Logs and reports a lip-sync failure |
+| `send_video_to_lipsync` | 2073 | public | None | No | Loads a clip into `LipSyncWidget` and switches to the Lip-Sync tab if it is visible |
+| `generate_reference_image_sync` | 2088 | public | Optional[Path] | No | Blocking single-image generation for the reference wizard; forces 1:1 aspect, uses `gemini-2.5-flash-image`, optionally passes a PIL reference image |
 
 ---
 
@@ -9128,7 +9315,7 @@ Enable toggle, preset combo (from `KenBurnsPresets`), start/end x/y/scale spin b
 ---
 
 ### Start Prompt Dialog
-**Path**: `gui/video/start_prompt_dialog.py` - 461 lines
+**Path**: `gui/video/start_prompt_dialog.py` - 467 lines
 **Purpose**: LLM-assisted generation of a scene's start-frame image prompt, with optional visual continuity from the previous frame (style-only or transition mode). Runs the LLM on a worker thread and mirrors all traffic into a status console.
 **Language**: Python
 
@@ -9137,7 +9324,7 @@ Enable toggle, preset combo (from `KenBurnsPresets`), start/end x/y/scale spin b
 |---------|-------------|
 | Imports | 1 |
 | `StartPromptGenerationThread` | 30 |
-| `StartPromptDialog` | 190 |
+| `StartPromptDialog` | 196 |
 
 #### Class: StartPromptGenerationThread (line 30)
 `QThread` that (optionally) analyzes the previous frame with `StyleAnalyzer`, then calls LiteLLM. Signals: `generation_complete(str)`, `generation_failed(str)`, `progress_update(str)`.
@@ -9155,17 +9342,17 @@ Enable toggle, preset combo (from `KenBurnsPresets`), start/end x/y/scale spin b
 ##### Methods
 | Method | Line | Type | Returns | Async | Description |
 |--------|------|------|---------|-------|-------------|
-| `__init__` | 199 | constructor | None | No | Stores generation params, sets the window title/min size, builds UI, restores geometry, and immediately calls `generate_prompt()` |
-| `init_ui` | 235 | public | None | No | Vertical splitter of context pane (source text, continuity banner, current prompt) / editable generated prompt + indeterminate progress bar / `DialogStatusConsole`; Regenerate button, OK/Cancel box, Ctrl+Enter primary action |
-| `generate_prompt` | 341 | public | None | No | Disables OK/Regenerate, logs parameters to both the file logger and the status console, then starts a `StartPromptGenerationThread` |
-| `_on_progress_update` | 382 | private | None | No | Mirrors thread progress messages to the log and status console |
-| `_get_mode_display_name` | 387 | private | str | No | Maps `ContinuityMode` to "None" / "Style Only" / "Transition" |
-| `_on_generation_complete` | 396 | private | None | No | Fills the editor, re-enables buttons, logs the response as SUCCESS |
-| `_on_generation_failed` | 409 | private | None | No | Re-enables buttons, logs the error, and leaves an editable failure message in the prompt box |
-| `get_prompt` | 424 | public | str | No | Returns the (possibly hand-edited) prompt text |
-| `restore_window_geometry` | 428 | public | None | No | Restores saved geometry from `QSettings` |
-| `showEvent` | 434 | public | None | No | Sets Discord presence to `CHATTING_WITH_AI` / "Start Frame Prompt" |
-| `on_dialog_close` | 442 | public | None | No | Every exit path: resets Discord presence, persists geometry + splitter, disconnects and stops the generation thread with a 2 s wait |
+| `__init__` | 205 | constructor | None | No | Stores generation params, sets the window title/min size, builds UI, restores geometry, and immediately calls `generate_prompt()` |
+| `init_ui` | 241 | public | None | No | Vertical splitter of context pane (source text, continuity banner, current prompt) / editable generated prompt + indeterminate progress bar / `DialogStatusConsole`; Regenerate button, OK/Cancel box, Ctrl+Enter primary action |
+| `generate_prompt` | 347 | public | None | No | Disables OK/Regenerate, logs parameters to both the file logger and the status console, then starts a `StartPromptGenerationThread` |
+| `_on_progress_update` | 388 | private | None | No | Mirrors thread progress messages to the log and status console |
+| `_get_mode_display_name` | 393 | private | str | No | Maps `ContinuityMode` to "None" / "Style Only" / "Transition" |
+| `_on_generation_complete` | 402 | private | None | No | Fills the editor, re-enables buttons, logs the response as SUCCESS |
+| `_on_generation_failed` | 415 | private | None | No | Re-enables buttons, logs the error, and leaves an editable failure message in the prompt box |
+| `get_prompt` | 430 | public | str | No | Returns the (possibly hand-edited) prompt text |
+| `restore_window_geometry` | 434 | public | None | No | Restores saved geometry from `QSettings` |
+| `showEvent` | 440 | public | None | No | Sets Discord presence to `CHATTING_WITH_AI` / "Start Frame Prompt" |
+| `on_dialog_close` | 448 | public | None | No | Every exit path: resets Discord presence, persists geometry + splitter, disconnects and stops the generation thread with a 2 s wait |
 
 ---
 
@@ -9589,7 +9776,7 @@ Supporting PySide6 widgets and dialogs for the Video Project tab: character-refe
 ---
 
 ### HistoryTab
-**Path**: `gui/video/history_tab.py` - 550 lines
+**Path**: `gui/video/history_tab.py` - 551 lines
 **Purpose**: Visual timeline over the project event store (`~/.imageai/video_projects/events.db`) — browse events, inspect details, create restore points, restore, export, and prune.
 **Language**: Python
 
@@ -9605,20 +9792,20 @@ Supporting PySide6 widgets and dialogs for the Video Project tab: character-refe
 | `create_details_panel` | 130 | public | QWidget | No | Event info label plus the detail text view |
 | `create_controls` | 167 | public | QWidget | No | Restore-point / restore / export / cleanup buttons and statistics labels |
 | `init_event_store` | 192 | public | None | No | Opens `EventStore` at the user DB path; loads history when a project id is set |
-| `set_project` | 203 | public | None | No | Switches project and reloads history |
-| `load_history` | 213 | public | None | No | Fetches events for the project, applies the filter, updates statistics |
-| `apply_filter` | 232 | public | None | No | Maps the combo selection to event types and rebuilds the tree |
-| `on_event_selected` | 297 | public | None | No | Shows details, enables restore buttons, emits `event_selected` |
-| `show_event_details` | 319 | public | None | No | Renders id/timestamp and the event payload into the details panel |
-| `create_restore_point` | 361 | public | None | No | Prompts for name + description and writes a restore point to the store |
-| `restore_to_point` | 404 | public | None | No | Confirms and requests restore to the selected event's timestamp |
-| `toggle_details` | 427 | public | None | No | Detail-level toggle (placeholder) |
-| `update_statistics` | 432 | public | None | No | Updates event count and approximate storage labels |
-| `export_history` | 447 | public | None | No | Saves the event list as JSON via a file dialog |
-| `clear_old_events` | 483 | public | None | No | Drops events older than 30 days, preserving `PROJECT_RESTORED` entries |
-| `_get_event_display_name` | 514 | private | str | No | Title-cases an `EventType` value |
-| `_get_event_summary` | 518 | private | str | No | Per-type one-line summary (scene added, images generated, duration, …) |
-| `_get_event_color` | 537 | private | Optional[QColor] | No | Per-type row color for the timeline |
+| `set_project` | 204 | public | None | No | Switches project and reloads history |
+| `load_history` | 214 | public | None | No | Fetches events for the project, applies the filter, updates statistics |
+| `apply_filter` | 233 | public | None | No | Maps the combo selection to event types and rebuilds the tree |
+| `on_event_selected` | 298 | public | None | No | Shows details, enables restore buttons, emits `event_selected` |
+| `show_event_details` | 320 | public | None | No | Renders id/timestamp and the event payload into the details panel |
+| `create_restore_point` | 362 | public | None | No | Prompts for name + description and writes a restore point to the store |
+| `restore_to_point` | 405 | public | None | No | Confirms and requests restore to the selected event's timestamp |
+| `toggle_details` | 428 | public | None | No | Detail-level toggle (placeholder) |
+| `update_statistics` | 433 | public | None | No | Updates event count and approximate storage labels |
+| `export_history` | 448 | public | None | No | Saves the event list as JSON via a file dialog |
+| `clear_old_events` | 484 | public | None | No | Drops events older than 30 days, preserving `PROJECT_RESTORED` entries |
+| `_get_event_display_name` | 515 | private | str | No | Title-cases an `EventType` value |
+| `_get_event_summary` | 519 | private | str | No | Per-type one-line summary (scene added, images generated, duration, …) |
+| `_get_event_color` | 538 | private | Optional[QColor] | No | Per-type row color for the timeline |
 
 ---
 

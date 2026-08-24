@@ -273,10 +273,118 @@ class MainWindow(QMainWindow):
         # Start background Ollama model detection
         self._start_background_ollama_detection()
 
+        # A config.json this session could not read is otherwise invisible:
+        # startup quarantined it, the API keys and the storage locations went
+        # with it, and nothing on screen says so.
+        self._check_config_health()
+        self._start_config_health_timer()
+
         print("Application ready!")
         self.status_bar.showMessage("Ready")
         QApplication.processEvents()
-    
+
+    # -- config.json health -------------------------------------------------
+
+    def save_config(self) -> bool:
+        """Save config.json, and tell the user when the write failed.
+
+        ``ConfigManager.save()`` reports a failed write through its return
+        value and through ``last_save_error``. A caller that reads neither
+        loses every setting change of the session without a sign, so every
+        save in this window goes through this method.
+
+        Returns:
+            True when config.json now holds this session's settings.
+        """
+        config = getattr(self, "config", None)
+        if config is None:
+            logger.error("There is no configuration to save.")
+            return False
+
+        try:
+            saved = config.save()
+        except Exception as exc:  # noqa: BLE001 - a Qt slot must not abort
+            logger.exception("Could not save config.json")
+            self._report_config_problem(
+                "Settings were not saved",
+                f"ImageAI could not save your settings:\n\n{exc}\n\n"
+                f"Every change you make now is lost when ImageAI closes. The "
+                f"log file holds the details.",
+                key=f"save-raised:{exc}",
+            )
+            return False
+
+        self._check_config_health()
+        # A ConfigManager older than the bool return reports success as None.
+        return saved is not False
+
+    def _start_config_health_timer(self) -> None:
+        """Poll for a failed save that another module started.
+
+        Dialogs and tabs outside this window save the same ConfigManager, and
+        this window cannot wrap their calls. ``last_save_error`` stays set
+        after a failed write, so a slow poll turns a silent loss into a
+        message. Each distinct problem is reported once, so the poll costs one
+        attribute read.
+        """
+        try:
+            self._config_health_timer = QTimer(self)
+            self._config_health_timer.setInterval(20000)
+            self._config_health_timer.timeout.connect(self._check_config_health)
+            self._config_health_timer.start()
+        except Exception:  # noqa: BLE001 - the app must still start
+            logger.exception("Could not start the configuration health timer")
+
+    def _check_config_health(self) -> None:
+        """Report a config.json this session could not read or could not write.
+
+        Both failures are silent otherwise. A quarantined config.json takes
+        the API keys and the recorded storage locations with it, and a failed
+        save drops every setting change of the session.
+        """
+        config = getattr(self, "config", None)
+        if config is None:
+            return
+
+        load_error = getattr(config, "load_error", None)
+        if load_error:
+            preserved = getattr(config, "preserved_config_path", None)
+            where = f"A copy of the original is at:\n{preserved}\n\n" if preserved else ""
+            self._report_config_problem(
+                "Settings file could not be read",
+                f"ImageAI could not read config.json:\n\n{load_error}\n\n"
+                f"{where}"
+                f"That copy still holds any stored API key and the folders your "
+                f"data was moved to. ImageAI runs with default settings until "
+                f"you repair the file or restore the copy.",
+                key=f"load:{load_error}",
+            )
+
+        save_error = getattr(config, "last_save_error", None)
+        if save_error:
+            self._report_config_problem(
+                "Settings were not saved",
+                f"ImageAI could not save your settings:\n\n{save_error}\n\n"
+                f"Every change you make now is lost when ImageAI closes.",
+                key=f"save:{save_error}",
+            )
+
+    def _report_config_problem(self, title: str, message: str, key: str) -> None:
+        """Log one configuration problem and show it once per session."""
+        seen = getattr(self, "_reported_config_problems", None)
+        if seen is None:
+            seen = set()
+            self._reported_config_problems = seen
+        if key in seen:
+            return
+        seen.add(key)
+
+        logger.error("%s: %s", title, message.replace("\n", " "))
+        try:
+            parent = self if isinstance(self, QWidget) else None
+            QMessageBox.warning(parent, title, message)
+        except Exception:  # noqa: BLE001 - reporting must never break the app
+            logger.exception("Could not show the configuration warning: %s", title)
 
     def _on_show_all_images_toggled(self, checked: bool):
         """Handle toggle of show all images checkbox."""
@@ -606,24 +714,6 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.tab_help, "❓ Help")
         self.tabs.addTab(self.tab_history, "📜 History")  # Always add history tab
 
-        # Batch Jobs tab — lists OpenAI Batch API submissions from BATCH_JOBS_PATH.
-        from PySide6.QtWidgets import QTableWidget, QPushButton as _PB, QVBoxLayout as _VBL, QWidget as _W, QHBoxLayout as _HBL
-        self.tab_batch_jobs = _W()
-        _bjl = _VBL(self.tab_batch_jobs)
-        self.batch_jobs_table = QTableWidget(0, 6)
-        self.batch_jobs_table.setHorizontalHeaderLabels([
-            "Job ID", "Model", "Submitted", "Requests", "Status", "Actions",
-        ])
-        self.batch_jobs_table.horizontalHeader().setStretchLastSection(True)
-        _bjl.addWidget(self.batch_jobs_table)
-        _ctrls = _HBL()
-        self.btn_batch_refresh = _PB("Refresh")
-        self.btn_batch_refresh.clicked.connect(self._refresh_batch_jobs_subtab)
-        _ctrls.addWidget(self.btn_batch_refresh)
-        _ctrls.addStretch()
-        _bjl.addLayout(_ctrls)
-        self.tabs.addTab(self.tab_batch_jobs, "🗂️ Batch Jobs")
-
         self._init_generate_tab()
         self._init_templates_tab()
         self._init_settings_tab()
@@ -742,17 +832,6 @@ class MainWindow(QMainWindow):
         act_report_error = QAction("How to &Report Errors", self)
         act_report_error.triggered.connect(self._show_error_reporting)
         help_menu.addAction(act_report_error)
-
-        # --- Generate menu ---
-        # 'Ge&nerate' (Alt+N): '&Generate' would collide with the Generate button's Alt+G
-        gen_menu = mb.addMenu("Ge&nerate")
-        self.action_submit_batch = QAction("Submit as Batch Job…", self)
-        self.action_submit_batch.setToolTip(
-            "Send the current prompt to the OpenAI Batch API "
-            "(50% discount, async — results in up to 24h)."
-        )
-        self.action_submit_batch.triggered.connect(self._submit_current_as_batch)
-        gen_menu.addAction(self.action_submit_batch)
 
     def _init_generate_tab(self):
         """Initialize the Generate tab."""
@@ -1642,7 +1721,7 @@ class MainWindow(QMainWindow):
             self.provider_combo.setCurrentText(self.current_provider)
             # Save the fallback provider so it persists
             self.config.set("provider", self.current_provider)
-            self.config.save()
+            self.save_config()
         provider_form.addRow("Active Provider:", self.provider_combo)
         providers_layout.addLayout(provider_form)
 
@@ -1778,6 +1857,9 @@ class MainWindow(QMainWindow):
         gcloud_layout.addWidget(self.gcloud_help_widget)
         v.addWidget(gcloud_group)
 
+        # === STORAGE LOCATIONS ===
+        self._add_storage_settings(v, self.tab_settings)
+
         # === MIDJOURNEY SETTINGS ===
         midjourney_group = QGroupBox("Midjourney Settings")
         midjourney_layout = QVBoxLayout(midjourney_group)
@@ -1879,7 +1961,7 @@ class MainWindow(QMainWindow):
         # Use external browser checkbox
         self.chk_external_browser = QCheckBox("Always use external browser (no embedded view)")
         self.chk_external_browser.setChecked(self.config.get("midjourney_external_browser", False))
-        self.chk_external_browser.toggled.connect(lambda s: (self.config.set("midjourney_external_browser", bool(s)), self.config.save()))
+        self.chk_external_browser.toggled.connect(lambda s: (self.config.set("midjourney_external_browser", bool(s)), self.save_config()))
         midjourney_layout.addWidget(self.chk_external_browser)
 
         # Info text
@@ -1904,7 +1986,7 @@ class MainWindow(QMainWindow):
         # LLM logging option
         self.chk_log_llm = QCheckBox("Log LLM prompts and responses (for debugging)")
         self.chk_log_llm.setChecked(self.config.get("log_llm_interactions", False))
-        self.chk_log_llm.toggled.connect(lambda checked: (self.config.set("log_llm_interactions", checked), self.config.save()))
+        self.chk_log_llm.toggled.connect(lambda checked: (self.config.set("log_llm_interactions", checked), self.save_config()))
         options_layout.addWidget(self.chk_log_llm)
 
         # Auto-copy filename option
@@ -3747,7 +3829,7 @@ For more detailed information, please refer to the full documentation.
         """Perform the actual UI state save."""
         try:
             self._save_ui_state()
-            self.config.save()
+            self.save_config()
         except Exception as e:
             print(f"Error saving UI state: {e}")
 
@@ -3801,7 +3883,7 @@ For more detailed information, please refer to the full documentation.
             # Update the current provider
             self.current_provider = provider_name
             self.config.set("provider", provider_name)
-            self.config.save()
+            self.save_config()
 
             # Update API key for new provider
             self.current_api_key = self.config.get_api_key(provider_name)
@@ -3836,7 +3918,7 @@ For more detailed information, please refer to the full documentation.
             self.current_provider = provider_name
             # Update the config
             self.config.set("provider", provider_name)
-            self.config.save()
+            self.save_config()
 
             # Update API key for new provider
             self.current_api_key = self.config.get_api_key(provider_name)
@@ -4150,7 +4232,7 @@ For more detailed information, please refer to the full documentation.
         """Handle provider change from Settings tab."""
         self.current_provider = provider.lower()
         self.config.set("provider", self.current_provider)
-        self.config.save()
+        self.save_config()
 
         # Update reference image button states
         self._update_use_current_button_state()
@@ -4302,7 +4384,7 @@ For more detailed information, please refer to the full documentation.
         self.current_aspect_ratio = ratio
         # Save to config
         self.config.config['last_aspect_ratio'] = ratio
-        self.config.save()
+        self.save_config()
         # When aspect ratio changes, switch resolution selector to auto mode
         if hasattr(self, 'resolution_selector') and self.resolution_selector:
             self.resolution_selector.set_mode_aspect_ratio()
@@ -4327,7 +4409,7 @@ For more detailed information, please refer to the full documentation.
             if width and height:
                 self.config.config['last_resolution_width'] = width
                 self.config.config['last_resolution_height'] = height
-                self.config.save()
+                self.save_config()
         self._update_cost_estimate()
         self._update_upscaling_visibility()
         # Update the "Will insert" preview to show resolution
@@ -4460,11 +4542,12 @@ For more detailed information, please refer to the full documentation.
             return
             
         try:
-            # Get cache directory from config or use default
-            cache_dir = Path.home() / ".cache" / "huggingface"
-            
-            # Create and show model browser
-            dialog = ModelBrowserDialog(self, cache_dir)
+            # No cache directory goes in here. ModelBrowserDialog resolves its
+            # own default through get_data_paths().huggingface(), which follows
+            # the Models root. The machine-wide ~/.cache/huggingface tree is
+            # deliberately outside the Models group, so an override that names
+            # it would leave every download behind on the next Models move.
+            dialog = ModelBrowserDialog(self)
             result = dialog.exec()
             
             if result == QDialog.Accepted:
@@ -4494,7 +4577,7 @@ For more detailed information, please refer to the full documentation.
             channel = self.discord_channel_edit.text().strip()
             self.config.set("midjourney_discord_server", server)
             self.config.set("midjourney_discord_channel", channel)
-            self.config.save()
+            self.save_config()
             # No dialog; keep it quiet
         except Exception:
             pass
@@ -4502,7 +4585,7 @@ For more detailed information, please refer to the full documentation.
     def _on_midjourney_use_discord_toggled(self, checked: bool):
         """Persist Use Discord setting and update button label."""
         self.config.set("midjourney_use_discord", bool(checked))
-        self.config.save()
+        self.save_config()
         if hasattr(self, 'btn_generate'):
             self._update_generate_button_for_provider(self.current_provider)
 
@@ -4581,7 +4664,7 @@ For more detailed information, please refer to the full documentation.
         self.config.set("midjourney_external_browser", self.chk_external_browser.isChecked())
 
         # Save configuration
-        self.config.save()
+        self.save_config()
 
         # Emit signal to refresh provider combos across the app
         self.api_keys_updated.emit()
@@ -4644,13 +4727,13 @@ For more detailed information, please refer to the full documentation.
         """Toggle auto-copy filename setting."""
         self.auto_copy_filename = checked
         self.config.set("auto_copy_filename", checked)
-        self.config.save()
+        self.save_config()
 
     def _apply_appearance(self):
         """Apply theme setting immediately and persist."""
         use_theme = self.chk_maestro_theme.isChecked()
         self.config.set("ui_maestro_theme", use_theme)
-        self.config.save()
+        self.save_config()
         from PySide6.QtWidgets import QApplication
         _app = QApplication.instance()
         if _app:
@@ -4764,20 +4847,20 @@ For more detailed information, please refer to the full documentation.
             self.config.set("gcloud_auth_validated", False)
             self.config.set("gcloud_project_id", "")
 
-        self.config.save()
+        self.save_config()
 
     def _on_project_id_fetched(self, project_id: str):
         """Handle project ID fetch (runs on main thread via signal)."""
         self.project_id_edit.setText(project_id)
         self.config.set("gcloud_project_id", project_id)
-        self.config.save()
+        self.save_config()
     
     def _authenticate_gcloud(self):
         """Run gcloud auth application-default login."""
         try:
             # Clear any cached validation before authenticating
             self.config.set("gcloud_auth_validated", False)
-            self.config.save()
+            self.save_config()
             
             # Show progress dialog
             msg = QMessageBox(self)
@@ -4824,7 +4907,7 @@ For more detailed information, please refer to the full documentation.
             # User can click "Check Status" button to detect it in background thread
             self.config.set("gcloud_project_id", "")
 
-        self.config.save()
+        self.save_config()
         
         # Update status if we have a project ID
         if project_id:
@@ -4967,7 +5050,7 @@ For more detailed information, please refer to the full documentation.
         self.upscaling_settings = settings
         # Save upscaling settings to config
         self.config.config['upscaling_settings'] = settings
-        self.config.save()
+        self.save_config()
         self._update_cost_estimate()
 
     def _get_target_resolution(self) -> tuple:
@@ -5598,7 +5681,7 @@ For more detailed information, please refer to the full documentation.
 
                         # Import compositor
                         from core.reference.image_compositor import ReferenceImageCompositor
-                        from core.constants import get_user_data_dir
+                        from core.paths import get_data_paths
 
                         # Create compositor
                         compositor = ReferenceImageCompositor(canvas_size=1024)
@@ -5607,7 +5690,7 @@ For more detailed information, please refer to the full documentation.
                         image_paths = [ref.path for ref in references]
 
                         # Create output path for composite
-                        composite_dir = get_user_data_dir() / "composites"
+                        composite_dir = get_data_paths().composites()
                         composite_dir.mkdir(parents=True, exist_ok=True)
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         composite_path = composite_dir / f"composite_{timestamp}.png"
@@ -6716,91 +6799,6 @@ For more detailed information, please refer to the full documentation.
                 logger.error(f"Error saving image: {e}")
                 QMessageBox.critical(self, APP_NAME, f"Error saving image:\n{e}")
 
-    def _submit_current_as_batch(self):
-        """Spawn a small dialog confirming Batch submission, then submit."""
-        from PySide6.QtWidgets import QMessageBox
-        if self.current_provider.lower() != "openai":
-            QMessageBox.information(self, "Batch", "Batch API is only available for the OpenAI provider.")
-            return
-        prompt = self.prompt_text.toPlainText().strip() if hasattr(self, 'prompt_text') else ""
-        if not prompt:
-            QMessageBox.information(self, "Batch", "Enter a prompt first.")
-            return
-        model = self.model_combo.currentData() or self.model_combo.currentText()
-        n = int(getattr(self, 'num_images_spin', None).value()) if hasattr(self, 'num_images_spin') else 1
-        confirm = QMessageBox.question(
-            self,
-            "Submit Batch Job",
-            f"Submit 1 batch request:\n  model: {model}\n  prompt: {prompt[:120]}…\n  n: {n}\n\n"
-            "Batch jobs return within 24 hours at 50% discount. Continue?",
-            QMessageBox.Ok | QMessageBox.Cancel,
-        )
-        if confirm != QMessageBox.Ok:
-            return
-        try:
-            from providers import get_provider
-            provider_instance = get_provider("openai", {"api_key": self.config.get_api_key("openai")})
-            req_body = {"model": model, "prompt": prompt, "n": n}
-            if getattr(self, 'output_format_row', None) is not None and self.output_format_row.isVisible():
-                req_body.update(self.output_format_row.get_settings())
-            if getattr(self, 'moderation_checkbox', None) is not None and self.moderation_checkbox.isVisible():
-                req_body.update(self.moderation_checkbox.get_settings())
-            if hasattr(self, 'quality_selector') and self.quality_selector:
-                qs = self.quality_selector.get_settings()
-                if qs.get("quality") in {"low", "medium", "high", "auto"}:
-                    req_body["quality"] = qs["quality"]
-            if hasattr(self, 'resolution_selector') and self.resolution_selector:
-                cs = getattr(self.resolution_selector, "get_custom_size", lambda: None)()
-                if cs:
-                    req_body["size"] = cs
-            job_id = provider_instance.submit_batch_job([req_body])
-            QMessageBox.information(self, "Batch", f"Submitted job:\n{job_id}\n\nView under the Batch Jobs tab.")
-            if hasattr(self, '_refresh_batch_jobs_subtab'):
-                self._refresh_batch_jobs_subtab()
-        except Exception as e:
-            QMessageBox.warning(self, "Batch", f"Submission failed:\n{e}")
-
-    def _refresh_batch_jobs_subtab(self):
-        """Populate the Batch Jobs table from BATCH_JOBS_PATH."""
-        from PySide6.QtWidgets import QTableWidgetItem, QPushButton
-        from core.constants import BATCH_JOBS_PATH
-        import json
-
-        entries = []
-        if BATCH_JOBS_PATH.exists():
-            try:
-                entries = json.loads(BATCH_JOBS_PATH.read_text(encoding="utf-8"))
-                if not isinstance(entries, list):
-                    entries = []
-            except (OSError, IOError, ValueError):
-                entries = []
-
-        self.batch_jobs_table.setRowCount(len(entries))
-        for row, entry in enumerate(entries):
-            self.batch_jobs_table.setItem(row, 0, QTableWidgetItem(entry.get("job_id", "")))
-            self.batch_jobs_table.setItem(row, 1, QTableWidgetItem(entry.get("model", "")))
-            self.batch_jobs_table.setItem(row, 2, QTableWidgetItem(entry.get("created_at", "")))
-            self.batch_jobs_table.setItem(row, 3, QTableWidgetItem(str(entry.get("request_count", ""))))
-            self.batch_jobs_table.setItem(row, 4, QTableWidgetItem(entry.get("status", "submitted")))
-
-            btn = QPushButton("Check / Download")
-            jid = entry.get("job_id", "")
-            btn.clicked.connect(lambda _checked=False, j=jid: self._check_batch_job_action(j))
-            self.batch_jobs_table.setCellWidget(row, 5, btn)
-
-    def _check_batch_job_action(self, job_id: str):
-        from PySide6.QtWidgets import QMessageBox
-        from providers import get_provider
-        try:
-            provider_instance = get_provider("openai", {"api_key": self.config.get_api_key("openai")})
-            images_dir = self.config.get_images_dir()
-            info = provider_instance.check_batch_job(job_id, output_dir=images_dir)
-            msg = f"Job: {info['job_id']}\nStatus: {info['status']}\nDownloaded: {len(info.get('downloaded', []))} file(s)"
-            QMessageBox.information(self, "Batch Job", msg)
-            self._refresh_batch_jobs_subtab()
-        except Exception as e:
-            QMessageBox.warning(self, "Batch Job", f"Check failed:\n{e}")
-
     def _copy_image_to_clipboard(self):
         """Copy current image to clipboard."""
         if not self.current_image_data:
@@ -6980,11 +6978,12 @@ For more detailed information, please refer to the full documentation.
     def _set_app_icon(self):
         """Set the application window icon."""
         from PySide6.QtGui import QIcon
+        from core.paths import get_data_paths
 
         # Try multiple locations for the icon
         icon_paths = [
             Path(__file__).parent.parent / "assets" / "icon.png",  # Project assets
-            self.config.config_dir / "generated" / "ImageAI Logo 01.png",  # Generated
+            get_data_paths().generated() / "ImageAI Logo 01.png",  # Generated
         ]
 
         for icon_path in icon_paths:
@@ -7049,7 +7048,7 @@ For more detailed information, please refer to the full documentation.
         config = self.config.get_discord_config()
         config["enabled"] = enabled
         self.config.set_discord_config(config)
-        self.config.save()
+        self.save_config()
 
         # Enable/disable the RPC manager
         discord_rpc.set_enabled(enabled)
@@ -7085,7 +7084,7 @@ For more detailed information, please refer to the full documentation.
 
         # Save to config
         self.config.set_discord_config(config)
-        self.config.save()
+        self.save_config()
 
         # Update RPC manager configuration
         discord_rpc.configure(
@@ -7587,6 +7586,212 @@ For more detailed information, please refer to the full documentation.
                     # Silently ignore resize errors during rapid resizing
                     pass
     
+    def _add_storage_settings(self, layout, parent):
+        """Build the Storage Locations widget and add it to the Settings tab.
+
+        The widget lets the user relocate each data group. A test can call this
+        method with its own layout and parent, which no full window build
+        allows.
+
+        Args:
+            layout: the Settings-tab layout that receives the widget.
+            parent: the widget that owns the new widget.
+
+        Returns:
+            The StorageSettingsWidget this method created.
+        """
+        from gui.storage_settings_widget import StorageSettingsWidget
+
+        self.storage_settings = StorageSettingsWidget(parent)
+        layout.addWidget(self.storage_settings)
+        return self.storage_settings
+
+    def close_data_handles(self, group):
+        """Release the files this process holds under one storage group.
+
+        The Storage Locations widget calls this before it moves a group.
+        Windows refuses to rename or delete a file that a process still holds
+        open, so every handle this process can release must close first. A
+        handle this process cannot release is logged at warning level. A
+        silent hook hides the cause of a failed move.
+
+        Every release here must be reversible. ``restore_data_handles`` undoes
+        them when the move does not end in a restart.
+
+        Args:
+            group: the core.paths.Group being moved.
+        """
+        import gc
+        import sys
+
+        from core.paths import Group
+
+        log = getattr(self, "logger", None) or logger
+        try:
+            group = group if isinstance(group, Group) else Group(group)
+        except ValueError:
+            log.error("Unknown storage group %r; no handles were released", group)
+            return
+
+        log.info("Releasing open %s files before the move", group.value)
+
+        # Buffered records must reach disk before the copy reads the files.
+        for handler in list(logging.getLogger().handlers):
+            try:
+                handler.flush()
+            except Exception as exc:
+                log.warning("Could not flush the %s log handler: %s",
+                            type(handler).__name__, exc)
+
+        if group is Group.IMAGES:
+            watcher = getattr(self, "midjourney_watcher", None)
+            if watcher is not None and getattr(watcher, "enabled", False):
+                try:
+                    watcher.set_enabled(False)
+                    self._midjourney_watch_paused = True
+                    log.info("Paused the Midjourney watcher for the move")
+                except Exception as exc:
+                    log.warning("Could not pause the Midjourney watcher: %s", exc)
+
+        elif group is Group.VIDEO:
+            workspace = None
+            if getattr(self, "_video_tab_loaded", False):
+                video_tab = getattr(self, "tab_video", None)
+                workspace = getattr(video_tab, "workspace", None)
+            if workspace is not None and getattr(workspace, "current_project", None):
+                try:
+                    workspace.save_project()
+                    log.info("Saved the open video project before the move")
+                except Exception as exc:
+                    log.warning("Could not save the open video project: %s", exc)
+
+            # EventStore opens a SQLite connection per call and closes it by
+            # reference count. Drop the cached stores, then collect, so no
+            # connection holds events.db open while the file moves.
+            video_tab = getattr(self, "tab_video", None)
+            owners = [video_tab, getattr(video_tab, "history_tab", None), workspace]
+            for owner in owners:
+                if owner is None or getattr(owner, "event_store", None) is None:
+                    continue
+                try:
+                    owner.event_store = None
+                    log.info("Dropped the cached event store on %s",
+                             type(owner).__name__)
+                except Exception as exc:
+                    log.warning("Could not drop the event store on %s: %s",
+                                type(owner).__name__, exc)
+            gc.collect()
+
+        elif group is Group.MODELS:
+            try:
+                from providers import clear_provider_cache
+
+                clear_provider_cache()
+                log.info("Cleared the provider cache to release model weights")
+            except Exception as exc:
+                log.warning("Could not clear the provider cache: %s", exc)
+            gc.collect()
+            torch = sys.modules.get("torch")
+            if torch is not None:
+                try:
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception as exc:
+                    log.warning("Could not empty the CUDA cache: %s", exc)
+                log.warning(
+                    "PyTorch is loaded. Weight files it still maps stay open "
+                    "until ImageAI restarts, so the move may leave copies of "
+                    "them behind."
+                )
+
+        elif group is Group.SETTINGS:
+            # The active log file cannot close here. This process writes to it
+            # for the rest of the session, and every error must reach it.
+            log.warning(
+                "The active log file stays open during the move. It remains "
+                "in the old location until ImageAI restarts."
+            )
+
+    def restore_data_handles(self, group):
+        """Take back the handles ``close_data_handles`` released.
+
+        ``close_data_handles`` runs before every move. Three paths then leave
+        this process running: the move fails, the user cancels the move, and
+        the user answers "Later" to the restart prompt. Without this method the
+        Midjourney watcher stays off, the video History tab loads nothing, and
+        "Create Restore Point" fails for the rest of the session. Each release
+        therefore has a matching restore here.
+
+        A resource this method cannot rebuild is logged at warning level, so
+        the log names what still needs a restart.
+
+        Args:
+            group: the core.paths.Group whose handles were released.
+        """
+        from core.paths import Group
+
+        log = getattr(self, "logger", None) or logger
+        try:
+            group = group if isinstance(group, Group) else Group(group)
+        except ValueError:
+            log.error("Unknown storage group %r; no handles were restored", group)
+            return
+
+        log.info("Restoring the %s handles this process released", group.value)
+
+        if group is Group.IMAGES:
+            if not getattr(self, "_midjourney_watch_paused", False):
+                return
+            watcher = getattr(self, "midjourney_watcher", None)
+            if watcher is None:
+                log.warning(
+                    "The Midjourney watcher is gone; it stays off until "
+                    "ImageAI restarts"
+                )
+            else:
+                try:
+                    watcher.set_enabled(True)
+                    log.info("Re-enabled the Midjourney watcher after the move")
+                except Exception as exc:
+                    log.warning(
+                        "Could not re-enable the Midjourney watcher: %s. It "
+                        "stays off until ImageAI restarts", exc
+                    )
+            # Clear the flag either way. A second restore must not report a
+            # pause that no longer applies.
+            self._midjourney_watch_paused = False
+
+        elif group is Group.VIDEO:
+            video_tab = getattr(self, "tab_video", None)
+            workspace = None
+            if getattr(self, "_video_tab_loaded", False):
+                workspace = getattr(video_tab, "workspace", None)
+            owners = [video_tab, getattr(video_tab, "history_tab", None), workspace]
+            for owner in owners:
+                if owner is None or getattr(owner, "event_store", None) is not None:
+                    continue
+                rebuild = getattr(owner, "init_event_store", None)
+                if not callable(rebuild):
+                    continue
+                try:
+                    rebuild()
+                    log.info("Rebuilt the event store on %s",
+                             type(owner).__name__)
+                except Exception as exc:
+                    log.warning("Could not rebuild the event store on %s: %s",
+                                type(owner).__name__, exc)
+
+        elif group is Group.MODELS:
+            # The provider cache and the CUDA cache both refill on the next
+            # request, so there is nothing to rebuild here.
+            log.info("Model caches refill on the next request")
+
+        elif group is Group.SETTINGS:
+            log.info(
+                "The log file never closed, so the Settings group has nothing "
+                "to restore"
+            )
+
     def closeEvent(self, event):
         """Save all UI state on close."""
         try:
@@ -7622,7 +7827,7 @@ For more detailed information, please refer to the full documentation.
             self._save_ui_state()
 
             # Save config
-            self.config.save()
+            self.save_config()
         except Exception as e:
             logger.error(f"Error saving UI state: {e}")
         
@@ -8153,7 +8358,7 @@ For more detailed information, please refer to the full documentation.
 
         # Save the expansion state when user manually toggles
         self.config.set('image_settings_expanded', is_visible)
-        self.config.save()
+        self.save_config()
 
         # Trigger image resize after layout change
         from PySide6.QtCore import QTimer
@@ -8166,7 +8371,7 @@ For more detailed information, please refer to the full documentation.
 
         # Save the expansion state
         self.config.set('reference_images_expanded', checked)
-        self.config.save()
+        self.save_config()
 
         # Trigger image resize after layout change
         from PySide6.QtCore import QTimer
@@ -8504,7 +8709,7 @@ For more detailed information, please refer to the full documentation.
             'usage': self.ref_usage_edit.text() if hasattr(self, 'ref_usage_edit') else ""
         }
         self.config.set('reference_images', ref_images)
-        self.config.save()
+        self.save_config()
 
     def _clear_reference_image_from_config(self):
         """Remove reference image from settings."""
@@ -8513,7 +8718,7 @@ For more detailed information, please refer to the full documentation.
         if 'image_tab' in ref_images:
             del ref_images['image_tab']
             self.config.set('reference_images', ref_images)
-            self.config.save()
+            self.save_config()
 
     def _load_reference_image_from_config(self):
         """Load reference image from settings."""
@@ -8589,7 +8794,7 @@ For more detailed information, please refer to the full documentation.
 
             # Save to config
             self.config.set('imagen_references', ref_data)
-            self.config.save()
+            self.save_config()
 
             logger.info(f"Saved {len(ref_data)} Imagen references to config")
 

@@ -65,7 +65,9 @@ class LocalSDWidget(QWidget):
     
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.cache_dir = Path.home() / ".cache" / "huggingface"
+        from core.paths import get_data_paths
+
+        self.cache_dir = get_data_paths().huggingface()
         self.download_thread = None
         self._init_ui()
         self._check_hf_auth()

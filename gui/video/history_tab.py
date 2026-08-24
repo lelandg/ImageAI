@@ -192,14 +192,30 @@ class HistoryTab(QWidget):
     def init_event_store(self):
         """Initialize event store connection"""
         try:
-            db_path = Path.home() / ".imageai" / "video_projects" / "events.db"
+            from core.paths import get_data_paths
+            db_path = get_data_paths().video_events_db()
             self.event_store = EventStore(db_path)
-            
+
             if self.project_id:
                 self.load_history()
         except Exception as e:
             self.logger.error(f"Failed to initialize event store: {e}")
-    
+
+    def ensure_event_store(self):
+        """Return the event store, opening it again when it was released.
+
+        A storage move releases the SQLite handle so events.db can move, and
+        the move can fail or finish without a restart. Every reader calls this
+        method, so the tab works again on the next access.
+
+        Returns:
+            The EventStore, or None when it could not open.
+        """
+        if self.event_store is None:
+            self.logger.info("Event store was released; opening it again")
+            self.init_event_store()
+        return self.event_store
+
     def set_project(self, project_id: str):
         """
         Set the current project to display history for.
@@ -212,12 +228,20 @@ class HistoryTab(QWidget):
     
     def load_history(self):
         """Load project history from event store"""
-        if not self.event_store or not self.project_id:
+        if not self.project_id:
             return
-        
+
+        store = self.ensure_event_store()
+        if store is None:
+            self.logger.error(
+                "No event store for project %s; the history stays empty",
+                self.project_id,
+            )
+            return
+
         try:
             # Get all events for project
-            self.current_events = self.event_store.get_events(self.project_id)
+            self.current_events = store.get_events(self.project_id)
             
             # Apply filter
             self.apply_filter()
@@ -382,23 +406,38 @@ class HistoryTab(QWidget):
                 "Enter an optional description:"
             )
             
+            store = self.ensure_event_store()
+            if store is None:
+                message = (
+                    "The history database is not open, so ImageAI cannot "
+                    "create a restore point. Restart ImageAI and try again."
+                )
+                self.logger.error(
+                    "Cannot create restore point '%s': no event store", name
+                )
+                QMessageBox.warning(self, "Error", message)
+                return
+
             try:
-                event_id = self.event_store.create_restore_point(
+                event_id = store.create_restore_point(
                     self.project_id,
                     name,
                     description or ""
                 )
-                
+
                 QMessageBox.information(
                     self,
                     "Success",
                     f"Restore point '{name}' created successfully"
                 )
-                
+
                 # Reload history
                 self.load_history()
-                
+
             except Exception as e:
+                self.logger.error(
+                    "Failed to create restore point '%s': %s", name, e, exc_info=True
+                )
                 QMessageBox.warning(self, "Error", f"Failed to create restore point: {e}")
     
     def restore_to_point(self):

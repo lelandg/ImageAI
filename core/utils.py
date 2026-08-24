@@ -179,9 +179,8 @@ def parse_image_size(size_str: str) -> tuple[int, int]:
 
 def images_output_dir() -> Path:
     """Directory where generated images are auto-saved."""
-    from .config import ConfigManager
-    config = ConfigManager()
-    d = config.config_dir / "generated"
+    from .paths import get_data_paths
+    d = get_data_paths().generated()
     d.mkdir(parents=True, exist_ok=True)
     return d
 

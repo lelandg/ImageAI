@@ -22,7 +22,7 @@ import numpy as np
 from PIL import Image
 from base64 import b64decode, b64encode
 
-from core.constants import get_user_data_dir
+from core.paths import get_data_paths
 from .constants import (
     REQUIRED_VISEMES,
     AI_VISEME_PROMPTS,
@@ -108,7 +108,7 @@ class AIFaceEditor:
         """
         self.provider = AIProvider(provider.lower())
         self.model = model or self.DEFAULT_MODELS[self.provider]
-        self.cache_dir = cache_dir or (get_user_data_dir() / "cache" / "ai_visemes")
+        self.cache_dir = cache_dir or get_data_paths().model_cache("ai_visemes")
         self.api_key = api_key
         self.quality_threshold = quality_threshold
         self.max_retries = max_retries

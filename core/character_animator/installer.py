@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from core.constants import get_user_data_dir
+from core.paths import get_data_paths
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +245,7 @@ def get_model_paths() -> Dict[str, Path]:
         Dictionary mapping model name to file path
     """
     # Use a weights directory in the user data folder
-    weights_dir = get_user_data_dir() / "weights" / "character_animator"
+    weights_dir = get_data_paths().weights() / "character_animator"
 
     paths = {}
     for model_name, model_info in PUPPET_MODELS.items():

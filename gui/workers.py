@@ -127,31 +127,6 @@ class StreamingGenWorker(QObject):
             self.error.emit(str(e))
 
 
-class BatchJobsLoaderWorker(QObject):
-    """Loads BATCH_JOBS_PATH and emits the entries as a list."""
-    loaded = Signal(list)
-    error = Signal(str)
-
-    def __init__(self):
-        super().__init__()
-
-    def run(self):
-        import json
-        try:
-            from core.constants import BATCH_JOBS_PATH
-            entries = []
-            if BATCH_JOBS_PATH.exists():
-                try:
-                    entries = json.loads(BATCH_JOBS_PATH.read_text(encoding="utf-8"))
-                    if not isinstance(entries, list):
-                        entries = []
-                except (OSError, IOError, ValueError):
-                    entries = []
-            self.loaded.emit(entries)
-        except Exception as e:  # noqa: BLE001
-            self.error.emit(str(e))
-
-
 class HistoryLoaderWorker(QObject):
     """Worker thread for progressive history loading."""
 
