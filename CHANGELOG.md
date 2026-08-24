@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-08-24
+
+### Removed
+- Remove the broken Batch Jobs tab and the empty Generate menu from the GUI. Batch work now runs through the CLI (`--layout-fill`, batch prompts). The `imageai-cli` skill docs no longer list the removed GUI entry points.
+
+### Fixed
+- Re-anchor video project media paths after a storage move, so existing projects open with their clips and images intact from the new root.
+- Normalize screenshot asset paths in project files, so screenshots resolve on both Windows and WSL.
+
 ### Fixed
 - A storage move that failed, that the user cancelled, or that the user
   answered "Later" to left the running app degraded. The move releases open
