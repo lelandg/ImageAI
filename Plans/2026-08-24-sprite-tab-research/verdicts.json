@@ -1,0 +1,135 @@
+[
+ {
+  "claim": "Veo 3.1, already wrapped by core/video/veo_client.py, accepts both a start image and a last_frame parameter, so passing the same image as first and last frame conditions the model to produce closed loops.",
+  "verdict": "confirmed",
+  "explanation": "All factual components hold. (1) Official Gemini API docs confirm Veo 3.1 interpolation takes an `image` (initial frame) plus `lastFrame` (final frame), used together; the Google Developers Blog Veo 3.1 announcement shows the Python SDK form `types.GenerateVideosConfig(last_frame=...)`. (2) The repo wrapper already supports both: VeoConfig.image (veo_client.py:77) and VeoConfig.last_frame (:78) are loaded and sent \u2014 last_frame via GenerateVideosConfig (:512-515), start image via generate_videos(image=...) (:548-553) \u2014 against veo-3.1-generate-001 / veo-3.1-fast-generate-001 (:61-62). (3) Passing the same image as both frames does condition the model to start and end on that frame, yielding a closed loop; this is the standard looping technique in Google's Flow \"Frames to Video\" workflow. Caveats for planning: Google does not officially document the same-image loop trick in API docs, and user reports show loops are not always seamless (motion discontinuity at the seam); also, last_frame currently works only with 8-second durations (4s returns \"use case is currently not supported\") and needs a current google-genai SDK. So treat looping as a supported-but-unguaranteed conditioning technique, not a documented guarantee of seamlessness.",
+  "correction": "",
+  "sources": [
+   "https://ai.google.dev/gemini-api/docs/veo",
+   "https://developers.googleblog.com/introducing-veo-3-1-and-new-creative-capabilities-in-the-gemini-api/",
+   "https://discuss.ai.google.dev/t/veo-3-1-last-frame-parameter-not-supported/107529",
+   "https://support.google.com/gemini/thread/382485806/veo-3-1-looping-videos-not-working-with-first-frame-last-frame",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/video/veo_client.py (lines 61-78, 512-515, 548-553)"
+  ]
+ },
+ {
+  "claim": "The repo's OpenAI capability table (providers/openai.py:46-99) marks gpt-image-1.5 and gpt-image-1 as supporting background=transparent alpha-PNG output, and marks gpt-image-2 as NOT supporting it; the 2026-08-20 gpt-image-2 transparency API preview has community-reported defects (alpha capped at 252-254, halo edges).",
+  "verdict": "confirmed",
+  "explanation": "All three parts verified. (1) Direct read of /mnt/d/Documents/Code/GitHub/ImageAI/providers/openai.py: MODEL_CAPS starts at line 46; gpt-image-2 has \"supports_transparent_bg\": False (line 61), gpt-image-1.5 True (line 80), gpt-image-1 True (line 99). (2) OpenAI announced transparent-background support for GPT-Image-2 in the API as a preview on August 20, 2026 (official OpenAI Developer Community announcement thread dated 2026-08-20; OpenAIDevs X post; covered by The Decoder and others). It works via background:\"transparent\" + output_format png/webp on generations, edits, and the Responses image tool. (3) On that same official thread, a community member reports opaque regions returning alpha 253/255 with noisy variation across 252-254, plus an \"unrequested border halo\" where the RGB beneath the transparency contains a grey border larger than the alpha channel \u2014 matching the claimed defects. Caveat for planning: the repo table's False for gpt-image-2 is now stale relative to the live API \u2014 the 2026-08-20 preview means gpt-image-2 DOES accept background=transparent, so the sprite tool should treat the repo flag as outdated pending an update, while budgeting post-processing (alpha thresholding, edge defringe) for the reported preview defects.",
+  "sources": [
+   "/mnt/d/Documents/Code/GitHub/ImageAI/providers/openai.py (lines 46-110: MODEL_CAPS)",
+   "https://community.openai.com/t/transparent-backgrounds-are-now-available-in-preview-for-gpt-image-2-in-the-api/1391541",
+   "https://x.com/OpenAIDevs/status/2090536933571330440",
+   "https://the-decoder.com/openais-gpt-image-2-can-now-generate-images-without-a-background/",
+   "https://www.newmobilelife.com/2026/08/21/openai-gpt-image-2-transparent-background-png/"
+  ]
+ },
+ {
+  "claim": "No Google Gemini image model emits an alpha channel; transparency requires green-plate prompting plus local keying, or white/black difference matting \u2014 and writing the word 'transparent' in a Gemini prompt makes it paint a literal checkerboard.",
+  "verdict": "confirmed",
+  "explanation": "Core claim confirmed as of 2026-08. No Gemini image model (gemini-2.5-flash-image, gemini-3-pro-image, gemini-3.1-flash-image/-lite) outputs an alpha channel: the official Gemini API image docs expose no transparency/background parameter (unlike OpenAI gpt-image), the API changelog through 2026-08-13 lists no such feature, and Google AI forum threads confirm transparent PNGs cannot be generated. Google-affiliated tutorials use exactly the claimed workarounds \u2014 Philipp Schmid (DeepMind) generates stickers on chromakey green #00FF00 and keys it out with HSV code, and a Google AI DEV post generates on white and thresholds the background via code execution \u2014 proving post-processing is mandatory. The checkerboard behavior is documented: guides warn that prompting 'transparent' pushes Gemini to paint a literal grey-and-white checkerboard of opaque pixels. Two minor overstatements: (1) the checkerboard is a frequent failure mode, not deterministic \u2014 the model sometimes fills with solid white/black instead; (2) the two named workarounds are the main documented ones, but white-plate + thresholding/segmentation-based removal also works, so 'requires' applies to the class (known-background generation + local matting), not those two methods exclusively. Neither nuance changes the planning implication: budget for a keying/matting post-process step for every Gemini sprite, and keep 'transparent' out of prompts.",
+  "correction": "Accurate as stated for planning purposes, with two softenings: prompting 'transparent' OFTEN (not always) yields a painted checkerboard \u2014 solid white/black fills also occur; and transparency requires SOME known-background generation + local post-process (green-plate keying, white/black difference matting, or white-plate thresholding/segmentation), the first two being the best-documented methods.",
+  "sources": [
+   "https://ai.google.dev/gemini-api/docs/image-generation",
+   "https://ai.google.dev/gemini-api/docs/changelog",
+   "https://www.philschmid.de/generate-stickers",
+   "https://dev.to/googleai/image-manipulation-on-a-budget-bounding-boxes-and-transparency-with-gemini-30-flash-and-cib",
+   "https://transparify.app/blog/gemini-transparent-background",
+   "https://discuss.ai.google.dev/t/unable-to-create-transparent-pngs/92868",
+   "https://support.google.com/gemini/thread/388691969/feature-request-ability-to-generate-images-with-transparent-backgrounds-png-with-alpha-channel?hl=en"
+  ]
+ },
+ {
+  "claim": "Aseprite's exported spritesheet JSON stores per-frame duration in milliseconds and meta.frameTags with directions forward/reverse/pingpong/pingpong_reverse, and Phaser 3's load.aseprite + anims.createFromAseprite builds animations from that file directly (verified against labs.phaser.io/assets/animations/aseprite/paladin.json).",
+  "verdict": "confirmed",
+  "explanation": "Each part checks out against primary sources. (1) The live file at labs.phaser.io/assets/animations/aseprite/paladin.json has a per-frame \"duration\" field (value 83) and a meta.frameTags array whose entries carry name/from/to/direction (e.g. {\"name\":\"step\",\"from\":0,\"to\":9,\"direction\":\"forward\"}). The millisecond unit is corroborated by Phaser PR #6095, which describes Aseprite frame \"durations in milliseconds: [1000, 50, 50]\" and fixed createFromAseprite to honor them. (2) The four direction strings come straight from Aseprite's source: convert_anidir_to_string in src/doc/anidir.cpp returns exactly \"forward\", \"reverse\", \"pingpong\", and \"pingpong_reverse\"; aseprite/aseprite issue #1156 confirms the direction field is emitted in the JSON export. Caveat: \"pingpong_reverse\" exists only in Aseprite 1.3+, and the paladin.json sample itself only uses \"forward\" \u2014 the full four-value set is the possible-values list, not what that one file demonstrates. (3) Current Phaser docs (docs.phaser.io, AnimationManager) confirm createFromAseprite \"creates one, or more animations from a loaded Aseprite JSON file\" loaded via this.load.aseprite (PNG + JSON together), playable by tag name (case-sensitive), with the doc example literally using 'paladin'. Minor nuance for planning: Phaser distributes the tag's total duration across frames rather than applying each raw per-frame ms independently (per PR #6095).",
+  "sources": [
+   "https://labs.phaser.io/assets/animations/aseprite/paladin.json",
+   "https://raw.githubusercontent.com/aseprite/aseprite/main/src/doc/anidir.cpp",
+   "https://docs.phaser.io/api-documentation/class/animations-animationmanager",
+   "https://github.com/phaserjs/phaser/pull/6095",
+   "https://github.com/aseprite/aseprite/issues/1156",
+   "https://www.aseprite.org/docs/cli/"
+  ]
+ },
+ {
+  "claim": "Godot 4 has no native JSON atlas import; engine-ready output requires grid slicing in the SpriteFrames editor or a generated .tres resource whose animations use per-animation FPS plus relative per-frame duration multipliers instead of milliseconds.",
+  "verdict": "confirmed",
+  "explanation": "Official Godot documentation supports both halves. (1) The stable 2D sprite animation tutorial offers only manual workflows \u2014 the SpriteFrames \"Add frames from sprite sheet\" uniform grid-slicing dialog (user enters horizontal/vertical frame counts) or Sprite2D Hframes/Vframes + AnimationPlayer \u2014 and never mentions JSON atlas metadata; TexturePacker/Aseprite JSON import exists only via third-party Asset Library plugins, and Godot 4.5/4.6 release notes add no native JSON atlas importer. (2) The SpriteFrames class reference confirms the timing model: set_animation_speed is \"frames per second\" per animation, and get_frame_duration returns \"a relative duration... (defaults to 1.0)\" where \"a frame with a duration of 2.0 is displayed twice as long as a frame with a duration of 1.0\"; absolute time = duration / (fps * abs(playing_speed)). Milliseconds are never used. Practical implication for the planned tool: per-frame ms timings (Aseprite JSON, GIF delays) must be converted by picking an animation FPS and emitting per-frame ratios in a generated .tres SpriteFrames resource. Minor non-refuting caveat: a third path is bundling a community importer plugin, but that is explicitly non-native, which the claim already excludes.",
+  "sources": [
+   "https://docs.godotengine.org/en/stable/classes/class_spriteframes.html",
+   "https://docs.godotengine.org/en/stable/tutorials/2d/2d_sprite_animation.html",
+   "https://godotengine.org/asset-library/asset/1503",
+   "https://godotengine.org/asset-library/asset/1880",
+   "https://godotengine.org/releases/4.6/"
+  ]
+ },
+ {
+  "claim": "rembg is MIT-licensed with MIT-licensed onnxruntime as its only heavy dependency and requires Python >=3.11,<3.14; its isnet-anime model (167.9 MB) suits cel/sprite content, while its bria-rmbg-2.0 model requires a paid BRIA license for commercial use.",
+  "verdict": "refuted",
+  "explanation": "Partly true, but two load-bearing parts fail against current (Aug 2026) sources. CONFIRMED: rembg is MIT (PyPI + LICENSE.txt); onnxruntime is MIT (PyPI classifier, v1.29.0); the Python floor is >=3.11; isnet-anime.onnx is 176,069,933 bytes = 167.9 MiB and the README describes it as \"high-accuracy segmentation for anime character\" (cel-style content; \"sprite\" is an extrapolation the docs do not make); and the README warns RMBG-2.0 \"requires a paid agreement for commercial use\" under a BRIA license (HF model card: CC BY-NC 4.0, commercial use via a BRIA agreement). REFUTED: (1) onnxruntime is NOT the \"only heavy dependency\" \u2014 in current rembg (2.0.81, released 2026-08-18) onnxruntime is not a default dependency at all; it moved behind extras (`rembg[cpu]` / `[gpu]` / `[rocm]`), so plain `pip install rembg` installs no inference runtime, and the base install already pulls other heavy packages: scipy, scikit-image, pymatting, numpy, pillow. (2) The Python cap is wrong for the current release: PyPI metadata for 2.0.81 enforces >=3.11,<4.0; the README's \">=3.11, <3.14\" line is stale relative to the shipped metadata. Naming nit: rembg's model key is \"bria-rmbg\" (the release asset is bria-rmbg-2.0.onnx); note it is now rembg's ~1.02 GB DEFAULT model, so a commercial sprite tool must explicitly select a different model or clear BRIA licensing.",
+  "correction": "rembg (v2.0.81) is MIT-licensed and requires Python >=3.11 (PyPI metadata caps at <4.0, not <3.14). MIT-licensed onnxruntime is required for local inference but is an optional extra (`pip install \"rembg[cpu]\"` or `[gpu]`), and the base install also depends on heavy packages scipy, scikit-image, pymatting, numpy, and pillow. The isnet-anime model (167.9 MiB / 176 MB) targets anime-character segmentation, a good fit for cel-style content. The BRIA model is named \"bria-rmbg\" in rembg (file bria-rmbg-2.0.onnx, ~1.02 GB, currently the default model); it is CC BY-NC 4.0 and commercial use requires a paid BRIA agreement.",
+  "sources": [
+   "https://pypi.org/project/rembg/",
+   "https://pypi.org/pypi/rembg/json",
+   "https://github.com/danielgatis/rembg",
+   "https://raw.githubusercontent.com/danielgatis/rembg/main/pyproject.toml",
+   "https://api.github.com/repos/danielgatis/rembg/releases/tags/v0.0.0",
+   "https://pypi.org/pypi/onnxruntime/json",
+   "https://huggingface.co/briaai/RMBG-2.0"
+  ]
+ },
+ {
+  "claim": "Pillow's Quantize.MEDIANCUT and Quantize.MAXCOVERAGE reject RGBA input (silently falling back to FASTOCTREE), Pillow's only dither options are NONE and FLOYDSTEINBERG, and Quantize.LIBIMAGEQUANT is compiled out of all official Pillow wheels because libimagequant is GPLv3.",
+  "verdict": "refuted",
+  "correction": "Two of the three parts hold, but the RGBA behavior is misstated. Corrected: (1) When you explicitly pass method=MEDIANCUT or MAXCOVERAGE to quantize() on an RGBA image, Pillow raises ValueError (\"Fast Octree (method == 2) and libimagequant (method == 3) are the only valid methods for quantizing RGBA images\") \u2014 there is NO silent fallback. The silent FASTOCTREE substitution happens only when no method is specified: the default is MEDIANCUT, but for RGBA the default switches to FASTOCTREE. So code that hardcodes MEDIANCUT will crash on RGBA sprites, not silently degrade. (2) Mostly true with a nuance: the Dither enum defines four members \u2014 NONE, ORDERED, RASTERIZE, FLOYDSTEINBERG \u2014 but ORDERED and RASTERIZE are marked \"Not yet implemented\" in the source, so NONE and FLOYDSTEINBERG (the default) are the only working options. (3) True: Pillow's docs state \"Libimagequant is licensed GPLv3, which is more restrictive than the Pillow license, therefore we will not be distributing binaries with libimagequant support enabled\"; verified empirically \u2014 features.check_feature(\"libimagequant\") returns False on the official Pillow 11.3.0 PyPI wheel. To use LIBIMAGEQUANT you must build Pillow from source against libimagequant.",
+  "explanation": "Verified against three authoritative sources plus a live test. (a) Pillow source (src/PIL/Image.py, quantize()): when method is None it defaults to MEDIANCUT, switching to FASTOCTREE for RGBA; but an explicit MEDIANCUT/MAXCOVERAGE on RGBA hits a raise ValueError branch \u2014 confirmed empirically on Pillow 11.3.0: im.quantize(method=Image.Quantize.MEDIANCUT) on an RGBA image raised the ValueError, while im.quantize() with no method succeeded via the FASTOCTREE default. The claim's \"silently falling back\" phrasing describes only the no-method-given path and is wrong for the reject path, a distinction that matters for planning (crash vs. degrade). (b) The Dither enum contains NONE=0, ORDERED=1 (# Not yet implemented), RASTERIZE=2 (# Not yet implemented), FLOYDSTEINBERG=3 (default); the API reference lists only NONE and FLOYDSTEINBERG as available, so the claim is functionally right though the enum technically has four members. (c) The \"Building from source\" page explicitly ties the absence of libimagequant in distributed binaries to its GPLv3 license, and the official 11.3.0 wheel reports libimagequant support as False. Planning implication for the sprite tool: for RGBA sprite quantization use FASTOCTREE (or LIBIMAGEQUANT only if users build Pillow from source, e.g. via imagequant/pyimagequant alternatives), and treat FLOYDSTEINBERG vs NONE as the full dithering choice space.",
+  "sources": [
+   "https://pillow.readthedocs.io/en/stable/reference/Image.html",
+   "https://raw.githubusercontent.com/python-pillow/Pillow/main/src/PIL/Image.py",
+   "https://pillow.readthedocs.io/en/stable/installation/building-from-source.html",
+   "Local empirical test: Pillow 11.3.0 official PyPI wheel in /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux (ValueError raised for MEDIANCUT on RGBA; features.check_feature('libimagequant') == False)"
+  ]
+ },
+ {
+  "claim": "The PyPI 'imagequant' package (Wanadev) ships BSD-3 binding code but bundles GPLv3-or-commercial libimagequant, so it can only be an optional user-installed extra in a non-GPL application.",
+  "verdict": "confirmed",
+  "explanation": "Every factual predicate checks out against authoritative sources. (1) PyPI metadata for 'imagequant' (latest 1.1.5, Oct 2024) lists Wanadev/Fabien Loison as author and declares the license as BSD-3-Clause; the README states \"Imagequant Python is licensed under the BSD 3 Clause.\" (2) The package bundles libimagequant: the wanadev/imagequant-python repo carries libimagequant as a git submodule and compiles it into the extension via imagequant/libimagequant_build.py, so PyPI wheels contain the compiled GPL library. (3) Upstream ImageOptim/libimagequant confirms the dual license: GPL v3 or later for FLOSS, or a commercial license \"for use in closed-source software, AppStore distribution, and other non-GPL uses\" \u2014 unchanged by the v4 Rust rewrite. The final clause is the standard legal consequence: because the distributed wheel contains GPLv3 code, a non-GPL application cannot bundle or hard-depend on it in its own distribution without triggering GPLv3 obligations; the accepted safe pattern is exactly an optional, user-installed extra. Minor nuance: \"only\" holds absent a purchased commercial libimagequant license (which would permit bundling) \u2014 an escape hatch the claim itself acknowledges via \"GPLv3-or-commercial\".",
+  "sources": [
+   "https://pypi.org/pypi/imagequant/json",
+   "https://github.com/wanadev/imagequant-python",
+   "https://github.com/ImageOptim/libimagequant"
+  ]
+ },
+ {
+  "claim": "CorridorKey (github.com/nikopueringer/CorridorKey) carries a CC BY-NC-SA-style license that forbids repackaging or paid inference, installs only via uv (not pip), and needs 6-8 GB VRAM \u2014 it can be bridged to a user install but never embedded or bundled.",
+  "verdict": "confirmed",
+  "explanation": "Verified against the repository's own README and LICENSE files. (1) License: the LICENSE is CC BY-NC-SA 4.0 with added restrictions that state verbatim \"You may not repackage, redistribute, sublicense, or sell this tool, in whole or in part, as a standalone product or as part of a competing product\" and \"You may not use this tool to provide inference as a paid API service, whether directly or indirectly.\" (2) Install: the README mandates uv (\"This project uses uv to manage Python and all dependencies\"), offers no pip path, and PyPI has no corridorkey package (pypi.org/pypi/corridorkey/json returns 404), so there is no pip install. (3) VRAM: the README states the base tool \"should work on computers with 6-8 gig of VRAM\" (optional GVM/VideoMaMa modules need ~24-80 GB). (4) Integration: because repackaging/redistribution is forbidden, bridging ImageAI to a user's own CorridorKey install is the only compliant default; embedding/bundling is barred by default. One nuance: \"never embedded\" is slightly absolute \u2014 the license allows incorporation into commercial software via a separate written agreement with the Licensor (contact@corridordigital.com), so embedding is possible with permission, just not by default.",
+  "correction": "Accurate for planning purposes, with one refinement: embedding/bundling is forbidden by default but can be permitted through a separate written agreement with Corridor (contact@corridordigital.com); also, 6-8 GB VRAM is the minimum for the core keyer only \u2014 optional GVM/VideoMaMa modules need ~24-80 GB.",
+  "sources": [
+   "https://github.com/nikopueringer/CorridorKey",
+   "https://raw.githubusercontent.com/nikopueringer/CorridorKey/main/README.md",
+   "https://raw.githubusercontent.com/nikopueringer/CorridorKey/main/LICENSE",
+   "https://pypi.org/pypi/corridorkey/json"
+  ]
+ },
+ {
+  "claim": "The ImageAI repo today contains no every-N-frame extractor (frame extraction is single-frame only), no chroma-key code, and no palette-quantization pipeline, while ffmpeg management (FFmpegManager/get_ffmpeg_path), Veo/Omni clients, transparent-canvas compositing, MediaPipe segmentation, and the VideoProject persistence pattern all already exist.",
+  "verdict": "confirmed",
+  "explanation": "Verified directly against the repo (local checkout on main @ 344e45a \u2014 the authoritative source for a repo-contents claim). All positive assertions hold: FFmpegManager (core/video/ffmpeg_utils.py:18) and get_ffmpeg_path (:310); Veo/Omni clients (core/video/veo_client.py, core/video/omni_client.py); transparent-canvas compositing (core/reference/image_compositor.py:82-83, Image.new('RGBA',...)); MediaPipe segmentation (core/character_animator/segmenter.py:70 plus availability.py/installer.py); VideoProject persistence (core/video/project.py:476 with to_dict/from_dict save/load). All negative assertions hold: zero chroma-key/green-screen/colorkey code; no palette-quantization pipeline (no Image.quantize, putpalette, palettegen/paletteuse, convert('P') anywhere \u2014 the few 'quantiz' grep hits are numpy color-binning analysis in ai_face_editor.py, a vectorization threshold docstring in svg_exporter.py, and geometric vertex quantization in core/layout/polygon.py); and no every-N-frame/stride extractor exists (no select=not(mod(n,N)), no fps-filter extraction). One minor caveat: 'single-frame only' is slightly overstated \u2014 providers/video/musetalk_provider.py:257 (_extract_video_frames) reads ALL frames of a video into memory via a cv2 loop for internal lip-sync processing. It is not an every-N extractor and not a reusable frame-dump utility (nothing written to disk, no stride), so the claim's substance for sprite-animation planning stands: an every-N-frame extractor would be new code, with user-facing extraction today limited to single frames (_extract_first_frame/_extract_last_frame in gui/video/video_project_tab.py:1151/1182, _extract_frame_at_playhead in gui/video/workspace_widget.py:4394).",
+  "correction": "Only nuance: MuseTalkProvider._extract_video_frames (providers/video/musetalk_provider.py:257) extracts all frames of a video in-memory for lip-sync, so 'frame extraction is single-frame only' should read 'all user-facing/reusable frame extraction is single-frame; one internal lip-sync helper reads all frames in-memory'.",
+  "sources": [
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/video/ffmpeg_utils.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/video/veo_client.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/video/omni_client.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/video/project.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/reference/image_compositor.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/character_animator/segmenter.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/providers/video/musetalk_provider.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/gui/video/video_project_tab.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/gui/video/workspace_widget.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/character_animator/ai_face_editor.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/character_animator/svg_exporter.py"
+  ]
+ }
+]
