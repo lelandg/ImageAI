@@ -201,3 +201,101 @@ def apply_profile_alpha(image: Image.Image, profile: OutputProfile) -> Image.Ima
     rgb, alpha = split_rgba(image)
     hard = binary_alpha(alpha, profile.alpha_threshold, profile.defringe_px)
     return compose_rgba(rgb, hard)
+
+
+# --- settings, overrides, and the three passes -------------------------------------
+
+def resolve_key_settings(settings: KeySettings, plate_color: str) -> KeySettings:
+    """Return settings with ``key_color`` filled from the plate color when it is None."""
+    if settings.key_color:
+        return settings
+    return replace(settings, key_color=plate_color)
+
+
+def apply_overrides(settings: KeySettings, overrides: Dict[str, Any]) -> KeySettings:
+    """Apply per-frame overrides (``key_color``, ``tolerance``, ``softness``)."""
+    if not overrides:
+        return settings
+    changes: Dict[str, Any] = {}
+    for key, value in overrides.items():
+        if value is None:
+            continue
+        if key == "key_color":
+            changes[key] = str(value)
+        elif key in ("tolerance", "softness"):
+            changes[key] = float(value)
+        else:
+            logger.debug("Ignoring unknown per-frame override %r", key)
+    return replace(settings, **changes) if changes else settings
+
+
+def frame_overrides(frames: Sequence[FrameMeta], index: int) -> Dict[str, Any]:
+    """Overrides recorded on the frame at ``index``; ``{}`` when there is none."""
+    if 0 <= index < len(frames):
+        return dict(frames[index].overrides or {})
+    return {}
+
+
+def _ml_alpha(image: Image.Image, backend: str, model: str, refine_edges: bool) -> np.ndarray:
+    """Indirection so the ML backends load lazily (Task 6 creates core.sprite.matting)."""
+    from core.sprite.matting import ml_alpha
+    return ml_alpha(image, backend, model, refine_edges=refine_edges)
+
+
+def key_pass(image: Image.Image, settings: KeySettings,
+             overrides: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray, Optional[Tuple[int, int, int]]]:
+    """Stage ``key``: estimate alpha and despill. Returns (rgb uint8, alpha float32, key_rgb)."""
+    eff = apply_overrides(settings, overrides)
+    if eff.method not in KEY_METHODS:
+        msg = f"Unknown key method {eff.method!r}; choose one of {KEY_METHODS}"
+        logger.error(msg)
+        raise KeyingError(msg)
+    if eff.method == "none":
+        rgb, alpha = split_rgba(image)
+        return rgb, alpha, None
+    rgb = np.asarray(image.convert("RGB")).copy()
+    if eff.method == "ml":
+        alpha = np.asarray(_ml_alpha(image, eff.ml_backend, eff.ml_model, eff.ml_refine_edges),
+                           dtype=np.float32)
+        return rgb, np.clip(alpha, 0.0, 1.0), None
+    if eff.key_color:
+        key_rgb = hex_to_rgb(eff.key_color)
+    else:
+        picked = pick_key_color(image, (0, 0), radius=2)
+        logger.warning("No key color set; sampled the top-left corner: %s", picked)
+        key_rgb = hex_to_rgb(picked)
+    alpha = chroma_alpha(rgb, key_rgb, eff.tolerance, eff.softness)
+    rgb = despill(rgb, key_rgb, eff.despill)
+    return rgb, alpha, key_rgb
+
+
+def cleanup_pass(alpha: np.ndarray, settings: KeySettings) -> np.ndarray:
+    """Stage ``cleanup``: despeckle, choke, feather."""
+    return choke_feather(alpha, settings.choke_px, settings.feather_px, settings.despeckle_px)
+
+
+def alpha_pass(rgb: np.ndarray, alpha: np.ndarray, key_rgb: Optional[Tuple[int, int, int]],
+               settings: KeySettings) -> Image.Image:
+    """Stage ``alpha``: decontaminate edge colors against the key, then compose RGBA."""
+    if settings.edge_decontaminate and key_rgb is not None:
+        rgb = decontaminate_edges(rgb, alpha, key_rgb)
+    return compose_rgba(rgb, alpha)
+
+
+def key_frame(image: Image.Image, settings: KeySettings, overrides: Dict[str, Any]) -> Image.Image:
+    """One-shot keyer for previews, the CLI, and tests: key -> cleanup -> alpha."""
+    rgb, alpha, key_rgb = key_pass(image, settings, overrides)
+    alpha = cleanup_pass(alpha, settings)
+    return alpha_pass(rgb, alpha, key_rgb, apply_overrides(settings, overrides))
+
+
+def pick_key_color(image: Image.Image, xy: Tuple[int, int], radius: int = 2) -> str:
+    """Average color in a (2*radius+1)^2 window around ``xy`` as ``#RRGGBB``."""
+    rgb = np.asarray(image.convert("RGB"))
+    h, w = rgb.shape[:2]
+    x, y = int(xy[0]), int(xy[1])
+    if not (0 <= x < w and 0 <= y < h):
+        raise ValueError(f"Point {xy} lies outside the {w}x{h} image")
+    r = max(0, int(radius))
+    patch = rgb[max(0, y - r): y + r + 1, max(0, x - r): x + r + 1]
+    return rgb_to_hex(patch.reshape(-1, 3).mean(axis=0))
