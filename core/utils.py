@@ -1,5 +1,6 @@
 """Utility functions for ImageAI."""
 
+import logging
 import re
 import string
 import json
@@ -9,6 +10,8 @@ from datetime import datetime
 
 from .constants import README_PATH
 from .security import path_validator
+
+logger = logging.getLogger(__name__)
 
 
 def sanitize_filename(name: str, max_len: int = 100) -> str:
@@ -216,8 +219,12 @@ def write_image_sidecar(image_path: Path, meta: dict) -> None:
     try:
         p = sidecar_path(image_path)
         p.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
-    except (OSError, IOError, json.JSONEncodeError):
-        pass
+    except (TypeError, ValueError, OSError) as exc:
+        # Never abort the caller over a sidecar failure -- the image is already
+        # saved. Log it so a disk-full/permission failure is at least traceable
+        # instead of silently vanishing (json.dumps raises TypeError/ValueError
+        # on unserializable metadata; write_text raises OSError).
+        logger.warning("Could not write image sidecar for %s: %s", image_path, exc)
 
 
 def read_image_sidecar(image_path: Path) -> Optional[dict]:
