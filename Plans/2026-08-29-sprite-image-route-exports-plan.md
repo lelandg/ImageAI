@@ -34,7 +34,7 @@ Sub-project 1: `core.sprite.models.{FrameMeta, TagMeta, SheetMeta, Rect, Size}` 
 Sub-project 2: `core.sprite.generation.errors.{SpriteGenerationError(user_message, *, retryable=None, ...), ProviderError, classify_provider_error(exc, *, provider="")}`; `core.sprite.generation.prompts.{inject_chroma(prompt, plate_color, *, loop), color_name, FORBIDDEN_WORDS}`; `core.sprite.generation.cost.record_actual(project, action, usd, note="", *, provider=None, model=None, seconds=None, estimated_usd=None) -> CostEntry` (keyword overrides keep video figures off image-route rows; `seconds` is the unit count — edits — for this route); `core.sprite.timing.ms_to_fps(durations_ms) -> (fps, multipliers)` (`[100, 100, 200] -> (10, [1.0, 1.0, 2.0])`); action-cards convention `completion_fn(**kwargs)` + `response.choices[0].message.content`.
 Sub-project 3: `core.sprite.matting.difference_matte(on_white, on_black) -> Image`.
 Sub-project 5a: `gui.sprite.workers.SpriteWorker(job, *, label="job", parent=None)` where `job(progress, token)`; signals `progress(str,int,int,str)`, `finished(object)`, `failed(str)` (uses `user_message` when present), `cancelled()`; `cancel()`, `token`; `gui.sprite.action_cards_panel.ActionCardsPanel.add_card_action(label, callback: Callable[[ActionCard], None]) -> None` (one button per card row, existing and future rows) and `.llm_provider() -> str`; `SpriteTab.make_provider(name: str = "google") -> ImageProvider` (raises `ValueError` with a user-facing message when the key is missing — call it inside a worker job); `SpriteTab.{config, console: DialogStatusConsole, log(message, level), current_project, current_action() -> Optional[ActionCard], action_cards_panel, add_toolbar_action(text, slot) -> QPushButton}`; signals `SpriteTab.projectChanged()`, `SpriteTab.actionSelected(str)`; `config.get_api_key(provider)`, `config.get_auth_mode(provider)` (`core/config.py:470`).
-Sub-project 5b: `gui.sprite.export_dialog.{ExportDialog(project, parent=None), ExportRequest(project, profiles, formats, out_dir, template, grid, pivot, purge), FormatFn = Callable[[SheetMeta, Path], List[Path]], ExportFormat(id, label, fn, needs_sheet=False, takes_template=False), sheet_png_path(meta, out_dir) -> Path}`; `ExportDialog.register_format(id, label, fn, *, needs_sheet=False, takes_template=False, checked=False) -> QCheckBox` — `fn(meta, out_dir)`; with `needs_sheet=True` the dialog has already run the grid exporter, so `meta` arrives with frame rects filled and the sheet PNG sits at `sheet_png_path(meta, out_dir)`; built-in ids `grid`, `aseprite_json`, `texturepacker_json`, `png_sequence`, `gif`; widgets `format_checks: Dict[str, QCheckBox]`, `profile_checks`, `options_layout: QVBoxLayout`, `pivot_x_spin` / `pivot_y_spin: QDoubleSpinBox`, `name_template_edit: QLineEdit`; methods `set_grid_options(GridOptions)`, `grid_options()`, `current_meta() -> Optional[SheetMeta]`, `selected_profiles()`, `selected_formats()`, `request()`. `FrameStrip.retouchRequested = Signal(int)`, `FrameStrip.frames()`; `PixelView.selection_rect() -> Optional[Rect]`; `FramesWorkspace.apply_frames(action_id: str, frames: List[FrameMeta], label: str)` (public: snapshot + set frames + refresh); attributes on the tab: `tab.frame_strip`, `tab.pixel_view`, `tab.frames_workspace`.
+Sub-project 5b: `gui.sprite.export_dialog.{ExportDialog(project, parent=None), ExportRequest(project, profiles, formats, out_dir, template, grid, pivot, purge), FormatFn = Callable[[SheetMeta, Path], List[Path]], ExportFormat(id, label, fn, needs_sheet=False, takes_template=False), sheet_png_path(meta, out_dir) -> Path}`; `ExportDialog.register_format(id, label, fn, *, needs_sheet=False, takes_template=False, checked=False) -> QCheckBox` — `fn(meta, out_dir)`; with `needs_sheet=True` the dialog has already run the grid exporter, so `meta` arrives with frame rects filled and the sheet PNG sits at `sheet_png_path(meta, out_dir)`; built-in ids `grid`, `aseprite_json`, `texturepacker_json`, `png_sequence`, `gif`; widgets `format_checks: Dict[str, QCheckBox]`, `profile_checks`, `options_layout: QVBoxLayout` (profiles box, formats box, `notes_label`, output box, grid box), `notes_label: QLabel`, `pivot_x_spin` / `pivot_y_spin: QDoubleSpinBox`, `name_template_edit: QLineEdit`; methods `set_grid_options(GridOptions)`, `grid_options()`, `current_meta() -> Optional[SheetMeta]`, `selected_profiles()`, `selected_formats()`, `request()`; registering an id twice raises `ValueError`. `FrameStrip.retouchRequested = Signal(int)`, `FrameStrip.frames()`, `FrameStrip.refresh()`; `PixelView.{set_select_mode(bool), select_mode(), selection_rect() -> Optional[Rect], set_selection_rect(Optional[Rect]), clear_selection(), selectionChanged = Signal(object)}` (5b ships the region selection; sub-project 6 only reads `selection_rect()`); `FramesWorkspace.apply_frames(action_id: str, frames: List[FrameMeta], label: str) -> None` (public: pushes the undo snapshot of the CURRENT `action.frames` itself, writes `action.frames`, reloads strip + player, logs, emits `projectChanged()` — callers pass a NEW deep-copied list and never mutate live `FrameMeta` objects first); attributes on the tab: `tab.frame_strip`, `tab.pixel_view`, `tab.frames_workspace`, `tab.undo_controller`, `tab.undo_stack`, `tab.refresh_frames()` (not used here).
 
 ## File Structure
 
@@ -1276,7 +1276,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): native .ase
 - Test: `tests/sprite/gui/test_export_dialog_engine_presets.py`
 
 **Interfaces:**
-- Consumes (5b `gui/sprite/export_dialog.py`): `ExportDialog.register_format(id, label, fn, *, needs_sheet=False, takes_template=False, checked=False) -> QCheckBox` with `fn(meta: SheetMeta, out_dir: Path) -> List[Path]`; with `needs_sheet=True` the dialog has already run the grid exporter, so `meta` arrives with frame rects filled and the sheet PNG sits at `sheet_png_path(meta, out_dir)` (module-level function); widgets `format_checks: Dict[str, QCheckBox]`, `options_layout: QVBoxLayout`, `pivot_x_spin` / `pivot_y_spin: QDoubleSpinBox`, `name_template_edit: QLineEdit`; `set_grid_options(GridOptions)`, `current_meta() -> Optional[SheetMeta]`. Also `ENGINE_PRESETS`, `FORMAT_IDS`, `fps_reconciliation` (Task 2), `export_godot_tres` (Task 1), `export_aseprite` (Task 3).
+- Consumes (5b `gui/sprite/export_dialog.py`): `ExportDialog.register_format(id, label, fn, *, needs_sheet=False, takes_template=False, checked=False) -> QCheckBox` with `fn(meta: SheetMeta, out_dir: Path) -> List[Path]`; with `needs_sheet=True` the dialog has already run the grid exporter, so `meta` arrives with frame rects filled and the sheet PNG sits at `sheet_png_path(meta, out_dir)` (module-level function); widgets `format_checks: Dict[str, QCheckBox]`, `options_layout: QVBoxLayout` (profiles box at index 0, then formats box, `notes_label`, output box, grid box), `notes_label: QLabel` (word-wrapped, under the formats box, empty by default — the preset notes go here), `pivot_x_spin` / `pivot_y_spin: QDoubleSpinBox`, `name_template_edit: QLineEdit`; `set_grid_options(GridOptions)`, `current_meta() -> Optional[SheetMeta]`. Also `ENGINE_PRESETS`, `FORMAT_IDS`, `fps_reconciliation` (Task 2), `export_godot_tres` (Task 1), `export_aseprite` (Task 3).
 - Produces: `FORMAT_GODOT = "godot_tres"`, `FORMAT_ASEPRITE = "aseprite_native"`; `write_godot_tres(meta, out_dir) -> List[Path]`; `write_aseprite_native(meta, out_dir) -> List[Path]`; `register_extra_formats(dialog) -> None`; `EnginePresetBox(QGroupBox)` with `presetChosen = Signal(str)`, `current_preset()`, `select(preset_id)`, `show_notes(meta)`; `install_engine_presets(dialog) -> EnginePresetBox` (also sets `dialog.engine_preset_box`).
 
 Format ids are shared verbatim between `EnginePreset.formats` (Task 2 `FORMAT_IDS`), the dialog's built-ins (`grid`, `aseprite_json`, `texturepacker_json`, `png_sequence`, `gif`), the two ids registered here (`godot_tres`, `aseprite_native`), and the CLI's `--sprite-formats` (sub-project 7). Output names: `.tres` and `.aseprite` are `<title>_<profile>` beside the sheet; `atlas_res_path` is `res://<sheet_png_path(meta, out_dir).name>`.
@@ -1295,7 +1295,7 @@ import pytest
 from PIL import Image
 
 pytest.importorskip("PySide6")
-from PySide6.QtWidgets import QCheckBox, QDoubleSpinBox, QLineEdit, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QDoubleSpinBox, QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from core.sprite.exporters.engine_presets import ENGINE_PRESETS, FORMAT_IDS
 from core.sprite.exporters.grid import GridOptions, export_grid
@@ -1313,7 +1313,9 @@ class _FakeDialog(QWidget):
     def __init__(self, meta=None):
         super().__init__()
         self.options_layout = QVBoxLayout(self)
+        self.options_layout.addWidget(QLabel("profiles box stand-in", self))
         self.format_checks = {fid: QCheckBox(fid, self) for fid in FORMAT_IDS}
+        self.notes_label = QLabel("", self)
         self.grid = GridOptions()
         self.pivot_x_spin = QDoubleSpinBox(self)
         self.pivot_y_spin = QDoubleSpinBox(self)
@@ -1382,8 +1384,10 @@ def test_selecting_preset_applies_fields_and_notes(qapp, tmp_path):
     assert dialog.grid == preset.grid
     assert (dialog.pivot_x_spin.value(), dialog.pivot_y_spin.value()) == preset.pivot
     assert dialog.name_template_edit.text() == preset.name_template
-    assert preset.how_to_import in box.notes.text()
-    assert "drift" in box.notes.text()          # 133 ms cannot be represented exactly at integer fps
+    assert box.notes is dialog.notes_label                       # notes reuse the dialog's label
+    assert preset.how_to_import in dialog.notes_label.text()
+    assert "drift" in dialog.notes_label.text()                  # 133 ms cannot be represented exactly at integer fps
+    assert dialog.options_layout.indexOf(box) == 1
 
 
 def test_unity_and_libgdx_presets_check_their_formats(qapp, tmp_path):
@@ -1399,9 +1403,9 @@ def test_custom_clears_notes_and_missing_meta_is_tolerated(qapp, tmp_path):
     dialog = _FakeDialog(meta=None)
     box = install_engine_presets(dialog)
     box.select("godot4")
-    assert ENGINE_PRESETS["godot4"].how_to_import in box.notes.text()
+    assert ENGINE_PRESETS["godot4"].how_to_import in dialog.notes_label.text()
     box.select("")
-    assert box.notes.text() == ""
+    assert dialog.notes_label.text() == ""
 
 
 def test_register_extra_formats(qapp):
@@ -1524,7 +1528,8 @@ class EnginePresetBox(QGroupBox):
 
     presetChosen = Signal(str)   # preset id; "" = custom
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, *, notes_label: Optional[QLabel] = None):
+        """``notes_label``: reuse the dialog's own label (5b ``ExportDialog.notes_label``) when given."""
         super().__init__("Engine preset", parent)
         layout = QVBoxLayout(self)
         row = QHBoxLayout()
@@ -1535,10 +1540,12 @@ class EnginePresetBox(QGroupBox):
             self.combo.addItem(preset.label, preset.id)
         row.addWidget(self.combo, 1)
         layout.addLayout(row)
-        self.notes = QLabel("")
+        if notes_label is None:
+            notes_label = QLabel("")
+            layout.addWidget(notes_label)
+        self.notes = notes_label
         self.notes.setWordWrap(True)
         self.notes.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        layout.addWidget(self.notes)
         self.combo.currentIndexChanged.connect(self._on_changed)
 
     def current_preset(self) -> Optional[EnginePreset]:
@@ -1569,9 +1576,12 @@ class EnginePresetBox(QGroupBox):
 
 
 def install_engine_presets(dialog) -> EnginePresetBox:
-    """Append an EnginePresetBox to the dialog's options layout and drive the fields from it."""
-    box = EnginePresetBox(dialog)
-    dialog.options_layout.addWidget(box)
+    """Insert an EnginePresetBox above the formats box and drive the dialog fields from it.
+
+    Notes go to the dialog's own ``notes_label`` (5b), which sits directly under the formats box.
+    """
+    box = EnginePresetBox(dialog, notes_label=dialog.notes_label)
+    dialog.options_layout.insertWidget(1, box)      # index 0 = profiles box, then this, then formats
 
     def apply(preset_id: str) -> None:
         preset = ENGINE_PRESETS.get(preset_id)
@@ -3497,6 +3507,7 @@ from PIL import Image
 pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QWidget
 
+from core.sprite.models import FrameMeta
 from core.sprite.pipeline import CancelToken, no_progress
 from core.sprite.project import ActionCard, SpriteProject
 from gui.sprite import image_route_dialog as ird
@@ -3678,8 +3689,12 @@ class _FakeTab(QWidget):
         self._action = action
         self.applied = []
         self.providers = []
-        self.frames_workspace = SimpleNamespace(
-            apply_frames=lambda action_id, frames, label: self.applied.append((action_id, label)))
+        self.frames_workspace = SimpleNamespace(apply_frames=self._apply_frames)
+
+    def _apply_frames(self, action_id, frames, label):
+        # Record what the real FramesWorkspace.apply_frames would snapshot (current list) and install (new list).
+        self.applied.append((action_id, label, len(self._action.frames), len(frames)))
+        self._action.frames = list(frames)
 
     def current_action(self):
         return self._action
@@ -3697,8 +3712,12 @@ def test_install_image_route_registers_button_and_builds_dialog(qapp, tmp_path):
     dialog = ird.open_image_route_dialog(tab, action, exec_dialog=False)
     assert isinstance(dialog, ImageRouteDialog)
     assert dialog._provider_factory == tab.make_provider
+    # Simulate a finished job: the worker wrote the new frames onto the action; the dialog kept the old list.
+    dialog.frames_before = []
+    action.frames = [FrameMeta(name="hero_walk_01", source_path=_png(tmp_path / "0001.png"), frame=(0, 0, 0, 0))]
     dialog.rendered.emit([])
-    assert tab.applied == [("a1", "Render (image)")]          # current action -> strip/player reload
+    assert tab.applied == [("a1", "Render (image)", 0, 1)]   # snapshot sees the pre-render list, new list installed
+    assert len(action.frames) == 1
 
 
 def test_rendered_for_another_action_only_refreshes_status(qapp, tmp_path):
@@ -3738,6 +3757,7 @@ Create `gui/sprite/image_route_dialog.py`:
 """Render one action card through the image route (sheet or edit-chain) in a SpriteWorker."""
 from __future__ import annotations
 
+import copy
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -3794,6 +3814,7 @@ class ImageRouteDialog(DialogCleanupMixin, QDialog):
         self._provider_factory = provider_factory
         self._pose_fn = pose_fn
         self._worker: Optional[SpriteWorker] = None
+        self.frames_before: List[FrameMeta] = []     # pre-render frame list; restored before apply_frames snapshots
         self.setWindowTitle(f"Render (image) — {action.name}")
         self._build_ui()
         self.logLine.connect(self.console.log)
@@ -3950,6 +3971,7 @@ class ImageRouteDialog(DialogCleanupMixin, QDialog):
         if self._worker is not None:
             self.console.log("A job is already running.", "WARNING")
             return
+        self.frames_before = copy.deepcopy(self.action.frames)
         self._worker = SpriteWorker(self.build_job(), parent=self)
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_rendered)
@@ -4009,12 +4031,19 @@ def _make_pose_fn(tab) -> PoseFn:
     return pose_fn
 
 
-def _on_rendered(tab, action: ActionCard) -> None:
-    """Refresh the card status; reload strip + player when the rendered action is the current one."""
+def _on_rendered(tab, action: ActionCard, dialog: ImageRouteDialog) -> None:
+    """Refresh the card status; reload strip + player when the rendered action is the current one.
+
+    The job already wrote ``action.frames``. ``apply_frames`` snapshots the current list for
+    undo before it installs the new one, so restore the pre-render list first and hand the
+    rendered list over as the new one.
+    """
     tab.action_cards_panel.refresh_status()
     current = tab.current_action()
     if current is not None and current.id == action.id:
-        tab.frames_workspace.apply_frames(action.id, list(action.frames), "Render (image)")
+        rendered = list(action.frames)
+        action.frames = list(dialog.frames_before)
+        tab.frames_workspace.apply_frames(action.id, rendered, "Render (image)")
     tab.console.log(f"Image route: '{action.name}' has {len(action.frames)} frame(s)", "SUCCESS")
 
 
@@ -4026,7 +4055,7 @@ def open_image_route_dialog(tab, action: ActionCard, *, exec_dialog: bool = True
         return None
     dialog = ImageRouteDialog(project, action, provider_factory=tab.make_provider,
                               pose_fn=_make_pose_fn(tab), parent=tab)
-    dialog.rendered.connect(lambda _paths, a=action: _on_rendered(tab, a))
+    dialog.rendered.connect(lambda _paths, a=action, d=dialog: _on_rendered(tab, a, d))
     if exec_dialog:
         dialog.exec()
     return dialog
@@ -4109,4 +4138,5 @@ No version bump here; sub-project 7 bumps once for the whole feature.
 9. **Aseprite header "Number of colors"** is written as the palette length when `meta.palette` is set and `0` otherwise; Aseprite falls back to its default palette for RGBA files without a Palette chunk. The file is verified byte-for-byte by the reader test; a manual open in Aseprite is an optional non-gating step in Task 3.
 10. **Format ids are one vocabulary** across `EnginePreset.formats`, the export dialog, and the CLI: `grid`, `aseprite_json`, `texturepacker_json`, `png_sequence`, `gif`, `godot_tres`, `aseprite_native` (the CLI plan's `aseprite` becomes `aseprite_native`; plan-cli was told). The dialog applies the preset pivot through its `pivot_x_spin` / `pivot_y_spin`; `export_with_preset` applies it through `with_pivot` for the CLI.
 11. **`core/sprite/timing.py` belongs to sub-project 2**, not 1 (design §4.2); the dependency line at the top of this plan already lists 2.
-12. **Retouch undo goes through `FramesWorkspace.apply_frames`** (snapshot + set + refresh) instead of pushing a `FrameListSnapshot` itself; `apply_retouch` therefore repoints a deep-copied frame list so the snapshot captures the pre-retouch path.
+12. **Undo goes through `FramesWorkspace.apply_frames(action_id, frames, label)`** for both retouch and image-route renders; sub-project 6 never pushes a snapshot itself. `apply_retouch` repoints a deep-copied frame list so the snapshot inside `apply_frames` captures the pre-retouch path. The image-route job writes `action.frames` inside the worker, so `ImageRouteDialog.start_render` keeps `frames_before` and `_on_rendered` restores it right before `apply_frames` installs the rendered list — otherwise the snapshot would hold the new frames and undo would be a no-op.
+13. **Preset notes use 5b's `ExportDialog.notes_label`** (`EnginePresetBox(notes_label=...)`); the box creates its own label only when used standalone. The box is inserted at `options_layout` index 1 (after the profiles box, above the formats box).
