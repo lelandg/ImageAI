@@ -11,15 +11,24 @@ import logging
 from pathlib import Path
 from typing import List, Optional, Sequence, Tuple
 
+import cv2
 import numpy as np
 from PIL import Image
 
 from .models import Rect, Size
 from .pipeline import CancelToken, ProgressFn, check, no_progress
 
+try:
+    from skimage.registration import phase_cross_correlation as _phase_cross_correlation
+except ImportError:  # scikit-image absent or broken: OpenCV fallback (design §1.7)
+    _phase_cross_correlation = None
+
 logger = logging.getLogger(__name__)
 
 ANCHORS = ("bottom_center", "center", "top_left", "top_center", "bottom_left")
+DEJITTER_METHODS = ("phase", "centroid")
+MIN_PHASE_RESPONSE = 0.02      # cv2.phaseCorrelate response below this is noise
+MAX_SHIFT_FRACTION = 0.25      # never move a frame more than a quarter of its size
 
 
 def has_transparency(frame: Path) -> bool:
@@ -168,3 +177,104 @@ def crop_and_pad(frames: Sequence[Path], out_dir: Path, bbox: Rect, cell: Size,
         written.append(dest)
         progress(stage, index, total, f"{stage}: {path.name}")
     return written
+
+
+# --- de-jitter -----------------------------------------------------------------------
+
+def alpha_centroid(alpha: np.ndarray) -> Optional[Tuple[float, float]]:
+    """Alpha-weighted centroid (y, x); None when the mask is empty."""
+    a = np.asarray(alpha, dtype=np.float32)
+    total = float(a.sum())
+    if total <= 0.0:
+        return None
+    yy, xx = np.mgrid[0:a.shape[0], 0:a.shape[1]].astype(np.float32)
+    return float((yy * a).sum() / total), float((xx * a).sum() / total)
+
+
+def _centroid_shift(ref: np.ndarray, mov: np.ndarray) -> Tuple[float, float]:
+    rc = alpha_centroid(ref)
+    mc = alpha_centroid(mov)
+    if rc is None or mc is None:
+        return 0.0, 0.0
+    return rc[0] - mc[0], rc[1] - mc[1]
+
+
+def estimate_shift(ref_alpha: np.ndarray, mov_alpha: np.ndarray, method: str) -> Tuple[float, float]:
+    """Return (dy, dx) to apply to the moving mask so it registers with the reference.
+
+    ``phase``: skimage phase_cross_correlation (upsample_factor=10) -> cv2.phaseCorrelate
+    -> centroid. ``centroid``: centroid difference only.
+    """
+    if method not in DEJITTER_METHODS:
+        raise ValueError(f"Unknown dejitter method {method!r}; choose one of {DEJITTER_METHODS}")
+    ref = np.asarray(ref_alpha, dtype=np.float32)
+    mov = np.asarray(mov_alpha, dtype=np.float32)
+    if method == "centroid" or ref.sum() <= 0.0 or mov.sum() <= 0.0:
+        return _centroid_shift(ref, mov)
+    if _phase_cross_correlation is not None:
+        shift, _error, _phase = _phase_cross_correlation(ref, mov, upsample_factor=10)
+        return float(shift[0]), float(shift[1])
+    (dx, dy), response = cv2.phaseCorrelate(ref, mov)
+    if response < MIN_PHASE_RESPONSE:
+        logger.debug("phaseCorrelate response %.3f too weak; using centroid", response)
+        return _centroid_shift(ref, mov)
+    return -float(dy), -float(dx)
+
+
+def translate_rgba(rgba: np.ndarray, dy: float, dx: float) -> np.ndarray:
+    """Sub-pixel translate an RGBA uint8 image. Premultiplied sampling avoids dark fringes."""
+    src = np.asarray(rgba).astype(np.float32)
+    alpha = src[:, :, 3:4] / 255.0
+    pre = np.concatenate([src[:, :, :3] * alpha, src[:, :, 3:4]], axis=2)
+    h, w = src.shape[:2]
+    matrix = np.array([[1.0, 0.0, dx], [0.0, 1.0, dy]], dtype=np.float32)
+    moved = cv2.warpAffine(pre, matrix, (w, h), flags=cv2.INTER_LINEAR,
+                           borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+    out_alpha = moved[:, :, 3:4] / 255.0
+    rgb = np.where(out_alpha > 0.0, moved[:, :, :3] / np.maximum(out_alpha, 1e-6), 0.0)
+    out = np.concatenate([rgb, moved[:, :, 3:4]], axis=2)
+    return np.clip(np.round(out), 0, 255).astype(np.uint8)
+
+
+def dejitter(frames: Sequence[Path], out_dir: Path, method: str = "phase", *,
+             progress: ProgressFn = no_progress,
+             token: Optional[CancelToken] = None) -> List[Path]:
+    """Align every frame to the first frame's alpha mask and write the results.
+
+    ``out_dir`` may be the input directory: all inputs are read before any output
+    is written. Shifts are clamped to MAX_SHIFT_FRACTION of the frame size.
+    """
+    if method not in DEJITTER_METHODS:
+        raise ValueError(f"Unknown dejitter method {method!r}; choose one of {DEJITTER_METHODS}")
+    frames = [Path(p) for p in frames]
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    images = []
+    for path in frames:
+        if token is not None:
+            token.raise_if_cancelled()
+        images.append(np.asarray(Image.open(path).convert("RGBA")))
+    outputs: List[Path] = []
+    if not images:
+        return outputs
+    ref_alpha = images[0][:, :, 3].astype(np.float32) / 255.0
+    h, w = ref_alpha.shape
+    max_dy, max_dx = MAX_SHIFT_FRACTION * h, MAX_SHIFT_FRACTION * w
+    total = len(images)
+    for index, (path, rgba) in enumerate(zip(frames, images)):
+        if token is not None:
+            token.raise_if_cancelled()
+        dst = out_dir / path.name
+        if index == 0:
+            Image.fromarray(rgba).save(dst)
+        else:
+            mov_alpha = rgba[:, :, 3].astype(np.float32) / 255.0
+            dy, dx = estimate_shift(ref_alpha, mov_alpha, method)
+            cdy, cdx = max(-max_dy, min(max_dy, dy)), max(-max_dx, min(max_dx, dx))
+            if (cdy, cdx) != (dy, dx):
+                logger.warning("dejitter %s: clamped shift (%.2f, %.2f) to (%.2f, %.2f)",
+                               path.name, dy, dx, cdy, cdx)
+            Image.fromarray(translate_rgba(rgba, cdy, cdx)).save(dst)
+        outputs.append(dst)
+        progress("stabilize", index + 1, total, f"dejitter {path.name}")
+    return outputs

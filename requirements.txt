@@ -36,6 +36,10 @@ mido>=1.3.2  # Low-level MIDI manipulation for detailed control
 # Video creation dependencies (required for video projects)
 opencv-python>=4.8.0  # Required for video frame processing and assembly
 
+# Sprite tab de-jitter (core/sprite/stabilize.py); OpenCV phaseCorrelate is the fallback
+scikit-image>=0.24  # skimage.registration.phase_cross_correlation (sub-pixel frame alignment)
+scipy>=1.13  # required by scikit-image
+
 # Discord Rich Presence (optional - for showing activity in Discord status)
 pypresence>=4.6.0  # Discord RPC wrapper library
 
