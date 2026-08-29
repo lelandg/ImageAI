@@ -21,7 +21,6 @@ from PIL import Image
 
 from core.sprite.models import FrameMeta
 from core.sprite.project import KeySettings, OutputProfile
-from core.video.ffmpeg_utils import get_ffmpeg_path
 
 logger = logging.getLogger(__name__)
 
@@ -302,6 +301,18 @@ def pick_key_color(image: Image.Image, xy: Tuple[int, int], radius: int = 2) -> 
 
 
 # --- ffmpeg preview --------------------------------------------------------------------
+
+def get_ffmpeg_path() -> Optional[str]:
+    """Lazy indirection to ``core.video.ffmpeg_utils.get_ffmpeg_path``.
+
+    ``core.video``'s package import loads ``google.genai``, which costs
+    seconds. Importing it only when this function runs keeps ``core.sprite``
+    (and ``core.sprite.pipeline``, which imports this module) free of that
+    cost on plain package import (tests/sprite/test_package.py).
+    """
+    from core.video.ffmpeg_utils import get_ffmpeg_path as _get_ffmpeg_path
+    return _get_ffmpeg_path()
+
 
 def ffmpeg_chromakey_preview(video: Path, out_mp4: Path, key_color: str,
                              similarity: float, blend: float) -> Path:

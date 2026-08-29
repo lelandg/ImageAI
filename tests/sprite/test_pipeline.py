@@ -64,7 +64,9 @@ def test_every_stage_has_registered_settings_and_a_code_version(tmp_path):
     project, action = _project(tmp_path)
     assert set(STAGE_SETTINGS) == set(STAGES)
     assert set(STAGE_CODE_VERSION) == set(STAGES)
-    assert stage_settings(project, action, "key")["key"]["tolerance"] == 0.20
+    # Sub-project 3 re-registers "key" with the real keying settings (flat, not
+    # nested under "key" -- see core.sprite.pipeline.key_stage_settings).
+    assert stage_settings(project, action, "key")["tolerance"] == 0.20
     assert stage_settings(project, action, "extract")["clip"] is None
     with pytest.raises(ValueError):
         stage_settings(project, action, "nope")
@@ -91,9 +93,12 @@ def test_register_stage_replaces_settings_and_code_version(tmp_path, registry):
     def runner(project, action, input_frames, out_dir, progress, token):
         return []
 
-    register_stage("key", runner, key_stage_settings, code_version=2)
+    # Sub-project 3 registers "key" at code_version=2; bump past whatever the
+    # current baseline is so this still exercises a genuine version change.
+    bumped = STAGE_CODE_VERSION["key"] + 1
+    register_stage("key", runner, key_stage_settings, code_version=bumped)
     assert STAGE_RUNNERS["key"] is runner
-    assert STAGE_CODE_VERSION["key"] == 2
+    assert STAGE_CODE_VERSION["key"] == bumped
     assert stage_fingerprint(project, action, "key") != before
     register_stage("key", runner)  # no settings function -> empty settings
     assert stage_settings(project, action, "key") == {}
@@ -272,7 +277,10 @@ def test_a_replacement_key_runner_changes_output_and_invalidates_downstream(tmp_
             rgba.save(path)
         return out
 
-    register_stage("key", blue_corner_runner, key_stage_settings, code_version=2)
+    # Sub-project 3 registers "key" at code_version=2; bump past whatever the
+    # current baseline is so this still exercises a genuine version change.
+    register_stage("key", blue_corner_runner, key_stage_settings,
+                   code_version=STAGE_CODE_VERSION["key"] + 1)
     messages = []
     out = run_pipeline(project, action, upto="hd", progress=lambda s, d, t, m: messages.append(m))
     assert "extract: cached" in messages

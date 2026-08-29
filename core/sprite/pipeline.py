@@ -29,6 +29,7 @@ from PIL import Image
 
 from .models import FrameMeta
 from .project import ActionCard, SpriteProject
+from core.sprite import keying
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +76,12 @@ class PipelineError(Exception):
     def __init__(self, user_message: str) -> None:
         super().__init__(user_message)
         self.user_message = user_message
+
+
+# ``stabilize`` imports ``CancelToken``/``ProgressFn``/``check``/``no_progress`` from
+# this module, so this import must come after those names are defined above (not at
+# the very top of the file) to avoid a circular-import failure on first package load.
+from .stabilize import dejitter  # noqa: E402
 
 
 # --- stage registry ---------------------------------------------------------
@@ -178,17 +185,45 @@ def extract_stage_settings(project: SpriteProject, action: ActionCard) -> Dict[s
     return settings
 
 
+def _effective_key_settings(project: SpriteProject):
+    return keying.resolve_key_settings(project.key, project.plate_color)
+
+
+def _frame_override_list(project: SpriteProject, action: ActionCard) -> List[Dict[str, Any]]:
+    """Per-frame overrides, one entry per *extracted* frame (design §4.1/§1.2).
+
+    Sized off the ``extract`` stage's own output, not ``len(action.frames)``:
+    ``run_pipeline`` rewrites ``action.frames`` from the ``stabilize`` output
+    mid-run (``_sync_frames``), so a settings function keyed on its length
+    would read a different frame count before and after that stage runs in
+    the same pass -- destabilizing the ``key``/``alpha`` fingerprint on every
+    run even when nothing the user controls changed.
+    """
+    total = len(list_frames(stage_dir(project, action, "extract"))) if project.project_dir else 0
+    return [keying.frame_overrides(action.frames, i) for i in range(total)]
+
+
 def key_stage_settings(project: SpriteProject, action: ActionCard) -> Dict[str, Any]:
-    return {"key": asdict(project.key), "plate_color": project.plate_color}
+    s = _effective_key_settings(project)
+    return {
+        "method": s.method, "key_color": s.key_color, "tolerance": s.tolerance,
+        "softness": s.softness, "despill": s.despill, "ml_backend": s.ml_backend,
+        "ml_model": s.ml_model, "ml_refine_edges": s.ml_refine_edges,
+        "overrides": _frame_override_list(project, action),
+    }
 
 
 def cleanup_stage_settings(project: SpriteProject, action: ActionCard) -> Dict[str, Any]:
-    key = asdict(project.key)
-    return {k: key[k] for k in ("despill", "edge_decontaminate", "choke_px", "feather_px", "despeckle_px")}
+    s = project.key
+    return {"choke_px": s.choke_px, "feather_px": s.feather_px, "despeckle_px": s.despeckle_px}
 
 
 def alpha_stage_settings(project: SpriteProject, action: ActionCard) -> Dict[str, Any]:
-    return {"method": project.key.method, "ml_refine_edges": project.key.ml_refine_edges}
+    s = _effective_key_settings(project)
+    return {
+        "method": s.method, "key_color": s.key_color, "edge_decontaminate": s.edge_decontaminate,
+        "overrides": _frame_override_list(project, action),
+    }
 
 
 def stabilize_stage_settings(project: SpriteProject, action: ActionCard) -> Dict[str, Any]:
@@ -322,9 +357,63 @@ def extract_runner(project: SpriteProject, action: ActionCard, input_frames: Lis
     return frames
 
 
+def key_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
+               out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
+    """Estimate alpha and despill every frame (chroma, ml, or none; per-frame overrides apply)."""
+    settings = _effective_key_settings(project)
+    _reset_dir(out_dir)
+    outputs: List[Path] = []
+    total = len(input_frames)
+    for index, src in enumerate(input_frames):
+        check(token)
+        overrides = keying.frame_overrides(action.frames, index)
+        rgb, alpha, _key = keying.key_pass(Image.open(src), settings, overrides)
+        dst = out_dir / src.name
+        keying.compose_rgba(rgb, alpha).save(dst)
+        outputs.append(dst)
+        progress("key", index + 1, total, f"key {src.name}")
+    return outputs
+
+
+def cleanup_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
+                   out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
+    """Choke/feather/despeckle the alpha the ``key`` stage produced."""
+    _reset_dir(out_dir)
+    outputs: List[Path] = []
+    total = len(input_frames)
+    for index, src in enumerate(input_frames):
+        check(token)
+        rgb, alpha = keying.split_rgba(Image.open(src))
+        alpha = keying.cleanup_pass(alpha, project.key)
+        dst = out_dir / src.name
+        keying.compose_rgba(rgb, alpha).save(dst)
+        outputs.append(dst)
+        progress("cleanup", index + 1, total, f"cleanup {src.name}")
+    return outputs
+
+
+def alpha_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
+                 out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
+    """Decontaminate spill on the keyed edges (chroma only) and finalize the RGBA."""
+    settings = _effective_key_settings(project)
+    _reset_dir(out_dir)
+    outputs: List[Path] = []
+    total = len(input_frames)
+    for index, src in enumerate(input_frames):
+        check(token)
+        eff = keying.apply_overrides(settings, keying.frame_overrides(action.frames, index))
+        key_rgb = keying.hex_to_rgb(eff.key_color) if (eff.method == "chroma" and eff.key_color) else None
+        rgb, alpha = keying.split_rgba(Image.open(src))
+        dst = out_dir / src.name
+        keying.alpha_pass(rgb, alpha, key_rgb, eff).save(dst)
+        outputs.append(dst)
+        progress("alpha", index + 1, total, f"alpha {src.name}")
+    return outputs
+
+
 def stabilize_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
                      out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
-    """Crop every frame to the union bbox plus ``pad_px``; no resampling."""
+    """Crop every frame to the union bbox plus ``pad_px``; no resampling. Then de-jitter."""
     from .stabilize import crop_and_pad, has_transparency, solid_border_bbox, union_alpha_bbox
 
     if not input_frames:
@@ -336,13 +425,22 @@ def stabilize_runner(project: SpriteProject, action: ActionCard, input_frames: L
     pad = max(0, project.stabilize.pad_px)
     cell = (bbox[2] + 2 * pad, bbox[3] + 2 * pad)
     _reset_dir(out_dir)
-    return crop_and_pad(input_frames, out_dir, bbox, cell, anchor=project.stabilize.anchor,
-                        pad_px=pad, stage=out_dir.name, progress=progress, token=token)
+    padded = crop_and_pad(input_frames, out_dir, bbox, cell, anchor=project.stabilize.anchor,
+                          pad_px=pad, stage=out_dir.name, progress=progress, token=token)
+    if project.stabilize.dejitter:
+        padded = dejitter(padded, out_dir, project.stabilize.dejitter_method,
+                          progress=progress, token=token)
+    return padded
 
 
 def hd_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
               out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
-    """Scale the stabilised frames proportionally into the hd profile cell."""
+    """Scale the stabilised frames proportionally into the hd profile cell.
+
+    The ``hd`` profile keeps the anti-aliased alpha the keying stages produced
+    unless ``binary_alpha`` is set, in which case ``apply_profile_alpha``
+    thresholds it (the HD alpha guarantee).
+    """
     from .stabilize import crop_and_pad
 
     prof = project.profile("hd")
@@ -351,18 +449,22 @@ def hd_runner(project: SpriteProject, action: ActionCard, input_frames: List[Pat
     with Image.open(input_frames[0]) as first:
         w, h = first.size
     _reset_dir(out_dir)
-    return crop_and_pad(input_frames, out_dir, (0, 0, w, h), prof.cell_size,
-                        anchor=project.stabilize.anchor, pad_px=0,
-                        upscale_small=prof.upscale_small, resample_method=prof.upscale_method,
-                        stage=out_dir.name, progress=progress, token=token)
+    written = crop_and_pad(input_frames, out_dir, (0, 0, w, h), prof.cell_size,
+                           anchor=project.stabilize.anchor, pad_px=0,
+                           upscale_small=prof.upscale_small, resample_method=prof.upscale_method,
+                           stage=out_dir.name, progress=progress, token=token)
+    for dst in written:
+        with Image.open(dst) as img:
+            keying.apply_profile_alpha(img, prof).save(dst)
+    return written
 
 
 register_stage("extract", extract_runner, extract_stage_settings)
-register_stage("key", identity_runner, key_stage_settings)
-register_stage("cleanup", identity_runner, cleanup_stage_settings)
-register_stage("alpha", identity_runner, alpha_stage_settings)
-register_stage("stabilize", stabilize_runner, stabilize_stage_settings)
-register_stage("hd", hd_runner, hd_stage_settings)
+register_stage("key", key_runner, key_stage_settings, code_version=2)
+register_stage("cleanup", cleanup_runner, cleanup_stage_settings, code_version=2)
+register_stage("alpha", alpha_runner, alpha_stage_settings, code_version=2)
+register_stage("stabilize", stabilize_runner, stabilize_stage_settings, code_version=2)
+register_stage("hd", hd_runner, hd_stage_settings, code_version=2)
 register_stage("pixel", identity_runner, pixel_stage_settings)
 
 
