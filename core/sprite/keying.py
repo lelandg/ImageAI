@@ -299,3 +299,45 @@ def pick_key_color(image: Image.Image, xy: Tuple[int, int], radius: int = 2) -> 
     r = max(0, int(radius))
     patch = rgb[max(0, y - r): y + r + 1, max(0, x - r): x + r + 1]
     return rgb_to_hex(patch.reshape(-1, 3).mean(axis=0))
+
+
+# --- ffmpeg preview --------------------------------------------------------------------
+
+def ffmpeg_chromakey_preview(video: Path, out_mp4: Path, key_color: str,
+                             similarity: float, blend: float) -> Path:
+    """Render a quick keyed preview MP4: ffmpeg ``chromakey`` composited over neutral grey.
+
+    ``similarity`` (0.01..1) and ``blend`` (0..1) are the ffmpeg filter parameters.
+    """
+    ffmpeg = get_ffmpeg_path()
+    if not ffmpeg:
+        msg = "FFmpeg is not available; install it from the Video tab or put ffmpeg on PATH."
+        logger.error("Chromakey preview failed: %s", msg)
+        raise KeyingError(msg)
+    r, g, b = hex_to_rgb(key_color)
+    color = f"0x{r:02X}{g:02X}{b:02X}"
+    similarity = min(1.0, max(0.01, float(similarity)))
+    blend = min(1.0, max(0.0, float(blend)))
+    graph = (
+        "[0:v]split[bg_in][fg_in];"
+        "[bg_in]drawbox=color=0x7F7F7F:t=fill[bg];"
+        f"[fg_in]chromakey={color}:{similarity:.3f}:{blend:.3f}[fg];"
+        "[bg][fg]overlay=format=auto,format=yuv420p"
+    )
+    out_mp4 = Path(out_mp4)
+    out_mp4.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(video),
+           "-filter_complex", graph, "-c:v", "libx264", "-preset", "veryfast", "-an", str(out_mp4)]
+    logger.info("Chromakey preview: %s", " ".join(cmd))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        msg = f"Chromakey preview could not run ffmpeg: {exc}"
+        logger.error(msg)
+        raise KeyingError(msg) from exc
+    if result.returncode != 0:
+        tail = (result.stderr or "").strip()[-800:]
+        msg = f"Chromakey preview failed (ffmpeg exit {result.returncode}): {tail}"
+        logger.error(msg)
+        raise KeyingError(msg)
+    return out_mp4
