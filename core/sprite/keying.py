@@ -95,3 +95,52 @@ def chroma_alpha(rgb: np.ndarray, key_rgb: Tuple[int, int, int],
     if soft <= 0.0:
         return (dist > tol).astype(np.float32)
     return np.clip((dist - tol) / soft, 0.0, 1.0).astype(np.float32)
+
+
+# --- despill and edge decontamination ------------------------------------------
+
+def despill(rgb: np.ndarray, key_rgb: Tuple[int, int, int], mode: str) -> np.ndarray:
+    """Limit the key's dominant channel and restore the luminance the clamp removed.
+
+    mode: none | average | double | limit (weakest to strongest).
+    """
+    if mode not in DESPILL_MODES:
+        raise ValueError(f"Unknown despill mode {mode!r}; choose one of {DESPILL_MODES}")
+    src = _as_float_rgb(rgb)
+    if mode == "none":
+        return np.clip(src, 0, 255).astype(np.uint8)
+    k = int(np.argmax(np.asarray(key_rgb, dtype=np.float32)))
+    others = [c for c in range(3) if c != k]
+    a = src[:, :, others[0]]
+    b = src[:, :, others[1]]
+    if mode == "average":
+        limit = (a + b) / 2.0
+    elif mode == "double":
+        limit = (2.0 * np.maximum(a, b) + np.minimum(a, b)) / 3.0
+    else:  # limit
+        limit = np.maximum(a, b)
+    out = src.copy()
+    y_before = src @ _Y
+    out[:, :, k] = np.minimum(src[:, :, k], limit)
+    y_after = out @ _Y
+    out += (y_before - y_after)[:, :, None]
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def decontaminate_edges(rgb: np.ndarray, alpha: np.ndarray,
+                        key_rgb: Tuple[int, int, int]) -> np.ndarray:
+    """Un-mix the key color from semi-transparent pixels: F = (C - (1-a)K) / a.
+
+    Pixels with alpha 0 or 1 are returned unchanged. The result is clamped to 0..255.
+    """
+    src = _as_float_rgb(rgb)
+    a = np.asarray(alpha, dtype=np.float32)
+    if a.shape != src.shape[:2]:
+        raise ValueError(f"alpha shape {a.shape} does not match image {src.shape[:2]}")
+    key = np.array(key_rgb, dtype=np.float32).reshape(1, 1, 3)
+    a3 = a[:, :, None]
+    fixed = (src - (1.0 - a3) * key) / np.maximum(a3, 1.0 / 255.0)
+    edge = (a > (1.0 / 255.0)) & (a < 1.0)
+    out = src.copy()
+    out[edge] = fixed[edge]
+    return np.clip(out, 0, 255).astype(np.uint8)
