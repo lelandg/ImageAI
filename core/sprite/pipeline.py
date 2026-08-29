@@ -352,8 +352,9 @@ def hd_runner(project: SpriteProject, action: ActionCard, input_frames: List[Pat
         w, h = first.size
     _reset_dir(out_dir)
     return crop_and_pad(input_frames, out_dir, (0, 0, w, h), prof.cell_size,
-                        anchor=project.stabilize.anchor, pad_px=0, stage=out_dir.name,
-                        progress=progress, token=token)
+                        anchor=project.stabilize.anchor, pad_px=0,
+                        upscale_small=prof.upscale_small, resample_method=prof.upscale_method,
+                        stage=out_dir.name, progress=progress, token=token)
 
 
 register_stage("extract", extract_runner, extract_stage_settings)

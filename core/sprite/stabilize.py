@@ -94,27 +94,50 @@ def anchor_offset(anchor: str, content: Size, cell: Size) -> Tuple[int, int]:
     return (x, y)
 
 
-def fit_size(content: Size, cell: Size) -> Size:
-    """Largest size with the aspect of ``content`` that fits inside ``cell``."""
+def fit_size(content: Size, cell: Size, *, allow_upscale: bool = True) -> Size:
+    """Largest size with the aspect of ``content`` that fits inside ``cell``.
+
+    ``allow_upscale=False`` caps the scale at 1.0, so content already
+    smaller than ``cell`` keeps its native size instead of being enlarged
+    (``OutputProfile.upscale_small``, M1).
+    """
     w, h = content
     cw, ch = cell
     if w < 1 or h < 1:
         return (0, 0)
     scale = min(cw / w, ch / h)
+    if not allow_upscale:
+        scale = min(scale, 1.0)
     return (max(1, int(round(w * scale))), max(1, int(round(h * scale))))
+
+
+RESAMPLE_METHODS = {
+    "lanczos": Image.Resampling.LANCZOS,
+    "nearest": Image.Resampling.NEAREST,
+    "bilinear": Image.Resampling.BILINEAR,
+    "bicubic": Image.Resampling.BICUBIC,
+}
+
+
+def _resample_filter(method: str) -> Image.Resampling:
+    return RESAMPLE_METHODS.get((method or "lanczos").lower(), Image.Resampling.LANCZOS)
 
 
 def crop_and_pad(frames: Sequence[Path], out_dir: Path, bbox: Rect, cell: Size,
                  anchor: str = "bottom_center", pad_px: int = 0,
-                 *, stage: str = "stabilize", progress: ProgressFn = no_progress,
+                 *, upscale_small: bool = True, resample_method: str = "lanczos",
+                 stage: str = "stabilize", progress: ProgressFn = no_progress,
                  token: Optional[CancelToken] = None) -> List[Path]:
     """Crop every frame to ``bbox`` (+pad), scale proportionally into ``cell``, anchor.
 
-    Output files keep their input names. Frames are never distorted; a
-    crop larger than the cell shrinks, a smaller one grows, both with
-    ``Image.LANCZOS`` and one scale factor for both axes. ``stage`` names
-    the caller's stage in progress events -- ``hd_runner`` passes ``"hd"``
-    so its per-frame progress does not report as ``"stabilize"``.
+    Output files keep their input names. Frames are never distorted: one
+    scale factor for both axes. A crop larger than ``cell`` always shrinks;
+    a crop smaller than ``cell`` only grows when ``upscale_small`` is true,
+    using ``resample_method`` (``OutputProfile.upscale_small``/
+    ``upscale_method``, M1) -- otherwise it keeps its native size, anchored
+    inside the cell. ``stage`` names the caller's stage in progress events
+    -- ``hd_runner`` passes ``"hd"`` so its per-frame progress does not
+    report as ``"stabilize"``.
     """
     if anchor not in ANCHORS:
         raise ValueError(f"Unknown anchor {anchor!r}; use one of {ANCHORS}")
@@ -125,6 +148,7 @@ def crop_and_pad(frames: Sequence[Path], out_dir: Path, bbox: Rect, cell: Size,
     cw, ch = cell
     if cw < 1 or ch < 1:
         raise ValueError(f"cell must be positive, got {cell}")
+    resample = _resample_filter(resample_method)
     written: List[Path] = []
     total = len(frames)
     for index, path in enumerate(frames, start=1):
@@ -134,9 +158,9 @@ def crop_and_pad(frames: Sequence[Path], out_dir: Path, bbox: Rect, cell: Size,
         # Expand by pad on a transparent canvas so the crop never reads outside the image.
         crop = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), (0, 0, 0, 0))
         crop.paste(rgba.crop((x, y, x + w, y + h)), (pad, pad))
-        target = fit_size(crop.size, cell)
+        target = fit_size(crop.size, cell, allow_upscale=upscale_small)
         if target != crop.size:
-            crop = crop.resize(target, Image.Resampling.LANCZOS)
+            crop = crop.resize(target, resample)
         canvas = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
         canvas.paste(crop, anchor_offset(anchor, crop.size, cell))
         dest = out_dir / path.name

@@ -176,6 +176,36 @@ def test_pipeline_runs_external_frames_through_hd(tmp_path, alpha_frames):
     assert any(e[0] == "hd" and e[3].startswith("hd:") for e in events[hd_running_at:])
 
 
+def test_hd_runner_honours_upscale_small_and_upscale_method(tmp_path, alpha_frames):
+    """M1 regression: hd_runner ignored OutputProfile.upscale_small/upscale_method,
+    always upscaling a crop smaller than the hd cell with LANCZOS."""
+    from core.sprite.stabilize import union_alpha_bbox
+
+    project, action = _project(tmp_path)
+    project.stabilize.pad_px = 0
+    project.profiles[0].cell_size = (200, 200)  # far larger than the stabilized crop
+    import_png_sequence(alpha_frames, stage_dir(project, action, "extract"))
+    register_external_frames(project, action)
+
+    project.profiles[0].upscale_small = False
+    out = run_pipeline(project, action, upto="hd")
+    with Image.open(out["stabilize"][0]) as stab:
+        # No pad_px, so the stabilize crop is the tight union bbox (90x24).
+        assert stab.size == (90, 24)
+    # upscale_small=False: content across all frames keeps its native
+    # (stabilized) footprint instead of being enlarged to fill the cell.
+    _, _, w, h = union_alpha_bbox(out["hd"])
+    assert (w, h) == (90, 24)
+
+    project.profiles[0].upscale_small = True
+    out = run_pipeline(project, action, upto="hd", force=True)
+    # upscale_small=True: content is scaled up (one factor for both axes)
+    # until it fills the 200x200 cell on at least one axis.
+    _, _, w, h = union_alpha_bbox(out["hd"])
+    assert w == 200 or h == 200
+    assert (w, h) != (90, 24)
+
+
 def test_imported_frames_without_registration_count_as_extracted(tmp_path, alpha_frames):
     """G9 entry contract: a populated extract dir and no clip means extract is done."""
     project, action = _project(tmp_path)

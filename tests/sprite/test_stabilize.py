@@ -33,6 +33,13 @@ def test_fit_size_never_distorts():
     assert fit_size((100, 50), (50, 50)) == (50, 25)
 
 
+def test_fit_size_caps_the_scale_at_one_when_upscale_is_disallowed():
+    """M1: OutputProfile.upscale_small=False keeps small content at its native size."""
+    assert fit_size((24, 24), (48, 48), allow_upscale=False) == (24, 24)
+    # Downscaling is unaffected -- the flag only caps growth, never shrinking.
+    assert fit_size((90, 24), (48, 48), allow_upscale=False) == (48, 13)
+
+
 @pytest.mark.parametrize("anchor,expected", [
     ("bottom_center", (12, 40)), ("center", (12, 20)), ("top_left", (0, 0)),
     ("top_center", (12, 0)), ("bottom_left", (0, 40)),
@@ -72,6 +79,49 @@ def test_crop_and_pad_identity_when_cell_equals_crop(tmp_path, alpha_frames):
         assert im.size == cell
         assert im.getpixel((2, 2)) == src.getpixel((8, 20))
         assert im.getpixel((0, 0)) == (0, 0, 0, 0)
+
+
+def test_crop_and_pad_keeps_native_size_when_upscale_small_is_false(tmp_path, alpha_frames):
+    """M1: a crop smaller than the cell is not enlarged when upscale_small=False."""
+    bbox = (8, 20, 24, 24)  # frame 0's square, smaller than the 48x48 cell
+    out = crop_and_pad([alpha_frames[0]], tmp_path / "cells", bbox, (48, 48),
+                       anchor="top_left", upscale_small=False)
+    with Image.open(out[0]) as im:
+        assert im.size == (48, 48)
+        alpha = im.getchannel("A")
+        solid = alpha.point(lambda v: 255 if v >= 128 else 0).getbbox()
+        assert solid == (0, 0, 24, 24)  # native size, anchored at top-left, not upscaled
+
+
+def test_crop_and_pad_upscale_small_true_still_grows_with_the_default_lanczos(tmp_path, alpha_frames):
+    bbox = (8, 20, 24, 24)
+    out = crop_and_pad([alpha_frames[0]], tmp_path / "cells", bbox, (48, 48),
+                       anchor="top_left", upscale_small=True)
+    with Image.open(out[0]) as im:
+        alpha = im.getchannel("A")
+        solid = alpha.point(lambda v: 255 if v >= 128 else 0).getbbox()
+        assert solid[2] - solid[0] == 48 and solid[3] - solid[1] == 48  # upscaled to fill the cell
+
+
+def test_crop_and_pad_resample_method_is_honoured(tmp_path, alpha_frames):
+    """M1: upscale_method picks the PIL resampling filter; nearest keeps hard
+    edges (binary alpha) where lanczos introduces intermediate alpha values.
+
+    The bbox pads well past the 24x24 square (frame 0's square sits at
+    x=8..32, y=20..44) so the crop has a real alpha edge inside it to
+    resample -- a bbox tight to the square's own bounds would leave a
+    solid-alpha crop with nothing at its interior for the filters to differ on.
+    """
+    bbox = (0, 0, 48, 48)
+    out_nearest = crop_and_pad([alpha_frames[0]], tmp_path / "nearest", bbox, (96, 96),
+                               anchor="top_left", upscale_small=True, resample_method="nearest")
+    out_lanczos = crop_and_pad([alpha_frames[0]], tmp_path / "lanczos", bbox, (96, 96),
+                               anchor="top_left", upscale_small=True, resample_method="lanczos")
+    with Image.open(out_nearest[0]) as im_near, Image.open(out_lanczos[0]) as im_lz:
+        near_values = set(im_near.getchannel("A").getdata())
+        lz_values = set(im_lz.getchannel("A").getdata())
+        assert near_values <= {0, 255}
+        assert any(0 < v < 255 for v in lz_values)
 
 
 def test_crop_and_pad_cancel_and_validation(tmp_path, alpha_frames):
