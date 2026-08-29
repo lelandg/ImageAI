@@ -5,11 +5,26 @@ retryable errors with exponential backoff, never retries a safety refusal,
 runs the processing pipeline up to ``stabilize`` after each clip, writes a
 ``CostEntry`` row per rendered clip, and honors the cancel token between
 jobs, inside jobs (through ``render_action``), and during backoff waits.
+
+Thread-safety: ``run()`` is meant to execute on a worker thread (5a's
+``SpriteWorker`` QThread) while ``enqueue``/``retry`` are called from the GUI
+thread. A ``threading.RLock`` guards every read-modify-write sequence around
+``pending``, ``results``, and an action's ``status``/``error``/``clip``
+fields; it is never held across a provider call (``render_action``) or a
+pipeline run, so a slow render never blocks the GUI thread from enqueuing
+more work.
+
+A ``Cancelled`` raised while an action has no clip yet puts the action back
+at the head of ``pending`` with ``status = "queued"`` so it is picked up
+again automatically; a ``Cancelled`` raised after the clip exists (e.g. the
+post-render pipeline stage) leaves the action ``"rendered"`` and does not
+re-queue it, since the clip is already saved.
 """
 import logging
+import threading
 import time
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from core.sprite.generation._common import emit
 from core.sprite.generation.cost import record_actual
@@ -53,6 +68,7 @@ class ActionQueue:
         self.pending: List[str] = []
         self.results: QueueResult = {}
         self._sleep: Callable[[float], None] = time.sleep
+        self._lock = threading.RLock()
 
     # -- lookup / requests ---------------------------------------------------
 
@@ -86,14 +102,16 @@ class ActionQueue:
         # Look up every id first so an unknown id raises before anything is
         # mutated: enqueue([valid, invalid]) leaves the valid card untouched.
         actions = [self._action(action_id) for action_id in action_ids]
-        for action_id, action in zip(action_ids, actions):
-            action.status = "queued"
-            action.error = None
-            self.results.pop(action_id, None)
-            if action_id not in self.pending:
-                self.pending.append(action_id)
-        names = ", ".join(self._action(i).name for i in self.pending)
-        emit(logger, self.log, f"Queue: {len(self.pending)} action(s) queued: {names}")
+        with self._lock:
+            for action_id, action in zip(action_ids, actions):
+                action.status = "queued"
+                action.error = None
+                self.results.pop(action_id, None)
+                if action_id not in self.pending:
+                    self.pending.append(action_id)
+            names = ", ".join(self._action(i).name for i in self.pending)
+            count = len(self.pending)
+        emit(logger, self.log, f"Queue: {count} action(s) queued: {names}")
 
     def retry(self, action_id: str) -> None:
         self.enqueue([action_id])
@@ -101,44 +119,77 @@ class ActionQueue:
     def _cancelled(self) -> bool:
         return self.token is not None and self.token.cancelled
 
-    def run(self) -> QueueResult:
-        """Render every pending card in order. Returns results for cards it touched."""
-        while self.pending:
+    def _pop_next(self) -> Optional[Tuple[str, ActionCard]]:
+        """Atomically check-cancel and pop the next pending id, if any.
+
+        Runs under the lock so a concurrent ``enqueue`` from another thread
+        can never interleave with the pop/status-set sequence.
+        """
+        with self._lock:
             if self._cancelled():
                 emit(logger, self.log, f"Queue cancelled; {len(self.pending)} action(s) stay queued",
                      level="warning")
-                break
+                return None
+            if not self.pending:
+                return None
             action_id = self.pending.pop(0)
             action = self._action(action_id)
             action.status = "rendering"
             action.error = None
+            return action_id, action
+
+    def run(self) -> QueueResult:
+        """Render every pending card in order. Returns results for cards it touched."""
+        while True:
+            popped = self._pop_next()
+            if popped is None:
+                break
+            action_id, action = popped
             try:
+                # Provider call and pipeline run happen with the lock released
+                # so a slow render never blocks a concurrent enqueue().
                 record = self._render_with_retries(action)
-                action.clip = record
-                action.status = "rendered"
+                with self._lock:
+                    action.clip = record
+                    action.status = "rendered"
                 entry = record_actual(self.project, action, None, note="rendered")
                 emit(logger, self.log, f"Cost: '{action.name}' estimated ${entry.estimated_usd} "
                                        f"({entry.seconds:.0f}s {entry.provider}/{entry.model})")
-                self.results[action_id] = record
+                with self._lock:
+                    self.results[action_id] = record
                 self._post_process(action)
             except Cancelled as exc:
-                if action.clip is None:
-                    action.status = "draft"
-                    action.error = f"cancelled: {exc}"
-                    self.results[action_id] = ProviderError(
-                        f"Render of '{action.name}' was cancelled. {exc}", retryable=True)
+                requeue_count: Optional[int] = None
+                with self._lock:
+                    if action.clip is None:
+                        # No clip yet: put the card back where it can be
+                        # picked up again instead of dropping it silently.
+                        action.status = "queued"
+                        action.error = f"cancelled: {exc}"
+                        self.pending.insert(0, action_id)
+                        self.results[action_id] = ProviderError(
+                            f"Render of '{action.name}' was cancelled. {exc}", retryable=True)
+                        requeue_count = len(self.pending)
+                    else:
+                        # The clip already exists (e.g. cancelled during the
+                        # post-render pipeline stage); nothing to re-queue.
+                        action.error = f"cancelled after render: {exc}"
+                if requeue_count is not None:
+                    emit(logger, self.log, f"Queue cancelled; {requeue_count} action(s) stay queued",
+                         level="warning")
                 else:
-                    action.error = f"cancelled after render: {exc}"
-                emit(logger, self.log, f"Queue stopped: {exc}", level="warning")
+                    emit(logger, self.log, f"Queue stopped: {exc}", level="warning")
                 self._save()
                 break
             except SpriteGenerationError as err:
-                action.status = "failed"
-                action.error = err.user_message
-                self.results[action_id] = err
+                with self._lock:
+                    action.status = "failed"
+                    action.error = err.user_message
+                    self.results[action_id] = err
                 emit(logger, self.log, f"'{action.name}' failed: {err.user_message}", level="error")
             self._save()
-        return dict(self.results)
+        with self._lock:
+            return dict(self.results)
 
     # -- internals -----------------------------------------------------------
 

@@ -1,4 +1,5 @@
 """Tests for core/sprite/generation/queue.py (batch queue, G6 retries, G2 cancel)."""
+import threading
 from pathlib import Path
 
 import pytest
@@ -165,7 +166,9 @@ def test_cancel_before_run_leaves_actions_queued(harness):
     assert q.pending == ["a1", "a2"]
 
 
-def test_cancel_inside_job_stops_queue_and_keeps_card_reusable(harness):
+def test_cancel_inside_job_stops_queue_and_requeues_card(harness):
+    """I3: a mid-render cancel (no clip yet) puts the card back at the head
+    of ``pending`` with status ``"queued"`` instead of dropping it."""
     token = CancelToken()
     project, q = harness["build"](token=token)
     harness["outcomes"] = [Cancelled("render of 'walk' cancelled; omni operation int-9 keeps running")]
@@ -175,8 +178,12 @@ def test_cancel_inside_job_stops_queue_and_keeps_card_reusable(harness):
     assert isinstance(results["a1"], ProviderError) and results["a1"].retryable is True
     assert "int-9" in results["a1"].user_message
     walk, run = project.actions
-    assert walk.status == "draft" and "int-9" in walk.error
-    assert run.status == "queued" and q.pending == ["a2"]
+    assert walk.status == "queued" and "int-9" in walk.error
+    assert run.status == "queued"
+    # a1 is back at the head of pending -- its original enqueue order --
+    # and the "stay queued" count includes it.
+    assert q.pending == ["a1", "a2"]
+    assert any("2 action(s) stay queued" in line for line in harness["logs"])
     assert harness["saves"] == 1
 
 
@@ -189,7 +196,8 @@ def test_cancel_during_backoff_stops_before_next_try(harness):
     results = q.run()
     assert len(harness["renders"]) == 1
     assert isinstance(results["a1"], ProviderError)
-    assert project.actions[0].status == "draft"
+    assert project.actions[0].status == "queued"
+    assert q.pending == ["a1"]
 
 
 def test_cancel_during_backoff_stops_within_one_slice(harness):
@@ -208,7 +216,8 @@ def test_cancel_during_backoff_stops_within_one_slice(harness):
     results = q.run()
     assert len(harness["renders"]) == 1
     assert isinstance(results["a1"], ProviderError)
-    assert project.actions[0].status == "draft"
+    assert project.actions[0].status == "queued"
+    assert q.pending == ["a1"]
     assert sum(harness["sleeps"]) < 0.5
 
 
@@ -277,3 +286,43 @@ def test_max_concurrent_is_logged_and_ignored(harness):
     q = ActionQueue(project, api_key="k", auth_mode="api-key", log=logs.append, max_concurrent=4)
     assert q.max_concurrent == 1
     assert any("max_concurrent" in line for line in logs)
+
+
+def test_enqueue_from_another_thread_while_run_is_mid_job(harness, make_action, monkeypatch):
+    """I2 regression: 5a calls ``enqueue`` from the GUI thread while ``run``
+    executes on a worker thread. The queue's pending/results/status
+    read-modify-write sequences must not corrupt under that interleaving."""
+    project, q = harness["build"](actions=[make_action(id="a1", name="walk")])
+    started = threading.Event()
+    release = threading.Event()
+
+    def blocking_render(req, *, api_key, auth_mode, progress, token, log):
+        started.set()
+        assert release.wait(timeout=5), "test deadlocked waiting for release"
+        return _record(req)
+
+    monkeypatch.setattr(queue_mod, "render_action", blocking_render)
+
+    q.enqueue(["a1"])
+    run_results = {}
+
+    def _run():
+        run_results.update(q.run())
+
+    runner = threading.Thread(target=_run)
+    runner.start()
+    assert started.wait(timeout=5), "render did not start on the worker thread"
+
+    # Enqueue a second card from the "GUI thread" while a1 is mid-render.
+    project.actions.append(make_action(id="a2", name="run"))
+    q.enqueue(["a2"])
+
+    release.set()
+    runner.join(timeout=5)
+    assert not runner.is_alive(), "worker thread did not finish"
+
+    assert set(run_results) == {"a1", "a2"}
+    assert all(isinstance(r, ClipRecord) for r in run_results.values())
+    assert project.actions[0].status == "rendered"
+    assert project.actions[1].status == "rendered"
+    assert q.pending == []
