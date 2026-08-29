@@ -325,6 +325,35 @@ def test_sync_frames_keeps_user_edits_by_index(tmp_path, alpha_frames):
     assert action.frames[2].duration_ms == round(1000 / 12)
 
 
+def test_a_cleared_frame_list_is_rebuilt_from_a_cached_stabilize_stage(tmp_path, alpha_frames):
+    """M6 regression: a project whose action.frames was cleared (or hand-edited)
+    must not stay frameless forever just because the stabilize cache is current."""
+    project, action = _project(tmp_path)
+    import_png_sequence(alpha_frames, stage_dir(project, action, "extract"))
+    register_external_frames(project, action)
+    run_pipeline(project, action, upto="stabilize")
+    assert len(action.frames) == 12
+
+    action.frames = []  # simulate a hand-edited project file
+    messages = []
+    run_pipeline(project, action, upto="stabilize", progress=lambda s, d, t, m: messages.append(m))
+    assert "stabilize: cached" in messages and "stabilize: running" not in messages
+    assert len(action.frames) == 12
+    assert action.frames[0].name == "walk_00"
+
+
+def test_a_non_empty_frame_list_is_left_alone_by_a_cached_stabilize_stage(tmp_path, alpha_frames):
+    """M6: user deletions must survive a cache hit -- only an empty list rebuilds."""
+    project, action = _project(tmp_path)
+    import_png_sequence(alpha_frames, stage_dir(project, action, "extract"))
+    register_external_frames(project, action)
+    run_pipeline(project, action, upto="stabilize")
+    del action.frames[3]  # a user deletion
+    assert len(action.frames) == 11
+    run_pipeline(project, action, upto="stabilize")
+    assert len(action.frames) == 11
+
+
 def test_cancel_stops_between_frames(tmp_path, alpha_frames):
     project, action = _project(tmp_path)
     import_png_sequence(alpha_frames, stage_dir(project, action, "extract"))

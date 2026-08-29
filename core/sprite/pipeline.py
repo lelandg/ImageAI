@@ -425,6 +425,13 @@ def run_pipeline(project: SpriteProject, action: ActionCard, *, upto: str = "pix
         out_dir = stage_dir(project, action, stage)
         if not force and is_stage_current(project, action, stage):
             outputs[stage] = list_frames(out_dir)
+            if stage == "stabilize" and not action.frames:
+                # A project whose frames list was cleared (or hand-edited)
+                # would otherwise stay frameless forever, since a cached
+                # stage never reaches the _sync_frames call below (M6).
+                # Only the empty case rebuilds -- a non-empty list is left
+                # alone so user deletions are never undone by a cache hit.
+                _sync_frames(action, outputs[stage])
             progress(stage, 0, 0, f"{stage}: cached")
             continue
         upstream = UPSTREAM[stage]
