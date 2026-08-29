@@ -2,7 +2,14 @@
 
 Route A of the sprite pipeline. ``render_action`` dispatches on
 ``GenerationSettings.provider`` and returns a ``ClipRecord`` with a sidecar.
+
+The ``core.video`` clients (and the ``google.genai`` SDK they import) are
+loaded lazily, inside the functions that need them, so importing this
+package does not pull ``google.genai`` (or Qt) into a process that never
+renders a clip — see ``test_import_does_not_load_cloud_video_clients``.
 """
+from __future__ import annotations
+
 import logging
 import os
 import shutil
@@ -10,7 +17,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image
@@ -23,8 +30,10 @@ from core.sprite.generation.prompts import inject_chroma, strip_render_terms
 from core.sprite.pipeline import CancelToken, Cancelled, ProgressFn, no_progress
 from core.sprite.project import ActionCard, ClipRecord, ExtractionSettings, GenerationSettings
 from core.sprite.timing import snap_duration
-from core.video.omni_client import OmniClient, OmniGenerationConfig
-from core.video.veo_client import VeoClient, VeoGenerationConfig, VeoModel
+
+if TYPE_CHECKING:
+    from core.video.omni_client import OmniClient, OmniGenerationConfig
+    from core.video.veo_client import VeoClient, VeoGenerationConfig, VeoModel
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +58,7 @@ def omni_prompt(req: RenderRequest, duration_s: int) -> str:
 def build_omni_config(req: RenderRequest, *,
                       log: Callable[[str], None] = logger.info) -> OmniGenerationConfig:
     """Omni config: plate first, then turnaround refs, capped at three."""
+    from core.video.omni_client import OmniClient, OmniGenerationConfig
     duration = snap_duration(req.action.duration_s, "omni", req.settings.model)
     if duration != req.action.duration_s:
         emit(logger, log, f"Omni: duration {req.action.duration_s}s snapped to {duration}s "
@@ -72,6 +82,7 @@ def build_omni_config(req: RenderRequest, *,
 def build_veo_config(req: RenderRequest, *,
                      log: Callable[[str], None] = logger.info) -> VeoGenerationConfig:
     """Veo config. Loop conditioning sets image=last_frame=plate and forces 8 s."""
+    from core.video.veo_client import VeoClient, VeoGenerationConfig, VeoModel
     model_id = req.settings.model or VeoModel.VEO_3_1_GENERATE.value
     try:
         model = VeoModel(model_id)
@@ -119,10 +130,12 @@ def build_veo_config(req: RenderRequest, *,
 # --- clients (module-level so tests can substitute them) ----------------------
 
 def _make_omni_client(api_key: Optional[str]) -> OmniClient:
+    from core.video.omni_client import OmniClient
     return OmniClient(api_key=api_key)
 
 
 def _make_veo_client(api_key: Optional[str], auth_mode: str) -> VeoClient:
+    from core.video.veo_client import VeoClient
     if auth_mode == "gcloud":
         return VeoClient(auth_mode="gcloud", project_id=os.environ.get("GOOGLE_CLOUD_PROJECT"))
     return VeoClient(api_key=api_key, auth_mode="api-key")
@@ -292,6 +305,7 @@ def refine_action(clip: ClipRecord, instruction: str, out_mp4: Path, *,
                   api_key: Optional[str],
                   log: Callable[[str], None] = logger.info) -> ClipRecord:
     """Conversational edit of an Omni clip via ``previous_interaction_id``."""
+    from core.video.omni_client import OmniGenerationConfig
     if (clip.provider or "").lower() != "omni":
         raise ProviderError("Refine works only for Omni clips. Re-render Veo clips instead.")
     if not clip.operation_id:
