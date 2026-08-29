@@ -11,7 +11,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional, Tuple, Union, Callable
 from dataclasses import dataclass
 from enum import Enum
 import hashlib
@@ -151,6 +151,13 @@ class VeoGenerationResult:
             self.metadata = {}
 
 
+class VeoPollCancelled(Exception):
+    """Raised inside the poll loop when ``cancel_check`` returns True.
+
+    The remote operation keeps running; the caller keeps the operation id.
+    """
+
+
 class VeoClient:
     """Client for Google Veo API video generation"""
     
@@ -198,6 +205,7 @@ class VeoClient:
         self.project_id = project_id
         self.region = region or self._detect_region()
         self.logger = logging.getLogger(__name__)
+        self.poll_interval = 10  # Google docs recommend 10-second polling
         self.client = None
 
         # Initialize client based on auth mode
@@ -322,25 +330,33 @@ class VeoClient:
         
         return True, None
     
-    async def generate_video_async(self, config: VeoGenerationConfig) -> VeoGenerationResult:
+    async def generate_video_async(self, config: VeoGenerationConfig,
+                                   cancel_check: Optional[Callable[[], bool]] = None
+                                   ) -> VeoGenerationResult:
         """
         Generate video asynchronously using Veo API.
-        
+
         Args:
             config: Generation configuration
-            
+
         Returns:
             Generation result
         """
         result = VeoGenerationResult()
-        
+
         # Validate configuration
         is_valid, error = self.validate_config(config)
         if not is_valid:
             result.success = False
             result.error = error
             return result
-        
+
+        if cancel_check is not None and cancel_check():
+            result.success = False
+            result.error = "cancelled"
+            self.logger.info("Veo generation cancelled before the request was sent")
+            return result
+
         try:
             start_time = time.time()
 
@@ -569,7 +585,8 @@ class VeoClient:
             constraints = self.MODEL_CONSTRAINTS[config.model]
             max_wait = 480  # 8 minutes
 
-            video_result = await self._poll_for_completion(response, max_wait)
+            video_result = await self._poll_for_completion(response, max_wait,
+                                                           cancel_check=cancel_check)
 
             if video_result:
                 # Handle both URL (str) and raw bytes (bytes) responses
@@ -602,14 +619,20 @@ class VeoClient:
             result.generation_time = time.time() - start_time
             self.logger.info(f"Generation completed in {result.generation_time:.1f} seconds")
             
+        except VeoPollCancelled:
+            result.success = False
+            result.error = "cancelled"
+            self.logger.info(f"Veo generation cancelled by the caller; operation "
+                             f"{result.operation_id} keeps running remotely")
         except Exception as e:
             self.logger.error(f"Veo generation failed: {e}")
             result.success = False
             result.error = str(e)
-        
+
         return result
-    
-    def generate_video(self, config: VeoGenerationConfig) -> VeoGenerationResult:
+
+    def generate_video(self, config: VeoGenerationConfig,
+                       cancel_check: Optional[Callable[[], bool]] = None) -> VeoGenerationResult:
         """
         Generate video synchronously (blocking).
 
@@ -623,7 +646,7 @@ class VeoClient:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(self.generate_video_async(config))
+            return loop.run_until_complete(self.generate_video_async(config, cancel_check=cancel_check))
         finally:
             loop.close()
 
@@ -790,7 +813,9 @@ class VeoClient:
         finally:
             loop.close()
 
-    async def _poll_for_completion(self, operation: Any, max_wait: int) -> Optional[Union[str, bytes]]:
+    async def _poll_for_completion(self, operation: Any, max_wait: int,
+                                   cancel_check: Optional[Callable[[], bool]] = None
+                                   ) -> Optional[Union[str, bytes]]:
         """
         Poll for video generation completion using official Google API pattern.
 
@@ -802,7 +827,7 @@ class VeoClient:
             Video URL if successful, None otherwise
         """
         start_time = time.time()
-        poll_interval = 10  # Google docs recommend 10 second intervals
+        poll_interval = getattr(self, "poll_interval", 10)
         poll_count = 0
 
         self.logger.info(f"Starting to poll for completion (max wait: {max_wait}s)")
@@ -810,6 +835,10 @@ class VeoClient:
 
         while time.time() - start_time < max_wait:
             try:
+                if cancel_check is not None and cancel_check() and not operation.done:
+                    self.logger.info(f"Poll cancelled by the caller; operation {operation.name} "
+                                     f"keeps running remotely")
+                    raise VeoPollCancelled(operation.name)
                 elapsed = time.time() - start_time
                 poll_count += 1
 
@@ -890,11 +919,13 @@ class VeoClient:
 
                 # Not done yet - wait and refresh operation status
                 self.logger.debug(f"Poll #{poll_count}: Operation not done yet, waiting {poll_interval}s...")
-                await asyncio.sleep(poll_interval)
+                await self._sleep_with_cancel(poll_interval, cancel_check)
 
                 # Refresh operation status (official Google pattern)
                 operation = self.client.operations.get(operation)
 
+            except VeoPollCancelled:
+                raise
             except Exception as e:
                 self.logger.error(f"Error polling for completion: {e}", exc_info=True)
                 return None
@@ -902,7 +933,19 @@ class VeoClient:
         total_elapsed = time.time() - start_time
         self.logger.warning(f"❌ Generation timed out after {total_elapsed:.1f} seconds ({poll_count} polls, max: {max_wait}s)")
         return None
-    
+
+    async def _sleep_with_cancel(self, seconds: float,
+                                 cancel_check: Optional[Callable[[], bool]]) -> None:
+        """Sleep ``seconds`` in 1-second slices so a cancel is seen quickly."""
+        end = time.time() + seconds
+        while True:
+            if cancel_check is not None and cancel_check():
+                raise VeoPollCancelled()
+            remaining = end - time.time()
+            if remaining <= 0:
+                return
+            await asyncio.sleep(min(1.0, remaining))
+
     async def _download_video(self, video_url: str) -> Optional[Path]:
         """
         Download video from URL to local storage with authentication.

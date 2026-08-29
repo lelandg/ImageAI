@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.llm_models import resolve_model
 
@@ -204,6 +204,13 @@ class OmniGenerationResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+class OmniPollCancelled(Exception):
+    """Raised inside the poll loop when ``cancel_check`` returns True.
+
+    The remote interaction keeps running; the caller keeps the interaction id.
+    """
+
+
 class OmniClient:
     """Client for Gemini Omni video generation via the Interactions API."""
 
@@ -257,7 +264,9 @@ class OmniClient:
         return True, None
 
     async def generate_video_async(self, config: OmniGenerationConfig,
-                                   output_path: Path) -> OmniGenerationResult:
+                                   output_path: Path,
+                                   cancel_check: Optional[Callable[[], bool]] = None
+                                   ) -> OmniGenerationResult:
         """Generate (or conversationally edit) a video with Gemini Omni.
 
         Args:
@@ -283,6 +292,12 @@ class OmniClient:
             self.logger.error(result.error)
             return result
 
+        if cancel_check is not None and cancel_check():
+            result.success = False
+            result.error = "cancelled"
+            self.logger.info("Omni generation cancelled before the request was sent")
+            return result
+
         try:
             video_uri = None
             if config.input_video is not None:
@@ -305,9 +320,11 @@ class OmniClient:
             interaction = await asyncio.to_thread(
                 self.client.interactions.create, **kwargs
             )
-
-            interaction = await self._await_terminal(interaction)
+            # Record the id before polling so a cancel keeps it.
             result.interaction_id = getattr(interaction, "id", None)
+
+            interaction = await self._await_terminal(interaction, cancel_check=cancel_check)
+            result.interaction_id = getattr(interaction, "id", None) or result.interaction_id
             status = getattr(interaction, "status", None)
             self.logger.info(f"Omni interaction {result.interaction_id} status={status}")
 
@@ -357,6 +374,12 @@ class OmniClient:
                 f"{result.generation_time:.1f}s"
             )
 
+        except OmniPollCancelled:
+            result.success = False
+            result.error = "cancelled"
+            result.generation_time = time.time() - start_time
+            self.logger.info(f"Omni generation cancelled by the caller; interaction "
+                             f"{result.interaction_id} keeps running remotely")
         except Exception as e:
             result.success = False
             result.error = str(e)
@@ -365,18 +388,26 @@ class OmniClient:
 
         return result
 
-    def generate_video(self, config: OmniGenerationConfig,
-                        output_path: Path) -> OmniGenerationResult:
+    def generate_video(self, config: OmniGenerationConfig, output_path: Path,
+                       cancel_check: Optional[Callable[[], bool]] = None
+                       ) -> OmniGenerationResult:
         """Synchronous wrapper around :meth:`generate_video_async`."""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(self.generate_video_async(config, output_path))
+            return loop.run_until_complete(
+                self.generate_video_async(config, output_path, cancel_check=cancel_check))
         finally:
             loop.close()
 
-    async def _await_terminal(self, interaction: Any) -> Any:
-        """Poll ``interactions.get`` until the interaction reaches a terminal state."""
+    async def _await_terminal(self, interaction: Any,
+                              cancel_check: Optional[Callable[[], bool]] = None) -> Any:
+        """Poll ``interactions.get`` until the interaction reaches a terminal state.
+
+        Raises ``OmniPollCancelled`` when ``cancel_check`` returns True while
+        the interaction is still running. A finished interaction is returned
+        even if the check fires afterwards.
+        """
         status = getattr(interaction, "status", None)
         if status in _TERMINAL_STATUSES:
             return interaction
@@ -387,7 +418,11 @@ class OmniClient:
 
         deadline = time.time() + self.timeout
         while time.time() < deadline:
-            await asyncio.sleep(self.polling_interval)
+            if cancel_check is not None and cancel_check():
+                self.logger.info(f"Omni poll cancelled by the caller; interaction "
+                                 f"{interaction_id} keeps running remotely")
+                raise OmniPollCancelled(interaction_id)
+            await self._sleep_with_cancel(self.polling_interval, cancel_check)
             try:
                 interaction = await asyncio.to_thread(
                     self.client.interactions.get, interaction_id
@@ -404,6 +439,18 @@ class OmniClient:
             f"Omni interaction {interaction_id} did not finish within {self.timeout}s"
         )
         return interaction
+
+    async def _sleep_with_cancel(self, seconds: float,
+                                 cancel_check: Optional[Callable[[], bool]]) -> None:
+        """Sleep ``seconds`` in 1-second slices so a cancel is seen quickly."""
+        end = time.time() + seconds
+        while True:
+            if cancel_check is not None and cancel_check():
+                raise OmniPollCancelled()
+            remaining = end - time.time()
+            if remaining <= 0:
+                return
+            await asyncio.sleep(min(1.0, remaining))
 
     async def _upload_video(self, path: Path) -> str:
         """Upload a video via the Files API and wait until it is ACTIVE.
