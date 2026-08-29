@@ -187,6 +187,13 @@ def test_export_png_sequence_puts_untagged_frames_last(tmp_path):
     assert [p.name for p in out][-2:] == ["untagged_01.png", "untagged_02.png"]
 
 
+def test_export_png_sequence_rejects_collision_prone_template(tmp_path):
+    meta = _meta(tmp_path)
+    with pytest.raises(ValueError, match="duplicate filename"):
+        export_png_sequence(meta, tmp_path / "seq", template="{tag}.png")
+    assert not (tmp_path / "seq").exists()
+
+
 def test_export_single_frame(tmp_path):
     meta = _meta(tmp_path)
     out = export_single_frame(meta.frames[4], tmp_path / "one" / "frame.png")

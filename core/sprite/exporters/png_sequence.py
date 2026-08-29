@@ -56,7 +56,9 @@ def export_png_sequence(meta: SheetMeta, out_dir: Path,
                         template: str = DEFAULT_TEMPLATE) -> List[Path]:
     """Write every frame as its own PNG, named per tag. Returns the paths."""
     out_dir = Path(out_dir)
-    written: List[Path] = []
+
+    # First pass: render all names and detect collisions before writing any file.
+    frame_infos: List[tuple[str, FrameMeta, str, int]] = []  # (name, frame, tag_name, index)
     covered = set()
     for tag in meta.tags:
         for tagframe, frame in enumerate(meta.frames_for(tag)):
@@ -64,13 +66,26 @@ def export_png_sequence(meta: SheetMeta, out_dir: Path,
             covered.add(index)
             name = render_frame_name(template, title=meta.title, tag=tag.name,
                                      frame=index, tagframe=tagframe)
-            written.append(_write_frame(frame, out_dir / name, {"tag": tag.name, "index": index}))
+            frame_infos.append((name, frame, tag.name, index))
+
     leftovers = [i for i in range(len(meta.frames)) if i not in covered]
     for tagframe, index in enumerate(leftovers):
         name = render_frame_name(template, title=meta.title, tag=UNTAGGED,
                                  frame=index, tagframe=tagframe)
-        written.append(_write_frame(meta.frames[index], out_dir / name,
-                                    {"tag": UNTAGGED, "index": index}))
+        frame_infos.append((name, meta.frames[index], UNTAGGED, index))
+
+    # Check for name collisions.
+    names_seen = {}
+    for name, _, _, _ in frame_infos:
+        if name in names_seen:
+            raise ValueError(f"Template '{template}' produces duplicate filename '{name}'")
+        names_seen[name] = True
+
+    # Second pass: write all frames.
+    written: List[Path] = []
+    for name, frame, tag_name, index in frame_infos:
+        written.append(_write_frame(frame, out_dir / name, {"tag": tag_name, "index": index}))
+
     logger.info(f"Wrote {len(written)} PNG frames to {out_dir}")
     return written
 
