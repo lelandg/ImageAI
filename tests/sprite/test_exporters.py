@@ -153,3 +153,43 @@ def test_texturepacker_array_has_filenames_and_animations(tmp_path):
     assert document["frames"][0]["pivot"] == {"x": 0.5, "y": 1.0}
     assert document["animations"] == {"walk": ["hero_walk_00.png", "hero_walk_01.png", "hero_walk_02.png"],
                                       "idle": ["hero_idle_00.png", "hero_idle_01.png"]}
+
+
+# --- png sequence ---------------------------------------------------------------
+from core.sprite.exporters.png_sequence import (  # noqa: E402 - grouped with the tests it serves
+    export_png_sequence,
+    export_single_frame,
+    render_frame_name,
+)
+
+
+def test_render_frame_name_fields():
+    assert render_frame_name("{title}_{tag}_{frame01}.png", title="hero", tag="walk", frame=4, tagframe=1) == "hero_walk_02.png"
+    assert render_frame_name("{tag}-{tagframe}-{frame}.png", title="h", tag="idle", frame=4, tagframe=1) == "idle-1-4.png"
+    assert render_frame_name("{title}/{tag}.png", title="a b", tag="x", frame=0, tagframe=0) == "a_b_x.png"
+
+
+def test_export_png_sequence_writes_per_tag_files_with_sidecars(tmp_path):
+    meta = _meta(tmp_path)
+    out = export_png_sequence(meta, tmp_path / "seq")
+    names = [p.name for p in out]
+    assert names == ["hero_walk_01.png", "hero_walk_02.png", "hero_walk_03.png", "hero_idle_01.png", "hero_idle_02.png"]
+    for path in out:
+        assert path.with_name(path.name + ".json").exists()
+    sidecar = json.loads((tmp_path / "seq" / "hero_idle_01.png.json").read_text())
+    assert sidecar["tag"] == "idle" and sidecar["index"] == 3 and sidecar["duration_ms"] == 200
+
+
+def test_export_png_sequence_puts_untagged_frames_last(tmp_path):
+    meta = _meta(tmp_path)
+    meta.tags = meta.tags[:1]
+    out = export_png_sequence(meta, tmp_path / "seq", template="{tag}_{frame01}.png")
+    assert [p.name for p in out][-2:] == ["untagged_01.png", "untagged_02.png"]
+
+
+def test_export_single_frame(tmp_path):
+    meta = _meta(tmp_path)
+    out = export_single_frame(meta.frames[4], tmp_path / "one" / "frame.png")
+    assert out.exists() and out.with_name("frame.png.json").exists()
+    with Image.open(out) as im:
+        assert im.size == (16, 16) and im.mode == "RGBA"
