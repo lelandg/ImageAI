@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 GROUP_CONTENTS = {
     Group.IMAGES: [
         "generated", "images", "composites", "styles", "Characters",
-        "Fonts", "midjourney_web_cache", "midjourney_web_storage",
+        "Fonts", "midjourney_web_cache", "midjourney_web_storage", "sprites",
     ],
     Group.VIDEO: ["video_projects"],
     Group.MODELS: ["musetalk", "weights", "huggingface"],
@@ -61,7 +61,9 @@ LEGACY_IMAGEAI_NAME = "legacy_imageai"
 
 # Loose files that move with the Settings group. config.json is deliberately
 # absent: it records where every other group lives, so it can never move.
-SETTINGS_FILES = ("details.jsonl", "batch_jobs.json", "video_config.json")
+SETTINGS_FILES = (
+    "details.jsonl", "batch_jobs.json", "video_config.json", "sprite_configs.json",
+)
 SETTINGS_GLOBS = ("*_history.json", "*_session.json", "*_history.backup_*.json")
 
 # Safety margin above the measured source size, in bytes.

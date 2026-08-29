@@ -224,6 +224,10 @@ class DataPaths:
     def midjourney_storage(self) -> Path:
         return self.root(Group.IMAGES) / "midjourney_web_storage"
 
+    def sprite_projects(self) -> Path:
+        """Sprite projects: intermediates and exports, a sibling of generated/."""
+        return self.root(Group.IMAGES) / "sprites"
+
     # -- Video -------------------------------------------------------------
 
     def video_projects(self) -> Path:
@@ -277,6 +281,10 @@ class DataPaths:
 
     def details(self) -> Path:
         return self.root(Group.SETTINGS) / "details.jsonl"
+
+    def sprite_configs(self) -> Path:
+        """Named sprite generation configurations (NamedConfigStore)."""
+        return self.root(Group.SETTINGS) / "sprite_configs.json"
 
     # -- Fixed -------------------------------------------------------------
 
