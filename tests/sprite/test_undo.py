@@ -30,6 +30,21 @@ def test_undo_returns_previous_state_and_parks_current_for_redo():
     assert stack.can_undo and not stack.can_redo
 
 
+def test_redo_then_undo_restores_the_state_before_the_first_undo():
+    """I2 regression: a second undo after a redo must not oscillate on the
+    redo target -- it has to restore the state the redo left behind."""
+    stack = SnapshotStack()
+    state_a = FrameListSnapshot.capture("a1", _frames(1), "a")
+    stack.push(state_a)
+    state_b = FrameListSnapshot.capture("a1", _frames(2), "b")
+    restored = stack.undo(state_b)
+    assert restored is state_a
+    redone = stack.redo()
+    assert redone is state_b
+    restored_again = stack.undo(redone)
+    assert restored_again is state_a
+
+
 def test_push_clears_redo():
     stack = SnapshotStack()
     stack.push(FrameListSnapshot.capture("a", _frames(1), "one"))

@@ -305,10 +305,11 @@ def extract_frames(video: Path, out_dir: Path, settings: ExtractionSettings, *,
             count = len(everything)
             if count == 0:
                 raise FFmpegError(f"ffmpeg produced no frames from {video.name}")
-            if n == 1 or count == 1:
+            n_eff = min(n, count)
+            if n_eff == 1 or count == 1:
                 picks = [0]
             else:
-                picks = sorted({int(round(i * (count - 1) / (n - 1))) for i in range(min(n, count))})
+                picks = sorted({int(round(i * (count - 1) / (n_eff - 1))) for i in range(n_eff)})
             frames = _renumber([everything[i] for i in picks], out_dir)
         finally:
             shutil.rmtree(temp, ignore_errors=True)

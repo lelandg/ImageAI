@@ -77,6 +77,25 @@ def test_extract_exact_n_of_one_keeps_the_first_frame(tmp_path, synthetic_mp4):
     assert len(result.frames) == 1
 
 
+def test_extract_exact_n_above_the_frame_count_returns_every_frame(tmp_path, synthetic_mp4):
+    """I3 regression: exact_n larger than the source's frame count must not
+    truncate into the first half of the clip -- it should keep every frame,
+    matching what estimate_frame_count already predicts (see test above,
+    exact_n=99 on a 48-frame source estimates 48)."""
+    result = extract_frames(synthetic_mp4, tmp_path / "out", ExtractionSettings(mode="exact_n", exact_n=99))
+    assert len(result.frames) == 12
+    assert [p.name for p in result.frames] == [f"{i:04d}.png" for i in range(1, 13)]
+    # The square must still advance across the full clip, not just its first half.
+    edges = []
+    for path in result.frames:
+        with Image.open(path) as im:
+            rgb = im.convert("RGB")
+            row = [rgb.getpixel((x, 32)) for x in range(112)]
+        edges.append(next(x for x, px in enumerate(row) if px[0] > 120))
+    assert edges == sorted(edges)
+    assert edges[-1] - edges[0] >= 60
+
+
 def test_extract_honours_trim(tmp_path, synthetic_mp4):
     settings = ExtractionSettings(mode="every_n", every_n=1, trim_start_s=0.25, trim_end_s=0.125)
     result = extract_frames(synthetic_mp4, tmp_path / "out", settings)

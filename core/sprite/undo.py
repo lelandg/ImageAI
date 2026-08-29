@@ -35,6 +35,7 @@ class SnapshotStack:
         self._depth = depth
         self._undo: List[FrameListSnapshot] = []
         self._redo: List[FrameListSnapshot] = []
+        self._restored: Optional[FrameListSnapshot] = None
 
     def push(self, snap: FrameListSnapshot) -> None:
         """Record the state *before* a destructive edit. Clears redo."""
@@ -42,20 +43,29 @@ class SnapshotStack:
         if len(self._undo) > self._depth:
             del self._undo[0]
         self._redo.clear()
+        self._restored = None
 
     def undo(self, current: FrameListSnapshot) -> Optional[FrameListSnapshot]:
         """Return the state to restore, and park ``current`` for redo."""
         if not self._undo:
             return None
         self._redo.append(current)
-        return self._undo.pop()
+        snap = self._undo.pop()
+        self._restored = snap
+        return snap
 
     def redo(self) -> Optional[FrameListSnapshot]:
-        """Return the state to restore, and move it back onto the undo stack."""
+        """Return the state to restore, and push the state being left onto undo.
+
+        Tracks the last state ``undo``/``redo`` restored so the pushed state
+        is always the one the caller is *leaving*, not the one being
+        entered -- otherwise a second undo would restore the wrong state.
+        """
         if not self._redo:
             return None
         snap = self._redo.pop()
-        self._undo.append(snap)
+        self._undo.append(self._restored if self._restored is not None else snap)
+        self._restored = snap
         return snap
 
     @property
