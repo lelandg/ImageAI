@@ -1,3 +1,6 @@
+import threading
+import time
+
 import pytest
 from PIL import Image
 
@@ -7,6 +10,7 @@ from core.sprite.extract import (
     estimate_frame_count,
     extract_frames,
     probe_video,
+    _run_ffmpeg,
 )
 from core.sprite.pipeline import CancelToken, Cancelled
 from core.sprite.project import ExtractionSettings
@@ -92,6 +96,40 @@ def test_extract_cancel(tmp_path, synthetic_mp4):
     token.cancel()
     with pytest.raises(Cancelled):
         extract_frames(synthetic_mp4, tmp_path / "out", ExtractionSettings(), token=token)
+
+
+def test_run_ffmpeg_cancel_stops_a_running_process_promptly(tmp_path, ffmpeg_exe):
+    # A slow lavfi source (20s of synthetic video) stands in for a real clip
+    # long enough that the poll loop, not process completion, must be what
+    # stops it. If cancellation only took effect between subprocess calls
+    # (the pre-fix behaviour), this would block for the full 20s.
+    # "-re" paces the lavfi source at its declared rate (real-time), so the
+    # encode actually spans ~20s instead of ffmpeg draining the generator as
+    # fast as it can (which finishes in well under a second and leaves
+    # nothing running to cancel).
+    cmd = [ffmpeg_exe, "-y", "-hide_banner", "-loglevel", "error",
+           "-re", "-f", "lavfi", "-i", "testsrc=size=64x64:rate=25",
+           "-t", "20", str(tmp_path / "%04d.png")]
+    token = CancelToken()
+    outcome = {}
+
+    def run():
+        started = time.monotonic()
+        try:
+            _run_ffmpeg(cmd, token)
+        except Cancelled:
+            outcome["cancelled"] = True
+        outcome["elapsed"] = time.monotonic() - started
+
+    thread = threading.Thread(target=run)
+    thread.start()
+    time.sleep(0.3)  # let ffmpeg actually start encoding
+    token.cancel()
+    thread.join(timeout=5)
+
+    assert not thread.is_alive(), "cancellation did not stop the ffmpeg subprocess promptly"
+    assert outcome.get("cancelled") is True
+    assert outcome["elapsed"] < 5
 
 
 def test_extract_bad_video_raises_ffmpeg_error(tmp_path, ffmpeg_exe):

@@ -13,6 +13,7 @@ import math
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,13 +21,14 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 from PIL import Image
 
-from .pipeline import CancelToken, ProgressFn, check, no_progress
+from .pipeline import CancelToken, Cancelled, ProgressFn, check, no_progress
 from .project import ExtractionSettings
 
 logger = logging.getLogger(__name__)
 
 FFMPEG_TIMEOUT_S = 600
 STDERR_TAIL = 800
+FFMPEG_POLL_S = 0.15
 
 
 class FFmpegError(Exception):
@@ -177,17 +179,53 @@ def estimate_frame_count(probe: Dict[str, Any], settings: ExtractionSettings) ->
     raise ValueError(f"Unknown extraction mode: {settings.mode!r}")
 
 
-def _run_ffmpeg(cmd: List[str]) -> None:
+def _terminate(proc: subprocess.Popen) -> None:
+    """Best-effort stop of a still-running ffmpeg process."""
+    proc.terminate()
+    try:
+        proc.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        try:
+            proc.communicate(timeout=2)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _run_ffmpeg(cmd: List[str], token: Optional[CancelToken] = None) -> None:
+    """Run ffmpeg, polling ``token`` so a cancel stops the subprocess promptly.
+
+    Uses ``Popen`` + a ``communicate(timeout=...)`` poll loop rather than a
+    single blocking ``subprocess.run`` so a mid-run cancel does not have to
+    wait for ffmpeg to finish (up to ``FFMPEG_TIMEOUT_S``). Retrying
+    ``communicate()`` after a ``TimeoutExpired`` is safe and loses no output
+    (documented ``subprocess`` behaviour since Python 3.3) and avoids the
+    pipe-fills-up deadlock a bare ``proc.wait()`` poll loop would risk.
+    """
     logger.info(f"ffmpeg: {' '.join(cmd)}")
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=FFMPEG_TIMEOUT_S)
-    except subprocess.TimeoutExpired as exc:
-        raise FFmpegError(f"ffmpeg timed out after {FFMPEG_TIMEOUT_S}s") from exc
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     except OSError as exc:
         raise FFmpegError(f"ffmpeg could not start: {exc}") from exc
-    if result.returncode != 0:
-        tail = (result.stderr or "").strip()[-STDERR_TAIL:]
-        raise FFmpegError(f"ffmpeg failed (exit {result.returncode}): {tail}")
+
+    start = time.monotonic()
+    stderr = ""
+    while True:
+        try:
+            _, stderr = proc.communicate(timeout=FFMPEG_POLL_S)
+            break
+        except subprocess.TimeoutExpired:
+            pass
+        if token is not None and token.cancelled:
+            _terminate(proc)
+            raise Cancelled()
+        if time.monotonic() - start > FFMPEG_TIMEOUT_S:
+            _terminate(proc)
+            raise FFmpegError(f"ffmpeg timed out after {FFMPEG_TIMEOUT_S}s")
+
+    if proc.returncode != 0:
+        tail = (stderr or "").strip()[-STDERR_TAIL:]
+        raise FFmpegError(f"ffmpeg failed (exit {proc.returncode}): {tail}")
 
 
 def _renumber(paths: List[Path], out_dir: Path) -> List[Path]:
@@ -251,18 +289,18 @@ def extract_frames(video: Path, out_dir: Path, settings: ExtractionSettings, *,
     if settings.mode == "every_n":
         n = max(1, int(settings.every_n))
         cmd += ["-vf", f"select=not(mod(n\\,{n}))", "-fps_mode", "vfr", str(out_dir / "%04d.png")]
-        _run_ffmpeg(cmd)
+        _run_ffmpeg(cmd, token)
         frames = sorted(out_dir.glob("*.png"))
     elif settings.mode == "target_fps":
         cmd += ["-vf", f"fps={max(1, int(settings.target_fps))}", str(out_dir / "%04d.png")]
-        _run_ffmpeg(cmd)
+        _run_ffmpeg(cmd, token)
         frames = sorted(out_dir.glob("*.png"))
     elif settings.mode == "exact_n":
         n = max(1, int(settings.exact_n))
         temp = Path(tempfile.mkdtemp(prefix="extract_all_", dir=out_dir.parent))
         try:
             cmd += [str(temp / "%04d.png")]
-            _run_ffmpeg(cmd)
+            _run_ffmpeg(cmd, token)
             everything = sorted(temp.glob("*.png"))
             count = len(everything)
             if count == 0:
