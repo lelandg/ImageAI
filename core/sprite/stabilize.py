@@ -106,13 +106,15 @@ def fit_size(content: Size, cell: Size) -> Size:
 
 def crop_and_pad(frames: Sequence[Path], out_dir: Path, bbox: Rect, cell: Size,
                  anchor: str = "bottom_center", pad_px: int = 0,
-                 *, progress: ProgressFn = no_progress,
+                 *, stage: str = "stabilize", progress: ProgressFn = no_progress,
                  token: Optional[CancelToken] = None) -> List[Path]:
     """Crop every frame to ``bbox`` (+pad), scale proportionally into ``cell``, anchor.
 
     Output files keep their input names. Frames are never distorted; a
     crop larger than the cell shrinks, a smaller one grows, both with
-    ``Image.LANCZOS`` and one scale factor for both axes.
+    ``Image.LANCZOS`` and one scale factor for both axes. ``stage`` names
+    the caller's stage in progress events -- ``hd_runner`` passes ``"hd"``
+    so its per-frame progress does not report as ``"stabilize"``.
     """
     if anchor not in ANCHORS:
         raise ValueError(f"Unknown anchor {anchor!r}; use one of {ANCHORS}")
@@ -140,5 +142,5 @@ def crop_and_pad(frames: Sequence[Path], out_dir: Path, bbox: Rect, cell: Size,
         dest = out_dir / path.name
         canvas.save(dest, format="PNG")
         written.append(dest)
-        progress("stabilize", index, total, f"stabilize: {path.name}")
+        progress(stage, index, total, f"{stage}: {path.name}")
     return written

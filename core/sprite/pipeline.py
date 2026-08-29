@@ -155,13 +155,26 @@ def _clip_info(action: ActionCard) -> Optional[Dict[str, object]]:
     return info
 
 
+def _frame_identity(path: Path) -> List[Any]:
+    """``[name, size]`` for a frame, or ``[name, "missing"]`` if it's gone (M5).
+
+    A frame removed between runs must invalidate the stage's fingerprint
+    (its identity changed) rather than raise a bare ``FileNotFoundError``
+    out of ``is_stage_current``/``run_pipeline``.
+    """
+    try:
+        return [path.name, path.stat().st_size]
+    except OSError:
+        return [path.name, "missing"]
+
+
 def extract_stage_settings(project: SpriteProject, action: ActionCard) -> Dict[str, Any]:
     """Extraction settings plus the clip identity, or the imported file list (G9)."""
     clip = _clip_info(action)
     settings: Dict[str, Any] = {"extraction": asdict(project.extraction), "clip": clip}
     if clip is None and project.project_dir is not None:
         frames = list_frames(stage_dir(project, action, "extract"))
-        settings["external"] = [[p.name, p.stat().st_size] for p in frames]
+        settings["external"] = [_frame_identity(p) for p in frames]
     return settings
 
 
@@ -324,7 +337,7 @@ def stabilize_runner(project: SpriteProject, action: ActionCard, input_frames: L
     cell = (bbox[2] + 2 * pad, bbox[3] + 2 * pad)
     _reset_dir(out_dir)
     return crop_and_pad(input_frames, out_dir, bbox, cell, anchor=project.stabilize.anchor,
-                        pad_px=pad, progress=progress, token=token)
+                        pad_px=pad, stage=out_dir.name, progress=progress, token=token)
 
 
 def hd_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
@@ -339,7 +352,7 @@ def hd_runner(project: SpriteProject, action: ActionCard, input_frames: List[Pat
         w, h = first.size
     _reset_dir(out_dir)
     return crop_and_pad(input_frames, out_dir, (0, 0, w, h), prof.cell_size,
-                        anchor=project.stabilize.anchor, pad_px=0,
+                        anchor=project.stabilize.anchor, pad_px=0, stage=out_dir.name,
                         progress=progress, token=token)
 
 

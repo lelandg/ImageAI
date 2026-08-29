@@ -35,11 +35,17 @@ def test_reanchor_marker_matches_the_accessor_leaf():
 
 
 def test_core_sprite_imports_no_qt():
-    """core/sprite is headless by design (design section 1)."""
+    """core/sprite is headless by design (design section 1).
+
+    Repo-absolute so this pins the global constraint from any cwd; a
+    cwd-relative glob would silently pass with an empty offender list when
+    run from anywhere other than the repo root (M3).
+    """
     import pathlib
 
+    sprite_dir = pathlib.Path(__file__).resolve().parents[2] / "core" / "sprite"
     offenders = []
-    for path in pathlib.Path("core/sprite").rglob("*.py"):
+    for path in sprite_dir.rglob("*.py"):
         text = path.read_text(encoding="utf-8")
         if "PySide6" in text or "PyQt" in text:
             offenders.append(str(path))

@@ -9,6 +9,7 @@ from core.sprite.pipeline import (
     CancelToken,
     Cancelled,
     PipelineError,
+    is_stage_current,
     key_stage_settings,
     no_progress,
     register_external_frames,
@@ -106,6 +107,21 @@ def test_register_external_frames_requires_frames(tmp_path):
         register_external_frames(project, action)
 
 
+def test_a_missing_external_frame_invalidates_the_extract_fingerprint(tmp_path, alpha_frames):
+    """M5 regression: a frame removed between runs must change the extract
+    settings (so the stage re-runs), not raise a bare OSError."""
+    from core.sprite.slicing import import_png_sequence
+
+    project, action = _project(tmp_path)
+    import_png_sequence(alpha_frames, stage_dir(project, action, "extract"))
+    register_external_frames(project, action)
+    before = stage_fingerprint(project, action, "extract")
+    (stage_dir(project, action, "extract") / "0001.png").unlink()
+    after = stage_fingerprint(project, action, "extract")  # must not raise
+    assert after != before
+    assert not is_stage_current(project, action, "extract")
+
+
 # --- run_pipeline (Task 10) -------------------------------------------------------
 from PIL import Image  # noqa: E402 - grouped with the tests it serves
 
@@ -153,6 +169,11 @@ def test_pipeline_runs_external_frames_through_hd(tmp_path, alpha_frames):
     assert action.status == "processed"
     assert set(project.stage_fingerprints["a1"]) == set(out)
     assert any(e[0] == "stabilize" and e[3].endswith("done") for e in events)
+    # I1 regression: hd's per-frame progress must report as "hd", not
+    # "stabilize" -- no stabilize event may appear after hd starts running.
+    hd_running_at = next(i for i, e in enumerate(events) if e[0] == "hd" and e[3].endswith("running"))
+    assert all(e[0] != "stabilize" for e in events[hd_running_at:])
+    assert any(e[0] == "hd" and e[3].startswith("hd:") for e in events[hd_running_at:])
 
 
 def test_imported_frames_without_registration_count_as_extracted(tmp_path, alpha_frames):
