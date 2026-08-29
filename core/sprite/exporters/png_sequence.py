@@ -22,11 +22,26 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_TEMPLATE = "{title}_{tag}_{frame01}.png"
 UNTAGGED = "untagged"
+TEMPLATE_FIELDS = ("title", "tag", "frame", "tagframe", "frame01")
 
 
 def render_frame_name(template: str, *, title: str, tag: str, frame: int, tagframe: int) -> str:
-    name = template.format(title=title, tag=tag, frame=frame, tagframe=tagframe,
-                           frame01=f"{tagframe + 1:02d}")
+    """Render a user-typed filename template.
+
+    Raises ``ValueError`` naming the offending field and the supported
+    field list for an unknown field (``KeyError``), a positional field
+    like ``{0}`` (``IndexError``), or an unbalanced brace (``ValueError``)
+    -- the ExportDialog (5b) feeds this a user string and needs a
+    user-readable message, not a bare formatting exception (M2).
+    """
+    try:
+        name = template.format(title=title, tag=tag, frame=frame, tagframe=tagframe,
+                               frame01=f"{tagframe + 1:02d}")
+    except (KeyError, IndexError, ValueError) as exc:
+        raise ValueError(
+            f"Template {template!r} is invalid ({exc}). "
+            f"Supported fields: {', '.join('{' + f + '}' for f in TEMPLATE_FIELDS)}"
+        ) from exc
     stem, dot, ext = name.rpartition(".")
     if not dot:
         stem, ext = name, "png"

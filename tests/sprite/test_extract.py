@@ -10,6 +10,7 @@ from core.sprite.extract import (
     estimate_frame_count,
     extract_frames,
     probe_video,
+    _renumber,
     _run_ffmpeg,
 )
 from core.sprite.pipeline import CancelToken, Cancelled
@@ -100,6 +101,37 @@ def test_extract_honours_trim(tmp_path, synthetic_mp4):
     settings = ExtractionSettings(mode="every_n", every_n=1, trim_start_s=0.25, trim_end_s=0.125)
     result = extract_frames(synthetic_mp4, tmp_path / "out", settings)
     assert 2 <= len(result.frames) <= 4
+
+
+def test_renumber_staged_temp_files_do_not_match_the_frame_glob(tmp_path, monkeypatch):
+    """M4 regression: a crash mid-renumber must not leave files that
+    pipeline.list_frames' ``*.png`` glob would count as frames."""
+    src = tmp_path / "src"
+    src.mkdir()
+    paths = []
+    for i in range(3):
+        path = src / f"{i}.png"
+        path.write_bytes(b"fake-png")
+        paths.append(path)
+    out_dir = tmp_path / "out"
+
+    real_move = __import__("shutil").move
+    calls = {"n": 0}
+
+    def flaky_move(source, dest):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            raise OSError("simulated crash mid-renumber")
+        return real_move(source, dest)
+
+    monkeypatch.setattr("core.sprite.extract.shutil.move", flaky_move)
+    with pytest.raises(OSError):
+        _renumber(paths, out_dir)
+
+    leftover = list(out_dir.glob("*"))
+    assert leftover, "expected a staged .tmp file to remain after the simulated crash"
+    assert not list(out_dir.glob("*.png")), \
+        f"a staged temp file matched the *.png frame glob: {leftover}"
 
 
 def test_extract_clears_stale_output(tmp_path, synthetic_mp4):

@@ -229,11 +229,16 @@ def _run_ffmpeg(cmd: List[str], token: Optional[CancelToken] = None) -> None:
 
 
 def _renumber(paths: List[Path], out_dir: Path) -> List[Path]:
-    """Move ``paths`` into ``out_dir`` as 0001.png, 0002.png, ..."""
+    """Move ``paths`` into ``out_dir`` as 0001.png, 0002.png, ...
+
+    Stages through a ``.tmp`` *suffix* rather than a prefix, so a crash or a
+    failed ``shutil.move`` mid-renumber leaves files that ``*.png`` glob
+    (``pipeline.list_frames``) does not pick up as frames (M4).
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     staged: List[Path] = []
     for index, src in enumerate(paths, start=1):
-        tmp = out_dir / f".tmp_{index:04d}.png"
+        tmp = out_dir / f"{index:04d}.png.tmp"
         shutil.move(str(src), str(tmp))
         staged.append(tmp)
     final: List[Path] = []

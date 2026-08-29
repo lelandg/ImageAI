@@ -180,6 +180,24 @@ def test_export_png_sequence_writes_per_tag_files_with_sidecars(tmp_path):
     assert sidecar["tag"] == "idle" and sidecar["index"] == 3 and sidecar["duration_ms"] == 200
 
 
+def test_render_frame_name_wraps_formatting_errors(tmp_path):
+    """M2: a user-typed template with a bad field must raise a readable
+    ValueError, not a bare KeyError/IndexError/ValueError."""
+    with pytest.raises(ValueError, match="name"):
+        render_frame_name("{name}.png", title="hero", tag="walk", frame=0, tagframe=0)
+    with pytest.raises(ValueError, match="0"):
+        render_frame_name("{0}.png", title="hero", tag="walk", frame=0, tagframe=0)
+    with pytest.raises(ValueError):
+        render_frame_name("{title.png", title="hero", tag="walk", frame=0, tagframe=0)
+
+
+def test_export_png_sequence_rejects_a_bad_template_before_writing_anything(tmp_path):
+    meta = _meta(tmp_path)
+    with pytest.raises(ValueError, match="Supported fields"):
+        export_png_sequence(meta, tmp_path / "seq", template="{bogus_field}.png")
+    assert not (tmp_path / "seq").exists()
+
+
 def test_export_png_sequence_puts_untagged_frames_last(tmp_path):
     meta = _meta(tmp_path)
     meta.tags = meta.tags[:1]
