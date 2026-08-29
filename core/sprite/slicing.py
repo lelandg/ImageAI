@@ -16,6 +16,7 @@ import numpy as np
 from PIL import Image
 
 from .models import Size
+from .pipeline import _reset_dir
 
 logger = logging.getLogger(__name__)
 
@@ -102,11 +103,14 @@ def guess_grid(sheet: Image.Image, key_color: Optional[str] = None) -> GridGuess
 
 def slice_sheet(sheet: Path, out_dir: Path, columns: int, rows: int,
                 cell: Optional[Size] = None, margin: int = 0, spacing: int = 0) -> List[Path]:
-    """Cut a sheet into ``columns * rows`` RGBA PNG frames, row-major."""
+    """Cut a sheet into ``columns * rows`` RGBA PNG frames, row-major.
+
+    Clears any frames already in ``out_dir`` first, so re-slicing after a
+    previous import never leaves stale frames behind.
+    """
     if columns < 1 or rows < 1:
         raise ValueError("columns and rows must be at least 1")
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = _reset_dir(Path(out_dir))
     with Image.open(sheet) as im:
         image = im.convert("RGBA")
     width, height = image.size
@@ -137,9 +141,12 @@ def slice_sheet(sheet: Path, out_dir: Path, columns: int, rows: int,
 
 
 def import_png_sequence(paths: Sequence[Path], out_dir: Path) -> List[Path]:
-    """Copy images into ``out_dir`` as RGBA PNGs numbered 0001.png... in the given order."""
-    out_dir = Path(out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    """Copy images into ``out_dir`` as RGBA PNGs numbered 0001.png... in the given order.
+
+    Clears any frames already in ``out_dir`` first, so re-importing a
+    shorter sequence never leaves stale frames from the previous import.
+    """
+    out_dir = _reset_dir(Path(out_dir))
     written: List[Path] = []
     for index, src in enumerate(paths, start=1):
         with Image.open(src) as im:
