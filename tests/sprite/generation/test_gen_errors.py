@@ -3,7 +3,7 @@ import logging
 
 import pytest
 
-from core.sprite.generation._common import emit, now_iso
+from core.sprite.generation._common import emit, now_iso, redact_secrets
 from core.sprite.generation.errors import (
     ProviderError,
     QuotaExceeded,
@@ -109,3 +109,26 @@ def test_emit_calls_sink_and_skips_duplicate_module_logger(caplog):
 def test_now_iso_is_second_precision():
     stamp = now_iso()
     assert "T" in stamp and len(stamp) == 19
+
+
+def test_classify_chains_cause_and_stores_original():
+    exc = RuntimeError("boom")
+    err = classify_provider_error(exc)
+    assert err.__cause__ is exc
+    assert err.original is exc
+
+
+def test_classify_redacts_secrets_from_user_message():
+    exc = RuntimeError(
+        "call failed: ?key=AIzaSyABCDEFGHIJKLMNOPQRSTUVWX "
+        "Authorization: Bearer abc.def.ghi"
+    )
+    err = classify_provider_error(exc)
+    assert "AIzaSyABCDEFGHIJKLMNOPQRSTUVWX" not in err.user_message
+    assert "abc.def.ghi" not in err.user_message
+    assert "***" in err.user_message
+
+
+def test_redact_secrets_leaves_ordinary_text_untouched():
+    text = "The provider returned an error: bad aspect ratio 4:3"
+    assert redact_secrets(text) == text
