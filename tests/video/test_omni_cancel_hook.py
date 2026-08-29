@@ -49,6 +49,24 @@ def test_await_terminal_returns_terminal_interaction_without_cancel():
     assert result is done
 
 
+def test_await_terminal_returns_finished_interaction_even_if_cancel_fires_after_done():
+    """Mirrors Veo's test_poll_returns_finished_video_even_if_cancel_fires_after_done:
+    an interaction that is already terminal is delivered instead of thrown
+    away, because the terminal check runs before cancel_check is ever
+    consulted -- so the caller does not pay for a clip and then lose it."""
+    done = _Interaction(status="completed")
+    client = _client(_Resource(_Interaction()))
+    calls = {"n": 0}
+
+    def cancel():
+        calls["n"] += 1
+        return True
+
+    result = asyncio.run(client._await_terminal(done, cancel_check=cancel))
+    assert result is done
+    assert calls["n"] == 0  # already terminal; cancel_check never consulted
+
+
 def test_generate_video_reports_cancelled_and_keeps_interaction_id(tmp_path):
     resource = _Resource(_Interaction(id="int_poll"))
     client = _client(resource)

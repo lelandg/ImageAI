@@ -338,6 +338,11 @@ class VeoClient:
 
         Args:
             config: Generation configuration
+            cancel_check: Optional callable polled before submission and
+                during the poll loop; returning True cancels the generation
+                (the operation id is preserved so the remote job can be
+                tracked, but a job that finishes during the last poll is
+                still delivered instead of thrown away).
 
         Returns:
             Generation result

@@ -272,6 +272,11 @@ class OmniClient:
         Args:
             config: Generation configuration.
             output_path: Where to write the resulting MP4.
+            cancel_check: Optional callable polled before submission and
+                during the poll loop; returning True cancels the generation
+                (the interaction id is preserved so the remote job can be
+                tracked, but an interaction that reaches a terminal state is
+                still delivered instead of thrown away).
 
         Returns:
             OmniGenerationResult with the saved path and interaction id.

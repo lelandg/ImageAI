@@ -86,6 +86,26 @@ def test_generate_turnaround_honors_cancel_token(png_file, tmp_path):
     provider.edit_image.assert_not_called()
 
 
+def test_generate_turnaround_honors_cancel_token_mid_pack(png_file, tmp_path):
+    """The cancel check runs at the top of the per-view loop, so a cancel
+    fired after the first view still stops before the second edit_image
+    call -- but the first view's file and sidecar are already saved."""
+    provider = _provider()
+    token = CancelToken()
+
+    def _cancel_after_first(*args, **kwargs):
+        token.cancel()
+        return (["ok"], [_png_bytes()])
+
+    provider.edit_image.side_effect = _cancel_after_first
+    out_dir = tmp_path / "t"
+    with pytest.raises(Cancelled):
+        generate_turnaround(provider, png_file(), out_dir, plate_color="#00FF00", token=token)
+    assert provider.edit_image.call_count == 1
+    assert (out_dir / "front.png").exists()
+    assert not (out_dir / "side.png").exists()
+
+
 def test_generate_turnaround_classifies_errors_and_stops(png_file, tmp_path):
     provider = _provider()
     provider.edit_image.side_effect = [(["ok"], [_png_bytes()]),
