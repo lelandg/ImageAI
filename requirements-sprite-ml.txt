@@ -1,0 +1,8 @@
+# Optional ML background-removal backends for the Sprite tab (design §1.7).
+# Install: python -m pip install -r requirements-sprite-ml.txt
+# Or in the app: Sprite tab > Processing > Install ML backends.
+# rembg needs Python >=3.11,<3.14. Models download on first use into
+# <Models root>/cache/rembg (core/sprite/matting.py). bria-rmbg is
+# non-commercial and is never installed or selected by default.
+mediapipe>=0.10.0,<0.10.15  # legacy mp.solutions API (removed in 0.10.15+); no model download
+rembg[cpu]>=2.0.60  # isnet-anime (MIT) default, u2netp (Apache-2.0)
