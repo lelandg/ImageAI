@@ -131,3 +131,21 @@ def ml_alpha(image: Image.Image, backend: str, model: str, *, refine_edges: bool
     if backend == "rembg":
         return _rembg_alpha(image, model or DEFAULT_REMBG_MODEL, refine_edges)
     raise _fail(f"Unknown matting backend {backend!r}; choose one of {ML_BACKENDS}.")
+
+
+# --- difference matte (image route) ---------------------------------------------------
+
+def difference_matte(on_white: Image.Image, on_black: Image.Image) -> Image.Image:
+    """Recover RGBA from the same subject rendered on white and on black.
+
+    alpha = 1 - mean(white - black); color = black / alpha (0 where alpha is 0).
+    """
+    white = np.asarray(on_white.convert("RGB"), dtype=np.float32) / 255.0
+    black = np.asarray(on_black.convert("RGB"), dtype=np.float32) / 255.0
+    if white.shape != black.shape:
+        raise ValueError(f"Size mismatch: on_white {white.shape[:2]} vs on_black {black.shape[:2]}")
+    alpha = np.clip(1.0 - (white - black).mean(axis=2), 0.0, 1.0)
+    safe = np.maximum(alpha, 1.0 / 255.0)[:, :, None]
+    color = np.where(alpha[:, :, None] > 0.0, black / safe, 0.0)
+    rgba = np.concatenate([np.clip(color, 0.0, 1.0), alpha[:, :, None]], axis=2)
+    return Image.fromarray(np.round(rgba * 255.0).astype(np.uint8))
