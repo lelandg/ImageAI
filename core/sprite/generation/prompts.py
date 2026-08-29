@@ -13,7 +13,7 @@ CHROMA_SUFFIX = ("solid chroma {color_name} background {hex}, flat even lighting
 LOOP_SUFFIX = "seamless loop, ends in the same pose it starts"
 FORBIDDEN_WORDS: Tuple[str, ...] = ("transparent", "checkerboard", "alpha")
 
-_ASPECT_RE = re.compile(r"\b\d{1,2}\s*:\s*\d{1,2}\b")
+_ASPECT_RE = re.compile(r"(?<!\d)(?:1\s*:\s*1|3\s*:\s*2|2\s*:\s*3|3\s*:\s*4|4\s*:\s*3|4\s*:\s*5|5\s*:\s*4|9\s*:\s*16|16\s*:\s*9|21\s*:\s*9|16\s*:\s*10|10\s*:\s*16|2\s*:\s*1|1\s*:\s*2|5\s*:\s*3|3\s*:\s*5)(?!\d)")
 _PIXELS_RE = re.compile(r"\b\d{2,5}\s*[x×]\s*\d{2,5}\b|\b\d{1,5}\s*px\b", re.IGNORECASE)
 _FORBIDDEN_RE = re.compile(r"\b(" + "|".join(FORBIDDEN_WORDS) + r")\b", re.IGNORECASE)
 _HEX_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")

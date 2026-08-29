@@ -62,3 +62,12 @@ def test_inject_never_emits_aspect_or_pixels():
     out = inject_chroma("jump", "#0000FF", loop=True)
     assert ":" not in out.replace("chroma blue background", "")
     assert "px" not in out.lower()
+
+
+def test_inject_preserves_clock_times_not_aspect_ratios():
+    out = inject_chroma("start at 10:30 AM with 16:9 composition", "#00FF00", loop=False)
+    body = out.split(", solid chroma")[0]
+    assert "10:30" in body, "Clock times must be preserved"
+    assert "16:9" not in body, "Known aspect ratios must be stripped"
+    assert "3:45" in inject_chroma("arrive 3:45", "#00FF00", loop=False), "3:45 time preserved"
+    assert "12:00" in inject_chroma("meet at 12:00 noon", "#00FF00", loop=False), "12:00 time preserved"
