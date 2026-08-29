@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 BACKOFF_SECONDS = (2.0, 4.0, 8.0)
 MAX_RETRIES = len(BACKOFF_SECONDS)
 PIPELINE_UPTO = "stabilize"
+_SLEEP_SLICE = 0.2  # backoff waits sleep in slices this long so a cancel is seen promptly
 
 QueueResult = Dict[str, Union[ClipRecord, SpriteGenerationError]]
 
@@ -82,8 +83,10 @@ class ActionQueue:
     # -- queue operations ----------------------------------------------------
 
     def enqueue(self, action_ids: Sequence[str]) -> None:
-        for action_id in action_ids:
-            action = self._action(action_id)
+        # Look up every id first so an unknown id raises before anything is
+        # mutated: enqueue([valid, invalid]) leaves the valid card untouched.
+        actions = [self._action(action_id) for action_id in action_ids]
+        for action_id, action in zip(action_ids, actions):
             action.status = "queued"
             action.error = None
             self.results.pop(action_id, None)
@@ -159,9 +162,21 @@ class ActionQueue:
                 emit(logger, self.log, f"'{action.name}' attempt {attempt} failed "
                                        f"({err.user_message}); retry in {delay:.0f}s",
                      level="warning")
-                self._sleep(delay)
-                if self._cancelled():
-                    raise Cancelled(f"cancelled while waiting to retry '{action.name}'")
+                self._wait_or_cancel(delay, action)
+
+    def _wait_or_cancel(self, delay: float, action: ActionCard) -> None:
+        """Sleep ``delay`` seconds in ``_SLEEP_SLICE`` slices.
+
+        Checks the cancel token after every slice so a cancel fired during a
+        long backoff wait is seen within one slice instead of only after the
+        full delay elapses.
+        """
+        remaining = delay
+        while remaining > 1e-9:
+            self._sleep(min(_SLEEP_SLICE, remaining))
+            remaining -= _SLEEP_SLICE
+            if self._cancelled():
+                raise Cancelled(f"cancelled while waiting to retry '{action.name}'")
 
     def _post_process(self, action: ActionCard) -> None:
         try:

@@ -71,6 +71,14 @@ def test_enqueue_marks_queued_and_dedupes(harness):
         q.enqueue(["missing"])
 
 
+def test_enqueue_is_atomic_on_invalid_id(harness):
+    project, q = harness["build"]()
+    with pytest.raises(ValueError):
+        q.enqueue(["a1", "missing"])
+    assert q.pending == []
+    assert project.actions[0].status == "draft" and project.actions[0].error is None
+
+
 def test_run_renders_in_order_runs_pipeline_and_records_cost(harness):
     project, q = harness["build"]()
     q.enqueue(["a1", "a2"])
@@ -96,7 +104,9 @@ def test_retries_retryable_errors_with_backoff(harness):
     results = q.run()
     assert isinstance(results["a1"], ClipRecord)
     assert len([r for r in harness["renders"] if r.action.id == "a1"]) == 3
-    assert harness["sleeps"] == [2.0, 4.0]
+    # The backoff wait sleeps in small slices (interruptible), so the total
+    # slept time -- not the call count -- matches the backoff policy.
+    assert sum(harness["sleeps"]) == pytest.approx(2.0 + 4.0)
     assert any("retry in 2s" in line for line in harness["logs"])
 
 
@@ -107,7 +117,8 @@ def test_gives_up_after_max_retries(harness):
     results = q.run()
     assert isinstance(results["a1"], QuotaExceeded)
     assert len(harness["renders"]) == MAX_RETRIES + 1
-    assert harness["sleeps"] == list(BACKOFF_SECONDS)
+    # Sliced sleeps; total time still matches the backoff policy.
+    assert sum(harness["sleeps"]) == pytest.approx(sum(BACKOFF_SECONDS))
     action = project.actions[0]
     assert action.status == "failed" and action.error == results["a1"].user_message
 
@@ -139,7 +150,8 @@ def test_raw_exception_is_classified_and_retried(harness):
     harness["outcomes"] = [RuntimeError("503 Service Unavailable"), "ok"]
     q.enqueue(["a1"])
     results = q.run()
-    assert isinstance(results["a1"], ClipRecord) and harness["sleeps"] == [2.0]
+    assert isinstance(results["a1"], ClipRecord)
+    assert sum(harness["sleeps"]) == pytest.approx(2.0)
 
 
 def test_cancel_before_run_leaves_actions_queued(harness):
@@ -178,6 +190,26 @@ def test_cancel_during_backoff_stops_before_next_try(harness):
     assert len(harness["renders"]) == 1
     assert isinstance(results["a1"], ProviderError)
     assert project.actions[0].status == "draft"
+
+
+def test_cancel_during_backoff_stops_within_one_slice(harness):
+    """A cancel fired mid-wait is seen within one sleep slice, not only after
+    the full backoff delay elapses (the wait is interruptible)."""
+    token = CancelToken()
+    project, q = harness["build"](token=token)
+    harness["outcomes"] = [QuotaExceeded("429"), "ok"]
+
+    def fake_sleep(seconds):
+        harness["sleeps"].append(seconds)
+        token.cancel()
+
+    q._sleep = fake_sleep
+    q.enqueue(["a1"])
+    results = q.run()
+    assert len(harness["renders"]) == 1
+    assert isinstance(results["a1"], ProviderError)
+    assert project.actions[0].status == "draft"
+    assert sum(harness["sleeps"]) < 0.5
 
 
 def test_pipeline_failure_keeps_rendered_status(harness, monkeypatch):
