@@ -130,3 +130,26 @@ def test_aseprite_array_matches_golden(tmp_path):
 def test_aseprite_rejects_unknown_layout(tmp_path):
     with pytest.raises(ValueError):
         aseprite_document(_meta(tmp_path), image_name="x.png", layout="tree")
+
+
+# --- texturepacker --------------------------------------------------------------
+from core.sprite.exporters.texturepacker_json import (  # noqa: E402 - grouped with the tests it serves
+    export_texturepacker_json,
+    texturepacker_document,
+)
+
+
+def test_texturepacker_hash_matches_golden(tmp_path):
+    filled = export_grid(_meta(tmp_path), tmp_path / "hero.png", GridOptions(shape_px=0))
+    out = tmp_path / "hero_tp.json"
+    export_texturepacker_json(filled, out, image_name="hero.png", layout="hash")
+    assert _normalized(json.loads(out.read_text())) == json.loads((GOLDEN / "texturepacker_hash.json").read_text())
+
+
+def test_texturepacker_array_has_filenames_and_animations(tmp_path):
+    filled = export_grid(_meta(tmp_path), tmp_path / "hero.png", GridOptions(shape_px=0))
+    document = texturepacker_document(filled, image_name="hero.png", layout="array")
+    assert document["frames"][0]["filename"] == "hero_walk_00.png"
+    assert document["frames"][0]["pivot"] == {"x": 0.5, "y": 1.0}
+    assert document["animations"] == {"walk": ["hero_walk_00.png", "hero_walk_01.png", "hero_walk_02.png"],
+                                      "idle": ["hero_idle_00.png", "hero_idle_01.png"]}
