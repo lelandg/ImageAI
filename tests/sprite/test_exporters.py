@@ -200,3 +200,52 @@ def test_export_single_frame(tmp_path):
     assert out.exists() and out.with_name("frame.png.json").exists()
     with Image.open(out) as im:
         assert im.size == (16, 16) and im.mode == "RGBA"
+
+
+# --- gif -----------------------------------------------------------------------
+from core.sprite.exporters.gif import export_gif, gif_durations  # noqa: E402 - grouped with the tests it serves
+
+
+def test_gif_durations_clamp_and_warn(tmp_path):
+    meta = _meta(tmp_path)
+    meta.frames[0].duration_ms = 5
+    durations, warnings = gif_durations(meta.frames)
+    assert durations == [20, 80, 80, 200, 200]
+    assert len(warnings) == 2
+    assert "hero_walk_00" in warnings[0] and "5 ms" in warnings[0]
+    assert "2 frame duration(s) rounded" in warnings[1]
+
+
+def test_export_gif_transparent_recipe(tmp_path):
+    meta = _meta(tmp_path)
+    meta.frames[1].duration_ms = 10
+    warnings = []
+    out = export_gif(meta, meta.tags[0], tmp_path / "walk.gif", warnings=warnings)
+    assert warnings and "10 ms raised to 20 ms" in warnings[0]
+    assert (tmp_path / "walk.gif.json").exists()
+    with Image.open(out) as gif:
+        assert gif.n_frames == 3
+        assert gif.info["transparency"] == 255
+        assert gif.info["loop"] == 0
+        for index, expected in enumerate([80, 20, 80]):
+            gif.seek(index)
+            assert gif.disposal_method == 2
+            assert gif.info["duration"] == expected
+            rgba = gif.convert("RGBA")
+            assert rgba.getpixel((0, 0))[3] == 0
+            assert rgba.getpixel((8 + index, 8))[3] == 255
+
+
+def test_export_gif_pingpong_and_reverse(tmp_path):
+    meta = _meta(tmp_path)
+    ping = export_gif(meta, meta.tags[1], tmp_path / "idle.gif")  # 2 frames: pingpong stays 2
+    with Image.open(ping) as gif:
+        assert gif.n_frames == 2
+    walk = TagMeta(name="walk", from_index=0, to_index=2, direction="pingpong")
+    with Image.open(export_gif(meta, walk, tmp_path / "pp.gif")) as gif:
+        assert gif.n_frames == 4
+    rev = TagMeta(name="walk", from_index=0, to_index=2, direction="reverse")
+    with Image.open(export_gif(meta, rev, tmp_path / "rev.gif", loop=3)) as gif:
+        assert gif.n_frames == 3 and gif.info["loop"] == 3
+    with pytest.raises(ValueError):
+        export_gif(meta, TagMeta(name="x", from_index=5, to_index=4), tmp_path / "x.gif")
