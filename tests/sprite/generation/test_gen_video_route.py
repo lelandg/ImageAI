@@ -133,10 +133,12 @@ from core.sprite.pipeline import CancelToken, Cancelled
 from core.sprite.project import ClipRecord
 
 
-def _omni_client(monkeypatch, *, success=True, error=None, interaction_id="int-1"):
+def _omni_client(monkeypatch, *, success=True, error=None, interaction_id="int-1",
+                 generation_time=1.5, has_synthid=True, metadata=None):
     """Install a fake Omni client factory; returns the MagicMock client."""
     client = MagicMock()
     captured = {}
+    metadata = {"safety_ratings": "none"} if metadata is None else metadata
 
     def generate_video(cfg, out_path, cancel_check=None):
         captured["cfg"] = cfg
@@ -145,7 +147,9 @@ def _omni_client(monkeypatch, *, success=True, error=None, interaction_id="int-1
             Path(out_path).parent.mkdir(parents=True, exist_ok=True)
             Path(out_path).write_bytes(b"omni-mp4")
         return SimpleNamespace(success=success, video_path=Path(out_path) if success else None,
-                               interaction_id=interaction_id, error=error)
+                               interaction_id=interaction_id, error=error,
+                               generation_time=generation_time, has_synthid=has_synthid,
+                               metadata=metadata)
     client.generate_video.side_effect = generate_video
     client.captured = captured
     monkeypatch.setattr(video_route, "_make_omni_client", lambda api_key: client)
@@ -173,6 +177,11 @@ def test_render_omni_writes_clip_record_and_sidecar(request_for, monkeypatch):
     joined = "\n".join(seen)
     assert "=== Video render request" in joined and record.prompt in joined
     assert progress[0][0] == "render" and progress[-1][1:3] == (1, 1)
+    # The full provider response (not just a one-line summary) must be logged.
+    assert "=== Video render response" in joined
+    assert "operation_id=int-1" in joined
+    assert "generation_time=1.5" in joined and "has_synthid=True" in joined
+    assert '"safety_ratings": "none"' in joined
 
 
 def test_render_veo_copies_native_file(request_for, monkeypatch, tmp_path):
@@ -180,14 +189,16 @@ def test_render_veo_copies_native_file(request_for, monkeypatch, tmp_path):
     native.write_bytes(b"veo-mp4")
     client = MagicMock()
     client.generate_video.return_value = SimpleNamespace(
-        success=True, video_path=native, operation_id="op-7", error=None)
+        success=True, video_path=native, video_url="https://example/veo.mp4", operation_id="op-7",
+        error=None, generation_time=4.2, has_synthid=True, metadata={"model_version": "veo-3.1"})
     factory_args = {}
     def factory(api_key, auth_mode):
         factory_args.update(api_key=api_key, auth_mode=auth_mode)
         return client
     monkeypatch.setattr(video_route, "_make_veo_client", factory)
     req = request_for("veo", model=VEO_FAST, resolution="720p", loop_conditioning=True)
-    record = render_action(req, api_key="k", auth_mode="api-key")
+    seen = []
+    record = render_action(req, api_key="k", auth_mode="api-key", log=seen.append)
     assert factory_args == {"api_key": "k", "auth_mode": "api-key"}
     assert req.out_mp4.read_bytes() == b"veo-mp4"
     assert record.provider == "veo" and record.model == VEO_FAST
@@ -195,6 +206,12 @@ def test_render_veo_copies_native_file(request_for, monkeypatch, tmp_path):
     assert record.params["duration_s"] == 8 and record.params["loop_conditioning"] is True
     assert record.params["last_frame"] == str(req.plate)
     assert "cancel_check" in client.generate_video.call_args.kwargs
+    # The full provider response (not just a one-line summary) must be logged.
+    joined = "\n".join(seen)
+    assert "=== Video render response" in joined
+    assert "operation_id=op-7" in joined and "video_url=https://example/veo.mp4" in joined
+    assert "generation_time=4.2" in joined and "has_synthid=True" in joined
+    assert '"model_version": "veo-3.1"' in joined
 
 
 def test_render_cancelled_raises_and_keeps_operation_id(request_for, monkeypatch):
@@ -307,7 +324,7 @@ def test_seam_scores_and_find_loop_seam(tmp_path):
 
 
 def test_trim_to_loop_cuts_at_best_seam(tmp_path, monkeypatch):
-    frames = _square_frames(tmp_path)
+    frames = _square_frames(tmp_path)  # seam_at=7 (default): frame 7 repeats frame 0
     monkeypatch.setattr(video_route, "extract_frames",
                         lambda video, out_dir, settings, **kw: ExtractResult(
                             frames=frames, source_fps=10.0, source_frames=10, duration_s=1.0))
@@ -319,8 +336,15 @@ def test_trim_to_loop_cuts_at_best_seam(tmp_path, monkeypatch):
     clip = tmp_path / "a1.mp4"
     clip.write_bytes(b"full")
     out, score = trim_to_loop(clip, tmp_path / "a1.loop.mp4")
-    assert cuts == [(clip, out, pytest.approx(0.8))]
+    fps = 10.0
+    seam_index = 7  # matches test_seam_scores_and_find_loop_seam's find_loop_seam(frames) == (7, 0.0)
+    # Exclusive cut: end_s covers frames 0..seam_index-1 only, so the near-duplicate
+    # seam frame (index 7, which matches frame 0) is excluded from the trimmed clip.
+    assert cuts == [(clip, out, pytest.approx(seam_index / fps))]
     assert score == 0.0 and out.read_bytes() == b"cut"
+    kept_frame_count = round(cuts[0][2] * fps)
+    last_kept_index = kept_frame_count - 1
+    assert last_kept_index == seam_index - 1
 
 
 def test_trim_to_loop_copies_when_tail_is_already_seamless(tmp_path, monkeypatch):

@@ -254,6 +254,15 @@ def render_action(req: RenderRequest, *, api_key: Optional[str], auth_mode: str 
                           f"{err.user_message}", level="error")
         raise err
 
+    import json
+    emit(logger, log, f"=== Video render response ({provider}/{model_id}) ===")
+    emit(logger, log, f"operation_id={operation_id} video_path={getattr(result, 'video_path', None)} "
+                      f"video_url={getattr(result, 'video_url', None)} "
+                      f"generation_time={getattr(result, 'generation_time', None)} "
+                      f"has_synthid={getattr(result, 'has_synthid', None)}")
+    emit(logger, log, f"metadata={json.dumps(getattr(result, 'metadata', {}) or {}, default=str)}")
+    emit(logger, log, "=== END video render response ===")
+
     if provider == "veo":
         native = Path(result.video_path) if getattr(result, "video_path", None) else None
         if native is None or not native.exists():
@@ -413,8 +422,15 @@ def trim_to_loop(clip: Path, out_mp4: Path, *,
             _copy()
             logger.info("trim_to_loop: no better seam than the tail (%.3f)", tail)
             return out_mp4, tail
+        if index <= 0:
+            _copy()
+            logger.info("trim_to_loop: seam found at frame 0; nothing to trim")
+            return out_mp4, tail
         fps = float(extracted.source_fps or 24.0)
-        end_s = (index + 1) / fps
+        # Exclusive cut: keep frames 0..index-1. Frame ``index`` is the one that
+        # best matches frame 0, so including it would play a near-duplicate frame
+        # immediately before the loop restarts at frame 0.
+        end_s = index / fps
         _cut_video(clip, out_mp4, end_s)
         logger.info("trim_to_loop: cut at frame %d (%.3fs), seam %.3f (tail was %.3f)",
                     index, end_s, best, tail)
