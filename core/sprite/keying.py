@@ -144,3 +144,60 @@ def decontaminate_edges(rgb: np.ndarray, alpha: np.ndarray,
     out = src.copy()
     out[edge] = fixed[edge]
     return np.clip(out, 0, 255).astype(np.uint8)
+
+
+# --- alpha cleanup ---------------------------------------------------------------
+
+def _kernel(px: int) -> np.ndarray:
+    size = 2 * int(px) + 1
+    return cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (size, size))
+
+
+def choke_feather(alpha: np.ndarray, choke_px: int, feather_px: int,
+                  despeckle_px: int) -> np.ndarray:
+    """Despeckle (open), then choke (erode; negative spreads), then feather (Gaussian)."""
+    a = np.asarray(alpha, dtype=np.float32)
+    if despeckle_px > 0:
+        a = cv2.morphologyEx(a, cv2.MORPH_OPEN, _kernel(despeckle_px))
+    if choke_px > 0:
+        a = cv2.erode(a, _kernel(choke_px))
+    elif choke_px < 0:
+        a = cv2.dilate(a, _kernel(-choke_px))
+    if feather_px > 0:
+        a = cv2.GaussianBlur(a, (0, 0), sigmaX=float(feather_px))
+    return np.clip(a, 0.0, 1.0).astype(np.float32)
+
+
+def binary_alpha(alpha: np.ndarray, threshold: int = 128, defringe_px: int = 0) -> np.ndarray:
+    """Hard 0/1 alpha: ``alpha * 255 >= threshold``. ``defringe_px`` erodes the result."""
+    a = np.asarray(alpha)
+    a255 = a.astype(np.float32) if a.dtype == np.uint8 else np.asarray(a, dtype=np.float32) * 255.0
+    hard = (a255 >= float(threshold)).astype(np.float32)
+    if defringe_px > 0:
+        hard = cv2.erode(hard, _kernel(defringe_px))
+    return hard.astype(np.float32)
+
+
+# --- RGBA helpers ------------------------------------------------------------------
+
+def compose_rgba(rgb: np.ndarray, alpha: np.ndarray) -> Image.Image:
+    """Build an RGBA image from uint8 RGB and float 0..1 alpha."""
+    rgb_u8 = np.asarray(rgb)[:, :, :3].astype(np.uint8)
+    a_u8 = np.clip(np.round(np.asarray(alpha, dtype=np.float32) * 255.0), 0, 255).astype(np.uint8)
+    rgba = np.concatenate([rgb_u8, a_u8[:, :, None]], axis=2)
+    return Image.fromarray(np.ascontiguousarray(rgba))
+
+
+def split_rgba(image: Image.Image) -> Tuple[np.ndarray, np.ndarray]:
+    """Return (rgb uint8 HxWx3, alpha float32 HxW). An image without alpha is opaque."""
+    rgba = np.asarray(image.convert("RGBA"))
+    return rgba[:, :, :3].copy(), rgba[:, :, 3].astype(np.float32) / 255.0
+
+
+def apply_profile_alpha(image: Image.Image, profile: OutputProfile) -> Image.Image:
+    """Binarize alpha only when the profile asks for it. The hd profile keeps soft alpha."""
+    if not profile.binary_alpha:
+        return image
+    rgb, alpha = split_rgba(image)
+    hard = binary_alpha(alpha, profile.alpha_threshold, profile.defringe_px)
+    return compose_rgba(rgb, hard)
