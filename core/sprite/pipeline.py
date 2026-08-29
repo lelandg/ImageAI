@@ -19,11 +19,15 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import shutil
 import threading
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from PIL import Image
+
+from .models import FrameMeta
 from .project import ActionCard, SpriteProject
 
 logger = logging.getLogger(__name__)
@@ -257,3 +261,167 @@ def register_external_frames(project: SpriteProject, action: ActionCard) -> List
     action.clip = None
     record_fingerprint(project, action, "extract")
     return frames
+
+
+def _reset_dir(directory: Path) -> Path:
+    if directory.exists():
+        shutil.rmtree(directory)
+    directory.mkdir(parents=True)
+    return directory
+
+
+# --- default runners (sub-project 1) ------------------------------------------
+
+
+def identity_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
+                    out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
+    """Copy every input frame unchanged. The placeholder for stages later sub-projects fill."""
+    stage = out_dir.name
+    _reset_dir(out_dir)
+    written: List[Path] = []
+    total = len(input_frames)
+    for index, path in enumerate(input_frames, start=1):
+        check(token)
+        dest = out_dir / path.name
+        shutil.copy2(path, dest)
+        written.append(dest)
+        progress(stage, index, total, f"{stage}: {path.name}")
+    return written
+
+
+def extract_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
+                   out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
+    """Extract from ``action.clip``; or accept frames an importer placed in ``out_dir``."""
+    from .extract import extract_frames
+
+    if action.clip is not None:
+        clip = Path(action.clip.path)
+        if not clip.exists():
+            raise PipelineError(f"Clip not found: {clip}")
+        result = extract_frames(clip, out_dir, project.extraction, progress=progress, token=token)
+        return result.frames
+    frames = list_frames(out_dir)
+    if not frames:
+        raise PipelineError(
+            f"Action '{action.name}' has no clip and no imported frames; "
+            "render it or import a video, PNG sequence, or sheet first"
+        )
+    return frames
+
+
+def stabilize_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
+                     out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
+    """Crop every frame to the union bbox plus ``pad_px``; no resampling."""
+    from .stabilize import crop_and_pad, has_transparency, solid_border_bbox, union_alpha_bbox
+
+    if not input_frames:
+        raise PipelineError("No frames to stabilize")
+    if has_transparency(input_frames[0]):
+        bbox = union_alpha_bbox(input_frames)
+    else:
+        bbox = solid_border_bbox(input_frames)
+    pad = max(0, project.stabilize.pad_px)
+    cell = (bbox[2] + 2 * pad, bbox[3] + 2 * pad)
+    _reset_dir(out_dir)
+    return crop_and_pad(input_frames, out_dir, bbox, cell, anchor=project.stabilize.anchor,
+                        pad_px=pad, progress=progress, token=token)
+
+
+def hd_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
+              out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
+    """Scale the stabilised frames proportionally into the hd profile cell."""
+    from .stabilize import crop_and_pad
+
+    prof = project.profile("hd")
+    if prof is None or not input_frames:
+        raise PipelineError("hd profile is missing")
+    with Image.open(input_frames[0]) as first:
+        w, h = first.size
+    _reset_dir(out_dir)
+    return crop_and_pad(input_frames, out_dir, (0, 0, w, h), prof.cell_size,
+                        anchor=project.stabilize.anchor, pad_px=0,
+                        progress=progress, token=token)
+
+
+register_stage("extract", extract_runner, extract_stage_settings)
+register_stage("key", identity_runner, key_stage_settings)
+register_stage("cleanup", identity_runner, cleanup_stage_settings)
+register_stage("alpha", identity_runner, alpha_stage_settings)
+register_stage("stabilize", stabilize_runner, stabilize_stage_settings)
+register_stage("hd", hd_runner, hd_stage_settings)
+register_stage("pixel", identity_runner, pixel_stage_settings)
+
+
+# --- the runner loop ----------------------------------------------------------
+
+
+def _sync_frames(action: ActionCard, frames: List[Path]) -> None:
+    """Rebuild ``action.frames`` after a stabilize run, keeping user edits.
+
+    The entry at each index carries over ``duration_ms``, ``pivot`` and
+    ``overrides`` from the previous ``FrameMeta`` at the same index, so a
+    per-frame keying override or an edited duration survives a re-run and
+    the key fingerprint stays stable. Indices beyond the old list get
+    defaults; old entries beyond the new count are dropped.
+    """
+    rebuilt: List[FrameMeta] = []
+    for index, path in enumerate(frames):
+        with Image.open(path) as im:
+            w, h = im.size
+        prev = action.frames[index] if index < len(action.frames) else None
+        rebuilt.append(FrameMeta(
+            name=f"{action.name}_{index:02d}",
+            source_path=path,
+            frame=(0, 0, w, h),
+            sprite_source_size=(0, 0, w, h),
+            source_size=(w, h),
+            duration_ms=prev.duration_ms if prev else round(1000 / max(1, action.fps)),
+            pivot=prev.pivot if prev else (0.5, 1.0),
+            overrides=dict(prev.overrides) if prev else {},
+        ))
+    action.frames = rebuilt
+
+
+def run_pipeline(project: SpriteProject, action: ActionCard, *, upto: str = "pixel",
+                 progress: ProgressFn = no_progress, token: Optional[CancelToken] = None,
+                 force: bool = False) -> Dict[str, List[Path]]:
+    """Run every registered stage up to and including ``upto``; return stage -> frames.
+
+    Each stage's runner receives the previous stage's output list (``[]`` for
+    ``extract``). Cached stages are skipped unless ``force`` is set. A disabled
+    profile stage is skipped and absent from the result. After ``stabilize``
+    runs, ``action.frames`` is rebuilt from its output. ``project.stage_fingerprints``
+    is updated in place; the caller saves the project.
+    """
+    if upto not in STAGES:
+        raise ValueError(f"Unknown stage: {upto!r}")
+    if project.project_dir is None:
+        raise ValueError("project_dir is not set")
+    outputs: Dict[str, List[Path]] = {}
+    stop = STAGES.index(upto)
+    for stage in STAGES[:stop + 1]:
+        check(token)
+        if stage in PROFILE_STAGES:
+            prof = project.profile(stage)
+            if prof is None or not prof.enabled:
+                continue
+        runner = STAGE_RUNNERS.get(stage)
+        if runner is None:
+            raise PipelineError(f"No runner is registered for stage {stage!r}")
+        out_dir = stage_dir(project, action, stage)
+        if not force and is_stage_current(project, action, stage):
+            outputs[stage] = list_frames(out_dir)
+            progress(stage, 0, 0, f"{stage}: cached")
+            continue
+        upstream = UPSTREAM[stage]
+        input_frames = outputs.get(upstream, []) if upstream else []
+        progress(stage, 0, 0, f"{stage}: running")
+        frames = runner(project, action, input_frames, out_dir, progress, token)
+        if stage == "stabilize":
+            _sync_frames(action, frames)
+        outputs[stage] = frames
+        record_fingerprint(project, action, stage)
+        progress(stage, len(frames), len(frames), f"{stage}: done")
+    if action.frames and action.status in ("rendered", "draft"):
+        action.status = "processed"
+    return outputs
