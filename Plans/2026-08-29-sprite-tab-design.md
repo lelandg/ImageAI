@@ -217,8 +217,9 @@ Pipeline re-runs are non-destructive by §1.2 and do not enter the stack.
   project.iasprite.json
   source/character.png (+ .json)  plate.png (+ .json)  turnaround/<view>.png (+ .json)
   clips/<action_id>.mp4 (+ .json sidecar: provider, model, params, prompt, cost)
-  stages/<action_id>/extracted/0001.png …
-  stages/<action_id>/keyed/ … cleaned/ … cells/ … hd/ … pixel/ …
+  stages/<action_id>/<stage>/0001.png …     stage ∈ STAGES: extract, key, cleanup,
+                                            alpha, stabilize, hd, pixel (reach every
+                                            directory through pipeline.stage_dir())
   exports/<profile>/<engine-preset>/<files>
   configs are NOT here — see NamedConfigStore
 ```
@@ -359,6 +360,10 @@ class OutputProfile:
     dither: str = "none"               # none | bayer2 | bayer4 | bayer8 | floyd
     palette_lock: bool = True
     locked_palette: Optional[List[str]] = None
+    upscale_small: bool = False        # pixel: upscale a source smaller than the cell (via core/upscaling.py)
+    upscale_method: str = "lanczos"
+
+def default_profiles() -> List[OutputProfile]   # hd 256×256 and pixel 64×64, BOTH enabled (decision 2: "generate both")
 
 @dataclass
 class ActionCard:
@@ -423,6 +428,15 @@ class SpriteProject:
     def sheet_meta(self, profile: str) -> SheetMeta
     def total_cost(self) -> Tuple[float, float]       # (estimated, actual)
     def purge_intermediates(self) -> int
+
+class SpriteProjectManager:                           # same module; mirrors core/video/project_manager.py
+    def __init__(self, base_dir: Optional[Path] = None)   # default get_data_paths().sprite_projects()
+    def create_project(self, name: str) -> SpriteProject
+    def list_projects(self) -> List[Dict[str, Any]]   # keys: name, slug, path, created, modified, actions
+    def find_project(self, name_or_slug: str) -> Optional[Path]
+    def load_project(self, path: Path) -> SpriteProject
+    def save_project(self, project: SpriteProject) -> Path
+    def delete_project(self, project: SpriteProject) -> bool
 ```
 
 Cell-size presets (`core/sprite/presets.py`): 8, 16, 16×24, 24, 16×32, 32,
@@ -511,17 +525,29 @@ center, top_left, top_center, bottom_left.
 
 ```python
 STAGES = ("extract", "key", "cleanup", "alpha", "stabilize", "hd", "pixel")
-STAGE_CODE_VERSION = {"extract": 1, "key": 1, ...}
-def stage_fingerprint(project, action, stage) -> str
+StageRunner = Callable[[SpriteProject, ActionCard, List[Path], Path, ProgressFn, Optional[CancelToken]], List[Path]]
+#            (project, action, input_frames, out_dir, progress, token) -> output frames written as NNNN.png
+SettingsFn = Callable[[SpriteProject, ActionCard], Dict[str, Any]]   # settings that feed the fingerprint
+STAGE_RUNNERS: Dict[str, StageRunner]; STAGE_SETTINGS: Dict[str, SettingsFn]; STAGE_CODE_VERSION: Dict[str, int]
+def register_stage(stage: str, runner: StageRunner, settings_fn: Optional[SettingsFn] = None, code_version: int = 1) -> None
+def stage_fingerprint(project, action, stage) -> str    # sha1(upstream fp + settings JSON + code version)
+def is_stage_current(project, action, stage) -> bool
+def register_external_frames(project, action) -> List[Path]   # G9: frames an importer placed in the extract dir
 def run_pipeline(project: SpriteProject, action: ActionCard, *, upto: str = "pixel",
                  progress: ProgressFn = no_progress, token: Optional[CancelToken] = None,
                  force: bool = False) -> Dict[str, List[Path]]      # stage → output frames
 def stage_dir(project, action, stage) -> Path
 ```
 
-Sub-project 1 ships `extract` and `stabilize` and the two profile stages
-with pass-through resize; `key`/`cleanup`/`alpha` are identity stages until
-sub-project 3 fills them; `pixel` is identity until sub-project 4.
+`run_pipeline` dispatches every stage through `STAGE_RUNNERS`, passes the
+previous stage's outputs as `input_frames`, and rebuilds `action.frames`
+after `stabilize` while carrying over each frame's `overrides`,
+`duration_ms`, and `pivot` by index. Sub-project 1 registers real runners
+for `extract`, `stabilize`, `hd` and an `identity_runner` for `key`,
+`cleanup`, `alpha`, `pixel`. Sub-project 3 re-registers `key`/`cleanup`/
+`alpha` (code_version 2) and sub-project 4 re-registers `pixel`
+(code_version 2) from their own modules; `core/sprite/__init__.py` imports
+those modules so the registrations run on package import.
 
 **`core/sprite/exporters/`** — every function takes a `SheetMeta` whose
 frames point at per-frame PNGs, and writes files. Signatures:
