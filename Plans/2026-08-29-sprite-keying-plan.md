@@ -1,5 +1,7 @@
 # Sprite Keying & Cleanup Implementation Plan
 
+**Status:** complete 2026-08-29
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Spec:** `Plans/2026-08-29-sprite-tab-design.md` — §1.7 (dependencies), §2 (data model: `KeySettings`, `StabilizeSettings`, `OutputProfile`, `FrameMeta.overrides`), §4.3 (keying & cleanup signatures). Read the spec before any task.
@@ -87,7 +89,7 @@ def register_stage(stage: str, runner: StageRunner, settings_fn=None, code_versi
 
 The keyer works in the (Cb, Cr) plane of BT.601 YCbCr. A constant added to all three RGB channels leaves (Cb, Cr) unchanged, so a luminance gradient on the plate keys the same as a flat plate. The test builds that gradient on purpose.
 
-- [ ] **Step 1: Write the fixture helpers**
+- [x] **Step 1: Write the fixture helpers**
 
 ```python
 # tests/sprite/keying_fixtures.py
@@ -151,7 +153,7 @@ def write_png(path: Path, array: np.ndarray) -> Path:
     return path
 ```
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```python
 # tests/sprite/test_keying_alpha.py
@@ -228,12 +230,12 @@ def test_chroma_alpha_rejects_non_image_arrays():
         keying.chroma_alpha(np.zeros((4, 4), np.uint8), FIELD, 0.2, 0.1)
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_keying_alpha.py -v`
 Expected: FAIL at collection with `ModuleNotFoundError: No module named 'core.sprite.keying'`.
 
-- [ ] **Step 4: Create `core/sprite/keying.py` with the header, errors, and the alpha math**
+- [x] **Step 4: Create `core/sprite/keying.py` with the header, errors, and the alpha math**
 
 ```python
 # core/sprite/keying.py
@@ -335,12 +337,12 @@ def chroma_alpha(rgb: np.ndarray, key_rgb: Tuple[int, int, int],
     return np.clip((dist - tol) / soft, 0.0, 1.0).astype(np.float32)
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_keying_alpha.py -v`
 Expected: 13 passed. (If `core.sprite.models` or `core.sprite.project` import fails, sub-project 1 is not on this branch — stop and report.)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/keying.py tests/sprite/keying_fixtures.py tests/sprite/test_keying_alpha.py
@@ -363,7 +365,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): chroma keye
 
 Despill limits the key's dominant channel (`argmax(key_rgb)`) against the other two: `average` → (a+b)/2, `double` → (2·max(a,b)+min(a,b))/3, `limit` → max(a,b). The luminance the clamp removed is added back as a neutral offset on all channels, which keeps (Cb, Cr) of the result stable.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/sprite/test_keying_despill.py
@@ -435,12 +437,12 @@ def test_decontaminate_clamps_to_uint8_range():
     assert out.min() >= 0 and out.max() <= 255
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_keying_despill.py -v`
 Expected: FAIL with `AttributeError: module 'core.sprite.keying' has no attribute 'despill'`.
 
-- [ ] **Step 3: Append the implementation to `core/sprite/keying.py`**
+- [x] **Step 3: Append the implementation to `core/sprite/keying.py`**
 
 ```python
 # --- despill and edge decontamination ------------------------------------------
@@ -492,12 +494,12 @@ def decontaminate_edges(rgb: np.ndarray, alpha: np.ndarray,
     return np.clip(out, 0, 255).astype(np.uint8)
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_keying_despill.py /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_keying_alpha.py -v`
 Expected: 25 passed (12 + 13).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/keying.py tests/sprite/test_keying_despill.py
@@ -520,7 +522,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): despill and
   - `keying.compose_rgba(rgb: np.ndarray, alpha: np.ndarray) -> Image.Image` and `keying.split_rgba(image: Image.Image) -> Tuple[np.ndarray, np.ndarray]` (rgb uint8, alpha float32).
   - `keying.apply_profile_alpha(image: Image.Image, profile: OutputProfile) -> Image.Image` — binarizes only when `profile.binary_alpha`; the HD soft-alpha guarantee lives here.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/sprite/test_keying_cleanup.py
@@ -624,12 +626,12 @@ def test_profile_binary_alpha_binarizes_and_keeps_colour():
     assert tuple(out[24, 32, :3]) == (220, 40, 40)
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_keying_cleanup.py -v`
 Expected: FAIL with `AttributeError: module 'core.sprite.keying' has no attribute 'choke_feather'`.
 
-- [ ] **Step 3: Append the implementation to `core/sprite/keying.py`**
+- [x] **Step 3: Append the implementation to `core/sprite/keying.py`**
 
 ```python
 # --- alpha cleanup ---------------------------------------------------------------
@@ -689,12 +691,12 @@ def apply_profile_alpha(image: Image.Image, profile: OutputProfile) -> Image.Ima
     return compose_rgba(rgb, hard)
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_keying_cleanup.py -v`
 Expected: 12 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/keying.py tests/sprite/test_keying_cleanup.py
@@ -721,7 +723,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): alpha choke
   - `keying.key_frame(image: Image.Image, settings: KeySettings, overrides: Dict[str, Any]) -> Image.Image` — RGBA; = `alpha_pass(cleanup_pass(key_pass(...)))`.
   - `keying._ml_alpha(image, backend, model, refine_edges)` — indirection that imports `core.sprite.matting.ml_alpha` lazily (Task 6 creates it); tests patch this name.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/sprite/test_key_frame.py
@@ -847,12 +849,12 @@ def test_key_pass_returns_key_rgb_for_chroma_only():
     assert key is None
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_key_frame.py -v`
 Expected: FAIL with `AttributeError: module 'core.sprite.keying' has no attribute 'resolve_key_settings'`.
 
-- [ ] **Step 3: Append the implementation to `core/sprite/keying.py`**
+- [x] **Step 3: Append the implementation to `core/sprite/keying.py`**
 
 ```python
 # --- settings, overrides, and the three passes -------------------------------------
@@ -956,12 +958,12 @@ def pick_key_color(image: Image.Image, xy: Tuple[int, int], radius: int = 2) -> 
     return rgb_to_hex(patch.reshape(-1, 3).mean(axis=0))
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_key_frame.py -v`
 Expected: 13 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/keying.py tests/sprite/test_key_frame.py
@@ -984,7 +986,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): key_frame w
 
 Filter graph (verified with the imageio-ffmpeg 7.0.2 binary): `[0:v]split[bg_in][fg_in];[bg_in]drawbox=color=0x7F7F7F:t=fill[bg];[fg_in]chromakey=0xRRGGBB:S:B[fg];[bg][fg]overlay=format=auto,format=yuv420p`. `drawbox … t=fill` fills the whole frame, so the graph needs no size.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/sprite/test_keying_ffmpeg.py
@@ -1064,12 +1066,12 @@ def test_pick_key_color_rejects_points_outside_the_image():
         keying.pick_key_color(Image.fromarray(rgb), (999, 0))
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_keying_ffmpeg.py -v`
 Expected: the three preview tests FAIL with `AttributeError: … has no attribute 'ffmpeg_chromakey_preview'`; the two `pick_key_color` tests PASS (Task 4 shipped the function).
 
-- [ ] **Step 3: Append the implementation to `core/sprite/keying.py`**
+- [x] **Step 3: Append the implementation to `core/sprite/keying.py`**
 
 ```python
 # --- ffmpeg preview --------------------------------------------------------------------
@@ -1114,12 +1116,12 @@ def ffmpeg_chromakey_preview(video: Path, out_mp4: Path, key_color: str,
     return out_mp4
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_keying_ffmpeg.py -v`
 Expected: 5 passed (or 3 passed + 2 skipped without ffmpeg; the venv has imageio-ffmpeg, so expect 5).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/keying.py tests/sprite/test_keying_ffmpeg.py
@@ -1150,7 +1152,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): ffmpeg chro
 
 Backend notes: mediapipe uses the legacy `mp.solutions.selfie_segmentation` API (repo pin `mediapipe>=0.10.0,<0.10.15`, see `core/character_animator/installer.py:39`). rembg reads `U2NET_HOME` for its model directory; set it to `rembg_model_dir()` before the first session. Sessions cache per model in `_REMBG_SESSIONS`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/sprite/test_matting.py
@@ -1344,12 +1346,12 @@ def test_moving_models_takes_the_rembg_cache(tmp_path, paths):
     assert (tmp_path / "cache" / "video" / "f.bin").exists()
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_matting.py /mnt/d/Documents/Code/GitHub/ImageAI/tests/migration/test_data_migration.py -k "matting or rembg" -v`
 Expected: `test_matting.py` FAILS at collection (`No module named 'core.sprite.matting'`); `test_moving_models_takes_the_rembg_cache` FAILS on `(dest / "cache" / "rembg" / "f.bin").exists()`.
 
-- [ ] **Step 3: Edit `core/data_migration.py:51-54`**
+- [x] **Step 3: Edit `core/data_migration.py:51-54`**
 
 ```python
 CACHE_OWNERS: Dict[Group, Tuple[str, ...]] = {
@@ -1358,7 +1360,7 @@ CACHE_OWNERS: Dict[Group, Tuple[str, ...]] = {
 }
 ```
 
-- [ ] **Step 4: Create `core/sprite/matting.py`**
+- [x] **Step 4: Create `core/sprite/matting.py`**
 
 ```python
 # core/sprite/matting.py
@@ -1496,12 +1498,12 @@ def ml_alpha(image: Image.Image, backend: str, model: str, *, refine_edges: bool
     raise _fail(f"Unknown matting backend {backend!r}; choose one of {ML_BACKENDS}.")
 ```
 
-- [ ] **Step 5: Run the tests to verify they pass**
+- [x] **Step 5: Run the tests to verify they pass**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_matting.py /mnt/d/Documents/Code/GitHub/ImageAI/tests/migration/test_data_migration.py -v`
 Expected: `test_matting.py` 11 passed; the whole migration module passes, including `test_cache_owners_covers_every_model_cache_and_video_cache_call_site` (it scans `core/sprite/matting.py` for `model_cache("rembg")`) and `test_every_owned_cache_name_is_owned_by_exactly_one_group`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/matting.py core/data_migration.py tests/sprite/test_matting.py tests/migration/test_data_migration.py
@@ -1519,7 +1521,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): ML matting 
 **Interfaces:**
 - Produces: `matting.difference_matte(on_white: Image.Image, on_black: Image.Image) -> Image.Image` — RGBA; α = 1 − mean(white − black), color = black / α. Consumed by sub-project 6 (image route).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/sprite/test_matting_difference.py
@@ -1564,12 +1566,12 @@ def test_difference_matte_rejects_size_mismatch():
         matting.difference_matte(white, black.resize((8, 8)))
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_matting_difference.py -v`
 Expected: FAIL with `AttributeError: module 'core.sprite.matting' has no attribute 'difference_matte'`.
 
-- [ ] **Step 3: Append to `core/sprite/matting.py`**
+- [x] **Step 3: Append to `core/sprite/matting.py`**
 
 ```python
 # --- difference matte (image route) ---------------------------------------------------
@@ -1590,12 +1592,12 @@ def difference_matte(on_white: Image.Image, on_black: Image.Image) -> Image.Imag
     return Image.fromarray(np.round(rgba * 255.0).astype(np.uint8))
 ```
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_matting_difference.py -v`
 Expected: 3 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/matting.py tests/sprite/test_matting_difference.py
@@ -1622,7 +1624,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): difference 
 
 Sign conventions were verified in the venv: skimage returns the shift to apply to the moving image directly; `cv2.phaseCorrelate(ref, mov)` returns `(dx, dy)` of the motion, so the shift to apply is `(-dy, -dx)`. The tests pin both.
 
-- [ ] **Step 1: Check package ages, then install the hard deps into the venv**
+- [x] **Step 1: Check package ages, then install the hard deps into the venv**
 
 Run:
 
@@ -1647,7 +1649,7 @@ $PY -c "import skimage, scipy; from skimage.registration import phase_cross_corr
 
 Expected: both import; versions print. (scipy 1.16.3 is already present in `.venv_linux`; scikit-image is new.)
 
-- [ ] **Step 2: Add the hard deps to `requirements.txt` after line 37**
+- [x] **Step 2: Add the hard deps to `requirements.txt` after line 37**
 
 ```
 opencv-python>=4.8.0  # Required for video frame processing and assembly
@@ -1657,7 +1659,7 @@ scikit-image>=0.24  # skimage.registration.phase_cross_correlation (sub-pixel fr
 scipy>=1.13  # required by scikit-image
 ```
 
-- [ ] **Step 3: Write the failing tests**
+- [x] **Step 3: Write the failing tests**
 
 ```python
 # tests/sprite/test_dejitter.py
@@ -1777,12 +1779,12 @@ def test_requirements_declare_the_dejitter_deps():
     assert {"scikit-image", "scipy"} <= names
 ```
 
-- [ ] **Step 4: Run the tests to verify they fail**
+- [x] **Step 4: Run the tests to verify they fail**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_dejitter.py -v`
 Expected: `test_requirements_declare_the_dejitter_deps` PASSES (Step 2); every other test FAILS with `AttributeError: module 'core.sprite.stabilize' has no attribute …`.
 
-- [ ] **Step 5: Append to `core/sprite/stabilize.py`**
+- [x] **Step 5: Append to `core/sprite/stabilize.py`**
 
 Add these imports at the top of the module if they are not there (`cv2`, `numpy`, `logging`, `Optional`, `Tuple`, `List`, `Sequence`), keep the existing `no_progress` / `CancelToken` import, and add:
 
@@ -1901,12 +1903,12 @@ def dejitter(frames: Sequence[Path], out_dir: Path, method: str = "phase", *,
     return outputs
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_dejitter.py -v`
 Expected: 13 passed. Also run sub-project 1's stabilize tests to confirm nothing regressed: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite -k stabilize -v` → all pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/stabilize.py requirements.txt tests/sprite/test_dejitter.py
@@ -1930,7 +1932,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): de-jitter f
   - Runners `key_runner`, `cleanup_runner`, `alpha_runner` registered in `STAGE_RUNNERS` (replacing `identity_runner` for those three stages; `pixel` keeps `identity_runner` until sub-project 4); `stabilize_runner` calls `dejitter` when `project.stabilize.dejitter`; `hd_runner` calls `keying.apply_profile_alpha`.
   - `STAGE_CODE_VERSION["key"|"cleanup"|"alpha"|"stabilize"|"hd"]` incremented by 1 each (via the `code_version=` argument of `register_stage`).
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/sprite/test_pipeline_keying.py
@@ -2099,12 +2101,12 @@ def test_stage_code_versions_were_bumped():
         assert pipeline.STAGE_CODE_VERSION[stage] >= 2, stage
 ```
 
-- [ ] **Step 2: Run the tests to verify they fail**
+- [x] **Step 2: Run the tests to verify they fail**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pipeline_keying.py -v`
 Expected: `test_key_cleanup_alpha_stages_produce_keyed_rgba` FAILS on `out[cov == 0][:, 3].max() == 0` (identity stages keep the green field opaque); `test_stage_code_versions_were_bumped` FAILS; the override and settings tests FAIL with `KeyError: 'overrides'` or on the fingerprint comparison.
 
-- [ ] **Step 3: Edit `core/sprite/pipeline.py`**
+- [x] **Step 3: Edit `core/sprite/pipeline.py`**
 
 Add imports near the top:
 
@@ -2231,12 +2233,12 @@ register_stage("hd", hd_runner, hd_stage_settings, code_version=2)              
 
 `_sync_frames` contract (sub-project 1, confirmed 2026-08-29): when it rebuilds `action.frames` from the `stabilize` output it carries over `overrides`, `duration_ms`, and `pivot` from the previous `FrameMeta` at the same index (indices beyond the old list get defaults; old entries beyond the new count are dropped), and sets `frame=(0, 0, w, h)`, `source_size=(w, h)`, `source_path=<stabilize output>`. Sub-project 1's `test_sync_frames_keeps_user_edits_by_index` and this plan's `test_overrides_survive_the_stabilize_frame_sync` both pin it; if either fails, the fix goes in `_sync_frames`, not in the keying stages.
 
-- [ ] **Step 4: Run the tests to verify they pass**
+- [x] **Step 4: Run the tests to verify they pass**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite -v`
 Expected: every test in `tests/sprite` passes, including sub-project 1's pipeline and exporter tests (their identity expectations for `key`/`cleanup`/`alpha` — if any test asserted that those stages copy frames byte-for-byte, update that assertion to the keyed behavior and say so in the commit body).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pipeline.py tests/sprite/test_pipeline_keying.py
@@ -2260,7 +2262,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): wire key, c
   - `ml_install.sprite_ml_packages() -> Tuple[List[str], str]` — `(packages, index_url)`; rembg omitted when Python is unsupported; `index_url` is `""` (PyPI).
   - `ml_install.requirements_file() -> Path` and `ml_install.parse_requirements(text: str) -> List[str]`.
 
-- [ ] **Step 1: Check the package ages (same rule as Task 8)**
+- [x] **Step 1: Check the package ages (same rule as Task 8)**
 
 Run:
 
@@ -2278,7 +2280,7 @@ EOF
 
 Do **not** install these into `.venv_linux` in this task; they are optional extras and the tests fake the modules. Record the ages in the task report. If the newest `rembg` is younger than 7 days, add `,<LATEST` to `REMBG_SPEC` and the requirements line.
 
-- [ ] **Step 2: Write the failing tests**
+- [x] **Step 2: Write the failing tests**
 
 ```python
 # tests/sprite/test_ml_install.py
@@ -2336,12 +2338,12 @@ def test_forbidden_packages_never_appear():
         assert forbidden not in joined
 ```
 
-- [ ] **Step 3: Run the tests to verify they fail**
+- [x] **Step 3: Run the tests to verify they fail**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_ml_install.py -v`
 Expected: FAIL at collection with `ModuleNotFoundError: No module named 'core.sprite.ml_install'`.
 
-- [ ] **Step 4: Create `requirements-sprite-ml.txt`**
+- [x] **Step 4: Create `requirements-sprite-ml.txt`**
 
 ```
 # Optional ML background-removal backends for the Sprite tab (design §1.7).
@@ -2354,7 +2356,7 @@ mediapipe>=0.10.0,<0.10.15  # legacy mp.solutions API (removed in 0.10.15+); no 
 rembg[cpu]>=2.0.60  # isnet-anime (MIT) default, u2netp (Apache-2.0)
 ```
 
-- [ ] **Step 5: Create `core/sprite/ml_install.py`**
+- [x] **Step 5: Create `core/sprite/ml_install.py`**
 
 ```python
 # core/sprite/ml_install.py
@@ -2405,12 +2407,12 @@ def parse_requirements(text: str) -> List[str]:
     return specs
 ```
 
-- [ ] **Step 6: Run the tests to verify they pass**
+- [x] **Step 6: Run the tests to verify they pass**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_ml_install.py /mnt/d/Documents/Code/GitHub/ImageAI/tests/test_no_hardcoded_paths.py -v`
 Expected: 6 + 3 passed (the guard test accepts `Path(__file__)`-relative repo files).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add requirements-sprite-ml.txt core/sprite/ml_install.py tests/sprite/test_ml_install.py
@@ -2424,22 +2426,22 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): optional ML
 **Files:**
 - Modify: `Plans/2026-08-29-sprite-keying-plan.md` (tick the boxes; add a "Status" line under the header)
 
-- [ ] **Step 1: Run the whole suite**
+- [x] **Step 1: Run the whole suite**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests -q`
 Expected: all green (the pre-feature baseline was 1057 tests at PR #42; sub-project 1 and this plan add to that). Fix any failure in the task that owns the code before moving on; never mark this task done on a red suite.
 
-- [ ] **Step 2: Confirm the guard tests and the CACHE_OWNERS pin once more**
+- [x] **Step 2: Confirm the guard tests and the CACHE_OWNERS pin once more**
 
 Run: `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/test_no_hardcoded_paths.py /mnt/d/Documents/Code/GitHub/ImageAI/tests/migration/test_data_migration.py -q`
 Expected: all pass.
 
-- [ ] **Step 3: Confirm no forbidden dependency slipped in**
+- [x] **Step 3: Confirm no forbidden dependency slipped in**
 
 Run: `grep -rniE "imagequant|corridorkey|bria" /mnt/d/Documents/Code/GitHub/ImageAI/requirements*.txt /mnt/d/Documents/Code/GitHub/ImageAI/core/sprite/*.py`
 Expected: matches only in `core/sprite/matting.py` (`REMBG_MODELS["bria-rmbg"]` with `default_ok: False`) and in the comment lines of `requirements-sprite-ml.txt`. No `pip install` line and no import references any of them.
 
-- [ ] **Step 4: Tick every checkbox in this plan, add `**Status:** complete <YYYY-MM-DD>` under the header, and commit**
+- [x] **Step 4: Tick every checkbox in this plan, add `**Status:** complete <YYYY-MM-DD>` under the header, and commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add Plans/2026-08-29-sprite-keying-plan.md
