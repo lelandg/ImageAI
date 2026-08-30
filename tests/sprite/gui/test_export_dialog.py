@@ -1,4 +1,5 @@
 import gc
+import threading
 import time
 from pathlib import Path
 
@@ -60,10 +61,22 @@ def _request(project, tmp_path, profiles, formats, **kw):
 
 
 def test_parse_scales():
+    """`export_grid` requires 1 in scales; parse_scales must never omit it (review Important 4)."""
     assert parse_scales("1,2,4") == (1, 2, 4)
-    assert parse_scales(" 2 ") == (2,)
+    assert parse_scales(" 2 ") == (1, 2)
+    assert parse_scales("1,1,2") == (1, 2)
     assert parse_scales("") == (1,)
     assert parse_scales("x,0,-1") == (1,)
+
+
+def test_validate_grid_options():
+    """Important 4: pre-flight-reject the combinations `export_grid` itself rejects."""
+    assert ed.validate_grid_options(GridOptions()) == []
+    assert ed.validate_grid_options(GridOptions(scales=(1, 2, 4))) == []
+    problems = ed.validate_grid_options(GridOptions(extrude_px=1, shape_px=1, border_px=0))
+    assert problems and "extrude" in problems[0].lower()
+    problems = ed.validate_grid_options(GridOptions(scales=(2, 4)))
+    assert problems and "scale" in problems[0].lower()
 
 
 def test_builtin_formats_registered_in_order(qapp, project):
@@ -89,24 +102,43 @@ def test_register_format_adds_checkbox_and_id(qapp, project):
     _close(dialog)
 
 
+def _on_disk(out_dir) -> list:
+    return sorted(p.name for p in Path(out_dir).iterdir() if p.is_file())
+
+
 def test_run_export_png_sequence_writes_files(project, tmp_path):
+    """Important 3: the reported list must match every file actually on disk (PNG + sidecar)."""
     logs = []
     req = _request(project, tmp_path, ["hd"], ["png_sequence"])
     files = run_export(req, _formats("png_sequence"), log=logs.append,
                        progress=no_progress, token=CancelToken())
-    assert len(files) == 4
+    assert len(files) == 8  # 4 frame PNGs + 4 ImageAI metadata sidecars
     assert all(Path(p).exists() for p in files)
     assert all(str(p).startswith(str(tmp_path / "out" / "hd")) for p in files)
+    assert sorted(Path(p).name for p in files) == _on_disk(tmp_path / "out" / "hd" / "frames")
     assert any("Wrote" in line for line in logs)
 
 
 def test_run_export_grid_writes_sheet_and_json_sidecar(project, tmp_path):
+    """Important 3: the sheet PNG, its Aseprite JSON, and its ImageAI metadata sidecar all report."""
     req = _request(project, tmp_path, ["hd"], ["grid"], grid=GridOptions(columns=2))
     files = run_export(req, _formats("grid"), log=lambda m: None,
                        progress=no_progress, token=CancelToken())
     names = sorted(Path(p).name for p in files)
-    assert names == ["walk_hd.json", "walk_hd.png"]
+    assert names == ["walk_hd.json", "walk_hd.png", "walk_hd.png.json"]
+    assert names == _on_disk(tmp_path / "out" / "hd")
     assert (tmp_path / "out" / "hd" / "walk_hd.png").stat().st_size > 0
+
+
+def test_run_export_grid_reports_every_scale(project, tmp_path):
+    """Important 3: `scales=(1, 2)` must report the @2x PNG/Aseprite-JSON/metadata trio too."""
+    req = _request(project, tmp_path, ["hd"], ["grid"], grid=GridOptions(scales=(1, 2)))
+    files = run_export(req, _formats("grid"), log=lambda m: None,
+                       progress=no_progress, token=CancelToken())
+    names = sorted(Path(p).name for p in files)
+    assert names == ["walk_hd.json", "walk_hd.png", "walk_hd.png.json",
+                     "walk_hd@2x.json", "walk_hd@2x.png", "walk_hd@2x.png.json"]
+    assert names == _on_disk(tmp_path / "out" / "hd")
 
 
 def test_run_export_sheet_written_once_for_sheet_formats(project, tmp_path):
@@ -114,14 +146,16 @@ def test_run_export_sheet_written_once_for_sheet_formats(project, tmp_path):
     files = run_export(req, _formats("grid", "aseprite_json", "texturepacker_json"),
                        log=lambda m: None, progress=no_progress, token=CancelToken())
     names = sorted(Path(p).name for p in files)
-    assert names == ["walk_hd.json", "walk_hd.png", "walk_hd.tp.json"]
+    assert names == ["walk_hd.json", "walk_hd.png", "walk_hd.png.json", "walk_hd.tp.json"]
+    assert names == _on_disk(tmp_path / "out" / "hd")
 
 
 def test_run_export_gif_per_tag(project, tmp_path):
     req = _request(project, tmp_path, ["pixel"], ["gif"])
     files = run_export(req, _formats("gif"), log=lambda m: None,
                        progress=no_progress, token=CancelToken())
-    assert [Path(p).name for p in files] == ["walk_walk.gif"]
+    assert [Path(p).name for p in files] == ["walk_walk.gif", "walk_walk.gif.json"]
+    assert sorted(Path(p).name for p in files) == _on_disk(tmp_path / "out" / "pixel")
 
 
 def test_run_export_applies_pivot_and_passes_filled_meta_to_plugins(project, tmp_path):
@@ -163,7 +197,7 @@ def test_dialog_export_runs_worker_and_emits(qapp, project, tmp_path):
     dialog.exported.connect(got.append)
     dialog.start_export()
     _wait_idle(dialog)
-    assert got and len(got[0]) == 4
+    assert got and len(got[0]) == 8  # 4 frame PNGs + 4 ImageAI metadata sidecars
     assert all(Path(p).exists() for p in got[0])
     assert "Export complete" in dialog.console.console.toPlainText()
     _close(dialog)
@@ -178,6 +212,46 @@ def test_dialog_validates_selection(qapp, project, monkeypatch):
     dialog.start_export()
     assert shown and not dialog.is_running()
     _close(dialog)
+
+
+def test_start_export_blocked_by_grid_padding_export_grid_rejects(qapp, project, monkeypatch):
+    """Important 4: a padding/extrude combo `export_grid` rejects is caught before the job starts."""
+    dialog = ExportDialog(project)
+    assert dialog.format_checks["grid"].isChecked()  # needs_sheet, so grid validation applies
+    dialog.border.setValue(0)
+    dialog.shape.setValue(1)
+    dialog.extrude.setValue(1)  # 2*extrude(2) > shape(1) -> export_grid raises ValueError
+    shown = []
+    monkeypatch.setattr(ed.QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a)))
+    dialog.start_export()
+    assert shown and not dialog.is_running()
+    assert "extrude" in shown[0][2].lower()
+    _close(dialog)
+
+
+def test_close_during_export_joins_running_worker(qapp, project, tmp_path, monkeypatch):
+    """Important 1: Escape/close mid-export cancels + joins, never drops a running thread."""
+    monkeypatch.setattr(ed, "CLOSE_SHUTDOWN_TIMEOUT_MS", 50)
+    release = threading.Event()
+
+    def gated(meta, out_dir):
+        release.wait(5)
+        return []
+
+    dialog = ExportDialog(project)
+    dialog.out_dir_edit.setText(str(tmp_path / "exp"))
+    for box in dialog.format_checks.values():
+        box.setChecked(False)
+    dialog.register_format("gated", "Gated", gated, checked=True)
+    for name, box in dialog.profile_checks.items():
+        box.setChecked(name == "hd")
+    dialog.start_export()
+    assert dialog.is_running()
+    threading.Timer(0.15, release.set).start()
+    dialog.done(0)  # shutdown(50) times out -> on_dialog_close falls back to join_orphans()
+    for _ in range(10):
+        QTest.qWait(20)
+    assert not dialog.is_busy()
 
 
 def test_set_grid_options_and_current_meta(qapp, project):
@@ -231,6 +305,28 @@ def test_purge_runs_after_export_when_enabled(qapp, project, tmp_path, monkeypat
     _wait_idle(dialog)
     assert purged == [1]
     assert "Purged 3" in dialog.console.console.toPlainText()
+    _close(dialog)
+
+
+def test_purge_skipped_when_export_writes_nothing(qapp, project, tmp_path, monkeypatch):
+    """Important 5: purge never runs after a zero-file export (skipped profile, no tags, etc.)."""
+    monkeypatch.setattr(ed.prefs, "purge_after_export_enabled", lambda: True)
+    from core.sprite.models import SheetMeta
+    monkeypatch.setattr(SpriteProject, "sheet_meta",
+                        lambda self, profile: SheetMeta(title="empty", frames=[], tags=[], profile=profile))
+    purged = []
+    monkeypatch.setattr(SpriteProject, "purge_intermediates", lambda self: purged.append(1) or 3)
+    dialog = ExportDialog(project)
+    assert dialog.purge_check.isChecked()
+    dialog.out_dir_edit.setText(str(tmp_path / "exp"))
+    for fmt_id, box in dialog.format_checks.items():
+        box.setChecked(fmt_id == "png_sequence")
+    dialog.start_export()
+    _wait_idle(dialog)
+    assert purged == []
+    text = dialog.console.console.toPlainText()
+    assert "Purged" not in text
+    assert "Export complete: 0 file(s)" in text
     _close(dialog)
 
 

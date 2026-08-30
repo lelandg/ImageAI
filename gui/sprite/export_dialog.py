@@ -29,6 +29,7 @@ from core.sprite.exporters.texturepacker_json import export_texturepacker_json
 from core.sprite.models import SheetMeta
 from core.sprite.pipeline import CancelToken, ProgressFn
 from core.sprite.project import SpriteProject
+from core.utils import sidecar_path
 from gui.common.dialog_conventions import (DialogCleanupMixin, bind_primary_action,
                                            persist_splitter, restore_splitter,
                                            set_default_button, standard_splitter)
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_TEMPLATE = "{title}_{tag}_{frame01}.png"
 SETTINGS_PREFIX = "sprite/export/"
 SPLITTER_KEY = SETTINGS_PREFIX + "splitter"
+CLOSE_SHUTDOWN_TIMEOUT_MS = 5000  # on_dialog_close's bound before it falls back to join_orphans()
 
 FormatFn = Callable[[SheetMeta, Path], List[Path]]
 
@@ -71,15 +73,39 @@ def sheet_png_path(meta: SheetMeta, out_dir: Path) -> Path:
     return Path(out_dir) / f"{meta.title}_{meta.profile}.png"
 
 
+def _grid_output_paths(png: Path, scales: Sequence[int]) -> List[Path]:
+    """Every file `export_grid` writes, for the documented per-scale naming (grid.py).
+
+    Each scale gets three files: the PNG itself (`<png>` at scale 1,
+    `<stem>@Nx<suffix>` otherwise), its Aseprite JSON (`<target>.json`), and its
+    ImageAI metadata sidecar (`sidecar_path(target)` = `<target>.png.json`).
+    """
+    paths: List[Path] = []
+    for scale in scales:
+        target = png if scale == 1 else png.with_name(f"{png.stem}@{scale}x{png.suffix}")
+        paths.append(target)
+        paths.append(target.with_suffix(".json"))
+        paths.append(sidecar_path(target))
+    return paths
+
+
 def format_grid(meta: SheetMeta, out_dir: Path) -> List[Path]:
-    """The sheet PNG; `export_grid` also writes `<png>.json` beside it (design gap 18)."""
+    """The sheet PNG plus its Aseprite JSON and ImageAI metadata sidecars (design gap 18).
+
+    Registered `needs_sheet=True`, so `run_export`'s top-level block normally already wrote
+    (and recorded) these files at every requested scale before this runs; the fallback export
+    below only fires if this format is ever invoked standalone, and covers scale 1 only.
+    """
     png = sheet_png_path(meta, out_dir)
     if tuple(meta.sheet_size) == (0, 0) or not png.exists():
         export_grid(meta, png, GridOptions())
     files = [png]
-    sidecar = png.with_suffix(".json")
-    if sidecar.exists():
-        files.append(sidecar)
+    aseprite = png.with_suffix(".json")
+    if aseprite.exists():
+        files.append(aseprite)
+    meta_sidecar = sidecar_path(png)
+    if meta_sidecar.exists():
+        files.append(meta_sidecar)
     return files
 
 
@@ -100,7 +126,13 @@ def format_texturepacker_json(meta: SheetMeta, out_dir: Path) -> List[Path]:
 def format_png_sequence(meta: SheetMeta, out_dir: Path, template: str = DEFAULT_TEMPLATE) -> List[Path]:
     frames_dir = Path(out_dir) / "frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
-    return [Path(p) for p in export_png_sequence(meta, frames_dir, template)]
+    files: List[Path] = []
+    for png in (Path(p) for p in export_png_sequence(meta, frames_dir, template)):
+        files.append(png)
+        sidecar = sidecar_path(png)
+        if sidecar.exists():
+            files.append(sidecar)
+    return files
 
 
 def format_gif(meta: SheetMeta, out_dir: Path) -> List[Path]:
@@ -110,7 +142,11 @@ def format_gif(meta: SheetMeta, out_dir: Path) -> List[Path]:
     files: List[Path] = []
     for tag in meta.tags:
         out = Path(out_dir) / f"{meta.title}_{tag.name}.gif"
-        files.append(Path(export_gif(meta, tag, out, loop=tag.repeat)))
+        gif_path = Path(export_gif(meta, tag, out, loop=tag.repeat))
+        files.append(gif_path)
+        sidecar = sidecar_path(gif_path)
+        if sidecar.exists():
+            files.append(sidecar)
     return files
 
 
@@ -124,6 +160,7 @@ BUILTIN_FORMATS: Tuple[ExportFormat, ...] = (
 
 
 def parse_scales(text: str) -> Tuple[int, ...]:
+    """Parse a comma-separated scale list; always includes 1 (`export_grid` requires it)."""
     values: List[int] = []
     for part in text.split(","):
         part = part.strip()
@@ -137,12 +174,32 @@ def parse_scales(text: str) -> Tuple[int, ...]:
         if value <= 0:
             return (1,)
         values.append(value)
-    return tuple(values) or (1,)
+    return tuple(sorted({1, *values}))
 
 
 def default_export_dir(project: SpriteProject) -> Path:
     base = project.project_dir if project.project_dir is not None else get_data_paths().sprite_projects() / project.name
     return Path(base) / "exports"
+
+
+def validate_grid_options(opts: GridOptions) -> List[str]:
+    """Problems `export_grid` would reject, phrased for the dialog's validation list.
+
+    Refuses with a shown+logged message rather than silently overriding the user's padding —
+    `parse_scales` already guarantees `scales` includes 1, so that check here only guards a
+    `GridOptions` built outside the dialog (e.g. by a sub-project-6 caller).
+    """
+    problems: List[str] = []
+    if opts.extrude_px < 0 or opts.shape_px < 0 or opts.border_px < 0 or opts.inner_px < 0:
+        problems.append("Grid padding values must not be negative.")
+    if opts.extrude_px > 0 and (2 * opts.extrude_px > opts.shape_px or opts.extrude_px > opts.border_px):
+        problems.append(
+            f"Grid extrude ({opts.extrude_px}px) needs shape padding of at least "
+            f"{2 * opts.extrude_px}px and border padding of at least {opts.extrude_px}px."
+        )
+    if any(s < 1 for s in opts.scales) or 1 not in opts.scales:
+        problems.append("Grid scales must be positive and include 1.")
+    return problems
 
 
 def run_export(request: ExportRequest, formats: Sequence[ExportFormat], *,
@@ -174,10 +231,9 @@ def run_export(request: ExportRequest, formats: Sequence[ExportFormat], *,
             png = sheet_png_path(meta, out_dir)
             progress("export", index, total, f"{profile}: sheet")
             meta = export_grid(meta, png, request.grid)
-            record(png)
-            sidecar = png.with_suffix(".json")
-            if sidecar.exists():
-                record(sidecar)
+            for path in _grid_output_paths(png, request.grid.scales):
+                if path.exists():
+                    record(path)
         for fmt in formats:
             token.raise_if_cancelled()
             progress("export", index, total, f"{profile}: {fmt.label}")
@@ -424,6 +480,7 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         if self.is_running():
             return
         request = self.request()
+        formats = [self._formats[fmt_id] for fmt_id in request.formats]
         problems = []
         if not request.profiles:
             problems.append("Select at least one profile.")
@@ -431,6 +488,8 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
             problems.append("Select at least one format.")
         if not self.out_dir_edit.text().strip():
             problems.append("Choose an output directory.")
+        if any(fmt.needs_sheet for fmt in formats):
+            problems.extend(validate_grid_options(request.grid))
         if problems:
             message = "\n".join(problems)
             logger.warning("Sprite export blocked: %s", message)
@@ -438,7 +497,6 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
             QMessageBox.warning(self, "Export", message)
             return
         self._save_settings()
-        formats = [self._formats[fmt_id] for fmt_id in request.formats]
         self._pending_purge = request.purge
         self.console.log(f"Export: profiles={request.profiles} formats={request.formats} → {request.out_dir}")
         logger.info("Sprite export start: %s", request)
@@ -476,10 +534,9 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         self.console.log(f"[{stage}] {message}")
 
     def _on_finished(self, result: Any) -> None:
-        self._worker = None
         self._set_running(False)
         files = [Path(p) for p in (result or [])]
-        if self._pending_purge:
+        if files and self._pending_purge:
             try:
                 count = self.project.purge_intermediates()
                 self.console.log(f"Purged {count} intermediate item(s) to the recycle bin", "WARNING")
@@ -493,14 +550,12 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         self.exported.emit(files)
 
     def _on_failed(self, message: str) -> None:
-        self._worker = None
         self._set_running(False)
         logger.error("Sprite export failed: %s", message)
         self.console.log(f"Export failed: {message}", "ERROR")
         QMessageBox.critical(self, "Export failed", message)
 
     def _on_cancelled(self) -> None:
-        self._worker = None
         self._set_running(False)
         logger.info("Sprite export cancelled")
         self.console.log("Export cancelled", "WARNING")
@@ -543,6 +598,12 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         put(SETTINGS_PREFIX + "formats", ",".join(self.selected_formats()))
 
     def on_dialog_close(self) -> None:
-        self.shutdown()                       # WorkerHost: cancel + join a running export
+        # WorkerHost: cancel + join a running export. Escape/close mid-export must never drop a
+        # running QThread (mirror sprite_tab.py's shutdown()/join_orphans() pattern) — the export
+        # job polls the cancel token, so an unbounded join still returns.
+        if not self.shutdown(timeout_ms=CLOSE_SHUTDOWN_TIMEOUT_MS):
+            logger.warning("Sprite export worker did not stop within %d ms; joining before close",
+                           CLOSE_SHUTDOWN_TIMEOUT_MS)
+            self.join_orphans()
         self._save_settings()
         persist_splitter(self.settings, SPLITTER_KEY, self.splitter)
