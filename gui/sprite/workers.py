@@ -197,10 +197,16 @@ class WorkerHost:
         return None
 
     def is_busy(self) -> bool:
-        """True while this host has a live worker, or one of its orphans runs."""
+        """True while this host has a live worker or an unreaped orphan.
+
+        An orphan counts as busy until ``_reap_orphan`` removes it — not
+        until ``isRunning()`` drops — so the emit-to-delivery window that
+        ``terminal_delivered`` closes for the live worker stays closed for
+        orphans too (re-review, Minor 5 residual).
+        """
         if self._live_worker() is not None:
             return True
-        return any(orphan.isRunning() for orphan in self._orphan_list())
+        return bool(self._orphan_list())
 
     @property
     def busy_label(self) -> Optional[str]:
@@ -215,8 +221,7 @@ class WorkerHost:
         if worker is not None:
             return worker.label
         for orphan in self._orphan_list():
-            if orphan.isRunning():
-                return orphan.label
+            return orphan.label
         return None
 
     def cancel_running(self) -> None:
@@ -233,17 +238,20 @@ class WorkerHost:
         destroyed.
         """
         worker = self._worker
-        if worker is None:
-            return True
-        worker.cancel()
-        stopped = True
-        if worker.isRunning() and not worker.wait(timeout_ms):
-            logger.error("Sprite worker %r did not stop within %d ms; kept as an orphan",
-                         worker.label, timeout_ms)
-            self._adopt_orphan(worker)
-            stopped = False
-        self._worker = None
-        return stopped
+        if worker is not None:
+            worker.cancel()
+            if worker.isRunning() and not worker.wait(timeout_ms):
+                logger.error("Sprite worker %r did not stop within %d ms; kept as an orphan",
+                             worker.label, timeout_ms)
+                # Clear the live slot BEFORE adopting, so a synchronous reap
+                # inside _adopt_orphan sees the post-shutdown state.
+                self._worker = None
+                self._adopt_orphan(worker)
+            self._worker = None
+        # An orphan from an EARLIER timed-out shutdown still counts: the caller
+        # must join_orphans() before the widget tree is destroyed (re-review,
+        # Important: second shutdown() must not report an all-clear).
+        return not self._orphan_list()
 
     def _adopt_orphan(self, worker: SpriteWorker) -> None:
         """Keep ``worker`` alive and detached until its thread exits.
@@ -279,10 +287,17 @@ class WorkerHost:
         worker.wait()  # the job emitted its terminal signal; the thread is exiting
         logger.info("Sprite orphan worker %r finished after shutdown", worker.label)
         worker.deleteLater()
-        self._on_worker_idle()
+        if self.is_busy():
+            return  # a new live worker started meanwhile; its own slots re-sync the UI
+        try:
+            self._on_worker_idle()
+        except RuntimeError as exc:
+            # The host widget was already destroyed (app exit drained the
+            # queued terminal event after teardown); nothing left to re-sync.
+            logger.debug("Sprite orphan idle hook skipped: %s", exc)
 
     def _on_worker_idle(self) -> None:
-        """Hook: the last orphan of this host stopped. Panels re-sync their UI."""
+        """Hook: the last orphan stopped and the host is idle. Panels re-sync their UI."""
 
     def join_orphans(self, timeout_ms: Optional[int] = None) -> bool:
         """Wait for every orphan of this host. ``None`` waits without a bound.

@@ -237,6 +237,68 @@ def test_shutdown_timeout_keeps_the_worker_as_an_orphan(qapp, caplog):
     assert host.idle_calls == 1
 
 
+def test_second_shutdown_reports_a_running_orphan(qapp):
+    """Re-review Important: shutdown() after an earlier timed-out shutdown()
+    must still return False while that orphan runs, so MainWindow.closeEvent
+    calls join_orphans() instead of destroying a running QThread."""
+    host = _IdleHost()
+    release = threading.Event()
+
+    def blocked(progress, token):
+        release.wait(20)
+        return "late result"
+
+    worker = host.start_job(blocked, label="blocked",
+                            on_finished=lambda r: None, on_failed=lambda m: None)
+    assert worker is not None
+    assert host.shutdown(timeout_ms=50) is False
+    assert host.shutdown(timeout_ms=50) is False   # second call: orphan still runs
+    assert host.is_busy()
+    release.set()
+    assert worker.wait(5000)
+    # The thread has exited but the reaper is not delivered yet: the orphan
+    # still counts as busy, so no new job can slip in before the idle hook.
+    assert host.is_busy()
+    for _ in range(5):
+        qapp.processEvents()
+    assert host.shutdown(timeout_ms=50) is True
+    assert not host.is_busy()
+    assert host.idle_calls == 1
+
+
+def test_orphan_idle_hook_is_skipped_while_a_new_job_runs(qapp):
+    """The reaper must not tell the panel it is idle when a new live worker
+    started after the orphan was reaped-eligible (re-review, Minor)."""
+    host = _IdleHost()
+    release = threading.Event()
+    release2 = threading.Event()
+
+    def blocked(progress, token):
+        release.wait(20)
+        return "a"
+
+    def blocked2(progress, token):
+        release2.wait(20)
+        return "b"
+
+    worker = host.start_job(blocked, label="a", on_finished=lambda r: None,
+                            on_failed=lambda m: None)
+    assert host.shutdown(timeout_ms=50) is False
+    release.set()
+    assert worker.wait(5000)
+    for _ in range(5):
+        qapp.processEvents()               # orphan reaped; host idle
+    assert host.idle_calls == 1
+    second = host.start_job(blocked2, label="b", on_finished=lambda r: None,
+                            on_failed=lambda m: None)
+    assert second is not None and host.is_busy()
+    release2.set()
+    assert second.wait(5000)
+    for _ in range(5):
+        qapp.processEvents()
+    assert host.idle_calls == 1            # no spurious idle call for the live worker
+
+
 def test_join_orphans_waits_for_the_released_orphan(qapp):
     """join_orphans() is what MainWindow.closeEvent uses instead of a destroy."""
     host = _Host()

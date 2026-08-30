@@ -231,6 +231,8 @@ def test_refine_pipeline_failure_keeps_clip_and_records_error(qapp, fake_config,
     monkeypatch.setattr(qp, "show_error",
                         lambda parent, title, message, exception=None: seen_errors.append(message))
     panel = _panel(fake_config, fake_project, monkeypatch)
+    console = []
+    panel.logMessage.connect(lambda message, level: console.append((level, message)))
     panel.refine("a1", "make the cape swing")
     wait_for_worker(panel)
     assert fake_project.actions[0].clip is new_clip
@@ -238,5 +240,10 @@ def test_refine_pipeline_failure_keeps_clip_and_records_error(qapp, fake_config,
     assert fake_project.actions[0].error is not None
     assert fake_project.actions[0].error.startswith("pipeline:")
     assert seen_errors == []  # finished path ran; no error dialog
+    # The failure is logged at ERROR (house rule), not reported as SUCCESS.
+    assert any(level == "ERROR" and "pipeline: ffmpeg not found" in message
+               for level, message in console)
+    assert not any(level == "SUCCESS" and "Refined clip ready" in message
+                   for level, message in console)
     tooltip = panel.table.item(0, COL_STATUS).toolTip()
     assert tooltip

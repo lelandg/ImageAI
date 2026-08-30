@@ -6,6 +6,7 @@ reflects card status and logs ``user_message`` for failures.
 """
 from __future__ import annotations
 
+import functools
 import logging
 from pathlib import Path
 from typing import List, Optional, Sequence
@@ -21,6 +22,7 @@ from core.sprite.generation.errors import SpriteGenerationError
 from core.sprite.generation.queue import ActionQueue
 from core.sprite.generation.video_route import refine_action
 from core.sprite.pipeline import Cancelled, run_pipeline
+from core.sprite.project import ActionCard
 from gui.common.dialog_conventions import bind_primary_action
 from gui.dialog_utils import show_error, show_warning
 from gui.sprite.workers import WorkerHost
@@ -263,7 +265,8 @@ class QueuePanel(WorkerHost, QGroupBox):
             return record
 
         self.logMessage.emit(f"Refine requested for {card.name}: {instruction}", "INFO")
-        worker = self.start_job(job, label="refine", on_finished=self._on_refine_done,
+        worker = self.start_job(job, label="refine",
+                                on_finished=functools.partial(self._on_refine_done, card),
                                 on_failed=self._on_failed, on_cancelled=self._on_cancelled,
                                 on_progress=self._on_progress)
         if worker is not None:
@@ -300,10 +303,17 @@ class QueuePanel(WorkerHost, QGroupBox):
         self.statusChanged.emit()
         self.queueFinished.emit(results)
 
-    def _on_refine_done(self, record) -> None:
+    def _on_refine_done(self, card: ActionCard, record) -> None:
         self._set_running(False)
         self.status_label.setText("")
-        self.logMessage.emit(f"Refined clip ready → {getattr(record, 'path', '')}", "SUCCESS")
+        if card.error:
+            # The refined clip is saved; only the local pipeline failed. Log it
+            # at ERROR like ActionQueue._post_process does (house rule: every
+            # error is logged), and leave the tooltip/card.error in place.
+            self.logMessage.emit(f"Refined clip saved → {getattr(record, 'path', '')}; "
+                                 f"{card.error} — re-run the pipeline", "ERROR")
+        else:
+            self.logMessage.emit(f"Refined clip ready → {getattr(record, 'path', '')}", "SUCCESS")
         self.refresh()
         self.statusChanged.emit()
 
@@ -324,4 +334,4 @@ class QueuePanel(WorkerHost, QGroupBox):
 
     def _on_worker_idle(self) -> None:
         """A worker orphaned by a timed-out ``shutdown()`` finally stopped."""
-        self._set_running(False)
+        self._set_running(self.is_busy())
