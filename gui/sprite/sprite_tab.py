@@ -26,6 +26,7 @@ from gui.llm_utils import DialogStatusConsole
 from gui.sprite.action_cards_panel import ActionCardsPanel
 from gui.sprite.character_panel import CharacterPanel
 from gui.sprite.generation_settings_dialog import GenerationSettingsDialog
+from gui.sprite.image_route_dialog import install_image_route
 from gui.sprite.prefs import sprite_settings
 from gui.sprite.queue_panel import QueuePanel
 from gui.sprite.retouch_wiring import install_retouch
@@ -70,6 +71,8 @@ class SpriteTab(QWidget):
         self.frames_workspace = FramesWorkspace(self)
         # Sub-project 6: frame-strip retouch dialog, wired last so frame_strip exists.
         install_retouch(self)
+        # Sub-project 6: "Render (image)" button on every action card row.
+        install_image_route(self)
 
     # -- build -------------------------------------------------------------
 
