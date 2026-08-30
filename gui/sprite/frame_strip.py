@@ -4,10 +4,11 @@ Design §4.5 / §1.4: every destructive list edit pushes a `FrameListSnapshot`
 through the `UndoController` before the change. Files on disk are never
 deleted here; the list only points at them.
 
-Thumbnails are decoded with `QImageReader` at strip-cell size (scaled
-proportionally, never cropped or distorted) rather than as full-resolution
-`QPixmap`s, and cached per `(path, mtime)` on the strip instance so repeated
-`set_frames()`/`refresh()` calls do not re-decode unchanged files.
+Thumbnails are decoded through `QImageReader` and scaled to strip-cell size
+(proportionally, never cropped or distorted). Qt's PNG handler does not
+support scaled decoding, so the decode itself runs at full size; the
+`(path, mtime)` cache on the strip instance is what keeps repeated
+`set_frames()`/`refresh()` calls from re-decoding unchanged files.
 """
 from __future__ import annotations
 
@@ -101,6 +102,22 @@ class FrameOverridesDialog(DialogCleanupMixin, QDialog):
         self._primary = bind_primary_action(self, self.accept)
         self.set_values(overrides)
 
+    def accept(self) -> None:
+        """Refuse OK on an invalid key colour: no snapshot, no override write.
+
+        `values()` still drops an invalid colour (belt for a future direct
+        caller), but that path is a commit point (final review, Important 5):
+        the user must see why nothing changed rather than have the checked
+        colour silently vanish.
+        """
+        if self.key_color_on.isChecked():
+            text = self.key_color.text().strip()
+            if not HEX_RE.match(text):
+                logger.warning("Frame overrides: refused invalid key color %r", text)
+                QMessageBox.warning(self, "Key color", f"{text!r} is not #RRGGBB")
+                return
+        super().accept()
+
     def set_values(self, overrides: Dict[str, Any]) -> None:
         self.key_color_on.setChecked("key_color" in overrides)
         self.key_color.setText(str(overrides.get("key_color", "") or ""))
@@ -182,6 +199,10 @@ class FrameStrip(QWidget):
         # Thumbnail cache: str(source_path) -> (mtime, QPixmap). Avoids
         # re-decoding unchanged files on every set_frames()/refresh() call.
         self._thumb_cache: Dict[str, Tuple[float, QPixmap]] = {}
+        # (path, mtime) pairs already logged as unavailable, so refresh()
+        # does not spam the log/console for a still-missing or still-corrupt
+        # file (final review, Minor 7).
+        self._thumb_warned: set = set()
         self._build()
 
     # ----- UI ---------------------------------------------------------
@@ -313,7 +334,13 @@ class FrameStrip(QWidget):
         # or deleted external file cannot break the frame list, and a purge
         # can clean it up. Anchored next to the neighbouring frame's file.
         dest_dir = Path(reference.source_path).parent / "inserted"
-        dest_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            logger.error("Insert frame: failed to create %s: %s", dest_dir, exc, exc_info=True)
+            self.logMessage.emit(f"Insert frame failed: {exc}", "ERROR")
+            QMessageBox.critical(self, "Insert frame", f"Cannot create {dest_dir}:\n{exc}")
+            return 0
         names = [f.name for f in self._frames]
         new_frames: List[FrameMeta] = []
         for path in paths:
@@ -464,12 +491,16 @@ class FrameStrip(QWidget):
     def _cached_thumbnail(self, source_path: Optional[Path]) -> Optional[QPixmap]:
         """Decode a strip-cell-sized thumbnail via QImageReader, cached by (path, mtime).
 
-        Never decodes the full-resolution image on the UI thread: QImageReader's
-        `setScaledSize` downsamples during the read itself. The scaled size
-        preserves aspect ratio (Qt.KeepAspectRatio semantics) so thumbnails are
-        never cropped or distorted. The cache entry is invalidated whenever the
-        file's mtime changes, so a retouch that repoints/rewrites a file is
-        re-decoded on the next refresh().
+        Qt's PNG handler does not implement `ScaledSize` (`supportsOption`
+        returns False for PNG), so `setScaledSize` has no effect on the
+        decode: `read()` decodes the full-resolution image and `QImage`
+        scales it down afterward. The scaled size preserves aspect ratio
+        (Qt.KeepAspectRatio semantics) so thumbnails are never cropped or
+        distorted. What actually avoids repeated work is the `(path, mtime)`
+        cache: an unchanged file is served from it instead of being
+        re-decoded on every `set_frames()`/`refresh()` call, and a retouch
+        that repoints/rewrites a file changes its mtime, so it is re-decoded
+        on the next refresh().
         """
         if not source_path:
             return None
@@ -477,6 +508,7 @@ class FrameStrip(QWidget):
         try:
             mtime = path.stat().st_mtime
         except OSError:
+            self._warn_thumbnail_once(str(path), None)
             return None
         key = str(path)
         cached = self._thumb_cache.get(key)
@@ -490,10 +522,20 @@ class FrameStrip(QWidget):
         image = reader.read()
         if image.isNull():
             self._thumb_cache.pop(key, None)
+            self._warn_thumbnail_once(key, mtime)
             return None
         pixmap = QPixmap.fromImage(image)
         self._thumb_cache[key] = (mtime, pixmap)
         return pixmap
+
+    def _warn_thumbnail_once(self, path: str, mtime: Optional[float]) -> None:
+        """Log + notify a decode/stat failure once per (path, mtime), never again for the same miss."""
+        key = (path, mtime)
+        if key in self._thumb_warned:
+            return
+        self._thumb_warned.add(key)
+        logger.warning("Frame strip: thumbnail unavailable for %s", path)
+        self.logMessage.emit(f"Thumbnail unavailable: {path}", "WARNING")
 
     def _on_current_changed(self, row: int) -> None:
         if 0 <= row < len(self._frames):

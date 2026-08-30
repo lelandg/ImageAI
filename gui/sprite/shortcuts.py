@@ -1,14 +1,21 @@
 """Keyboard shortcuts for the Sprite tab (design §1.5).
 
-Every shortcut is scoped to the tab (`WidgetWithChildrenShortcut`), so other
-tabs keep their own keys and text fields inside the tab still receive plain
-characters (Qt gives the focused editor the ShortcutOverride first).
-Ctrl+Enter is bound per panel/dialog with `bind_primary_action`, not here.
+Design §1.5's "Where" column scopes most rows to one working area, not the
+whole tab: Space, `,`, `.`, Home, End and L to the preview player; Delete
+and Ctrl+D to the frame strip; `+`/`-`/`=`/Ctrl+0/G to the pixel view. The
+pixel view lives inside the preview player (deviation 2), so its rows are
+scoped to the player widget too. Only Ctrl+Z/Ctrl+Y (and the additive
+Ctrl+Shift+Z) are tab-wide, matching undo/redo's tab-level meaning. Every
+`QShortcut` uses `WidgetWithChildrenShortcut`, scoped to its owner widget, so
+a shortcut fires only when the focus is inside its own working area and a
+focused button or text field elsewhere in the tab still receives its own
+keys (Qt gives the focused widget the ShortcutOverride first). Ctrl+Enter is
+bound per panel/dialog with `bind_primary_action`, not here.
 """
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QKeySequence, QShortcut
@@ -16,11 +23,23 @@ from PySide6.QtWidgets import QWidget
 
 logger = logging.getLogger(__name__)
 
+# Attribute on `tab` that owns the callable named by a row's "owner.method" target.
 OWNER_ATTRS = {
     "strip": "frame_strip",
     "player": "preview_player",
     "view": "pixel_view",
     "workspace": "frames_workspace",
+}
+
+# Attribute on `tab` that owns the QShortcut itself (its scoping widget, design
+# §1.5's "Where" column). `view` shares the player's widget because PixelView
+# lives inside PreviewPlayer (deviation 2). `workspace` (undo/redo) has no
+# entry: `install_shortcuts` parents those directly on the tab, tab-wide.
+SHORTCUT_WIDGET_ATTRS: Dict[str, Optional[str]] = {
+    "strip": "frame_strip",
+    "player": "preview_player",
+    "view": "preview_player",
+    "workspace": None,
 }
 
 SHORTCUT_TABLE: Tuple[Tuple[str, str, str], ...] = (
@@ -49,6 +68,12 @@ def resolve_target(tab: Any, dotted: str) -> Callable[[], Any]:
     return getattr(getattr(tab, attr), method)
 
 
+def _shortcut_parent(tab: QWidget, owner: str) -> QWidget:
+    """The widget that scopes an owner's shortcuts (design §1.5's "Where" column)."""
+    attr = SHORTCUT_WIDGET_ATTRS[owner]  # KeyError on an unknown owner is a programming error
+    return getattr(tab, attr) if attr else tab
+
+
 def install_shortcuts(tab: QWidget) -> Dict[str, QShortcut]:
     """Bind the §1.5 table on `tab`; a second call disables the previous set."""
     previous = getattr(tab, "_sprite_shortcuts", None)
@@ -59,8 +84,10 @@ def install_shortcuts(tab: QWidget) -> Dict[str, QShortcut]:
             shortcut.deleteLater()
     shortcuts: Dict[str, QShortcut] = {}
     for key, dotted, description in SHORTCUT_TABLE:
+        owner, _, _ = dotted.partition(".")
         slot = resolve_target(tab, dotted)
-        shortcut = QShortcut(QKeySequence(key), tab)
+        parent = _shortcut_parent(tab, owner)
+        shortcut = QShortcut(QKeySequence(key), parent)
         shortcut.setContext(Qt.WidgetWithChildrenShortcut)
         shortcut.setWhatsThis(description)
         shortcut.activated.connect(slot)

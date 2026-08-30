@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 from PySide6.QtWidgets import QDialog
@@ -183,3 +184,86 @@ def test_refresh_rereads_thumbnails_after_source_repoint(qapp, tmp_path):
     assert after != before
     assert strip.count() == 2
     assert strip.current_index() == 1  # selection survives a refresh
+
+
+# ----- final review fixes -----
+
+def test_edit_overrides_refuses_invalid_key_color(qapp, tmp_path, monkeypatch):
+    """B2 / Important 5: an invalid key colour must not close the dialog or write an override."""
+    strip, undo = _strip(tmp_path)
+    shown = []
+    monkeypatch.setattr(fs.QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a)))
+
+    def fake_exec(self):
+        # Stand in for the user checking Key color, typing "green", and
+        # clicking OK: drive the dialog's real accept() (not QDialog's),
+        # so the fix under test actually runs.
+        self.key_color_on.setChecked(True)
+        self.key_color.setText("green")
+        self.accept()
+        return self.result()
+
+    monkeypatch.setattr(fs.FrameOverridesDialog, "exec", fake_exec)
+    strip.select_index(0)
+    strip.edit_overrides_for_selected()
+
+    assert shown, "QMessageBox.warning was not shown for an invalid key colour"
+    assert strip.frames()[0].overrides == {}
+    assert not undo.can_undo("act1")
+
+
+def test_frame_overrides_dialog_accept_rejects_bad_hex_directly(qapp, monkeypatch):
+    """The dialog itself refuses OK on invalid input, independent of the caller."""
+    dialog = FrameOverridesDialog({})
+    shown = []
+    monkeypatch.setattr(fs.QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a)))
+    dialog.key_color_on.setChecked(True)
+    dialog.key_color.setText("green")
+    dialog.accept()
+    assert dialog.result() != QDialog.Accepted
+    assert shown
+    dialog.done(QDialog.Rejected)
+
+
+def test_missing_frame_file_warns_once_across_two_refreshes(qapp, tmp_path, caplog):
+    """B4 / Minor 7: a missing source file shows a grey cell and warns exactly once."""
+    strip, _ = _strip(tmp_path, 1)
+    frame = strip.frames()[0]
+    missing_path = frame.source_path
+    missing_path.unlink()
+    messages = []
+    strip.logMessage.connect(lambda msg, level: messages.append((msg, level)))
+
+    with caplog.at_level(logging.WARNING, logger="gui.sprite.frame_strip"):
+        strip.refresh()
+        strip.refresh()
+
+    pixmap = strip.list.item(0).icon().pixmap(fs.THUMB_PX, fs.THUMB_PX)
+    assert not pixmap.isNull()  # grey placeholder, not a failure to render at all
+
+    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warning_records) == 1, [r.getMessage() for r in warning_records]
+    assert messages == [(f"Thumbnail unavailable: {missing_path}", "WARNING")]
+
+
+def test_insert_from_file_reports_mkdir_failure(qapp, tmp_path, monkeypatch):
+    """B5 / Minor 9: a mkdir failure for inserted/ goes through the same error pattern as copy2."""
+    strip, undo = _strip(tmp_path, 1)
+    extra = write_frame_png(tmp_path / "extra" / "Wide Frame.png", size=(4, 4))
+    shown = []
+    monkeypatch.setattr(fs.QMessageBox, "critical", staticmethod(lambda *a, **k: shown.append(a)))
+
+    real_mkdir = Path.mkdir
+
+    def fake_mkdir(self, *args, **kwargs):
+        if self.name == "inserted":
+            raise OSError("permission denied")
+        return real_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(fs.Path, "mkdir", fake_mkdir)
+    strip.select_index(0)
+
+    assert strip.insert_from_file([extra]) == 0
+    assert shown
+    assert strip.count() == 1
+    assert not undo.can_undo("act1")
