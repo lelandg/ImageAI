@@ -53,7 +53,7 @@
   - `anchor_offset(content: Size, cell: Size, anchor: str) -> Tuple[int, int]`
   - `fit_pad_integer(image: Image.Image, cell: Size, anchor: str, *, scale: Optional[int] = None) -> Image.Image`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/sprite/test_pixelart.py
@@ -178,7 +178,7 @@ def test_fit_pad_integer_non_multiple_fits():
     assert opaque_pixels(out) == 63 * 38
 ```
 
-- [ ] **Step 2: Run the tests and confirm the failure**
+- [x] **Step 2: Run the tests and confirm the failure**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -186,7 +186,7 @@ def test_fit_pad_integer_non_multiple_fits():
 
 Expected: collection error `ModuleNotFoundError: No module named 'core.sprite.pixelart'`.
 
-- [ ] **Step 3: Create the module**
+- [x] **Step 3: Create the module**
 
 ```python
 # core/sprite/pixelart.py
@@ -299,7 +299,7 @@ Notes for the implementer:
 - `Image.reduce(k)` is an exact k×k box filter. Pillow converts RGBA to premultiplied `RGBa` inside `reduce`, so transparent neighbors do not darken edge pixels. The output size is `ceil(w/k) × ceil(h/k)`, which is why `integer_fit_scale` uses `ceil`.
 - The header imports everything Tasks 2–7 need (`io`, `json`, `asdict`, `datetime`, `Path`, the keying and pipeline names). Keep them now so the module header never changes again. `core/sprite/pipeline.py` must never import `pixelart` (the package `__init__` imports `pixelart` after `.pipeline`).
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -307,7 +307,7 @@ Notes for the implementer:
 
 Expected: `11 passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py tests/sprite/test_pixelart.py && git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): integer fit and pad for the pixel profile"
@@ -327,7 +327,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py tests/sp
   - `resolution_check(src: Size, cell: Size) -> Optional[str]`
   - `upscale_then_fit(image: Image.Image, cell: Size, anchor: str, *, method: str = "lanczos") -> Image.Image`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add `resolution_check, upscale_then_fit` to the `from core.sprite.pixelart import (...)` block, then append:
 
@@ -385,7 +385,7 @@ def test_upscale_then_fit_rejects_unknown_method():
         upscale_then_fit(square_frame((8, 8), (8, 8)), (64, 64), "center", method="magic")
 ```
 
-- [ ] **Step 2: Run the tests and confirm the failure**
+- [x] **Step 2: Run the tests and confirm the failure**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -393,7 +393,7 @@ def test_upscale_then_fit_rejects_unknown_method():
 
 Expected: `ImportError: cannot import name 'resolution_check' from 'core.sprite.pixelart'`.
 
-- [ ] **Step 3: Append the implementation**
+- [x] **Step 3: Append the implementation**
 
 ```python
 # --- Task 2: resolution check + upscale ---------------------------------------
@@ -445,7 +445,7 @@ Notes:
 - The warning fires only when **both** axes are smaller than the cell. When one axis already reaches the cell, an upscale cannot make the character larger, so there is nothing to warn about.
 - The target size is proportional (`factor = min(...)`), so `upscale_lanczos`'s exact-size resize never distorts. `upscale_image` swallows its own errors and returns the original bytes; `fit_pad_integer` then pads the small image. The stage never fails because an upscaler is missing.
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -453,7 +453,7 @@ Notes:
 
 Expected: `17 passed`, total wall time under 3 s (proof that `core.upscaling` was not imported for real).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py tests/sprite/test_pixelart.py && git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): resolution check and upscale-then-fit for pixel frames"
@@ -471,7 +471,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py tests/sp
 - Consumes: numpy.
 - Produces: `bayer_matrix(n: int) -> np.ndarray` — shape `(n, n)`, float64, values `(rank + 0.5) / n²` in the open interval (0, 1), mean exactly 0.5, `n ∈ {2, 4, 8}`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add `bayer_matrix` to the import block, then append:
 
@@ -506,7 +506,7 @@ def test_bayer_rejects_other_sizes():
             bayer_matrix(bad)
 ```
 
-- [ ] **Step 2: Run the tests and confirm the failure**
+- [x] **Step 2: Run the tests and confirm the failure**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -514,7 +514,7 @@ def test_bayer_rejects_other_sizes():
 
 Expected: `ImportError: cannot import name 'bayer_matrix' from 'core.sprite.pixelart'`.
 
-- [ ] **Step 3: Append the implementation**
+- [x] **Step 3: Append the implementation**
 
 ```python
 # --- Task 3: Bayer matrix ------------------------------------------------------
@@ -532,7 +532,7 @@ def bayer_matrix(n: int) -> np.ndarray:
     return (matrix.astype(np.float64) + 0.5) / float(n * n)
 ```
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -540,7 +540,7 @@ def bayer_matrix(n: int) -> np.ndarray:
 
 Expected: `21 passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py tests/sprite/test_pixelart.py && git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): Bayer threshold matrices for ordered dither"
@@ -561,7 +561,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py tests/sp
   - `palette_to_hex(colors: Sequence[Sequence[int]]) -> List[str]` — uppercase `#RRGGBB`
   - `build_shared_palette(frames: Sequence[Image.Image], colors: int) -> List[str]` — union of opaque pixels (alpha ≥ `PALETTE_ALPHA_MIN`), MEDIANCUT on a 1×N RGB mosaic, sorted dark to light, deduplicated, `[]` when nothing is opaque
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add `build_shared_palette, hex_to_palette, palette_to_hex` to the import block, then append:
 
@@ -629,7 +629,7 @@ def test_build_shared_palette_subsamples_large_inputs(monkeypatch):
     assert build_shared_palette([frame], 4) == ["#0AC81E"]
 ```
 
-- [ ] **Step 2: Run the tests and confirm the failure**
+- [x] **Step 2: Run the tests and confirm the failure**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -637,7 +637,7 @@ def test_build_shared_palette_subsamples_large_inputs(monkeypatch):
 
 Expected: `ImportError: cannot import name 'build_shared_palette' from 'core.sprite.pixelart'`.
 
-- [ ] **Step 3: Append the implementation**
+- [x] **Step 3: Append the implementation**
 
 ```python
 # --- Task 4: shared palette ----------------------------------------------------
@@ -693,7 +693,7 @@ Notes:
 - `np.asarray(quantized)` on a `P` image yields the index plane; `used` drops any palette slot MEDIANCUT allocated but never referenced.
 - The luminance sort makes the order independent of MEDIANCUT internals. `SheetMeta.palette` and the Aseprite palette chunk (sub-project 6) inherit that order.
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -701,7 +701,7 @@ Notes:
 
 Expected: `29 passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py tests/sprite/test_pixelart.py && git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): shared palette build with MEDIANCUT on flattened RGB"
@@ -723,7 +723,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py tests/sp
   - `quantize_to_palette(image: Image.Image, palette: Sequence[str], dither: str) -> Image.Image` — RGBA out; alpha unchanged; fully transparent pixels become `(0, 0, 0, 0)`; empty palette → copy
   - `FLOYD_WARNING` (declared in Task 1; first consumer here and in Task 7)
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add `FLOYD_WARNING, nearest_palette_indices, palette_spread, quantize_to_palette` to the import block, then append:
 
@@ -822,7 +822,7 @@ def test_floyd_warning_names_dither_crawl():
     assert "bayer" in FLOYD_WARNING
 ```
 
-- [ ] **Step 2: Run the tests and confirm the failure**
+- [x] **Step 2: Run the tests and confirm the failure**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -830,7 +830,7 @@ def test_floyd_warning_names_dither_crawl():
 
 Expected: `ImportError: cannot import name 'nearest_palette_indices' from 'core.sprite.pixelart'`.
 
-- [ ] **Step 3: Append the implementation**
+- [x] **Step 3: Append the implementation**
 
 ```python
 # --- Task 5: quantize to a fixed palette ---------------------------------------
@@ -908,7 +908,7 @@ Notes:
 - The Bayer offset scales with `palette_spread`, so a dense palette dithers softly and a sparse palette dithers hard. The same offset applies to all three channels (luminance-style ordered dither).
 - Memory: `nearest_palette_indices` never allocates more than `chunk × P` float32 (64 MB at 256 colors). A 720×720 frame with 256 colors maps in well under a second.
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -916,7 +916,7 @@ Notes:
 
 Expected: `39 passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py tests/sprite/test_pixelart.py && git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): quantize frames to a fixed palette with none/bayer/floyd dither"
@@ -939,7 +939,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py tests/sp
 
 The tests use `SimpleNamespace` stand-ins on purpose: the functions read only the attributes named above, and Task 7 exercises the real dataclasses.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Add `ensure_palette, rebuild_palette, remap_to_locked` to the import block, then append:
 
@@ -1011,7 +1011,7 @@ def test_rebuild_palette_requires_palette_size():
         rebuild_palette(make_project(), make_profile(palette_size=None), [])
 ```
 
-- [ ] **Step 2: Run the tests and confirm the failure**
+- [x] **Step 2: Run the tests and confirm the failure**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -1019,7 +1019,7 @@ def test_rebuild_palette_requires_palette_size():
 
 Expected: `ImportError: cannot import name 'ensure_palette' from 'core.sprite.pixelart'`.
 
-- [ ] **Step 3: Append the implementation**
+- [x] **Step 3: Append the implementation**
 
 ```python
 # --- Task 6: lock / remap ---------------------------------------------------------
@@ -1057,7 +1057,7 @@ def ensure_palette(project: Any, profile: Any, frames: Sequence[Image.Image]) ->
 
 Lock semantics in one sentence each: the first pixel run of a project builds the palette and stores it; every later action maps to the stored palette while `palette_lock` is on; `palette_lock` off rebuilds on every run; only `rebuild_palette` (the GUI "Rebuild palette" action, sub-project 5b) replaces a locked palette. The palette persists because `OutputProfile` is part of `project.iasprite.json`.
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -1065,7 +1065,7 @@ Lock semantics in one sentence each: the first pixel run of a project builds the
 
 Expected: `47 passed`.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py tests/sprite/test_pixelart.py && git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): palette lock, remap, and rebuild semantics"
@@ -1094,7 +1094,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py tests/sp
   - Progress messages the GUI (5b) shows: `"fit NNNN.png (1/k)"`, `"wrote NNNN.png"`, `"warning: <text>"`
   - `SheetMeta.palette` needs no code here: sub-project 1's `sheet_meta` copies `locked_palette`, which `ensure_palette` fills; `test_sheet_meta_pixel_carries_locked_palette` pins that
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 # tests/sprite/test_pipeline_pixel.py
@@ -1316,7 +1316,7 @@ def test_sheet_meta_pixel_carries_locked_palette(tmp_path):
 
 `test_run_pipeline_dispatches_pixel_runner_with_stabilize_frames` seeds every earlier stage as "cached" through the public contract only (`stage_dir`, `stage_fingerprint`, `stage_fingerprints`), so it needs no ffmpeg and no clip. Sub-project 1's `is_stage_current` requires a recorded fingerprint, at least one PNG in the stage directory, and fingerprint equality; the test writes the PNG **before** it records the fingerprint because the `extract` settings hash the directory listing. The tests build their own profiles, so the enabled/disabled default of `default_profiles()` does not matter to them.
 
-- [ ] **Step 2: Run the tests and confirm the failure**
+- [x] **Step 2: Run the tests and confirm the failure**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pipeline_pixel.py -v
@@ -1324,7 +1324,7 @@ def test_sheet_meta_pixel_carries_locked_palette(tmp_path):
 
 Expected: `ImportError: cannot import name 'pixel_stage_settings' from 'core.sprite.pixelart'`.
 
-- [ ] **Step 3: Implement**
+- [x] **Step 3: Implement**
 
 3a. Append the stage to `core/sprite/pixelart.py` (the header from Task 1 already imports `json`, `asdict`, `Path`, `Dict`, `apply_profile_alpha`, `CancelToken`, `ProgressFn`, `no_progress`, `register_stage`):
 
@@ -1432,7 +1432,7 @@ from . import pixelart  # noqa: E402,F401  registers the "pixel" stage runner
 
 Why the order inside `run_pixel_stage` matters: the palette is built from the **fitted, binary-alpha** frames, so it reflects colors at the pixel resolution and never contains fringe blends. One `scale` for the whole action keeps every frame at the same size, which is what stops jitter. The manifest is the GUI's durable record of the resolution warning; the `progress` message is the live one. `run_pipeline` resolves the stage's input through `UPSTREAM["pixel"] == "stabilize"`, so the runner never sees the `hd` outputs. A bad `upscale_method` string raises `ValueError` from `upscale_then_fit`; the pipeline's failure handling logs it with the profile settings.
 
-- [ ] **Step 4: Run the tests and confirm they pass**
+- [x] **Step 4: Run the tests and confirm they pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pipeline_pixel.py /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pixelart.py -v
@@ -1440,7 +1440,7 @@ Why the order inside `run_pixel_stage` matters: the palette is built from the **
 
 Expected: `58 passed`.
 
-- [ ] **Step 5: Run the whole sprite suite**
+- [x] **Step 5: Run the whole sprite suite**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite -v
@@ -1448,7 +1448,7 @@ Expected: `58 passed`.
 
 Expected: every test passes without an edit to any sub-project 1 test. Sub-project 1's `test_every_stage_has_a_registered_runner` asserts only that every stage has a callable runner, and its `test_pixel_stage_is_skipped_while_disabled_and_runs_when_enabled` asserts only file names and location, so the real runner satisfies both.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py core/sprite/__init__.py tests/sprite/test_pipeline_pixel.py && git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): pixel stage runner with shared palette and dither"
@@ -1461,7 +1461,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py core/spr
 **Files:**
 - Modify: `Plans/2026-08-29-sprite-pixel-art-plan.md` (this file: tick the boxes; append deviations)
 
-- [ ] **Step 1: Run the whole suite**
+- [x] **Step 1: Run the whole suite**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest -q
@@ -1469,7 +1469,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/pixelart.py core/spr
 
 Expected: everything green (the pre-feature baseline was 1057 tests; add sub-projects 1, 3, and this plan's 58).
 
-- [ ] **Step 2: Run the path guard on its own**
+- [x] **Step 2: Run the path guard on its own**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/test_no_hardcoded_paths.py -v
@@ -1477,7 +1477,7 @@ Expected: everything green (the pre-feature baseline was 1057 tests; add sub-pro
 
 Expected: passes. `core/sprite/pixelart.py` writes no path; `run_pixel_stage` writes only under the `out_dir` it receives.
 
-- [ ] **Step 3: Confirm the import stays fast**
+- [x] **Step 3: Confirm the import stays fast**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -c "import time; t = time.time(); import core.sprite.pixelart, core.sprite.pipeline; print('%.2fs' % (time.time() - t))"
@@ -1485,7 +1485,7 @@ Expected: passes. `core/sprite/pixelart.py` writes no path; `run_pixel_stage` wr
 
 Expected: a few seconds at most (sub-project 1's `core/sprite/__init__.py` pulls `core.video.ffmpeg_utils`, about 6 s on this machine; that cost is theirs). If the number is 20 s or more, something imported `core.upscaling` at module level; fix it.
 
-- [ ] **Step 4: Update this plan**
+- [x] **Step 4: Update this plan**
 
 Tick every completed checkbox. Under "Deviations from the design", record anything the implementer changed while wiring Task 7 (stage callable shape, skip rule, fingerprint input). Commit:
 
@@ -1518,3 +1518,4 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI add Plans/2026-08-29-sprite-pixel-ar
 9. **`rebuild_palette` stamps `project.modified`** so a palette change marks the project dirty even when no other field changed. `SpriteProject.save()` may overwrite the stamp; that is fine.
 10. **Binary alpha through `keying.apply_profile_alpha`** — the stage does not call `binary_alpha` directly. `apply_profile_alpha(image, profile)` honors `binary_alpha`, `alpha_threshold`, and `defringe_px` and returns alpha in {0, 255}; the stage then zeroes the RGB of fully transparent pixels so PNGs stay clean.
 11. **`SheetMeta.palette` is sub-project 1's code**: `sheet_meta` passes `list(prof.locked_palette) if prof.locked_palette and prof.palette_size else None`, so a profile with quantization turned off never advertises a stale palette. `ensure_palette` fills `locked_palette`; no code in this plan touches `project.py`.
+12. **`run_pixel_stage` cancellation checks** — the Task 7 review flagged the three inline `if token is not None: token.raise_if_cancelled()` blocks as duplicating logic the pipeline module already centralizes. Task 8 replaced all three with `core.sprite.pipeline.check(token)` (imported alongside `_reset_dir`); same semantics, one fewer pattern to keep in sync. Covered by the existing cancel test in `tests/sprite/test_pipeline_pixel.py`, which stayed green with no edit.
