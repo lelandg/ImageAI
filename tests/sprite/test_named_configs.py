@@ -1,6 +1,7 @@
 # tests/sprite/test_named_configs.py
 """NamedConfigStore: named GenerationSettings in one JSON file (decision 9)."""
 import json
+import os
 
 import pytest
 
@@ -79,3 +80,39 @@ def test_corrupt_file_is_logged_and_treated_as_empty(tmp_path, caplog):
     with caplog.at_level("ERROR"):
         assert store.list_names() == [DEFAULT_NAME]
     assert any("unreadable" in record.message for record in caplog.records)
+
+
+def test_save_raises_and_leaves_file_unchanged_when_unreadable(tmp_path):
+    """Minor 9: an OSError on read must not be swallowed into an overwrite."""
+    store = _store(tmp_path)
+    for i in range(5):
+        store.save(f"c{i}", GenerationSettings())
+    original_bytes = store.path.read_bytes()
+    store.path.chmod(0o000)
+    try:
+        if os.access(store.path, os.R_OK):
+            pytest.skip("this user can read a 0o000 file (e.g. root); can't exercise OSError")
+        with pytest.raises(OSError):
+            store.save("x", GenerationSettings())
+    finally:
+        store.path.chmod(0o644)
+    assert store.path.read_bytes() == original_bytes
+    assert store.list_names() == [DEFAULT_NAME, "c0", "c1", "c2", "c3", "c4"]
+
+
+def test_save_quarantines_unparsable_file_and_preserves_old_bytes(tmp_path):
+    """Minor 9: a file that exists but doesn't parse is quarantined, not overwritten blind."""
+    store = _store(tmp_path)
+    for i in range(5):
+        store.save(f"c{i}", GenerationSettings())
+    corrupt = store.path.with_name(store.path.name + ".corrupt")
+    corrupt.write_text("stale quarantine from an earlier run", encoding="utf-8")
+    store.path.write_text("{not json", encoding="utf-8")
+
+    store.save("x", GenerationSettings())
+
+    assert store.list_names() == [DEFAULT_NAME, "x"]
+    doc = json.loads(store.path.read_text(encoding="utf-8"))
+    assert set(doc["configs"]) == {"x"}
+    assert corrupt.exists()
+    assert corrupt.read_text(encoding="utf-8") == "{not json"  # the bad bytes, not the earlier stale one

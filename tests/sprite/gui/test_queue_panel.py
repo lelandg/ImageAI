@@ -98,6 +98,7 @@ def test_start_runs_queue_in_worker_and_reports(qapp, fake_config, fake_project,
     panel.logMessage.connect(lambda m, level: lines.append((level, m)))
     panel.enqueue(["a1"])
     panel.start()
+    assert not panel.progress.isHidden()
     wait_for_worker(panel)
     queue = _FakeQueue.instances[-1]
     assert queue.ids == ["a1"] and queue.api_key == "test-key" and queue.auth_mode == "api-key"
@@ -106,7 +107,7 @@ def test_start_runs_queue_in_worker_and_reports(qapp, fake_config, fake_project,
     assert panel.table.item(0, COL_ACTUAL).text() == "$0.12"
     assert any(level == "SUCCESS" for level, _ in lines)
     assert any("rendering a1" in m for _, m in lines)
-    assert not panel.progress.isVisible()
+    assert panel.progress.isHidden()
 
 
 def test_start_with_nothing_queued_warns(qapp, fake_config, fake_project, monkeypatch):
@@ -211,3 +212,31 @@ def test_refine_replaces_clip_and_reruns_pipeline(qapp, fake_config, fake_projec
     assert fake_project.actions[0].clip is new_clip
     assert fake_project.actions[0].status == "rendered"
     assert changed
+
+
+def test_refine_pipeline_failure_keeps_clip_and_records_error(qapp, fake_config, fake_project,
+                                                               monkeypatch, wait_for_worker):
+    fake_project.actions[0].clip = types.SimpleNamespace(path=Path("a1.mp4"), actual_usd=0.1)
+    new_clip = types.SimpleNamespace(path=Path("a1.r1.mp4"), actual_usd=0.2)
+
+    def fake_refine(clip, instruction, out_mp4, *, api_key, log):
+        return new_clip
+
+    def fake_pipeline(project, action, *, upto, progress, token, force):
+        raise RuntimeError("ffmpeg not found")
+
+    monkeypatch.setattr(qp, "refine_action", fake_refine)
+    monkeypatch.setattr(qp, "run_pipeline", fake_pipeline)
+    seen_errors = []
+    monkeypatch.setattr(qp, "show_error",
+                        lambda parent, title, message, exception=None: seen_errors.append(message))
+    panel = _panel(fake_config, fake_project, monkeypatch)
+    panel.refine("a1", "make the cape swing")
+    wait_for_worker(panel)
+    assert fake_project.actions[0].clip is new_clip
+    assert fake_project.actions[0].status == "rendered"
+    assert fake_project.actions[0].error is not None
+    assert fake_project.actions[0].error.startswith("pipeline:")
+    assert seen_errors == []  # finished path ran; no error dialog
+    tooltip = panel.table.item(0, COL_STATUS).toolTip()
+    assert tooltip

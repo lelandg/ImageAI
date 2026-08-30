@@ -20,7 +20,7 @@ from core.sprite.generation.cost import estimate_action, estimate_project
 from core.sprite.generation.errors import SpriteGenerationError
 from core.sprite.generation.queue import ActionQueue
 from core.sprite.generation.video_route import refine_action
-from core.sprite.pipeline import run_pipeline
+from core.sprite.pipeline import Cancelled, run_pipeline
 from gui.common.dialog_conventions import bind_primary_action
 from gui.dialog_utils import show_error, show_warning
 from gui.sprite.workers import WorkerHost
@@ -252,7 +252,14 @@ class QueuePanel(WorkerHost, QGroupBox):
             card.clip = record
             card.status = "rendered"
             card.error = None
-            run_pipeline(project, card, upto="stabilize", progress=progress, token=token, force=True)
+            try:
+                run_pipeline(project, card, upto="stabilize", progress=progress, token=token,
+                             force=True)
+            except Cancelled:
+                raise
+            except Exception as exc:  # noqa: BLE001 - the clip is safe; report and continue
+                card.error = f"pipeline: {exc}"
+                progress("refine", 0, 0, f"Clip saved as {record.path}; pipeline failed: {exc}")
             return record
 
         self.logMessage.emit(f"Refine requested for {card.name}: {instruction}", "INFO")
@@ -314,3 +321,7 @@ class QueuePanel(WorkerHost, QGroupBox):
         self.logMessage.emit("Queue cancelled.", "WARNING")
         self.refresh()
         self.statusChanged.emit()
+
+    def _on_worker_idle(self) -> None:
+        """A worker orphaned by a timed-out ``shutdown()`` finally stopped."""
+        self._set_running(False)

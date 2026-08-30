@@ -1,5 +1,6 @@
 import json
 import shutil
+import threading
 from pathlib import Path
 
 import pytest
@@ -209,6 +210,35 @@ def test_manager_save_project_gives_a_homeless_project_a_directory(tmp_path):
     assert project.project_dir.parent == tmp_path / "sprites"
     assert (project.project_dir / "stages").is_dir()
     assert manager.save_project(project) == path
+
+
+def test_concurrent_save_is_serialized_and_never_corrupts_the_file(tmp_path):
+    """Minor 4 (interim fix): two threads racing SpriteProject.save() must not
+
+    hit a torn tmp-write-and-replace. The single-writer redesign (GUI owns
+    every save) is deferred to sub-project 5b; this only guards the file.
+    """
+    project = _build(tmp_path / "sprites" / "P_race")
+    errors = []
+
+    def hammer():
+        try:
+            for _ in range(200):
+                project.save()
+        except Exception as exc:  # noqa: BLE001 - captured and asserted below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=hammer) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert not errors
+    assert all(not t.is_alive() for t in threads)
+    loaded = SpriteProject.load(project.project_file())
+    assert loaded.name == project.name
+    assert loaded.actions[0].id == "a1"
 
 
 def test_manager_defaults_to_the_sprite_projects_path(tmp_path, monkeypatch):

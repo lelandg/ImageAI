@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import shutil
+import threading
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
@@ -27,6 +28,13 @@ logger = logging.getLogger(__name__)
 PROJECT_FILE_NAME = "project.iasprite.json"
 PROJECT_SUBDIRS = ("source", "clips", "stages", "exports")
 SPRITES_DIR_NAME = "sprites"  # the DataPaths.sprite_projects() leaf name
+
+# Interim fix (final-review Minor 4): serializes the tmp-write-and-replace in
+# SpriteProject.save() so the queue worker thread and a GUI-thread autosave
+# never race on the same project file. One process-wide lock for every
+# project is coarser than necessary; the single-writer redesign (the GUI
+# owns every save, the worker only requests one) is deferred to sub-project 5b.
+_SAVE_LOCK = threading.RLock()
 
 
 def _now() -> str:
@@ -427,12 +435,13 @@ class SpriteProject:
         if path is None:
             path = self.project_file()
         path = Path(path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self.modified = _now()
-        payload = json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
-        tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(payload, encoding="utf-8")
-        tmp.replace(path)
+        with _SAVE_LOCK:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            self.modified = _now()
+            payload = json.dumps(self.to_dict(), indent=2, ensure_ascii=False)
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text(payload, encoding="utf-8")
+            tmp.replace(path)
         return path
 
     @classmethod

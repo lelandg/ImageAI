@@ -48,13 +48,25 @@ class NamedConfigStore:
 
     # -- persistence -------------------------------------------------------
 
-    def _read(self) -> Dict[str, dict]:
+    def _read(self, strict: bool = False) -> Dict[str, dict]:
+        """Read the store.
+
+        ``strict=False`` (the default) degrades an unreadable or unparsable
+        file to ``{}`` and logs ERROR — used by ``list_names()`` and ``get()``,
+        which must never raise on a broken store. ``strict=True`` re-raises
+        ``OSError`` (the file exists but can't be read) and ``ValueError``
+        (the file exists but doesn't parse) instead of swallowing them — used
+        by ``save()``/``delete()`` so they never overwrite a store they could
+        not actually read.
+        """
         if not self._path.exists():
             return {}
         try:
             document = json.loads(self._path.read_text(encoding="utf-8"))
         except (OSError, ValueError) as exc:
             logger.error("Sprite config store unreadable (%s): %s", self._path, exc)
+            if strict:
+                raise
             return {}
         configs = document.get("configs") if isinstance(document, dict) else None
         return {str(k): dict(v) for k, v in configs.items() if isinstance(v, dict)} \
@@ -66,6 +78,30 @@ class NamedConfigStore:
         tmp.write_text(json.dumps({"version": FORMAT_VERSION, "configs": configs}, indent=2),
                        encoding="utf-8")
         os.replace(tmp, self._path)
+
+    def _read_for_write(self) -> Dict[str, dict]:
+        """Read strictly for ``save()``/``delete()``.
+
+        A file that exists but does not parse is quarantined (renamed to
+        ``<name>.corrupt``, overwriting an older quarantine) so the caller's
+        new entry is written cleanly and the old bytes stay on disk for
+        inspection. A file that exists but can't be read (``OSError``, e.g.
+        permission denied) is not our data to discard — the exception
+        propagates so the caller shows an error instead of silently dropping
+        every other saved configuration.
+        """
+        try:
+            return self._read(strict=True)
+        except ValueError:
+            corrupt = self._path.with_name(self._path.name + ".corrupt")
+            try:
+                os.replace(self._path, corrupt)
+                logger.error("Sprite config store did not parse; renamed %s to %s",
+                            self._path, corrupt)
+            except OSError as exc:
+                logger.error("Sprite config store did not parse and could not be quarantined "
+                            "(%s): %s", self._path, exc)
+            return {}
 
     # -- API ---------------------------------------------------------------
 
@@ -86,7 +122,7 @@ class NamedConfigStore:
         name = (name or "").strip()
         if not name:
             raise ValueError("A configuration needs a name.")
-        configs = self._read()
+        configs = self._read_for_write()
         data = settings_to_dict(settings)
         data["config_name"] = name
         configs[name] = data
@@ -96,7 +132,7 @@ class NamedConfigStore:
     def delete(self, name: str) -> None:
         if name == DEFAULT_NAME:
             raise ValueError('The "Default" configuration cannot be deleted.')
-        configs = self._read()
+        configs = self._read_for_write()
         if name not in configs:
             raise KeyError(name)
         del configs[name]
