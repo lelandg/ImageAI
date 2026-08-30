@@ -28,6 +28,7 @@ from gui.sprite.character_panel import CharacterPanel
 from gui.sprite.generation_settings_dialog import GenerationSettingsDialog
 from gui.sprite.prefs import sprite_settings
 from gui.sprite.queue_panel import QueuePanel
+from gui.sprite.retouch_wiring import install_retouch
 from providers import get_provider
 
 logger = logging.getLogger(__name__)
@@ -67,6 +68,8 @@ class SpriteTab(QWidget):
         # and this keeps sprite_tab importable on its own.
         from .frames_workspace import FramesWorkspace
         self.frames_workspace = FramesWorkspace(self)
+        # Sub-project 6: frame-strip retouch dialog, wired last so frame_strip exists.
+        install_retouch(self)
 
     # -- build -------------------------------------------------------------
 
