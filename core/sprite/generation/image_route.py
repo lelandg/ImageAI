@@ -14,6 +14,7 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from PIL import Image
 
+from core.sprite.generation._common import emit
 from core.sprite.generation.errors import ProviderError, classify_provider_error
 from core.sprite.generation.pose_steps import generate_pose_instructions  # noqa: F401 — re-export (design §4.6)
 from core.sprite.generation.prompts import inject_chroma
@@ -73,23 +74,22 @@ def save_png(data: bytes, out_png: Path) -> Path:
 def log_request(log: LogFn, *, what: str, provider: str, model: Optional[str], prompt: str, params: Dict) -> None:
     message = (f"[image route] {what} request: provider={provider} model={model or 'default'} "
                f"params={params}\nprompt: {prompt}")
-    logger.info(message)
-    log(message)
+    emit(logger, log, message)
 
 
 def log_response(log: LogFn, *, what: str, texts: Sequence[str], images: Sequence[bytes]) -> None:
     text = " | ".join(t.strip() for t in texts if t and t.strip()) or "(none)"
     message = f"[image route] {what} response: {len(images)} image(s) {[len(b) for b in images]} bytes; text: {text}"
-    logger.info(message)
-    log(message)
+    emit(logger, log, message)
 
 
-def call_provider(provider, method: str, *args, what: str, **kwargs) -> Tuple[List[str], List[bytes]]:
+def call_provider(provider, method: str, *args, what: str, log: LogFn = logger.info,
+                  **kwargs) -> Tuple[List[str], List[bytes]]:
     """Call ``provider.<method>`` and map any exception to a SpriteGenerationError."""
     try:
         return getattr(provider, method)(*args, **kwargs)
     except Exception as exc:  # noqa: BLE001 — classify_provider_error decides the subclass
-        logger.error("[image route] %s failed: %s", what, exc)
+        emit(logger, log, f"[image route] {what} failed: {exc}", level="error")
         raise classify_provider_error(exc) from exc
 
 
@@ -173,12 +173,12 @@ def generate_sheet(
         params: Dict = {"size": size, "n": 1}
         log_request(log, what="sheet", provider=kind, model=model, prompt=prompt, params=params)
         texts, images = call_provider(provider, "edit_image", [character], prompt, what="sheet",
-                                      model=model, size=size, n=1)
+                                      log=log, model=model, size=size, n=1)
     else:
         params = {"aspect_ratio": SHEET_ASPECT_GEMINI}
         log_request(log, what="sheet", provider=kind, model=model, prompt=prompt, params=params)
         texts, images = call_provider(provider, "edit_image", character, prompt, what="sheet",
-                                      model=model, aspect_ratio=SHEET_ASPECT_GEMINI)
+                                      log=log, model=model, aspect_ratio=SHEET_ASPECT_GEMINI)
     log_response(log, what="sheet", texts=texts, images=images)
     out = save_png(first_image(texts, images, what="sheet"), out_png)
     write_image_sidecar(out, {

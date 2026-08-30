@@ -1,5 +1,6 @@
 # tests/sprite/test_image_route.py
 import json
+import logging
 import re
 from io import BytesIO
 from pathlib import Path
@@ -125,6 +126,31 @@ def test_generate_sheet_logs_request_and_response(tmp_path):
                    frames=3, plate_color="#00FF00", log=lines.append)
     assert any("request" in l and "prompt:" in l for l in lines)
     assert any("response" in l and "1 image" in l for l in lines)
+
+
+def test_generate_sheet_default_log_writes_each_full_content_message_once(tmp_path, caplog):
+    caplog.set_level(logging.INFO, logger="core.sprite.generation.image_route")
+
+    generate_sheet(_google(), _character(tmp_path), _action(), tmp_path / "s.png",
+                   frames=3, plate_color="#00FF00")
+
+    messages = [r.getMessage() for r in caplog.records]
+    request_lines = [m for m in messages if m.startswith("[image route] sheet request:")]
+    response_lines = [m for m in messages if m.startswith("[image route] sheet response:")]
+    assert len(request_lines) == 1
+    assert len(response_lines) == 1
+
+
+def test_generate_sheet_provider_failure_emits_error_to_log(tmp_path, caplog):
+    caplog.set_level(logging.ERROR, logger="core.sprite.generation.image_route")
+    provider = _google()
+    provider.edit_image.side_effect = RuntimeError("boom")
+    logged = []
+    with pytest.raises(SpriteGenerationError):
+        generate_sheet(provider, _character(tmp_path), _action(), tmp_path / "s.png",
+                       frames=3, plate_color="#00FF00", log=logged.append)
+    assert any("failed" in l and "boom" in l for l in logged)
+    assert any(r.levelname == "ERROR" and "failed" in r.getMessage() for r in caplog.records)
 
 
 def test_generate_sheet_honors_cancel_token(tmp_path):
