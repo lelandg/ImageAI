@@ -9,7 +9,7 @@ from PIL import Image
 
 from core.sprite import pixelart
 from core.sprite.pixelart import (
-    anchor_offset, fit_pad_integer, integer_fit_scale,
+    anchor_offset, bayer_matrix, fit_pad_integer, integer_fit_scale,
     resolution_check, upscale_then_fit,
 )
 
@@ -171,3 +171,33 @@ def test_upscale_then_fit_pads_when_upscaler_returns_original(monkeypatch):
 def test_upscale_then_fit_rejects_unknown_method():
     with pytest.raises(ValueError):
         upscale_then_fit(square_frame((8, 8), (8, 8)), (64, 64), "center", method="magic")
+
+
+# --- Task 3 -------------------------------------------------------------------------
+
+def test_bayer2_values():
+    m = bayer_matrix(2)
+    expected = (np.array([[0, 2], [3, 1]], dtype=np.float64) + 0.5) / 4.0
+    assert np.allclose(m, expected)
+
+
+def test_bayer_matrices_are_permutations_with_mean_half():
+    for n in (2, 4, 8):
+        m = bayer_matrix(n)
+        assert m.shape == (n, n)
+        ranks = np.round(m * n * n - 0.5).astype(int)
+        assert sorted(ranks.flatten().tolist()) == list(range(n * n))
+        assert abs(m.mean() - 0.5) < 1e-12
+        assert m.min() > 0.0 and m.max() < 1.0
+
+
+def test_bayer4_top_left_block_is_scaled_bayer2():
+    m4 = bayer_matrix(4)
+    ranks = np.round(m4 * 16 - 0.5).astype(int)
+    assert ranks[:2, :2].tolist() == [[0, 8], [12, 4]]
+
+
+def test_bayer_rejects_other_sizes():
+    for bad in (1, 3, 16):
+        with pytest.raises(ValueError):
+            bayer_matrix(bad)

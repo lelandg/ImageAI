@@ -137,3 +137,18 @@ def upscale_then_fit(image: Image.Image, cell: Size, anchor: str,
     logger.info("pixel profile upscaled %dx%d -> %dx%d via %s", sw, sh,
                 upscaled.width, upscaled.height, method)
     return fit_pad_integer(upscaled.convert("RGBA"), cell_wh, anchor)
+
+
+# --- Task 3: Bayer matrix ------------------------------------------------------
+
+def bayer_matrix(n: int) -> np.ndarray:
+    """Normalized n x n Bayer threshold matrix, n in {2, 4, 8}, values in (0, 1)."""
+    if n not in (2, 4, 8):
+        raise ValueError(f"bayer size must be 2, 4, or 8, got {n}")
+    matrix = np.zeros((1, 1), dtype=np.int64)
+    size = 1
+    while size < n:
+        matrix = np.block([[4 * matrix, 4 * matrix + 2],
+                           [4 * matrix + 3, 4 * matrix + 1]])
+        size *= 2
+    return (matrix.astype(np.float64) + 0.5) / float(n * n)
