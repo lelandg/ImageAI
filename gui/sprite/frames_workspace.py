@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, List, Optional, Union
 
-from PySide6.QtCore import QObject
+from PySide6.QtCore import QEvent, QObject
 from PySide6.QtGui import QImage, QPixmap
 from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
@@ -70,6 +70,14 @@ class FramesWorkspace(QObject):
         tab.refresh_frames = self.refresh_frames  # sub-project 6 calls tab.refresh_frames()
         self.shortcuts = install_shortcuts(tab)
         self.export_btn = tab.add_toolbar_action("Export…", self.open_export_dialog)
+        # The toolbar Export button follows the panel's own Export button, which
+        # ProcessingPanel gates on "a project is open and no job runs"
+        # (`ProcessingPanel._sync_enabled`). The panel has no running-state
+        # signal, so the workspace watches that button's EnabledChange event
+        # instead of keeping a second copy of the running state, which could
+        # drift from the panel's (final review, Important 3).
+        self.panel.export_btn.installEventFilter(self)
+        self._sync_export_enabled()
 
         tab.projectChanged.connect(self._on_project_changed)
         tab.actionSelected.connect(self._on_action_selected)
@@ -90,6 +98,15 @@ class FramesWorkspace(QObject):
     # ----- tab events -------------------------------------------------
     def current_action(self) -> Optional[ActionCard]:
         return self._action
+
+    def eventFilter(self, obj, event) -> bool:
+        """Mirror the panel's Export button onto the toolbar Export button."""
+        if obj is self.panel.export_btn and event.type() == QEvent.EnabledChange:
+            self._sync_export_enabled()
+        return super().eventFilter(obj, event)
+
+    def _sync_export_enabled(self) -> None:
+        self.export_btn.setEnabled(self.panel.export_btn.isEnabled())
 
     def _on_project_changed(self) -> None:
         """Rebind the panels when the project object changes; re-read frames otherwise.
@@ -284,18 +301,29 @@ class FramesWorkspace(QObject):
         collector at an arbitrary later time, and freeing that tree while another
         worker runs Qt code crashes the process (5b Task 7 finding).
 
-        The reference is dropped and `deleteLater()` is called only AFTER `exec()`
-        returns. Qt tags a DeferredDelete event with the loop level at post time and
-        delivers it as that loop unwinds, so a `deleteLater()` posted from inside the
-        modal loop would destroy the dialog before `exec()` returns and hand the caller
-        a dead object (review, Important 2). Posted here, the delete waits for the
-        caller's own event loop, so the returned dialog is alive for the caller to read.
+        The `finally` drops the reference for every exit path, not only for a dialog
+        that emits `finished`: a dialog closed without that signal — or one that
+        raises out of `exec()` — must not stay held for the life of the tab, or the
+        workspace refuses every later export and `shutdown()` keeps poking a closed
+        dialog. See `test_export_dialog_reference_is_released_even_without_a_finished_signal`.
+        `deleteLater()` runs after `exec()` returns, so the object the caller receives
+        is still readable; sub-project 6 registers its export formats on it.
+
+        The export is refused while the processing panel runs. `run_pipeline` rewrites
+        `action.frames`, the locked palette and the stage directories that the export
+        reads, and no lock guards `SpriteProject` (final review, Important 3).
         """
         project = self.tab.current_project
         if project is None:
             logger.warning("Export requested with no project open")
             self.tab.log("Export: open or create a sprite project first.", "WARNING")
             QMessageBox.warning(self.tab, "Export", "Open or create a sprite project first.")
+            return None
+        if self.panel.is_busy():
+            label = self.panel.busy_label or "processing"
+            logger.warning("Export refused: the %r job is still running", label)
+            self.tab.log(f"Wait for the running {label} job to finish before exporting",
+                         "WARNING")
             return None
         open_dialog = self._export_dialog
         if open_dialog is not None:

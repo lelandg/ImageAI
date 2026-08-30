@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import functools
 import logging
+import weakref
 from typing import Any, Callable, List, Optional
 
 from PySide6.QtCore import QThread, Signal
@@ -26,13 +27,42 @@ from core.sprite.pipeline import Cancelled, CancelToken, ProgressFn
 logger = logging.getLogger(__name__)
 
 # Strong references to every orphaned worker until its thread exits. An
-# orphan's only other owners form a pure Python cycle (worker -> reaper
-# partial -> host -> host._orphans -> worker); the cyclic garbage collector
-# may collect that cycle while the thread still runs, and deleting a running
-# QThread aborts the process (5b Task 7 finding).
+# orphan is detached from the host widget, so Qt no longer owns it, and its
+# only other owner is ``host._orphans`` — which dies with the host. The
+# cyclic garbage collector may free the host while the orphan's thread still
+# runs, and deleting a running QThread aborts the process (5b Task 7 finding).
 _LIVE_ORPHANS: "set[SpriteWorker]" = set()
 
 Job = Callable[[ProgressFn, CancelToken], Any]
+
+
+def _disconnect_worker(worker: "SpriteWorker", *, progress: bool) -> None:
+    """Drop every slot the host bound to a released worker's own signals.
+
+    PySide keeps a connected ``functools.partial`` in C++ connection storage.
+    The cyclic garbage collector cannot traverse that storage, so anything the
+    partial holds stays alive for as long as the worker does. The host binds
+    only weak references to the worker there (see ``start_job``), and this
+    explicit disconnect releases the rest at release time instead of at
+    destruction time.
+
+    ``progress`` says whether ``start_job`` connected the progress signal; a
+    disconnect on a signal with no connection makes libpyside print a
+    RuntimeWarning. ``start_job`` always connects the other three.
+
+    Qt allows a disconnect during the emission of the same signal: the slots
+    that have not run yet are skipped. The host therefore calls this only for a
+    worker with no later slot to run — never for an orphan, whose reaper is
+    connected after the release slot.
+    """
+    signals = [worker.finished, worker.failed, worker.cancelled]
+    if progress:
+        signals.append(worker.progress)
+    for signal in signals:
+        try:
+            signal.disconnect()
+        except (RuntimeError, TypeError):  # already disconnected
+            pass
 
 
 class SpriteWorker(QThread):
@@ -139,12 +169,23 @@ class WorkerHost:
             logger.warning("Sprite job %r refused: %r is still running", label, self.busy_label)
             return None
         worker = SpriteWorker(job, label=label, parent=self)
+        # Every slot below binds a WEAK reference to the worker, never the
+        # worker itself. PySide stores a connected partial in C++ connection
+        # storage, which the cyclic garbage collector cannot traverse, so a
+        # partial that holds its own worker keeps that worker — its job closure
+        # (API keys, the project) and, for an export, the dialog graph — alive
+        # for the life of the process (final review, Important 2; probe: 20/20
+        # finished workers alive after gc.collect()). A weak reference carries
+        # the same identity test with no cycle: the worker stays owned by Qt
+        # (parented to the host) until _release_worker detaches it, so every
+        # slot below resolves it while the event is being delivered.
+        wref = weakref.ref(worker)
         # FIRST connection, so it runs before the caller's slots: the worker
         # stops counting as live the moment its terminal event reaches the GUI
         # thread. That closes the Minor 5 window (a new job started between the
         # emit and the delivery) while keeping the queue-drain pattern working
         # (starting job B from inside job A's on_finished).
-        mark = functools.partial(self._mark_terminal, worker)
+        mark = functools.partial(self._mark_terminal, wref)
         worker.finished.connect(mark)
         worker.failed.connect(mark)
         worker.cancelled.connect(mark)
@@ -153,21 +194,21 @@ class WorkerHost:
         # to a different project/worker before the event was delivered) must
         # be dropped rather than run against whatever is now the host's live
         # state (review finding, Task 8 fix round 2 - stale queued events).
-        worker.finished.connect(functools.partial(self._guarded, worker, "finished", on_finished))
-        worker.failed.connect(functools.partial(self._guarded, worker, "failed", on_failed))
+        worker.finished.connect(functools.partial(self._guarded, wref, "finished", on_finished))
+        worker.failed.connect(functools.partial(self._guarded, wref, "failed", on_failed))
         if on_cancelled is not None:
-            worker.cancelled.connect(functools.partial(self._guarded, worker, "cancelled", on_cancelled))
+            worker.cancelled.connect(functools.partial(self._guarded, wref, "cancelled", on_cancelled))
         if on_progress is not None:
             # Guarded like the terminal signals: progress from a released or
             # orphaned worker must not drive the host's current UI/project
             # (final review, Minor 3).
-            worker.progress.connect(functools.partial(self._guarded, worker, "progress", on_progress))
+            worker.progress.connect(functools.partial(self._guarded, wref, "progress", on_progress))
         # Release AFTER the caller's slots (same connection type keeps order).
-        # Bound to this worker instance: a queued release event for a worker
-        # that has already been superseded by a newer one (e.g. the caller
-        # started job B from inside job A's on_finished) must not clear the
-        # host's current _worker.
-        release = functools.partial(self._release_worker, worker)
+        # Bound to this worker: a queued release event for a worker that has
+        # already been superseded by a newer one (e.g. the caller started job B
+        # from inside job A's on_finished) must not clear the host's current
+        # _worker — but it must still join and detach its OWN worker.
+        release = functools.partial(self._release_worker, wref, on_progress is not None)
         worker.finished.connect(release)
         worker.failed.connect(release)
         worker.cancelled.connect(release)
@@ -175,20 +216,25 @@ class WorkerHost:
         worker.start()
         return worker
 
-    def _guarded(self, worker: SpriteWorker, signal_name: str, callback, *args) -> None:
-        """Run ``callback(*args)`` only while ``worker`` is still the host's live worker.
+    def _guarded(self, wref: "weakref.ReferenceType", signal_name: str, callback,
+                 *args) -> None:
+        """Run ``callback(*args)`` only while the sender is the host's live worker.
 
         Dropping a stale event here — rather than in every panel's own
         on_finished/on_failed/on_cancelled — protects every ``WorkerHost``
         subclass at the source, including future ones.
         """
-        if self._worker is not worker:
-            logger.debug("Dropped stale %s from released worker %r", signal_name, worker.label)
+        worker = wref()
+        if worker is None or self._worker is not worker:
+            label = worker.label if worker is not None else "(freed)"
+            logger.debug("Dropped stale %s from released worker %r", signal_name, label)
             return
         callback(*args)
 
-    def _mark_terminal(self, worker: SpriteWorker, *_args) -> None:
-        worker.mark_terminal()
+    def _mark_terminal(self, wref: "weakref.ReferenceType", *_args) -> None:
+        worker = wref()
+        if worker is not None:
+            worker.mark_terminal()
 
     def _live_worker(self) -> Optional[SpriteWorker]:
         """The host's worker while its result has not been delivered yet.
@@ -273,21 +319,29 @@ class WorkerHost:
         worker.setParent(None)
         self._orphan_list().append(worker)
         _LIVE_ORPHANS.add(worker)
-        reaper = functools.partial(self._reap_orphan, worker)
+        # A weak reference, for the reason given in ``start_job``: a partial
+        # that holds its own worker is invisible to the cyclic collector, so an
+        # orphan would never be freed after the reap. The orphan list and
+        # ``_LIVE_ORPHANS`` hold the strong references that keep it alive.
+        wref = weakref.ref(worker)
+        reaper = functools.partial(self._reap_orphan, wref)
         worker.finished.connect(reaper)
         worker.failed.connect(reaper)
         worker.cancelled.connect(reaper)
         if not worker.isRunning():
             # The job ended between the wait() timeout and the connect above,
             # so no terminal signal is left to trigger the reaper.
-            self._reap_orphan(worker)
+            self._reap_orphan(wref)
 
-    def _reap_orphan(self, worker: SpriteWorker, *_args) -> None:
+    def _reap_orphan(self, wref: "weakref.ReferenceType", *_args) -> None:
         """Drop a finished orphan and tell the host it may be idle again.
 
         Idempotent: the orphan list is the single guard, so a terminal signal
         that arrives after ``_adopt_orphan``'s direct call is a no-op.
         """
+        worker = wref()
+        if worker is None:
+            return
         orphans = self._orphan_list()
         if worker not in orphans:
             return
@@ -322,13 +376,20 @@ class WorkerHost:
                 joined = False
         return joined
 
-    def _release_worker(self, worker: SpriteWorker, *_args) -> None:
-        """Clear ``self._worker`` only if it still points at ``worker``.
+    def _release_worker(self, wref: "weakref.ReferenceType", progress: bool,
+                        *_args) -> None:
+        """Clear ``self._worker`` only if it still points at this worker.
 
         A queued finished/failed/cancelled event for a worker that a later
-        ``start_job`` call has already superseded must be a no-op, or it
-        would orphan the new worker (see review finding, Task 1 fix round 1).
+        ``start_job`` call has already superseded must not clear the host's
+        slot, or it would orphan the new worker (see review finding, Task 1
+        fix round 1). The join and the detach below run for the superseded
+        worker too: they belong to the worker that emitted the event, not to
+        the host's current one.
         """
+        worker = wref()
+        if worker is None:
+            return
         if self._worker is worker:
             self._worker = None
         # The terminal event has been delivered and run() returned right after
@@ -336,8 +397,13 @@ class WorkerHost:
         # host. A finished QThread left as a child of a parentless host (e.g.
         # ExportDialog) rides along when the cyclic garbage collector frees
         # that host, and Qt aborts if any such child still runs (5b Task 7
-        # finding). Detached and joined, the worker is freed by Python when
-        # its last reference drops — never while its thread runs. (deleteLater
-        # here crashes: the worker's own signal delivery is still on the stack.)
+        # finding). Detached, joined and disconnected, the worker is freed by
+        # Python as soon as its last reference drops — never while its thread
+        # runs.
         worker.wait()
         worker.setParent(None)
+        if worker not in self._orphan_list():
+            # Not an orphan, so the release slot is the last one on this
+            # signal: no reaper is waiting behind it that the disconnect could
+            # skip. An orphan keeps its connections until Qt destroys it.
+            _disconnect_worker(worker, progress=progress)

@@ -344,6 +344,67 @@ def test_finished_workers_are_detached_from_the_host(qapp):
     assert host.findChildren(QThread) == []
 
 
+def test_finished_worker_is_freed(qapp):
+    """Final review, Important 2: a finished worker must be reclaimable.
+
+    ``start_job`` connects three partials to the worker's own signals. PySide
+    keeps a connected partial in C++ connection storage, which the cyclic
+    garbage collector cannot traverse, so a partial that held its own worker
+    made the cycle permanent: every job leaked the QThread, its job closure
+    (API keys, the project) and, for an export, the dialog graph. Probe at the
+    broken revision: 20 of 20 finished workers still alive after
+    ``gc.collect()``.
+    """
+    import gc
+    import weakref
+
+    host = _Host()
+    results = []
+    worker = host.start_job(lambda progress, token: "done", label="freeable",
+                            on_finished=lambda r: results.append(r),
+                            on_failed=lambda m: None,
+                            on_progress=lambda *args: None)
+    assert worker is not None
+    assert worker.wait(5000)
+    for _ in range(5):
+        qapp.processEvents()
+    assert results == ["done"]
+    assert not host.is_busy()
+    ref = weakref.ref(worker)
+    del worker
+    gc.collect()
+    assert ref() is None, "the finished worker is still referenced by its own connections"
+
+
+def test_reaped_orphan_is_freed(qapp):
+    """Important 2, orphan path: the reaper partial must not pin its worker either."""
+    import gc
+    import weakref
+    from gui.sprite import workers as workers_mod
+
+    host = _IdleHost()
+    release = threading.Event()
+
+    def blocked(progress, token):
+        release.wait(20)
+        return "late result"
+
+    worker = host.start_job(blocked, label="orphan",
+                            on_finished=lambda r: None, on_failed=lambda m: None)
+    assert worker is not None
+    assert host.shutdown(timeout_ms=50) is False
+    release.set()
+    assert worker.wait(5000)
+    for _ in range(5):
+        qapp.processEvents()               # deliver the terminal event to the reaper
+    assert host._orphan_list() == []
+    assert worker not in workers_mod._LIVE_ORPHANS
+    ref = weakref.ref(worker)
+    del worker
+    gc.collect()
+    assert ref() is None, "the reaped orphan is still referenced by its own connections"
+
+
 def test_join_orphans_waits_for_the_released_orphan(qapp):
     """join_orphans() is what MainWindow.closeEvent uses instead of a destroy."""
     host = _Host()

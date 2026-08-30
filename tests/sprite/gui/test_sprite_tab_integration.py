@@ -164,9 +164,34 @@ def test_apply_frames_on_another_action_does_not_touch_the_shown_widgets(qapp, t
     project.actions.append(other)
     replacement = make_frames(tmp_path / "jump_v2", 7)
 
+    # Minor 11: the end-state assertions below cannot fail on their own. apply_frames emits
+    # projectChanged, whose same-project fast path calls refresh_frames() and heals the strip
+    # from the SELECTED action, so a reload=True regression is invisible afterwards. Record
+    # every widget write instead, and assert the other card's list never reached the widgets.
+    set_frames_calls = []
+    reload_calls = []
+    real_set_frames = workspace.strip.set_frames
+    real_reload_player = workspace._reload_player
+
+    def record_set_frames(frames):
+        set_frames_calls.append([f.name for f in frames])
+        real_set_frames(frames)
+
+    def record_reload_player():
+        reload_calls.append(workspace.strip.count())
+        real_reload_player()
+
+    monkeypatch.setattr(workspace.strip, "set_frames", record_set_frames)
+    monkeypatch.setattr(workspace, "_reload_player", record_reload_player)
+
     workspace.apply_frames(other.id, replacement, "retouch jump")
 
-    assert [f.name for f in other.frames] == [f.name for f in replacement]  # written
+    replacement_names = [f.name for f in replacement]
+    assert replacement_names not in set_frames_calls     # the strip never held the other card
+    assert set_frames_calls == [[f.name for f in action.frames]]  # one write: the selected card
+    assert reload_calls == [len(action.frames)]          # one reload, over the healed strip
+
+    assert [f.name for f in other.frames] == replacement_names              # written
     assert workspace.undo_controller.can_undo(other.id)                     # snapshot pushed
     assert workspace.strip.action_id() == action.id                         # still the selected card
     assert workspace.strip.count() == len(action.frames) == 4               # not the other 7 frames
@@ -322,9 +347,11 @@ def test_export_dialog_is_parented_and_released_when_it_finishes(qapp, tmp_path,
 
 
 def test_real_export_dialog_is_alive_on_return_and_deleted_afterwards(qapp, tmp_path, monkeypatch):
-    # Review Important 2: Qt delivers a DeferredDelete posted inside the modal loop as that
-    # loop unwinds, so deleteLater() must run only AFTER exec() returns. A fake dialog runs no
-    # event loop and cannot show this — use the real ExportDialog.
+    # Final review Minor 2: the workspace releases its reference in `finally` and calls
+    # deleteLater() only after exec() returns, so the caller still receives a readable
+    # dialog — sub-project 6 registers its export formats on it — and the object goes away
+    # once the event loop delivers the deferred delete. A fake dialog runs no event loop, so
+    # only the real ExportDialog shows that a real modal loop leaves the object valid.
     import shiboken6
     from PySide6.QtCore import QEvent, QTimer
     from gui.sprite.export_dialog import ExportDialog
@@ -406,6 +433,51 @@ def test_export_without_a_project_is_logged_and_shown(qapp, tmp_path, monkeypatc
     workspace.shutdown()
 
 
+def test_export_is_refused_while_the_panel_runs(qapp, tmp_path, monkeypatch):
+    # Final review Important 3: the pipeline rewrites action.frames, the locked palette and
+    # the stage directories the export reads, and no lock guards SpriteProject. The toolbar
+    # Export button follows the panel's own Export button, and open_export_dialog refuses
+    # even when the caller bypasses the button (a shortcut, sub-project 6).
+    import threading
+    import gui.sprite.processing_panel as pp
+
+    tab, workspace, project, action = _workspace(qapp, tmp_path, monkeypatch)
+    release = threading.Event()
+
+    def blocked_pipeline(*args, **kwargs):
+        release.wait(20)
+        return {"pixel": []}
+
+    monkeypatch.setattr(pp, "run_pipeline", blocked_pipeline)
+    opened = []
+
+    def factory(proj, parent):
+        opened.append(proj)
+        return _FakeDialog(proj, parent)
+
+    monkeypatch.setattr(workspace, "export_dialog_factory", factory)
+    assert workspace.export_btn.isEnabled()          # idle: the toolbar button is live
+
+    workspace.panel.run_pipeline()
+    worker = workspace.panel._worker
+    assert worker is not None and workspace.panel.is_busy()
+    assert not workspace.export_btn.isEnabled()      # gated with the panel's own button
+    assert workspace.open_export_dialog() is None
+    assert opened == []                              # no dialog was built
+    assert (f"Wait for the running {workspace.panel.busy_label} job to finish before "
+            f"exporting", "WARNING") in tab.log_calls
+
+    release.set()
+    assert worker.wait(5000)
+    for _ in range(5):
+        qapp.processEvents()
+    assert not workspace.panel.is_busy()
+    assert workspace.export_btn.isEnabled()          # re-enabled once the panel is idle
+    assert workspace.open_export_dialog() is not None
+    assert opened == [project]
+    workspace.shutdown()
+
+
 def test_decode_failures_are_logged_and_shown(qapp, tmp_path, monkeypatch):
     # Task 2 / Task 3 carry-forward: a frame that cannot be decoded must reach the console,
     # not only the file log, or the preview goes blank with no explanation.
@@ -413,7 +485,12 @@ def test_decode_failures_are_logged_and_shown(qapp, tmp_path, monkeypatch):
     broken = _broken_png(tmp_path)
     action.frames = [_frame_at(broken)]
     workspace.refresh_frames()
-    assert [level for message, level in tab.log_calls if "broken.png" in message] == ["WARNING"]
+    # Every console line about the file is a WARNING, and the player's own decode failure is
+    # one of them. The count is not pinned: the strip reports an unreadable thumbnail on the
+    # same console, and that is a second warning about the same file.
+    levels = [level for message, level in tab.log_calls if "broken.png" in message]
+    assert levels and set(levels) == {"WARNING"}
+    assert any(message.startswith("Cannot decode frame image:") for message, _ in tab.log_calls)
 
     tab.log_calls.clear()
     assert workspace.set_view_image(broken) is False
