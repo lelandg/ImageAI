@@ -186,3 +186,116 @@ def test_slice_falls_back_to_one_row_when_guess_disagrees(tmp_path, monkeypatch)
     frames = slice_generated_sheet(sheet, tmp_path / "frames", 3, "#00FF00", log=logged.append)
     assert len(frames) == 3 and Image.open(frames[0]).size == (16, 16)
     assert any("rejected" in l for l in logged)
+
+
+from core.sprite.generation.image_route import default_openai_edit_model, edit_chain, openai_edit_size
+
+
+def _distinct_replies(n):
+    return [png_bytes(w=16, h=16, squares=1, color=(0, 255, 0, 255)) if i % 2 == 0
+            else png_bytes(w=16, h=16, squares=1, color=(0, 250, 5, 255)) for i in range(n)]
+
+
+def test_edit_chain_google_chains_previous_frame(tmp_path):
+    provider = _google()
+    provider.start_edit_session.return_value = True
+    replies = _distinct_replies(3)
+    provider.edit_image.side_effect = [([], [r]) for r in replies]
+    character = _character(tmp_path)
+    out = edit_chain(provider, character, _action(), tmp_path / "chain", frames=3,
+                     pose_instructions=["pose one", "pose two", "pose three"], plate_color="#00FF00")
+    assert [p.name for p in out] == ["0001.png", "0002.png", "0003.png"]
+    calls = provider.edit_image.call_args_list
+    assert calls[0].args[0] == [character.read_bytes(), character.read_bytes()]
+    assert calls[1].args[0] == [character.read_bytes(), replies[0]]
+    assert calls[2].args[0] == [character.read_bytes(), replies[1]]
+    assert all(c.kwargs["model"] == "default-google-image-model" for c in calls)
+    assert "pose two" in calls[1].args[1] and "#00FF00" in calls[1].args[1]
+    provider.start_edit_session.assert_called_once()
+    provider.reset_edit_session.assert_called_once()
+    sidecar = json.loads((tmp_path / "chain" / "0002.png.json").read_text(encoding="utf-8"))
+    assert sidecar["step"] == 2 and sidecar["of"] == 3 and sidecar["route"] == "image_edit_chain"
+    assert sidecar["reference_images"][1].endswith("0001.png")
+
+
+def test_edit_chain_openai_passes_size_and_default_model(tmp_path):
+    provider = _openai()
+    provider.edit_image.side_effect = [([], [r]) for r in _distinct_replies(2)]
+    out = edit_chain(provider, _character(tmp_path), _action(), tmp_path / "chain", frames=2,
+                     pose_instructions=["a", "b"], plate_color="#00FF00")
+    assert len(out) == 2
+    kwargs = provider.edit_image.call_args_list[0].kwargs
+    assert kwargs["model"] == default_openai_edit_model()
+    assert kwargs["size"] == openai_edit_size(default_openai_edit_model(), (16, 16)) and kwargs["n"] == 1
+    # OpenAIProvider has no start_edit_session/reset_edit_session at all (only GoogleProvider does),
+    # so MagicMock(spec=OpenAIProvider) has no such attribute -- the google-only branch in edit_chain
+    # structurally cannot touch it here; asserting non-attendance on a spec'd-out attribute would raise
+    # AttributeError rather than assert anything.
+
+
+def test_openai_edit_size_prefers_custom_when_legal_else_closest_preset():
+    model = next(m for m, c in MODEL_CAPS.items() if c["supports_custom_size"])
+    assert openai_edit_size(model, (1024, 1024)) == "1024x1024"
+    assert openai_edit_size(model, (1000, 1010)) == "1008x1008"
+    small = openai_edit_size(model, (200, 200))          # below the pixel floor -> preset
+    assert small in MODEL_CAPS[model]["valid_sizes"]
+    legacy = next(m for m, c in MODEL_CAPS.items() if not c["supports_custom_size"] and c["supports_mask"])
+    assert openai_edit_size(legacy, (300, 100)) == max(
+        (s for s in MODEL_CAPS[legacy]["valid_sizes"] if s != "auto"),
+        key=lambda s: parse_size_string(s)[0] / parse_size_string(s)[1])
+
+
+def test_edit_chain_matte_pairs(tmp_path, monkeypatch):
+    provider = _google()
+    provider.start_edit_session.return_value = True
+    provider.edit_image.side_effect = [([], [r]) for r in _distinct_replies(4)]
+    seen = []
+
+    def fake_matte(on_white, on_black):
+        seen.append((on_white.size, on_black.size))
+        return Image.new("RGBA", on_white.size, (10, 20, 30, 128))
+
+    monkeypatch.setattr("core.sprite.matting.difference_matte", fake_matte)
+    out = edit_chain(provider, _character(tmp_path), _action(), tmp_path / "chain", frames=2,
+                     pose_instructions=["a", "b"], plate_color="#00FF00", matte_pairs=True)
+    assert len(out) == 2 and len(seen) == 2
+    assert (tmp_path / "chain" / "0001.white.png").exists() and (tmp_path / "chain" / "0001.black.png").exists()
+    assert Image.open(out[0]).getchannel("A").getextrema() == (128, 128)
+    prompts = [c.args[1].lower() for c in provider.edit_image.call_args_list]
+    assert "#ffffff" in prompts[0] and "#000000" in prompts[1]
+    sidecar = json.loads((tmp_path / "chain" / "0001.png.json").read_text(encoding="utf-8"))
+    assert sidecar["matte_pairs"] is True and len(sidecar["plates"]) == 2
+
+
+def test_edit_chain_cancels_between_steps(tmp_path):
+    provider = _google()
+    provider.start_edit_session.return_value = True
+    token = CancelToken()
+
+    def first_then_cancel(*args, **kwargs):
+        token.cancel()
+        return ([], [png_bytes(w=16, h=16, squares=1)])
+
+    provider.edit_image.side_effect = first_then_cancel
+    with pytest.raises(Cancelled):
+        edit_chain(provider, _character(tmp_path), _action(), tmp_path / "chain", frames=3,
+                   pose_instructions=["a", "b", "c"], plate_color="#00FF00", token=token)
+    assert sorted(p.name for p in (tmp_path / "chain").glob("*.png")) == ["0001.png"]
+    provider.reset_edit_session.assert_called_once()
+
+
+def test_edit_chain_length_mismatch(tmp_path):
+    with pytest.raises(ValueError):
+        edit_chain(_google(), _character(tmp_path), _action(), tmp_path / "chain", frames=3,
+                   pose_instructions=["a"], plate_color="#00FF00")
+
+
+def test_edit_chain_session_failure_is_logged_not_fatal(tmp_path):
+    provider = _google()
+    provider.start_edit_session.return_value = False
+    provider.edit_image.side_effect = [([], [r]) for r in _distinct_replies(1)]
+    logged = []
+    out = edit_chain(provider, _character(tmp_path), _action(), tmp_path / "chain", frames=1,
+                     pose_instructions=["a"], plate_color="#00FF00", log=logged.append)
+    assert len(out) == 1 and any("session" in l for l in logged)
+    provider.reset_edit_session.assert_not_called()

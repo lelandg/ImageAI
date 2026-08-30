@@ -116,7 +116,10 @@ def openai_edit_size(model: str, size: Size) -> str:
     w, h = int(size[0]), int(size[1])
     if caps.get("supports_custom_size"):
         multiple = int(caps.get("custom_size_edge_multiple", 16))
-        cw, ch = max(multiple, round(w / multiple) * multiple), max(multiple, round(h / multiple) * multiple)
+        # Round half up (not Python's round-half-to-even) so an exact .5 edge grows to the
+        # larger multiple, matching the closest-legal-size contract at the halfway point.
+        cw = max(multiple, int(w / multiple + 0.5) * multiple)
+        ch = max(multiple, int(h / multiple + 0.5) * multiple)
         ok, _why = validate_custom_size(cw, ch, caps)
         if ok:
             return f"{cw}x{ch}"
@@ -217,3 +220,102 @@ def slice_generated_sheet(
             "columns": columns, "rows": rows, "timestamp": _timestamp(),
         })
     return paths
+
+
+# --------------------------------------------------------------------------- edit-chain route
+
+MATTE_PLATES = ("#FFFFFF", "#000000")
+
+
+def edit_chain(
+    provider,
+    character: Path,
+    action: ActionCard,
+    out_dir: Path,
+    *,
+    frames: int,
+    pose_instructions: Sequence[str],
+    plate_color: str,
+    model: Optional[str] = None,
+    log: LogFn = logger.info,
+    token: Optional[CancelToken] = None,
+    matte_pairs: bool = False,
+) -> List[Path]:
+    """Render ``frames`` PNGs where frame k is an edit of [character, frame k-1]."""
+    if frames < 1:
+        raise ValueError("frames must be >= 1")
+    if len(pose_instructions) != frames:
+        raise ValueError(f"pose_instructions has {len(pose_instructions)} entries; expected {frames}")
+    character = Path(character)
+    if not character.exists():
+        raise FileNotFoundError(character)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    kind = provider_kind(provider)
+    model = model or (default_openai_edit_model() if kind == "openai" else provider.get_default_model())
+    character_bytes = character.read_bytes()
+    with Image.open(character) as img:
+        char_size: Size = img.size
+    session_started = False
+    if kind == "google":
+        session_started = bool(provider.start_edit_session(
+            character_bytes, style_context="sprite animation frames; keep the exact character", model=model))
+        if not session_started:
+            log("[image route] edit session did not start; continuing with single-shot edits")
+            logger.warning("[image route] start_edit_session returned False")
+    plates = list(MATTE_PLATES) if matte_pairs else [plate_color]
+    outputs: List[Path] = []
+    prev_bytes = character_bytes
+    try:
+        for k, instruction in enumerate(pose_instructions, start=1):
+            if token is not None:
+                token.raise_if_cancelled()
+            what = f"edit-chain step {k}/{frames}"
+            out_png = out_dir / f"{k:04d}.png"
+            step_images: Dict[str, bytes] = {}
+            prompts: Dict[str, str] = {}
+            for color in plates:
+                prompt = inject_chroma(STEP_PROMPT.format(instruction=instruction.strip()), color, loop=False)
+                prompts[color] = prompt
+                params: Dict = {"step": k, "plate": color}
+                refs = [character_bytes, prev_bytes]
+                if kind == "openai":
+                    size = openai_edit_size(model, char_size)
+                    params["size"] = size
+                    log_request(log, what=what, provider=kind, model=model, prompt=prompt, params=params)
+                    texts, images = call_provider(provider, "edit_image", refs, prompt, what=what, log=log,
+                                                  model=model, size=size, n=1)
+                else:
+                    log_request(log, what=what, provider=kind, model=model, prompt=prompt, params=params)
+                    texts, images = call_provider(provider, "edit_image", refs, prompt, what=what, log=log,
+                                                  model=model)
+                log_response(log, what=what, texts=texts, images=images)
+                step_images[color] = first_image(texts, images, what=what)
+            plate_paths: List[str] = []
+            if matte_pairs:
+                from core.sprite.matting import difference_matte
+                white = save_png(step_images[MATTE_PLATES[0]], out_dir / f"{k:04d}.white.png")
+                black = save_png(step_images[MATTE_PLATES[1]], out_dir / f"{k:04d}.black.png")
+                with Image.open(white) as w_img, Image.open(black) as b_img:
+                    matted = difference_matte(w_img.convert("RGB"), b_img.convert("RGB"))
+                matted.convert("RGBA").save(out_png, "PNG")
+                plate_paths = [str(white), str(black)]
+                next_bytes = step_images[MATTE_PLATES[0]]
+            else:
+                save_png(step_images[plate_color], out_png)
+                next_bytes = step_images[plate_color]
+            write_image_sidecar(out_png, {
+                "prompt": prompts[plates[0]], "prompts": prompts, "provider": kind, "model": model,
+                "timestamp": _timestamp(), "route": "image_edit_chain",
+                "action": action.name, "action_id": action.id, "step": k, "of": frames,
+                "pose": instruction, "plate_color": plate_color, "matte_pairs": matte_pairs,
+                "plates": plate_paths,
+                "reference_images": [str(character), str(outputs[-1]) if outputs else str(character)],
+            })
+            outputs.append(out_png)
+            prev_bytes = next_bytes
+            log(f"[image route] step {k}/{frames} saved: {out_png}")
+    finally:
+        if kind == "google" and session_started:
+            provider.reset_edit_session()
+    return outputs
