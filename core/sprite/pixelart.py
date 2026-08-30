@@ -27,7 +27,7 @@ from PIL import Image
 
 from core.sprite import stabilize
 from core.sprite.keying import apply_profile_alpha, hex_to_rgb, rgb_to_hex
-from core.sprite.pipeline import CancelToken, ProgressFn, _reset_dir, no_progress, register_stage
+from core.sprite.pipeline import CancelToken, ProgressFn, _reset_dir, check, no_progress, register_stage
 
 logger = logging.getLogger(__name__)
 
@@ -341,16 +341,14 @@ def run_pixel_stage(project: Any, action: Any, input_frames: List[Path], out_dir
 
     frames: List[Image.Image] = []
     for path in input_frames:
-        if token is not None:
-            token.raise_if_cancelled()
+        check(token)
         with Image.open(path) as img:
             frames.append(img.convert("RGBA"))
     scale = max((integer_fit_scale(f.size, cell) for f in frames), default=1)
 
     fitted: List[Image.Image] = []
     for index, frame in enumerate(frames):
-        if token is not None:
-            token.raise_if_cancelled()
+        check(token)
         warning = resolution_check(frame.size, cell)
         if warning is not None and profile.upscale_small:
             image = upscale_then_fit(frame, cell, anchor, method=profile.upscale_method)
@@ -370,8 +368,7 @@ def run_pixel_stage(project: Any, action: Any, input_frames: List[Path], out_dir
 
     outputs: List[Path] = []
     for index, image in enumerate(fitted):
-        if token is not None:
-            token.raise_if_cancelled()
+        check(token)
         if palette:
             image = quantize_to_palette(image, palette, profile.dither)
         target = out_dir / input_frames[index].name
