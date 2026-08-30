@@ -5,9 +5,24 @@ import pytest
 from PySide6.QtTest import QTest
 
 import gui.sprite.processing_panel as pp
+from core.sprite.project import ActionCard
 from gui.sprite.pixel_view import PixelView
 from gui.sprite.processing_panel import CUSTOM_PRESET, ProcessingPanel
 from gui_synthetic import make_project
+
+
+def _make_clip(root, name):
+    """An action-shaped clip stub whose `path` points at a real (empty) file."""
+    path = root / "clips" / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"\x00")
+    return type("Clip", (), {"path": path})()
+
+
+def _pump(times=5):
+    """Deliver the queued cross-thread worker signals."""
+    for _ in range(times):
+        QTest.qWait(20)
 
 
 def _wait_idle(panel, timeout_s=10.0):
@@ -296,6 +311,154 @@ def test_probe_worker_timeout_becomes_orphan(qapp, tmp_path, monkeypatch):
         assert widget.is_busy(), "an orphaned probe worker must keep the host busy"
     finally:
         release.set()
-    assert widget.join_orphans(10000)
+        assert widget.join_orphans(10000)
     _wait_idle(widget)
     assert widget._probe_worker is None
+
+
+def test_orphaned_worker_resets_the_run_ui(qapp, tmp_path, monkeypatch):
+    """A timed-out shutdown orphans the worker; the idle hook must reset the run UI.
+
+    WorkerHost._guarded drops the orphan's terminal signal, so _on_done/_on_failed
+    never run — without _on_worker_idle the progress bar and Cancel button would
+    stay live for a job that already stopped (review, Minor 1).
+    """
+    monkeypatch.setattr(pp, "available_backends", lambda: {"mediapipe": False, "rembg": False})
+    project, action = make_project(tmp_path)
+    release = threading.Event()
+
+    def slow_run(proj, act, *, upto, progress, token, force):
+        release.wait(30.0)
+        return {"pixel": []}
+
+    monkeypatch.setattr(pp, "run_pipeline", slow_run)
+    widget = ProcessingPanel()
+    widget.set_project(project)
+    widget.set_action(action)
+    try:
+        widget.run_pipeline()
+        assert widget.is_busy()
+        assert not widget.progress_bar.isHidden(), "the run UI should be live"
+        assert widget.cancel_btn.isEnabled()
+        assert widget.shutdown(timeout_ms=50) is False, "the worker should be orphaned"
+    finally:
+        release.set()
+        assert widget.join_orphans(10000)
+    _wait_idle(widget)          # pumps until _reap_orphan runs _on_worker_idle
+    assert widget.progress_bar.isHidden(), "the progress bar stayed live after the orphan stopped"
+    assert widget.progress_label.isHidden()
+    assert not widget.cancel_btn.isEnabled(), "Cancel stayed enabled after the orphan stopped"
+
+
+def test_orphaned_probe_result_is_dropped_after_shutdown(qapp, tmp_path, monkeypatch):
+    """A probe orphaned by a timed-out shutdown must never write the panel's estimate."""
+    monkeypatch.setattr(pp, "available_backends", lambda: {"mediapipe": False, "rembg": False})
+    project, action = make_project(tmp_path)
+    action.clip = _make_clip(tmp_path, "act1.mp4")
+    release = threading.Event()
+
+    def slow_probe(path):
+        release.wait(30.0)
+        return {"fps": 24.0, "duration": 10.0}
+
+    monkeypatch.setattr(pp, "probe_video", slow_probe)
+    widget = ProcessingPanel()
+    widget.set_project(project)
+    widget.set_action(action)
+    try:
+        assert widget._probe_worker is not None
+        probe_id = widget._probe_id
+        before = widget.estimate_text()
+        assert widget.shutdown(timeout_ms=50) is False
+        # The guard, not the worker, is what drops the result: deliver it by hand.
+        widget._probe_done(probe_id, action.id, {"fps": 24.0, "duration": 10.0})
+        assert widget.estimate_text() == before
+    finally:
+        release.set()
+        assert widget.join_orphans(10000)
+    _pump()
+    assert widget.estimate_text() == before
+    assert "?" in widget.estimate_text()
+
+
+def test_action_switch_supersedes_probe_and_drops_the_late_result(qapp, tmp_path, monkeypatch):
+    """A -> B mid-probe: B is probed, and A's late result never reaches the estimate."""
+    monkeypatch.setattr(pp, "available_backends", lambda: {"mediapipe": False, "rembg": False})
+    project, action_a = make_project(tmp_path)
+    action_b = ActionCard(id="act2", name="run", prompt="run cycle")
+    project.actions.append(action_b)
+    action_a.clip = _make_clip(tmp_path, "a.mp4")
+    action_b.clip = _make_clip(tmp_path, "b.mp4")
+    gate = threading.Event()
+
+    def fake_probe(path):
+        if path.name == "a.mp4":
+            gate.wait(30.0)
+            return {"fps": 24.0, "duration": 10.0}   # every_n=8 -> ~30 frames
+        return {"fps": 24.0, "duration": 1.0}        # every_n=8 -> ~3 frames
+
+    monkeypatch.setattr(pp, "probe_video", fake_probe)
+    widget = ProcessingPanel()
+    widget.set_project(project)
+    try:
+        widget.set_action(action_a)
+        worker_a = widget._probe_worker
+        assert worker_a is not None and worker_a.isRunning()
+
+        widget.set_action(action_b)                   # supersedes A's probe
+        worker_b = widget._probe_worker
+        assert worker_b is not None and worker_b is not worker_a, "B must be probed too"
+        assert worker_b.wait(10000)
+        _pump()
+        assert widget.estimate_text() == "yields ~3 frames"
+    finally:
+        # Release A and join it before returning: a worker still blocked on the
+        # Event at test exit crashes the whole-directory run.
+        gate.set()
+        assert widget.join_orphans(10000)
+        widget.shutdown()
+    _pump()
+    assert widget.estimate_text() == "yields ~3 frames", "A's stale probe overwrote B"
+
+
+def test_queued_probe_release_never_waits_on_the_new_worker(qapp, tmp_path, monkeypatch):
+    """A's queued `finished`, delivered after B started, must not join B's thread."""
+    monkeypatch.setattr(pp, "available_backends", lambda: {"mediapipe": False, "rembg": False})
+    project, action_a = make_project(tmp_path)
+    action_b = ActionCard(id="act2", name="run", prompt="run cycle")
+    project.actions.append(action_b)
+    action_a.clip = _make_clip(tmp_path, "a.mp4")
+    action_b.clip = _make_clip(tmp_path, "b.mp4")
+    gate = threading.Event()
+
+    def fake_probe(path):
+        if path.name == "a.mp4":
+            return {"fps": 24.0, "duration": 10.0}    # ~30 frames
+        gate.wait(30.0)
+        return {"fps": 24.0, "duration": 1.0}
+
+    monkeypatch.setattr(pp, "probe_video", fake_probe)
+    widget = ProcessingPanel()
+    widget.set_project(project)
+    widget.set_action(action_a)
+    worker_a = widget._probe_worker
+    assert worker_a is not None
+    # Join A's thread WITHOUT pumping: its `finished` is now posted, not delivered.
+    assert worker_a.wait(10000)
+
+    widget.set_action(action_b)                       # B's probe blocks on the gate
+    worker_b = widget._probe_worker
+    assert worker_b is not None and worker_b.isRunning()
+
+    start = time.monotonic()
+    _pump()                                           # A's queued event lands here
+    elapsed = time.monotonic() - start
+    try:
+        assert elapsed < 2.0, f"a stale probe event joined the running worker ({elapsed:.1f}s)"
+        assert worker_b.isRunning(), "B's probe was released by A's stale event"
+        assert "?" in widget.estimate_text(), "A's stale probe overwrote the estimate"
+    finally:
+        # Release B and join it before returning; shutdown() may orphan it.
+        gate.set()
+        widget.shutdown()
+        assert widget.join_orphans(10000)

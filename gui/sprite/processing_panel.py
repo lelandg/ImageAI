@@ -7,6 +7,7 @@ pipeline's stage cache (§1.2) decides what re-runs.
 from __future__ import annotations
 
 import contextlib
+import functools
 import json
 import logging
 import re
@@ -215,6 +216,7 @@ class ProcessingPanel(WorkerHost, QWidget):
         self._probe: Optional[Dict[str, Any]] = None
         self._probe_path: Optional[Path] = None
         self._probe_worker: Optional[SpriteWorker] = None
+        self._probe_id = 0
         self._view: Optional[PixelView] = None
         self._loading = False
         self.profile_editors: Dict[str, ProfileEditor] = {}
@@ -438,6 +440,10 @@ class ProcessingPanel(WorkerHost, QWidget):
         return self._project
 
     def set_action(self, action: Optional[ActionCard]) -> None:
+        # Supersede first, and unconditionally: a probe started for the previous
+        # action must be detached even when the new action has no clip to probe,
+        # or its late result would still be the panel's "current" probe worker.
+        self._supersede_probe()
         self._action = action
         self._probe = None
         self._probe_path = None
@@ -445,7 +451,7 @@ class ProcessingPanel(WorkerHost, QWidget):
         self._update_estimate()
         clip = getattr(action, "clip", None) if action is not None else None
         if clip is not None and getattr(clip, "path", None):
-            self._probe_clip(Path(clip.path))
+            self._probe_clip(Path(clip.path), action.id)
 
     def action(self) -> Optional[ActionCard]:
         return self._action
@@ -610,7 +616,15 @@ class ProcessingPanel(WorkerHost, QWidget):
             primary.set_enabled(ready)
 
     def _on_worker_idle(self) -> None:
-        """A worker orphaned by a timed-out ``shutdown()`` finally stopped."""
+        """A worker orphaned by a timed-out ``shutdown()`` finally stopped.
+
+        The orphan's terminal signal is dropped by ``WorkerHost._guarded`` (it is no
+        longer the host's live worker), so ``_on_done``/``_on_failed`` never run and
+        nothing else clears the run UI. Reset it here, the way
+        ``gui/sprite/queue_panel.py`` does, or the progress bar and Cancel button
+        stay live for a job that has already stopped (review, Minor 1).
+        """
+        self._set_running(self.is_busy())
         self._sync_enabled()
 
     # ----- user actions -----------------------------------------------
@@ -786,40 +800,103 @@ class ProcessingPanel(WorkerHost, QWidget):
         self.logMessage.emit("Cancelled.", "WARNING")
 
     # ----- probe worker (short-lived, beside the WorkerHost worker) ---
-    def _probe_clip(self, path: Path) -> None:
-        if self._probe_worker is not None and self._probe_worker.isRunning():
-            return
-        self._release_probe()
+    def _probe_clip(self, path: Path, action_id: Optional[str]) -> None:
+        """Start an ffprobe worker for ``path``, superseding any probe in flight."""
+        self._supersede_probe()
         self._probe_path = path
+        self._probe_id += 1
+        probe_id = self._probe_id
         # Parented to the panel so Qt owns the QThread: dropping the Python
         # reference in _release_probe must never destroy a running thread.
         worker = SpriteWorker(lambda progress, token: probe_video(path), label="probe", parent=self)
-        worker.finished.connect(self._probe_done)
-        worker.failed.connect(self._probe_failed)
+        # Bound to THIS run and the action it was started for, so a late event
+        # from a superseded probe never touches the panel's current state.
+        # The bound values are ints/str, never the worker itself: a partial that
+        # holds the worker and is connected to that same worker keeps the QThread
+        # wrapper alive past its refcount drop, which moves its teardown into an
+        # arbitrary later GC pass and crashed this suite intermittently.
+        worker.finished.connect(functools.partial(self._probe_done, probe_id, action_id))
+        worker.failed.connect(functools.partial(self._probe_failed, probe_id, action_id))
         self._probe_worker = worker
         worker.start()
 
-    def _probe_done(self, result: Any) -> None:
-        self._release_probe()
+    def _probe_is_current(self, probe_id: int, action_id: Optional[str],
+                          signal_name: str) -> bool:
+        """True while run ``probe_id`` is still this panel's probe for the selected action.
+
+        Mirrors ``WorkerHost._guarded`` (workers.py): the identity test lives in
+        one place, so every probe slot drops a stale event the same way. Every
+        path that detaches a probe — ``_supersede_probe``, ``_release_probe``,
+        ``shutdown`` — clears ``_probe_worker``, and every new run bumps
+        ``_probe_id``, so these two tests identify the live run exactly.
+        """
+        if probe_id != self._probe_id or self._probe_worker is None:
+            logger.debug("Dropped probe %s: run %d was superseded", signal_name, probe_id)
+            return False
+        current = self._action.id if self._action is not None else None
+        if action_id != current:
+            logger.debug("Dropped probe %s: started for action %r, now %r",
+                         signal_name, action_id, current)
+            return False
+        return True
+
+    def _probe_done(self, probe_id: int, action_id: Optional[str], result: Any) -> None:
+        if not self._probe_is_current(probe_id, action_id, "finished"):
+            return
+        self._release_probe(self._probe_worker)
         if isinstance(result, dict):
             self.set_probe(result)
 
-    def _probe_failed(self, message: str) -> None:
+    def _probe_failed(self, probe_id: int, action_id: Optional[str], message: str) -> None:
         """Log AND show every ffprobe failure; the estimate stays '~?'."""
+        if not self._probe_is_current(probe_id, action_id, "failed"):
+            return
         path = self._probe_path
         name = path.name if path is not None else "the clip"
-        self._release_probe()
+        self._release_probe(self._probe_worker)
         logger.warning("ffprobe failed for %s: %s", path, message)
         self.logMessage.emit(f"ffprobe failed for {name}: {message}", "WARNING")
 
-    def _release_probe(self) -> None:
-        """Drop the probe worker whose job has already emitted its terminal signal."""
+    def _supersede_probe(self) -> None:
+        """Detach the current probe worker so a new probe can start.
+
+        A worker that still runs becomes an orphan of this host: ``WorkerHost``
+        reaps it when its thread exits, so it is never destroyed while it runs and
+        ``is_busy()`` stays True until then. The worker is NOT cancelled: its token
+        cannot stop the ffprobe subprocess, and cancelling would only turn the
+        terminal signal into ``cancelled`` and hide the identity guard that must
+        drop the stale result. A worker that already stopped is released here.
+        """
         worker = self._probe_worker
-        self._probe_worker = None
         if worker is None:
             return
-        worker.wait()   # run() emitted before it returned; the thread is exiting
-        worker.deleteLater()
+        self._probe_worker = None
+        if worker.isRunning():
+            logger.info("Probe worker for %s superseded; kept until its thread exits",
+                        self._probe_path)
+            self._adopt_orphan(worker)
+        else:
+            self._release_probe(worker)
+
+    def _release_probe(self, worker: SpriteWorker) -> None:
+        """Release the one probe worker whose job has already stopped.
+
+        Takes the worker as an argument — never reads ``self._probe_worker`` — so a
+        late event can never wait on a probe that is still running.
+
+        Joins the thread and detaches the worker, the same way
+        ``WorkerHost._release_worker`` releases the host's own worker (workers.py,
+        commit fee96b5). A finished QThread left as a child of the panel rides along
+        when the cyclic garbage collector frees the panel, and Qt aborts if any such
+        child still runs. Detached and joined, the worker is freed by Python when its
+        last reference drops. ``deleteLater()`` is NOT usable here: the worker's own
+        signal delivery is still on the stack, and the deferred delete crashed this
+        suite (measured: 10 segfaults in 16 runs).
+        """
+        if self._probe_worker is worker:
+            self._probe_worker = None
+        worker.wait()          # the caller established that this worker's job stopped
+        worker.setParent(None)
 
     def shutdown(self, timeout_ms: int = 5000) -> bool:
         """Cancel and join both workers. False means one is still an orphan.
@@ -838,7 +915,7 @@ class ProcessingPanel(WorkerHost, QWidget):
                 self._adopt_orphan(probe)
                 joined = False
             else:
-                self._release_probe()
+                self._release_probe(probe)
         return joined
 
     def _warn(self, title: str, message: str) -> None:
