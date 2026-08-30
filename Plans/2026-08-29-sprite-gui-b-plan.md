@@ -1,6 +1,6 @@
 # Sprite GUI (B): Frames, Preview, Processing, Export Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Date:** 2026-08-29
 **Spec:** `Plans/2026-08-29-sprite-tab-design.md` — §1.4 (undo), §1.5 (shortcuts),
@@ -160,7 +160,7 @@ change under "Deviations from the design" at the end of this file.
 
 **Steps:**
 
-- [ ] Write the shared synthetic helper `tests/sprite/gui/gui_synthetic.py`:
+- [x] Write the shared synthetic helper `tests/sprite/gui/gui_synthetic.py`:
 
 ```python
 """Synthetic frames and projects for the sprite GUI tests (no binary fixtures)."""
@@ -223,7 +223,7 @@ def sheet_from_action(action: ActionCard, profile: str = "hd") -> SheetMeta:
     )
 ```
 
-- [ ] Write the failing test `tests/sprite/gui/test_undo_controller.py`:
+- [x] Write the failing test `tests/sprite/gui/test_undo_controller.py`:
 
 ```python
 from pathlib import Path
@@ -299,9 +299,9 @@ def test_clear_drops_history(qapp, tmp_path):
     assert not ctl.can_undo("a") and not ctl.can_redo("a")
 ```
 
-- [ ] Run: `QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_undo_controller.py -v` → fails with `ModuleNotFoundError: gui.sprite.undo_controller`.
+- [x] Run: `QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_undo_controller.py -v` → fails with `ModuleNotFoundError: gui.sprite.undo_controller`.
 
-- [ ] Implement `gui/sprite/undo_controller.py`:
+- [x] Implement `gui/sprite/undo_controller.py`:
 
 ```python
 """Per-action undo/redo for the sprite frame list (design §1.4).
@@ -408,8 +408,8 @@ class UndoController(QObject):
         self.stateChanged.emit(stack.can_undo, stack.can_redo)
 ```
 
-- [ ] Run the test file again → 6 passed.
-- [ ] Commit:
+- [x] Run the test file again → 6 passed.
+- [x] Commit:
 
 ```
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/undo_controller.py tests/sprite/gui/gui_synthetic.py tests/sprite/gui/test_undo_controller.py
@@ -443,7 +443,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): UndoCon
 
 **Steps:**
 
-- [ ] Write the failing test `tests/sprite/gui/test_pixel_view.py`:
+- [x] Write the failing test `tests/sprite/gui/test_pixel_view.py`:
 
 ```python
 from PySide6.QtCore import QPointF, Qt
@@ -587,9 +587,9 @@ def test_checkerboard_brush_is_textured(qapp):
     assert brush.texture().width() == 8
 ```
 
-- [ ] Run → fails on import.
+- [x] Run → fails on import.
 
-- [ ] Implement `gui/sprite/pixel_view.py`:
+- [x] Implement `gui/sprite/pixel_view.py`:
 
 ```python
 """Nearest-neighbor zoom view for one sprite frame (design §4.5).
@@ -889,8 +889,8 @@ class PixelView(QGraphicsView):
         painter.drawRect(QRectF(x, y, w, h))
 ```
 
-- [ ] Run → 10 passed.
-- [ ] Commit:
+- [x] Run → 10 passed.
+- [x] Commit:
 
 ```
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/pixel_view.py tests/sprite/gui/test_pixel_view.py
@@ -926,7 +926,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): PixelVi
 
 **Steps:**
 
-- [ ] Write the failing test `tests/sprite/gui/test_preview_player.py`:
+- [x] Write the failing test `tests/sprite/gui/test_preview_player.py`:
 
 ```python
 from PySide6.QtGui import QColor, QImage
@@ -1054,9 +1054,9 @@ def test_empty_frames_are_safe(qapp):
     assert not player.is_playing()
 ```
 
-- [ ] Run → fails on import.
+- [x] Run → fails on import.
 
-- [ ] Implement `gui/sprite/preview_player.py`:
+- [x] Implement `gui/sprite/preview_player.py`:
 
 ```python
 """Animation preview: QTimer + QPixmap, per-frame duration, loop modes, seam meter.
@@ -1434,8 +1434,8 @@ class PreviewPlayer(QWidget):
         self.seam_label.setStyleSheet(SEAM_STYLES[level])
 ```
 
-- [ ] Run → 9 passed.
-- [ ] Commit:
+- [x] Run → 9 passed.
+- [x] Commit:
 
 ```
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/preview_player.py tests/sprite/gui/test_preview_player.py
@@ -1474,7 +1474,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): Preview
 
 **Steps:**
 
-- [ ] Write the failing test `tests/sprite/gui/test_frame_strip.py`:
+- [x] Write the failing test `tests/sprite/gui/test_frame_strip.py`:
 
 ```python
 from pathlib import Path
@@ -1645,9 +1645,9 @@ def test_refresh_rereads_thumbnails_after_source_repoint(qapp, tmp_path):
     assert strip.current_index() == 1  # selection survives a refresh
 ```
 
-- [ ] Run → fails on import.
+- [x] Run → fails on import.
 
-- [ ] Implement `gui/sprite/frame_strip.py`:
+- [x] Implement `gui/sprite/frame_strip.py`:
 
 ```python
 """Frame strip: order, duplicate, delete, insert, duration, per-frame overrides.
@@ -2117,8 +2117,8 @@ class FrameStrip(QWidget):
         QMessageBox.warning(self, title, message)
 ```
 
-- [ ] Run → 14 passed.
-- [ ] Commit:
+- [x] Run → 14 passed.
+- [x] Commit:
 
 ```
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/frame_strip.py tests/sprite/gui/test_frame_strip.py
@@ -2150,7 +2150,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): FrameSt
 
 **Steps:**
 
-- [ ] Write the failing test `tests/sprite/gui/test_ml_install_dialog.py`:
+- [x] Write the failing test `tests/sprite/gui/test_ml_install_dialog.py`:
 
 ```python
 from PySide6.QtCore import QThread, Signal
@@ -2243,9 +2243,9 @@ def test_reject_is_blocked_while_running(qapp, monkeypatch):
     assert not dialog.isVisible()
 ```
 
-- [ ] Run → fails on import.
+- [x] Run → fails on import.
 
-- [ ] Implement `gui/sprite/ml_install_dialog.py`:
+- [x] Implement `gui/sprite/ml_install_dialog.py`:
 
 ```python
 """Runtime install dialog for the sprite ML matting backends (mediapipe, rembg).
@@ -2425,8 +2425,8 @@ class SpriteMLInstallDialog(DialogCleanupMixin, QDialog):
         QMessageBox.warning(self, title, message)
 ```
 
-- [ ] Run → 4 passed.
-- [ ] Commit:
+- [x] Run → 4 passed.
+- [x] Commit:
 
 ```
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/ml_install_dialog.py tests/sprite/gui/test_ml_install_dialog.py
@@ -2481,7 +2481,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): ML back
 
 **Steps:**
 
-- [ ] Write the failing test `tests/sprite/gui/test_processing_panel.py`:
+- [x] Write the failing test `tests/sprite/gui/test_processing_panel.py`:
 
 ```python
 import time
@@ -2727,9 +2727,9 @@ def test_no_project_disables_run(qapp, monkeypatch):
     assert "?" in widget.estimate_text()
 ```
 
-- [ ] Run → fails on import.
+- [x] Run → fails on import.
 
-- [ ] Implement `gui/sprite/processing_panel.py`:
+- [x] Implement `gui/sprite/processing_panel.py`:
 
 ```python
 """Processing panel: extraction, key, profiles, stabilize; runs the pipeline (design §4.5).
@@ -3530,8 +3530,8 @@ class ProcessingPanel(WorkerHost, QWidget):
         QMessageBox.warning(self, title, message)
 ```
 
-- [ ] Run → 17 passed.
-- [ ] Commit:
+- [x] Run → 17 passed.
+- [x] Commit:
 
 ```
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/processing_panel.py tests/sprite/gui/test_processing_panel.py
@@ -3590,7 +3590,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): Process
 
 **Steps:**
 
-- [ ] Write the failing test `tests/sprite/gui/test_export_dialog.py`:
+- [x] Write the failing test `tests/sprite/gui/test_export_dialog.py`:
 
 ```python
 import time
@@ -3849,9 +3849,9 @@ def test_settings_round_trip(qapp, project, tmp_path):
     again.done(0)
 ```
 
-- [ ] Run → fails on import.
+- [x] Run → fails on import.
 
-- [ ] Implement `gui/sprite/export_dialog.py`:
+- [x] Implement `gui/sprite/export_dialog.py`:
 
 ```python
 """Sprite export dialog (design §4.5, §1.6).
@@ -4400,8 +4400,8 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         persist_splitter(self.settings, SPLITTER_KEY, self.splitter)
 ```
 
-- [ ] Run → 16 passed.
-- [ ] Commit:
+- [x] Run → 16 passed.
+- [x] Commit:
 
 ```
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/export_dialog.py tests/sprite/gui/test_export_dialog.py
@@ -4429,7 +4429,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): ExportD
 
 **Steps:**
 
-- [ ] Write the failing test `tests/sprite/gui/test_shortcuts.py`:
+- [x] Write the failing test `tests/sprite/gui/test_shortcuts.py`:
 
 ```python
 from types import SimpleNamespace
@@ -4505,9 +4505,9 @@ def test_reinstall_replaces_previous_shortcuts(qapp):
     assert all(s.isEnabled() for s in second.values())
 ```
 
-- [ ] Run → fails on import.
+- [x] Run → fails on import.
 
-- [ ] Implement `gui/sprite/shortcuts.py`:
+- [x] Implement `gui/sprite/shortcuts.py`:
 
 ```python
 """Keyboard shortcuts for the Sprite tab (design §1.5).
@@ -4582,8 +4582,8 @@ def install_shortcuts(tab: QWidget) -> Dict[str, QShortcut]:
     return shortcuts
 ```
 
-- [ ] Run → 5 passed.
-- [ ] Commit:
+- [x] Run → 5 passed.
+- [x] Commit:
 
 ```
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/shortcuts.py tests/sprite/gui/test_shortcuts.py
@@ -4627,7 +4627,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): tab-sco
 
 **Steps:**
 
-- [ ] Write the failing test `tests/sprite/gui/test_sprite_tab_integration.py`:
+- [x] Write the failing test `tests/sprite/gui/test_sprite_tab_integration.py`:
 
 ```python
 from PySide6.QtCore import QObject, Signal
@@ -4881,9 +4881,9 @@ def test_real_sprite_tab_constructs_workspace(qapp, monkeypatch):
     tab.frames_workspace.shutdown()
 ```
 
-- [ ] Run → fails on import.
+- [x] Run → fails on import.
 
-- [ ] Implement `gui/sprite/frames_workspace.py`:
+- [x] Implement `gui/sprite/frames_workspace.py`:
 
 ```python
 """Builds the 5b widgets and wires them into SpriteTab (design §4.5).
@@ -5130,7 +5130,7 @@ class FramesWorkspace(QObject):
         self.panel.shutdown()
 ```
 
-- [ ] Edit `gui/sprite/sprite_tab.py` (sub-project 5a's file; its Task 8 reserves the attributes
+- [x] Edit `gui/sprite/sprite_tab.py` (sub-project 5a's file; its Task 8 reserves the attributes
   the workspace sets). At the **end** of `SpriteTab.__init__`, after `self._sync_title()`, add:
 
 ```python
@@ -5146,10 +5146,10 @@ class FramesWorkspace(QObject):
   importable on its own for 5a's tests. The `aboutToQuit` connection in the workspace stays as
   a safety net for exits that skip the main window.
 
-- [ ] Run `test_sprite_tab_integration.py` → 9 passed. Then re-run 5a's tab tests:
+- [x] Run `test_sprite_tab_integration.py` → 9 passed. Then re-run 5a's tab tests:
   `QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui -v`
   → all green (5a's tests plus Tasks 1–9).
-- [ ] Commit:
+- [x] Commit:
 
 ```
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/frames_workspace.py gui/sprite/sprite_tab.py tests/sprite/gui/test_sprite_tab_integration.py
@@ -5164,16 +5164,16 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): wire fr
 
 **Steps:**
 
-- [ ] Run the sprite GUI suite:
+- [x] Run the sprite GUI suite:
   `QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite -v`
   → green.
-- [ ] Run the path guard and dialog-convention suites:
+- [x] Run the path guard and dialog-convention suites:
   `QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/test_no_hardcoded_paths.py /mnt/d/Documents/Code/GitHub/ImageAI/tests/gui/test_dialog_conventions.py -v`
   → green (no `AppData` / `XDG` / `.imageai` tokens in `gui/sprite/`).
-- [ ] Run the whole suite once:
+- [x] Run the whole suite once:
   `QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI -q`
   → green. Paste the final summary line into the commit body of the next step.
-- [ ] Grep the new modules for banned patterns; every command must print nothing:
+- [x] Grep the new modules for banned patterns; every command must print nothing:
 
 ```
 grep -n "QMovie" /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/*.py
@@ -5181,7 +5181,7 @@ grep -n "SmoothPixmapTransform, True\|Qt.SmoothTransformation" /mnt/d/Documents/
 grep -n "from PIL\|import PIL" /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/frame_strip.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/preview_player.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/pixel_view.py
 ```
 
-- [ ] Update the plan-file checkboxes above and commit the plan state:
+- [x] Update the plan-file checkboxes above and commit the plan state:
 
 ```
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add Plans/2026-08-29-sprite-gui-b-plan.md
@@ -5294,3 +5294,7 @@ on the viewport, which needs no window focus. Timer test uses 5 ms frames and a 
 9. **`PixelView` gains a region selection** (`set_select_mode`, `selection_rect`, `clear_selection`)
    because 6's retouch dialog reads `tab.pixel_view.selection_rect()`; the design listed only zoom,
    grid, and checkerboard for the pixel view.
+
+
+13. **No live re-run of changed stages** (final review 2026-08-30, Minor 1). Design §4.5 lists "live re-run of changed stages" for `processing_panel.py`; the panel writes settings back on every change and re-runs only on the explicit Run action, and the stage cache (§1.2) decides what a Run skips. An opt-in debounced auto-run stays a follow-up for sub-project 6/7.
+14. **§1.5 shortcut scope corrected** (final review 2026-08-30, Important 1). Task 8's first version bound every §1.5 row on the tab, so Space stole every focused button and Delete on the action-cards table deleted frames. The shipped `install_shortcuts` creates each shortcut on its owner (`frame_strip`, `preview_player`, the pixel-view container) with `Qt.WidgetWithChildrenShortcut`; only Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z stay on the tab, matching the design's "Where" column.
