@@ -1,10 +1,10 @@
 from PySide6.QtGui import QColor, QImage
 from PySide6.QtTest import QTest
 
-from core.sprite.models import TagMeta
+from core.sprite.models import FrameMeta, TagMeta
 from gui.sprite.preview_player import (MODES, PreviewPlayer, loop_seam_score, next_index,
                                        seam_level)
-from gui_synthetic import make_frames
+from gui_synthetic import make_frames, write_frame_png
 
 
 def test_next_index_modes():
@@ -37,8 +37,24 @@ def test_set_frames_shows_first_and_reports_seam(qapp, tmp_path):
     assert player.current_index() == 0
     assert player.view.image() is not None
     assert 0.0 < player.seam_score() < 0.1
-    assert "12" in player.fps_readout() or "10" in player.fps_readout()  # 100 ms → 10.0 fps
+    assert player.fps_readout() == "10.0 fps"  # 100 ms → 10.0 fps; the "12" branch was dead
     assert player.slider.maximum() == 3
+
+
+def test_fps_readout_variable_duration(qapp, tmp_path):
+    """Minor 13: mixed frame durations must report the mean fps with a "(variable)" suffix,
+    not the exact-match text `test_set_frames_shows_first_and_reports_seam` covers."""
+    frames = [
+        FrameMeta(name="frame_00", source_path=write_frame_png(tmp_path / "0000.png"),
+                  frame=(0, 0, 8, 8), source_size=(8, 8),
+                  sprite_source_size=(0, 0, 8, 8), duration_ms=100),
+        FrameMeta(name="frame_01", source_path=write_frame_png(tmp_path / "0001.png", dot=(1, 0)),
+                  frame=(0, 0, 8, 8), source_size=(8, 8),
+                  sprite_source_size=(0, 0, 8, 8), duration_ms=300),
+    ]
+    player = PreviewPlayer()
+    player.set_frames(frames)
+    assert player.fps_readout() == "5.0 fps (variable)"  # mean 200 ms -> 1000/200
 
 
 def test_step_and_bounds(qapp, tmp_path):

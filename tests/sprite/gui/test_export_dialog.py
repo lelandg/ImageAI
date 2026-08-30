@@ -38,6 +38,26 @@ def _wait_idle(dialog, timeout_s=10.0):
     assert not dialog.is_running(), "export worker did not finish"
 
 
+@pytest.fixture(autouse=True)
+def _isolated_export_settings():
+    """Important 7: tests must not see another test's persisted sprite/export/* keys.
+
+    `tests/conftest.py` sandboxes QSettings into one session-scoped ini file with no
+    per-test reset, so a value one test's `_save_settings()` writes (e.g. `formats`)
+    stays there for every test that runs after it in the same process — order-dependent
+    failures like `test_start_export_blocked_by_grid_padding_export_grid_rejects` seeing
+    `format_checks["grid"]` unchecked because an earlier test unchecked it and saved.
+    Removing the whole `sprite/export` group before each test (not after, so a crashed
+    test never leaves the store dirty for the next one) makes every test start from the
+    same clean slate. `test_settings_round_trip` is unaffected: it exercises persistence
+    across two `ExportDialog`s constructed within itself.
+    """
+    settings = ed.prefs.sprite_settings()
+    settings.remove(ed.SETTINGS_PREFIX.rstrip("/"))
+    settings.sync()
+    yield
+
+
 @pytest.fixture
 def project(tmp_path, monkeypatch):
     project, _action = make_project(tmp_path)
@@ -66,7 +86,19 @@ def test_parse_scales():
     assert parse_scales(" 2 ") == (1, 2)
     assert parse_scales("1,1,2") == (1, 2)
     assert parse_scales("") == (1,)
-    assert parse_scales("x,0,-1") == (1,)
+
+
+def test_parse_scales_refuses_bad_tokens():
+    """Important 4: a non-integer or non-positive scale raises, naming the offending token,
+    instead of silently collapsing the whole list to (1,)."""
+    with pytest.raises(ValueError, match="4x"):
+        parse_scales("1,2,4x")
+    with pytest.raises(ValueError, match="x"):
+        parse_scales("x,0,-1")
+    with pytest.raises(ValueError, match="0"):
+        parse_scales("0")
+    with pytest.raises(ValueError, match="-1"):
+        parse_scales("-1")
 
 
 def test_validate_grid_options():
@@ -226,6 +258,20 @@ def test_start_export_blocked_by_grid_padding_export_grid_rejects(qapp, project,
     dialog.start_export()
     assert shown and not dialog.is_running()
     assert "extrude" in shown[0][2].lower()
+    _close(dialog)
+
+
+def test_start_export_blocked_by_bad_scales_text(qapp, project, monkeypatch):
+    """Important 4: an invalid scales token blocks Export with a shown+logged message,
+    instead of silently exporting the 1x sheet only."""
+    dialog = ExportDialog(project)
+    assert dialog.format_checks["grid"].isChecked()  # needs_sheet, so scales are parsed
+    dialog.scales_edit.setText("1,2,4x")
+    shown = []
+    monkeypatch.setattr(ed.QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a)))
+    dialog.start_export()
+    assert shown and not dialog.is_running()
+    assert "4x" in shown[0][2]
     _close(dialog)
 
 
@@ -399,3 +445,38 @@ def test_settings_round_trip(qapp, project, tmp_path):
     assert again.grid_options().scales == (1, 2)
     assert again.format_checks["gif"].isChecked()
     _close(again)
+
+
+def test_persisted_formats_apply_to_a_format_registered_after_construction(qapp, project):
+    """T7 fix-now (register_format): `_load_settings` used to apply the persisted `formats`
+    set only to checkboxes that existed at `__init__`, so a format a sub-project-6 caller
+    `register_format`'d afterward always came up unchecked even when the user last saved it."""
+    ed.prefs.set_pref(ed.SETTINGS_PREFIX + "formats", "gif,godot_tres")
+    dialog = ExportDialog(project)
+    assert dialog.format_checks["gif"].isChecked()
+    assert not dialog.format_checks["grid"].isChecked()
+    box = dialog.register_format("godot_tres", "Godot 4 SpriteFrames (.tres)", lambda meta, out_dir: [])
+    assert box.isChecked()
+    _close(dialog)
+
+
+def test_out_dir_persistence_is_per_project(qapp, tmp_path, monkeypatch):
+    """T7 fix-now (out_dir per project): `sprite/export/out_dir` carried no project identity,
+    so project A's saved directory became project B's default too; keying by project fixes it."""
+    monkeypatch.setattr(ed.prefs, "purge_after_export_enabled", lambda: False)
+    monkeypatch.setattr(ed.prefs, "set_purge_after_export", lambda value: None)
+    monkeypatch.setattr(ed.prefs, "confirm_purge", lambda parent: True)
+    project_a, _ = make_project(tmp_path / "a")
+    project_b, _ = make_project(tmp_path / "b")
+
+    dialog_a = ExportDialog(project_a)
+    dialog_a.out_dir_edit.setText(str(tmp_path / "custom_export"))
+    _close(dialog_a)  # persists under project A's key
+
+    dialog_b = ExportDialog(project_b)
+    assert dialog_b.out_dir_edit.text() == str(ed.default_export_dir(project_b))
+    _close(dialog_b)
+
+    dialog_a_again = ExportDialog(project_a)
+    assert dialog_a_again.out_dir_edit.text() == str(tmp_path / "custom_export")
+    _close(dialog_a_again)

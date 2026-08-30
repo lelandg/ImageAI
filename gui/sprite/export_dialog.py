@@ -160,7 +160,11 @@ BUILTIN_FORMATS: Tuple[ExportFormat, ...] = (
 
 
 def parse_scales(text: str) -> Tuple[int, ...]:
-    """Parse a comma-separated scale list; always includes 1 (`export_grid` requires it)."""
+    """Parse a comma-separated scale list; always includes 1 (`export_grid` requires it).
+
+    Raises `ValueError` naming the offending token on any non-integer or non-positive
+    value, instead of silently collapsing the whole list to `(1,)` (review Important 4).
+    """
     values: List[int] = []
     for part in text.split(","):
         part = part.strip()
@@ -169,10 +173,9 @@ def parse_scales(text: str) -> Tuple[int, ...]:
         try:
             value = int(part)
         except ValueError:
-            logger.warning("Export: ignored scale %r", part)
-            return (1,)
+            raise ValueError(f"Scale {part!r} is not a whole number.")
         if value <= 0:
-            return (1,)
+            raise ValueError(f"Scale {part!r} must be positive.")
         values.append(value)
     return tuple(sorted({1, *values}))
 
@@ -180,6 +183,19 @@ def parse_scales(text: str) -> Tuple[int, ...]:
 def default_export_dir(project: SpriteProject) -> Path:
     base = project.project_dir if project.project_dir is not None else get_data_paths().sprite_projects() / project.name
     return Path(base) / "exports"
+
+
+def _project_settings_key(project: SpriteProject) -> str:
+    """Identify `project` for a per-project QSettings sub-key (T7 fix-now).
+
+    `sprite/export/out_dir` used to carry no project identity, so restoring it made
+    project A's saved directory become project B's default too. `project_dir.name`
+    is the on-disk project folder (unique per `SpriteProjectManager.create`); fall
+    back to the name slug for a project that has not been saved to disk yet.
+    """
+    if project.project_dir is not None:
+        return Path(project.project_dir).name
+    return project.slug
 
 
 def validate_grid_options(opts: GridOptions) -> List[str]:
@@ -261,6 +277,10 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         self.format_checks: Dict[str, QCheckBox] = {}
         self.profile_checks: Dict[str, QCheckBox] = {}
         self._pending_purge = False
+        # Persisted `formats` selection (T7 fix-now): populated by `_load_settings`, applied to
+        # every checkbox that exists at that point AND to every later `register_format` call, so
+        # a sub-project-6 format that registers after construction still restores checked/unchecked.
+        self._wanted_formats: Optional[set] = None
         self.setWindowTitle(f"Export sprites — {project.name}")
         self.setModal(True)
         self.setMinimumSize(660, 680)
@@ -402,7 +422,9 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         self._formats[id] = ExportFormat(id=id, label=label, fn=fn, needs_sheet=needs_sheet,
                                          takes_template=takes_template)
         box = QCheckBox(label)
-        box.setChecked(checked)
+        # A persisted `formats` selection loaded before this call (register_format run after
+        # __init__, e.g. sub-project 6) overrides the caller's default `checked` (T7 fix-now).
+        box.setChecked(id in self._wanted_formats if self._wanted_formats is not None else checked)
         self.format_checks[id] = box
         self.formats_layout.addWidget(box)
         return box
@@ -479,9 +501,20 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
     def start_export(self) -> None:
         if self.is_running():
             return
-        request = self.request()
+        problems: List[str] = []
+        try:
+            request = self.request()
+        except ValueError as exc:
+            # `parse_scales` refused the scales field (Important 4): keep validating the
+            # rest with a placeholder grid so profile/format/out_dir problems still show.
+            problems.append(str(exc))
+            request = ExportRequest(project=self.project, profiles=self.selected_profiles(),
+                                    formats=self.selected_formats(),
+                                    out_dir=Path(self.out_dir_edit.text().strip() or "."),
+                                    template=self.name_template_edit.text().strip() or DEFAULT_TEMPLATE,
+                                    grid=GridOptions(), pivot=None,
+                                    purge=self.purge_check.isChecked())
         formats = [self._formats[fmt_id] for fmt_id in request.formats]
-        problems = []
         if not request.profiles:
             problems.append("Select at least one profile.")
         if not request.formats:
@@ -563,7 +596,7 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
     # ----- settings (prefs.get_pref / set_pref, keys under sprite/export/) ---
     def _load_settings(self) -> None:
         get = prefs.get_pref
-        out_dir = get(SETTINGS_PREFIX + "out_dir", "")
+        out_dir = get(SETTINGS_PREFIX + f"out_dir/{_project_settings_key(self.project)}", "")
         if out_dir:
             self.out_dir_edit.setText(str(out_dir))
         self.name_template_edit.setText(str(get(SETTINGS_PREFIX + "template", DEFAULT_TEMPLATE)))
@@ -578,13 +611,15 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         self.pivot_y_spin.setValue(float(get(SETTINGS_PREFIX + "pivot_y", 1.0)))
         formats = get(SETTINGS_PREFIX + "formats", None)
         if formats:
-            wanted = set(str(formats).split(","))
+            # Kept on the instance (T7 fix-now) so a format `register_format`'d after this
+            # runs (sub-project 6) restores checked/unchecked too, not just the builtins.
+            self._wanted_formats = set(str(formats).split(","))
             for fmt_id, box in self.format_checks.items():
-                box.setChecked(fmt_id in wanted)
+                box.setChecked(fmt_id in self._wanted_formats)
 
     def _save_settings(self) -> None:
         put = prefs.set_pref
-        put(SETTINGS_PREFIX + "out_dir", self.out_dir_edit.text())
+        put(SETTINGS_PREFIX + f"out_dir/{_project_settings_key(self.project)}", self.out_dir_edit.text())
         put(SETTINGS_PREFIX + "template", self.name_template_edit.text())
         put(SETTINGS_PREFIX + "grid/columns", self.columns.value())
         put(SETTINGS_PREFIX + "grid/border", self.border.value())

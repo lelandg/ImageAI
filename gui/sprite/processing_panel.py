@@ -537,6 +537,20 @@ class ProcessingPanel(WorkerHost, QWidget):
         logger.warning("Processing panel: invalid key color %r ignored", text)
         return None
 
+    def _check_key_color_field(self) -> bool:
+        """Block a commit point (Run pipeline / Preview key) on a typed key colour that
+        does not parse, instead of silently keying on the plate colour (Important 6).
+
+        Call after `_write_back()`, which already dropped the bad value to `None` with a
+        log-only warning per keystroke; this re-reads the live field text so the two
+        commit points show and log the refusal instead of running against the plate.
+        """
+        text = self.key_color_edit.text().strip()
+        if text and not HEX_RE.match(text):
+            self._warn("Key color", f"{text!r} is not #RRGGBB")
+            return False
+        return True
+
     def _write_back(self) -> None:
         project = self._project
         if project is None:
@@ -654,6 +668,8 @@ class ProcessingPanel(WorkerHost, QWidget):
             self._warn("Run pipeline", "Select an action card first.")
             return
         self._write_back()
+        if not self._check_key_color_field():
+            return
         force = self.force_check.isChecked()
 
         def job(progress, token):
@@ -701,6 +717,8 @@ class ProcessingPanel(WorkerHost, QWidget):
             self._warn("Preview key", "This action has no clip. Render or import one first.")
             return
         self._write_back()
+        if not self._check_key_color_field():
+            return
         key = project.key
         color = key.key_color or project.plate_color
         video = Path(clip.path)
@@ -717,7 +735,9 @@ class ProcessingPanel(WorkerHost, QWidget):
     def _preview_done(self, result: Any) -> None:
         path = Path(result)
         self.logMessage.emit(f"Chroma preview written: {path}", "SUCCESS")
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+            logger.warning("Chroma preview: no handler opened %s", path)
+            self.logMessage.emit(f"Chroma preview: could not open {path}; open it manually.", "WARNING")
 
     def rebuild_palette_for(self, profile_name: str) -> None:
         project, action = self._project, self._action
@@ -886,11 +906,14 @@ class ProcessingPanel(WorkerHost, QWidget):
 
         Joins the thread and detaches the worker, the same way
         ``WorkerHost._release_worker`` releases the host's own worker (workers.py,
-        commit fee96b5). A finished QThread left as a child of the panel rides along
+        run-id fix). A finished QThread left as a child of the panel rides along
         when the cyclic garbage collector frees the panel, and Qt aborts if any such
-        child still runs. Detached and joined, the worker is freed by Python when its
-        last reference drops. ``deleteLater()`` is NOT usable here: the worker's own
-        signal delivery is still on the stack, and the deferred delete crashed this
+        child still runs. Detached and joined, the worker is released by the host here;
+        it is freed once no partial connected to its signals still holds it — the
+        partials bound above (``_probe_done``/``_probe_failed``) carry only
+        ``probe_id``/``action_id``, never the worker itself, so nothing keeps it alive
+        past this method's return. ``deleteLater()`` is NOT usable here: the worker's
+        own signal delivery is still on the stack, and the deferred delete crashed this
         suite (measured: 10 segfaults in 16 runs).
         """
         if self._probe_worker is worker:

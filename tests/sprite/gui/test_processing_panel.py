@@ -133,6 +133,22 @@ def test_run_pipeline_uses_worker_and_emits(panel, monkeypatch):
     assert any(l == "SUCCESS" for _, l in logs)
 
 
+def test_run_pipeline_blocked_by_invalid_key_color(panel, monkeypatch):
+    """Important 6: a typed key colour that does not parse must never silently key on
+    the plate colour — Run pipeline refuses (logged + shown) instead of starting."""
+    widget, project, _ = panel
+    called = []
+    monkeypatch.setattr(pp, "run_pipeline", lambda *a, **k: called.append(1))
+    shown = []
+    monkeypatch.setattr(pp.QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a)))
+    widget.key_color_edit.setText("1E90FF")  # missing '#', HEX_RE rejects it
+    widget.run_pipeline()
+    assert not called
+    assert not widget.is_busy()
+    assert shown and "1E90FF" in shown[0][2]
+    assert project.key.key_color is None  # _write_back already dropped the bad value
+
+
 def test_failed_pipeline_is_logged_and_shown(panel, monkeypatch):
     widget, _, _ = panel
 
@@ -181,6 +197,36 @@ def test_preview_key_runs_ffmpeg_helper(panel, monkeypatch, tmp_path):
     assert len(calls) == 1 and calls[0][0] == clip
     assert calls[0][2] == (project.key.key_color or project.plate_color)
     assert opened
+
+
+def test_preview_key_blocked_by_invalid_key_color(panel, monkeypatch, tmp_path):
+    """Important 6: same refusal at the Preview key commit point."""
+    widget, project, action = panel
+    clip = tmp_path / "clips" / "act1.mp4"
+    clip.parent.mkdir(parents=True)
+    clip.write_bytes(b"\x00")
+    action.clip = type("Clip", (), {"path": clip})()
+    calls = []
+    monkeypatch.setattr(pp, "ffmpeg_chromakey_preview", lambda *a, **k: calls.append(1))
+    shown = []
+    monkeypatch.setattr(pp.QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a)))
+    widget.key_color_edit.setText("green")
+    widget.preview_key_on_clip()
+    assert not calls
+    assert not widget.is_busy()
+    assert shown and "green" in shown[0][2]
+
+
+def test_preview_done_warns_when_openurl_fails(panel, monkeypatch, tmp_path):
+    """Minor 8: `_preview_done` must log a WARNING with the path when no handler opens it,
+    instead of only the SUCCESS "written" line (silent failure otherwise)."""
+    widget, _, _ = panel
+    monkeypatch.setattr(pp.QDesktopServices, "openUrl", staticmethod(lambda url: False))
+    logs = []
+    widget.logMessage.connect(lambda m, l: logs.append((m, l)))
+    path = tmp_path / "preview_chromakey.mp4"
+    widget._preview_done(path)
+    assert any(l == "WARNING" and str(path) in m for m, l in logs)
 
 
 def test_key_color_pick_roundtrip(panel):

@@ -82,7 +82,7 @@ def test_reject_is_blocked_while_running(qapp, monkeypatch):
     dialog.start_install()
     dialog.reject()
     assert shown and dialog.isVisible()
-    dialog._installer.wait(5000)
+    assert dialog._installer.wait(5000), "fake installer did not finish"
     QTest.qWait(20)
     dialog.reject()
     assert not dialog.isVisible()
