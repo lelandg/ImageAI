@@ -27,14 +27,19 @@ from PIL import Image
 
 from core.sprite import stabilize
 from core.sprite.keying import apply_profile_alpha, hex_to_rgb, rgb_to_hex
-from core.sprite.pipeline import CancelToken, ProgressFn, _reset_dir, check, no_progress, register_stage
+from core.sprite.pipeline import (
+    CancelToken, PipelineError, ProgressFn, _reset_dir, check, register_stage,
+)
 
 logger = logging.getLogger(__name__)
 
 Size = Tuple[int, int]
 
 DITHER_MODES: Tuple[str, ...] = ("none", "bayer2", "bayer4", "bayer8", "floyd")
-ANCHORS: Tuple[str, ...] = ("bottom_center", "center", "top_left", "top_center", "bottom_left")
+# Re-exported so a caller importing from this module still finds it; the
+# single source of truth is stabilize.ANCHORS (this module has no anchor use
+# of its own besides delegating to stabilize.anchor_offset).
+ANCHORS: Tuple[str, ...] = stabilize.ANCHORS
 # Mirrors core.upscaling.UpscalingMethod. core.upscaling is imported lazily in
 # upscale_then_fit: its module import pulls torchvision (23 s on a machine
 # with torch installed), and core.sprite must stay fast to import.
@@ -106,7 +111,7 @@ def resolution_check(src: Size, cell: Size) -> Optional[str]:
     return (
         f"Source frame {sw}x{sh} is smaller than the pixel cell {cw}x{ch}. "
         f"The pixel profile does not upscale by default, so the character fills "
-        f"only part of the cell. Run the pipeline with upscale_small=True to "
+        f"only part of the cell. Enable the pixel profile's upscale_small setting to "
         f"upscale {factor:.2f}x through core.upscaling first, or generate the "
         f"source at {cw}x{ch} or larger. An integer multiple such as "
         f"{2 * cw}x{2 * ch} gives the cleanest pixels."
@@ -280,10 +285,24 @@ def remap_to_locked(image: Image.Image, locked_palette: Sequence[str]) -> Image.
 
 
 def rebuild_palette(project: Any, profile: Any, frames: Sequence[Image.Image]) -> List[str]:
-    """Build a new shared palette from ``frames`` and store it on ``profile``."""
+    """Build a new shared palette from ``frames`` and store it on ``profile``.
+
+    An all-transparent ``frames`` (e.g. keying removed everything for this
+    action) makes :func:`build_shared_palette` return ``[]``. That must never
+    clobber an existing non-empty ``locked_palette`` -- the palette is
+    project-wide, so one action with no opaque pixels would otherwise erase
+    the palette every other action was quantized with. In that case the
+    existing palette is kept and returned unchanged.
+    """
     if profile.palette_size is None:
         raise ValueError(f"profile {profile.name!r} has no palette_size")
     palette = build_shared_palette(frames, profile.palette_size)
+    if not palette and profile.locked_palette:
+        logger.warning(
+            "sprite project %r: %s action produced no opaque pixels; keeping "
+            "the existing %d-color palette instead of clearing it",
+            project.name, profile.name, len(profile.locked_palette))
+        return list(profile.locked_palette)
     profile.locked_palette = list(palette) if palette else None
     project.modified = datetime.now().isoformat(timespec="seconds")
     logger.info("sprite project %r: rebuilt %s palette with %d colors",
@@ -295,12 +314,20 @@ def ensure_palette(project: Any, profile: Any, frames: Sequence[Image.Image]) ->
     """Return the palette the pixel stage must use.
 
     * ``palette_size is None`` -> ``[]`` (no quantization).
-    * ``palette_lock`` and a stored ``locked_palette`` -> that palette.
-    * otherwise -> :func:`rebuild_palette` (the first run locks it).
+    * a ``locked_palette`` is already stored -> reuse it, whether or not
+      ``palette_lock`` is on. The palette is project-wide (one
+      ``OutputProfile`` shared by every action), not per-action: rebuilding
+      it on every unlocked run would make action B's colors overwrite action
+      A's, thrash the cache (the palette feeds the stage fingerprint), and
+      leave ``SheetMeta.palette`` describing only the last action processed.
+      ``palette_lock`` off only means the palette is eligible for an
+      explicit "Rebuild palette" action (:func:`rebuild_palette`, called
+      directly) -- it does not mean "rebuild automatically every run".
+    * otherwise -> :func:`rebuild_palette` (the first run locks it in).
     """
     if profile.palette_size is None:
         return []
-    if profile.palette_lock and profile.locked_palette:
+    if profile.locked_palette:
         return list(profile.locked_palette)
     return rebuild_palette(project, profile, frames)
 
@@ -320,6 +347,29 @@ def pixel_stage_settings(project: Any, action: Any) -> Dict[str, Any]:
     return asdict(profile)
 
 
+def _validate_pixel_profile(profile: Any) -> None:
+    """Raise ``ValueError`` naming the field when a pixel profile setting is out of range.
+
+    ``OutputProfile.from_dict`` coerces types but validates no ranges, so a
+    hand-edited or older ``project.iasprite.json`` can carry a bad
+    ``palette_size``, ``dither`` or ``upscale_method`` into the stage. Called
+    once at the top of :func:`run_pixel_stage`, which wraps the result in a
+    ``PipelineError`` -- the helper functions below (``build_shared_palette``,
+    ``quantize_to_palette``, ``upscale_then_fit``) keep their own
+    ``ValueError`` for direct callers.
+    """
+    if profile.palette_size is not None and not 1 <= int(profile.palette_size) <= 256:
+        raise ValueError(
+            f"pixel profile {profile.name!r}: palette_size must be 1..256, got {profile.palette_size!r}")
+    if profile.dither not in DITHER_MODES:
+        raise ValueError(
+            f"pixel profile {profile.name!r}: dither must be one of {DITHER_MODES}, got {profile.dither!r}")
+    if profile.upscale_method not in UPSCALE_METHODS:
+        raise ValueError(
+            f"pixel profile {profile.name!r}: upscale_method must be one of "
+            f"{UPSCALE_METHODS}, got {profile.upscale_method!r}")
+
+
 def run_pixel_stage(project: Any, action: Any, input_frames: List[Path], out_dir: Path,
                     progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
     """Stabilized frames -> integer fit -> binary alpha -> shared palette -> PNGs.
@@ -328,15 +378,26 @@ def run_pixel_stage(project: Any, action: Any, input_frames: List[Path], out_dir
     ``out_dir/<input name>`` per frame plus ``out_dir/pixel.json`` (scale,
     palette, warnings). Returns the PNG paths in input order. Returns ``[]``
     without touching disk when the pixel profile is absent or disabled.
+    Raises ``PipelineError`` (logged first) when the profile's
+    ``palette_size``, ``dither`` or ``upscale_method`` is out of range.
     """
     profile = project.profile("pixel")
     if profile is None or not profile.enabled:
         logger.info("pixel stage skipped for %s: profile absent or disabled", action.name)
         return []
+    try:
+        _validate_pixel_profile(profile)
+    except ValueError as exc:
+        logger.error("pixel stage (%s): invalid profile: %s", action.name, exc)
+        raise PipelineError(str(exc)) from exc
     cell = (int(profile.cell_size[0]), int(profile.cell_size[1]))
     anchor = project.stabilize.anchor
     _reset_dir(out_dir)
     total = len(input_frames)
+    # Two passes (fit, then write) over the same ``total`` frames share one
+    # progress denominator so a done/total-driven bar fills once instead of
+    # filling, resetting, and filling again.
+    grand_total = 2 * total
     warnings: List[str] = []
 
     frames: List[Image.Image] = []
@@ -360,7 +421,11 @@ def run_pixel_stage(project: Any, action: Any, input_frames: List[Path], out_dir
         arr = np.array(image.convert("RGBA"))
         arr[arr[..., 3] == 0] = (0, 0, 0, 0)
         fitted.append(Image.fromarray(arr))
-        progress("pixel", index + 1, total, f"fit {input_frames[index].name} (1/{scale})")
+        progress("pixel", index + 1, grand_total, f"fit {input_frames[index].name} (1/{scale})")
+    # The full-size source frames are no longer needed once every frame is
+    # fitted; drop the reference so a large action does not hold both the
+    # full-size and cell-size copies live through the write loop below.
+    frames.clear()
 
     palette = ensure_palette(project, profile, fitted)
     if palette and profile.dither == "floyd":
@@ -374,11 +439,12 @@ def run_pixel_stage(project: Any, action: Any, input_frames: List[Path], out_dir
         target = out_dir / input_frames[index].name
         image.save(target, format="PNG")
         outputs.append(target)
-        progress("pixel", index + 1, total, f"wrote {target.name}")
+        progress("pixel", total + index + 1, grand_total, f"wrote {target.name}")
 
     manifest = {
         "cell_size": list(cell), "scale": scale, "anchor": anchor,
         "binary_alpha": bool(profile.binary_alpha), "palette": list(palette),
+        "palette_size": profile.palette_size, "palette_lock": bool(profile.palette_lock),
         "dither": profile.dither if palette else "none",
         "upscale_small": bool(profile.upscale_small),
         "upscale_method": str(profile.upscale_method), "warnings": warnings,
@@ -386,7 +452,7 @@ def run_pixel_stage(project: Any, action: Any, input_frames: List[Path], out_dir
     (out_dir / "pixel.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     for text in warnings:
         logger.warning("pixel stage (%s): %s", action.name, text)
-        progress("pixel", total, total, f"warning: {text}")
+        progress("pixel", grand_total, grand_total, f"warning: {text}")
     return outputs
 
 

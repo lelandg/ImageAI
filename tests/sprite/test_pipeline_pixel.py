@@ -10,7 +10,7 @@ from PIL import Image
 from core.sprite import pipeline as pipeline_mod
 from core.sprite.pipeline import (
     STAGE_CODE_VERSION, STAGE_RUNNERS, STAGE_SETTINGS, STAGES, Cancelled, CancelToken,
-    no_progress, run_pipeline, stage_dir, stage_fingerprint,
+    PipelineError, no_progress, run_pipeline, stage_dir, stage_fingerprint,
 )
 from core.sprite.pixelart import pixel_stage_settings, run_pixel_stage
 from core.sprite.project import ActionCard, OutputProfile, SpriteProject, StabilizeSettings
@@ -222,3 +222,72 @@ def test_sheet_meta_pixel_carries_locked_palette(tmp_path):
     project = make_project(tmp_path, profile)
     assert project.sheet_meta("pixel").palette == ["#000000", "#FF00FF"]
     assert project.sheet_meta("hd").palette is None
+
+
+def _write_solid_frames(tmp_path, subdir, count, color):
+    src = tmp_path / subdir
+    src.mkdir()
+    paths = []
+    for i in range(count):
+        arr = np.zeros((32, 32, 4), dtype=np.uint8)
+        arr[:, :] = (*color, 255)
+        path = src / f"{i + 1:04d}.png"
+        Image.fromarray(arr).save(path)
+        paths.append(path)
+    return paths
+
+
+def test_pixel_stage_unlocked_shares_one_palette_across_actions(tmp_path):
+    """I1 regression: with palette_lock=False and more than one action, a
+    second action's run must not overwrite the project-wide locked_palette
+    action A was quantized with -- that overwrite would change A's stage
+    fingerprint (locked_palette feeds it via pixel_stage_settings) so A's
+    second run is never a cache hit, and SheetMeta.palette would describe
+    only the last action processed instead of matching A's PNGs on disk."""
+    profile = make_profile(palette_lock=False, palette_size=2)
+    project = make_project(tmp_path, profile)
+    action_a = ActionCard(id="a1", name="walk", prompt="walk")
+    action_b = ActionCard(id="b1", name="run", prompt="run")
+    inputs_a = _write_solid_frames(tmp_path, "a_src", 2, (200, 40, 40))
+    inputs_b = _write_solid_frames(tmp_path, "b_src", 2, (40, 40, 200))
+    out_a = tmp_path / "pixel_a"
+    out_b = tmp_path / "pixel_b"
+
+    run_pixel_stage(project, action_a, inputs_a, out_a, no_progress, None)
+    fingerprint_a_after_first_run = stage_fingerprint(project, action_a, "pixel")
+    palette_after_a = list(profile.locked_palette)
+    assert palette_after_a == ["#C82828"]
+
+    run_pixel_stage(project, action_b, inputs_b, out_b, no_progress, None)
+    # B's run must not have changed the shared palette -- so A's fingerprint,
+    # which hashes locked_palette, is unchanged and a second run of A would
+    # be a cache hit (is_stage_current would see no settings change).
+    assert profile.locked_palette == palette_after_a
+    assert stage_fingerprint(project, action_a, "pixel") == fingerprint_a_after_first_run
+
+    run_pixel_stage(project, action_a, inputs_a, out_a, no_progress, None)
+    assert profile.locked_palette == palette_after_a
+
+    arr = np.asarray(Image.open(sorted(out_a.glob("*.png"))[0]))
+    opaque = arr[arr[..., 3] == 255][:, :3]
+    assert {tuple(px) for px in opaque} <= {(200, 40, 40)}
+    # SheetMeta.palette must match what is actually on disk for action A.
+    assert project.sheet_meta("pixel").palette == palette_after_a
+
+
+@pytest.mark.parametrize("field, bad_value", [
+    ("dither", "bogus"),
+    ("palette_size", 0),
+    ("upscale_method", "bogus"),
+])
+def test_run_pixel_stage_raises_pipeline_error_on_bad_profile_field(tmp_path, caplog, field, bad_value):
+    """I2 regression: bad profile config must surface as PipelineError with a
+    user-facing message and be logged, like every sibling runner, instead of
+    an un-annotated ValueError."""
+    inputs = write_frames(tmp_path, count=1)
+    project = make_project(tmp_path, make_profile(**{field: bad_value}))
+    with caplog.at_level("ERROR"):
+        with pytest.raises(PipelineError) as excinfo:
+            run_pixel_stage(project, make_action(), inputs, tmp_path / "pixel", no_progress, None)
+    assert str(bad_value) in excinfo.value.user_message
+    assert any(str(bad_value) in record.message for record in caplog.records)

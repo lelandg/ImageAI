@@ -135,7 +135,7 @@ def test_resolution_check_warns_when_smaller_in_both_axes():
     text = resolution_check((40, 30), (64, 64))
     assert text is not None
     assert "40x30" in text and "64x64" in text
-    assert "upscale_small=True" in text
+    assert "upscale_small" in text
     assert "128x128" in text
 
 
@@ -399,8 +399,19 @@ def test_ensure_palette_reuses_locked_palette_when_locked():
     assert profile.locked_palette == ["#123456"]
 
 
-def test_ensure_palette_rebuilds_every_run_when_unlocked():
+def test_ensure_palette_keeps_existing_palette_when_unlocked():
+    """I1 regression: an unlocked profile with a stored palette must not
+    rebuild from whatever action happens to run -- the palette is
+    project-wide, shared by every action, and only an explicit "Rebuild
+    palette" call (rebuild_palette, not ensure_palette) replaces it."""
     project, profile = make_project(), make_profile(palette_lock=False, locked_palette=["#123456"])
+    frames = [square_frame((8, 8), (8, 8), color=(0, 255, 0, 255))]
+    assert ensure_palette(project, profile, frames) == ["#123456"]
+    assert profile.locked_palette == ["#123456"]
+
+
+def test_ensure_palette_builds_when_unlocked_and_no_palette_yet():
+    project, profile = make_project(), make_profile(palette_lock=False, locked_palette=None)
     frames = [square_frame((8, 8), (8, 8), color=(0, 255, 0, 255))]
     assert ensure_palette(project, profile, frames) == ["#00FF00"]
     assert profile.locked_palette == ["#00FF00"]
@@ -419,8 +430,16 @@ def test_rebuild_palette_overrides_lock():
     assert profile.locked_palette == ["#0000FF"]
 
 
-def test_rebuild_palette_clears_lock_when_frames_are_empty():
+def test_rebuild_palette_keeps_existing_palette_when_frames_are_empty():
+    """I1 sub-case regression: an all-transparent action (e.g. keying removed
+    every pixel) must never clobber a non-empty project palette."""
     project, profile = make_project(), make_profile(locked_palette=["#123456"])
+    assert rebuild_palette(project, profile, [Image.new("RGBA", (4, 4), (0, 0, 0, 0))]) == ["#123456"]
+    assert profile.locked_palette == ["#123456"]
+
+
+def test_rebuild_palette_stays_empty_when_frames_are_empty_and_no_prior_palette():
+    project, profile = make_project(), make_profile(locked_palette=None)
     assert rebuild_palette(project, profile, [Image.new("RGBA", (4, 4), (0, 0, 0, 0))]) == []
     assert profile.locked_palette is None
 
