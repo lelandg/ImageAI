@@ -15,7 +15,7 @@ from core.sprite.models import FrameMeta, SheetMeta, TagMeta
 def _frame_png(path: Path, seed: int, size=(8, 8)) -> bytes:
     rng = np.random.default_rng(seed)
     arr = rng.integers(0, 256, size=(size[1], size[0], 4), dtype=np.uint8)
-    Image.fromarray(arr, "RGBA").save(path)
+    Image.fromarray(arr).save(path)
     return arr.tobytes()
 
 
