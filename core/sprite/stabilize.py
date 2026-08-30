@@ -203,13 +203,16 @@ def estimate_shift(ref_alpha: np.ndarray, mov_alpha: np.ndarray, method: str) ->
     """Return (dy, dx) to apply to the moving mask so it registers with the reference.
 
     ``phase``: skimage phase_cross_correlation (upsample_factor=10) -> cv2.phaseCorrelate
-    -> centroid. ``centroid``: centroid difference only.
+    -> centroid. ``centroid``: centroid difference only. A mask with no structure
+    (empty, or uniformly transparent/opaque -- zero variance) also falls back to
+    centroid: skimage's sub-pixel refinement returns a spurious ~0.7 px shift on
+    two identical constant masks instead of (0, 0) (I3).
     """
     if method not in DEJITTER_METHODS:
         raise ValueError(f"Unknown dejitter method {method!r}; choose one of {DEJITTER_METHODS}")
     ref = np.asarray(ref_alpha, dtype=np.float32)
     mov = np.asarray(mov_alpha, dtype=np.float32)
-    if method == "centroid" or ref.sum() <= 0.0 or mov.sum() <= 0.0:
+    if method == "centroid" or ref.std() < 1e-6 or mov.std() < 1e-6:
         return _centroid_shift(ref, mov)
     if _phase_cross_correlation is not None:
         shift, _error, _phase = _phase_cross_correlation(ref, mov, upsample_factor=10)
@@ -241,40 +244,46 @@ def dejitter(frames: Sequence[Path], out_dir: Path, method: str = "phase", *,
              token: Optional[CancelToken] = None) -> List[Path]:
     """Align every frame to the first frame's alpha mask and write the results.
 
-    ``out_dir`` may be the input directory: all inputs are read before any output
-    is written. Shifts are clamped to MAX_SHIFT_FRACTION of the frame size.
+    Every frame registers against frame 0 (never its predecessor), so only
+    frame 0's array needs to survive past its own iteration; frames are read
+    and written one at a time rather than all loaded up front (I2). ``out_dir``
+    may be the input directory: each frame is read before its own output file
+    is written, and a frame's own file is never touched before that frame has
+    been read, so no frame is overwritten before use. Shifts are clamped to
+    MAX_SHIFT_FRACTION of the frame size.
     """
     if method not in DEJITTER_METHODS:
         raise ValueError(f"Unknown dejitter method {method!r}; choose one of {DEJITTER_METHODS}")
     frames = [Path(p) for p in frames]
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
-    images = []
-    for path in frames:
-        if token is not None:
-            token.raise_if_cancelled()
-        images.append(np.asarray(Image.open(path).convert("RGBA")))
     outputs: List[Path] = []
-    if not images:
+    if not frames:
         return outputs
-    ref_alpha = images[0][:, :, 3].astype(np.float32) / 255.0
+    total = len(frames)
+
+    check(token)
+    first_path = frames[0]
+    first_rgba = np.asarray(Image.open(first_path).convert("RGBA"))
+    ref_alpha = first_rgba[:, :, 3].astype(np.float32) / 255.0
     h, w = ref_alpha.shape
     max_dy, max_dx = MAX_SHIFT_FRACTION * h, MAX_SHIFT_FRACTION * w
-    total = len(images)
-    for index, (path, rgba) in enumerate(zip(frames, images)):
-        if token is not None:
-            token.raise_if_cancelled()
+    dst0 = out_dir / first_path.name
+    Image.fromarray(first_rgba).save(dst0)
+    outputs.append(dst0)
+    progress("stabilize", 1, total, f"dejitter {first_path.name}")
+
+    for index, path in enumerate(frames[1:], start=2):
+        check(token)
+        rgba = np.asarray(Image.open(path).convert("RGBA"))
+        mov_alpha = rgba[:, :, 3].astype(np.float32) / 255.0
+        dy, dx = estimate_shift(ref_alpha, mov_alpha, method)
+        cdy, cdx = max(-max_dy, min(max_dy, dy)), max(-max_dx, min(max_dx, dx))
+        if (cdy, cdx) != (dy, dx):
+            logger.warning("dejitter %s: clamped shift (%.2f, %.2f) to (%.2f, %.2f)",
+                           path.name, dy, dx, cdy, cdx)
         dst = out_dir / path.name
-        if index == 0:
-            Image.fromarray(rgba).save(dst)
-        else:
-            mov_alpha = rgba[:, :, 3].astype(np.float32) / 255.0
-            dy, dx = estimate_shift(ref_alpha, mov_alpha, method)
-            cdy, cdx = max(-max_dy, min(max_dy, dy)), max(-max_dx, min(max_dx, dx))
-            if (cdy, cdx) != (dy, dx):
-                logger.warning("dejitter %s: clamped shift (%.2f, %.2f) to (%.2f, %.2f)",
-                               path.name, dy, dx, cdy, cdx)
-            Image.fromarray(translate_rgba(rgba, cdy, cdx)).save(dst)
+        Image.fromarray(translate_rgba(rgba, cdy, cdx)).save(dst)
         outputs.append(dst)
-        progress("stabilize", index + 1, total, f"dejitter {path.name}")
+        progress("stabilize", index, total, f"dejitter {path.name}")
     return outputs
