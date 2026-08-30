@@ -22,7 +22,7 @@ def _on_disk_recursive(out_dir: Path) -> list:
 def _png(path: Path, shade: int) -> Path:
     arr = np.zeros((8, 8, 4), dtype=np.uint8)
     arr[2:6, 2:6] = (shade, 40, 200, 255)
-    Image.fromarray(arr, "RGBA").save(path)
+    Image.fromarray(arr).save(path)
     return path
 
 
