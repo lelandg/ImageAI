@@ -77,3 +77,12 @@ def test_requires_filled_grid_rects():
 def test_requires_frames():
     with pytest.raises(ValueError):
         render_godot_tres(SheetMeta(title="x", frames=[], tags=[], sheet_size=(1, 1)), atlas_res_path="res://x.png")
+
+
+def test_tag_name_with_quotes_and_backslash_is_escaped(tmp_path):
+    meta = _meta()
+    meta.tags = [TagMeta(name='he said "run"\\now', from_index=0, to_index=1)]
+    text = render_godot_tres(meta, atlas_res_path="res://hero.png")
+    assert 'he said \\"run\\"\\\\now' in text
+    out = export_godot_tres(meta, tmp_path / "hero.tres", atlas_res_path="res://hero.png")
+    assert out.exists()

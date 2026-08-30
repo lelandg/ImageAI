@@ -27,6 +27,11 @@ def _fmt_float(value: float) -> str:
     return text
 
 
+def _escape(text: str) -> str:
+    """Escape ``\\`` then ``"`` so ``text`` is safe inside a .tres string literal."""
+    return text.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def ordered_frame_indices(tag: TagMeta) -> List[int]:
     """Unroll a tag direction into the explicit frame order Godot plays.
 
@@ -77,7 +82,7 @@ def _animation_block(meta: SheetMeta, tag: TagMeta) -> str:
         "{\n"
         '"frames": [' + ", ".join(entries) + "],\n"
         f'"loop": {loop},\n'
-        f'"name": &"{tag.name}",\n'
+        f'"name": &"{_escape(tag.name)}",\n'
         f'"speed": {_fmt_float(fps)}\n'
         "}"
     )
@@ -93,7 +98,7 @@ def render_godot_tres(meta: SheetMeta, *, atlas_res_path: str) -> str:
     parts = [
         f'[gd_resource type="SpriteFrames" load_steps={load_steps} format={GODOT_FORMAT}]',
         "",
-        f'[ext_resource type="Texture2D" path="{atlas_res_path}" id="1"]',
+        f'[ext_resource type="Texture2D" path="{_escape(atlas_res_path)}" id="1"]',
         "",
     ]
     for index, frame in enumerate(meta.frames, start=1):
