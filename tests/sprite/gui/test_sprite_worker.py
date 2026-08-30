@@ -1,5 +1,6 @@
 # tests/sprite/gui/test_sprite_worker.py
 """SpriteWorker contract (design §1.1): progress, finished(object), failed, cancelled."""
+import threading
 import time
 
 from PySide6.QtWidgets import QApplication, QWidget
@@ -99,6 +100,17 @@ class _Host(WorkerHost, QWidget):
     pass
 
 
+class _IdleHost(_Host):
+    """Records the ``_on_worker_idle`` hook the panels override."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.idle_calls = 0
+
+    def _on_worker_idle(self) -> None:
+        self.idle_calls += 1
+
+
 def test_worker_host_runs_one_job_at_a_time(qapp):
     host = _Host()
     results = []
@@ -132,13 +144,14 @@ def test_worker_host_shutdown_cancels_and_joins(qapp):
     worker = host.start_job(forever, label="loop",
                             on_finished=lambda r: None, on_failed=lambda m: None)
     assert worker is not None
-    host.shutdown(timeout_ms=5000)
+    assert host.shutdown(timeout_ms=5000) is True
     assert not worker.isRunning()
     assert worker.token.cancelled
+    assert host._orphan_list() == []
 
 
 def test_worker_host_shutdown_timeout_logs_error(qapp, caplog):
-    """shutdown() times out (Minor 1): logs an error but still returns."""
+    """shutdown() times out: logs an error and reports False to the caller."""
     host = _Host()
 
     def slow_to_cancel(progress, token):
@@ -155,9 +168,120 @@ def test_worker_host_shutdown_timeout_logs_error(qapp, caplog):
                             on_finished=lambda r: None, on_failed=lambda m: None)
     assert worker is not None
     with caplog.at_level("ERROR"):
-        host.shutdown(timeout_ms=50)
+        assert host.shutdown(timeout_ms=50) is False
     assert any("did not stop within" in record.message for record in caplog.records)
     assert worker.wait(2000)  # let the thread actually exit before the test ends
+    for _ in range(5):
+        qapp.processEvents()  # reap the orphan so the test leaves nothing behind
+
+
+def test_new_job_is_refused_while_the_previous_result_is_undelivered(qapp):
+    """Minor 5: the emit → delivery window must not admit a second job.
+
+    ``run()`` emits ``finished`` and then returns, so ``isRunning()`` is
+    already False while the result is still queued. A job started in that
+    window used to take the host's ``_worker`` slot and ``_guarded`` then
+    dropped the first result.
+    """
+    host = _Host()
+    calls = []
+    worker = host.start_job(lambda progress, token: "a-done", label="a",
+                            on_finished=lambda r: calls.append(r), on_failed=lambda m: None)
+    assert worker is not None
+    assert worker.wait(5000)     # the thread exited; finished is queued, not delivered
+    assert not worker.isRunning()
+    assert host.is_busy()
+    refused = host.start_job(lambda progress, token: "b-done", label="b",
+                             on_finished=lambda r: calls.append(r), on_failed=lambda m: None)
+    assert refused is None
+    for _ in range(5):
+        qapp.processEvents()
+    assert calls == ["a-done"]   # A's result was delivered, not dropped as stale
+    assert not host.is_busy()
+
+
+def test_shutdown_timeout_keeps_the_worker_as_an_orphan(qapp, caplog):
+    """Important 1: a timed-out shutdown() must not abandon a running QThread.
+
+    The worker is kept (detached from the host widget), the host stays busy so
+    no second job writes the same output paths, and the reaper clears it and
+    calls ``_on_worker_idle`` once the job actually returns.
+    """
+    host = _IdleHost()
+    release = threading.Event()
+
+    def blocked(progress, token):
+        release.wait(20)
+        return "late result"
+
+    worker = host.start_job(blocked, label="blocked",
+                            on_finished=lambda r: None, on_failed=lambda m: None)
+    assert worker is not None
+    with caplog.at_level("ERROR"):
+        assert host.shutdown(timeout_ms=50) is False
+    assert any("kept as an orphan" in record.message for record in caplog.records)
+    assert host._worker is None
+    assert host.is_busy()                  # the orphan still runs
+    assert host.busy_label == "blocked"    # never dereferences the cleared _worker
+    assert host._orphan_list() == [worker]
+    refused = host.start_job(blocked, label="second",
+                             on_finished=lambda r: None, on_failed=lambda m: None)
+    assert refused is None                 # no second writer for the same paths
+    release.set()
+    assert worker.wait(5000)
+    for _ in range(5):
+        qapp.processEvents()               # deliver the terminal event to the reaper
+    assert host._orphan_list() == []
+    assert not host.is_busy()
+    assert host.busy_label is None
+    assert host.idle_calls == 1
+
+
+def test_join_orphans_waits_for_the_released_orphan(qapp):
+    """join_orphans() is what MainWindow.closeEvent uses instead of a destroy."""
+    host = _Host()
+    release = threading.Event()
+
+    def blocked(progress, token):
+        release.wait(20)
+        return "late result"
+
+    worker = host.start_job(blocked, label="blocked",
+                            on_finished=lambda r: None, on_failed=lambda m: None)
+    assert worker is not None
+    assert host.shutdown(timeout_ms=50) is False
+    assert host.join_orphans(timeout_ms=50) is False  # still running
+    release.set()
+    assert host.join_orphans() is True                # unbounded wait
+    assert not worker.isRunning()
+    for _ in range(5):
+        qapp.processEvents()
+    assert host._orphan_list() == []
+
+
+def test_progress_from_a_released_worker_is_dropped(qapp, caplog):
+    """Minor 3: an orphan's progress must not drive the host's current UI."""
+    host = _Host()
+    seen = []
+    gate = threading.Event()
+
+    def late_progress(progress, token):
+        gate.wait(20)
+        progress("plate", 0, 0, "line from the released worker")
+        return "done"
+
+    worker = host.start_job(late_progress, label="late",
+                            on_finished=lambda r: None, on_failed=lambda m: None,
+                            on_progress=lambda *args: seen.append(args))
+    assert worker is not None
+    assert host.shutdown(timeout_ms=50) is False
+    with caplog.at_level("DEBUG", logger="gui.sprite.workers"):
+        gate.set()
+        assert worker.wait(5000)
+        for _ in range(5):
+            qapp.processEvents()
+    assert seen == []
+    assert any("Dropped stale progress" in record.message for record in caplog.records)
 
 
 def test_worker_host_drops_stale_finished_event_after_shutdown(qapp, caplog):

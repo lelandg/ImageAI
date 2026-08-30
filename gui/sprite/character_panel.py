@@ -201,7 +201,8 @@ class CharacterPanel(WorkerHost, QGroupBox):
             out_png.parent.mkdir(parents=True, exist_ok=True)
             provider = get_provider("google", provider_cfg)
             return Path(make_chroma_plate(provider, character, out_png, color,
-                                          log=lambda m: progress("plate", 0, 0, m)))
+                                          log=lambda m: progress("plate", 0, 0, m),
+                                          token=token))
 
         self.logMessage.emit(f"Chroma plate requested ({color}) for {character.name}", "INFO")
         self._begin("plate", job, self._on_plate_done)
@@ -266,6 +267,10 @@ class CharacterPanel(WorkerHost, QGroupBox):
     def _finish(self) -> None:
         self.progress.setVisible(False)
         self.status_label.setText("")
+        self._sync_enabled()
+
+    def _on_worker_idle(self) -> None:
+        """A worker orphaned by a timed-out ``shutdown()`` finally stopped."""
         self._sync_enabled()
 
     def _history_entry(self, path: Path, prompt: str) -> dict:

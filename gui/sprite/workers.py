@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import functools
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable, List, Optional
 
 from PySide6.QtCore import QThread, Signal
 
@@ -39,10 +39,27 @@ class SpriteWorker(QThread):
         self._job = job
         self._label = label
         self._token = CancelToken()
+        self._terminal_delivered = False
 
     @property
     def token(self) -> CancelToken:
         return self._token
+
+    @property
+    def terminal_delivered(self) -> bool:
+        """True once finished/failed/cancelled has been delivered on the GUI thread.
+
+        ``run()`` emits its terminal signal before the thread exits and the
+        event is delivered later, so ``isRunning()`` is False for a stretch in
+        which the result has not reached the host yet. ``WorkerHost`` uses this
+        flag — not ``isRunning()`` — to decide whether it is still busy
+        (final review, Minor 5).
+        """
+        return self._terminal_delivered
+
+    def mark_terminal(self) -> None:
+        """Called by the host from the terminal signal, before the caller's slot."""
+        self._terminal_delivered = True
 
     @property
     def label(self) -> str:
@@ -84,16 +101,46 @@ class WorkerHost:
     ``start_job`` refuses (returns ``None``) while a worker runs; callers log a
     warning. The worker is parented to the host so Qt keeps it alive; the
     host must call ``shutdown()`` before it is destroyed.
+
+    A worker that outlives ``shutdown()``'s bounded join becomes an *orphan*:
+    the host keeps a reference to it, detaches it from the host widget and
+    reaps it when its thread finally exits. An orphan still counts as busy, so
+    no second job can write the same output paths, and the host widget can be
+    destroyed without Qt aborting on "QThread: Destroyed while thread is still
+    running" (final review, Important 1 / Minor 5).
     """
 
     _worker: Optional[SpriteWorker] = None
+    _orphans: Optional[List[SpriteWorker]] = None
+
+    def _orphan_list(self) -> List[SpriteWorker]:
+        """The host's orphan list, created on first use.
+
+        ``WorkerHost`` is a mixin with no ``__init__`` of its own, so the list
+        cannot be created in a constructor without forcing every subclass to
+        cooperate; this one accessor owns the lazy creation.
+        """
+        orphans = getattr(self, "_orphans", None)
+        if orphans is None:
+            orphans = []
+            self._orphans = orphans
+        return orphans
 
     def start_job(self, job: Job, *, label: str, on_finished, on_failed,
                   on_cancelled=None, on_progress=None) -> Optional[SpriteWorker]:
         if self.is_busy():
-            logger.warning("Sprite job %r refused: %r is still running", label, self._worker.label)
+            logger.warning("Sprite job %r refused: %r is still running", label, self.busy_label)
             return None
         worker = SpriteWorker(job, label=label, parent=self)
+        # FIRST connection, so it runs before the caller's slots: the worker
+        # stops counting as live the moment its terminal event reaches the GUI
+        # thread. That closes the Minor 5 window (a new job started between the
+        # emit and the delivery) while keeping the queue-drain pattern working
+        # (starting job B from inside job A's on_finished).
+        mark = functools.partial(self._mark_terminal, worker)
+        worker.finished.connect(mark)
+        worker.failed.connect(mark)
+        worker.cancelled.connect(mark)
         # Guarded: a finished/failed/cancelled event queued for a worker that
         # shutdown()/_release_worker already released (e.g. the host switched
         # to a different project/worker before the event was delivered) must
@@ -104,7 +151,10 @@ class WorkerHost:
         if on_cancelled is not None:
             worker.cancelled.connect(functools.partial(self._guarded, worker, "cancelled", on_cancelled))
         if on_progress is not None:
-            worker.progress.connect(on_progress)
+            # Guarded like the terminal signals: progress from a released or
+            # orphaned worker must not drive the host's current UI/project
+            # (final review, Minor 3).
+            worker.progress.connect(functools.partial(self._guarded, worker, "progress", on_progress))
         # Release AFTER the caller's slots (same connection type keeps order).
         # Bound to this worker instance: a queued release event for a worker
         # that has already been superseded by a newer one (e.g. the caller
@@ -130,32 +180,123 @@ class WorkerHost:
             return
         callback(*args)
 
+    def _mark_terminal(self, worker: SpriteWorker, *_args) -> None:
+        worker.mark_terminal()
+
+    def _live_worker(self) -> Optional[SpriteWorker]:
+        """The host's worker while its result has not been delivered yet.
+
+        Not ``isRunning()``: ``run()`` emits its terminal signal before the
+        thread exits, so an ``isRunning()`` test leaves a window in which a
+        second job starts and the first result is then dropped as stale
+        (final review, Minor 5).
+        """
+        worker = self._worker
+        if worker is not None and not worker.terminal_delivered:
+            return worker
+        return None
+
     def is_busy(self) -> bool:
-        return self._worker is not None and self._worker.isRunning()
+        """True while this host has a live worker, or one of its orphans runs."""
+        if self._live_worker() is not None:
+            return True
+        return any(orphan.isRunning() for orphan in self._orphan_list())
 
     @property
     def busy_label(self) -> Optional[str]:
-        """The running worker's label, or ``None`` when idle.
+        """The busy worker's label, or ``None`` when idle.
 
         Public accessor for callers (e.g. ``SpriteTab``) that want to report
         what job is being cancelled without reaching into the private
-        ``_worker`` attribute.
+        ``_worker`` attribute. Falls back to a still-running orphan's label so
+        it never dereferences a cleared ``_worker``.
         """
-        return self._worker.label if self.is_busy() else None
+        worker = self._live_worker()
+        if worker is not None:
+            return worker.label
+        for orphan in self._orphan_list():
+            if orphan.isRunning():
+                return orphan.label
+        return None
 
     def cancel_running(self) -> None:
         if self._worker is not None:
             self._worker.cancel()
 
-    def shutdown(self, timeout_ms: int = 5000) -> None:
-        """Cancel and join the running worker (call from closeEvent / tab shutdown)."""
+    def shutdown(self, timeout_ms: int = 5000) -> bool:
+        """Cancel and join the running worker (call from closeEvent / tab shutdown).
+
+        Returns True when the worker stopped inside ``timeout_ms``. On a
+        timeout the worker is NOT dropped: it becomes an orphan of this host
+        (see the class docstring) and False is returned so the caller can
+        decide to wait longer — ``join_orphans()`` — before the widget tree is
+        destroyed.
+        """
         worker = self._worker
         if worker is None:
-            return
+            return True
         worker.cancel()
+        stopped = True
         if worker.isRunning() and not worker.wait(timeout_ms):
-            logger.error("Sprite worker %r did not stop within %d ms", worker.label, timeout_ms)
+            logger.error("Sprite worker %r did not stop within %d ms; kept as an orphan",
+                         worker.label, timeout_ms)
+            self._adopt_orphan(worker)
+            stopped = False
         self._worker = None
+        return stopped
+
+    def _adopt_orphan(self, worker: SpriteWorker) -> None:
+        """Keep ``worker`` alive and detached until its thread exits.
+
+        ``setParent(None)`` takes the QThread out of the host widget's child
+        tree, so destroying the widget cannot destroy a running thread. The
+        reaper is wired to the worker's own Python ``finished``/``failed``/
+        ``cancelled`` signals — ``run()`` always emits exactly one of them
+        before it returns — because the Python ``finished = Signal(object)``
+        shadows ``QThread.finished()``.
+        """
+        worker.setParent(None)
+        self._orphan_list().append(worker)
+        reaper = functools.partial(self._reap_orphan, worker)
+        worker.finished.connect(reaper)
+        worker.failed.connect(reaper)
+        worker.cancelled.connect(reaper)
+        if not worker.isRunning():
+            # The job ended between the wait() timeout and the connect above,
+            # so no terminal signal is left to trigger the reaper.
+            self._reap_orphan(worker)
+
+    def _reap_orphan(self, worker: SpriteWorker, *_args) -> None:
+        """Drop a finished orphan and tell the host it may be idle again.
+
+        Idempotent: the orphan list is the single guard, so a terminal signal
+        that arrives after ``_adopt_orphan``'s direct call is a no-op.
+        """
+        orphans = self._orphan_list()
+        if worker not in orphans:
+            return
+        orphans.remove(worker)
+        worker.wait()  # the job emitted its terminal signal; the thread is exiting
+        logger.info("Sprite orphan worker %r finished after shutdown", worker.label)
+        worker.deleteLater()
+        self._on_worker_idle()
+
+    def _on_worker_idle(self) -> None:
+        """Hook: the last orphan of this host stopped. Panels re-sync their UI."""
+
+    def join_orphans(self, timeout_ms: Optional[int] = None) -> bool:
+        """Wait for every orphan of this host. ``None`` waits without a bound.
+
+        Call this before the host widget is destroyed when ``shutdown()``
+        returned False; a QThread destroyed while it runs aborts the process.
+        """
+        joined = True
+        for worker in list(self._orphan_list()):
+            if timeout_ms is None:
+                worker.wait()
+            elif not worker.wait(timeout_ms):
+                joined = False
+        return joined
 
     def _release_worker(self, worker: SpriteWorker, *_args) -> None:
         """Clear ``self._worker`` only if it still points at ``worker``.

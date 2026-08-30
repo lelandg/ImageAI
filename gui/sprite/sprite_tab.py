@@ -268,9 +268,15 @@ class SpriteTab(QWidget):
         """
         for panel in (self.character_panel, self.action_cards_panel, self.queue_panel):
             label = panel.busy_label
-            panel.shutdown()
+            stopped = panel.shutdown()
             if label is not None:
                 self.log(f"Cancelled running {label} job to switch project", "WARNING")
+            if not stopped:
+                # The worker is now an orphan of its panel: it keeps the panel
+                # busy (so no second job writes the same paths) and its events
+                # are dropped by _guarded, but it still holds the OLD project.
+                self.log(f"The {label} job is still finishing; it cannot start again "
+                         "until it stops.", "WARNING")
 
     def _apply_project(self, project: SpriteProject) -> None:
         self._shutdown_panel_workers()
@@ -391,12 +397,27 @@ class SpriteTab(QWidget):
 
     # -- lifecycle ---------------------------------------------------------
 
-    def shutdown(self) -> None:
-        """Cancel every running worker and persist layout. MainWindow calls this on close."""
-        for panel in (self.character_panel, self.action_cards_panel, self.queue_panel):
-            panel.shutdown()
+    def shutdown(self) -> bool:
+        """Cancel every running worker and persist layout. MainWindow calls this on close.
+
+        Returns True only when every panel joined its worker inside the bound.
+        A False result means at least one worker is now an orphan of its panel;
+        the caller must call ``join_orphans()`` before this widget tree is
+        destroyed, or Qt aborts on a running QThread (final review, Important 1).
+        """
+        stopped = [panel.shutdown()
+                   for panel in (self.character_panel, self.action_cards_panel, self.queue_panel)]
         self._persist_splitters()
+        return all(stopped)
+
+    def join_orphans(self, timeout_ms: Optional[int] = None) -> bool:
+        """Wait for every panel's orphaned worker. ``None`` waits without a bound."""
+        joined = [panel.join_orphans(timeout_ms)
+                  for panel in (self.character_panel, self.action_cards_panel, self.queue_panel)]
+        return all(joined)
 
     def closeEvent(self, event) -> None:
-        self.shutdown()
+        if not self.shutdown():
+            logger.warning("A sprite worker did not stop in time; waiting for it before close")
+            self.join_orphans()
         super().closeEvent(event)

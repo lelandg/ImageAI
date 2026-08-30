@@ -1,6 +1,9 @@
 # tests/sprite/gui/test_action_cards_panel.py
 """ActionCardsPanel: brief → cards, editable table, per-card render/refine."""
+import threading
+
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication
 
 import gui.sprite.action_cards_panel as acp
 from core.sprite.generation.action_cards import ActionCardDraft
@@ -102,9 +105,10 @@ def test_generate_cards_appends_unique_names(qapp, fake_config, fake_project, mo
     captured = {}
 
     def fake_generate(brief, genre, *, provider, model, api_key, plate_color,
-                      completion_fn=None, log=None):
+                      auth_mode=None, completion_fn=None, log=None, token=None):
         captured.update(brief=brief, genre=genre, provider=provider, model=model,
-                        api_key=api_key, plate_color=plate_color)
+                        api_key=api_key, plate_color=plate_color, auth_mode=auth_mode,
+                        token=token)
         log("contract ok")
         return [ActionCardDraft(name="idle", prompt="stands still", duration_s=4, loop=True,
                                 target_frames=6, fps=12),
@@ -125,7 +129,85 @@ def test_generate_cards_appends_unique_names(qapp, fake_config, fake_project, mo
     assert fake_project.brief == "a brave knight" and fake_project.genre_preset == "sidescroller"
     assert captured["model"] == "chat-model" and captured["api_key"] == "test-key"
     assert captured["plate_color"] == "#00FF00"
+    # Minor 2: the worker's cancel token reaches the completion call.
+    assert captured["token"] is not None and hasattr(captured["token"], "raise_if_cancelled")
     assert panel.table.rowCount() == 4 and changed
+
+
+def test_generate_cards_reads_the_google_key_under_its_config_name(qapp, fake_project,
+                                                                    monkeypatch, wait_for_worker):
+    """Important 2: the combo id is "gemini"; Settings stores the key as "google"."""
+    captured = {}
+    lookups = []
+
+    class KeyConfig:
+        def get_api_key(self, provider):
+            lookups.append(provider)
+            return "k" if provider == "google" else None
+
+        def get_auth_mode(self, provider="google"):
+            return "gcloud" if provider == "google" else "api_key"
+
+        def get(self, key, default=None):
+            return default
+
+        def set(self, key, value):
+            pass
+
+    def fake_generate(brief, genre, **kwargs):
+        captured.update(kwargs)
+        return [ActionCardDraft(name="idle", prompt="stands still", duration_s=4, loop=True,
+                                target_frames=6, fps=12)]
+
+    monkeypatch.setattr(acp, "generate_action_cards", fake_generate)
+    monkeypatch.setattr(acp, "resolve_model", lambda provider, family: "chat-model")
+    panel = _panel(KeyConfig(), fake_project)
+    index = panel.llm_combo.findData("gemini")
+    assert index >= 0, "the LLM combo no longer offers the gemini provider id"
+    panel.llm_combo.setCurrentIndex(index)
+    assert panel.llm_provider() == "gemini"
+    assert ActionCardsPanel._config_key_for("gemini") == "google"
+    assert ActionCardsPanel._config_key_for("openai") == "openai"
+    panel.brief_edit.setText("a brave knight")
+    panel.generate_cards()
+    wait_for_worker(panel)
+    assert lookups == ["google"]
+    assert captured["api_key"] == "k"
+    assert captured["auth_mode"] == "gcloud"
+    assert captured["provider"] == "gemini"  # the provider id itself is unchanged
+
+
+def test_cancel_button_cancels_running_generation(qapp, fake_config, fake_project, monkeypatch):
+    """Minor 2 + T4: a Cancel button stops a slow LLM call and re-enables the panel."""
+    release = threading.Event()
+    lines = []
+
+    def blocking_generate(brief, genre, *, token=None, **kwargs):
+        while not release.wait(0.005):
+            if token is not None:
+                token.raise_if_cancelled()
+        return []
+
+    monkeypatch.setattr(acp, "generate_action_cards", blocking_generate)
+    monkeypatch.setattr(acp, "resolve_model", lambda provider, family: "chat-model")
+    panel = _panel(fake_config, fake_project)
+    panel.logMessage.connect(lambda m, level: lines.append((level, m)))
+    assert not panel.cancel_btn.isEnabled()   # idle: nothing to cancel
+    panel.brief_edit.setText("a brave knight")
+    panel.generate_cards()
+    worker = panel._worker
+    assert worker is not None
+    assert panel.cancel_btn.isEnabled() and not panel.generate_btn.isEnabled()
+    panel.cancel_btn.click()
+    assert worker.token.cancelled
+    assert worker.wait(10000)
+    release.set()
+    for _ in range(5):
+        QApplication.processEvents()
+    assert ("WARNING", "Card generation cancelled.") in lines
+    assert panel.generate_btn.isEnabled() and not panel.cancel_btn.isEnabled()
+    assert panel.progress.isHidden()
+    assert not panel.is_busy()
 
 
 def test_generate_cards_requires_brief(qapp, fake_config, fake_project, monkeypatch):

@@ -17,6 +17,7 @@ from core.sprite.generation.action_cards import (
     parse_action_cards,
 )
 from core.sprite.generation.errors import ProviderError, QuotaExceeded
+from core.sprite.pipeline import Cancelled, CancelToken
 
 VALID = {
     "version": "1.0",
@@ -175,3 +176,37 @@ def test_draft_to_card():
     assert card.name == "idle" and card.prompt == "p" and card.duration_s == 4
     assert card.loop is True and card.target_frames == 6 and card.fps == 12
     assert card.status == "draft" and len(card.id) == 32
+
+
+def test_generate_action_cards_raises_before_the_completion_when_cancelled():
+    """Minor 2: a cancelled token stops the contract before the LLM is called."""
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        return _response(json.dumps(VALID))
+
+    token = CancelToken()
+    token.cancel()
+    with pytest.raises(Cancelled):
+        generate_action_cards("a knight", "fighting", provider="openai", model="gpt-4o",
+                              api_key="k", plate_color="#00FF00",
+                              completion_fn=fake_completion, token=token)
+    assert calls == []
+
+
+def test_generate_action_cards_raises_after_the_completion_when_cancelled():
+    """Cancel during a slow chat call is honored as soon as the call returns."""
+    token = CancelToken()
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        token.cancel()  # the user clicks Cancel while the chat call runs
+        return _response(json.dumps(VALID))
+
+    with pytest.raises(Cancelled):
+        generate_action_cards("a knight", "fighting", provider="openai", model="gpt-4o",
+                              api_key="k", plate_color="#00FF00",
+                              completion_fn=fake_completion, token=token)
+    assert len(calls) == 1

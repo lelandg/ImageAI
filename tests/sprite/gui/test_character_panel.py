@@ -96,8 +96,9 @@ def test_make_plate_runs_in_worker_and_records_plate(qapp, fake_config, fake_pro
                                                      monkeypatch, wait_for_worker):
     calls = {}
 
-    def fake_make_plate(provider, character, out_png, plate_color="#00FF00", *, model=None, log=None):
-        calls.update(character=character, out=out_png, color=plate_color)
+    def fake_make_plate(provider, character, out_png, plate_color="#00FF00", *, model=None,
+                        log=None, token=None):
+        calls.update(character=character, out=out_png, color=plate_color, token=token)
         Path(out_png).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(character, out_png)
         log("plate done")
@@ -120,6 +121,8 @@ def test_make_plate_runs_in_worker_and_records_plate(qapp, fake_config, fake_pro
     assert ready == [expected]
     assert history and history[0]["path"] == expected and history[0]["source_tab"] == "sprite"
     assert any("plate done" in line for line in lines)
+    # Minor 2: the worker's cancel token reaches the provider call.
+    assert calls["token"] is not None and hasattr(calls["token"], "raise_if_cancelled")
 
 
 def test_worker_failure_is_shown_and_logged(qapp, fake_config, fake_project, png,
@@ -134,9 +137,12 @@ def test_worker_failure_is_shown_and_logged(qapp, fake_config, fake_project, png
     fake_project.character_source = png
     panel.set_project(fake_project)
     panel.make_plate()
+    # Minor 12: isHidden() (not isVisible()) is the assertion with teeth — an
+    # unshown parent makes isVisible() False whatever setVisible() did.
+    assert not panel.progress.isHidden()
     wait_for_worker(panel)
     assert seen == ["provider exploded"]
-    assert not panel.progress.isVisible()
+    assert panel.progress.isHidden()
 
 
 def test_generate_turnaround_stores_views(qapp, fake_config, fake_project, png,

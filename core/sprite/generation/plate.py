@@ -14,6 +14,7 @@ from PIL import Image
 from core.sprite.generation._common import emit, now_iso
 from core.sprite.generation.errors import ProviderError, classify_provider_error
 from core.sprite.generation.prompts import color_name, normalize_hex
+from core.sprite.pipeline import CancelToken
 from core.utils import write_image_sidecar
 
 logger = logging.getLogger(__name__)
@@ -25,8 +26,14 @@ PLATE_PROMPT = ("Place this exact character on a flat solid {color_name} backgro
 def make_chroma_plate(provider, character: Path, out_png: Path,
                       plate_color: str = "#00FF00", *, model: Optional[str] = None,
                       aspect_ratio: str = "16:9",
-                      log: Callable[[str], None] = logger.info) -> Path:
-    """Render ``character`` onto a solid ``plate_color`` plate and save ``out_png``."""
+                      log: Callable[[str], None] = logger.info,
+                      token: Optional[CancelToken] = None) -> Path:
+    """Render ``character`` onto a solid ``plate_color`` plate and save ``out_png``.
+
+    ``token`` is checked immediately before and immediately after the provider
+    call, so a Cancel request during a slow image call is honored as soon as
+    the call returns instead of after the whole job (final review, Minor 2).
+    """
     character = Path(character)
     out_png = Path(out_png)
     if not character.exists():
@@ -42,12 +49,16 @@ def make_chroma_plate(provider, character: Path, out_png: Path,
                       f"plate_color={hex_color} image={character}")
     emit(logger, log, f"Prompt (FULL, {len(prompt)} chars):\n{prompt}")
 
+    if token is not None:
+        token.raise_if_cancelled()
     try:
         texts, images = provider.edit_image(character, prompt, model_id, aspect_ratio=aspect_ratio)
     except Exception as exc:  # noqa: BLE001 - classified below
         err = classify_provider_error(exc, provider="gemini")
         emit(logger, log, f"Chroma plate failed: {err.user_message}", level="error")
         raise err from exc
+    if token is not None:
+        token.raise_if_cancelled()
 
     emit(logger, log, f"=== Chroma plate response: {len(images)} image(s), {len(texts)} text(s) ===")
     for text in texts:

@@ -32,6 +32,11 @@ logger = logging.getLogger(__name__)
 COL_NAME, COL_PROMPT, COL_SECONDS, COL_LOOP, COL_FRAMES, COL_FPS, COL_STATUS, COL_ACTIONS = range(8)
 HEADERS = ("Name", "Prompt", "Seconds", "Loop", "Frames", "FPS", "Status", "")
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+# The LLM combo carries ``core.llm_models`` provider ids; the Settings tab
+# stores keys under the app's own provider names. The only mismatch today is
+# Google: combo id "gemini" vs config key "google" (``gui/main_window.py``
+# ``_save_and_test``). ollama/lmstudio need no key (final review, Important 2).
+CONFIG_KEY_BY_PROVIDER_ID = {"gemini": "google"}
 INT_LIMITS = {COL_SECONDS: (1, 15), COL_FRAMES: (1, 64), COL_FPS: (1, 60)}
 RERENDER_STATES = ("rendered", "processed", "failed")
 
@@ -80,6 +85,10 @@ class ActionCardsPanel(WorkerHost, QGroupBox):
         self.generate_btn.setToolTip("Ctrl+Enter")
         self.generate_btn.clicked.connect(self.generate_cards)
         top.addWidget(self.generate_btn)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.setToolTip("Stop the running card generation")
+        self.cancel_btn.clicked.connect(self.cancel_running)
+        top.addWidget(self.cancel_btn)
         root.addLayout(top)
 
         self.table = QTableWidget(0, len(HEADERS))
@@ -119,6 +128,7 @@ class ActionCardsPanel(WorkerHost, QGroupBox):
         for widget in (self.generate_btn, self.add_btn, self.remove_btn, self.render_all_btn,
                        self.brief_edit, self.genre_combo, self.table):
             widget.setEnabled(has_project and not busy)
+        self.cancel_btn.setEnabled(busy)
         if hasattr(self, "_primary"):
             self._primary.set_enabled(has_project and not busy)
 
@@ -356,6 +366,19 @@ class ActionCardsPanel(WorkerHost, QGroupBox):
         data = self.llm_combo.currentData()
         return str(data) if data else "google"
 
+    @staticmethod
+    def _config_key_for(provider_id: str) -> str:
+        """The ``ConfigManager`` key name for an ``llm_models`` provider id.
+
+        ``get_all_provider_ids()`` yields "gemini" for Google, but the Settings
+        tab writes that key (and its auth mode) under "google". Every other
+        chat caller maps the name before the lookup
+        (``gui/layout/text_gen_dialog.py``, ``CharacterPanel._provider_config``);
+        this panel did not, so an API-key Google user got ``api_key=None`` and
+        LiteLLM fell to the ``vertex_ai/`` route (final review, Important 2).
+        """
+        return CONFIG_KEY_BY_PROVIDER_ID.get(provider_id, provider_id)
+
     def _on_llm_changed(self, _index: int) -> None:
         set_pref(LLM_PROVIDER_KEY, self.llm_provider())
 
@@ -396,7 +419,9 @@ class ActionCardsPanel(WorkerHost, QGroupBox):
         genre = self.genre_combo.currentText()
         provider = self.llm_provider()
         model = resolve_model(provider, "chat")
-        api_key = self.config.get_api_key(provider)
+        config_key = self._config_key_for(provider)
+        api_key = self.config.get_api_key(config_key)
+        auth_mode = self.config.get_auth_mode(config_key)
         plate_color = getattr(self.project, "plate_color", "#00FF00")
         self.project.brief = brief
         self.project.genre_preset = genre
@@ -404,8 +429,10 @@ class ActionCardsPanel(WorkerHost, QGroupBox):
         def job(progress, token):
             progress("cards", 0, 0, f"Asking {provider}/{model} for {genre} action cards")
             drafts = generate_action_cards(brief, genre, provider=provider, model=model,
-                                           api_key=api_key, plate_color=plate_color,
-                                           log=lambda m: progress("cards", 0, 0, m))
+                                           api_key=api_key, auth_mode=auth_mode,
+                                           plate_color=plate_color,
+                                           log=lambda m: progress("cards", 0, 0, m),
+                                           token=token)
             token.raise_if_cancelled()
             return list(drafts)
 
@@ -425,6 +452,10 @@ class ActionCardsPanel(WorkerHost, QGroupBox):
     def _finish(self) -> None:
         self.progress.setVisible(False)
         self.status_label.setText("")
+        self._sync_enabled()
+
+    def _on_worker_idle(self) -> None:
+        """A worker orphaned by a timed-out ``shutdown()`` finally stopped."""
         self._sync_enabled()
 
     def _on_cards_done(self, drafts) -> None:

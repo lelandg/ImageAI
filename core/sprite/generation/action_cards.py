@@ -18,6 +18,7 @@ from core.llm_parsing import LLMResponseParser
 from core.sprite.generation._common import emit
 from core.sprite.generation.errors import ProviderError, classify_provider_error
 from core.sprite.generation.prompts import color_name, normalize_hex, strip_render_terms
+from core.sprite.pipeline import CancelToken
 from core.sprite.project import ActionCard
 
 logger = logging.getLogger(__name__)
@@ -264,13 +265,18 @@ def generate_action_cards(brief: str, genre: str, *, provider: str, model: Optio
                           api_key: Optional[str], plate_color: str, character_notes: str = "",
                           auth_mode: Optional[str] = None,
                           completion_fn: Optional[Callable[..., Any]] = None,
-                          log: Callable[[str], None] = logger.info) -> List[ActionCardDraft]:
+                          log: Callable[[str], None] = logger.info,
+                          token: Optional[CancelToken] = None) -> List[ActionCardDraft]:
     """Run the contract against a chat model and return validated drafts.
 
     ``completion_fn`` defaults to ``litellm.completion``. Kwargs come from
     ``build_completion_kwargs`` (temperature 0.2, max_tokens 4000, JSON mode
     where the model supports it). The model defaults to
     ``default_chat_model(provider)``.
+
+    ``token`` is checked immediately before and immediately after the
+    completion call, so a Cancel request during a slow chat call is honored as
+    soon as the call returns (final review, Minor 2).
     """
     provider_id = normalize_provider(provider)
     model_id = model or default_chat_model(provider_id)
@@ -293,12 +299,16 @@ def generate_action_cards(brief: str, genre: str, *, provider: str, model: Optio
         litellm.drop_params = True
         completion_fn = litellm.completion
 
+    if token is not None:
+        token.raise_if_cancelled()
     try:
         response = completion_fn(**kwargs)
     except Exception as exc:  # noqa: BLE001 - classified below
         err = classify_provider_error(exc, provider=provider_id)
         emit(logger, log, f"Action cards failed: {err.user_message}", level="error")
         raise err from exc
+    if token is not None:
+        token.raise_if_cancelled()
 
     text = _response_text(response)
     emit(logger, log, "=== LLM RESPONSE ===")

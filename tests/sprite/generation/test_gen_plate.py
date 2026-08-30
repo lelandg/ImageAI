@@ -8,6 +8,7 @@ from PIL import Image
 
 from core.sprite.generation.errors import ProviderError, SafetyRefusal
 from core.sprite.generation.plate import PLATE_PROMPT, make_chroma_plate
+from core.sprite.pipeline import Cancelled, CancelToken
 
 
 def _png_bytes(color=(0, 255, 0)):
@@ -78,3 +79,30 @@ def test_make_plate_classifies_provider_exceptions(png_file, tmp_path):
 def test_make_plate_rejects_missing_source(tmp_path):
     with pytest.raises(FileNotFoundError):
         make_chroma_plate(_provider(), tmp_path / "missing.png", tmp_path / "p.png")
+
+
+def test_make_plate_raises_before_the_provider_call_when_cancelled(png_file, tmp_path):
+    """Minor 2: a cancelled token stops the plate before any money is spent."""
+    provider = _provider()
+    token = CancelToken()
+    token.cancel()
+    with pytest.raises(Cancelled):
+        make_chroma_plate(provider, png_file(), tmp_path / "p.png", token=token)
+    assert provider.edit_image.call_count == 0
+    assert not (tmp_path / "p.png").exists()
+
+
+def test_make_plate_raises_after_the_provider_call_when_cancelled(png_file, tmp_path):
+    """Cancel during a slow image call is honored as soon as the call returns."""
+    provider = _provider()
+    token = CancelToken()
+
+    def cancel_then_return(*args, **kwargs):
+        token.cancel()  # the user clicks Cancel while the image call runs
+        return [], [_png_bytes()]
+
+    provider.edit_image.side_effect = cancel_then_return
+    with pytest.raises(Cancelled):
+        make_chroma_plate(provider, png_file(), tmp_path / "p.png", token=token)
+    assert provider.edit_image.call_count == 1
+    assert not (tmp_path / "p.png").exists()  # no half-written plate, no sidecar

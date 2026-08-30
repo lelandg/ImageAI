@@ -7829,7 +7829,14 @@ For more detailed information, please refer to the full documentation.
             # Stop sprite workers and persist the sprite tab layout
             if getattr(self, "_sprite_tab_loaded", False) and hasattr(self.tab_sprite, "shutdown"):
                 try:
-                    self.tab_sprite.shutdown()
+                    if not self.tab_sprite.shutdown():
+                        # A worker outlived the bounded join. Destroying the
+                        # widget tree now would abort the process with
+                        # "QThread: Destroyed while thread is still running",
+                        # so wait it out instead.
+                        logger.warning("A sprite worker did not stop in time; "
+                                       "waiting for it to finish before close")
+                        self.tab_sprite.join_orphans()
                 except Exception as e:
                     logger.error(f"Error shutting down sprite tab: {e}")
 
@@ -8277,6 +8284,9 @@ For more detailed information, please refer to the full documentation.
         """One-action context menu shared by the Image result and the History table."""
         from PySide6.QtWidgets import QMenu
         menu = QMenu(parent)
+        # Without this the C++ QMenu stays a child of the label/view after
+        # exec() and every right-click leaks one (final review, Minor 6).
+        menu.setAttribute(Qt.WA_DeleteOnClose)
         action = menu.addAction("Send to Sprite")
         exists = False
         if path:
