@@ -31,7 +31,7 @@ def png_bytes(w=48, h=16, color=(0, 255, 0, 255), squares=3) -> bytes:
         x0 = i * cell + 3
         arr[4:12, x0:x0 + 8] = (200, 40 + 40 * i, 60, 255)
     buf = BytesIO()
-    Image.fromarray(arr, "RGBA").save(buf, "PNG")
+    Image.fromarray(arr).save(buf, "PNG")
     return buf.getvalue()
 
 
