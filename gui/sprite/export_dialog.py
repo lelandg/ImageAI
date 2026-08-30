@@ -34,6 +34,8 @@ from gui.common.dialog_conventions import (DialogCleanupMixin, bind_primary_acti
                                            persist_splitter, restore_splitter,
                                            set_default_button, standard_splitter)
 from gui.llm_utils import DialogStatusConsole
+from gui.sprite.engine_preset_box import install_engine_presets
+from gui.sprite.export_formats import register_extra_formats
 
 from . import prefs
 from .workers import WorkerHost
@@ -288,6 +290,8 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         for fmt in BUILTIN_FORMATS:
             self.register_format(fmt.id, fmt.label, fmt.fn, needs_sheet=fmt.needs_sheet,
                                  takes_template=fmt.takes_template, checked=fmt.id == "grid")
+        register_extra_formats(self)
+        install_engine_presets(self)
         self._load_settings()
         self.logMessage.connect(self.console.log)
         self.purge_check.setChecked(prefs.purge_after_export_enabled())

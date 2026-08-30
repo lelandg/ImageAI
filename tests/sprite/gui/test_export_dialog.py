@@ -113,22 +113,25 @@ def test_validate_grid_options():
 
 def test_builtin_formats_registered_in_order(qapp, project):
     dialog = ExportDialog(project)
-    assert dialog.formats() == ["grid", "aseprite_json", "texturepacker_json", "png_sequence", "gif"]
+    # Sub-project 6 (gui/sprite/export_formats.py) registers its two ids right after the
+    # built-ins, before settings restore, so they always appear at the end here.
+    assert dialog.formats() == ["grid", "aseprite_json", "texturepacker_json", "png_sequence", "gif",
+                                "godot_tres", "aseprite_native"]
     assert set(dialog.profile_checks) == {p.name for p in project.profiles}
     assert dialog.options_layout is not None
-    assert dialog.notes_label.wordWrap() and dialog.notes_label.text() == ""
+    assert dialog.notes_label.wordWrap()
     _close(dialog)
 
 
 def test_register_format_adds_checkbox_and_id(qapp, project):
     dialog = ExportDialog(project)
-    box = dialog.register_format("godot_tres", "Godot 4 SpriteFrames (.tres)", lambda meta, out_dir: [])
-    assert "godot_tres" in dialog.formats()
-    assert box.text() == "Godot 4 SpriteFrames (.tres)"
-    assert dialog.format_checks["godot_tres"] is box
-    assert "godot_tres" not in dialog.selected_formats()
+    box = dialog.register_format("custom_fmt", "Custom format (.xyz)", lambda meta, out_dir: [])
+    assert "custom_fmt" in dialog.formats()
+    assert box.text() == "Custom format (.xyz)"
+    assert dialog.format_checks["custom_fmt"] is box
+    assert "custom_fmt" not in dialog.selected_formats()
     box.setChecked(True)
-    assert "godot_tres" in dialog.selected_formats()
+    assert "custom_fmt" in dialog.selected_formats()
     with pytest.raises(ValueError):
         dialog.register_format("grid", "dup", lambda meta, out_dir: [])
     _close(dialog)
@@ -451,11 +454,11 @@ def test_persisted_formats_apply_to_a_format_registered_after_construction(qapp,
     """T7 fix-now (register_format): `_load_settings` used to apply the persisted `formats`
     set only to checkboxes that existed at `__init__`, so a format a sub-project-6 caller
     `register_format`'d afterward always came up unchecked even when the user last saved it."""
-    ed.prefs.set_pref(ed.SETTINGS_PREFIX + "formats", "gif,godot_tres")
+    ed.prefs.set_pref(ed.SETTINGS_PREFIX + "formats", "gif,custom_fmt")
     dialog = ExportDialog(project)
     assert dialog.format_checks["gif"].isChecked()
     assert not dialog.format_checks["grid"].isChecked()
-    box = dialog.register_format("godot_tres", "Godot 4 SpriteFrames (.tres)", lambda meta, out_dir: [])
+    box = dialog.register_format("custom_fmt", "Custom format (.xyz)", lambda meta, out_dir: [])
     assert box.isChecked()
     _close(dialog)
 
