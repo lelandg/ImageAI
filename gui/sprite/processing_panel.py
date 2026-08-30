@@ -905,8 +905,9 @@ class ProcessingPanel(WorkerHost, QWidget):
         late event can never wait on a probe that is still running.
 
         Joins the thread and detaches the worker, the same way
-        ``WorkerHost._release_worker`` releases the host's own worker (workers.py,
-        run-id fix). A finished QThread left as a child of the panel rides along
+        ``WorkerHost._release_worker`` releases the host's own worker (workers.py
+        binds weak references into the signal partials and disconnects after
+        release). A finished QThread left as a child of the panel rides along
         when the cyclic garbage collector frees the panel, and Qt aborts if any such
         child still runs. Detached and joined, the worker is released by the host here;
         it is freed once no partial connected to its signals still holds it — the
