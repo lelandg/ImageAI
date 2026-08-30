@@ -9,8 +9,9 @@ from PIL import Image
 
 from core.sprite import pixelart
 from core.sprite.pixelart import (
-    anchor_offset, bayer_matrix, fit_pad_integer, integer_fit_scale,
-    resolution_check, upscale_then_fit,
+    anchor_offset, bayer_matrix, build_shared_palette, fit_pad_integer,
+    hex_to_palette, integer_fit_scale, palette_to_hex, resolution_check,
+    upscale_then_fit,
 )
 
 
@@ -201,3 +202,66 @@ def test_bayer_rejects_other_sizes():
     for bad in (1, 3, 16):
         with pytest.raises(ValueError):
             bayer_matrix(bad)
+
+
+# --- Task 4 -------------------------------------------------------------------------
+
+def test_hex_round_trip():
+    pal = hex_to_palette(["#FF0000", "#00ff00", "0000FF"])
+    assert pal.shape == (3, 3)
+    assert pal.tolist() == [[255, 0, 0], [0, 255, 0], [0, 0, 255]]
+    assert palette_to_hex(pal) == ["#FF0000", "#00FF00", "#0000FF"]
+    assert hex_to_palette([]).shape == (0, 3)
+
+
+def test_pillow_mediancut_raises_on_rgba_but_our_path_does_not():
+    rgba = Image.new("RGBA", (8, 8), (255, 0, 0, 255))
+    with pytest.raises(ValueError):
+        rgba.quantize(colors=4, method=Image.Quantize.MEDIANCUT)
+    with pytest.raises(ValueError):
+        rgba.quantize(colors=4, method=Image.Quantize.MAXCOVERAGE)
+    assert build_shared_palette([rgba], 4) == ["#FF0000"]
+
+
+def test_build_shared_palette_unions_frames_and_sorts_dark_to_light():
+    f1 = square_frame((8, 8), (8, 8), color=(255, 0, 0, 255))
+    f2 = square_frame((8, 8), (8, 8), color=(0, 0, 255, 255))
+    f3 = square_frame((8, 8), (8, 8), color=(255, 255, 255, 255))
+    assert build_shared_palette([f1, f2, f3], 8) == ["#0000FF", "#FF0000", "#FFFFFF"]
+
+
+def test_build_shared_palette_ignores_transparent_and_fringe_pixels():
+    arr = np.zeros((4, 4, 4), dtype=np.uint8)
+    arr[:, :2] = (0, 255, 0, 255)
+    arr[:, 2:] = (255, 0, 255, 100)
+    frame = Image.fromarray(arr)
+    assert build_shared_palette([frame], 8) == ["#00FF00"]
+
+
+def test_build_shared_palette_empty_when_nothing_opaque():
+    assert build_shared_palette([Image.new("RGBA", (4, 4), (0, 0, 0, 0))], 8) == []
+
+
+def test_build_shared_palette_respects_color_budget_and_is_deterministic():
+    rng = np.random.default_rng(7)
+    arr = rng.integers(0, 256, (32, 32, 4), dtype=np.uint8)
+    arr[..., 3] = 255
+    frame = Image.fromarray(arr)
+    pal_a = build_shared_palette([frame], 16)
+    pal_b = build_shared_palette([frame], 16)
+    assert pal_a == pal_b
+    assert 1 <= len(pal_a) <= 16
+    assert len(set(pal_a)) == len(pal_a)
+
+
+def test_build_shared_palette_rejects_bad_sizes():
+    frame = square_frame((4, 4), (4, 4))
+    for bad in (0, 257):
+        with pytest.raises(ValueError):
+            build_shared_palette([frame], bad)
+
+
+def test_build_shared_palette_subsamples_large_inputs(monkeypatch):
+    monkeypatch.setattr(pixelart, "MAX_PALETTE_SAMPLES", 64)
+    frame = square_frame((32, 32), (32, 32), color=(10, 200, 30, 255))
+    assert build_shared_palette([frame], 4) == ["#0AC81E"]

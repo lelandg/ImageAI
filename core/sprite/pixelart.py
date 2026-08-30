@@ -152,3 +152,51 @@ def bayer_matrix(n: int) -> np.ndarray:
                            [4 * matrix + 3, 4 * matrix + 1]])
         size *= 2
     return (matrix.astype(np.float64) + 0.5) / float(n * n)
+
+
+# --- Task 4: shared palette ----------------------------------------------------
+
+def hex_to_palette(palette: Sequence[str]) -> np.ndarray:
+    """``["#RRGGBB", ...]`` -> int32 array of shape (P, 3)."""
+    if len(palette) == 0:
+        return np.zeros((0, 3), dtype=np.int32)
+    return np.array([hex_to_rgb(c) for c in palette], dtype=np.int32)
+
+
+def palette_to_hex(colors: Sequence[Sequence[int]]) -> List[str]:
+    """Rows of (r, g, b) -> ``["#RRGGBB", ...]`` (uppercase)."""
+    return ["#%02X%02X%02X" % (int(r), int(g), int(b)) for r, g, b in colors]
+
+
+def _luma_key(rgb: Tuple[int, int, int]) -> Tuple[float, int, int, int]:
+    r, g, b = rgb
+    return 0.299 * r + 0.587 * g + 0.114 * b, r, g, b
+
+
+def build_shared_palette(frames: Sequence[Image.Image], colors: int) -> List[str]:
+    """MEDIANCUT over the union of every frame's opaque pixels.
+
+    Returns at most ``colors`` hex strings, sorted dark to light, with no
+    duplicates. Returns ``[]`` when no pixel reaches ``PALETTE_ALPHA_MIN``.
+    """
+    if not 1 <= int(colors) <= 256:
+        raise ValueError(f"palette size must be 1..256, got {colors}")
+    samples: List[np.ndarray] = []
+    for frame in frames:
+        arr = np.asarray(frame if frame.mode == "RGBA" else frame.convert("RGBA"))
+        mask = arr[..., 3] >= PALETTE_ALPHA_MIN
+        if mask.any():
+            samples.append(arr[..., :3][mask])
+    if not samples:
+        return []
+    pixels = np.concatenate(samples, axis=0)
+    if len(pixels) > MAX_PALETTE_SAMPLES:
+        step = math.ceil(len(pixels) / MAX_PALETTE_SAMPLES)
+        pixels = pixels[::step]
+    mosaic = Image.fromarray(np.ascontiguousarray(pixels.reshape(1, -1, 3)))
+    quantized = mosaic.quantize(colors=int(colors), method=Image.Quantize.MEDIANCUT,
+                                dither=Image.Dither.NONE)
+    flat = quantized.getpalette()
+    used = np.unique(np.asarray(quantized))
+    entries = {(flat[3 * i], flat[3 * i + 1], flat[3 * i + 2]) for i in used}
+    return palette_to_hex(sorted(entries, key=_luma_key))
