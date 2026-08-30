@@ -6,8 +6,8 @@ signals and keeps `ActionCard.frames` as the single source of truth.
 """
 from __future__ import annotations
 
-import functools
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, List, Optional, Union
 
 from PySide6.QtCore import QObject
@@ -44,6 +44,7 @@ class FramesWorkspace(QObject):
         super().__init__(tab)
         self.tab = tab
         self._action: Optional[ActionCard] = None
+        self._project: Optional[SpriteProject] = None
         self._syncing = False
         self._export_dialog: Optional[ExportDialog] = None
         self.export_dialog_factory = ExportDialog
@@ -91,7 +92,21 @@ class FramesWorkspace(QObject):
         return self._action
 
     def _on_project_changed(self) -> None:
+        """Rebind the panels when the project object changes; re-read frames otherwise.
+
+        The tab emits ``projectChanged`` for every project-level edit, not only for a
+        switch. Rebinding on each one would delete and rebuild every profile editor and
+        reload the strip a second time after an edit that already reloaded it. So the
+        project identity decides: a new object rebinds, the same object only re-reads
+        ``ActionCard.frames``. A change of the selected card arrives on ``actionSelected``
+        (``ActionCardsPanel`` emits it whenever the table selection changes, including
+        when a removed card clears it), so no action can be missed here.
+        """
         project = self.tab.current_project
+        if project is self._project:
+            self.refresh_frames()
+            return
+        self._project = project
         self.panel.set_project(project)
         self._set_action(self.tab.current_action() if project is not None else None)
 
@@ -189,7 +204,7 @@ class FramesWorkspace(QObject):
         """A preview frame did not decode. `PreviewPlayer` logged it; show it too."""
         self.tab.log(f"Cannot decode frame image: {source or '(no file)'}", "WARNING")
 
-    def set_view_image(self, source: Union[str, QImage, QPixmap, None]) -> bool:
+    def set_view_image(self, source: Union[Path, str, QImage, QPixmap, None]) -> bool:
         """Show `source` in the pixel view; report a decode failure to the console.
 
         `PixelView.set_image` returns False and keeps the old image when a file does
@@ -224,29 +239,40 @@ class FramesWorkspace(QObject):
         self._replace_frames(action, frames, "Redo")
         return True
 
-    def _replace_frames(self, action: ActionCard, frames: List[FrameMeta], label: str) -> None:
-        """Write `action.frames` and reload the strip and the player (no snapshot, no signal)."""
+    def _replace_frames(self, action: ActionCard, frames: List[FrameMeta], label: str,
+                        *, reload: bool = True) -> None:
+        """Write `action.frames` (no snapshot, no signal); reload the widgets when asked.
+
+        `reload=False` writes a card the widgets are not showing: the strip and the player
+        follow the selected action, so pushing another action's frames into them would show
+        the wrong card.
+        """
         action.frames = list(frames)
-        self.strip.set_frames(action.frames)
-        self._reload_player()
+        if reload:
+            self.strip.set_frames(action.frames)
+            self._reload_player()
         self.tab.log(f"{label}: '{action.name}' now has {len(action.frames)} frames")
 
     def apply_frames(self, action_id: str, frames: List[FrameMeta], label: str) -> None:
         """Public edit path for sub-project 6 (retouch, image route).
 
-        Pushes a snapshot of the action's current list, replaces it with `frames`, reloads
-        the strip and the player, and emits `tab.projectChanged()` so the tab marks the
-        project modified. Pass a NEW list (deep-copied frames with the new `source_path`);
-        do not push a snapshot yourself and do not edit the current FrameMeta objects in
-        place — the snapshot must hold the list as it was before the change.
+        Pushes a snapshot of the action's current list, replaces it with `frames`, saves the
+        project through `SpriteTab.save_current_project()`, and emits `tab.projectChanged()`.
+        The strip and the player reload only when `action_id` is the selected action; they
+        always show the selected card. Pass a NEW list (deep-copied frames with the new
+        `source_path`); do not push a snapshot yourself and do not edit the current FrameMeta
+        objects in place — the snapshot must hold the list as it was before the change.
         """
         action = self._find_action(action_id)
         if action is None:
             logger.error("apply_frames: unknown action id %r", action_id)
             self.tab.log(f"{label}: action {action_id!r} not found", "ERROR")
             return
+        current = self._action
         self.undo_controller.snapshot(action.id, action.frames, label)
-        self._replace_frames(action, frames, label)
+        self._replace_frames(action, frames, label,
+                             reload=current is not None and current.id == action.id)
+        self.tab.save_current_project()
         self.tab.projectChanged.emit()
 
     # ----- export -----------------------------------------------------
@@ -256,8 +282,14 @@ class FramesWorkspace(QObject):
         The dialog is a child of the tab and the workspace holds it while it is open.
         A parentless dialog that owns worker plumbing is freed by the cyclic garbage
         collector at an arbitrary later time, and freeing that tree while another
-        worker runs Qt code crashes the process (5b Task 7 finding). On `finished`
-        the reference is dropped and the dialog is scheduled for deletion.
+        worker runs Qt code crashes the process (5b Task 7 finding).
+
+        The reference is dropped and `deleteLater()` is called only AFTER `exec()`
+        returns. Qt tags a DeferredDelete event with the loop level at post time and
+        delivers it as that loop unwinds, so a `deleteLater()` posted from inside the
+        modal loop would destroy the dialog before `exec()` returns and hand the caller
+        a dead object (review, Important 2). Posted here, the delete waits for the
+        caller's own event loop, so the returned dialog is alive for the caller to read.
         """
         project = self.tab.current_project
         if project is None:
@@ -272,11 +304,14 @@ class FramesWorkspace(QObject):
         dialog = self.export_dialog_factory(project, self.tab)
         self._export_dialog = dialog
         dialog.logMessage.connect(self.tab.log)
-        dialog.finished.connect(functools.partial(self._on_export_dialog_finished, dialog))
-        dialog.exec()
+        try:
+            dialog.exec()
+        finally:
+            self._release_export_dialog(dialog)
         return dialog
 
-    def _on_export_dialog_finished(self, dialog: Any, _result: int = 0) -> None:
+    def _release_export_dialog(self, dialog: Any) -> None:
+        """Drop the workspace's reference and schedule the closed dialog for deletion."""
         if self._export_dialog is dialog:
             self._export_dialog = None
         dialog.deleteLater()

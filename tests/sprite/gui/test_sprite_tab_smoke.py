@@ -225,6 +225,49 @@ def test_project_switch_cancels_running_worker_before_swap(qapp, fake_config):
     assert tab.action_cards_panel.project is new_project
 
 
+def test_project_switch_cancels_the_workspace_processing_worker(qapp, fake_config):
+    """Task 9 review, Important 1: the 5b processing panel is the tab's fourth worker host.
+
+    A project switch must cancel and join it like the three left-column panels. Otherwise a
+    pipeline keeps running while ``_on_project_changed`` repoints the panel at the new
+    project, the panel stays busy with no console line saying why, and the job's own slots
+    still count as live (``WorkerHost._guarded`` cannot drop them).
+    """
+    tab = SpriteTab(config=fake_config)
+    old_project = tab.new_project_named("old")
+    panel = tab.frames_workspace.panel
+    finished_calls = []
+
+    def slow_job(progress, token):
+        # Bounded, like the 5a tests: polls the cancel token every 5 ms for up to 1.5 s.
+        for _ in range(300):
+            token.raise_if_cancelled()
+            time.sleep(0.005)
+        return "unexpected-completion"
+
+    def on_finished(result):
+        finished_calls.append(result)
+        if panel.project() is not None:
+            panel.project().actions.append(ActionCard(id="stale", name="stale", prompt=""))
+
+    worker = panel.start_job(slow_job, label="test-pipeline", on_finished=on_finished,
+                             on_failed=lambda m: None, on_cancelled=lambda: None)
+    assert worker is not None
+    assert panel.is_busy()
+
+    new_project = tab.new_project_named("new")
+
+    for _ in range(5):
+        QApplication.processEvents()
+
+    assert not panel.is_busy()             # cancelled and joined before the swap
+    assert finished_calls == []
+    assert new_project.actions == []
+    assert old_project.actions == []
+    assert panel.project() is new_project
+    assert "test-pipeline job to switch project" in tab.console.console.toPlainText()
+
+
 def test_project_switch_drops_stale_finished_event_from_instant_job(qapp, fake_config):
     """Fix round 2: an instant job that finishes right before the switch still
     has its ``finished`` queued when ``_apply_project`` swaps the project —

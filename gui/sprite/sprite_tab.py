@@ -255,6 +255,18 @@ class SpriteTab(QWidget):
             raise ValueError(f"No {name} API key is configured. Add one in Settings.")
         return get_provider(name, {"api_key": api_key, "auth_mode": self.config.get_auth_mode(name)})
 
+    def _worker_panels(self) -> list:
+        """Every ``WorkerHost`` this tab owns, left column plus the 5b processing panel.
+
+        The 5b workspace is built at the end of ``__init__``; the ``getattr`` guard
+        keeps this usable from any earlier call site.
+        """
+        panels = [self.character_panel, self.action_cards_panel, self.queue_panel]
+        workspace = getattr(self, "frames_workspace", None)
+        if workspace is not None:
+            panels.append(workspace.panel)
+        return panels
+
     def _shutdown_panel_workers(self) -> None:
         """Cancel and join any in-flight panel job before the project is replaced.
 
@@ -271,7 +283,7 @@ class SpriteTab(QWidget):
         finished/failed/cancelled event for a worker that is no longer the
         panel's live ``_worker`` (review finding, fix round 2).
         """
-        for panel in (self.character_panel, self.action_cards_panel, self.queue_panel):
+        for panel in self._worker_panels():
             label = panel.busy_label
             stopped = panel.shutdown()
             if label is not None:
@@ -309,6 +321,15 @@ class SpriteTab(QWidget):
             self.project_manager.save_project(self._project)
         except Exception as exc:  # noqa: BLE001 - reported, never raised out of a slot
             self._report_error("save project", exc)
+
+    def save_current_project(self) -> None:
+        """Autosave the open project; no-op when none is open. Errors are reported, never raised.
+
+        Public wrapper over the tab's own autosave path. The 5b workspace calls it after a
+        frame-list edit (``FramesWorkspace.apply_frames``), so a retouch survives a crash the
+        same way a card edit does.
+        """
+        self._autosave()
 
     def new_project(self) -> None:
         name, ok = QInputDialog.getText(self, "New sprite project", "Project name:", text="sprite")

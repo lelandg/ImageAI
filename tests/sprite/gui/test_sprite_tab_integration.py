@@ -26,8 +26,12 @@ class _StubTab(QWidget):
         self.placed = {}
         self.toolbar_buttons = []
         self.log_calls = []
+        self.saved = []
         self._layout = QVBoxLayout(self)
         self._layout.addWidget(self.console)
+
+    def save_current_project(self):
+        self.saved.append(self._project)
 
     def add_toolbar_action(self, text, slot):
         button = QPushButton(text, self)
@@ -133,6 +137,41 @@ def test_apply_frames_snapshots_reloads_and_emits_project_changed(qapp, tmp_path
     assert action.frames[1].source_path == old_path
     workspace.apply_frames("no-such-action", new_frames, "ignored")  # logged, no raise
     assert ("ignored: action 'no-such-action' not found", "ERROR") in tab.log_calls
+    workspace.shutdown()
+
+
+def test_apply_frames_saves_the_project_and_does_not_rebuild_the_panel(qapp, tmp_path, monkeypatch):
+    # Review Important 3: the retouch path must persist, and the projectChanged it emits must
+    # not re-enter _on_project_changed and rebuild every profile editor.
+    import copy
+    tab, workspace, project, action = _workspace(qapp, tmp_path, monkeypatch)
+    editors = list(workspace.panel.profile_editors.values())
+    assert editors, "the fixture project must have output profiles for this test to mean anything"
+    tab.saved.clear()
+    workspace.apply_frames(action.id, copy.deepcopy(action.frames), "retouch")
+    assert tab.saved == [project]                                       # autosaved once
+    assert list(workspace.panel.profile_editors.values()) == editors    # same widgets, no rebuild
+    assert workspace.panel.project() is project
+    workspace.shutdown()
+
+
+def test_apply_frames_on_another_action_does_not_touch_the_shown_widgets(qapp, tmp_path, monkeypatch):
+    # Review Minor 4: the strip and the player always show the SELECTED action.
+    from core.sprite.project import ActionCard
+    tab, workspace, project, action = _workspace(qapp, tmp_path, monkeypatch)
+    other = ActionCard(id="act2", name="jump", prompt="jump")
+    other.frames = make_frames(tmp_path / "jump", 2)
+    project.actions.append(other)
+    replacement = make_frames(tmp_path / "jump_v2", 7)
+
+    workspace.apply_frames(other.id, replacement, "retouch jump")
+
+    assert [f.name for f in other.frames] == [f.name for f in replacement]  # written
+    assert workspace.undo_controller.can_undo(other.id)                     # snapshot pushed
+    assert workspace.strip.action_id() == action.id                         # still the selected card
+    assert workspace.strip.count() == len(action.frames) == 4               # not the other 7 frames
+    assert len(workspace.player.frames()) == 4
+    assert tab.saved == [project]                                           # still persisted
     workspace.shutdown()
 
 
@@ -282,6 +321,68 @@ def test_export_dialog_is_parented_and_released_when_it_finishes(qapp, tmp_path,
     workspace.shutdown()
 
 
+def test_real_export_dialog_is_alive_on_return_and_deleted_afterwards(qapp, tmp_path, monkeypatch):
+    # Review Important 2: Qt delivers a DeferredDelete posted inside the modal loop as that
+    # loop unwinds, so deleteLater() must run only AFTER exec() returns. A fake dialog runs no
+    # event loop and cannot show this — use the real ExportDialog.
+    import shiboken6
+    from PySide6.QtCore import QEvent, QTimer
+    from gui.sprite.export_dialog import ExportDialog
+
+    tab, workspace, project, action = _workspace(qapp, tmp_path, monkeypatch)
+
+    def factory(proj, parent):
+        # The REAL QDialog.exec() runs a nested event loop; a zero-timer closes it from
+        # inside. A stubbed exec() would run no loop at all and could not show the bug.
+        built = ExportDialog(proj, parent)
+        QTimer.singleShot(0, lambda: built.done(0))
+        return built
+
+    monkeypatch.setattr(workspace, "export_dialog_factory", factory)
+
+    dialog = workspace.open_export_dialog()
+    assert isinstance(dialog, ExportDialog)
+    assert shiboken6.isValid(dialog)             # the caller receives a live object
+    assert dialog.parent() is tab
+    assert dialog.formats()                      # readable: sub-project 6 registers formats here
+    assert workspace._export_dialog is None      # the reference is dropped again
+
+    qapp.sendPostedEvents(None, QEvent.DeferredDelete)
+    qapp.processEvents()
+    assert not shiboken6.isValid(dialog)         # and the dialog is gone once the loop runs
+    workspace.shutdown()
+
+
+def test_export_dialog_reference_is_released_even_without_a_finished_signal(qapp, tmp_path,
+                                                                           monkeypatch):
+    # Releasing after exec() instead of on `finished` does not depend on the dialog emitting
+    # anything: a dialog closed without a finished signal must not stay held forever, or the
+    # workspace refuses every later export and shutdown() keeps poking a closed dialog.
+    class _SilentDialog(QObject):
+        finished = Signal(int)
+        logMessage = Signal(str, str)
+
+        def __init__(self, proj, parent):
+            super().__init__(parent)
+
+        def exec(self):
+            return 0        # closed without emitting finished
+
+        def shutdown(self, timeout_ms=5000):
+            return True
+
+        def join_orphans(self, timeout_ms=None):
+            return True
+
+    tab, workspace, project, action = _workspace(qapp, tmp_path, monkeypatch)
+    monkeypatch.setattr(workspace, "export_dialog_factory", _SilentDialog)
+    dialog = workspace.open_export_dialog()
+    assert dialog is not None
+    assert workspace._export_dialog is None                # released by open_export_dialog
+    assert workspace.open_export_dialog() is not dialog    # a later export is not blocked
+    workspace.shutdown()
+
+
 def test_shutdown_stops_an_open_export_dialog(qapp, tmp_path, monkeypatch):
     tab, workspace, project, action = _workspace(qapp, tmp_path, monkeypatch)
     dialog = _FakeDialog(project, tab)
@@ -366,6 +467,31 @@ def test_real_sprite_tab_constructs_workspace(qapp, monkeypatch):
     assert tab.preview_area.layout().itemAt(0).widget() is tab.frames_workspace.player
     assert tab.processing_area.layout().itemAt(0).widget() is tab.frames_workspace.panel
     tab.frames_workspace.shutdown()
+
+
+def test_apply_frames_persists_through_the_real_tab(qapp, monkeypatch):
+    # Review Important 3: SpriteTab.save_current_project() is the public autosave path, and
+    # apply_frames must go through it — a retouch has to survive a crash.
+    from pathlib import Path
+    import gui.sprite.processing_panel as pp
+    monkeypatch.setattr(pp, "available_backends", lambda: {"mediapipe": False, "rembg": False})
+    from gui.sprite.sprite_tab import SpriteTab
+    tab = SpriteTab(_FakeConfig())
+    project = tab.new_project_named("persist")
+    card = tab.action_cards_panel.add_card()
+    tab.action_cards_panel.table.selectRow(0)
+    assert tab.current_action() is card
+    assert tab.frames_workspace.current_action() is card
+
+    saved = tab.save_project()
+    assert saved is not None and Path(saved).exists()
+    Path(saved).unlink()
+
+    frames = make_frames(Path(project.project_dir) / "stages" / card.id / "stabilize", 3)
+    tab.frames_workspace.apply_frames(card.id, frames, "retouch")
+    assert Path(saved).exists()                      # written again by the autosave path
+    assert len(card.frames) == 3
+    tab.shutdown()
 
 
 def test_real_sprite_tab_shutdown_covers_the_workspace(qapp, monkeypatch):
