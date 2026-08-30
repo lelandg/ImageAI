@@ -77,6 +77,25 @@ def test_insert_from_file_reads_size(qapp, tmp_path):
     assert inserted.frame == (0, 0, 12, 6)
     assert inserted.duration_ms == 100
     assert undo.can_undo("act1")
+    anchor_dir = strip.frames()[0].source_path.parent
+    assert inserted.source_path.parent == anchor_dir / "inserted"
+    assert inserted.source_path.exists()
+    assert inserted.source_path != extra
+    assert extra.exists()  # the original external file is untouched
+
+
+def test_insert_from_file_refuses_on_empty_strip(qapp, tmp_path, monkeypatch):
+    undo = UndoController()
+    strip = FrameStrip(undo)
+    strip.set_action_id("act1")
+    strip.set_frames([])
+    extra = write_frame_png(tmp_path / "extra" / "Wide Frame.png", size=(12, 6))
+    shown = []
+    monkeypatch.setattr(fs.QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a)))
+    assert strip.insert_from_file([extra]) == 0
+    assert shown
+    assert strip.count() == 0
+    assert not undo.can_undo("act1")
 
 
 def test_insert_from_file_reports_bad_image(qapp, tmp_path, monkeypatch):

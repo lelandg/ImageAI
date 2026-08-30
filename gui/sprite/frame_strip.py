@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
@@ -300,9 +301,19 @@ class FrameStrip(QWidget):
         paths = [Path(p) for p in paths]
         if not paths:
             return 0
+        if not self._frames:
+            self._warn("Insert frame", "Add at least one frame first; there is nothing to anchor the copy on.")
+            return 0
         at = self.current_index()
-        reference = self._frames[at] if 0 <= at < len(self._frames) else None
-        duration = reference.duration_ms if reference is not None else 100
+        anchor = at if 0 <= at < len(self._frames) else 0
+        reference = self._frames[anchor]
+        duration = reference.duration_ms
+        # Copy inserted frames into the project instead of pointing at the
+        # user's external file, so the project stays self-contained: a moved
+        # or deleted external file cannot break the frame list, and a purge
+        # can clean it up. Anchored next to the neighbouring frame's file.
+        dest_dir = Path(reference.source_path).parent / "inserted"
+        dest_dir.mkdir(parents=True, exist_ok=True)
         names = [f.name for f in self._frames]
         new_frames: List[FrameMeta] = []
         for path in paths:
@@ -311,10 +322,18 @@ class FrameStrip(QWidget):
                 self._warn("Insert frame", f"Cannot read image: {path}")
                 continue
             width, height = image.width(), image.height()
+            dest = self._unique_dest_path(dest_dir, path.stem)
+            try:
+                shutil.copy2(path, dest)
+            except OSError as exc:
+                logger.error("Insert frame: failed to copy %s into the project: %s", path, exc, exc_info=True)
+                self.logMessage.emit(f"Insert frame failed: {exc}", "ERROR")
+                QMessageBox.critical(self, "Insert frame", f"Cannot copy {path.name} into the project:\n{exc}")
+                continue
             name = unique_name(sanitize_frame_name(path.stem), names)
             names.append(name)
             new_frames.append(FrameMeta(
-                name=name, source_path=path, frame=(0, 0, width, height),
+                name=name, source_path=dest, frame=(0, 0, width, height),
                 source_size=(width, height), sprite_source_size=(0, 0, width, height),
                 duration_ms=duration,
             ))
@@ -327,6 +346,15 @@ class FrameStrip(QWidget):
         self.select_index(insert_at)
         logger.info("Frame strip: inserted %d frame(s) at %d", len(new_frames), insert_at)
         return len(new_frames)
+
+    @staticmethod
+    def _unique_dest_path(dest_dir: Path, stem: str) -> Path:
+        n = 1
+        while True:
+            candidate = dest_dir / f"{stem}_{n}.png"
+            if not candidate.exists():
+                return candidate
+            n += 1
 
     def move_frame(self, src: int, dst: int) -> None:
         if not (0 <= src < len(self._frames)) or not (0 <= dst < len(self._frames)) or src == dst:
