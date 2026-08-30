@@ -260,14 +260,16 @@ class SpriteTab(QWidget):
         cancels and bound-waits the worker, so by the time this returns, the
         job either already finished (and its callback already ran, against
         the still-current OLD project) or it will emit ``cancelled()`` — never
-        a late ``finished``/``failed`` against the new project.
+        a late ``finished``/``failed`` against the new project. A job whose
+        result was already queued (but not yet delivered) when ``shutdown()``
+        runs is caught separately: ``WorkerHost._guarded`` drops any
+        finished/failed/cancelled event for a worker that is no longer the
+        panel's live ``_worker`` (review finding, fix round 2).
         """
         for panel in (self.character_panel, self.action_cards_panel, self.queue_panel):
-            worker = panel._worker
-            was_busy = panel.is_busy()
-            label = worker.label if worker is not None else "job"
+            label = panel.busy_label
             panel.shutdown()
-            if was_busy:
+            if label is not None:
                 self.log(f"Cancelled running {label} job to switch project", "WARNING")
 
     def _apply_project(self, project: SpriteProject) -> None:

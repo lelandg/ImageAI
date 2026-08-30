@@ -223,3 +223,41 @@ def test_project_switch_cancels_running_worker_before_swap(qapp, fake_config):
     assert new_project.actions == []
     assert old_project.actions == []
     assert tab.action_cards_panel.project is new_project
+
+
+def test_project_switch_drops_stale_finished_event_from_instant_job(qapp, fake_config):
+    """Fix round 2: an instant job that finishes right before the switch still
+    has its ``finished`` queued when ``_apply_project`` swaps the project —
+    ``shutdown()`` releases the worker before that queued event is drained,
+    so ``WorkerHost._guarded`` must drop it instead of letting it mutate the
+    NEW project (the sub-case fix round 1's ``is_busy()``/``shutdown()`` call
+    alone does not catch, since the worker is no longer running by then).
+    """
+    tab = SpriteTab(config=fake_config)
+    old_project = tab.new_project_named("old")
+
+    finished_calls = []
+
+    def instant_job(progress, token):
+        return "instant-result"
+
+    def on_finished(result):
+        finished_calls.append(result)
+        if tab.action_cards_panel.project is not None:
+            tab.action_cards_panel.project.actions.append(
+                ActionCard(id="stale2", name="stale2", prompt=""))
+
+    worker = tab.action_cards_panel.start_job(
+        instant_job, label="test-instant", on_finished=on_finished,
+        on_failed=lambda m: None, on_cancelled=lambda: None)
+    assert worker is not None
+    assert worker.wait(5000)  # thread joined; finished is queued, not yet delivered
+
+    new_project = tab.new_project_named("new")  # _apply_project shuts the worker down first
+
+    for _ in range(5):
+        QApplication.processEvents()  # now deliver the stale queued event, if any
+
+    assert finished_calls == []
+    assert new_project.actions == []
+    assert old_project.actions == []

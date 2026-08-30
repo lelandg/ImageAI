@@ -94,10 +94,15 @@ class WorkerHost:
             logger.warning("Sprite job %r refused: %r is still running", label, self._worker.label)
             return None
         worker = SpriteWorker(job, label=label, parent=self)
-        worker.finished.connect(on_finished)
-        worker.failed.connect(on_failed)
+        # Guarded: a finished/failed/cancelled event queued for a worker that
+        # shutdown()/_release_worker already released (e.g. the host switched
+        # to a different project/worker before the event was delivered) must
+        # be dropped rather than run against whatever is now the host's live
+        # state (review finding, Task 8 fix round 2 - stale queued events).
+        worker.finished.connect(functools.partial(self._guarded, worker, "finished", on_finished))
+        worker.failed.connect(functools.partial(self._guarded, worker, "failed", on_failed))
         if on_cancelled is not None:
-            worker.cancelled.connect(on_cancelled)
+            worker.cancelled.connect(functools.partial(self._guarded, worker, "cancelled", on_cancelled))
         if on_progress is not None:
             worker.progress.connect(on_progress)
         # Release AFTER the caller's slots (same connection type keeps order).
@@ -113,8 +118,30 @@ class WorkerHost:
         worker.start()
         return worker
 
+    def _guarded(self, worker: SpriteWorker, signal_name: str, callback, *args) -> None:
+        """Run ``callback(*args)`` only while ``worker`` is still the host's live worker.
+
+        Dropping a stale event here — rather than in every panel's own
+        on_finished/on_failed/on_cancelled — protects every ``WorkerHost``
+        subclass at the source, including future ones.
+        """
+        if self._worker is not worker:
+            logger.debug("Dropped stale %s from released worker %r", signal_name, worker.label)
+            return
+        callback(*args)
+
     def is_busy(self) -> bool:
         return self._worker is not None and self._worker.isRunning()
+
+    @property
+    def busy_label(self) -> Optional[str]:
+        """The running worker's label, or ``None`` when idle.
+
+        Public accessor for callers (e.g. ``SpriteTab``) that want to report
+        what job is being cancelled without reaching into the private
+        ``_worker`` attribute.
+        """
+        return self._worker.label if self.is_busy() else None
 
     def cancel_running(self) -> None:
         if self._worker is not None:

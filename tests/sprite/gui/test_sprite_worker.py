@@ -160,6 +160,31 @@ def test_worker_host_shutdown_timeout_logs_error(qapp, caplog):
     assert worker.wait(2000)  # let the thread actually exit before the test ends
 
 
+def test_worker_host_drops_stale_finished_event_after_shutdown(qapp, caplog):
+    """Fix round 2 (review finding): a job that finishes naturally an instant
+    before shutdown() still has its ``finished`` event queued (undelivered)
+    at the moment shutdown() releases the worker (``self._worker = None``).
+    That queued event must be dropped when the event loop later delivers it,
+    not run against whatever the host's live state has since become."""
+    host = _Host()
+    calls = []
+
+    def instant(progress, token):
+        return "instant-result"
+
+    worker = host.start_job(instant, label="instant",
+                            on_finished=lambda r: calls.append(r), on_failed=lambda m: None)
+    assert worker is not None
+    assert worker.wait(5000)  # thread joined; finished is QUEUED, not yet delivered
+    with caplog.at_level("DEBUG", logger="gui.sprite.workers"):
+        host.shutdown()  # releases the worker before the queued event is drained
+        for _ in range(3):
+            QApplication.processEvents()  # deliver the now-stale queued event
+    assert calls == []
+    assert any("Dropped stale finished" in record.message for record in caplog.records)
+    assert not host.is_busy()
+
+
 def test_worker_host_starts_next_job_from_on_finished(qapp):
     """Queue-draining pattern (review finding, Task 1 fix round 1): starting
     job B from inside job A's on_finished must not let A's queued release
