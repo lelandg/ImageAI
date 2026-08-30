@@ -1,5 +1,7 @@
 # tests/sprite/gui/test_retouch_dialog.py
 import copy
+import threading
+import time
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +12,7 @@ from PIL import Image
 
 pytest.importorskip("PySide6")
 from PySide6.QtCore import QObject, Signal
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QWidget
 
 from core.sprite.models import FrameMeta
@@ -105,6 +108,46 @@ def test_empty_instruction_blocks_run(qapp, tmp_path, monkeypatch):
     monkeypatch.setattr(rd, "retouch_frame", lambda *a, **k: pytest.fail("must not run"))
     dialog.start_retouch()
     assert "instruction" in dialog.console.console.toPlainText().lower()
+
+
+def test_close_while_busy_joins_running_worker(qapp, tmp_path, monkeypatch):
+    """A running worker must never be dropped when the dialog closes mid-retouch (Task 9 fix).
+
+    Mirrors tests/sprite/gui/test_export_dialog.py::test_close_during_export_joins_running_worker
+    exactly, including its two race fixes (see that test's docstring for why both are needed):
+    - `entered` blocks the test until the worker thread has genuinely reached the gated mock, so
+      `shutdown()`'s `worker.cancel()` cannot race a not-yet-scheduled QThread into finishing
+      almost instantly for the wrong reason.
+    - `release` fires from a `threading.Timer` scheduled BEFORE the blocking close call, so
+      `on_dialog_close()`'s `join_orphans()` fallback (not the gated job's own timing) is what the
+      elapsed-time assertion actually measures.
+    """
+    monkeypatch.setattr(rd, "CLOSE_SHUTDOWN_TIMEOUT_MS", 50)
+    entered = threading.Event()
+    release = threading.Event()
+
+    def blocked(provider, frame, instruction, out_png=None, **kwargs):
+        entered.set()
+        release.wait(5)
+        return tmp_path / "0002.r1.png"
+
+    monkeypatch.setattr(rd, "retouch_frame", blocked)
+    dialog, _ = _dialog(tmp_path)
+    dialog.instruction.setPlainText("x")
+    dialog.start_retouch()
+    worker = dialog._worker
+    assert worker is not None and dialog.is_busy()
+    assert entered.wait(5), "the gated job never started"
+    threading.Timer(0.15, release.set).start()
+    started = time.monotonic()
+    dialog.reject()  # shutdown(50) times out -> on_dialog_close must join_orphans() before returning
+    elapsed_ms = (time.monotonic() - started) * 1000
+    assert not worker.isRunning(), "reject() returned before the job actually stopped"
+    assert elapsed_ms >= 140, f"reject() returned suspiciously fast ({elapsed_ms:.1f} ms)"
+    for _ in range(5):
+        QTest.qWait(20)  # let the queued terminal signal deliver so the orphan is fully reaped
+    assert not dialog.is_busy()
+    assert dialog.run_btn.isEnabled() and not dialog.cancel_btn.isEnabled()   # _on_worker_idle ran
 
 
 class _Strip(QObject):

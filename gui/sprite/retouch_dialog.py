@@ -16,15 +16,24 @@ from core.sprite.models import Rect
 from core.sprite.pipeline import CancelToken, ProgressFn
 from gui.common.dialog_conventions import DialogCleanupMixin, bind_primary_action, set_default_button
 from gui.llm_utils import DialogStatusConsole
-from gui.sprite.workers import SpriteWorker
+from gui.sprite.workers import WorkerHost
 
 logger = logging.getLogger(__name__)
 
 PROVIDERS = (("google", "Google Gemini"), ("openai", "OpenAI gpt-image"))
+CLOSE_SHUTDOWN_TIMEOUT_MS = 5000  # on_dialog_close's bound before it falls back to join_orphans()
 
 
-class RetouchDialog(DialogCleanupMixin, QDialog):
-    """Ctrl+Enter runs the retouch; Escape closes. Never overwrites the source frame."""
+class RetouchDialog(WorkerHost, DialogCleanupMixin, QDialog):
+    """Ctrl+Enter runs the retouch; Escape closes. Never overwrites the source frame.
+
+    Mixes in ``WorkerHost`` (mirrors ``ExportDialog``) rather than owning a bare ``SpriteWorker``
+    directly: a retouch call can run long, and a close mid-call must never abandon a running
+    QThread whose only parent is this closing dialog (destroying a running QThread aborts the
+    process). ``on_dialog_close`` uses the same bounded-``shutdown()``-then-``join_orphans()``
+    fallback as ``ExportDialog.on_dialog_close``; ``retouch_frame`` now polls its ``token`` around
+    the provider call, so the unbounded join still returns promptly after a cancel.
+    """
 
     retouched = Signal(object)   # Path of the new frame file
     logLine = Signal(str)        # worker-thread log lines -> console (queued)
@@ -37,7 +46,6 @@ class RetouchDialog(DialogCleanupMixin, QDialog):
         self.neighbors: List[Path] = [Path(n) for n in neighbors]
         self.region: Optional[Rect] = tuple(region) if region else None
         self._provider_factory = provider_factory
-        self._worker: Optional[SpriteWorker] = None
         self.result_path: Optional[Path] = None
         self.setWindowTitle(f"Retouch {self.frame.name}")
         self._build_ui()
@@ -116,33 +124,30 @@ class RetouchDialog(DialogCleanupMixin, QDialog):
             token.raise_if_cancelled()
             provider = factory(provider_id)
             out = retouch_frame(provider, frame, instruction, neighbors=neighbors, region=region,
-                                model=model, log=console_log)
+                                model=model, log=console_log, token=token)
             progress("retouch", 1, 1, f"Saved {out.name}")
             return out
 
         return job
 
     def start_retouch(self) -> None:
-        if self._worker is not None:
+        if self.is_busy():
             self.console.log("A retouch is already running.", "WARNING")
             return
         if not self.instruction.toPlainText().strip():
             logger.warning("retouch: empty instruction")
             self.console.log("Enter an instruction first.", "WARNING")
             return
-        self._worker = SpriteWorker(self.build_job(), parent=self)
-        self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_finished)
-        self._worker.failed.connect(self._on_failed)
-        self._worker.cancelled.connect(self._on_cancelled)
         self.run_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.console.log(f"Retouch started: {self.frame.name}")
-        self._worker.start()
+        self.start_job(self.build_job(), label="retouch", on_finished=self._on_finished,
+                       on_failed=self._on_failed, on_cancelled=self._on_cancelled,
+                       on_progress=self._on_progress)
 
     def cancel_retouch(self) -> None:
-        if self._worker is not None:
-            self._worker.cancel()
+        if self.is_busy():
+            self.cancel_running()
             self.console.log("Cancel requested", "WARNING")
 
     def _on_progress(self, stage: str, done: int, total: int, message: str) -> None:
@@ -167,10 +172,16 @@ class RetouchDialog(DialogCleanupMixin, QDialog):
     def _finish_worker(self) -> None:
         self.run_btn.setEnabled(True)
         self.cancel_btn.setEnabled(False)
-        self._worker = None
+
+    def _on_worker_idle(self) -> None:
+        """A worker orphaned by a timed-out ``shutdown()`` finally stopped (WorkerHost hook)."""
+        self._finish_worker()
 
     def on_dialog_close(self) -> None:
-        if self._worker is not None:
-            self._worker.cancel()
-            self._worker.wait(2000)
-            self._worker = None
+        # WorkerHost: cancel + join a running retouch. Escape/close mid-retouch must never drop a
+        # running QThread (mirror export_dialog.py's on_dialog_close) — retouch_frame polls the
+        # cancel token around its provider call, so an unbounded join still returns.
+        if not self.shutdown(timeout_ms=CLOSE_SHUTDOWN_TIMEOUT_MS):
+            logger.warning("Retouch worker did not stop within %d ms; joining before close",
+                           CLOSE_SHUTDOWN_TIMEOUT_MS)
+            self.join_orphans()

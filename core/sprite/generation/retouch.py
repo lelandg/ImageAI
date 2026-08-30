@@ -22,6 +22,7 @@ from core.sprite.generation.image_route import (
     openai_edit_size, provider_kind,
 )
 from core.sprite.models import Rect, Size
+from core.sprite.pipeline import CancelToken
 from core.utils import write_image_sidecar
 
 logger = logging.getLogger(__name__)
@@ -113,8 +114,15 @@ def retouch_frame(
     model: Optional[str] = None,
     log: LogFn = logger.info,
     attempts: int = 2,
+    token: Optional[CancelToken] = None,
 ) -> Path:
-    """Retouch one frame; write ``NNNN.r<k>.png`` beside it (never overwrite) and return that path."""
+    """Retouch one frame; write ``NNNN.r<k>.png`` beside it (never overwrite) and return that path.
+
+    ``token`` is checked immediately before and immediately after each attempt's provider call
+    (same convention as ``make_chroma_plate``/``generate_action_cards``), so a Cancel request
+    during a slow image call is honored as soon as that call returns instead of after the whole
+    retry loop.
+    """
     frame = Path(frame)
     if not frame.exists():
         raise FileNotFoundError(frame)
@@ -135,6 +143,8 @@ def retouch_frame(
     params: Dict = {"region": list(region) if region else None, "neighbors": [str(p) for p in neighbor_paths]}
     last_reason = ""
     for attempt in range(1, attempts + 1):
+        if token is not None:
+            token.raise_if_cancelled()
         what = f"retouch {frame.name} attempt {attempt}/{attempts}"
         if kind == "google":
             log_request(log, what=what, provider=kind, model=model, prompt=prompt, params=params)
@@ -151,6 +161,8 @@ def retouch_frame(
             log_request(log, what=what, provider=kind, model=model, prompt=prompt, params=params)
             texts, images = call_provider(provider, "edit_image", [frame_bytes, *neighbor_bytes], prompt,
                                           what=what, log=log, model=model, mask=mask, size=size_str, n=1)
+        if token is not None:
+            token.raise_if_cancelled()
         log_response(log, what=what, texts=texts, images=images)
         data = first_image(texts, images, what=what)
         with Image.open(BytesIO(data)) as reply:

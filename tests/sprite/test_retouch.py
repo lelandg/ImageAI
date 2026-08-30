@@ -12,6 +12,7 @@ from core.sprite.generation.errors import ProviderError
 from core.sprite.generation.retouch import (
     build_region_mask, fit_to_size, next_retouch_path, retouch_frame, validate_retouch,
 )
+from core.sprite.pipeline import CancelToken, Cancelled
 from providers.google import GoogleProvider
 from providers.openai import MODEL_CAPS, OpenAIProvider
 
@@ -157,3 +158,14 @@ def test_logs_request_and_response(tmp_path):
     retouch_frame(_google(_png(shade=180)), f2, "x", log=lines.append)
     assert any("request" in l and "prompt:" in l for l in lines)
     assert any("response" in l for l in lines) and any("validation" in l for l in lines)
+
+
+def test_retouch_frame_honors_pre_cancelled_token(tmp_path):
+    f1, f2, f3 = _frames(tmp_path)
+    token = CancelToken()
+    token.cancel()
+    provider = _google(_png(shade=180))
+    with pytest.raises(Cancelled):
+        retouch_frame(provider, f2, "x", neighbors=[f1, f3], token=token)
+    provider.edit_image.assert_not_called()
+    provider.edit_image_region.assert_not_called()
