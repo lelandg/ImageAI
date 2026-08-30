@@ -440,7 +440,11 @@ def hd_runner(project: SpriteProject, action: ActionCard, input_frames: List[Pat
 
     The ``hd`` profile keeps the anti-aliased alpha the keying stages produced
     unless ``binary_alpha`` is set, in which case ``apply_profile_alpha``
-    thresholds it (the HD alpha guarantee).
+    thresholds it (the HD alpha guarantee). That post-pass is skipped entirely
+    when ``binary_alpha`` is off, since ``apply_profile_alpha`` would just
+    re-encode every frame unchanged (Minor 2); when it runs, it polls
+    ``token`` and reports progress per frame so a cancel is not stuck behind
+    the whole pass (Minor 1).
     """
     from .stabilize import crop_and_pad
 
@@ -454,9 +458,13 @@ def hd_runner(project: SpriteProject, action: ActionCard, input_frames: List[Pat
                            anchor=project.stabilize.anchor, pad_px=0,
                            upscale_small=prof.upscale_small, resample_method=prof.upscale_method,
                            stage=out_dir.name, progress=progress, token=token)
-    for dst in written:
-        with Image.open(dst) as img:
-            keying.apply_profile_alpha(img, prof).save(dst)
+    if prof.binary_alpha:
+        total = len(written)
+        for index, dst in enumerate(written, start=1):
+            check(token)
+            with Image.open(dst) as img:
+                keying.apply_profile_alpha(img, prof).save(dst)
+            progress("hd", index, total, f"hd: alpha {dst.name}")
     return written
 
 

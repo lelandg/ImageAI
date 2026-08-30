@@ -130,7 +130,7 @@ def test_a_missing_external_frame_invalidates_the_extract_fingerprint(tmp_path, 
 # --- run_pipeline (Task 10) -------------------------------------------------------
 from PIL import Image  # noqa: E402 - grouped with the tests it serves
 
-from core.sprite import pipeline  # noqa: E402
+from core.sprite import keying, pipeline  # noqa: E402
 from core.sprite.pipeline import identity_runner, run_pipeline  # noqa: E402
 from core.sprite.project import ClipRecord  # noqa: E402
 from core.sprite.slicing import import_png_sequence  # noqa: E402
@@ -395,3 +395,38 @@ def test_pipeline_extracts_from_a_clip(tmp_path, synthetic_mp4):
     out = run_pipeline(project, action, upto="stabilize")
     assert len(out["extract"]) == 3
     assert len(action.frames) == 3
+
+
+def test_hd_alpha_post_pass_is_skipped_when_binary_alpha_is_off(tmp_path, alpha_frames, monkeypatch):
+    """Minor 2 regression: hd's soft-alpha default must not re-encode every
+    frame through a no-op apply_profile_alpha."""
+    project, action = _project(tmp_path)
+    import_png_sequence(alpha_frames, stage_dir(project, action, "extract"))
+    register_external_frames(project, action)
+    assert project.profiles[0].binary_alpha is False  # default hd profile keeps soft alpha
+    calls = []
+    monkeypatch.setattr(keying, "apply_profile_alpha", lambda img, prof: calls.append(1) or img)
+    run_pipeline(project, action, upto="hd")
+    assert calls == []
+
+
+def test_hd_alpha_post_pass_runs_and_honours_cancel_with_progress(tmp_path, alpha_frames):
+    """Minor 1 regression: the hd alpha post-pass polls the cancel token and
+    reports per-frame progress, so a cancel does not wait for the whole pass."""
+    project, action = _project(tmp_path)
+    import_png_sequence(alpha_frames, stage_dir(project, action, "extract"))
+    register_external_frames(project, action)
+    project.profiles[0].binary_alpha = True  # force the hd post-pass to run
+    token = CancelToken()
+    seen = []
+
+    def watch(stage, done, total, message):
+        seen.append((stage, done, total, message))
+        if message.startswith("hd: alpha") and done == 2:
+            token.cancel()
+
+    with pytest.raises(Cancelled):
+        run_pipeline(project, action, upto="hd", progress=watch, token=token)
+    alpha_events = [e for e in seen if e[3].startswith("hd: alpha")]
+    assert len(alpha_events) == 2, "the post-pass must stop as soon as the token is cancelled"
+    assert "hd" not in project.stage_fingerprints.get("a1", {})
