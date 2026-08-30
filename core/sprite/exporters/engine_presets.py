@@ -198,6 +198,25 @@ FORMAT_WRITERS: Dict[str, Writer] = {
 }
 
 
+def _grid_output_paths(png: Path, scales: Tuple[int, ...]) -> List[Path]:
+    """Every file ``export_grid`` writes for ``png``, across every scale in ``scales``.
+
+    ``export_grid`` (``core/sprite/exporters/grid.py``) writes, for each entry
+    in ``opts.scales``: the sheet PNG itself (``<stem>.png``, or
+    ``<stem>@Nx.png`` for ``scale != 1``), its Aseprite JSON sidecar
+    (``target.with_suffix(".json")``), and the ImageAI metadata sidecar
+    (``sidecar_path(target)``, e.g. ``hero.png.json``) -- unconditionally,
+    for every scale. The manifest must list all three per scale, not just
+    the first sidecar found, or a consumer copying/zipping from this list
+    silently drops real files.
+    """
+    paths: List[Path] = []
+    for scale in scales:
+        target = png if scale == 1 else png.with_name(f"{png.stem}@{scale}x{png.suffix}")
+        paths.extend([target, target.with_suffix(".json"), sidecar_path(target)])
+    return paths
+
+
 def export_with_preset(meta: SheetMeta, preset_id: str, out_dir: Path) -> List[Path]:
     """Run every exporter of ``preset_id`` into ``out_dir``; return the written paths."""
     preset = ENGINE_PRESETS.get(preset_id)
@@ -212,11 +231,7 @@ def export_with_preset(meta: SheetMeta, preset_id: str, out_dir: Path) -> List[P
     if ATLAS_FORMATS.intersection(preset.formats):
         png = out_dir / f"{title}.png"
         laid = export_grid(meta, png, preset.grid)
-        written.append(png)
-        for candidate in (png.with_suffix(".json"), sidecar_path(png)):
-            if candidate.exists():
-                written.append(candidate)
-                break
+        written.extend(_grid_output_paths(png, preset.grid.scales))
     for fmt in preset.formats:
         if fmt == "grid":
             continue

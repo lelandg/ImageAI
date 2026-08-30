@@ -1,16 +1,22 @@
 # tests/sprite/test_engine_presets.py
+import dataclasses
 from pathlib import Path
 
 import numpy as np
 import pytest
 from PIL import Image
 
+from core.sprite.exporters import engine_presets as engine_presets_mod
 from core.sprite.exporters.engine_presets import (
     ATLAS_FORMATS, ENGINE_PRESETS, FORMAT_IDS, EnginePreset,
     export_with_preset, fps_reconciliation, with_pivot,
 )
 from core.sprite.exporters.grid import GridOptions
 from core.sprite.models import FrameMeta, SheetMeta, TagMeta
+
+
+def _on_disk_recursive(out_dir: Path) -> list:
+    return sorted(str(p.relative_to(out_dir)) for p in Path(out_dir).rglob("*") if p.is_file())
 
 
 def _png(path: Path, shade: int) -> Path:
@@ -108,3 +114,29 @@ def test_fps_reconciliation_gif_clamp_and_rounding(tmp_path):
 def test_fps_reconciliation_unknown_target(tmp_path):
     with pytest.raises(ValueError):
         fps_reconciliation(_meta(tmp_path), "unity")
+
+
+def test_manifest_matches_every_file_on_disk_for_atlas_preset(tmp_path):
+    """The returned list is the export manifest: it must name every file written, no more, no less."""
+    out = tmp_path / "out"
+    written = export_with_preset(_meta(tmp_path), "phaser3", out)
+    reported = sorted(str(p.relative_to(out)) for p in written)
+    assert reported == _on_disk_recursive(out)
+    # both grid sidecars are present, not just the first one found on disk
+    assert "hero.json" in reported and "hero.png.json" in reported
+
+
+def test_manifest_includes_every_scale_sheet_and_its_sidecars(tmp_path, monkeypatch):
+    """Presets whose GridOptions carries multiple scales must report every @Nx PNG + its two sidecars."""
+    base = ENGINE_PRESETS["phaser3"]
+    scaled_grid = dataclasses.replace(base.grid, scales=(1, 2))
+    scaled_preset = dataclasses.replace(base, grid=scaled_grid)
+    monkeypatch.setitem(engine_presets_mod.ENGINE_PRESETS, "phaser3", scaled_preset)
+
+    out = tmp_path / "out"
+    written = export_with_preset(_meta(tmp_path), "phaser3", out)
+    names = {p.name for p in written}
+    assert {"hero.png", "hero.json", "hero.png.json",
+            "hero@2x.png", "hero@2x.json", "hero@2x.png.json"} <= names
+    reported = sorted(str(p.relative_to(out)) for p in written)
+    assert reported == _on_disk_recursive(out)
