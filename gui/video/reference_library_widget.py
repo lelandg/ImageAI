@@ -26,6 +26,7 @@ class ReferenceCard(QFrame):
 
     remove_clicked = Signal(object)  # ReferenceImage
     edit_clicked = Signal(object)  # ReferenceImage
+    send_to_sprite_clicked = Signal(object)  # Path — "Send to Sprite" (design §4.5)
 
     def __init__(self, reference: ReferenceImage, parent=None):
         super().__init__(parent)
@@ -177,19 +178,28 @@ class ReferenceCard(QFrame):
         else:
             self.setStyleSheet("QFrame { border: 2px solid #ff4444; }")  # Red for errors
 
-    def contextMenuEvent(self, event):
-        """Show context menu"""
+    def _build_context_menu(self) -> QMenu:
+        """Edit / Send to Sprite / Remove. Built separately so tests can inspect it."""
         menu = QMenu(self)
 
         edit_action = QAction("Edit Info", self)
         edit_action.triggered.connect(lambda: self.edit_clicked.emit(self.reference))
         menu.addAction(edit_action)
 
+        sprite_action = QAction("Send to Sprite", self)
+        sprite_action.setEnabled(self.reference.path.exists())
+        sprite_action.triggered.connect(
+            lambda: self.send_to_sprite_clicked.emit(Path(self.reference.path)))
+        menu.addAction(sprite_action)
+
         remove_action = QAction("Remove", self)
         remove_action.triggered.connect(lambda: self.remove_clicked.emit(self.reference))
         menu.addAction(remove_action)
+        return menu
 
-        menu.exec_(event.globalPos())
+    def contextMenuEvent(self, event):
+        """Show context menu"""
+        self._build_context_menu().exec_(event.globalPos())
 
 
 class ExtractedFrameCard(QFrame):
@@ -264,6 +274,7 @@ class ReferenceLibraryWidget(QWidget):
 
     references_changed = Signal()  # Emitted when references are added/removed
     frame_selected = Signal(Path)  # Emitted when an extracted frame is selected to add as reference
+    sendToSpriteRequested = Signal(object)  # Path — forwarded from a card's context menu
 
     def __init__(self, parent=None, project: Optional[VideoProject] = None):
         super().__init__(parent)
@@ -274,6 +285,11 @@ class ReferenceLibraryWidget(QWidget):
         self.setup_ui()
         if self.project:
             self.refresh()
+
+    def _connect_card(self, card: ReferenceCard) -> None:
+        card.remove_clicked.connect(self.on_remove_reference)
+        card.edit_clicked.connect(self.on_edit_reference)
+        card.send_to_sprite_clicked.connect(self.sendToSpriteRequested)
 
     def setup_ui(self):
         """Setup widget UI"""
@@ -462,8 +478,7 @@ class ReferenceLibraryWidget(QWidget):
         # Create cards
         for ref in refs:
             card = ReferenceCard(ref, self)
-            card.remove_clicked.connect(self.on_remove_reference)
-            card.edit_clicked.connect(self.on_edit_reference)
+            self._connect_card(card)
             self.cards_layout.addWidget(card)
             self.reference_cards.append(card)
 

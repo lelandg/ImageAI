@@ -1576,6 +1576,7 @@ class VideoProjectTab(QWidget):
     image_provider_changed = Signal(str)  # provider name
     llm_provider_changed = Signal(str, str)  # provider name, model name
     add_to_history_signal = Signal(dict)  # history entry
+    sendToSpriteRequested = Signal(object)  # Path — from the reference library (design §4.5)
 
     def __init__(self, config: ConfigManager, providers: Dict[str, Any]):
         super().__init__()
@@ -1681,6 +1682,7 @@ class VideoProjectTab(QWidget):
 
         self.logger.info("UI STEP 10: Connecting reference library signals...")
         self.reference_library_widget.references_changed.connect(self.on_references_changed)
+        self.reference_library_widget.sendToSpriteRequested.connect(self.sendToSpriteRequested)
         self.tab_widget.addTab(self.reference_library_widget, "📸 References")
         self.logger.info("UI STEP 10: Reference library tab added")
 
