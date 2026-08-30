@@ -1,5 +1,6 @@
 # tests/sprite/gui/conftest.py
 """Shared fixtures for the Sprite GUI tests (offscreen, sandboxed QSettings)."""
+import gc
 import types
 
 import pytest
@@ -91,3 +92,20 @@ def wait_for_worker():
         return worker
 
     return _wait
+
+
+@pytest.fixture(autouse=True)
+def _collect_dead_qt_objects_between_tests(qapp):
+    """Run the cyclic garbage collector at test teardown, when no worker runs.
+
+    Closed dialogs/panels with worker plumbing form reference cycles. When
+    the collector frees such a widget tree on the GUI thread while a later
+    test's SpriteWorker runs Qt code, PySide crashes (5b Task 7 finding,
+    3/10 segfaults with the per-file mitigation removed). Collecting at
+    teardown — after the test joined its workers — keeps the pile of dead
+    dialogs from reaching an automatic collection mid-job.
+    """
+    yield
+    for _ in range(3):
+        qapp.processEvents()
+    gc.collect()
