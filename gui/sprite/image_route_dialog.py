@@ -20,17 +20,19 @@ from core.sprite.generation.image_route import (
     slice_generated_sheet,
 )
 from core.sprite.models import FrameMeta
-from core.sprite.pipeline import CancelToken, ProgressFn, run_pipeline, stage_dir
+from core.sprite.pipeline import Cancelled, CancelToken, ProgressFn, run_pipeline, stage_dir
 from core.sprite.project import ActionCard, SpriteProject
 from gui.common.dialog_conventions import DialogCleanupMixin, bind_primary_action, set_default_button
 from gui.llm_utils import DialogStatusConsole
-from gui.sprite.workers import SpriteWorker
+from gui.sprite.action_cards_panel import CONFIG_KEY_BY_PROVIDER_ID
+from gui.sprite.workers import WorkerHost
 
 logger = logging.getLogger(__name__)
 
 PROVIDERS = (("google", "Google Gemini"), ("openai", "OpenAI gpt-image"))
 MODES = (("sheet", "Sheet (one image, sliced)"), ("edit_chain", "Edit chain (one edit per frame)"))
 PoseFn = Callable[[ActionCard, int, Callable[[str], None]], List[str]]
+CLOSE_SHUTDOWN_TIMEOUT_MS = 5000  # on_dialog_close's bound before it falls back to join_orphans()
 
 
 def archive_existing_frames(extract_dir: Path) -> Optional[Path]:
@@ -40,12 +42,52 @@ def archive_existing_frames(extract_dir: Path) -> Optional[Path]:
         return None
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     archive = extract_dir.with_name(f"{extract_dir.name}.prev-{stamp}")
+    # The stamp has one-second resolution, so two renders in the same second would
+    # rename onto an existing directory. That raises OSError on Linux (non-empty
+    # target) and always on Windows, so add a counter until the name is free.
+    serial = 2
+    while archive.exists():
+        archive = extract_dir.with_name(f"{extract_dir.name}.prev-{stamp}-{serial}")
+        serial += 1
     extract_dir.rename(archive)
     logger.info("archived previous frames: %s -> %s", extract_dir, archive)
     return archive
 
 
-class ImageRouteDialog(DialogCleanupMixin, QDialog):
+def billed_units(mode: str, matte: bool, extract_dir: Path, sheet_done: bool) -> int:
+    """Provider calls already paid for when a render stops early.
+
+    ``edit_chain`` writes one ``NNNN.png`` per finished step (the ``NNNN.white.png``
+    and ``NNNN.black.png`` plates keep a non-numeric stem), so the finished files
+    count the steps the provider already billed. A matte pair costs two calls per
+    step. The sheet route bills one call, and only once ``generate_sheet`` returns.
+    """
+    if mode == "sheet":
+        return 1 if sheet_done else 0
+    extract_dir = Path(extract_dir)
+    if not extract_dir.is_dir():
+        return 0
+    steps = sum(1 for path in extract_dir.glob("*.png") if path.stem.isdigit())
+    return steps * (2 if matte else 1)
+
+
+def record_partial_spend(project: SpriteProject, action: ActionCard, *, mode: str, provider: str,
+                         model: Optional[str], units: int, outcome: str,
+                         log: Callable[[str], None]) -> None:
+    """Write a ledger row for provider calls the user already paid for on a render that stopped.
+
+    A failure at step 5 of 8 has still spent 5 edits. Without this row the cost
+    panel understates real spend, and a retry compounds the error.
+    """
+    if units <= 0:
+        return
+    note = f"image route {mode} {outcome}: {units} edit(s) billed"
+    record_actual(project, action, None, note=note, provider=provider, model=model,
+                  seconds=float(units))
+    log(f"[image route] ledger: {note}")
+
+
+class ImageRouteDialog(WorkerHost, DialogCleanupMixin, QDialog):
     rendered = Signal(object)   # List[Path]
     logLine = Signal(str)
 
@@ -57,7 +99,6 @@ class ImageRouteDialog(DialogCleanupMixin, QDialog):
         self.action = action
         self._provider_factory = provider_factory
         self._pose_fn = pose_fn
-        self._worker: Optional[SpriteWorker] = None
         self.frames_before: List[FrameMeta] = []     # pre-render frame list; restored before apply_frames snapshots
         self.setWindowTitle(f"Render (image) — {action.name}")
         self._build_ui()
@@ -121,7 +162,7 @@ class ImageRouteDialog(DialogCleanupMixin, QDialog):
         chain = self.mode_combo.currentData() == "edit_chain"
         self.matte_check.setEnabled(chain)
         self.steps_edit.setEnabled(chain)
-        self.steps_btn.setEnabled(chain)
+        self.steps_btn.setEnabled(chain and not self.is_busy())
 
     # ----------------------------------------------------------------- jobs
     def _typed_steps(self) -> List[str]:
@@ -129,7 +170,7 @@ class ImageRouteDialog(DialogCleanupMixin, QDialog):
 
     def generate_steps(self) -> None:
         """Fill the pose-step editor from the LLM contract (runs in a worker)."""
-        if self._worker is not None:
+        if self.is_busy():
             self.console.log("A job is already running.", "WARNING")
             return
         action, frames, pose_fn, log = self.action, self.frames_spin.value(), self._pose_fn, self.logLine.emit
@@ -139,13 +180,14 @@ class ImageRouteDialog(DialogCleanupMixin, QDialog):
             token.raise_if_cancelled()
             return pose_fn(action, frames, log)
 
-        self._worker = SpriteWorker(job, parent=self)
-        self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_steps_ready)
-        self._worker.failed.connect(self._on_failed)
-        self._worker.cancelled.connect(self._on_cancelled)
+        # Buttons go disabled BEFORE start_job: a synchronous worker (tests) delivers
+        # its terminal signal inside start_job, so a later _set_running(True) would
+        # undo the _set_running(False) the finished slot already ran.
         self._set_running(True)
-        self._worker.start()
+        if self.start_job(job, label="pose steps", on_finished=self._on_steps_ready,
+                          on_failed=self._on_failed, on_cancelled=self._on_cancelled,
+                          on_progress=self._on_progress) is None:
+            self._set_running(False)
 
     def _on_steps_ready(self, steps) -> None:
         self.steps_edit.setPlainText("\n".join(steps))
@@ -173,37 +215,71 @@ class ImageRouteDialog(DialogCleanupMixin, QDialog):
             archived = archive_existing_frames(extract_dir)
             if archived is not None:
                 log(f"[image route] previous frames kept at {archived}")
-            if mode == "sheet":
-                progress("image_route", 0, 3, "Generating sheet")
-                sheet_png = Path(project.project_dir) / "clips" / f"{action.id}_sheet.png"
-                sheet = generate_sheet(provider, Path(character), action, sheet_png, frames=frames,
-                                       plate_color=project.plate_color, model=model, log=log, token=token)
-                progress("image_route", 1, 3, "Slicing sheet")
-                paths = slice_generated_sheet(sheet, extract_dir, frames, project.plate_color, log=log)
-            else:
-                steps = typed_steps
-                if len(steps) != frames:
-                    progress("image_route", 0, 3, f"Generating {frames} pose steps")
-                    steps = pose_fn(action, frames, log)
-                progress("image_route", 1, 3, f"Edit chain: {frames} steps")
-                paths = edit_chain(provider, Path(character), action, extract_dir, frames=frames,
-                                   pose_instructions=steps, plate_color=project.plate_color, model=model,
-                                   log=log, token=token, matte_pairs=matte)
-            progress("image_route", 2, 3, "Running pipeline to stabilize")
-            duration_ms = round(1000 / max(1, action.fps))
-            action.frames = [
-                FrameMeta(name=f"{project.name}_{action.name}_{i:02d}", source_path=p, frame=(0, 0, 0, 0),
-                          duration_ms=duration_ms)
-                for i, p in enumerate(paths, start=1)
-            ]
-            action.clip = None
-            action.status = "rendered"
-            action.error = None
-            edits = len(paths) * (2 if matte else 1)
-            record_actual(project, action, None,
-                          note=f"image route {mode}: {len(paths)} frame(s), {edits} edit(s)",
-                          provider=provider_id, model=model_used, seconds=float(edits))
-            run_pipeline(project, action, upto="stabilize", progress=progress, token=token)
+            # Restore points: a render that does not finish must leave the card exactly
+            # as it was, with an honest status — never a "rendered" badge over a failure.
+            frames_before = list(action.frames)
+            status_before = action.status
+            clip_before = action.clip
+            action.clip = None          # G9 pre-extracted entry point; also keeps video figures off the ledger row
+            sheet_done = False
+            recorded = False
+            try:
+                if mode == "sheet":
+                    progress("image_route", 0, 3, "Generating sheet")
+                    sheet_png = Path(project.project_dir) / "clips" / f"{action.id}_sheet.png"
+                    sheet = generate_sheet(provider, Path(character), action, sheet_png, frames=frames,
+                                           plate_color=project.plate_color, model=model, log=log, token=token)
+                    sheet_done = True
+                    progress("image_route", 1, 3, "Slicing sheet")
+                    paths = slice_generated_sheet(sheet, extract_dir, frames, project.plate_color, log=log)
+                else:
+                    steps = typed_steps
+                    if len(steps) != frames:
+                        progress("image_route", 0, 3, f"Generating {frames} pose steps")
+                        steps = pose_fn(action, frames, log)
+                    progress("image_route", 1, 3, f"Edit chain: {frames} steps")
+                    paths = edit_chain(provider, Path(character), action, extract_dir, frames=frames,
+                                       pose_instructions=steps, plate_color=project.plate_color, model=model,
+                                       log=log, token=token, matte_pairs=matte)
+                progress("image_route", 2, 3, "Running pipeline to stabilize")
+                duration_ms = round(1000 / max(1, action.fps))
+                action.frames = [
+                    FrameMeta(name=f"{project.name}_{action.name}_{i:02d}", source_path=p, frame=(0, 0, 0, 0),
+                              duration_ms=duration_ms)
+                    for i, p in enumerate(paths, start=1)
+                ]
+                action.status = "rendered"
+                action.error = None
+                edits = len(paths) * (2 if matte else 1)
+                # Before run_pipeline: those edits are paid for whatever the pipeline does next.
+                record_actual(project, action, None,
+                              note=f"image route {mode}: {len(paths)} frame(s), {edits} edit(s)",
+                              provider=provider_id, model=model_used, seconds=float(edits))
+                recorded = True
+                run_pipeline(project, action, upto="stabilize", progress=progress, token=token)
+            except Cancelled:
+                if not recorded:
+                    record_partial_spend(project, action, mode=mode, provider=provider_id, model=model_used,
+                                         units=billed_units(mode, matte, extract_dir, sheet_done),
+                                         outcome="cancelled", log=log)
+                action.frames = frames_before
+                action.status = status_before
+                action.error = None
+                action.clip = clip_before
+                project.save()
+                raise
+            except Exception as exc:  # noqa: BLE001 — the worker turns this into failed(user_message)
+                message = getattr(exc, "user_message", None) or str(exc)
+                if not recorded:
+                    record_partial_spend(project, action, mode=mode, provider=provider_id, model=model_used,
+                                         units=billed_units(mode, matte, extract_dir, sheet_done),
+                                         outcome=f"failed ({message})", log=log)
+                action.frames = frames_before
+                action.status = "failed"
+                action.error = message
+                action.clip = clip_before
+                project.save()
+                raise
             action.status = "processed"
             project.save()
             progress("image_route", 3, 3, f"{len(paths)} frame(s) ready")
@@ -212,22 +288,20 @@ class ImageRouteDialog(DialogCleanupMixin, QDialog):
         return job
 
     def start_render(self) -> None:
-        if self._worker is not None:
+        if self.is_busy():
             self.console.log("A job is already running.", "WARNING")
             return
         self.frames_before = copy.deepcopy(self.action.frames)
-        self._worker = SpriteWorker(self.build_job(), parent=self)
-        self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_rendered)
-        self._worker.failed.connect(self._on_failed)
-        self._worker.cancelled.connect(self._on_cancelled)
-        self._set_running(True)
         self.console.log(f"Image route started: {self.action.name} ({self.mode_combo.currentData()})")
-        self._worker.start()
+        self._set_running(True)
+        if self.start_job(self.build_job(), label="image route", on_finished=self._on_rendered,
+                          on_failed=self._on_failed, on_cancelled=self._on_cancelled,
+                          on_progress=self._on_progress) is None:
+            self._set_running(False)
 
     def cancel_render(self) -> None:
-        if self._worker is not None:
-            self._worker.cancel()
+        if self.is_busy():
+            self.cancel_running()
             self.console.log("Cancel requested", "WARNING")
 
     def _on_progress(self, stage: str, done: int, total: int, message: str) -> None:
@@ -253,25 +327,47 @@ class ImageRouteDialog(DialogCleanupMixin, QDialog):
         self.render_btn.setEnabled(not running)
         self.steps_btn.setEnabled(not running and self.mode_combo.currentData() == "edit_chain")
         self.cancel_btn.setEnabled(running)
-        if not running:
-            self._worker = None
+
+    def _on_worker_idle(self) -> None:
+        """WorkerHost hook: the last orphan stopped, so re-enable the buttons."""
+        self._set_running(False)
 
     def on_dialog_close(self) -> None:
-        if self._worker is not None:
-            self._worker.cancel()
-            self._worker.wait(2000)
-            self._worker = None
+        # WorkerHost: cancel + join a running render. Escape/close mid-render must never
+        # drop a running QThread — deleting one aborts the process (gui/sprite/workers.py).
+        if not self.shutdown(timeout_ms=CLOSE_SHUTDOWN_TIMEOUT_MS):
+            logger.warning("Image route worker did not stop within %d ms; joining before close",
+                           CLOSE_SHUTDOWN_TIMEOUT_MS)
+            self.join_orphans()
 
 
 # --------------------------------------------------------------------- tab wiring
 
+def _config_key_for(provider_id: str) -> str:
+    """The ``ConfigManager`` key name for an ``llm_models`` provider id.
+
+    ``get_all_provider_ids()`` yields "gemini" for Google, but the Settings tab
+    writes that key and its auth mode under "google". The mapping table is
+    ``ActionCardsPanel``'s, imported so the two cannot drift apart.
+    """
+    return CONFIG_KEY_BY_PROVIDER_ID.get(provider_id, provider_id)
+
+
 def _make_pose_fn(tab) -> PoseFn:
-    """Pose steps use the chat provider chosen in the action-cards panel; the model comes from the registry."""
+    """Pose steps use the chat provider chosen in the action-cards panel; the model comes from the registry.
+
+    The panel's combo box, the api key and the auth mode are read here, on the GUI
+    thread, and closed over by value. Qt widgets are not thread-safe, and this
+    callable runs inside a SpriteWorker.
+    """
+    provider = tab.action_cards_panel.llm_provider()
+    config_key = _config_key_for(provider)
+    api_key = tab.config.get_api_key(config_key)
+    auth_mode = tab.config.get_auth_mode(config_key)
+
     def pose_fn(action: ActionCard, frames: int, log: Callable[[str], None]) -> List[str]:
-        provider = tab.action_cards_panel.llm_provider()
-        auth_mode = tab.config.get_auth_mode(provider) if provider in ("google", "gemini") else None
         return generate_pose_instructions(action, frames, provider=provider, model=None,
-                                          api_key=tab.config.get_api_key(provider), auth_mode=auth_mode, log=log)
+                                          api_key=api_key, auth_mode=auth_mode, log=log)
     return pose_fn
 
 

@@ -1,4 +1,5 @@
 # tests/sprite/gui/test_image_route_dialog.py
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -10,8 +11,9 @@ from PIL import Image
 pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QWidget
 
+from core.sprite.generation.errors import ProviderError
 from core.sprite.models import FrameMeta
-from core.sprite.pipeline import CancelToken, no_progress
+from core.sprite.pipeline import Cancelled, CancelToken, no_progress
 from core.sprite.project import ActionCard, SpriteProject
 from gui.sprite import image_route_dialog as ird
 from gui.sprite.image_route_dialog import ImageRouteDialog, archive_existing_frames, install_image_route
@@ -155,10 +157,15 @@ def test_archive_existing_frames_moves_aside(tmp_path):
 
 
 class _FakeConfig:
-    """Mirror of 5a's FakeConfig: get/set/save/get_api_key/get_auth_mode."""
+    """5a's FakeConfig, made key-sensitive: only the "google" key holds the Google credentials.
+
+    The Settings tab stores the Google key and auth mode under "google", while the
+    panel's provider id is "gemini". A lookup with the unmapped id must come back empty.
+    """
 
     def __init__(self):
         self.store = {}
+        self.key_reads = []
 
     def get(self, key, default=None):
         return self.store.get(key, default)
@@ -170,10 +177,12 @@ class _FakeConfig:
         return True
 
     def get_api_key(self, provider):
-        return "test-key"
+        self.key_reads.append(provider)
+        return "test-key" if provider == "google" else None
 
     def get_auth_mode(self, provider="google"):
-        return "api-key"
+        self.key_reads.append(provider)
+        return "api-key" if provider == "google" else None
 
 
 class _FakeTab(QWidget):
@@ -182,9 +191,10 @@ class _FakeTab(QWidget):
     def __init__(self, tmp_path, action=None):
         super().__init__()
         self.actions = {}
+        self.provider_reads = 0
         self.action_cards_panel = SimpleNamespace(
             add_card_action=lambda label, cb: self.actions.__setitem__(label, cb),
-            llm_provider=lambda: "google",
+            llm_provider=self._llm_provider,
             refresh_status=lambda: None)
         self.config = _FakeConfig()
         self.console = SimpleNamespace(log=lambda *a, **k: None)
@@ -198,6 +208,11 @@ class _FakeTab(QWidget):
         # Record what the real FramesWorkspace.apply_frames would snapshot (current list) and install (new list).
         self.applied.append((action_id, label, len(self._action.frames), len(frames)))
         self._action.frames = list(frames)
+
+    def _llm_provider(self):
+        # get_all_provider_ids() yields "gemini" for Google (action_cards_panel.py:76-83).
+        self.provider_reads += 1
+        return "gemini"
 
     def current_action(self):
         return self._action
@@ -231,7 +246,7 @@ def test_rendered_for_another_action_only_refreshes_status(qapp, tmp_path):
     assert tab.applied == []
 
 
-def test_pose_fn_uses_panel_provider_and_config(qapp, tmp_path, monkeypatch):
+def test_pose_fn_maps_the_gemini_id_to_the_google_config_key(qapp, tmp_path, monkeypatch):
     seen = {}
 
     def fake_generate(action, frames, **kwargs):
@@ -242,5 +257,133 @@ def test_pose_fn_uses_panel_provider_and_config(qapp, tmp_path, monkeypatch):
     tab = _FakeTab(tmp_path, _action())
     steps = ird._make_pose_fn(tab)(_action(), 3, lambda _m: None)
     assert steps == ["p", "p", "p"]
-    assert seen["provider"] == "google" and seen["api_key"] == "test-key" and seen["auth_mode"] == "api-key"
+    # The generator gets the panel's own id; both config lookups get the mapped key.
+    assert seen["provider"] == "gemini"
+    assert seen["api_key"] == "test-key" and seen["auth_mode"] == "api-key"
     assert seen["model"] is None
+    assert tab.config.key_reads == ["google", "google"]
+
+
+def test_pose_fn_snapshots_the_provider_combo_on_the_gui_thread(qapp, tmp_path, monkeypatch):
+    monkeypatch.setattr(ird, "generate_pose_instructions", lambda action, frames, **k: ["p"] * frames)
+    tab = _FakeTab(tmp_path, _action())
+    pose_fn = ird._make_pose_fn(tab)
+    assert tab.provider_reads == 1 and tab.config.key_reads == ["google", "google"]
+    pose_fn(_action(), 2, lambda _m: None)
+    pose_fn(_action(), 2, lambda _m: None)
+    # The callable runs inside a SpriteWorker; it must never touch the live combo box again.
+    assert tab.provider_reads == 1 and tab.config.key_reads == ["google", "google"]
+
+
+def test_failed_pipeline_restores_frames_and_marks_the_action_failed(qapp, tmp_path, monkeypatch):
+    produced = [_png(tmp_path / f"{k:04d}.png") for k in (1, 2, 3)]
+    _patch_core(monkeypatch, tmp_path, produced)
+    ird.run_pipeline.side_effect = RuntimeError("stabilize blew up")
+    dialog = _dialog(tmp_path)
+    action = dialog.action
+    kept = [FrameMeta(name="old", source_path=_png(tmp_path / "old.png"), frame=(0, 0, 0, 0))]
+    action.frames = list(kept)
+    with pytest.raises(RuntimeError):
+        dialog.build_job()(no_progress, CancelToken())
+    assert action.frames == kept                    # the frame swap is rolled back
+    assert action.status == "failed"                # the badge never claims "rendered" after a failure
+    assert "stabilize blew up" in action.error
+    ird.record_actual.assert_called_once()          # the paid edits, recorded before the pipeline ran
+    dialog.project.save.assert_called_once()        # the honest state is persisted
+
+
+def test_partial_edit_chain_failure_records_the_paid_steps(qapp, tmp_path, monkeypatch):
+    extract_dir = _patch_core(monkeypatch, tmp_path, [])
+
+    def fail_at_step_3(*a, **k):
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        _png(extract_dir / "0001.png")
+        _png(extract_dir / "0002.png")
+        _png(extract_dir / "0002.white.png")        # a matte plate is not a finished step
+        raise ProviderError("provider said no at step 3")
+
+    ird.edit_chain.side_effect = fail_at_step_3
+    dialog = _dialog(tmp_path)
+    dialog.mode_combo.setCurrentIndex(1)
+    dialog.steps_edit.setPlainText("one\ntwo\nthree")
+    action = dialog.action
+    with pytest.raises(ProviderError):
+        dialog.build_job()(no_progress, CancelToken())
+    assert action.frames == [] and action.status == "failed"
+    assert "step 3" in action.error
+    ledger = ird.record_actual.call_args.kwargs
+    assert ledger["seconds"] == 2.0 and "failed" in ledger["note"]
+    assert ledger["provider"] == "google" and ledger["model"] == "default-image-model"
+    dialog.project.save.assert_called_once()
+
+
+def test_cancelled_render_restores_status_and_bills_finished_steps(qapp, tmp_path, monkeypatch):
+    extract_dir = _patch_core(monkeypatch, tmp_path, [])
+
+    def cancel_at_step_2(*a, **k):
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        _png(extract_dir / "0001.png")
+        raise Cancelled()
+
+    ird.edit_chain.side_effect = cancel_at_step_2
+    dialog = _dialog(tmp_path)
+    dialog.mode_combo.setCurrentIndex(1)
+    dialog.steps_edit.setPlainText("one\ntwo\nthree")
+    action = dialog.action
+    with pytest.raises(Cancelled):
+        dialog.build_job()(no_progress, CancelToken())
+    assert action.status == "draft" and action.error is None    # a cancel is never a failure
+    ledger = ird.record_actual.call_args.kwargs
+    assert ledger["seconds"] == 1.0 and "cancelled" in ledger["note"]
+
+
+def _gated_dialog(tmp_path, monkeypatch, gate, entered):
+    """A dialog whose sheet call blocks until ``gate`` is released (a provider HTTP call)."""
+    produced = [_png(tmp_path / f"{k:04d}.png") for k in (1, 2, 3)]
+    _patch_core(monkeypatch, tmp_path, produced)
+
+    def blocking_sheet(*a, **k):
+        entered.set()
+        assert gate.wait(10), "gate was never released"
+        return tmp_path / "sheet.png"
+
+    monkeypatch.setattr(ird, "generate_sheet", blocking_sheet)
+    return _dialog(tmp_path)
+
+
+def test_close_while_a_render_runs_joins_the_worker(qapp, tmp_path, monkeypatch):
+    gate, entered = threading.Event(), threading.Event()
+    dialog = _gated_dialog(tmp_path, monkeypatch, gate, entered)
+    dialog.start_render()
+    worker = dialog._worker
+    try:
+        assert entered.wait(10), "the job never started"
+        threading.Timer(0.2, gate.set).start()
+        dialog.reject()                     # Escape / Close button -> on_dialog_close
+        assert not dialog.is_busy()         # cancelled and joined, never dropped while running
+        assert worker.isFinished()
+    finally:
+        gate.set()
+        assert dialog.join_orphans(10000)
+        assert worker.wait(10000)
+        for _ in range(3):
+            qapp.processEvents()
+
+
+def test_shutdown_timeout_keeps_the_worker_as_an_orphan(qapp, tmp_path, monkeypatch):
+    gate, entered = threading.Event(), threading.Event()
+    dialog = _gated_dialog(tmp_path, monkeypatch, gate, entered)
+    dialog.start_render()
+    worker = dialog._worker
+    try:
+        assert entered.wait(10), "the job never started"
+        # The job blocks in a provider call, so it cannot reach a cancel-token poll.
+        assert dialog.shutdown(timeout_ms=1) is False
+        assert dialog.is_busy()             # kept as an orphan of the host
+        assert worker.parent() is None      # detached: destroying the dialog cannot destroy the thread
+    finally:
+        gate.set()
+        assert dialog.join_orphans(10000)
+        for _ in range(3):
+            qapp.processEvents()
+    assert not dialog.is_busy()             # reaped on its own terminal signal
