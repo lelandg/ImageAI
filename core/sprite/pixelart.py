@@ -27,7 +27,7 @@ from PIL import Image
 
 from core.sprite import stabilize
 from core.sprite.keying import apply_profile_alpha, hex_to_rgb, rgb_to_hex
-from core.sprite.pipeline import CancelToken, ProgressFn, no_progress, register_stage
+from core.sprite.pipeline import CancelToken, ProgressFn, _reset_dir, no_progress, register_stage
 
 logger = logging.getLogger(__name__)
 
@@ -303,3 +303,98 @@ def ensure_palette(project: Any, profile: Any, frames: Sequence[Image.Image]) ->
     if profile.palette_lock and profile.locked_palette:
         return list(profile.locked_palette)
     return rebuild_palette(project, profile, frames)
+
+
+# --- Task 7: pipeline stage ----------------------------------------------------
+
+def pixel_stage_settings(project: Any, action: Any) -> Dict[str, Any]:
+    """Settings that feed the ``pixel`` stage fingerprint: the whole pixel profile.
+
+    ``locked_palette``, ``upscale_small`` and ``upscale_method`` are fields of
+    the profile, so a rebuilt palette or a toggled upscale re-runs the stage
+    by itself. ``{}`` when the profile is absent or disabled.
+    """
+    profile = project.profile("pixel")
+    if profile is None or not profile.enabled:
+        return {}
+    return asdict(profile)
+
+
+def run_pixel_stage(project: Any, action: Any, input_frames: List[Path], out_dir: Path,
+                    progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
+    """Stabilized frames -> integer fit -> binary alpha -> shared palette -> PNGs.
+
+    ``StageRunner`` signature (sub-project 1 registry). Writes
+    ``out_dir/<input name>`` per frame plus ``out_dir/pixel.json`` (scale,
+    palette, warnings). Returns the PNG paths in input order. Returns ``[]``
+    without touching disk when the pixel profile is absent or disabled.
+    """
+    profile = project.profile("pixel")
+    if profile is None or not profile.enabled:
+        logger.info("pixel stage skipped for %s: profile absent or disabled", action.name)
+        return []
+    cell = (int(profile.cell_size[0]), int(profile.cell_size[1]))
+    anchor = project.stabilize.anchor
+    _reset_dir(out_dir)
+    total = len(input_frames)
+    warnings: List[str] = []
+
+    frames: List[Image.Image] = []
+    for path in input_frames:
+        if token is not None:
+            token.raise_if_cancelled()
+        with Image.open(path) as img:
+            frames.append(img.convert("RGBA"))
+    scale = max((integer_fit_scale(f.size, cell) for f in frames), default=1)
+
+    fitted: List[Image.Image] = []
+    for index, frame in enumerate(frames):
+        if token is not None:
+            token.raise_if_cancelled()
+        warning = resolution_check(frame.size, cell)
+        if warning is not None and profile.upscale_small:
+            image = upscale_then_fit(frame, cell, anchor, method=profile.upscale_method)
+        else:
+            if warning is not None and warning not in warnings:
+                warnings.append(warning)
+            image = fit_pad_integer(frame, cell, anchor, scale=scale)
+        image = apply_profile_alpha(image, profile)
+        arr = np.array(image.convert("RGBA"))
+        arr[arr[..., 3] == 0] = (0, 0, 0, 0)
+        fitted.append(Image.fromarray(arr))
+        progress("pixel", index + 1, total, f"fit {input_frames[index].name} (1/{scale})")
+
+    palette = ensure_palette(project, profile, fitted)
+    if palette and profile.dither == "floyd":
+        warnings.append(FLOYD_WARNING)
+
+    outputs: List[Path] = []
+    for index, image in enumerate(fitted):
+        if token is not None:
+            token.raise_if_cancelled()
+        if palette:
+            image = quantize_to_palette(image, palette, profile.dither)
+        target = out_dir / input_frames[index].name
+        image.save(target, format="PNG")
+        outputs.append(target)
+        progress("pixel", index + 1, total, f"wrote {target.name}")
+
+    manifest = {
+        "cell_size": list(cell), "scale": scale, "anchor": anchor,
+        "binary_alpha": bool(profile.binary_alpha), "palette": list(palette),
+        "dither": profile.dither if palette else "none",
+        "upscale_small": bool(profile.upscale_small),
+        "upscale_method": str(profile.upscale_method), "warnings": warnings,
+    }
+    (out_dir / "pixel.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    for text in warnings:
+        logger.warning("pixel stage (%s): %s", action.name, text)
+        progress("pixel", total, total, f"warning: {text}")
+    return outputs
+
+
+# Importing this module registers the stage. core/sprite/__init__.py imports it
+# after .pipeline, so this call replaces sub-project 1's identity runner.
+# code_version=2: the identity runner is version 1, and a real runner at the
+# same version with the same settings would reuse a stale identity output.
+register_stage("pixel", run_pixel_stage, settings_fn=pixel_stage_settings, code_version=2)

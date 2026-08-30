@@ -82,6 +82,7 @@ from .exporters import (
     export_single_frame,
     export_texturepacker_json,
 )
+from . import pixelart  # noqa: E402,F401  registers the "pixel" stage runner
 
 __all__ = [
     # models
