@@ -62,6 +62,11 @@ class SpriteTab(QWidget):
         self._wire()
         self._restore_splitters()
         self._sync_title()
+        # Sub-project 5b: strip + preview + processing + export + shortcuts + undo.
+        # Local import: frames_workspace imports nothing from sprite_tab at runtime,
+        # and this keeps sprite_tab importable on its own.
+        from .frames_workspace import FramesWorkspace
+        self.frames_workspace = FramesWorkspace(self)
 
     # -- build -------------------------------------------------------------
 
@@ -400,20 +405,24 @@ class SpriteTab(QWidget):
     def shutdown(self) -> bool:
         """Cancel every running worker and persist layout. MainWindow calls this on close.
 
-        Returns True only when every panel joined its worker inside the bound.
-        A False result means at least one worker is now an orphan of its panel;
+        Returns True only when every panel and the 5b workspace joined its worker
+        inside the bound. A False result means at least one worker is an orphan;
         the caller must call ``join_orphans()`` before this widget tree is
         destroyed, or Qt aborts on a running QThread (final review, Important 1).
         """
+        # The 5b workspace first: it hosts the processing panel's pipeline worker and
+        # any open export dialog, which must stop before this widget tree goes down.
+        workspace_stopped = self.frames_workspace.shutdown()
         stopped = [panel.shutdown()
                    for panel in (self.character_panel, self.action_cards_panel, self.queue_panel)]
         self._persist_splitters()
-        return all(stopped)
+        return workspace_stopped and all(stopped)
 
     def join_orphans(self, timeout_ms: Optional[int] = None) -> bool:
         """Wait for every panel's orphaned worker. ``None`` waits without a bound."""
         joined = [panel.join_orphans(timeout_ms)
                   for panel in (self.character_panel, self.action_cards_panel, self.queue_panel)]
+        joined.append(self.frames_workspace.join_orphans(timeout_ms))
         return all(joined)
 
     def closeEvent(self, event) -> None:

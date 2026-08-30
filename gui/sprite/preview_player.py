@@ -78,6 +78,7 @@ class PreviewPlayer(QWidget):
     playingChanged = Signal(bool)
     modeChanged = Signal(str)
     sourceChanged = Signal(str)
+    decodeFailed = Signal(str)   # source path of a frame that did not decode
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -292,6 +293,9 @@ class PreviewPlayer(QWidget):
             pixmap = QPixmap(str(frame.source_path)) if frame.source_path else QPixmap()
             if pixmap.isNull():
                 logger.error("PreviewPlayer: cannot decode frame %s (%s)", index, frame.source_path)
+                # The owner (FramesWorkspace) shows this in the tab console: a blank
+                # preview must never be the only sign that a frame failed to decode.
+                self.decodeFailed.emit(str(frame.source_path or ""))
             self._cache[index] = pixmap
         return pixmap
 
