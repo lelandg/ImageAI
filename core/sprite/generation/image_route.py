@@ -261,11 +261,12 @@ def edit_chain(
         session_started = bool(provider.start_edit_session(
             character_bytes, style_context="sprite animation frames; keep the exact character", model=model))
         if not session_started:
-            log("[image route] edit session did not start; continuing with single-shot edits")
-            logger.warning("[image route] start_edit_session returned False")
+            emit(logger, log, "[image route] edit session did not start; continuing with single-shot edits",
+                 level="warning")
     plates = list(MATTE_PLATES) if matte_pairs else [plate_color]
     outputs: List[Path] = []
     prev_bytes = character_bytes
+    prev_reference_path: Path = character
     try:
         for k, instruction in enumerate(pose_instructions, start=1):
             if token is not None:
@@ -296,24 +297,34 @@ def edit_chain(
                 from core.sprite.matting import difference_matte
                 white = save_png(step_images[MATTE_PLATES[0]], out_dir / f"{k:04d}.white.png")
                 black = save_png(step_images[MATTE_PLATES[1]], out_dir / f"{k:04d}.black.png")
+                for plate_path, plate_color_value in ((white, MATTE_PLATES[0]), (black, MATTE_PLATES[1])):
+                    write_image_sidecar(plate_path, {
+                        "prompt": prompts[plate_color_value], "provider": kind, "model": model,
+                        "timestamp": _timestamp(), "route": "image_edit_chain_plate",
+                        "action": action.name, "action_id": action.id, "step": k, "of": frames,
+                        "pose": instruction, "plate_color": plate_color_value,
+                    })
                 with Image.open(white) as w_img, Image.open(black) as b_img:
                     matted = difference_matte(w_img.convert("RGB"), b_img.convert("RGB"))
                 matted.convert("RGBA").save(out_png, "PNG")
                 plate_paths = [str(white), str(black)]
                 next_bytes = step_images[MATTE_PLATES[0]]
+                next_reference_path = white
             else:
                 save_png(step_images[plate_color], out_png)
                 next_bytes = step_images[plate_color]
+                next_reference_path = out_png
             write_image_sidecar(out_png, {
                 "prompt": prompts[plates[0]], "prompts": prompts, "provider": kind, "model": model,
                 "timestamp": _timestamp(), "route": "image_edit_chain",
                 "action": action.name, "action_id": action.id, "step": k, "of": frames,
                 "pose": instruction, "plate_color": plate_color, "matte_pairs": matte_pairs,
                 "plates": plate_paths,
-                "reference_images": [str(character), str(outputs[-1]) if outputs else str(character)],
+                "reference_images": [str(character), str(prev_reference_path)],
             })
             outputs.append(out_png)
             prev_bytes = next_bytes
+            prev_reference_path = next_reference_path
             log(f"[image route] step {k}/{frames} saved: {out_png}")
     finally:
         if kind == "google" and session_started:

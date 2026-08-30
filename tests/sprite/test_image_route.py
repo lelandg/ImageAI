@@ -265,6 +265,22 @@ def test_edit_chain_matte_pairs(tmp_path, monkeypatch):
     assert "#ffffff" in prompts[0] and "#000000" in prompts[1]
     sidecar = json.loads((tmp_path / "chain" / "0001.png.json").read_text(encoding="utf-8"))
     assert sidecar["matte_pairs"] is True and len(sidecar["plates"]) == 2
+    # every artifact written by this route gets a .json sidecar (AGENTS.md hard rule) --
+    # the white/black plates are no exception, and they carry the same provenance fields
+    # (provider, model, prompt, plate colour, step index) as the merged frame's sidecar.
+    white_sidecar_path = tmp_path / "chain" / "0001.white.png.json"
+    black_sidecar_path = tmp_path / "chain" / "0001.black.png.json"
+    assert white_sidecar_path.exists() and black_sidecar_path.exists()
+    white_sidecar = json.loads(white_sidecar_path.read_text(encoding="utf-8"))
+    black_sidecar = json.loads(black_sidecar_path.read_text(encoding="utf-8"))
+    assert white_sidecar["plate_color"] == "#FFFFFF" and white_sidecar["step"] == 1 and white_sidecar["of"] == 2
+    assert white_sidecar["provider"] == "google" and white_sidecar["model"] == "default-google-image-model"
+    assert "#ffffff" in white_sidecar["prompt"].lower()
+    assert black_sidecar["plate_color"] == "#000000" and "#000000" in black_sidecar["prompt"].lower()
+    # in matte mode the chain actually feeds the previous WHITE plate bytes into the next
+    # step, not the merged RGBA -- the second frame's sidecar must cite that true source.
+    sidecar2 = json.loads((tmp_path / "chain" / "0002.png.json").read_text(encoding="utf-8"))
+    assert sidecar2["reference_images"][1].endswith("0001.white.png")
 
 
 def test_edit_chain_cancels_between_steps(tmp_path):
@@ -298,4 +314,24 @@ def test_edit_chain_session_failure_is_logged_not_fatal(tmp_path):
     out = edit_chain(provider, _character(tmp_path), _action(), tmp_path / "chain", frames=1,
                      pose_instructions=["a"], plate_color="#00FF00", log=logged.append)
     assert len(out) == 1 and any("session" in l for l in logged)
+    provider.reset_edit_session.assert_not_called()
+
+
+def test_edit_chain_session_failure_survives_raising_log_sink(tmp_path):
+    """The session-start-failure warning goes through _common.emit, which swallows a
+    raising sink (never breaks generation; the failure goes to DEBUG) -- so a console
+    sink that raises on that specific message must not abort the chain."""
+    provider = _google()
+    provider.start_edit_session.return_value = False
+    provider.edit_image.side_effect = [([], [r]) for r in _distinct_replies(1)]
+
+    session_message = "[image route] edit session did not start; continuing with single-shot edits"
+
+    def flaky_log(message):
+        if message == session_message:
+            raise RuntimeError("console sink exploded")
+
+    out = edit_chain(provider, _character(tmp_path), _action(), tmp_path / "chain", frames=1,
+                     pose_instructions=["a"], plate_color="#00FF00", log=flaky_log)
+    assert len(out) == 1
     provider.reset_edit_session.assert_not_called()
