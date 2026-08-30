@@ -55,6 +55,23 @@ def hex_to_rgb(hex_color: str) -> Tuple[int, int, int]:
     return int(text[0:2], 16), int(text[2:4], 16), int(text[4:6], 16)
 
 
+def parse_key_color(hex_color: str, *, context: str = "") -> Tuple[int, int, int]:
+    """``hex_to_rgb`` for callers that must not leak a bare ``ValueError``.
+
+    Logs and re-raises a parse failure as ``KeyingError`` naming the offending
+    value (and ``context``, e.g. a frame name, when given) so it carries a
+    ``user_message`` and is caught by the same handling as every other keying
+    failure (I1).
+    """
+    try:
+        return hex_to_rgb(hex_color)
+    except ValueError as exc:
+        where = f" ({context})" if context else ""
+        msg = f"Invalid key color {hex_color!r}{where}: {exc}"
+        logger.error(msg)
+        raise KeyingError(msg) from exc
+
+
 def rgb_to_hex(rgb: Sequence[int]) -> str:
     r, g, b = (max(0, min(255, int(round(v)))) for v in rgb[:3])
     return f"#{r:02X}{g:02X}{b:02X}"
@@ -211,20 +228,32 @@ def resolve_key_settings(settings: KeySettings, plate_color: str) -> KeySettings
     return replace(settings, key_color=plate_color)
 
 
-def apply_overrides(settings: KeySettings, overrides: Dict[str, Any]) -> KeySettings:
-    """Apply per-frame overrides (``key_color``, ``tolerance``, ``softness``)."""
+def apply_overrides(settings: KeySettings, overrides: Dict[str, Any], *,
+                    frame_name: str = "") -> KeySettings:
+    """Apply per-frame overrides (``OVERRIDE_KEYS``: key_color, tolerance, softness).
+
+    ``frame_name`` is used only to name the frame in a parse-failure message
+    (I1); it never changes the result.
+    """
     if not overrides:
         return settings
     changes: Dict[str, Any] = {}
     for key, value in overrides.items():
         if value is None:
             continue
+        if key not in OVERRIDE_KEYS:
+            logger.debug("Ignoring unknown per-frame override %r", key)
+            continue
         if key == "key_color":
             changes[key] = str(value)
-        elif key in ("tolerance", "softness"):
+            continue
+        try:
             changes[key] = float(value)
-        else:
-            logger.debug("Ignoring unknown per-frame override %r", key)
+        except (TypeError, ValueError) as exc:
+            where = f" for frame {frame_name!r}" if frame_name else ""
+            msg = f"Invalid {key} override {value!r}{where}: {exc}"
+            logger.error(msg)
+            raise KeyingError(msg) from exc
     return replace(settings, **changes) if changes else settings
 
 
@@ -241,10 +270,14 @@ def _ml_alpha(image: Image.Image, backend: str, model: str, refine_edges: bool) 
     return ml_alpha(image, backend, model, refine_edges=refine_edges)
 
 
-def key_pass(image: Image.Image, settings: KeySettings,
-             overrides: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray, Optional[Tuple[int, int, int]]]:
-    """Stage ``key``: estimate alpha and despill. Returns (rgb uint8, alpha float32, key_rgb)."""
-    eff = apply_overrides(settings, overrides)
+def key_pass(image: Image.Image, settings: KeySettings, overrides: Dict[str, Any],
+             *, frame_name: str = "") -> Tuple[np.ndarray, np.ndarray, Optional[Tuple[int, int, int]]]:
+    """Stage ``key``: estimate alpha and despill. Returns (rgb uint8, alpha float32, key_rgb).
+
+    ``frame_name`` (e.g. the source filename) is used only to name the frame
+    in a parse-failure message raised as ``KeyingError`` (I1).
+    """
+    eff = apply_overrides(settings, overrides, frame_name=frame_name)
     if eff.method not in KEY_METHODS:
         msg = f"Unknown key method {eff.method!r}; choose one of {KEY_METHODS}"
         logger.error(msg)
@@ -258,7 +291,7 @@ def key_pass(image: Image.Image, settings: KeySettings,
                            dtype=np.float32)
         return rgb, np.clip(alpha, 0.0, 1.0), None
     if eff.key_color:
-        key_rgb = hex_to_rgb(eff.key_color)
+        key_rgb = parse_key_color(eff.key_color, context=frame_name)
     else:
         picked = pick_key_color(image, (0, 0), radius=2)
         logger.warning("No key color set; sampled the top-left corner: %s", picked)
@@ -281,11 +314,12 @@ def alpha_pass(rgb: np.ndarray, alpha: np.ndarray, key_rgb: Optional[Tuple[int, 
     return compose_rgba(rgb, alpha)
 
 
-def key_frame(image: Image.Image, settings: KeySettings, overrides: Dict[str, Any]) -> Image.Image:
+def key_frame(image: Image.Image, settings: KeySettings, overrides: Dict[str, Any],
+              *, frame_name: str = "") -> Image.Image:
     """One-shot keyer for previews, the CLI, and tests: key -> cleanup -> alpha."""
-    rgb, alpha, key_rgb = key_pass(image, settings, overrides)
+    rgb, alpha, key_rgb = key_pass(image, settings, overrides, frame_name=frame_name)
     alpha = cleanup_pass(alpha, settings)
-    return alpha_pass(rgb, alpha, key_rgb, apply_overrides(settings, overrides))
+    return alpha_pass(rgb, alpha, key_rgb, apply_overrides(settings, overrides, frame_name=frame_name))
 
 
 def pick_key_color(image: Image.Image, xy: Tuple[int, int], radius: int = 2) -> str:
@@ -325,7 +359,7 @@ def ffmpeg_chromakey_preview(video: Path, out_mp4: Path, key_color: str,
         msg = "FFmpeg is not available; install it from the Video tab or put ffmpeg on PATH."
         logger.error("Chromakey preview failed: %s", msg)
         raise KeyingError(msg)
-    r, g, b = hex_to_rgb(key_color)
+    r, g, b = parse_key_color(key_color, context="chromakey preview")
     color = f"0x{r:02X}{g:02X}{b:02X}"
     similarity = min(1.0, max(0.01, float(similarity)))
     blend = min(1.0, max(0.0, float(blend)))

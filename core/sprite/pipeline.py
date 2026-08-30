@@ -367,7 +367,7 @@ def key_runner(project: SpriteProject, action: ActionCard, input_frames: List[Pa
     for index, src in enumerate(input_frames):
         check(token)
         overrides = keying.frame_overrides(action.frames, index)
-        rgb, alpha, _key = keying.key_pass(Image.open(src), settings, overrides)
+        rgb, alpha, _key = keying.key_pass(Image.open(src), settings, overrides, frame_name=src.name)
         dst = out_dir / src.name
         keying.compose_rgba(rgb, alpha).save(dst)
         outputs.append(dst)
@@ -401,8 +401,9 @@ def alpha_runner(project: SpriteProject, action: ActionCard, input_frames: List[
     total = len(input_frames)
     for index, src in enumerate(input_frames):
         check(token)
-        eff = keying.apply_overrides(settings, keying.frame_overrides(action.frames, index))
-        key_rgb = keying.hex_to_rgb(eff.key_color) if (eff.method == "chroma" and eff.key_color) else None
+        eff = keying.apply_overrides(settings, keying.frame_overrides(action.frames, index), frame_name=src.name)
+        key_rgb = (keying.parse_key_color(eff.key_color, context=src.name)
+                  if (eff.method == "chroma" and eff.key_color) else None)
         rgb, alpha = keying.split_rgba(Image.open(src))
         dst = out_dir / src.name
         keying.alpha_pass(rgb, alpha, key_rgb, eff).save(dst)

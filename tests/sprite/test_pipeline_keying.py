@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from core.sprite import pipeline
+from core.sprite import keying, pipeline
 from core.sprite.models import FrameMeta
 from core.sprite.project import ActionCard, SpriteProject
 from tests.sprite.keying_fixtures import disc_on_field, write_png
@@ -161,3 +161,47 @@ def test_hd_profile_keeps_soft_alpha_unless_binary_requested(tmp_path):
 def test_stage_code_versions_were_bumped():
     for stage in ("key", "cleanup", "alpha", "stabilize", "hd"):
         assert pipeline.STAGE_CODE_VERSION[stage] >= 2, stage
+
+
+def test_bad_plate_color_raises_keying_error_not_a_bare_value_error(tmp_path, caplog):
+    """I1 regression: a bad key colour reaching ``run_pipeline`` (here via a
+    typo'd plate colour) must surface as ``KeyingError`` with a ``user_message``
+    and a logged line, not an un-logged bare ``ValueError``."""
+    project = _project(tmp_path)
+    project.plate_color = "not-a-color"
+    action = _action()
+    _seed_extract(project, action)
+    with caplog.at_level("ERROR"):
+        with pytest.raises(keying.KeyingError) as info:
+            pipeline.run_pipeline(project, action, upto="alpha")
+    assert info.value.user_message
+    assert "not-a-color" in caplog.text
+
+
+def test_bad_tolerance_override_raises_keying_error_through_the_key_stage(tmp_path, caplog):
+    """I1 regression: apply_overrides' float() cast on a bad per-frame override
+    must not leak a bare ValueError out of run_pipeline either."""
+    project = _project(tmp_path)
+    action = _action()
+    _seed_extract(project, action)
+    action.frames[1].overrides = {"tolerance": "not-a-number"}
+    with caplog.at_level("ERROR"):
+        with pytest.raises(keying.KeyingError) as info:
+            pipeline.run_pipeline(project, action, upto="key")
+    assert info.value.user_message
+    assert "not-a-number" in caplog.text
+
+
+def test_alpha_runner_rejects_a_bad_key_color_override(tmp_path, caplog):
+    """I1 regression at the pipeline.py:405 boundary specifically: alpha_runner's
+    own hex parse must raise KeyingError, not a bare ValueError."""
+    project = _project(tmp_path)
+    action = _action()
+    paths = _seed_extract(project, action)
+    action.frames[0].overrides = {"key_color": "rgb(0,200,0)"}
+    with caplog.at_level("ERROR"):
+        with pytest.raises(keying.KeyingError) as info:
+            pipeline.alpha_runner(project, action, paths, pipeline.stage_dir(project, action, "alpha"),
+                                  pipeline.no_progress, None)
+    assert info.value.user_message
+    assert "rgb(0,200,0)" in caplog.text

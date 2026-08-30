@@ -61,6 +61,19 @@ def test_preview_without_ffmpeg_raises(monkeypatch, tmp_path):
         keying.ffmpeg_chromakey_preview(tmp_path / "a.mp4", tmp_path / "b.mp4", "#00FF00", 0.3, 0.1)
 
 
+def test_preview_rejects_a_bad_key_color(monkeypatch, tmp_path, caplog):
+    """I1 / deferred-minor row 10: the unguarded hex_to_rgb call must raise
+    KeyingError like the two failures already below it in this function,
+    instead of a bare ValueError. Stubs ffmpeg availability so this does not
+    depend on ffmpeg actually being installed -- the parse happens first."""
+    monkeypatch.setattr(keying, "get_ffmpeg_path", lambda: "/usr/bin/ffmpeg")
+    with caplog.at_level("ERROR"):
+        with pytest.raises(keying.KeyingError) as info:
+            keying.ffmpeg_chromakey_preview(tmp_path / "a.mp4", tmp_path / "b.mp4", "not-a-color", 0.3, 0.1)
+    assert info.value.user_message
+    assert "chromakey preview" in caplog.text.lower()
+
+
 def test_pick_key_color_averages_a_window():
     rgb, _ = disc_on_field(gradient=False)
     img = Image.fromarray(rgb)

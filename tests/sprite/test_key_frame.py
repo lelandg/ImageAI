@@ -35,6 +35,17 @@ def test_apply_overrides_ignores_none_values():
     assert keying.apply_overrides(base, {"tolerance": None}).tolerance == 0.2
 
 
+def test_apply_overrides_rejects_an_unparseable_tolerance(caplog):
+    """I1 regression: a bad tolerance/softness override must raise KeyingError
+    (logged, with a user_message), not a bare ValueError."""
+    base = KeySettings(key_color="#00C800", tolerance=0.2)
+    with caplog.at_level("ERROR"):
+        with pytest.raises(keying.KeyingError) as info:
+            keying.apply_overrides(base, {"tolerance": "not-a-number"}, frame_name="0003.png")
+    assert info.value.user_message
+    assert "0003.png" in caplog.text and "not-a-number" in caplog.text
+
+
 def test_frame_overrides_reads_frame_meta():
     frames = [FrameMeta(name="a", source_path=None, frame=(0, 0, 0, 0)),
               FrameMeta(name="b", source_path=None, frame=(0, 0, 0, 0), overrides={"tolerance": 0.9})]
@@ -119,3 +130,20 @@ def test_key_pass_returns_key_rgb_for_chroma_only():
     assert key == (0, 200, 0)
     _rgb, _alpha, key = keying.key_pass(img, KeySettings(method="none"), {})
     assert key is None
+
+
+def test_key_pass_rejects_a_bad_key_color(caplog):
+    """I1 regression: keying.py:261's hex_to_rgb call must raise KeyingError,
+    named with the offending value and frame name, not a bare ValueError."""
+    img, _ = _image()
+    with caplog.at_level("ERROR"):
+        with pytest.raises(keying.KeyingError) as info:
+            keying.key_pass(img, KeySettings(key_color="not-a-color"), {}, frame_name="0007.png")
+    assert info.value.user_message
+    assert "0007.png" in caplog.text and "not-a-color" in caplog.text
+
+
+def test_key_frame_rejects_a_bad_key_color_override():
+    img, _ = _image()
+    with pytest.raises(keying.KeyingError):
+        keying.key_frame(img, KeySettings(key_color="#00C800"), {"key_color": "rgb(0,200,0)"})
