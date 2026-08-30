@@ -270,3 +270,36 @@ def quantize_to_palette(image: Image.Image, palette: Sequence[str], dither: str)
     out = np.dstack([out_rgb.astype(np.uint8), alpha]).astype(np.uint8)
     out[alpha == 0] = (0, 0, 0, 0)
     return Image.fromarray(np.ascontiguousarray(out))
+
+
+# --- Task 6: lock / remap ---------------------------------------------------------
+
+def remap_to_locked(image: Image.Image, locked_palette: Sequence[str]) -> Image.Image:
+    """Aseprite-style "Remap": nearest color, no dither, alpha untouched."""
+    return quantize_to_palette(image, locked_palette, "none")
+
+
+def rebuild_palette(project: Any, profile: Any, frames: Sequence[Image.Image]) -> List[str]:
+    """Build a new shared palette from ``frames`` and store it on ``profile``."""
+    if profile.palette_size is None:
+        raise ValueError(f"profile {profile.name!r} has no palette_size")
+    palette = build_shared_palette(frames, profile.palette_size)
+    profile.locked_palette = list(palette) if palette else None
+    project.modified = datetime.now().isoformat(timespec="seconds")
+    logger.info("sprite project %r: rebuilt %s palette with %d colors",
+                project.name, profile.name, len(palette))
+    return palette
+
+
+def ensure_palette(project: Any, profile: Any, frames: Sequence[Image.Image]) -> List[str]:
+    """Return the palette the pixel stage must use.
+
+    * ``palette_size is None`` -> ``[]`` (no quantization).
+    * ``palette_lock`` and a stored ``locked_palette`` -> that palette.
+    * otherwise -> :func:`rebuild_palette` (the first run locks it).
+    """
+    if profile.palette_size is None:
+        return []
+    if profile.palette_lock and profile.locked_palette:
+        return list(profile.locked_palette)
+    return rebuild_palette(project, profile, frames)

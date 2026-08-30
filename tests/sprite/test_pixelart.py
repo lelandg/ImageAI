@@ -10,9 +10,10 @@ from PIL import Image
 from core.sprite import pixelart
 from core.sprite.pixelart import (
     FLOYD_WARNING, anchor_offset, bayer_matrix, build_shared_palette,
-    fit_pad_integer, hex_to_palette, integer_fit_scale,
+    ensure_palette, fit_pad_integer, hex_to_palette, integer_fit_scale,
     nearest_palette_indices, palette_spread, palette_to_hex,
-    quantize_to_palette, resolution_check, upscale_then_fit,
+    quantize_to_palette, rebuild_palette, remap_to_locked, resolution_check,
+    upscale_then_fit,
 )
 
 
@@ -360,3 +361,70 @@ def test_quantize_empty_palette_returns_copy_and_bad_dither_raises():
 def test_floyd_warning_names_dither_crawl():
     assert "crawl" in FLOYD_WARNING
     assert "bayer" in FLOYD_WARNING
+
+
+# --- Task 6 -------------------------------------------------------------------------
+
+def make_profile(**kw):
+    base = dict(name="pixel", enabled=True, cell_size=(64, 64), binary_alpha=True,
+                alpha_threshold=128, defringe_px=0, palette_size=8, dither="none",
+                palette_lock=True, locked_palette=None)
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def make_project():
+    return SimpleNamespace(name="proj", modified="2026-01-01T00:00:00")
+
+
+def test_remap_to_locked_is_nearest_no_dither():
+    src = Image.new("RGBA", (4, 4), (100, 100, 100, 255))
+    out = np.asarray(remap_to_locked(src, ["#000000", "#FFFFFF"]))
+    assert (out[..., :3] == 0).all()
+    assert (out[..., 3] == 255).all()
+
+
+def test_ensure_palette_builds_and_locks_on_first_run():
+    project, profile = make_project(), make_profile()
+    frames = [square_frame((8, 8), (8, 8), color=(255, 0, 0, 255))]
+    assert ensure_palette(project, profile, frames) == ["#FF0000"]
+    assert profile.locked_palette == ["#FF0000"]
+    assert project.modified != "2026-01-01T00:00:00"
+
+
+def test_ensure_palette_reuses_locked_palette_when_locked():
+    project, profile = make_project(), make_profile(locked_palette=["#123456"])
+    frames = [square_frame((8, 8), (8, 8), color=(255, 0, 0, 255))]
+    assert ensure_palette(project, profile, frames) == ["#123456"]
+    assert profile.locked_palette == ["#123456"]
+
+
+def test_ensure_palette_rebuilds_every_run_when_unlocked():
+    project, profile = make_project(), make_profile(palette_lock=False, locked_palette=["#123456"])
+    frames = [square_frame((8, 8), (8, 8), color=(0, 255, 0, 255))]
+    assert ensure_palette(project, profile, frames) == ["#00FF00"]
+    assert profile.locked_palette == ["#00FF00"]
+
+
+def test_ensure_palette_empty_when_no_palette_size():
+    project, profile = make_project(), make_profile(palette_size=None, locked_palette=["#123456"])
+    assert ensure_palette(project, profile, []) == []
+    assert profile.locked_palette == ["#123456"]
+
+
+def test_rebuild_palette_overrides_lock():
+    project, profile = make_project(), make_profile(locked_palette=["#123456"])
+    frames = [square_frame((8, 8), (8, 8), color=(0, 0, 255, 255))]
+    assert rebuild_palette(project, profile, frames) == ["#0000FF"]
+    assert profile.locked_palette == ["#0000FF"]
+
+
+def test_rebuild_palette_clears_lock_when_frames_are_empty():
+    project, profile = make_project(), make_profile(locked_palette=["#123456"])
+    assert rebuild_palette(project, profile, [Image.new("RGBA", (4, 4), (0, 0, 0, 0))]) == []
+    assert profile.locked_palette is None
+
+
+def test_rebuild_palette_requires_palette_size():
+    with pytest.raises(ValueError):
+        rebuild_palette(make_project(), make_profile(palette_size=None), [])
