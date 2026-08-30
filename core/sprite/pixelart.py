@@ -26,7 +26,7 @@ import numpy as np
 from PIL import Image
 
 from core.sprite import stabilize
-from core.sprite.keying import apply_profile_alpha, hex_to_rgb
+from core.sprite.keying import apply_profile_alpha, hex_to_rgb, rgb_to_hex
 from core.sprite.pipeline import CancelToken, ProgressFn, no_progress, register_stage
 
 logger = logging.getLogger(__name__)
@@ -165,7 +165,7 @@ def hex_to_palette(palette: Sequence[str]) -> np.ndarray:
 
 def palette_to_hex(colors: Sequence[Sequence[int]]) -> List[str]:
     """Rows of (r, g, b) -> ``["#RRGGBB", ...]`` (uppercase)."""
-    return ["#%02X%02X%02X" % (int(r), int(g), int(b)) for r, g, b in colors]
+    return [rgb_to_hex(c) for c in colors]
 
 
 def _luma_key(rgb: Tuple[int, int, int]) -> Tuple[float, int, int, int]:
@@ -200,3 +200,73 @@ def build_shared_palette(frames: Sequence[Image.Image], colors: int) -> List[str
     used = np.unique(np.asarray(quantized))
     entries = {(flat[3 * i], flat[3 * i + 1], flat[3 * i + 2]) for i in used}
     return palette_to_hex(sorted(entries, key=_luma_key))
+
+
+# --- Task 5: quantize to a fixed palette ---------------------------------------
+
+def nearest_palette_indices(rgb_flat: np.ndarray, palette_rgb: np.ndarray,
+                            chunk: int = 65536) -> np.ndarray:
+    """Index of the nearest palette color (squared RGB distance) per pixel.
+
+    Exact for integer inputs: every intermediate is an integer below 2**24,
+    so float32 holds it without rounding. Ties resolve to the lowest index.
+    """
+    pal = np.asarray(palette_rgb, dtype=np.float32)
+    pal_sq = np.sum(pal * pal, axis=1)
+    out = np.empty(len(rgb_flat), dtype=np.int64)
+    for start in range(0, len(rgb_flat), chunk):
+        block = np.asarray(rgb_flat[start:start + chunk], dtype=np.float32)
+        dist = (np.sum(block * block, axis=1)[:, None]
+                - 2.0 * (block @ pal.T) + pal_sq[None, :])
+        out[start:start + chunk] = np.argmin(dist, axis=1)
+    return out
+
+
+def palette_spread(palette_rgb: np.ndarray) -> float:
+    """Mean nearest-neighbor RGB distance inside the palette (dither amplitude)."""
+    pal = np.asarray(palette_rgb, dtype=np.float32)
+    if len(pal) < 2:
+        return 0.0
+    diff = pal[:, None, :] - pal[None, :, :]
+    dist = np.sqrt(np.sum(diff * diff, axis=-1))
+    np.fill_diagonal(dist, np.inf)
+    return float(np.mean(np.min(dist, axis=1)))
+
+
+def quantize_to_palette(image: Image.Image, palette: Sequence[str], dither: str) -> Image.Image:
+    """Map every pixel to the nearest color of ``palette``; alpha is carried unchanged.
+
+    ``dither``: none | bayer2 | bayer4 | bayer8 | floyd. Fully transparent
+    pixels come back as (0, 0, 0, 0).
+    """
+    if dither not in DITHER_MODES:
+        raise ValueError(f"unknown dither {dither!r}; expected one of {DITHER_MODES}")
+    rgba = image if image.mode == "RGBA" else image.convert("RGBA")
+    pal = hex_to_palette(palette)
+    if len(pal) == 0:
+        return rgba.copy()
+    arr = np.asarray(rgba)
+    rgb = arr[..., :3]
+    alpha = arr[..., 3]
+    height, width = alpha.shape
+    if dither == "floyd":
+        # Transparent pixels get an exact palette color so they diffuse no error.
+        filled = rgb.copy()
+        filled[alpha == 0] = pal[0]
+        pal_img = Image.new("P", (1, 1))
+        pal_img.putpalette(pal.astype(np.uint8).flatten().tolist())
+        quantized = Image.fromarray(np.ascontiguousarray(filled)).quantize(
+            palette=pal_img, dither=Image.Dither.FLOYDSTEINBERG)
+        out_rgb = np.asarray(quantized.convert("RGB"))
+    else:
+        work = rgb.astype(np.float32)
+        if dither != "none":
+            n = int(dither[len("bayer"):])
+            tiled = np.tile(bayer_matrix(n), (math.ceil(height / n), math.ceil(width / n)))
+            offsets = (tiled[:height, :width] - 0.5) * palette_spread(pal)
+            work = np.clip(work + offsets[..., None], 0.0, 255.0)
+        idx = nearest_palette_indices(work.reshape(-1, 3), pal)
+        out_rgb = pal[idx].reshape(height, width, 3)
+    out = np.dstack([out_rgb.astype(np.uint8), alpha]).astype(np.uint8)
+    out[alpha == 0] = (0, 0, 0, 0)
+    return Image.fromarray(np.ascontiguousarray(out))

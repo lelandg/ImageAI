@@ -9,9 +9,10 @@ from PIL import Image
 
 from core.sprite import pixelart
 from core.sprite.pixelart import (
-    anchor_offset, bayer_matrix, build_shared_palette, fit_pad_integer,
-    hex_to_palette, integer_fit_scale, palette_to_hex, resolution_check,
-    upscale_then_fit,
+    FLOYD_WARNING, anchor_offset, bayer_matrix, build_shared_palette,
+    fit_pad_integer, hex_to_palette, integer_fit_scale,
+    nearest_palette_indices, palette_spread, palette_to_hex,
+    quantize_to_palette, resolution_check, upscale_then_fit,
 )
 
 
@@ -265,3 +266,97 @@ def test_build_shared_palette_subsamples_large_inputs(monkeypatch):
     monkeypatch.setattr(pixelart, "MAX_PALETTE_SAMPLES", 64)
     frame = square_frame((32, 32), (32, 32), color=(10, 200, 30, 255))
     assert build_shared_palette([frame], 4) == ["#0AC81E"]
+
+
+# --- Task 5 -------------------------------------------------------------------------
+
+PALETTE = ["#000000", "#FF0000", "#00FF00", "#0000FF", "#FFFFFF"]
+
+
+def test_nearest_palette_indices_exact_and_tie_to_lowest():
+    pal = hex_to_palette(PALETTE)
+    rgb = np.array([[250, 5, 5], [0, 0, 0], [100, 100, 100], [10, 250, 10]], dtype=np.uint8)
+    idx = nearest_palette_indices(rgb, pal)
+    assert idx.tolist() == [1, 0, 0, 2]
+    pal2 = hex_to_palette(["#000000", "#FFFFFF"])
+    mid = np.array([[127, 127, 127], [128, 128, 128]], dtype=np.uint8)
+    assert nearest_palette_indices(mid, pal2).tolist() == [0, 1]
+
+
+def test_nearest_palette_indices_chunks_agree():
+    rng = np.random.default_rng(3)
+    rgb = rng.integers(0, 256, (1000, 3), dtype=np.uint8)
+    pal = hex_to_palette(PALETTE)
+    assert np.array_equal(nearest_palette_indices(rgb, pal, chunk=7),
+                          nearest_palette_indices(rgb, pal, chunk=100000))
+
+
+def test_palette_spread():
+    assert palette_spread(hex_to_palette(["#000000"])) == 0.0
+    assert palette_spread(hex_to_palette(["#000000", "#0000FF"])) == pytest.approx(255.0)
+
+
+def test_quantize_none_maps_to_nearest_and_keeps_alpha():
+    arr = np.zeros((2, 2, 4), dtype=np.uint8)
+    arr[0, 0] = (250, 5, 5, 255)
+    arr[0, 1] = (5, 250, 5, 128)
+    arr[1, 0] = (5, 5, 250, 255)
+    arr[1, 1] = (77, 77, 77, 0)
+    out = quantize_to_palette(Image.fromarray(arr), PALETTE, "none")
+    res = np.asarray(out)
+    assert tuple(res[0, 0]) == (255, 0, 0, 255)
+    assert tuple(res[0, 1]) == (0, 255, 0, 128)
+    assert tuple(res[1, 0]) == (0, 0, 255, 255)
+    assert tuple(res[1, 1]) == (0, 0, 0, 0)
+
+
+def test_quantize_output_colors_are_subset_of_palette():
+    rng = np.random.default_rng(11)
+    arr = rng.integers(0, 256, (16, 16, 4), dtype=np.uint8)
+    arr[..., 3] = 255
+    src = Image.fromarray(arr)
+    pal_set = {tuple(c) for c in hex_to_palette(PALETTE).tolist()}
+    for mode in ("none", "bayer2", "bayer4", "bayer8", "floyd"):
+        out = np.asarray(quantize_to_palette(src, PALETTE, mode))
+        colors = {tuple(px[:3]) for px in out.reshape(-1, 4)}
+        assert colors <= pal_set, mode
+        assert (out[..., 3] == 255).all(), mode
+
+
+def test_quantize_bayer_produces_a_checker_on_a_midtone():
+    src = Image.new("RGBA", (4, 4), (128, 128, 128, 255))
+    out = np.asarray(quantize_to_palette(src, ["#000000", "#FFFFFF"], "bayer2"))
+    assert (out[..., 3] == 255).all()
+    assert out[0, 0, 0] != out[0, 1, 0]
+    assert out[0, 0, 0] == out[1, 1, 0]
+    none = np.asarray(quantize_to_palette(src, ["#000000", "#FFFFFF"], "none"))
+    assert (none[..., 0] == none[0, 0, 0]).all()
+
+
+def test_quantize_floyd_uses_pillow_diffusion():
+    src = Image.new("RGBA", (8, 8), (128, 128, 128, 255))
+    out = np.asarray(quantize_to_palette(src, ["#000000", "#FFFFFF"], "floyd"))
+    values = set(out[..., 0].flatten().tolist())
+    assert values == {0, 255}
+
+
+def test_quantize_floyd_transparent_pixels_do_not_bleed():
+    arr = np.zeros((4, 4, 4), dtype=np.uint8)
+    arr[:, 2:] = (250, 250, 250, 255)
+    out = np.asarray(quantize_to_palette(Image.fromarray(arr), ["#000000", "#FFFFFF"], "floyd"))
+    assert (out[:, :2] == 0).all()
+    assert (out[:, 2:, :3] == 255).all()
+
+
+def test_quantize_empty_palette_returns_copy_and_bad_dither_raises():
+    src = square_frame((4, 4), (4, 4))
+    out = quantize_to_palette(src, [], "none")
+    assert np.array_equal(np.asarray(out), np.asarray(src))
+    assert out is not src
+    with pytest.raises(ValueError):
+        quantize_to_palette(src, PALETTE, "ordered")
+
+
+def test_floyd_warning_names_dither_crawl():
+    assert "crawl" in FLOYD_WARNING
+    assert "bayer" in FLOYD_WARNING
