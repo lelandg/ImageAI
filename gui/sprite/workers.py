@@ -14,6 +14,7 @@ Connect these to bound methods of QObjects so the slot runs on the GUI thread.
 """
 from __future__ import annotations
 
+import functools
 import logging
 from typing import Any, Callable, Optional
 
@@ -100,9 +101,14 @@ class WorkerHost:
         if on_progress is not None:
             worker.progress.connect(on_progress)
         # Release AFTER the caller's slots (same connection type keeps order).
-        worker.finished.connect(self._release_worker)
-        worker.failed.connect(self._release_worker)
-        worker.cancelled.connect(self._release_worker)
+        # Bound to this worker instance: a queued release event for a worker
+        # that has already been superseded by a newer one (e.g. the caller
+        # started job B from inside job A's on_finished) must not clear the
+        # host's current _worker.
+        release = functools.partial(self._release_worker, worker)
+        worker.finished.connect(release)
+        worker.failed.connect(release)
+        worker.cancelled.connect(release)
         self._worker = worker
         worker.start()
         return worker
@@ -124,5 +130,12 @@ class WorkerHost:
             logger.error("Sprite worker %r did not stop within %d ms", worker.label, timeout_ms)
         self._worker = None
 
-    def _release_worker(self, *_args) -> None:
-        self._worker = None
+    def _release_worker(self, worker: SpriteWorker, *_args) -> None:
+        """Clear ``self._worker`` only if it still points at ``worker``.
+
+        A queued finished/failed/cancelled event for a worker that a later
+        ``start_job`` call has already superseded must be a no-op, or it
+        would orphan the new worker (see review finding, Task 1 fix round 1).
+        """
+        if self._worker is worker:
+            self._worker = None

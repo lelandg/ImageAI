@@ -135,3 +135,70 @@ def test_worker_host_shutdown_cancels_and_joins(qapp):
     host.shutdown(timeout_ms=5000)
     assert not worker.isRunning()
     assert worker.token.cancelled
+
+
+def test_worker_host_shutdown_timeout_logs_error(qapp, caplog):
+    """shutdown() times out (Minor 1): logs an error but still returns."""
+    host = _Host()
+
+    def slow_to_cancel(progress, token):
+        # Ignores the token past the shutdown timeout, then cooperates so the
+        # thread eventually exits and the test doesn't leak it.
+        start = time.time()
+        while time.time() - start < 0.2:
+            pass
+        while True:
+            token.raise_if_cancelled()
+            time.sleep(0.005)
+
+    worker = host.start_job(slow_to_cancel, label="stubborn",
+                            on_finished=lambda r: None, on_failed=lambda m: None)
+    assert worker is not None
+    with caplog.at_level("ERROR"):
+        host.shutdown(timeout_ms=50)
+    assert any("did not stop within" in record.message for record in caplog.records)
+    assert worker.wait(2000)  # let the thread actually exit before the test ends
+
+
+def test_worker_host_starts_next_job_from_on_finished(qapp):
+    """Queue-draining pattern (review finding, Task 1 fix round 1): starting
+    job B from inside job A's on_finished must not let A's queued release
+    event (delivered after B is already the current worker) orphan B."""
+    host = _Host()
+    calls = {"a": 0, "b": 0}
+    result_b = []
+    started = {}
+
+    def job_a(progress, token):
+        return "a-done"
+
+    def job_b(progress, token):
+        return "b-done"
+
+    def on_finished_a(result):
+        calls["a"] += 1
+
+        def on_finished_b(r):
+            calls["b"] += 1
+            result_b.append(r)
+
+        b_worker = host.start_job(job_b, label="b",
+                                  on_finished=on_finished_b, on_failed=lambda m: None)
+        assert b_worker is not None, "job B was refused: A's release fired before B started"
+        assert host._worker is b_worker
+        assert host.is_busy()
+        started["b"] = b_worker
+
+    first = host.start_job(job_a, label="a", on_finished=on_finished_a, on_failed=lambda m: None)
+    assert first is not None
+    assert first.wait(5000)
+    for _ in range(5):
+        qapp.processEvents()
+    assert "b" in started, "on_finished_a did not run"
+    assert started["b"].wait(5000)
+    for _ in range(5):
+        qapp.processEvents()
+    assert calls == {"a": 1, "b": 1}
+    assert result_b == ["b-done"]
+    assert not host.is_busy()
+    assert host._worker is None
