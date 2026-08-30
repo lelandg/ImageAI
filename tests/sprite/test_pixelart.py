@@ -10,6 +10,7 @@ from PIL import Image
 from core.sprite import pixelart
 from core.sprite.pixelart import (
     anchor_offset, fit_pad_integer, integer_fit_scale,
+    resolution_check, upscale_then_fit,
 )
 
 
@@ -117,3 +118,56 @@ def test_fit_pad_integer_non_multiple_fits():
     out = fit_pad_integer(src, (64, 64), "bottom_center")
     assert out.size == (64, 64)
     assert opaque_pixels(out) == 63 * 38
+
+
+# --- Task 2 -------------------------------------------------------------------------
+
+def test_resolution_check_none_when_source_large_enough():
+    assert resolution_check((64, 64), (64, 64)) is None
+    assert resolution_check((256, 256), (64, 64)) is None
+    assert resolution_check((100, 40), (64, 64)) is None
+
+
+def test_resolution_check_warns_when_smaller_in_both_axes():
+    text = resolution_check((40, 30), (64, 64))
+    assert text is not None
+    assert "40x30" in text and "64x64" in text
+    assert "upscale_small=True" in text
+    assert "128x128" in text
+
+
+def test_upscale_then_fit_upscales_small_source_proportionally(monkeypatch):
+    calls = []
+    install_fake_upscaler(monkeypatch, calls)
+    src = square_frame((16, 8), (16, 8))
+    out = upscale_then_fit(src, (64, 64), "bottom_center", method="lanczos")
+    assert calls == [(64, 32, "lanczos")]
+    assert out.size == (64, 64)
+    arr = np.asarray(out)
+    rows = np.where(arr[..., 3] > 0)[0]
+    cols = np.where(arr[..., 3] > 0)[1]
+    assert cols.min() == 0 and cols.max() == 63
+    assert rows.max() == 63 and rows.min() == 32
+
+
+def test_upscale_then_fit_is_fit_pad_when_source_large_enough():
+    src = square_frame((128, 128), (128, 128))
+    out = upscale_then_fit(src, (64, 64), "top_left", method="lanczos")
+    assert np.array_equal(np.asarray(out), np.asarray(fit_pad_integer(src, (64, 64), "top_left")))
+
+
+def test_upscale_then_fit_pads_when_upscaler_returns_original(monkeypatch):
+    calls = []
+    fake = types.ModuleType("core.upscaling")
+    fake.upscale_image = lambda data, w, h, method="lanczos", **kw: (calls.append((w, h, method)), data)[1]
+    monkeypatch.setitem(sys.modules, "core.upscaling", fake)
+    src = square_frame((10, 20), (10, 20))
+    out = upscale_then_fit(src, (64, 64), "center", method="lanczos")
+    assert calls == [(32, 64, "lanczos")]
+    assert out.size == (64, 64)
+    assert opaque_pixels(out) == 10 * 20
+
+
+def test_upscale_then_fit_rejects_unknown_method():
+    with pytest.raises(ValueError):
+        upscale_then_fit(square_frame((8, 8), (8, 8)), (64, 64), "center", method="magic")

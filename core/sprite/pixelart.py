@@ -92,3 +92,48 @@ def fit_pad_integer(image: Image.Image, cell: Size, anchor: str,
     canvas = Image.new("RGBA", cell_wh, (0, 0, 0, 0))
     canvas.paste(reduced, anchor_offset(reduced.size, cell_wh, anchor))
     return canvas
+
+
+# --- Task 2: resolution check + upscale ---------------------------------------
+
+def resolution_check(src: Size, cell: Size) -> Optional[str]:
+    """Warning text when the source is smaller than the cell in both axes."""
+    sw, sh = int(src[0]), int(src[1])
+    cw, ch = int(cell[0]), int(cell[1])
+    if sw >= cw or sh >= ch:
+        return None
+    factor = min(cw / sw, ch / sh)
+    return (
+        f"Source frame {sw}x{sh} is smaller than the pixel cell {cw}x{ch}. "
+        f"The pixel profile does not upscale by default, so the character fills "
+        f"only part of the cell. Run the pipeline with upscale_small=True to "
+        f"upscale {factor:.2f}x through core.upscaling first, or generate the "
+        f"source at {cw}x{ch} or larger. An integer multiple such as "
+        f"{2 * cw}x{2 * ch} gives the cleanest pixels."
+    )
+
+
+def upscale_then_fit(image: Image.Image, cell: Size, anchor: str,
+                     *, method: str = "lanczos") -> Image.Image:
+    """Upscale proportionally through ``core.upscaling`` when the source is
+    smaller than the cell, then :func:`fit_pad_integer`."""
+    if method not in UPSCALE_METHODS:
+        raise ValueError(f"unknown upscale method {method!r}; expected one of {UPSCALE_METHODS}")
+    rgba = image if image.mode == "RGBA" else image.convert("RGBA")
+    cell_wh = (int(cell[0]), int(cell[1]))
+    if resolution_check(rgba.size, cell_wh) is None:
+        return fit_pad_integer(rgba, cell_wh, anchor)
+    sw, sh = rgba.size
+    factor = min(cell_wh[0] / sw, cell_wh[1] / sh)
+    target_w = min(cell_wh[0], max(1, round(sw * factor)))
+    target_h = min(cell_wh[1], max(1, round(sh * factor)))
+    from core.upscaling import upscale_image  # lazy: see UPSCALE_METHODS note
+
+    buf = io.BytesIO()
+    rgba.save(buf, format="PNG")
+    data = upscale_image(buf.getvalue(), target_w, target_h, method)
+    upscaled = Image.open(io.BytesIO(data))
+    upscaled.load()
+    logger.info("pixel profile upscaled %dx%d -> %dx%d via %s", sw, sh,
+                upscaled.width, upscaled.height, method)
+    return fit_pad_integer(upscaled.convert("RGBA"), cell_wh, anchor)
