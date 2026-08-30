@@ -250,7 +250,28 @@ class SpriteTab(QWidget):
             raise ValueError(f"No {name} API key is configured. Add one in Settings.")
         return get_provider(name, {"api_key": api_key, "auth_mode": self.config.get_auth_mode(name)})
 
+    def _shutdown_panel_workers(self) -> None:
+        """Cancel and join any in-flight panel job before the project is replaced.
+
+        A worker still running against the OLD project must never deliver its
+        ``finished``/``failed`` result after the panels have been repointed at
+        a NEW project — that result would be written against the wrong
+        project (cross-project data corruption). ``WorkerHost.shutdown()``
+        cancels and bound-waits the worker, so by the time this returns, the
+        job either already finished (and its callback already ran, against
+        the still-current OLD project) or it will emit ``cancelled()`` — never
+        a late ``finished``/``failed`` against the new project.
+        """
+        for panel in (self.character_panel, self.action_cards_panel, self.queue_panel):
+            worker = panel._worker
+            was_busy = panel.is_busy()
+            label = worker.label if worker is not None else "job"
+            panel.shutdown()
+            if was_busy:
+                self.log(f"Cancelled running {label} job to switch project", "WARNING")
+
     def _apply_project(self, project: SpriteProject) -> None:
+        self._shutdown_panel_workers()
         self._project = project
         self.character_panel.set_project(project)
         self.action_cards_panel.set_project(project)

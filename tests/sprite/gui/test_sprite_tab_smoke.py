@@ -1,11 +1,12 @@
 # tests/sprite/gui/test_sprite_tab_smoke.py
 """SpriteTab: construction, project toolbar, 5b slots, routing, console."""
+import time
 from pathlib import Path
 
-from PySide6.QtWidgets import QDialog, QLabel, QPushButton
+from PySide6.QtWidgets import QApplication, QDialog, QLabel, QPushButton
 
 import gui.sprite.sprite_tab as st
-from core.sprite.project import GenerationSettings
+from core.sprite.project import ActionCard, GenerationSettings
 from gui.sprite import SpriteTab
 from gui.sprite.character_panel import CharacterPanel
 from gui.sprite.prefs import sprite_settings
@@ -176,3 +177,49 @@ def test_make_provider_uses_config_keys(qapp, fake_config, monkeypatch):
     fake_config.api_key = None
     with pytest.raises(ValueError, match="API key"):
         tab.make_provider("google")
+
+
+def test_project_switch_cancels_running_worker_before_swap(qapp, fake_config):
+    """Fix round 1: a worker still running against the OLD project must never
+    deliver its result after the panel has been repointed at a NEW project.
+
+    ``on_finished`` here mirrors the real bug: it mutates whatever project the
+    panel is CURRENTLY pointed at (as ``_on_cards_done`` does with
+    ``self.project.actions.append(...)``), which is exactly what corrupts the
+    new project if a stale job's ``finished`` fires after the swap.
+    """
+    tab = SpriteTab(config=fake_config)
+    old_project = tab.new_project_named("old")
+
+    finished_calls = []
+
+    def slow_job(progress, token):
+        # Bounded: checks the cancel token every 5 ms for up to 1.5 s, so
+        # WorkerHost.shutdown()'s bounded wait (default 5000 ms) always wins.
+        for _ in range(300):
+            token.raise_if_cancelled()
+            time.sleep(0.005)
+        return "unexpected-completion"
+
+    def on_finished(result):
+        finished_calls.append(result)
+        if tab.action_cards_panel.project is not None:
+            tab.action_cards_panel.project.actions.append(
+                ActionCard(id="stale", name="stale", prompt=""))
+
+    worker = tab.action_cards_panel.start_job(
+        slow_job, label="test-slow", on_finished=on_finished,
+        on_failed=lambda m: None, on_cancelled=lambda: None)
+    assert worker is not None
+    assert tab.action_cards_panel.is_busy()
+
+    new_project = tab.new_project_named("new")
+
+    for _ in range(5):
+        QApplication.processEvents()
+
+    assert not tab.action_cards_panel.is_busy()
+    assert finished_calls == []  # the stale job was cancelled, never finished
+    assert new_project.actions == []
+    assert old_project.actions == []
+    assert tab.action_cards_panel.project is new_project
