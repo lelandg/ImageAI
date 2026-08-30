@@ -326,6 +326,24 @@ def test_orphan_survives_garbage_collection_of_its_host(qapp):
     assert worker not in workers_mod._LIVE_ORPHANS
 
 
+def test_finished_workers_are_detached_from_the_host(qapp):
+    """A finished worker must not stay a QThread child of the host: a parentless
+    host (e.g. a dialog) freed by the garbage collector would take dead threads
+    with it (5b Task 7 finding)."""
+    from PySide6.QtCore import QThread
+
+    host = _Host()
+    for i in range(5):
+        worker = host.start_job(lambda progress, token: i, label=f"job{i}",
+                                on_finished=lambda r: None, on_failed=lambda m: None)
+        assert worker is not None
+        assert worker.wait(5000)
+        for _ in range(5):
+            qapp.processEvents()
+        assert not host.is_busy()
+    assert host.findChildren(QThread) == []
+
+
 def test_join_orphans_waits_for_the_released_orphan(qapp):
     """join_orphans() is what MainWindow.closeEvent uses instead of a destroy."""
     host = _Host()

@@ -331,3 +331,13 @@ class WorkerHost:
         """
         if self._worker is worker:
             self._worker = None
+        # The terminal event has been delivered and run() returned right after
+        # emitting it, so the thread is exiting: join it and detach it from the
+        # host. A finished QThread left as a child of a parentless host (e.g.
+        # ExportDialog) rides along when the cyclic garbage collector frees
+        # that host, and Qt aborts if any such child still runs (5b Task 7
+        # finding). Detached and joined, the worker is freed by Python when
+        # its last reference drops — never while its thread runs. (deleteLater
+        # here crashes: the worker's own signal delivery is still on the stack.)
+        worker.wait()
+        worker.setParent(None)
