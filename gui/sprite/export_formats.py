@@ -12,6 +12,7 @@ from typing import List
 from core.sprite.exporters.aseprite_native import export_aseprite
 from core.sprite.exporters.godot_tres import export_godot_tres
 from core.sprite.models import SheetMeta
+from core.utils import sidecar_path
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ def write_godot_tres(meta: SheetMeta, out_dir: Path) -> List[Path]:
         raise ValueError(f"godot_tres needs the sheet PNG at {png}; register it with needs_sheet=True")
     out = export_godot_tres(meta, out_dir / f"{_stem(meta)}.tres", atlas_res_path=f"res://{png.name}")
     logger.info("Godot SpriteFrames: %s", out)
-    return [out]
+    return [out, sidecar_path(out)]
 
 
 def write_aseprite_native(meta: SheetMeta, out_dir: Path) -> List[Path]:
@@ -40,7 +41,7 @@ def write_aseprite_native(meta: SheetMeta, out_dir: Path) -> List[Path]:
     out_dir.mkdir(parents=True, exist_ok=True)
     out = export_aseprite(meta, out_dir / f"{_stem(meta)}.aseprite")
     logger.info("Aseprite file: %s", out)
-    return [out]
+    return [out, sidecar_path(out)]
 
 
 def register_extra_formats(dialog) -> None:

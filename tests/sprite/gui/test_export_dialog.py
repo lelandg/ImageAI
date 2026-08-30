@@ -119,7 +119,7 @@ def test_builtin_formats_registered_in_order(qapp, project):
                                 "godot_tres", "aseprite_native"]
     assert set(dialog.profile_checks) == {p.name for p in project.profiles}
     assert dialog.options_layout is not None
-    assert dialog.notes_label.wordWrap()
+    assert dialog.notes_label.wordWrap() and dialog.notes_label.text() == ""
     _close(dialog)
 
 

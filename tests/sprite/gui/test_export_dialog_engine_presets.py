@@ -133,9 +133,14 @@ def test_write_godot_tres_uses_runner_sheet(tmp_path):
     laid, out = _laid_out(tmp_path, _meta(tmp_path))
     written = write_godot_tres(laid, out)
     tres = out / "hero_hd.tres"
-    assert written == [tres] and tres.exists()
+    tres_json = out / "hero_hd.tres.json"
+    assert written == [tres, tres_json]
+    assert all(p.exists() for p in written)
     assert f'path="res://{sheet_png_path(laid, out).name}"' in tres.read_text(encoding="utf-8")
-    assert (out / "hero_hd.tres.json").exists()
+    # the manifest lists every file this writer itself wrote, and nothing it did not
+    # (the sheet PNG + its own sidecars were already on disk from `_laid_out`, out of scope here)
+    on_disk = sorted(p for p in out.glob("hero_hd.tres*") if p.is_file())
+    assert on_disk == sorted(written)
 
 
 def test_write_godot_tres_requires_sheet(tmp_path):
@@ -149,4 +154,9 @@ def test_write_aseprite_native(tmp_path):
     out = tmp_path / "out" / "hd"
     out.mkdir(parents=True)
     written = write_aseprite_native(_meta(tmp_path), out)
-    assert written == [out / "hero_hd.aseprite"] and written[0].exists()
+    ase = out / "hero_hd.aseprite"
+    ase_json = out / "hero_hd.aseprite.json"
+    assert written == [ase, ase_json]
+    assert all(p.exists() for p in written)
+    on_disk = sorted(p for p in out.glob("hero_hd.aseprite*") if p.is_file())
+    assert on_disk == sorted(written)
