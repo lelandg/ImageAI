@@ -1,5 +1,6 @@
 # tests/sprite/test_pose_steps.py
 import json
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -107,6 +108,18 @@ def test_generate_wraps_provider_errors():
         raise RuntimeError("429 RESOURCE_EXHAUSTED")
     with pytest.raises(SpriteGenerationError):
         generate_pose_instructions(_action(), 4, model="m", completion_fn=boom)
+
+
+def test_generate_default_log_writes_each_full_content_message_once(caplog):
+    caplog.set_level(logging.INFO, logger="core.sprite.generation.pose_steps")
+
+    generate_pose_instructions(_action(), 4, model="m", completion_fn=lambda **kw: _reply())
+
+    messages = [r.getMessage() for r in caplog.records]
+    request_lines = [m for m in messages if m.startswith("[pose steps] request:")]
+    response_lines = [m for m in messages if m.startswith("[pose steps] response:")]
+    assert len(request_lines) == 1
+    assert len(response_lines) == 1
 
 
 def test_generate_resolves_model_when_missing(monkeypatch):

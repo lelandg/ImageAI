@@ -14,6 +14,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.llm_models import resolve_model
 from core.llm_params import LLMParams, build_completion_kwargs
 from core.llm_parsing import LLMResponseParser
+from core.sprite.generation._common import emit
 from core.sprite.generation.errors import classify_provider_error
 from core.sprite.generation.prompts import FORBIDDEN_WORDS
 from core.sprite.project import ActionCard
@@ -165,20 +166,17 @@ def generate_pose_instructions(
         f"[pose steps] request: provider={provider} model={kwargs.get('model')} params={redacted}\n"
         + "\n".join(f"--- {m['role']} ---\n{m['content']}" for m in messages)
     )
-    logger.info(request_log)
-    log(request_log)
+    emit(logger, log, request_log)
     try:
         response = completion_fn(**kwargs)
     except Exception as exc:  # noqa: BLE001 — every provider failure becomes a SpriteGenerationError
-        logger.error("[pose steps] completion failed: %s", exc)
-        log(f"[pose steps] completion failed: {exc}")
+        emit(logger, log, f"[pose steps] completion failed: {exc}", level="error")
         raise classify_provider_error(exc) from exc
     text = _response_text(response)
-    logger.info("[pose steps] response:\n%s", text)
-    log(f"[pose steps] response:\n{text}")
+    emit(logger, log, f"[pose steps] response:\n{text}")
     try:
         return parse_pose_steps(text, frames)
     except PoseStepsContractError as exc:
-        logger.warning("[pose steps] contract violation (%s); using fallback steps", exc)
-        log(f"[pose steps] contract violation: {exc}; using generic fallback steps")
+        emit(logger, log, f"[pose steps] contract violation: {exc}; using generic fallback steps",
+             level="warning")
         return fallback_pose_steps(action, frames)
