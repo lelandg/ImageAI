@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Last Updated:** 2026-08-29 10:20
+**Last Updated:** 2026-08-30 08:56
 
 **Spec:** `Plans/2026-08-29-sprite-tab-design.md` — §1.1 (worker contract), §1.5 (shortcuts: Ctrl+Enter / Escape), §1.6 (storage, purge preference, named configs), §2 (data model), §4.5 (GUI module list), decision 8 (cost labels), decision 9 (Generation Settings dialog + named configurations).
 
@@ -75,7 +75,7 @@ Consumed, not created here (sub-project 1): `core/sprite/project.py` — `Sprite
 - Produces: `gui.sprite.workers.WorkerHost` mixin — `start_job(job, *, label, on_finished, on_failed, on_cancelled=None, on_progress=None) -> Optional[SpriteWorker]` (returns `None` when busy), `is_busy() -> bool`, `cancel_running() -> None`, `shutdown(timeout_ms: int = 5000) -> None`.
 - Cancellation mapping (decision): `Cancelled` raised by the job → `cancelled()` signal (no `failed`). The UI shows no error dialog on cancel. A job that returns normally after `token.cancel()` also reports `cancelled()`.
 
-- [ ] **Step 1: Test fixtures** — create `tests/sprite/gui/conftest.py`:
+- [x] **Step 1: Test fixtures** — create `tests/sprite/gui/conftest.py`:
 
 ```python
 # tests/sprite/gui/conftest.py
@@ -173,7 +173,7 @@ def wait_for_worker():
     return _wait
 ```
 
-- [ ] **Step 2: Failing tests** — create `tests/sprite/gui/test_sprite_worker.py`:
+- [x] **Step 2: Failing tests** — create `tests/sprite/gui/test_sprite_worker.py`:
 
 ```python
 # tests/sprite/gui/test_sprite_worker.py
@@ -308,14 +308,14 @@ def test_worker_host_shutdown_cancels_and_joins(qapp):
     assert worker.token.cancelled
 ```
 
-- [ ] **Step 3: Run — expect failure**
+- [x] **Step 3: Run — expect failure**
 
 ```bash
 QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_sprite_worker.py -v
 ```
 Expected: collection error `ModuleNotFoundError: No module named 'gui.sprite'`.
 
-- [ ] **Step 4: Implement** — create `gui/sprite/__init__.py`:
+- [x] **Step 4: Implement** — create `gui/sprite/__init__.py`:
 
 ```python
 """Sprite tab GUI package (design §4.5). ``SpriteTab`` is exported in Task 8."""
@@ -454,7 +454,7 @@ class WorkerHost:
         self._worker = None
 ```
 
-- [ ] **Step 5: Run — expect pass**
+- [x] **Step 5: Run — expect pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m py_compile /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/workers.py
@@ -462,7 +462,7 @@ QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/p
 ```
 Expected: 7 passed.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/__init__.py gui/sprite/workers.py tests/sprite/gui/conftest.py tests/sprite/gui/test_sprite_worker.py
@@ -483,7 +483,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): SpriteW
 - Produces: `core.sprite.configs.DEFAULT_NAME = "Default"`, `FORMAT_VERSION = 1`, `settings_to_dict(settings) -> dict`, `settings_from_dict(data, *, name=None) -> GenerationSettings`, `NamedConfigStore(path: Optional[Path] = None)` with `path -> Path`, `list_names() -> List[str]` ("Default" always first), `get(name) -> GenerationSettings` (`KeyError` when missing; "Default" always resolves), `save(name, settings) -> None` (`ValueError` on empty name), `delete(name) -> None` (`ValueError` for "Default", `KeyError` when missing).
 - File format: `{"version": 1, "configs": {name: {GenerationSettings fields…}}}`, written atomically (tmp + `os.replace`).
 
-- [ ] **Step 1: Failing tests** — create `tests/sprite/test_named_configs.py`:
+- [x] **Step 1: Failing tests** — create `tests/sprite/test_named_configs.py`:
 
 ```python
 # tests/sprite/test_named_configs.py
@@ -569,14 +569,14 @@ def test_corrupt_file_is_logged_and_treated_as_empty(tmp_path, caplog):
     assert any("unreadable" in record.message for record in caplog.records)
 ```
 
-- [ ] **Step 2: Run — expect failure**
+- [x] **Step 2: Run — expect failure**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_named_configs.py -v
 ```
 Expected: `ModuleNotFoundError: No module named 'core.sprite.configs'`.
 
-- [ ] **Step 3: Implement** — create `core/sprite/configs.py`:
+- [x] **Step 3: Implement** — create `core/sprite/configs.py`:
 
 ```python
 """Named generation configurations for the Sprite tab (design decision 9, §1.6).
@@ -685,14 +685,14 @@ class NamedConfigStore:
         logger.info("Deleted sprite generation configuration %r", name)
 ```
 
-- [ ] **Step 4: Run — expect pass**
+- [x] **Step 4: Run — expect pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_named_configs.py /mnt/d/Documents/Code/GitHub/ImageAI/tests/test_no_hardcoded_paths.py -v
 ```
 Expected: 9 passed in the configs file; the path guard stays green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/configs.py tests/sprite/test_named_configs.py
@@ -711,7 +711,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): NamedConfig
 **Interfaces:**
 - Produces: `gui.sprite.prefs.sprite_settings() -> QSettings` (`QSettings("ImageAI", "Sprite")`), `PURGE_KEY = "sprite/purge_after_export"`, `LLM_PROVIDER_KEY = "sprite/llm_provider"`, `purge_after_export_enabled() -> bool`, `set_purge_after_export(enabled: bool) -> None`, `confirm_purge(parent: Optional[QWidget]) -> bool`, `PURGE_MESSAGE: str`, `get_pref(key: str, default=None)`, `set_pref(key: str, value) -> None`.
 
-- [ ] **Step 1: Failing tests** — create `tests/sprite/gui/test_sprite_prefs.py`:
+- [x] **Step 1: Failing tests** — create `tests/sprite/gui/test_sprite_prefs.py`:
 
 ```python
 # tests/sprite/gui/test_sprite_prefs.py
@@ -770,14 +770,14 @@ def test_generic_pref_roundtrip(qapp):
     assert prefs.get_pref(prefs.LLM_PROVIDER_KEY, "google") == "google"
 ```
 
-- [ ] **Step 2: Run — expect failure**
+- [x] **Step 2: Run — expect failure**
 
 ```bash
 QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_sprite_prefs.py -v
 ```
 Expected: `ModuleNotFoundError: No module named 'gui.sprite.prefs'`.
 
-- [ ] **Step 3: Implement** — create `gui/sprite/prefs.py`:
+- [x] **Step 3: Implement** — create `gui/sprite/prefs.py`:
 
 ```python
 """Sticky Sprite-tab preferences (QSettings) and the purge confirmation.
@@ -846,14 +846,14 @@ def confirm_purge(parent: Optional[QWidget]) -> bool:
     return reply == QMessageBox.Yes
 ```
 
-- [ ] **Step 4: Run — expect pass**
+- [x] **Step 4: Run — expect pass**
 
 ```bash
 QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_sprite_prefs.py -v
 ```
 Expected: 6 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/prefs.py tests/sprite/gui/test_sprite_prefs.py
@@ -874,7 +874,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): sticky 
 - Produces: `gui.sprite.character_panel.CharacterPanel(WorkerHost, QGroupBox)` — `__init__(self, config, parent=None)`; Signals `sourceChanged(object)` (Path of the normalized PNG), `plateReady(object)` (Path), `turnaroundReady(object)` (dict view → Path), `plateColorChanged(str)`, `historyEntry(dict)`, `logMessage(str, str)`; methods `set_project(project) -> None`, `set_source(path: Path) -> None` (validates, then normalizes in a worker), `plate_color -> str` property, `make_plate() -> None`, `generate_turnaround() -> None`, `cancel() -> None`, plus the `WorkerHost` API. Helper `paths_from_mime(mime: QMimeData) -> List[Path]` (module-level, image suffixes only).
 - Widget names (5b/tests rely on them): `drop_label`, `browse_btn`, `analysis_label`, `plate_color_btn`, `plate_btn`, `turnaround_btn`, `cancel_btn`, `progress`, `status_label`.
 
-- [ ] **Step 1: Failing tests** — create `tests/sprite/gui/test_character_panel.py`:
+- [x] **Step 1: Failing tests** — create `tests/sprite/gui/test_character_panel.py`:
 
 ```python
 # tests/sprite/gui/test_character_panel.py
@@ -1064,14 +1064,14 @@ def test_paths_from_mime_filters_images(qapp, tmp_path):
     assert paths_from_mime(mime) == [tmp_path / "a.png"]
 ```
 
-- [ ] **Step 2: Run — expect failure**
+- [x] **Step 2: Run — expect failure**
 
 ```bash
 QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_character_panel.py -v
 ```
 Expected: `ModuleNotFoundError: No module named 'gui.sprite.character_panel'`.
 
-- [ ] **Step 3: Implement** — create `gui/sprite/character_panel.py`:
+- [x] **Step 3: Implement** — create `gui/sprite/character_panel.py`:
 
 ```python
 """Character intake panel: drop/browse → normalize → chroma plate → turnaround.
@@ -1425,7 +1425,7 @@ class CharacterPanel(WorkerHost, QGroupBox):
             self.set_source(paths[0])
 ```
 
-- [ ] **Step 4: Run — expect pass**
+- [x] **Step 4: Run — expect pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m py_compile /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/character_panel.py
@@ -1433,7 +1433,7 @@ QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/p
 ```
 Expected: 11 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/character_panel.py tests/sprite/gui/test_character_panel.py
@@ -1454,7 +1454,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): Charact
 - Produces: `gui.sprite.generation_settings_dialog.GenerationSettingsDialog(DialogCleanupMixin, QDialog)` — `__init__(self, settings: GenerationSettings, store: NamedConfigStore, parent=None)`; `set_settings(settings) -> None`; `settings() -> GenerationSettings`; module constants `PROVIDERS = ("omni", "veo")`, `RESOLUTIONS = ("720p", "1080p")`, `ASPECT_RATIOS = ("16:9", "9:16", "1:1")`, `PROVIDER_DEFAULT_LABEL = "(provider default)"`, `GEOMETRY_KEY = "sprite/gen_settings_geometry"`; `model_choices(provider: str) -> List[str]`. Ctrl+Enter = OK (`self._primary`), Escape = reject (QDialog default), geometry saved on every exit path.
 - Widget names: `config_combo`, `load_btn`, `save_as_btn`, `delete_btn`, `provider_combo`, `model_combo` (editable), `resolution_combo`, `aspect_combo`, `duration_spin`, `fps_spin`, `loop_check`, `plate_color_btn`, `turnaround_check`, `audio_check`, `cost_label`, `ok_btn`, `cancel_btn`.
 
-- [ ] **Step 1: Failing tests** — create `tests/sprite/gui/test_generation_settings_dialog.py`:
+- [x] **Step 1: Failing tests** — create `tests/sprite/gui/test_generation_settings_dialog.py`:
 
 ```python
 # tests/sprite/gui/test_generation_settings_dialog.py
@@ -1590,14 +1590,14 @@ def test_geometry_saved_on_close(qapp, tmp_path):
     assert sprite_settings().value(gsd.GEOMETRY_KEY) is not None
 ```
 
-- [ ] **Step 2: Run — expect failure**
+- [x] **Step 2: Run — expect failure**
 
 ```bash
 QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_generation_settings_dialog.py -v
 ```
 Expected: `ModuleNotFoundError: No module named 'gui.sprite.generation_settings_dialog'`.
 
-- [ ] **Step 3: Implement** — create `gui/sprite/generation_settings_dialog.py`:
+- [x] **Step 3: Implement** — create `gui/sprite/generation_settings_dialog.py`:
 
 ```python
 """Generation Settings dialog: every GenerationSettings field + named configurations.
@@ -1886,7 +1886,7 @@ class GenerationSettingsDialog(DialogCleanupMixin, QDialog):
         settings.sync()
 ```
 
-- [ ] **Step 4: Run — expect pass**
+- [x] **Step 4: Run — expect pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m py_compile /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/generation_settings_dialog.py
@@ -1894,7 +1894,7 @@ QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/p
 ```
 Expected: 12 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/generation_settings_dialog.py tests/sprite/gui/test_generation_settings_dialog.py
@@ -1915,7 +1915,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): Generat
 - Produces: `gui.sprite.action_cards_panel.ActionCardsPanel(WorkerHost, QGroupBox)` — `__init__(self, config, parent=None)`; Signals `renderRequested(list)` (action ids), `refineRequested(str, str)` (action id, instruction), `cardsChanged()`, `actionSelected(str)` (selected card id, `""` when none — 5b/6 consume it), `logMessage(str, str)`; methods `add_card_action(label: str, callback: Callable[[ActionCard], None]) -> None` (adds one button to every card row, existing and future; the button calls `callback(card)`; attribute `extra_row_actions: List[Tuple[str, Callable]]`), `set_project(project)`, `refresh()` (rebuild rows), `refresh_status()` (status column + row buttons only), `refresh_hint()`, `generate_cards()`, `add_card() -> ActionCard`, `remove_selected() -> int`, `selected_ids() -> List[str]`, `request_render(action_id)`, `request_rerender(action_id)`, `request_refine(action_id)`, `card_by_id(action_id) -> Optional[ActionCard]`, `llm_provider() -> str`. Column constants `COL_NAME … COL_ACTIONS`, `NAME_RE`.
 - Widget names: `brief_edit`, `genre_combo`, `llm_combo`, `generate_btn`, `add_btn`, `remove_btn`, `render_all_btn`, `table`, `hint_label`, `progress`, `status_label`. Ctrl+Enter inside the panel = Generate cards (`self._primary`, `Qt.WidgetWithChildrenShortcut`).
 
-- [ ] **Step 1: Failing tests** — create `tests/sprite/gui/test_action_cards_panel.py`:
+- [x] **Step 1: Failing tests** — create `tests/sprite/gui/test_action_cards_panel.py`:
 
 ```python
 # tests/sprite/gui/test_action_cards_panel.py
@@ -2105,14 +2105,14 @@ def test_add_card_action_adds_button_to_every_row(qapp, fake_config, fake_projec
     assert last_buttons[-1].text() == "Render (image)"
 ```
 
-- [ ] **Step 2: Run — expect failure**
+- [x] **Step 2: Run — expect failure**
 
 ```bash
 QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_action_cards_panel.py -v
 ```
 Expected: `ModuleNotFoundError: No module named 'gui.sprite.action_cards_panel'`.
 
-- [ ] **Step 3: Implement** — create `gui/sprite/action_cards_panel.py`:
+- [x] **Step 3: Implement** — create `gui/sprite/action_cards_panel.py`:
 
 ```python
 """Action cards panel: brief + genre → LLM action cards → editable table.
@@ -2568,7 +2568,7 @@ class ActionCardsPanel(WorkerHost, QGroupBox):
         self.logMessage.emit("Card generation cancelled.", "WARNING")
 ```
 
-- [ ] **Step 4: Run — expect pass**
+- [x] **Step 4: Run — expect pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m py_compile /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/action_cards_panel.py
@@ -2576,7 +2576,7 @@ QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/p
 ```
 Expected: 13 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/action_cards_panel.py tests/sprite/gui/test_action_cards_panel.py
@@ -2597,7 +2597,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): ActionC
 - Produces: `gui.sprite.queue_panel.QueuePanel(WorkerHost, QGroupBox)` — `__init__(self, config, parent=None)`; Signals `queueFinished(object)` (the `run()` dict), `statusChanged()`, `logMessage(str, str)`; methods `set_project(project)`, `refresh()`, `enqueue(ids: Sequence[str])`, `start(ids: Optional[Sequence[str]] = None)`, `cancel()`, `retry()`, `refine(action_id: str, instruction: str)`, `selected_ids() -> List[str]`; module helper `fmt_usd(value: Optional[float]) -> str` ("unknown" for `None`). Column constants `COL_ACTION, COL_STATUS, COL_ESTIMATE, COL_ACTUAL`.
 - Widget names: `table`, `total_label`, `progress`, `status_label`, `start_btn`, `cancel_btn`, `retry_btn`. Ctrl+Enter inside the panel = Start (`self._primary`).
 
-- [ ] **Step 1: Failing tests** — create `tests/sprite/gui/test_queue_panel.py`:
+- [x] **Step 1: Failing tests** — create `tests/sprite/gui/test_queue_panel.py`:
 
 ```python
 # tests/sprite/gui/test_queue_panel.py
@@ -2815,14 +2815,14 @@ def test_refine_replaces_clip_and_reruns_pipeline(qapp, fake_config, fake_projec
     assert changed
 ```
 
-- [ ] **Step 2: Run — expect failure**
+- [x] **Step 2: Run — expect failure**
 
 ```bash
 QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_queue_panel.py -v
 ```
 Expected: `ModuleNotFoundError: No module named 'gui.sprite.queue_panel'`.
 
-- [ ] **Step 3: Implement** — create `gui/sprite/queue_panel.py`:
+- [x] **Step 3: Implement** — create `gui/sprite/queue_panel.py`:
 
 ```python
 """Queue panel: one row per action card, cost estimate + actual, Start/Cancel/Retry.
@@ -3143,7 +3143,7 @@ class QueuePanel(WorkerHost, QGroupBox):
         self.statusChanged.emit()
 ```
 
-- [ ] **Step 4: Run — expect pass**
+- [x] **Step 4: Run — expect pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m py_compile /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/queue_panel.py
@@ -3151,7 +3151,7 @@ QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/p
 ```
 Expected: 11 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/queue_panel.py tests/sprite/gui/test_queue_panel.py
@@ -3173,7 +3173,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): QueuePa
 - Produces: `gui.sprite.SpriteTab` / `gui.sprite.sprite_tab.SpriteTab(QWidget)` — `__init__(self, config, parent=None)` (`config` is the `ConfigManager`; the tab and every panel read API keys through `config.get_api_key` / `get_auth_mode`); Signals `addToHistoryRequested(dict)`, `projectChanged()`, `actionSelected(str)` (forwarded from the action-cards table; `""` when nothing is selected); properties `current_project -> Optional[SpriteProject]`; `current_action() -> Optional[ActionCard]` (the selected card); `add_toolbar_action(text: str, slot) -> QPushButton` (inserted before the toolbar stretch — 5b adds "Export…" here); `make_provider(name: str = "google") -> ImageProvider` (`get_provider` with this tab's credentials; raises `ValueError` with a user-facing message when the key is missing — call it inside a worker job so `failed(str)` shows it); attribute `toolbar_layout: QHBoxLayout`. **Reserved for 5b** (set by `FramesWorkspace(self)`, appended as the last two lines of `__init__` in sub-project 5b — this plan never defines them): `frames_workspace`, `frame_strip`, `preview_player`, `pixel_view`, `processing_panel`, `undo_controller`, `undo_stack`, `refresh_frames`; project API `new_project()`, `new_project_named(name) -> Optional[SpriteProject]`, `open_project()`, `open_project_from(path) -> Optional[SpriteProject]`, `save_project() -> Optional[Path]`, `save_project_as()`, `save_project_to(path) -> Optional[Path]`, `open_generation_settings()`; routing `set_character_source(path: Path)`; **5b hooks** `set_frame_widget(w: QWidget)`, `set_preview_widget(w)`, `set_processing_widget(w)` (replace the placeholder inside `frame_area` / `preview_area` / `processing_area`; the widget is kept as `frame_widget` / `preview_widget` / `processing_widget`); `log(message, level="INFO")`; `shutdown()`; `closeEvent`. Attributes 5b uses: `console: DialogStatusConsole`, `character_panel`, `action_cards_panel`, `queue_panel`, `left_splitter`, `right_splitter`, `main_splitter`, `console_splitter`, `config_store: NamedConfigStore`, `project_manager`.
 - Module constants: `PROJECT_FILTER = "Sprite projects (*.iasprite.json)"`, `SPLITTER_KEYS` (`sprite/splitter_main|left|right|console`).
 
-- [ ] **Step 1: Failing tests** — create `tests/sprite/gui/test_sprite_tab_smoke.py`:
+- [x] **Step 1: Failing tests** — create `tests/sprite/gui/test_sprite_tab_smoke.py`:
 
 ```python
 # tests/sprite/gui/test_sprite_tab_smoke.py
@@ -3356,14 +3356,14 @@ def test_make_provider_uses_config_keys(qapp, fake_config, monkeypatch):
         tab.make_provider("google")
 ```
 
-- [ ] **Step 2: Run — expect failure**
+- [x] **Step 2: Run — expect failure**
 
 ```bash
 QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_sprite_tab_smoke.py -v
 ```
 Expected: `ImportError: cannot import name 'SpriteTab' from 'gui.sprite'`.
 
-- [ ] **Step 3: Implement** — create `gui/sprite/sprite_tab.py`:
+- [x] **Step 3: Implement** — create `gui/sprite/sprite_tab.py`:
 
 ```python
 """Sprite tab: project toolbar, intake / action-card / queue panels, 5b slots, console.
@@ -3757,7 +3757,7 @@ from .sprite_tab import SpriteTab
 __all__ = ["SpriteTab"]
 ```
 
-- [ ] **Step 4: Run — expect pass**
+- [x] **Step 4: Run — expect pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m py_compile /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/sprite_tab.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/__init__.py
@@ -3765,7 +3765,7 @@ QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/p
 ```
 Expected: `test_sprite_tab_smoke.py` 13 passed; every earlier `tests/sprite/gui` file still green.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/__init__.py gui/sprite/sprite_tab.py tests/sprite/gui/test_sprite_tab_smoke.py
@@ -3788,7 +3788,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): SpriteT
 - Produces (video): `ReferenceCard.send_to_sprite_clicked = Signal(object)` + `_build_context_menu() -> QMenu`; `ReferenceLibraryWidget.sendToSpriteRequested = Signal(object)` + `_connect_card(card)`; `VideoProjectTab.sendToSpriteRequested = Signal(object)` (forwarded from the library); `_load_video_tab` connects it to `_on_send_to_sprite`.
 - Design §4.5 names the signal `sendToSpriteRequested(Path)`; payload is a `Path` carried by `Signal(object)`.
 
-- [ ] **Step 1: Failing tests** — create `tests/sprite/gui/test_main_window_sprite_wiring.py`:
+- [x] **Step 1: Failing tests** — create `tests/sprite/gui/test_main_window_sprite_wiring.py`:
 
 ```python
 # tests/sprite/gui/test_main_window_sprite_wiring.py
@@ -3972,14 +3972,14 @@ def test_video_tab_declares_and_main_window_connects_the_signal(qapp):
     assert "sendToSpriteRequested" in source and "_on_send_to_sprite" in source
 ```
 
-- [ ] **Step 2: Run — expect failure**
+- [x] **Step 2: Run — expect failure**
 
 ```bash
 QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_main_window_sprite_wiring.py -v
 ```
 Expected: `AttributeError: type object 'MainWindow' has no attribute '_load_sprite_tab'` (and `ReferenceCard has no attribute 'send_to_sprite_clicked'`).
 
-- [ ] **Step 3: Implement — `gui/main_window.py`**
+- [x] **Step 3: Implement — `gui/main_window.py`**
 
 3a. In `_init_ui`, directly after the video placeholder block (`self._video_tab_loaded = False  # Track if real video tab is loaded`):
 
@@ -4119,7 +4119,7 @@ Expected: `AttributeError: type object 'MainWindow' has no attribute '_load_spri
 
 `Qt`, `Path`, `QMessageBox` and `QWidget` are already imported at the top of `gui/main_window.py` (`:6`, `:17`, `:19-22`).
 
-- [ ] **Step 4: Implement — `gui/video/reference_library_widget.py`**
+- [x] **Step 4: Implement — `gui/video/reference_library_widget.py`**
 
 4a. `ReferenceCard` signals become:
 
@@ -4183,7 +4183,7 @@ and in the card creation loop replace the two `card.*.connect(...)` lines with `
             self.reference_cards.append(card)
 ```
 
-- [ ] **Step 5: Implement — `gui/video/video_project_tab.py`**
+- [x] **Step 5: Implement — `gui/video/video_project_tab.py`**
 
 5a. `VideoProjectTab` signals become:
 
@@ -4201,7 +4201,7 @@ and in the card creation loop replace the two `card.*.connect(...)` lines with `
         self.reference_library_widget.sendToSpriteRequested.connect(self.sendToSpriteRequested)
 ```
 
-- [ ] **Step 6: Run — expect pass**
+- [x] **Step 6: Run — expect pass**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m py_compile /mnt/d/Documents/Code/GitHub/ImageAI/gui/main_window.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/video/reference_library_widget.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/video/video_project_tab.py
@@ -4210,8 +4210,9 @@ QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/p
 Expected: 10 passed in the wiring file; `tests/gui` unchanged and green.
 
 - [ ] **Step 7: Manual check (PowerShell, `.venv`, per AGENTS.md)** — `python main.py`: the "🎮 Sprite" tab sits after "📖 Layout"; clicking it replaces the placeholder; right-click on the Image-tab result and on a History row shows "Send to Sprite"; the Video → References card menu shows it; each lands on the Sprite tab with a new project named after the file. Record the outcome in the commit body.
+  **Deferred to Leland** — headless CI/agent dispatch has no interactive display for a manual PowerShell click-through; this step still needs a human run before the sub-project is fully verified end-to-end.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/main_window.py gui/video/reference_library_widget.py gui/video/video_project_tab.py tests/sprite/gui/test_main_window_sprite_wiring.py
@@ -4228,28 +4229,28 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite-gui): lazy Sp
 
 **Interfaces:** none new.
 
-- [ ] **Step 1: Compile every touched module**
+- [x] **Step 1: Compile every touched module**
 
 ```bash
 /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m py_compile /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/__init__.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/workers.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/prefs.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/character_panel.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/generation_settings_dialog.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/action_cards_panel.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/queue_panel.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/sprite_tab.py /mnt/d/Documents/Code/GitHub/ImageAI/core/sprite/configs.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/main_window.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/video/reference_library_widget.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/video/video_project_tab.py
 ```
 Expected: no output.
 
-- [ ] **Step 2: Sprite suite + path guard + dialog conventions**
+- [x] **Step 2: Sprite suite + path guard + dialog conventions**
 
 ```bash
 QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite /mnt/d/Documents/Code/GitHub/ImageAI/tests/test_no_hardcoded_paths.py /mnt/d/Documents/Code/GitHub/ImageAI/tests/gui -v
 ```
 Expected: all green — 5a adds 7 + 9 + 6 + 11 + 12 + 13 + 11 + 13 + 10 = 92 tests on top of sub-projects 1–4.
 
-- [ ] **Step 3: Full suite (the single full run for this sub-project)**
+- [x] **Step 3: Full suite (the single full run for this sub-project)**
 
 ```bash
 QT_QPA_PLATFORM=offscreen /mnt/d/Documents/Code/GitHub/ImageAI/.venv_linux/bin/python -m pytest -q
 ```
 Expected: 0 failures. If a failure is in a 5a file, fix it and re-run this step; if it is in another sub-project's file, report it to the team lead and do not patch it here.
 
-- [ ] **Step 4: Commit any fix**
+- [x] **Step 4: Commit any fix**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI status --short
@@ -4258,7 +4259,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "test(sprite-gui): stabili
 ```
 Skip the commit when `status --short` is empty.
 
-- [ ] **Step 5: Close the plan** — tick every `- [ ]` above to `- [x]`, set **Last Updated** with `date '+%Y-%m-%d %H:%M'`, and commit:
+- [x] **Step 5: Close the plan** — tick every `- [ ]` above to `- [x]`, set **Last Updated** with `date '+%Y-%m-%d %H:%M'`, and commit:
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add Plans/2026-08-29-sprite-gui-a-plan.md
