@@ -62,6 +62,28 @@ def test_ml_alpha_unknown_backend_raises_and_logs(caplog):
     assert info.value.user_message and "magic" in caplog.text
 
 
+def test_ml_alpha_mediapipe_broken_install_raises_matting_unavailable(monkeypatch, caplog):
+    """Minor 4 regression: ``_installed`` reports True (the name is present in
+    ``sys.modules``, per Python's own re-import-blocking convention of setting
+    it to None after a failed import), but the actual ``import`` still raises.
+    That must surface as ``MattingUnavailable``, not a bare ``ImportError``."""
+    monkeypatch.setitem(sys.modules, "mediapipe", None)
+    with caplog.at_level("ERROR"):
+        with pytest.raises(matting.MattingUnavailable) as info:
+            matting.ml_alpha(Image.new("RGB", (4, 4)), "mediapipe", "", refine_edges=False)
+    assert info.value.user_message
+    assert "mediapipe" in caplog.text.lower()
+
+
+def test_ml_alpha_rembg_broken_install_raises_matting_unavailable(monkeypatch, caplog):
+    monkeypatch.setitem(sys.modules, "rembg", None)
+    with caplog.at_level("ERROR"):
+        with pytest.raises(matting.MattingUnavailable) as info:
+            matting.ml_alpha(Image.new("RGB", (4, 4)), "rembg", "u2netp", refine_edges=False)
+    assert info.value.user_message
+    assert "rembg" in caplog.text.lower()
+
+
 def test_ml_alpha_missing_backend_names_the_install(monkeypatch, caplog):
     monkeypatch.delitem(sys.modules, "rembg", raising=False)
     monkeypatch.setattr(matting, "_installed", lambda name: False)

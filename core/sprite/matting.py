@@ -90,7 +90,10 @@ def _tighten(mask: np.ndarray) -> np.ndarray:
 def _mediapipe_alpha(rgb: np.ndarray, refine_edges: bool) -> np.ndarray:
     if not _installed("mediapipe"):
         raise _fail(f"MediaPipe is not installed. {INSTALL_HINT}")
-    import mediapipe as mp  # lazy: heavy import
+    try:
+        import mediapipe as mp  # lazy: heavy import
+    except ImportError as exc:
+        raise _fail(f"MediaPipe is installed but could not be imported ({exc}). {INSTALL_HINT}") from exc
     solutions = getattr(mp, "solutions", None)
     if solutions is None or not hasattr(solutions, "selfie_segmentation"):
         raise _fail("This MediaPipe build has no mp.solutions.selfie_segmentation; "
@@ -114,7 +117,10 @@ def _rembg_alpha(image: Image.Image, model: str, refine_edges: bool) -> np.ndarr
         logger.warning("rembg model %s is %s - non-commercial use only; you chose it explicitly.",
                        model, info["license"])
     os.environ["U2NET_HOME"] = str(rembg_model_dir())
-    from rembg import new_session, remove  # lazy: heavy import
+    try:
+        from rembg import new_session, remove  # lazy: heavy import
+    except ImportError as exc:
+        raise _fail(f"rembg is installed but could not be imported ({exc}). {INSTALL_HINT}") from exc
     session = _REMBG_SESSIONS.get(model)
     if session is None:
         logger.info("rembg: loading model %s (%s MB) from %s", model, info["size_mb"], rembg_model_dir())
