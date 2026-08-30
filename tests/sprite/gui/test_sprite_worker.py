@@ -299,6 +299,33 @@ def test_orphan_idle_hook_is_skipped_while_a_new_job_runs(qapp):
     assert host.idle_calls == 1            # no spurious idle call for the live worker
 
 
+def test_orphan_survives_garbage_collection_of_its_host(qapp):
+    """An orphan must not die with its host: the host/worker reference cycle is
+    collectable, and deleting a running QThread aborts the process (5b Task 7)."""
+    import gc
+    from gui.sprite import workers as workers_mod
+
+    release = threading.Event()
+
+    def blocked(progress, token):
+        release.wait(20)
+        return "late"
+
+    host = _IdleHost()
+    worker = host.start_job(blocked, label="blocked",
+                            on_finished=lambda r: None, on_failed=lambda m: None)
+    assert host.shutdown(timeout_ms=50) is False
+    assert worker in workers_mod._LIVE_ORPHANS
+    del host
+    gc.collect()
+    assert worker.isRunning()              # still alive after the host is gone
+    release.set()
+    assert worker.wait(5000)
+    for _ in range(5):
+        qapp.processEvents()
+    assert worker not in workers_mod._LIVE_ORPHANS
+
+
 def test_join_orphans_waits_for_the_released_orphan(qapp):
     """join_orphans() is what MainWindow.closeEvent uses instead of a destroy."""
     host = _Host()

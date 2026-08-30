@@ -25,6 +25,13 @@ from core.sprite.pipeline import Cancelled, CancelToken, ProgressFn
 
 logger = logging.getLogger(__name__)
 
+# Strong references to every orphaned worker until its thread exits. An
+# orphan's only other owners form a pure Python cycle (worker -> reaper
+# partial -> host -> host._orphans -> worker); the cyclic garbage collector
+# may collect that cycle while the thread still runs, and deleting a running
+# QThread aborts the process (5b Task 7 finding).
+_LIVE_ORPHANS: "set[SpriteWorker]" = set()
+
 Job = Callable[[ProgressFn, CancelToken], Any]
 
 
@@ -265,6 +272,7 @@ class WorkerHost:
         """
         worker.setParent(None)
         self._orphan_list().append(worker)
+        _LIVE_ORPHANS.add(worker)
         reaper = functools.partial(self._reap_orphan, worker)
         worker.finished.connect(reaper)
         worker.failed.connect(reaper)
@@ -285,6 +293,7 @@ class WorkerHost:
             return
         orphans.remove(worker)
         worker.wait()  # the job emitted its terminal signal; the thread is exiting
+        _LIVE_ORPHANS.discard(worker)
         logger.info("Sprite orphan worker %r finished after shutdown", worker.label)
         worker.deleteLater()
         if self.is_busy():
