@@ -230,11 +230,40 @@ def test_start_export_blocked_by_grid_padding_export_grid_rejects(qapp, project,
 
 
 def test_close_during_export_joins_running_worker(qapp, project, tmp_path, monkeypatch):
-    """Important 1: Escape/close mid-export cancels + joins, never drops a running thread."""
+    """Important 1: Escape/close mid-export cancels + joins, never drops a running thread.
+
+    Discriminating (re-review New 1): capture the worker and assert it has actually stopped
+    IMMEDIATELY after done() returns, before any qWait -- a check made only after pumping events
+    would pass even with the join_orphans() fallback removed, because the gated job's own
+    release fires independently during that pump.
+
+    Two races had to be closed to make this genuinely discriminating (verified out of tree,
+    task-7-report.md fix round 2):
+    - `entered` (a second Event) blocks the test until the worker thread has actually reached
+      `gated()`; without it, `shutdown()`'s `worker.cancel()` can run before the newly-started
+      QThread schedules its first line, so `run_export` sees an already-cancelled token and
+      never calls the job at all -- the worker then finishes almost instantly regardless of
+      which `on_dialog_close` runs, and the test passes for the wrong reason either way.
+    - `_save_settings` is stubbed out: its real body does ~11 `QSettings.sync()` calls, which on
+      a loaded filesystem took ~400 ms in isolation -- long enough that even the broken
+      `on_dialog_close` (shutdown(50) with no join_orphans() fallback) returns *after* the 150 ms
+      release fires by sheer I/O coincidence, again passing for the wrong reason. Stubbing it
+      keeps this test scoped to the join itself; settings persistence has its own coverage
+      (`test_settings_round_trip`).
+    With both races closed, the broken variant reliably returns in ~50 ms with the worker still
+    running (fails both assertions below); the real fix reliably takes the full ~150 ms and the
+    worker has stopped.
+
+    No extra `gc.collect()` here -- the autouse teardown fixture in conftest.py (7077dc7) sweeps
+    every GUI test's dead Qt objects; this test only needs to prove the join actually happened.
+    """
     monkeypatch.setattr(ed, "CLOSE_SHUTDOWN_TIMEOUT_MS", 50)
+    monkeypatch.setattr(ExportDialog, "_save_settings", lambda self: None)
+    entered = threading.Event()
     release = threading.Event()
 
     def gated(meta, out_dir):
+        entered.set()
         release.wait(5)
         return []
 
@@ -246,11 +275,17 @@ def test_close_during_export_joins_running_worker(qapp, project, tmp_path, monke
     for name, box in dialog.profile_checks.items():
         box.setChecked(name == "hd")
     dialog.start_export()
-    assert dialog.is_running()
+    worker = dialog._worker
+    assert worker is not None and dialog.is_running()
+    assert entered.wait(5), "the gated job never started"
     threading.Timer(0.15, release.set).start()
-    dialog.done(0)  # shutdown(50) times out -> on_dialog_close falls back to join_orphans()
-    for _ in range(10):
-        QTest.qWait(20)
+    started = time.monotonic()
+    dialog.done(0)  # shutdown(50) times out -> on_dialog_close must join_orphans() before returning
+    elapsed_ms = (time.monotonic() - started) * 1000
+    assert not worker.isRunning(), "done() returned before the job actually stopped"
+    assert elapsed_ms >= 140, f"done() returned suspiciously fast ({elapsed_ms:.1f} ms)"
+    for _ in range(5):
+        QTest.qWait(20)  # let the queued terminal signal deliver so the orphan is fully reaped
     assert not dialog.is_busy()
 
 
