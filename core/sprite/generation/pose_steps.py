@@ -11,10 +11,10 @@ import logging
 import re
 from typing import Any, Callable, Dict, List, Optional
 
-from core.llm_models import resolve_model
 from core.llm_params import LLMParams, build_completion_kwargs
 from core.llm_parsing import LLMResponseParser
 from core.sprite.generation._common import emit
+from core.sprite.generation.action_cards import default_chat_model
 from core.sprite.generation.errors import classify_provider_error
 from core.sprite.generation.prompts import FORBIDDEN_WORDS
 from core.sprite.project import ActionCard
@@ -153,7 +153,7 @@ def generate_pose_instructions(
     if frames < 1:
         raise ValueError("frames must be >= 1")
     messages = build_pose_messages(action, frames, character_notes)
-    model = model or resolve_model(provider, "chat")
+    model = model or default_chat_model(provider)
     if completion_fn is None:
         import litellm
         completion_fn = litellm.completion

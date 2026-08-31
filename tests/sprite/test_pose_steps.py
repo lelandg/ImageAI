@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from core.sprite.generation.action_cards import default_chat_model
 from core.sprite.generation.errors import SpriteGenerationError
 from core.sprite.generation.pose_steps import (
     CONTRACT_NAME, PoseStepsContractError, build_pose_messages, fallback_pose_steps,
@@ -123,7 +124,7 @@ def test_generate_default_log_writes_each_full_content_message_once(caplog):
 
 
 def test_generate_resolves_model_when_missing(monkeypatch):
-    monkeypatch.setattr("core.sprite.generation.pose_steps.resolve_model", lambda p, f: "resolved-model")
+    monkeypatch.setattr("core.sprite.generation.pose_steps.default_chat_model", lambda p: "resolved-model")
     seen = {}
 
     def fake(**kw):
@@ -132,3 +133,17 @@ def test_generate_resolves_model_when_missing(monkeypatch):
 
     generate_pose_instructions(_action(), 4, provider="openai", completion_fn=fake)
     assert seen["model"].endswith("resolved-model")
+
+
+def test_generate_default_model_resolves_to_a_real_model_not_the_family_name():
+    """No monkeypatch of the resolver: exercise the real default_chat_model() path."""
+    seen = {}
+
+    def fake(**kw):
+        seen.update(kw)
+        return _reply()
+
+    generate_pose_instructions(_action(), 4, provider="gemini", completion_fn=fake)
+    resolved = seen["model"].rsplit("/", 1)[-1]
+    assert resolved != "chat"
+    assert resolved == default_chat_model("gemini")
