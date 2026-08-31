@@ -122,6 +122,10 @@ def retouch_frame(
     (same convention as ``make_chroma_plate``/``generate_action_cards``), so a Cancel request
     during a slow image call is honored as soon as that call returns instead of after the whole
     retry loop.
+
+    The Gemini region path sends one image, because ``edit_image_region`` accepts one image.
+    On that path ``neighbors`` are dropped, and the prompt, the request log and the sidecar all
+    report zero neighbours. Every other path sends the neighbours as extra references.
     """
     frame = Path(frame)
     if not frame.exists():
@@ -138,32 +142,38 @@ def retouch_frame(
     size: Size = original.size
     frame_bytes = frame.read_bytes()
     neighbor_paths = [Path(n) for n in neighbors if Path(n).exists()]
-    neighbor_bytes = [p.read_bytes() for p in neighbor_paths]
-    prompt = retouch_prompt(instruction, neighbors=len(neighbor_paths))
-    params: Dict = {"region": list(region) if region else None, "neighbors": [str(p) for p in neighbor_paths]}
+    # GoogleProvider.edit_image_region takes exactly one image, so the Gemini region path
+    # cannot carry the neighbours. The prompt, the request params and the sidecar record
+    # what the provider really receives, because core/utils.py defines reference_images as
+    # the inputs to the edit.
+    sent_neighbors: List[Path] = [] if (kind == "google" and region is not None) else neighbor_paths
+    neighbor_bytes = [p.read_bytes() for p in sent_neighbors]
+    prompt = retouch_prompt(instruction, neighbors=len(sent_neighbors))
+    params: Dict = {"region": list(region) if region else None, "neighbors": [str(p) for p in sent_neighbors]}
     last_reason = ""
     for attempt in range(1, attempts + 1):
         if token is not None:
             token.raise_if_cancelled()
         what = f"retouch {frame.name} attempt {attempt}/{attempts}"
         if kind == "google":
-            log_request(log, what=what, provider=kind, model=model, prompt=prompt, params=params)
+            log_request(log, what=what, provider=kind, model=model, prompt=prompt, params=params, logger=logger)
             if region is not None:
                 texts, images = call_provider(provider, "edit_image_region", frame_bytes, tuple(region), prompt,
-                                              what=what, log=log, model=model)
+                                              what=what, log=log, logger=logger, model=model)
             else:
                 texts, images = call_provider(provider, "edit_image", [frame_bytes, *neighbor_bytes], prompt,
-                                              what=what, log=log, model=model)
+                                              what=what, log=log, logger=logger, model=model)
         else:
             size_str = openai_edit_size(model, size)
             params["size"] = size_str
             mask = build_region_mask(size, region) if region is not None else None
-            log_request(log, what=what, provider=kind, model=model, prompt=prompt, params=params)
+            log_request(log, what=what, provider=kind, model=model, prompt=prompt, params=params, logger=logger)
             texts, images = call_provider(provider, "edit_image", [frame_bytes, *neighbor_bytes], prompt,
-                                          what=what, log=log, model=model, mask=mask, size=size_str, n=1)
+                                          what=what, log=log, logger=logger, model=model, mask=mask,
+                                          size=size_str, n=1)
         if token is not None:
             token.raise_if_cancelled()
-        log_response(log, what=what, texts=texts, images=images)
+        log_response(log, what=what, texts=texts, images=images, logger=logger)
         data = first_image(texts, images, what=what)
         with Image.open(BytesIO(data)) as reply:
             edited = fit_to_size(reply, size)
@@ -176,7 +186,7 @@ def retouch_frame(
                 "prompt": prompt, "provider": kind, "model": model, "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "route": "retouch", "source_frame": str(frame), "instruction": instruction,
                 "region": list(region) if region else None,
-                "reference_images": [str(p) for p in neighbor_paths],
+                "reference_images": [str(p) for p in sent_neighbors],
                 "mask": "region alpha mask" if (kind == "openai" and region is not None) else None,
                 "attempt": attempt,
             })

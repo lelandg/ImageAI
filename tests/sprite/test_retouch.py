@@ -1,5 +1,6 @@
 # tests/sprite/test_retouch.py
 import json
+import logging
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -84,6 +85,51 @@ def test_google_region_uses_edit_image_region(tmp_path):
     args, kwargs = provider.edit_image_region.call_args
     assert args[0] == f2.read_bytes() and args[1] == (8, 8, 16, 16) and "add a glove" in args[2]
     provider.edit_image.assert_not_called()
+
+
+def test_google_region_prompt_and_provenance_report_no_neighbors(tmp_path):
+    """GoogleProvider.edit_image_region takes one image, so the neighbours are not sent on
+    that path. The prompt, the request log and the sidecar must say so, because a sidecar
+    that names inputs the provider never saw cannot reproduce the frame."""
+    f1, f2, f3 = _frames(tmp_path)
+    provider = _google(_png(shade=180))
+    lines = []
+    out = retouch_frame(provider, f2, "add a glove", neighbors=[f1, f3], region=(8, 8, 16, 16),
+                        log=lines.append)
+
+    prompt = provider.edit_image_region.call_args.args[2]
+    assert "neighboring" not in prompt.lower()
+    sidecar = json.loads((tmp_path / "0002.r1.png.json").read_text(encoding="utf-8"))
+    assert sidecar["reference_images"] == [] and out.exists()
+    request = next(l for l in lines if " request: " in l)
+    assert "'neighbors': []" in request
+
+
+def test_google_whole_frame_prompt_and_provenance_keep_the_neighbors(tmp_path):
+    """Control for the region path: every other branch really sends the neighbours, so the
+    prompt and the sidecar keep naming them."""
+    f1, f2, f3 = _frames(tmp_path)
+    provider = _google(_png(shade=180))
+    retouch_frame(provider, f2, "add a glove", neighbors=[f1, f3])
+    assert "neighboring" in provider.edit_image.call_args.args[1].lower()
+    sidecar = json.loads((tmp_path / "0002.r1.png.json").read_text(encoding="utf-8"))
+    assert [Path(p).name for p in sidecar["reference_images"]] == ["0001.png", "0003.png"]
+
+
+def test_default_log_writes_each_full_content_message_once(tmp_path, caplog):
+    """The default sink is this module's logger.info. The shared helpers live in image_route,
+    so they receive this module's logger and _common.emit skips the duplicate sink. A CLI that
+    calls retouch_frame without a log= argument must not double the log file."""
+    caplog.set_level(logging.INFO)
+    f1, f2, f3 = _frames(tmp_path)
+
+    retouch_frame(_google(_png(shade=180)), f2, "fix the left hand", neighbors=[f1, f3])
+
+    records = [r for r in caplog.records if r.getMessage().startswith("[image route] retouch ")]
+    request_lines = [r for r in records if " request: " in r.getMessage()]
+    response_lines = [r for r in records if " response: " in r.getMessage()]
+    assert len(request_lines) == 1 and len(response_lines) == 1
+    assert {r.name for r in request_lines + response_lines} == {"core.sprite.generation.retouch"}
 
 
 def test_openai_region_builds_alpha_mask(tmp_path):

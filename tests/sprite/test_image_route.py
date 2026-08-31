@@ -259,7 +259,8 @@ def test_edit_chain_matte_pairs(tmp_path, monkeypatch):
     out = edit_chain(provider, _character(tmp_path), _action(), tmp_path / "chain", frames=2,
                      pose_instructions=["a", "b"], plate_color="#00FF00", matte_pairs=True)
     assert len(out) == 2 and len(seen) == 2
-    assert (tmp_path / "chain" / "0001.white.png").exists() and (tmp_path / "chain" / "0001.black.png").exists()
+    plates_dir = tmp_path / "chain" / "plates"
+    assert (plates_dir / "0001.white.png").exists() and (plates_dir / "0001.black.png").exists()
     assert Image.open(out[0]).getchannel("A").getextrema() == (128, 128)
     prompts = [c.args[1].lower() for c in provider.edit_image.call_args_list]
     assert "#ffffff" in prompts[0] and "#000000" in prompts[1]
@@ -268,8 +269,8 @@ def test_edit_chain_matte_pairs(tmp_path, monkeypatch):
     # every artifact written by this route gets a .json sidecar (AGENTS.md hard rule) --
     # the white/black plates are no exception, and they carry the same provenance fields
     # (provider, model, prompt, plate colour, step index) as the merged frame's sidecar.
-    white_sidecar_path = tmp_path / "chain" / "0001.white.png.json"
-    black_sidecar_path = tmp_path / "chain" / "0001.black.png.json"
+    white_sidecar_path = plates_dir / "0001.white.png.json"
+    black_sidecar_path = plates_dir / "0001.black.png.json"
     assert white_sidecar_path.exists() and black_sidecar_path.exists()
     white_sidecar = json.loads(white_sidecar_path.read_text(encoding="utf-8"))
     black_sidecar = json.loads(black_sidecar_path.read_text(encoding="utf-8"))
@@ -281,6 +282,52 @@ def test_edit_chain_matte_pairs(tmp_path, monkeypatch):
     # step, not the merged RGBA -- the second frame's sidecar must cite that true source.
     sidecar2 = json.loads((tmp_path / "chain" / "0002.png.json").read_text(encoding="utf-8"))
     assert sidecar2["reference_images"][1].endswith("0001.white.png")
+
+
+def test_matte_plates_stay_out_of_the_pipeline_stage_directory(tmp_path, monkeypatch):
+    """pipeline.list_frames globs *.png in the stage directory, so a plate left there
+    would play as an animation frame. The plates live in a sibling "plates" directory
+    and keep both their sidecars and their entry in the composed frame's sidecar."""
+    from core.sprite import pipeline
+
+    provider = _google()
+    provider.start_edit_session.return_value = True
+    provider.edit_image.side_effect = [([], [r]) for r in _distinct_replies(4)]
+    monkeypatch.setattr("core.sprite.matting.difference_matte",
+                        lambda on_white, on_black: Image.new("RGBA", on_white.size, (10, 20, 30, 128)))
+
+    extract_dir = tmp_path / "stages" / "a1" / "extract"
+    out = edit_chain(provider, _character(tmp_path), _action(), extract_dir, frames=2,
+                     pose_instructions=["a", "b"], plate_color="#00FF00", matte_pairs=True)
+
+    assert pipeline.list_frames(extract_dir) == [extract_dir / "0001.png", extract_dir / "0002.png"]
+    assert pipeline.list_frames(extract_dir) == out
+    for step in (1, 2):
+        for color in ("white", "black"):
+            plate = extract_dir / "plates" / f"{step:04d}.{color}.png"
+            assert plate.exists() and plate.with_suffix(".png.json").exists()
+        sidecar = json.loads((extract_dir / f"{step:04d}.png.json").read_text(encoding="utf-8"))
+        assert [Path(p).parent.name for p in sidecar["plates"]] == ["plates", "plates"]
+        assert all(Path(p).exists() for p in sidecar["plates"])
+
+
+def test_edit_chain_cancel_during_the_white_plate_does_not_buy_the_black_one(tmp_path):
+    """The token is polled before every paid call, so a Cancel that lands while the white
+    plate is in flight stops the step instead of paying for the black plate too."""
+    provider = _google()
+    provider.start_edit_session.return_value = True
+    token = CancelToken()
+
+    def cancel_during_the_call(*args, **kwargs):
+        token.cancel()
+        return ([], [png_bytes(w=16, h=16, squares=1)])
+
+    provider.edit_image.side_effect = cancel_during_the_call
+    with pytest.raises(Cancelled):
+        edit_chain(provider, _character(tmp_path), _action(), tmp_path / "chain", frames=2,
+                   pose_instructions=["a", "b"], plate_color="#00FF00", matte_pairs=True, token=token)
+    assert provider.edit_image.call_count == 1
+    assert not (tmp_path / "chain" / "plates").exists()
 
 
 def test_edit_chain_cancels_between_steps(tmp_path):

@@ -71,21 +71,34 @@ def save_png(data: bytes, out_png: Path) -> Path:
     return out_png
 
 
-def log_request(log: LogFn, *, what: str, provider: str, model: Optional[str], prompt: str, params: Dict) -> None:
+def log_request(log: LogFn, *, what: str, provider: str, model: Optional[str], prompt: str, params: Dict,
+                logger: logging.Logger = logger) -> None:
+    """Log one provider request in full.
+
+    ``logger`` is the file logger that receives the line. A module that imports this
+    helper passes its own logger. ``emit`` then skips a sink that is a bound method of
+    that same logger, so a caller's default ``log=logger.info`` sink writes one line,
+    not two.
+    """
     message = (f"[image route] {what} request: provider={provider} model={model or 'default'} "
                f"params={params}\nprompt: {prompt}")
     emit(logger, log, message)
 
 
-def log_response(log: LogFn, *, what: str, texts: Sequence[str], images: Sequence[bytes]) -> None:
+def log_response(log: LogFn, *, what: str, texts: Sequence[str], images: Sequence[bytes],
+                 logger: logging.Logger = logger) -> None:
+    """Log one provider response in full. ``logger`` follows the rule in ``log_request``."""
     text = " | ".join(t.strip() for t in texts if t and t.strip()) or "(none)"
     message = f"[image route] {what} response: {len(images)} image(s) {[len(b) for b in images]} bytes; text: {text}"
     emit(logger, log, message)
 
 
 def call_provider(provider, method: str, *args, what: str, log: LogFn = logger.info,
-                  **kwargs) -> Tuple[List[str], List[bytes]]:
-    """Call ``provider.<method>`` and map any exception to a SpriteGenerationError."""
+                  logger: logging.Logger = logger, **kwargs) -> Tuple[List[str], List[bytes]]:
+    """Call ``provider.<method>`` and map any exception to a SpriteGenerationError.
+
+    ``logger`` follows the rule in ``log_request``.
+    """
     try:
         return getattr(provider, method)(*args, **kwargs)
     except Exception as exc:  # noqa: BLE001 — classify_provider_error decides the subclass
@@ -190,7 +203,7 @@ def generate_sheet(
         "frames": frames, "plate_color": plate_color, "params": params,
         "reference_images": [str(character)],
     })
-    log(f"[image route] sheet saved: {out}")
+    emit(logger, log, f"[image route] sheet saved: {out}")
     return out
 
 
@@ -209,10 +222,10 @@ def slice_generated_sheet(
     columns, rows = frames, 1
     if guess.confidence >= MIN_GRID_CONFIDENCE and guess.columns * guess.rows == frames:
         columns, rows = guess.columns, guess.rows
-        log(f"[image route] grid detected: {columns}x{rows} (confidence {guess.confidence:.2f})")
+        emit(logger, log, f"[image route] grid detected: {columns}x{rows} (confidence {guess.confidence:.2f})")
     else:
-        log(f"[image route] grid guess {guess.columns}x{guess.rows} (confidence {guess.confidence:.2f}) "
-            f"rejected; slicing {frames}x1")
+        emit(logger, log, f"[image route] grid guess {guess.columns}x{guess.rows} "
+                          f"(confidence {guess.confidence:.2f}) rejected; slicing {frames}x1")
     paths = list(slice_sheet(sheet_png, Path(out_dir), columns, rows))
     for index, path in enumerate(paths, start=1):
         write_image_sidecar(path, {
@@ -241,7 +254,13 @@ def edit_chain(
     token: Optional[CancelToken] = None,
     matte_pairs: bool = False,
 ) -> List[Path]:
-    """Render ``frames`` PNGs where frame k is an edit of [character, frame k-1]."""
+    """Render ``frames`` PNGs where frame k is an edit of [character, frame k-1].
+
+    ``out_dir`` receives only the composed ``NNNN.png`` frames. In matte mode the white
+    and black plates go into ``out_dir/plates``, because ``pipeline.list_frames`` globs
+    ``*.png`` in the stage directory and must see the frames alone. Each plate keeps its
+    own ``.json`` sidecar, and the composed frame's sidecar lists both plate paths.
+    """
     if frames < 1:
         raise ValueError("frames must be >= 1")
     if len(pose_instructions) != frames:
@@ -276,6 +295,10 @@ def edit_chain(
             step_images: Dict[str, bytes] = {}
             prompts: Dict[str, str] = {}
             for color in plates:
+                # Poll before every paid call, so a Cancel during the white plate never
+                # buys the black one (same convention as retouch_frame).
+                if token is not None:
+                    token.raise_if_cancelled()
                 prompt = inject_chroma(STEP_PROMPT.format(instruction=instruction.strip()), color, loop=False)
                 prompts[color] = prompt
                 params: Dict = {"step": k, "plate": color}
@@ -295,8 +318,12 @@ def edit_chain(
             plate_paths: List[str] = []
             if matte_pairs:
                 from core.sprite.matting import difference_matte
-                white = save_png(step_images[MATTE_PLATES[0]], out_dir / f"{k:04d}.white.png")
-                black = save_png(step_images[MATTE_PLATES[1]], out_dir / f"{k:04d}.black.png")
+                # The plates are inputs to the matte, not animation frames. They go into a
+                # sibling "plates" directory, because pipeline.list_frames globs *.png in the
+                # stage directory and would otherwise play the raw plates as frames.
+                plates_dir = out_dir / "plates"
+                white = save_png(step_images[MATTE_PLATES[0]], plates_dir / f"{k:04d}.white.png")
+                black = save_png(step_images[MATTE_PLATES[1]], plates_dir / f"{k:04d}.black.png")
                 for plate_path, plate_color_value in ((white, MATTE_PLATES[0]), (black, MATTE_PLATES[1])):
                     write_image_sidecar(plate_path, {
                         "prompt": prompts[plate_color_value], "provider": kind, "model": model,
@@ -325,7 +352,7 @@ def edit_chain(
             outputs.append(out_png)
             prev_bytes = next_bytes
             prev_reference_path = next_reference_path
-            log(f"[image route] step {k}/{frames} saved: {out_png}")
+            emit(logger, log, f"[image route] step {k}/{frames} saved: {out_png}")
     finally:
         if kind == "google" and session_started:
             provider.reset_edit_session()
