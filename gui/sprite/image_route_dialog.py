@@ -57,10 +57,14 @@ def archive_existing_frames(extract_dir: Path) -> Optional[Path]:
 def billed_units(mode: str, matte: bool, extract_dir: Path, sheet_done: bool) -> int:
     """Provider calls already paid for when a render stops early.
 
-    ``edit_chain`` writes one ``NNNN.png`` per finished step (the ``NNNN.white.png``
-    and ``NNNN.black.png`` plates keep a non-numeric stem), so the finished files
-    count the steps the provider already billed. A matte pair costs two calls per
-    step. The sheet route bills one call, and only once ``generate_sheet`` returns.
+    ``edit_chain`` writes one ``NNNN.png`` per finished step into ``extract_dir``, so
+    the finished files count the steps the provider already billed. ``edit_chain``
+    writes the ``NNNN.white.png`` and ``NNNN.black.png`` matte plates into
+    ``extract_dir/plates`` instead. The glob below is not recursive, so it never
+    reaches those plates. The ``path.stem.isdigit()`` filter stays as a defensive
+    guard. The filter also keeps the count right for an older project directory whose
+    plates still sit beside the frames. A matte pair costs two calls per step. The
+    sheet route bills one call, and only once ``generate_sheet`` returns.
     """
     if mode == "sheet":
         return 1 if sheet_done else 0
@@ -372,18 +376,35 @@ def _make_pose_fn(tab) -> PoseFn:
 
 
 def _on_rendered(tab, action: ActionCard, dialog: ImageRouteDialog) -> None:
-    """Refresh the card status; reload strip + player when the rendered action is the current one.
+    """Refresh the card status and install the rendered frames through the undo path.
 
     The job already wrote ``action.frames``. ``apply_frames`` snapshots the current list for
     undo before it installs the new one, so restore the pre-render list first and hand the
     rendered list over as the new one.
+
+    A card that is not the selected one takes the same path. "Render (image)" sits on every
+    card row, so a render of an unselected card is a normal action. Without the snapshot that
+    card's undo stack holds only older entries, and the next Ctrl+Z on it discards the render.
+    ``apply_frames`` reloads the strip and the player only for the selected card, so the
+    unselected path costs one extra save and one extra ``projectChanged`` emit.
+
+    The restore is destructive, so it runs only for a card the project holds. ``apply_frames``
+    looks the id up in ``project.actions`` and returns without installing anything when it
+    finds nothing. A restore before that call would leave the card with the pre-render list
+    while the rendered PNGs sit on disk, which throws away a render the user paid for.
     """
     tab.action_cards_panel.refresh_status()
-    current = tab.current_action()
-    if current is not None and current.id == action.id:
-        rendered = list(action.frames)
+    rendered = list(action.frames)
+    project = tab.current_project
+    known = project is not None and any(a.id == action.id for a in project.actions)
+    if known:
         action.frames = list(dialog.frames_before)
         tab.frames_workspace.apply_frames(action.id, rendered, "Render (image)")
+    else:
+        logger.error("image route: action %r (%s) is not in the open project; the render is "
+                     "kept without an undo snapshot", action.id, action.name)
+        tab.console.log(f"Rendered frames kept for '{action.name}', but no undo snapshot was "
+                        f"recorded: the card is not in the open project.", "ERROR")
     tab.console.log(f"Image route: '{action.name}' has {len(action.frames)} frame(s)", "SUCCESS")
 
 
@@ -392,6 +413,17 @@ def open_image_route_dialog(tab, action: ActionCard, *, exec_dialog: bool = True
     if project is None:
         logger.warning("image route: no project open")
         tab.console.log("Open or create a sprite project first.", "WARNING")
+        return None
+    # The render is refused while the processing panel runs. The image route renames the
+    # extract stage directory aside, clears the clip, rewrites action.frames and runs a
+    # second pipeline, while the running job writes the same stage directory and the same
+    # project. No lock guards SpriteProject, so the last writer wins; on Windows the rename
+    # raises PermissionError instead (final review, Important 7).
+    panel = tab.frames_workspace.panel
+    if panel.is_busy():
+        label = panel.busy_label or "processing"
+        logger.warning("Image route refused: the %r job is still running", label)
+        tab.console.log(f"Wait for the running {label} job to finish before rendering", "WARNING")
         return None
     dialog = ImageRouteDialog(project, action, provider_factory=tab.make_provider,
                               pose_fn=_make_pose_fn(tab), parent=tab)

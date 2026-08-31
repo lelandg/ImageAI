@@ -18,7 +18,18 @@ def apply_retouch(tab, action: ActionCard, index: int, new_path: Path) -> None:
     The copy matters: apply_frames snapshots the current list for undo before it installs the
     new one. apply_frames already saves the project (SpriteTab.save_current_project()) and logs
     the frame-count change, so this does not save or log a second time.
+
+    The index is re-validated here. QDialog.exec() blocks user input but still delivers queued
+    events, so a pipeline worker can replace action.frames with a shorter list while the modal
+    retouch dialog is up. A stale index must never raise IndexError out of a Qt slot
+    (final review, Important 8).
     """
+    if not (0 <= index < len(action.frames)):
+        logger.warning("retouch: frame %d is gone from '%s' (%d frame(s) now)",
+                       index + 1, action.name, len(action.frames))
+        tab.console.log(f"Retouch not applied: frame {index + 1} no longer exists on "
+                        f"'{action.name}'.", "WARNING")
+        return
     frames = copy.deepcopy(action.frames)
     frames[index].source_path = Path(new_path)
     tab.frames_workspace.apply_frames(action.id, frames, f"retouch {index + 1}")
@@ -27,6 +38,16 @@ def apply_retouch(tab, action: ActionCard, index: int, new_path: Path) -> None:
 
 
 def open_retouch_dialog(tab, index: int, *, exec_dialog: bool = True) -> Optional[RetouchDialog]:
+    # The retouch is refused while the processing panel runs. The pipeline replaces
+    # action.frames while the modal dialog holds one index, and the retouch result is then
+    # applied to a list the pipeline overwrites (final review, Important 8). The busy test
+    # runs first, so a frame the pipeline already dropped reports the real reason.
+    panel = tab.frames_workspace.panel
+    if panel.is_busy():
+        label = panel.busy_label or "processing"
+        logger.warning("Retouch refused: the %r job is still running", label)
+        tab.console.log(f"Wait for the running {label} job to finish before retouching", "WARNING")
+        return None
     action = tab.current_action()
     if action is None or not (0 <= index < len(action.frames)) or action.frames[index].source_path is None:
         logger.warning("retouch: no frame at index %s", index)

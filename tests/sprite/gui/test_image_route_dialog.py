@@ -1,5 +1,6 @@
 # tests/sprite/gui/test_image_route_dialog.py
 import threading
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -16,7 +17,9 @@ from core.sprite.models import FrameMeta
 from core.sprite.pipeline import Cancelled, CancelToken, no_progress
 from core.sprite.project import ActionCard, SpriteProject
 from gui.sprite import image_route_dialog as ird
-from gui.sprite.image_route_dialog import ImageRouteDialog, archive_existing_frames, install_image_route
+from gui.sprite.image_route_dialog import (
+    ImageRouteDialog, archive_existing_frames, billed_units, install_image_route,
+)
 from gui.sprite.workers import SpriteWorker
 
 
@@ -156,6 +159,53 @@ def test_archive_existing_frames_moves_aside(tmp_path):
     assert archive_existing_frames(tmp_path / "nope") is None
 
 
+def test_archive_existing_frames_serializes_a_same_second_collision(tmp_path, monkeypatch):
+    """Two renders inside one second must not rename onto the same archive name.
+
+    The stamp has one-second resolution. A rename onto an existing non-empty directory
+    raises OSError on Linux and always on Windows, so the serial counter is the only thing
+    that keeps the second render alive. The clock is frozen to force the collision.
+    """
+    frozen = datetime(2026, 8, 30, 12, 0, 0)
+    monkeypatch.setattr(ird, "datetime", SimpleNamespace(now=lambda: frozen))
+    extract = tmp_path / "extracted"
+    names = []
+    for _ in range(2):
+        extract.mkdir()
+        _png(extract / "0001.png")
+        archived = archive_existing_frames(extract)
+        assert archived is not None and (archived / "0001.png").exists()
+        names.append(archived.name)
+    assert names == ["extracted.prev-20260830-120000", "extracted.prev-20260830-120000-2"]
+    assert not extract.exists()
+
+
+def _chain_dir(tmp_path) -> Path:
+    """An extract directory after two finished edit-chain steps, with one matte pair."""
+    extract = tmp_path / "chain"
+    extract.mkdir()
+    for name in ("0001.png", "0002.png", "0002.white.png", "0002.black.png"):
+        _png(extract / name)
+    return extract
+
+
+def test_billed_units_sheet_route_bills_only_a_returned_sheet(tmp_path):
+    # The sheet route is one provider call, and the user owes it only once generate_sheet returns.
+    assert billed_units("sheet", False, tmp_path, sheet_done=False) == 0
+    assert billed_units("sheet", False, tmp_path, sheet_done=True) == 1
+
+
+def test_billed_units_counts_only_finished_steps_after_a_partial_failure(tmp_path):
+    # Two NNNN.png files are two billed steps; a matte plate keeps a non-numeric stem.
+    assert billed_units("edit_chain", False, _chain_dir(tmp_path), False) == 2
+    assert billed_units("edit_chain", False, tmp_path / "never-created", False) == 0
+
+
+def test_billed_units_doubles_every_step_in_matte_mode(tmp_path):
+    # A matte step costs one white plate call and one black plate call.
+    assert billed_units("edit_chain", True, _chain_dir(tmp_path), False) == 4
+
+
 class _FakeConfig:
     """5a's FakeConfig, made key-sensitive: only the "google" key holds the Google credentials.
 
@@ -185,10 +235,20 @@ class _FakeConfig:
         return "api-key" if provider == "google" else None
 
 
+class _IdlePanel:
+    """The ProcessingPanel surface the busy guard reads, with no worker of its own."""
+
+    busy_label = None
+
+    @staticmethod
+    def is_busy():
+        return False
+
+
 class _FakeTab(QWidget):
     """The SpriteTab surface that image_route_dialog touches (5a/5b names)."""
 
-    def __init__(self, tmp_path, action=None):
+    def __init__(self, tmp_path, action=None, *, panel=None):
         super().__init__()
         self.actions = {}
         self.provider_reads = 0
@@ -197,17 +257,37 @@ class _FakeTab(QWidget):
             llm_provider=self._llm_provider,
             refresh_status=lambda: None)
         self.config = _FakeConfig()
-        self.console = SimpleNamespace(log=lambda *a, **k: None)
+        self.log_calls = []
+        self.console = SimpleNamespace(log=self._log)
         self.current_project = _project(tmp_path)
+        # _on_rendered mirrors FramesWorkspace._find_action: only a card the project holds
+        # may take the destructive pre-render restore.
+        self.current_project.actions = [a for a in (action,) if a is not None]
         self._action = action
+        self.known = {a.id: a for a in (action,) if a is not None}
         self.applied = []
         self.providers = []
-        self.frames_workspace = SimpleNamespace(apply_frames=self._apply_frames)
+        self.frames_workspace = SimpleNamespace(apply_frames=self._apply_frames,
+                                                panel=panel or _IdlePanel())
+
+    def track(self, action):
+        """Register a card apply_frames may target while the tab shows another one."""
+        self.known[action.id] = action
+        self.current_project.actions.append(action)
+        return action
+
+    def _log(self, message, level="INFO"):
+        self.log_calls.append((message, level))
 
     def _apply_frames(self, action_id, frames, label):
         # Record what the real FramesWorkspace.apply_frames would snapshot (current list) and install (new list).
-        self.applied.append((action_id, label, len(self._action.frames), len(frames)))
-        self._action.frames = list(frames)
+        target = self.known.get(action_id)
+        if target is None:
+            # The real apply_frames logs an ERROR and returns without installing anything.
+            self.applied.append((action_id, label, None, len(frames)))
+            return
+        self.applied.append((action_id, label, len(target.frames), len(frames)))
+        target.frames = list(frames)
 
     def _llm_provider(self):
         # get_all_provider_ids() yields "gemini" for Google (action_cards_panel.py:76-83).
@@ -238,12 +318,89 @@ def test_install_image_route_registers_button_and_builds_dialog(qapp, tmp_path):
     assert len(action.frames) == 1
 
 
-def test_rendered_for_another_action_only_refreshes_status(qapp, tmp_path):
+def test_rendered_for_another_action_still_snapshots_that_action(qapp, tmp_path):
+    """M9: "Render (image)" sits on every card row, so an unselected card needs its snapshot.
+
+    Without apply_frames that card's undo stack keeps only older entries, and the next
+    Ctrl+Z on it discards the render. The selected card's own frames stay untouched.
+    """
     other = ActionCard(id="zz", name="idle", prompt="stands", duration_s=2, loop=True, target_frames=2, fps=12)
     tab = _FakeTab(tmp_path, _action())
+    tab.track(other)
     dialog = ird.open_image_route_dialog(tab, other, exec_dialog=False)
+    dialog.frames_before = []
+    other.frames = [FrameMeta(name="hero_idle_01", source_path=_png(tmp_path / "zz0001.png"),
+                              frame=(0, 0, 0, 0))]
     dialog.rendered.emit([])
-    assert tab.applied == []
+    assert tab.applied == [("zz", "Render (image)", 0, 1)]   # snapshot sees the pre-render list
+    assert len(other.frames) == 1
+    assert tab.current_action().frames == []                 # the selected card is untouched
+
+
+def test_rendered_for_an_action_the_project_does_not_hold_keeps_the_frames(qapp, tmp_path):
+    """apply_frames refuses an unknown action id, so the pre-render restore must not run.
+
+    The restore would leave the card holding the old list while the rendered PNGs sit on
+    disk, which throws away a render the user paid for. The frames stay, and the missing
+    undo snapshot is reported as an ERROR.
+    """
+    other = ActionCard(id="zz", name="idle", prompt="stands", duration_s=2, loop=True, target_frames=2, fps=12)
+    tab = _FakeTab(tmp_path, _action())          # 'other' is never tracked: not in project.actions
+    dialog = ird.open_image_route_dialog(tab, other, exec_dialog=False)
+    dialog.frames_before = []
+    rendered = [FrameMeta(name="hero_idle_01", source_path=_png(tmp_path / "zz0001.png"),
+                          frame=(0, 0, 0, 0))]
+    other.frames = list(rendered)
+    dialog.rendered.emit([])
+    assert tab.applied == []                     # apply_frames is never reached
+    assert other.frames == rendered              # the paid render is kept on the card
+    assert any(level == "ERROR" and "no undo snapshot" in message
+               for message, level in tab.log_calls)
+
+
+def _gated_panel(monkeypatch, gate, entered):
+    """A real ProcessingPanel running a real SpriteWorker that blocks until ``gate`` is set."""
+    import gui.sprite.processing_panel as pp
+
+    monkeypatch.setattr(pp, "available_backends", lambda: {"mediapipe": False, "rembg": False})
+    panel = pp.ProcessingPanel()
+
+    def job(progress, token):
+        entered.set()
+        assert gate.wait(10), "gate was never released"
+        return {}
+
+    worker = panel.start_job(job, label="pipeline", on_finished=lambda _result: None,
+                             on_failed=lambda _message: None)
+    assert worker is not None
+    return panel, worker
+
+
+def test_image_route_is_refused_while_the_processing_panel_runs(qapp, tmp_path, monkeypatch):
+    """Important 7: the render is a second writer against the stage directory and the project.
+
+    It renames the extract directory aside, clears the clip, rewrites action.frames and runs
+    a second pipeline while the panel's worker writes the same files. The refusal reaches
+    the console as well as the log, and it lifts as soon as the panel goes idle.
+    """
+    gate, entered = threading.Event(), threading.Event()
+    panel, worker = _gated_panel(monkeypatch, gate, entered)
+    action = _action()
+    tab = _FakeTab(tmp_path, action, panel=panel)
+    try:
+        assert entered.wait(10), "the gated job never started"
+        assert panel.is_busy()
+        assert ird.open_image_route_dialog(tab, action, exec_dialog=False) is None
+        assert (f"Wait for the running {panel.busy_label} job to finish before rendering",
+                "WARNING") in tab.log_calls
+    finally:
+        gate.set()
+        assert worker.wait(10000)
+        for _ in range(5):
+            qapp.processEvents()
+        assert panel.shutdown()
+    assert not panel.is_busy()
+    assert ird.open_image_route_dialog(tab, action, exec_dialog=False) is not None
 
 
 def test_pose_fn_maps_the_gemini_id_to_the_google_config_key(qapp, tmp_path, monkeypatch):

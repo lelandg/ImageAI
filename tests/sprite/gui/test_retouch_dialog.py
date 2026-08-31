@@ -154,19 +154,34 @@ class _Strip(QObject):
     retouchRequested = Signal(int)
 
 
+class _IdlePanel:
+    """The ProcessingPanel surface the busy guard reads, with no worker of its own."""
+
+    busy_label = None
+
+    @staticmethod
+    def is_busy():
+        return False
+
+
 class _FakeTab(QWidget):
     """The SpriteTab surface that retouch_wiring touches (5a/5b names)."""
 
-    def __init__(self, action, region=None):
+    def __init__(self, action, region=None, *, panel=None):
         super().__init__()
         self.frame_strip = _Strip()
         self.pixel_view = SimpleNamespace(selection_rect=lambda: region)
-        self.frames_workspace = SimpleNamespace(apply_frames=self._apply_frames)
+        self.frames_workspace = SimpleNamespace(apply_frames=self._apply_frames,
+                                                panel=panel or _IdlePanel())
         self._action = action
         self.current_project = SimpleNamespace(project_dir=None, save=lambda: None)
-        self.console = SimpleNamespace(log=lambda *a, **k: None)
+        self.log_calls = []
+        self.console = SimpleNamespace(log=self._log)
         self.applied = []
         self.providers = []
+
+    def _log(self, message, level="INFO"):
+        self.log_calls.append((message, level))
 
     def _apply_frames(self, action_id, frames, label):
         assert action_id == self._action.id
@@ -209,6 +224,65 @@ def test_open_retouch_dialog_collects_neighbors_region_and_provider_factory(qapp
     dialog._provider_factory("openai")
     assert tab.providers == ["openai"]
     assert open_retouch_dialog(tab, 7, exec_dialog=False) is None
+
+
+def test_apply_retouch_ignores_an_index_the_pipeline_dropped(qapp, tmp_path):
+    """Important 8: exec() still delivers queued events, so the frame list can shrink.
+
+    The retouched frame is gone by the time the result lands. A stale index must never raise
+    IndexError out of the Qt slot; the slot returns with a console WARNING instead.
+    """
+    action = _action(tmp_path)
+    tab = _FakeTab(action)
+    action.frames = action.frames[:1]           # the pipeline replaced a 3-frame list with a 1-frame one
+    apply_retouch(tab, action, 2, tmp_path / "0003.r1.png")
+    assert tab.applied == []
+    assert [f.source_path.name for f in action.frames] == ["0001.png"]
+    assert any(level == "WARNING" and "no longer exists" in message
+               for message, level in tab.log_calls)
+
+
+def _gated_panel(monkeypatch, gate, entered):
+    """A real ProcessingPanel running a real SpriteWorker that blocks until ``gate`` is set."""
+    import gui.sprite.processing_panel as pp
+
+    monkeypatch.setattr(pp, "available_backends", lambda: {"mediapipe": False, "rembg": False})
+    panel = pp.ProcessingPanel()
+
+    def job(progress, token):
+        entered.set()
+        assert gate.wait(10), "gate was never released"
+        return {}
+
+    worker = panel.start_job(job, label="pipeline", on_finished=lambda _result: None,
+                             on_failed=lambda _message: None)
+    assert worker is not None
+    return panel, worker
+
+
+def test_retouch_is_refused_while_the_processing_panel_runs(qapp, tmp_path, monkeypatch):
+    """Important 8: the modal dialog holds one index while the pipeline rewrites the list.
+
+    The refusal reaches the console as well as the log, and it lifts as soon as the panel
+    goes idle.
+    """
+    gate, entered = threading.Event(), threading.Event()
+    panel, worker = _gated_panel(monkeypatch, gate, entered)
+    tab = _FakeTab(_action(tmp_path), panel=panel)
+    try:
+        assert entered.wait(10), "the gated job never started"
+        assert panel.is_busy()
+        assert open_retouch_dialog(tab, 1, exec_dialog=False) is None
+        assert (f"Wait for the running {panel.busy_label} job to finish before retouching",
+                "WARNING") in tab.log_calls
+    finally:
+        gate.set()
+        assert worker.wait(10000)
+        for _ in range(5):
+            qapp.processEvents()
+        assert panel.shutdown()
+    assert not panel.is_busy()
+    assert open_retouch_dialog(tab, 1, exec_dialog=False) is not None
 
 
 def test_install_retouch_connects_signal(qapp, tmp_path, monkeypatch):
