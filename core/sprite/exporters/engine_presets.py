@@ -15,7 +15,7 @@ from core.sprite.exporters.png_sequence import export_png_sequence
 from core.sprite.exporters.texturepacker_json import export_texturepacker_json
 from core.sprite.models import SheetMeta
 from core.sprite.timing import ms_to_fps
-from core.utils import sanitize_filename, sidecar_path, write_image_sidecar
+from core.utils import read_image_sidecar, sanitize_filename, sidecar_path, write_image_sidecar
 
 logger = logging.getLogger(__name__)
 
@@ -166,18 +166,26 @@ def _write_godot_tres(meta: SheetMeta, out_dir: Path, title: str, preset: Engine
 
 
 def _write_png_sequence(meta: SheetMeta, out_dir: Path, title: str, preset: EnginePreset) -> List[Path]:
-    return list(export_png_sequence(meta, out_dir / "frames", template=preset.name_template))
+    pngs = list(export_png_sequence(meta, out_dir / "frames", template=preset.name_template))
+    return [p for png in pngs for p in (png, sidecar_path(png))]
 
 
 def _write_gif(meta: SheetMeta, out_dir: Path, title: str, preset: EnginePreset) -> List[Path]:
     paths: List[Path] = []
     for tag in meta.tags:
         out = export_gif(meta, tag, out_dir / f"{title}_{tag.name}.gif")
-        write_image_sidecar(out, {
+        # export_gif already wrote a sidecar with the correct unrolled frame
+        # count plus durations_ms/loop/warnings/timestamp -- merge the preset
+        # fields into it instead of overwriting, and derive "frames" the same
+        # way the exporter did (ordered_frame_indices), so a pingpong/reverse
+        # tag's sidecar never disagrees with the GIF it describes.
+        sidecar = read_image_sidecar(out) or {}
+        sidecar.update({
             "format": "gif", "title": meta.title, "tag": tag.name, "profile": meta.profile,
-            "frames": tag.to_index - tag.from_index + 1, "direction": tag.direction,
+            "frames": len(ordered_frame_indices(tag)), "direction": tag.direction,
             "app": meta.app, "version": meta.version,
         })
+        write_image_sidecar(out, sidecar)
         paths.extend([out, sidecar_path(out)])
     return paths
 

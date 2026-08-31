@@ -27,14 +27,21 @@ def _meta() -> SheetMeta:
     return SheetMeta(title="hero", frames=frames, tags=tags, sheet_size=(32, 32), cell_size=(16, 16))
 
 
-def _norm(text: str) -> str:
-    return " ".join(text.split())
+def _lines(text: str) -> list:
+    """Line list tolerant of end-of-line trailing whitespace and a trailing EOF newline.
+
+    Godot's text-resource parser is line-oriented: every ``[section]`` header
+    and every ``key = value`` must start its own line. Comparing line by line
+    (instead of collapsing all whitespace) catches a regression that keeps
+    every token in order but drops the line breaks Godot needs to parse it.
+    """
+    return [line.rstrip() for line in text.splitlines()]
 
 
-def test_export_matches_golden_after_whitespace_normalization(tmp_path):
+def test_export_matches_golden_line_by_line(tmp_path):
     out = export_godot_tres(_meta(), tmp_path / "hero.tres", atlas_res_path="res://hero.png")
     assert out.exists()
-    assert _norm(out.read_text(encoding="utf-8")) == _norm(GOLDEN.read_text(encoding="utf-8"))
+    assert _lines(out.read_text(encoding="utf-8")) == _lines(GOLDEN.read_text(encoding="utf-8"))
 
 
 def test_export_writes_json_sidecar(tmp_path):

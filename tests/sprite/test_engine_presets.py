@@ -1,5 +1,6 @@
 # tests/sprite/test_engine_presets.py
 import dataclasses
+import json
 from pathlib import Path
 
 import numpy as np
@@ -124,6 +125,37 @@ def test_manifest_matches_every_file_on_disk_for_atlas_preset(tmp_path):
     assert reported == _on_disk_recursive(out)
     # both grid sidecars are present, not just the first one found on disk
     assert "hero.json" in reported and "hero.png.json" in reported
+
+
+def test_manifest_matches_every_file_on_disk_for_web_preview_preset(tmp_path):
+    """web_preview contains png_sequence; its manifest must equal disk exactly, sidecars included."""
+    out = tmp_path / "out"
+    written = export_with_preset(_meta(tmp_path), "web_preview", out)
+    reported = sorted(str(p.relative_to(out)) for p in written)
+    assert reported == _on_disk_recursive(out)
+    # every frame PNG's sidecar is reported, not just the PNG itself
+    assert "frames/hero_walk_01.png.json" in reported
+    assert "frames/hero_idle_02.png.json" in reported
+
+
+def test_gif_sidecar_frame_count_reflects_pingpong_unrolling(tmp_path):
+    """A ping-pong tag's GIF holds more frames than to_index - from_index + 1; the sidecar must agree."""
+    meta = _meta(tmp_path)
+    meta.tags = [TagMeta(name="walk", from_index=0, to_index=3, direction="pingpong")]
+    written = export_with_preset(meta, "web_preview", tmp_path / "out")
+    sidecar = tmp_path / "out" / "hero_walk.gif.json"
+    assert sidecar in written
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    # 4 forward frames + the 2 reflected middle frames == 6, not to_index - from_index + 1 == 4
+    assert data["frames"] == 6
+    assert data["direction"] == "pingpong"
+    assert data["title"] == "hero"
+    assert data["tag"] == "walk"
+    assert data["profile"] == meta.profile
+    assert data["app"] == meta.app
+    assert data["version"] == meta.version
+    # export_gif's own fields (durations_ms/loop/warnings/timestamp) survive the merge
+    assert "durations_ms" in data and "timestamp" in data
 
 
 def test_manifest_includes_every_scale_sheet_and_its_sidecars(tmp_path, monkeypatch):
