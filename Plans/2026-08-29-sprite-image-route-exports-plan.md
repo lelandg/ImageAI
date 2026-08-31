@@ -1,8 +1,10 @@
 # Sprite Image Route, Retouch & Engine Exports Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Spec:** `Plans/2026-08-29-sprite-tab-design.md` §2 (data model), §3 row 6, §4.6 (image route, retouch, engine exports), §5 (testing).
+
+**Last Updated:** 2026-08-30 20:05 — sub-project 6 COMPLETE. Tasks 1-11 done, final review + fix wave + scoped re-review closed. Suite 1903 passed / 19 skipped / 2 warnings at `dd48719`.
 
 **Goal:** Ship Route B of the sprite pipeline (image-model sheets and edit-chains, with optional difference matting), a non-destructive per-frame AI retouch, and three engine-ready exporters (Godot 4 `.tres`, native `.aseprite`, engine presets), wired into the Sprite tab.
 
@@ -79,7 +81,7 @@ Sub-project 5b: `gui.sprite.export_dialog.{ExportDialog(project, parent=None), E
 
 Godot facts used here (verified 2026-08-24): Godot 4 has no JSON atlas importer. A text `SpriteFrames` resource with one `AtlasTexture` sub-resource per frame is the engine-ready path. `AtlasTexture.margin = Rect2(x, y, w, h)` offsets the drawn texture by `(x, y)` inside a region enlarged by `(w, h)`, so `margin = Rect2(ox, oy, sw - w, sh - h)` restores a trimmed cell. Each animation carries `speed` (fps), `loop`, and per-frame `duration` multipliers. `load_steps` = ext resources + sub resources + 1. `SpriteFrames` has no direction field, so reverse and ping-pong tags are unrolled.
 
-- [ ] **Step 1: Write the golden file**
+- [x] **Step 1: Write the golden file**
 
 Create `tests/sprite/golden/godot.tres` with this exact content:
 
@@ -124,7 +126,7 @@ animations = [{
 }]
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 Create `tests/sprite/test_godot_tres.py`:
 
@@ -210,11 +212,11 @@ def test_requires_frames():
         render_godot_tres(SheetMeta(title="x", frames=[], tags=[], sheet_size=(1, 1)), atlas_res_path="res://x.png")
 ```
 
-- [ ] **Step 3: Run the test to see it fail**
+- [x] **Step 3: Run the test to see it fail**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_godot_tres.py -v` → `ModuleNotFoundError: core.sprite.exporters.godot_tres`.
 
-- [ ] **Step 4: Implement the exporter**
+- [x] **Step 4: Implement the exporter**
 
 Create `core/sprite/exporters/godot_tres.py`:
 
@@ -347,11 +349,11 @@ def export_godot_tres(meta: SheetMeta, out_tres: Path, *, atlas_res_path: str) -
     return out_tres
 ```
 
-- [ ] **Step 5: Run the test to see it pass**
+- [x] **Step 5: Run the test to see it pass**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_godot_tres.py -v` → 8 passed.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/exporters/godot_tres.py tests/sprite/test_godot_tres.py tests/sprite/golden/godot.tres
@@ -372,7 +374,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): Godot 4 Spr
 
 Output naming convention (shared with Task 4 and sub-project 7): the grid PNG is `<sanitized title>.png`; the grid's own Aseprite JSON sidecar stays at `<title>.json`; TexturePacker JSON is `<title>.atlas.json`; explicit Aseprite JSON is `<title>.aseprite.json`; Godot is `<title>.tres`; native Aseprite is `<title>.aseprite`; GIFs are `<title>_<tag>.gif`; PNG frames go to `frames/`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/sprite/test_engine_presets.py`:
 
@@ -489,11 +491,11 @@ def test_fps_reconciliation_unknown_target(tmp_path):
         fps_reconciliation(_meta(tmp_path), "unity")
 ```
 
-- [ ] **Step 2: Run the test to see it fail**
+- [x] **Step 2: Run the test to see it fail**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_engine_presets.py -v` → `ModuleNotFoundError`.
 
-- [ ] **Step 3: Implement the presets**
+- [x] **Step 3: Implement the presets**
 
 Create `core/sprite/exporters/engine_presets.py`:
 
@@ -766,11 +768,11 @@ def fps_reconciliation(meta: SheetMeta, target: str) -> List[str]:
     raise ValueError(f"Unknown reconciliation target {target!r}; use 'godot' or 'gif'")
 ```
 
-- [ ] **Step 4: Run the test to see it pass**
+- [x] **Step 4: Run the test to see it pass**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_engine_presets.py -v` → 11 passed. If `test_web_preview_writes_gif_per_tag_and_frames` fails on the `frames` parent name, check the sub-project 1 `export_png_sequence` return value; it must return the written frame paths.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/exporters/engine_presets.py tests/sprite/test_engine_presets.py
@@ -897,7 +899,7 @@ Struct formats derived from the layout (sizes checked: header 128, frame header 
 | tags head / tag | `<H8x` / `<HHBH6xBBBB` + STRING |
 | palette head / entry | `<III8x` / `<HBBBB` |
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/sprite/test_aseprite_native.py`:
 
@@ -1019,11 +1021,11 @@ def test_requires_frames(tmp_path):
         export_aseprite(SheetMeta(title="x", frames=[], tags=[]), tmp_path / "x.aseprite")
 ```
 
-- [ ] **Step 2: Run the test to see it fail**
+- [x] **Step 2: Run the test to see it fail**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_aseprite_native.py -v` → `ModuleNotFoundError`.
 
-- [ ] **Step 3: Implement the writer and reader**
+- [x] **Step 3: Implement the writer and reader**
 
 Create `core/sprite/exporters/aseprite_native.py`:
 
@@ -1250,15 +1252,15 @@ def read_aseprite_summary(path: Path) -> Dict[str, Any]:
     return summary
 ```
 
-- [ ] **Step 4: Run the test to see it pass**
+- [x] **Step 4: Run the test to see it pass**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_aseprite_native.py -v` → 10 passed. Then run `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_engine_presets.py -q` again (the `aseprite_native` writer import in Task 2 now resolves).
 
-- [ ] **Step 5: Manual check (optional, not gated)**
+- [x] **Step 5: Manual check (optional, not gated)**
 
 Open the produced file in Aseprite (or `aseprite -b hero.aseprite --list-tags`) once, and record the result in the commit body. The byte-level test is the gate.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/exporters/aseprite_native.py tests/sprite/test_aseprite_native.py
@@ -1281,7 +1283,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): native .ase
 
 Format ids are shared verbatim between `EnginePreset.formats` (Task 2 `FORMAT_IDS`), the dialog's built-ins (`grid`, `aseprite_json`, `texturepacker_json`, `png_sequence`, `gif`), the two ids registered here (`godot_tres`, `aseprite_native`), and the CLI's `--sprite-formats` (sub-project 7). Output names: `.tres` and `.aseprite` are `<title>_<profile>` beside the sheet; `atlas_res_path` is `res://<sheet_png_path(meta, out_dir).name>`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/sprite/gui/test_export_dialog_engine_presets.py`:
 
@@ -1440,11 +1442,11 @@ def test_write_aseprite_native(tmp_path):
     assert written == [out / "hero_hd.aseprite"] and written[0].exists()
 ```
 
-- [ ] **Step 2: Run the test to see it fail**
+- [x] **Step 2: Run the test to see it fail**
 
 `QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_export_dialog_engine_presets.py -v` → `ModuleNotFoundError: gui.sprite.engine_preset_box`.
 
-- [ ] **Step 3: Implement the format writers**
+- [x] **Step 3: Implement the format writers**
 
 Create `gui/sprite/export_formats.py`:
 
@@ -1501,7 +1503,7 @@ def register_extra_formats(dialog) -> None:
     dialog.register_format(FORMAT_ASEPRITE, "Aseprite file (.aseprite)", write_aseprite_native)
 ```
 
-- [ ] **Step 4: Implement the preset box**
+- [x] **Step 4: Implement the preset box**
 
 Create `gui/sprite/engine_preset_box.py`:
 
@@ -1602,7 +1604,7 @@ def install_engine_presets(dialog) -> EnginePresetBox:
     return box
 ```
 
-- [ ] **Step 5: Wire the dialog (5b file)**
+- [x] **Step 5: Wire the dialog (5b file)**
 
 Modify `gui/sprite/export_dialog.py`: add the two imports at module top and, in `ExportDialog.__init__`, right after the built-in formats are registered and before saved settings are restored (so saved format choices still apply to the new checkboxes), add:
 
@@ -1614,11 +1616,11 @@ from gui.sprite.export_formats import register_extra_formats
         install_engine_presets(self)
 ```
 
-- [ ] **Step 6: Run the tests to see them pass**
+- [x] **Step 6: Run the tests to see them pass**
 
 `QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui -v` → the 9 new tests pass and the 5b export-dialog tests still pass (the two new ids appear at the end of `formats()`).
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/export_formats.py gui/sprite/engine_preset_box.py gui/sprite/export_dialog.py tests/sprite/gui/test_export_dialog_engine_presets.py
@@ -1639,7 +1641,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): export dial
 
 Contract (per `Docs/LLM-Contracts.md`): the system prompt names the contract and embeds the JSON Schema; the user prompt carries the action and reiterates `frames`; the code handler validates version, count, order, and non-empty poses, strips forbidden words, and falls back to generic evenly spaced poses on any contract violation. `completion_fn` is called as `completion_fn(**kwargs)` with the litellm kwargs (same convention as `action_cards.generate_action_cards`).
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/sprite/test_pose_steps.py`:
 
@@ -1767,11 +1769,11 @@ def test_generate_resolves_model_when_missing(monkeypatch):
     assert seen["model"].endswith("resolved-model")
 ```
 
-- [ ] **Step 2: Run the test to see it fail**
+- [x] **Step 2: Run the test to see it fail**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pose_steps.py -v` → `ModuleNotFoundError`.
 
-- [ ] **Step 3: Implement the contract**
+- [x] **Step 3: Implement the contract**
 
 Create `core/sprite/generation/pose_steps.py`:
 
@@ -1962,11 +1964,11 @@ def generate_pose_instructions(
         return fallback_pose_steps(action, frames)
 ```
 
-- [ ] **Step 4: Run the test to see it pass**
+- [x] **Step 4: Run the test to see it pass**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_pose_steps.py -v` → 10 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/generation/pose_steps.py tests/sprite/test_pose_steps.py
@@ -1985,7 +1987,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): Sprite Pose
 - Consumes: `GoogleProvider.edit_image(image, prompt, model=None, **kwargs)` (`providers/google.py:1832-1905`; honors `aspect_ratio=` via `image_config`); `OpenAIProvider.edit_image(image, prompt, model=None, mask=None, size="1024x1024", n=1, **kwargs)` (`providers/openai.py:821-940`); `MODEL_CAPS` (`providers/openai.py:46-168`); `validate_custom_size`, `parse_size_string` (`core/image_size.py:12-69`); `inject_chroma` (sub-project 2); `guess_grid`, `slice_sheet` (sub-project 1); `ProviderError`, `classify_provider_error` (sub-project 2); `CancelToken`; `write_image_sidecar`.
 - Produces: `provider_kind(provider) -> str`; `call_provider(provider, method, *args, what, **kwargs)`; `first_image(texts, images, *, what) -> bytes`; `save_png(data, out_png) -> Path`; `log_request(...)`, `log_response(...)`; `openai_sheet_size(model) -> str`; `sheet_prompt(action, frames, plate_color) -> str`; `generate_sheet(provider, character, action, out_png, *, frames, plate_color, model=None, log=logger.info, token=None) -> Path`; `slice_generated_sheet(sheet_png, out_dir, frames, plate_color, *, log=logger.info) -> List[Path]`; re-export `generate_pose_instructions`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/sprite/test_image_route.py`:
 
@@ -2154,11 +2156,11 @@ def test_slice_falls_back_to_one_row_when_guess_disagrees(tmp_path, monkeypatch)
     assert any("rejected" in l for l in logged)
 ```
 
-- [ ] **Step 2: Run the test to see it fail**
+- [x] **Step 2: Run the test to see it fail**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_image_route.py -v` → `ModuleNotFoundError`.
 
-- [ ] **Step 3: Implement the module (sheet half)**
+- [x] **Step 3: Implement the module (sheet half)**
 
 Create `core/sprite/generation/image_route.py`:
 
@@ -2384,11 +2386,11 @@ def slice_generated_sheet(
     return paths
 ```
 
-- [ ] **Step 4: Run the test to see it pass**
+- [x] **Step 4: Run the test to see it pass**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_image_route.py -v` → 12 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/generation/image_route.py tests/sprite/test_image_route.py
@@ -2409,7 +2411,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): image route
 
 Continuity: frame k is an edit whose inputs are `[character, frame k-1]`, so identity comes from the character and motion continuity from the previous frame. `edit_image` on both providers is single-shot; the Gemini chat session started by `start_edit_session` establishes style context and is reset in `finally`. With `matte_pairs=True` every step is rendered twice (white plate `#FFFFFF`, black plate `#000000`); `difference_matte` produces the RGBA frame, the two plates stay on disk as `NNNN.white.png` / `NNNN.black.png`, and the chain continues from the white plate.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 Append to `tests/sprite/test_image_route.py`:
 
@@ -2524,11 +2526,11 @@ def test_edit_chain_session_failure_is_logged_not_fatal(tmp_path):
     provider.reset_edit_session.assert_not_called()
 ```
 
-- [ ] **Step 2: Run the tests to see them fail**
+- [x] **Step 2: Run the tests to see them fail**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_image_route.py -v -k edit_chain` → `ImportError: cannot import name 'edit_chain'`.
 
-- [ ] **Step 3: Implement `edit_chain`**
+- [x] **Step 3: Implement `edit_chain`**
 
 Append to `core/sprite/generation/image_route.py`:
 
@@ -2631,11 +2633,11 @@ def edit_chain(
     return outputs
 ```
 
-- [ ] **Step 4: Run the tests to see them pass**
+- [x] **Step 4: Run the tests to see them pass**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_image_route.py -v` → 19 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/generation/image_route.py tests/sprite/test_image_route.py
@@ -2654,7 +2656,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): image route
 - Consumes: `GoogleProvider.edit_image_region(image: bytes, region_bbox, prompt, model=None, ...)` (`providers/google.py:1907-2014`); `GoogleProvider.edit_image` list input; `OpenAIProvider.edit_image(..., mask=bytes, size=...)` (`providers/openai.py:821-940`, mask semantics: alpha 0 = editable, per `_create_alpha_mask` `:1070-1122`); validation pattern from `core/character_animator/ai_face_editor.py:561-617`; helpers from Task 6/7 (`provider_kind`, `call_provider`, `first_image`, `log_request`, `log_response`, `openai_edit_size`, `default_openai_edit_model`); `ProviderError`; `write_image_sidecar`.
 - Produces: `next_retouch_path(frame: Path) -> Path`; `build_region_mask(size: Size, region: Rect, feather: int = 5) -> bytes`; `fit_to_size(image, size) -> Image`; `validate_retouch(original, edited, region) -> Tuple[bool, str]`; `retouch_prompt(instruction, *, neighbors: int) -> str`; `retouch_frame(provider, frame: Path, instruction: str, out_png: Optional[Path] = None, *, neighbors: Sequence[Path] = (), region: Optional[Rect] = None, model=None, log=logger.info, attempts: int = 2) -> Path`.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/sprite/test_retouch.py`:
 
@@ -2817,11 +2819,11 @@ def test_logs_request_and_response(tmp_path):
     assert any("response" in l for l in lines) and any("validation" in l for l in lines)
 ```
 
-- [ ] **Step 2: Run the test to see it fail**
+- [x] **Step 2: Run the test to see it fail**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_retouch.py -v` → `ModuleNotFoundError`.
 
-- [ ] **Step 3: Implement the module**
+- [x] **Step 3: Implement the module**
 
 Create `core/sprite/generation/retouch.py`:
 
@@ -3005,11 +3007,11 @@ def retouch_frame(
     raise ProviderError(message)
 ```
 
-- [ ] **Step 4: Run the test to see it pass**
+- [x] **Step 4: Run the test to see it pass**
 
 `$PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/test_retouch.py -v` → 12 passed.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add core/sprite/generation/retouch.py tests/sprite/test_retouch.py
@@ -3032,7 +3034,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): non-destruc
 
 Mixin order is `(DialogCleanupMixin, QDialog)` — the mixin's `done()`/`closeEvent()` must precede `QDialog` in the MRO (docstring at `gui/common/dialog_conventions.py:103-141`). Console writes from the worker thread go through the `logLine` signal (queued connection), never directly.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/sprite/gui/test_retouch_dialog.py`:
 
@@ -3216,11 +3218,11 @@ def test_install_retouch_connects_signal(qapp, tmp_path, monkeypatch):
     assert calls == [1]
 ```
 
-- [ ] **Step 2: Run the test to see it fail**
+- [x] **Step 2: Run the test to see it fail**
 
 `QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_retouch_dialog.py -v` → `ModuleNotFoundError: gui.sprite.retouch_dialog`.
 
-- [ ] **Step 3: Implement the dialog**
+- [x] **Step 3: Implement the dialog**
 
 Create `gui/sprite/retouch_dialog.py`:
 
@@ -3403,7 +3405,7 @@ class RetouchDialog(DialogCleanupMixin, QDialog):
             self._worker = None
 ```
 
-- [ ] **Step 4: Implement the wiring**
+- [x] **Step 4: Implement the wiring**
 
 Create `gui/sprite/retouch_wiring.py`:
 
@@ -3460,15 +3462,15 @@ def install_retouch(tab) -> None:
     tab.frame_strip.retouchRequested.connect(lambda index: open_retouch_dialog(tab, index))
 ```
 
-- [ ] **Step 5: Wire the tab (5a file)**
+- [x] **Step 5: Wire the tab (5a file)**
 
 Modify `gui/sprite/sprite_tab.py`: add `from gui.sprite.retouch_wiring import install_retouch` and, as the last statement of `SpriteTab.__init__` (after 5b's `FramesWorkspace` has set `frame_strip` / `pixel_view` / `frames_workspace` on the tab), `install_retouch(self)`. The region comes from 5b's `PixelView.selection_rect()`; sub-project 6 adds no selection UI.
 
-- [ ] **Step 6: Run the tests to see them pass**
+- [x] **Step 6: Run the tests to see them pass**
 
 `QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui -v` → 9 new tests pass; the 5a/5b tab, strip, and pixel-view tests still pass.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/retouch_dialog.py gui/sprite/retouch_wiring.py gui/sprite/sprite_tab.py tests/sprite/gui/test_retouch_dialog.py
@@ -3490,7 +3492,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): Retouch dia
 
 The dialog calls providers and an LLM, so it carries a `DialogStatusConsole` at the bottom (splitter), Ctrl+Enter = Render, Escape = close. The job writes frames into `stage_dir(project, action, "extract")` with `action.clip = None` (the G9 pre-extracted entry point), records a ledger row, then runs `run_pipeline(upto="stabilize")` like the video queue.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 Create `tests/sprite/gui/test_image_route_dialog.py`:
 
@@ -3745,11 +3747,11 @@ def test_pose_fn_uses_panel_provider_and_config(qapp, tmp_path, monkeypatch):
 
 ```
 
-- [ ] **Step 2: Run the test to see it fail**
+- [x] **Step 2: Run the test to see it fail**
 
 `QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui/test_image_route_dialog.py -v` → `ModuleNotFoundError`.
 
-- [ ] **Step 3: Implement the dialog and install hook**
+- [x] **Step 3: Implement the dialog and install hook**
 
 Create `gui/sprite/image_route_dialog.py`:
 
@@ -4066,15 +4068,15 @@ def install_image_route(tab) -> None:
     tab.action_cards_panel.add_card_action("Render (image)", lambda action: open_image_route_dialog(tab, action))
 ```
 
-- [ ] **Step 4: Wire the tab (5a file)**
+- [x] **Step 4: Wire the tab (5a file)**
 
 Modify `gui/sprite/sprite_tab.py`: add `from gui.sprite.image_route_dialog import install_image_route` and `install_image_route(self)` right after `install_retouch(self)` at the end of `SpriteTab.__init__`. 5a's `ActionCardsPanel.add_card_action` renders the button on existing and future rows.
 
-- [ ] **Step 5: Run the tests to see them pass**
+- [x] **Step 5: Run the tests to see them pass**
 
 `QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/sprite/gui -v` → 11 new tests pass; `tests/sprite/gui/test_action_cards_panel.py` (5a) still passes.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add gui/sprite/image_route_dialog.py gui/sprite/sprite_tab.py tests/sprite/gui/test_image_route_dialog.py
@@ -4088,7 +4090,7 @@ git -C /mnt/d/Documents/Code/GitHub/ImageAI commit -m "feat(sprite): Render (ima
 **Files:**
 - Modify: `Plans/2026-08-29-sprite-image-route-exports-plan.md` (tick the boxes)
 
-- [ ] **Step 1: Run the guard and the whole suite**
+- [x] **Step 1: Run the guard and the whole suite**
 
 ```bash
 QT_QPA_PLATFORM=offscreen $PY -m pytest /mnt/d/Documents/Code/GitHub/ImageAI/tests/test_no_hardcoded_paths.py -q
@@ -4098,7 +4100,7 @@ QT_QPA_PLATFORM=offscreen $PY -m pytest -q
 
 All three must be green. Record the final pass count in the commit body.
 
-- [ ] **Step 2: Grep for forbidden literals in the new runtime code**
+- [x] **Step 2: Grep for forbidden literals in the new runtime code**
 
 ```bash
 grep -rnE "gpt-image-[0-9]|gemini-[0-9]|claude-[0-9]" /mnt/d/Documents/Code/GitHub/ImageAI/core/sprite/generation/image_route.py /mnt/d/Documents/Code/GitHub/ImageAI/core/sprite/generation/retouch.py /mnt/d/Documents/Code/GitHub/ImageAI/core/sprite/generation/pose_steps.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/image_route_dialog.py /mnt/d/Documents/Code/GitHub/ImageAI/gui/sprite/retouch_dialog.py
@@ -4106,7 +4108,7 @@ grep -rnE "gpt-image-[0-9]|gemini-[0-9]|claude-[0-9]" /mnt/d/Documents/Code/GitH
 
 The only permitted hit is the `MODEL_CAPS["gpt-image-1"]` fallback key inside `openai_sheet_size`/`openai_edit_size`, which mirrors `providers/openai.py:173` (`_caps_for`). Replace any other hit with a capability lookup.
 
-- [ ] **Step 3: Tick every checkbox in this plan and commit**
+- [x] **Step 3: Tick every checkbox in this plan and commit**
 
 ```bash
 git -C /mnt/d/Documents/Code/GitHub/ImageAI add Plans/2026-08-29-sprite-image-route-exports-plan.md
@@ -4140,3 +4142,8 @@ No version bump here; sub-project 7 bumps once for the whole feature.
 11. **`core/sprite/timing.py` belongs to sub-project 2**, not 1 (design §4.2); the dependency line at the top of this plan already lists 2.
 12. **Undo goes through `FramesWorkspace.apply_frames(action_id, frames, label)`** for both retouch and image-route renders; sub-project 6 never pushes a snapshot itself. `apply_retouch` repoints a deep-copied frame list so the snapshot inside `apply_frames` captures the pre-retouch path. The image-route job writes `action.frames` inside the worker, so `ImageRouteDialog.start_render` keeps `frames_before` and `_on_rendered` restores it right before `apply_frames` installs the rendered list — otherwise the snapshot would hold the new frames and undo would be a no-op.
 13. **Preset notes use 5b's `ExportDialog.notes_label`** (`EnginePresetBox(notes_label=...)`); the box creates its own label only when used standalone. The box is inserted at `options_layout` index 1 (after the profiles box, above the formats box).
+14. **Matte plates live in `<out_dir>/plates`, not beside the frames** (final review 2026-08-30, Important 6). `edit_chain` first wrote `NNNN.white.png` and `NNNN.black.png` into `out_dir`, which the GUI sets to the pipeline's extract stage directory. `pipeline.list_frames` is an unfiltered `glob("*.png")`, so a 3-frame matte render produced 9 `action.frames` ordered `0001.black, 0001, 0001.white, …`: the raw plates played as animation frames and keying plus stabilize were paid three times. The plates now go into a `plates` subdirectory. `list_frames` is unchanged, because it is a sub-project 1 contract every stage depends on. Each plate keeps its own `.json` sidecar and the composed frame's sidecar lists both plate paths.
+15. **Pose-step chat models resolve through `action_cards.default_chat_model`** (final review 2026-08-30, Important 3). `resolve_model(provider, "chat")` passed `"chat"` as the registry *family*, and no `gemini/chat` or `anthropic/chat` family exists, so the resolver logged a warning and returned the family name itself. Every pose-step call asked the provider for a model named `"chat"`. `default_chat_model` normalizes the provider alias, picks the per-provider family, and carries an offline static default. The model-ID literals stay in `action_cards._CHAT_FAMILY`, which is their sanctioned home.
+16. **The Gemini region retouch sends no neighbour frames, and says so** (final review 2026-08-30, Important 4). `GoogleProvider.edit_image_region` accepts exactly one image, so that one branch cannot carry the neighbours. The prompt, the request params and the sidecar `reference_images` now derive from the neighbours actually sent, which is an empty list on that branch. Every other path still sends and still reports them. `core/utils.py` defines `reference_images` as the inputs to the edit, so the record must match what the provider received.
+17. **Both new card-row entry points refuse while the processing panel is busy** (final review 2026-08-30, Important 7 and 8). "Render (image)" and frame-strip "Retouch…" are writers: they rename the extract stage directory aside, clear the clip, rewrite `action.frames` and run a second pipeline. No lock guards `SpriteProject`, so a second writer against a running pipeline let the last writer win, and on Windows the rename raised `PermissionError`. Both entry points now refuse in the shape `FramesWorkspace.open_export_dialog` already ships, and log plus show the refusal. `apply_retouch` also re-validates its frame index, because `QDialog.exec()` still delivers queued events and a pipeline worker can shorten `action.frames` under a modal dialog.
+18. **A render whose card the open project does not hold keeps its frames** (final review fix wave, 2026-08-30). Deviation 12's restore is destructive, and `apply_frames` returns early on an action id `_find_action` cannot resolve. Restoring before that call would leave the card with the pre-render list while the rendered PNGs sit on disk. `_on_rendered` now tests reachability first; an unknown card keeps the rendered frames and reports the missing undo snapshot as an ERROR, because a paid render is never discarded silently.
