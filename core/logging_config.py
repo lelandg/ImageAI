@@ -8,10 +8,78 @@ import logging.handlers
 from pathlib import Path
 from datetime import datetime
 import platform
+import re
 import sys
 import atexit
 import shutil
+import traceback
 import warnings
+
+
+# Secret shapes that must never reach a log line. Compiled once; the filter
+# runs on every record, so the match must stay cheap.
+_QUERY_KEY_RE = re.compile(r"([?&]key=)[^&\s'\"]+")
+_GOOGLE_KEY_RE = re.compile(r"AIza[0-9A-Za-z_\-]{20,}")
+_OPENAI_KEY_RE = re.compile(r"sk-[0-9A-Za-z_\-]{20,}")
+_HF_KEY_RE = re.compile(r"hf_[A-Za-z0-9]{16,}")
+_BEARER_RE = re.compile(r"(?i)\bBearer\s+\S+")
+_MASK = "***"
+
+
+def redact_secrets(text: str) -> str:
+    """Replace API keys and bearer tokens in ``text`` with ``***``.
+
+    Only the ``?key=`` / ``&key=`` query form is masked. A bare ``key=`` is
+    not: the sprite pipeline has a stage named ``key``.
+    """
+    text = _QUERY_KEY_RE.sub(r"\g<1>" + _MASK, text)
+    text = _GOOGLE_KEY_RE.sub(_MASK, text)
+    text = _OPENAI_KEY_RE.sub(_MASK, text)
+    text = _HF_KEY_RE.sub(_MASK, text)
+    return _BEARER_RE.sub("Bearer " + _MASK, text)
+
+
+class SecretRedactionFilter(logging.Filter):
+    """Mask API keys in the message and in the traceback of every record.
+
+    The filter formats the message once and stores the redacted text back in
+    ``record.msg``. A traceback is rendered once into ``record.exc_text``.
+    ``logging.Formatter.format`` prints a pre-set ``exc_text`` and does not
+    render ``exc_info`` again, so every handler prints the redacted copy.
+    ``record.exc_info`` stays on the record: one ``LogRecord`` is shared by
+    every handler, and a later handler (pytest ``caplog``, a handler added
+    after ``setup_logging``) must still see the exception.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Handler.handle does not guard filter(). An exception here would
+        # escape into the caller of the logging call, so the filter never
+        # raises. On failure the record passes through unredacted and the
+        # stdlib path handles it.
+        try:
+            self._redact(record)
+        except Exception:
+            pass
+        return True
+
+    @staticmethod
+    def _redact(record: logging.LogRecord) -> None:
+        try:
+            message = record.getMessage()
+        except Exception:
+            # A bad format string must not drop the record.
+            message = f"{record.msg} {record.args!r}"
+        record.msg = redact_secrets(message)
+        record.args = None
+
+        exc_info = record.exc_info
+        if exc_info:
+            # Logger._log turns exc_info=True or an exception instance into a
+            # tuple before the record exists, so exc_info is a tuple here.
+            rendered = "".join(traceback.format_exception(*exc_info))
+            record.exc_text = redact_secrets(rendered.rstrip("\n"))
+        elif record.exc_text:
+            record.exc_text = redact_secrets(record.exc_text)
 
 
 def _report_storage_warnings(root_logger, data_paths, set_warning_sink):
@@ -88,6 +156,7 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
     console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setLevel(logging.WARNING)  # Only show warnings and errors in console
     console_handler.setFormatter(simple_formatter)
+    console_handler.addFilter(SecretRedactionFilter())
     root_logger.addHandler(console_handler)
     
     # File handler (detailed format for debugging)
@@ -100,6 +169,7 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
         )
         file_handler.setLevel(log_level)
         file_handler.setFormatter(detailed_formatter)
+        file_handler.addFilter(SecretRedactionFilter())
         root_logger.addHandler(file_handler)
         
         # Log startup information
@@ -156,8 +226,11 @@ def setup_logging(log_level=logging.INFO, log_to_file=True):
             except Exception as e:
                 print(f"Could not copy log file: {e}", file=sys.stderr)
         
-        atexit.register(copy_log_on_exit)
-        
+        # A pytest process must not overwrite the repo's ./imageai_current.log
+        # with a short test log. The copy is for real app runs only.
+        if "pytest" not in sys.modules:
+            atexit.register(copy_log_on_exit)
+
         return log_file
     
     return None

@@ -1,5 +1,6 @@
 """OpenAI provider for image generation."""
 
+import logging
 from typing import Dict, Any, Optional, Tuple, List
 from base64 import b64decode
 from io import BytesIO
@@ -22,6 +23,8 @@ except ImportError:
 
 # This will be populated on first use
 OpenAIClient = None
+
+logger = logging.getLogger(__name__)
 
 
 def _connection_error_types():
@@ -186,12 +189,26 @@ class OpenAIProvider(ImageProvider):
         self.client = None
         
         # Don't initialize client here - do it lazily when needed
-    
-    def _ensure_client(self):
-        """Ensure OpenAI client is available."""
+
+    def reconfigure(self, config: Dict[str, Any]) -> bool:
+        """Apply new credentials. Drop the client so the next call rebuilds it."""
+        changed = super().reconfigure(config)
+        if changed:
+            self.client = None
+            logger.info("OpenAI credentials changed; client will be rebuilt on next use")
+        return changed
+
+    def _ensure_client(self) -> Any:
+        """Build the OpenAI client when it is missing and return it.
+
+        Every entry point uses the returned client, not ``self.client``.
+        ``reconfigure()`` can null ``self.client`` from another thread while
+        a call is in flight.
+        """
         global OpenAIClient
 
         if not OPENAI_AVAILABLE:
+            logger.error("The 'openai' package is not installed")
             raise ImportError(
                 "The 'openai' package is not installed. "
                 "Please run: pip install openai"
@@ -204,6 +221,7 @@ class OpenAIProvider(ImageProvider):
 
         if not self.client:
             if not self.api_key:
+                logger.error("OpenAI requires an API key")
                 raise ValueError("OpenAI requires an API key")
             client_kwargs = {"api_key": self.api_key, "max_retries": 2}
             try:
@@ -215,7 +233,8 @@ class OpenAIProvider(ImageProvider):
             except ImportError:
                 pass
             self.client = OpenAIClient(**client_kwargs)
-    
+        return self.client
+
     def generate(
         self,
         prompt: str,
@@ -226,7 +245,7 @@ class OpenAIProvider(ImageProvider):
         **kwargs
     ) -> Tuple[List[str], List[bytes]]:
         """Generate images using OpenAI DALL-E with enhanced settings."""
-        self._ensure_client()
+        client = self._ensure_client()
 
         model = model or self.get_default_model()
         caps = _caps_for(model)
@@ -637,10 +656,10 @@ class OpenAIProvider(ImageProvider):
                     if moderation in {"auto", "low"}:
                         edit_params["moderation"] = moderation
 
-                response = self.client.images.edit(**edit_params)
+                response = client.images.edit(**edit_params)
             else:
                 # Standard generation without reference images
-                response = self.client.images.generate(**gen_params)
+                response = client.images.generate(**gen_params)
 
             data_items = getattr(response, "data", []) or []
             for item in data_items:
@@ -678,7 +697,7 @@ class OpenAIProvider(ImageProvider):
             if model in ["dall-e-3", "gpt-image-1", "gpt-image-1-mini"] and kwargs.get('num_images', 1) > 1:
                 for _ in range(kwargs.get('num_images', 1) - 1):
                     try:
-                        response = self.client.images.generate(**gen_params)
+                        response = client.images.generate(**gen_params)
                         data_items = getattr(response, "data", []) or []
                         for item in data_items:
                             if response_format == "b64_json":
@@ -773,8 +792,8 @@ class OpenAIProvider(ImageProvider):
             return False, "No API key configured"
 
         try:
-            self._ensure_client()
-            self.client.models.list()
+            client = self._ensure_client()
+            client.models.list()
             return True, "API key is valid"
         except Exception as e:  # noqa: BLE001 — surface every backend failure to the user
             msg = str(e)
@@ -838,7 +857,7 @@ class OpenAIProvider(ImageProvider):
         ``mask`` is an optional alpha PNG for inpainting; only sent when the model
         supports it (``MODEL_CAPS[model]['supports_mask']``).
         """
-        self._ensure_client()
+        client = self._ensure_client()
 
         # Default to the best edit-capable model, not gpt-image-2's snapshot,
         # so callers that forget to pass `model` get sensible behavior.
@@ -925,7 +944,7 @@ class OpenAIProvider(ImageProvider):
         )
 
         try:
-            response = self.client.images.edit(**edit_kwargs)
+            response = client.images.edit(**edit_kwargs)
             for item in (getattr(response, "data", []) or []):
                 b64 = getattr(item, "b64_json", None)
                 if b64:
@@ -948,7 +967,7 @@ class OpenAIProvider(ImageProvider):
         **kwargs
     ) -> Tuple[List[str], List[bytes]]:
         """Create variations of an image."""
-        self._ensure_client()
+        client = self._ensure_client()
 
         model = "dall-e-2"  # Only DALL-E 2 supports variations
         texts: List[str] = []
@@ -962,7 +981,7 @@ class OpenAIProvider(ImageProvider):
             image_file = BytesIO(image)
             image_file.name = "image.png"
 
-            response = self.client.images.create_variation(
+            response = client.images.create_variation(
                 image=image_file,
                 n=n,
                 size=size,
@@ -1030,8 +1049,9 @@ class OpenAIProvider(ImageProvider):
         partials_seen = 0
         final_b64s: List[str] = []
 
+        client = self._ensure_client()
         try:
-            stream = self.client.images.generate(**params)
+            stream = client.images.generate(**params)
             for event in stream:
                 etype = getattr(event, "type", "")
                 if etype == "image_generation.partial_image":
@@ -1152,7 +1172,7 @@ class OpenAIProvider(ImageProvider):
         import logging
         logger = logging.getLogger(__name__)
 
-        self._ensure_client()
+        client = self._ensure_client()
 
         model = model or "gpt-image-1"
         texts: List[str] = []
@@ -1233,7 +1253,7 @@ class OpenAIProvider(ImageProvider):
             }
 
             logger.info(f"Calling OpenAI images.edit with model={model}, size={size}")
-            response = self.client.images.edit(**edit_params)
+            response = client.images.edit(**edit_params)
 
             # Extract image from response
             data_items = getattr(response, "data", []) or []
@@ -1350,7 +1370,7 @@ class OpenAIProvider(ImageProvider):
         from core.constants import batch_jobs_path
 
         ledger = batch_jobs_path()
-        self._ensure_client()
+        client = self._ensure_client()
         logger = logging.getLogger(__name__)
 
         if not requests:
@@ -1374,9 +1394,9 @@ class OpenAIProvider(ImageProvider):
         from io import BytesIO
         upload = BytesIO(payload_bytes)
         upload.name = f"imageai_batch_{int(time.time())}.jsonl"
-        file_obj = self.client.files.create(file=upload, purpose="batch")
+        file_obj = client.files.create(file=upload, purpose="batch")
 
-        batch = self.client.batches.create(
+        batch = client.batches.create(
             input_file_id=file_obj.id,
             endpoint=endpoint,
             completion_window=completion_window,
@@ -1425,8 +1445,8 @@ class OpenAIProvider(ImageProvider):
         import json, logging
         logger = logging.getLogger(__name__)
 
-        self._ensure_client()
-        batch = self.client.batches.retrieve(job_id)
+        client = self._ensure_client()
+        batch = client.batches.retrieve(job_id)
         status = getattr(batch, "status", None) or batch.get("status")
 
         result = {
@@ -1441,7 +1461,7 @@ class OpenAIProvider(ImageProvider):
             output_file_id = getattr(batch, "output_file_id", None) or batch.get("output_file_id")
             if output_file_id:
                 result["output_files"].append(output_file_id)
-                content = self.client.files.content(output_file_id)
+                content = client.files.content(output_file_id)
                 # SDK returns a streaming-friendly object; read() yields bytes.
                 raw = content.read() if hasattr(content, "read") else bytes(content)
                 if output_dir is not None:

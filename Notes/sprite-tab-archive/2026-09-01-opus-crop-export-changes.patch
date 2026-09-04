@@ -1,0 +1,1688 @@
+diff --git a/core/sprite/__init__.py b/core/sprite/__init__.py
+index a9e82ca..5cb296b 100644
+--- a/core/sprite/__init__.py
++++ b/core/sprite/__init__.py
+@@ -67,6 +67,8 @@ from .slicing import GridGuess, foreground_mask, guess_grid, import_png_sequence
+ from .stabilize import (
+     ANCHORS,
+     anchor_offset,
++    aspect_crop_box,
++    aspect_crop_gain,
+     crop_and_pad,
+     fit_size,
+     has_transparency,
+@@ -106,7 +108,8 @@ __all__ = [
+     # extract / slicing / stabilize
+     "ExtractResult", "FFmpegError", "cull_duplicates", "estimate_frame_count",
+     "extract_frames", "probe_video", "GridGuess", "foreground_mask", "guess_grid",
+-    "import_png_sequence", "slice_sheet", "ANCHORS", "anchor_offset", "crop_and_pad",
++    "import_png_sequence", "slice_sheet", "ANCHORS", "anchor_offset", "aspect_crop_box",
++    "aspect_crop_gain", "crop_and_pad",
+     "fit_size", "has_transparency", "solid_border_bbox", "union_alpha_bbox",
+     # exporters
+     "GridOptions", "export_aseprite_json", "export_gif", "export_grid",
+diff --git a/core/sprite/generation/queue.py b/core/sprite/generation/queue.py
+index c8e7ded..212304d 100644
+--- a/core/sprite/generation/queue.py
++++ b/core/sprite/generation/queue.py
+@@ -2,7 +2,7 @@
+ 
+ Renders queued cards one at a time with ``render_action``, retries
+ retryable errors with exponential backoff, never retries a safety refusal,
+-runs the processing pipeline up to ``stabilize`` after each clip, writes a
++runs the processing pipeline through the profile stages after each clip, writes a
+ ``CostEntry`` row per rendered clip, and honors the cancel token between
+ jobs, inside jobs (through ``render_action``), and during backoff waits.
+ 
+@@ -43,7 +43,11 @@ logger = logging.getLogger(__name__)
+ 
+ BACKOFF_SECONDS = (2.0, 4.0, 8.0)
+ MAX_RETRIES = len(BACKOFF_SECONDS)
+-PIPELINE_UPTO = "stabilize"
++# The queue runs the whole pipeline, profile stages included. A run that stops
++# at "stabilize" writes no stages/<action_id>/hd or /pixel directory, and
++# SpriteProject.sheet_meta() then falls back to the stabilize PNG, so every
++# export silently ships raw stabilize frames instead of the profile output.
++PIPELINE_UPTO = "pixel"
+ _SLEEP_SLICE = 0.2  # backoff waits sleep in slices this long so a cancel is seen promptly
+ 
+ QueueResult = Dict[str, Union[ClipRecord, SpriteGenerationError]]
+@@ -231,8 +235,8 @@ class ActionQueue:
+ 
+     def _post_process(self, action: ActionCard) -> None:
+         try:
+-            run_pipeline(self.project, action, upto=PIPELINE_UPTO,
+-                         progress=self.progress, token=self.token)
++            outputs = run_pipeline(self.project, action, upto=PIPELINE_UPTO,
++                                   progress=self.progress, token=self.token)
+         except Cancelled:
+             raise
+         except Exception as exc:  # noqa: BLE001 - the clip is safe; report and continue
+@@ -241,8 +245,11 @@ class ActionQueue:
+                                    f"The clip is saved; run the pipeline again from the "
+                                    f"processing panel.", level="error")
+         else:
+-            emit(logger, self.log, f"Frames ready for '{action.name}' "
+-                                   f"(pipeline up to '{PIPELINE_UPTO}')")
++            # Name the stages that produced frames instead of the requested
++            # stop stage: run_pipeline skips a disabled profile, so
++            # "up to 'pixel'" would promise an export the run never wrote.
++            stages = ", ".join(outputs) or "none"
++            emit(logger, self.log, f"Frames ready for '{action.name}' (stages: {stages})")
+ 
+     def _save(self) -> None:
+         if self.project.project_dir is None:
+diff --git a/core/sprite/pipeline.py b/core/sprite/pipeline.py
+index 7b2a05d..7d0b4f8 100644
+--- a/core/sprite/pipeline.py
++++ b/core/sprite/pipeline.py
+@@ -438,6 +438,16 @@ def hd_runner(project: SpriteProject, action: ActionCard, input_frames: List[Pat
+               out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
+     """Scale the stabilised frames proportionally into the hd profile cell.
+ 
++    The profile's ``crop_to_cell_aspect`` field, on by default, adds a crop
++    to the cell's proportions before that scale, so the output fills the cell
++    instead of sitting between transparent bars. The crop trims margin only:
++    ``subject_bbox`` reads the action's union alpha bbox and ``crop_and_pad``
++    protects it, so a standing character never loses its head to a square
++    cell. One rect covers the whole action, so every frame takes the same
++    crop box and the animation does not shift. ``upscale_small`` still
++    governs the scale, and ``aspect_crop_gain`` drops the crop for any frame
++    it cannot buy extra cell coverage for.
++
+     The ``hd`` profile keeps the anti-aliased alpha the keying stages produced
+     unless ``binary_alpha`` is set, in which case ``apply_profile_alpha``
+     thresholds it (the HD alpha guarantee). That post-pass is skipped entirely
+@@ -446,7 +456,7 @@ def hd_runner(project: SpriteProject, action: ActionCard, input_frames: List[Pat
+     ``token`` and reports progress per frame so a cancel is not stuck behind
+     the whole pass (Minor 1).
+     """
+-    from .stabilize import crop_and_pad
++    from .stabilize import crop_and_pad, subject_bbox
+ 
+     prof = project.profile("hd")
+     if prof is None or not input_frames:
+@@ -454,9 +464,12 @@ def hd_runner(project: SpriteProject, action: ActionCard, input_frames: List[Pat
+     with Image.open(input_frames[0]) as first:
+         w, h = first.size
+     _reset_dir(out_dir)
++    protect = subject_bbox(input_frames) if prof.crop_to_cell_aspect else None
+     written = crop_and_pad(input_frames, out_dir, (0, 0, w, h), prof.cell_size,
+                            anchor=project.stabilize.anchor, pad_px=0,
+-                           upscale_small=prof.upscale_small, resample_method=prof.upscale_method,
++                           upscale_small=prof.upscale_small,
++                           crop_to_aspect=prof.crop_to_cell_aspect, protect=protect,
++                           resample_method=prof.upscale_method,
+                            stage=out_dir.name, progress=progress, token=token)
+     if prof.binary_alpha:
+         total = len(written)
+@@ -473,6 +486,9 @@ register_stage("key", key_runner, key_stage_settings, code_version=2)
+ register_stage("cleanup", cleanup_runner, cleanup_stage_settings, code_version=2)
+ register_stage("alpha", alpha_runner, alpha_stage_settings, code_version=2)
+ register_stage("stabilize", stabilize_runner, stabilize_stage_settings, code_version=2)
++# Still code_version 2: the cell-aspect crop is a profile field, so it rides the
++# stage settings fingerprint (`_profile_settings` serialises the whole profile) and
++# a toggle re-runs the stage on its own. Version-2 output stays valid.
+ register_stage("hd", hd_runner, hd_stage_settings, code_version=2)
+ register_stage("pixel", identity_runner, pixel_stage_settings)
+ 
+diff --git a/core/sprite/pixelart.py b/core/sprite/pixelart.py
+index fd08be9..fb0208d 100644
+--- a/core/sprite/pixelart.py
++++ b/core/sprite/pixelart.py
+@@ -80,6 +80,34 @@ def anchor_offset(content: Size, cell: Size, anchor: str) -> Tuple[int, int]:
+     return stabilize.anchor_offset(anchor, content, cell)
+ 
+ 
++def crop_to_cell_aspect(image: Image.Image, cell: Size, anchor: str,
++                        protect: Optional[Tuple[int, int, int, int]] = None) -> Image.Image:
++    """Crop ``image`` to the cell's proportions, placed by ``anchor``.
++
++    A 16:9 frame fitted into a square cell keeps transparent bars above and
++    below the character; the crop removes them. The crop runs before
++    :func:`integer_fit_scale`, so every frame of an action still reduces by
++    the one shared factor and the animation does not jitter.
++
++    ``protect`` names the subject rect the crop must keep, so the crop trims
++    margin and never the character. ``run_pixel_stage`` passes the action's
++    union alpha bbox, which is one rect for every frame, so the character
++    does not shift inside the cell between frames.
++
++    ``fit_pad_integer`` never enlarges, so ``aspect_crop_gain`` is asked with
++    ``allow_upscale=False``: a crop that cannot cover more of the cell than
++    the uncropped frame would only delete pixels, so the image comes back
++    unchanged.
++    """
++    rgba = image if image.mode == "RGBA" else image.convert("RGBA")
++    box = stabilize.aspect_crop_gain(rgba.size, cell, anchor, allow_upscale=False,
++                                     protect=protect)
++    if box is None:
++        return rgba
++    x, y, w, h = box
++    return rgba.crop((x, y, x + w, y + h))
++
++
+ def fit_pad_integer(image: Image.Image, cell: Size, anchor: str,
+                     *, scale: Optional[int] = None) -> Image.Image:
+     """Box-filter downscale by an integer factor, then pad on a transparent canvas.
+@@ -372,7 +400,7 @@ def _validate_pixel_profile(profile: Any) -> None:
+ 
+ def run_pixel_stage(project: Any, action: Any, input_frames: List[Path], out_dir: Path,
+                     progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
+-    """Stabilized frames -> integer fit -> binary alpha -> shared palette -> PNGs.
++    """Stabilized frames -> optional aspect crop -> integer fit -> binary alpha -> palette -> PNGs.
+ 
+     ``StageRunner`` signature (sub-project 1 registry). Writes
+     ``out_dir/<input name>`` per frame plus ``out_dir/pixel.json`` (scale,
+@@ -400,17 +428,42 @@ def run_pixel_stage(project: Any, action: Any, input_frames: List[Path], out_dir
+     grand_total = 2 * total
+     warnings: List[str] = []
+ 
++    # The aspect crop precedes the shared scale: the scale must be computed
++    # from the sizes the frames actually carry into fit_pad_integer. The
++    # subject rect covers the whole action, so the crop trims margin only and
++    # every frame takes the same box -- the character keeps its head and does
++    # not shift inside the cell between frames.
++    crop_to_aspect = bool(getattr(profile, "crop_to_cell_aspect", False))
++    protect = stabilize.subject_bbox(input_frames) if crop_to_aspect else None
+     frames: List[Image.Image] = []
++    source_sizes: List[Size] = []
+     for path in input_frames:
+         check(token)
+         with Image.open(path) as img:
+-            frames.append(img.convert("RGBA"))
++            rgba = img.convert("RGBA")
++        source_sizes.append(rgba.size)
++        frames.append(crop_to_cell_aspect(rgba, cell, anchor, protect) if crop_to_aspect else rgba)
+     scale = max((integer_fit_scale(f.size, cell) for f in frames), default=1)
++    if crop_to_aspect:
++        lost = max((1.0 - (f.width * f.height) / float(sw * sh)
++                    for f, (sw, sh) in zip(frames, source_sizes)), default=0.0)
++        if lost > stabilize.CROP_LOSS_WARN_FRACTION:
++            warnings.append(
++                f"The pixel profile's crop_to_cell_aspect setting dropped up to {lost:.0%} of a "
++                f"source frame to reach the {cell[0]}x{cell[1]} cell aspect (anchor {anchor}). "
++                f"The subject rect is protected, so what goes is margin. Turn the setting off to "
++                f"keep the margin, or give the profile a cell with the aspect of the content."
++            )
+ 
+     fitted: List[Image.Image] = []
+     for index, frame in enumerate(frames):
+         check(token)
+-        warning = resolution_check(frame.size, cell)
++        # The check measures the frame the user produced, not the cropped one: a
++        # 200x40 source is not "smaller than the cell" in width, and telling the
++        # user to regenerate it at 64x64 or larger would not change anything.
++        # The same branch gates upscale_then_fit, whose stability_api method is a
++        # paid call per frame, so the crop must not route new frames into it.
++        warning = resolution_check(source_sizes[index], cell)
+         if warning is not None and profile.upscale_small:
+             image = upscale_then_fit(frame, cell, anchor, method=profile.upscale_method)
+         else:
+@@ -459,5 +512,8 @@ def run_pixel_stage(project: Any, action: Any, input_frames: List[Path], out_dir
+ # Importing this module registers the stage. core/sprite/__init__.py imports it
+ # after .pipeline, so this call replaces sub-project 1's identity runner.
+ # code_version=2: the identity runner is version 1, and a real runner at the
+-# same version with the same settings would reuse a stale identity output.
++# same version with the same settings would reuse a stale identity output. The
++# cell-aspect crop needs no further bump, because it is a field of the pixel
++# profile and pixel_stage_settings serialises the whole profile: a toggle re-runs
++# the stage through the settings fingerprint, and version-2 output stays valid.
+ register_stage("pixel", run_pixel_stage, settings_fn=pixel_stage_settings, code_version=2)
+diff --git a/core/sprite/project.py b/core/sprite/project.py
+index 4283aa6..b965da5 100644
+--- a/core/sprite/project.py
++++ b/core/sprite/project.py
+@@ -16,7 +16,7 @@ import uuid
+ from dataclasses import asdict, dataclass, field
+ from datetime import datetime
+ from pathlib import Path
+-from typing import Any, Dict, List, Optional, Tuple
++from typing import Any, Dict, List, Optional, Set, Tuple
+ 
+ from core.recycle_bin import send_to_recycle_bin
+ from core.utils import sanitize_filename
+@@ -170,6 +170,12 @@ class OutputProfile:
+     locked_palette: Optional[List[str]] = None
+     upscale_small: bool = False        # pixel: upscale a source smaller than the cell (sub-project 4)
+     upscale_method: str = "lanczos"
++    # On by default: an export must carry the cell's proportions, not the source clip's.
++    # The crop trims margin only -- `stabilize.subject_bbox` gives the profile stages the
++    # action's union alpha bbox and the crop keeps it, so a standing character in a square
++    # cell keeps its head and the crop stops at the subject. Turn it off to letterbox the
++    # whole frame inside the cell instead.
++    crop_to_cell_aspect: bool = True
+ 
+     def to_dict(self) -> Dict[str, Any]:
+         data = asdict(self)
+@@ -193,6 +199,7 @@ class OutputProfile:
+             locked_palette=[str(c) for c in locked] if locked is not None else None,
+             upscale_small=bool(data.get("upscale_small", False)),
+             upscale_method=str(data.get("upscale_method", "lanczos")),
++            crop_to_cell_aspect=bool(data.get("crop_to_cell_aspect", True)),
+         )
+ 
+ 
+@@ -510,12 +517,29 @@ class SpriteProject:
+         profile stages write a file of the same name under
+         ``stages/<action_id>/<profile>/``; when that file exists the sheet
+         points at it, otherwise it falls back to the stabilize PNG.
++
++        The fallback is deliberate, but it is invisible in the export: an
++        export of unprocessed frames looks like a finished one. The first
++        fallback of each action therefore logs a warning that names the
++        action, the profile and the directory that is missing. The flag is
++        per action id, not per call, because an export whose 'run', 'idle'
++        and 'jump' actions all lack profile output must name all three; only
++        the first frame of an action logs, so a 24-frame action still writes
++        one line. A disabled profile is named as the cause, because the
++        pipeline skips a disabled profile and the "run the pipeline" advice
++        would never fix it.
+         """
+         prof = self.profile(profile)
+         if prof is None:
+             raise ValueError(f"Unknown output profile: {profile!r}")
+         frames: List[FrameMeta] = []
+         tags: List[TagMeta] = []
++        warned_actions: Set[str] = set()
++        if prof.enabled:
++            remedy = "Run the pipeline through the profile stages, then export again."
++        else:
++            remedy = (f"The '{profile}' profile is disabled, so the pipeline skips its stage. "
++                      f"Enable the profile, run the pipeline again, then export.")
+         for action in self.actions:
+             if not action.frames:
+                 continue
+@@ -523,9 +547,18 @@ class SpriteProject:
+             for frame in action.frames:
+                 src = frame.source_path
+                 if src is not None and self.project_dir is not None:
+-                    candidate = self.project_dir / "stages" / action.id / profile / src.name
++                    stage_dir = self.project_dir / "stages" / action.id / profile
++                    candidate = stage_dir / src.name
+                     if candidate.exists():
+                         src = candidate
++                    elif action.id not in warned_actions:
++                        warned_actions.add(action.id)
++                        logger.warning(
++                            f"Sprite project '{self.name}': the '{profile}' stage output for "
++                            f"action '{action.name}' is missing ({stage_dir}). The sheet falls "
++                            f"back to the stabilize frames, so this export does not carry the "
++                            f"'{profile}' cell size or palette. {remedy}"
++                        )
+                 frames.append(FrameMeta(
+                     name=frame.name,
+                     source_path=src,
+diff --git a/core/sprite/stabilize.py b/core/sprite/stabilize.py
+index 1c1a56b..d007b67 100644
+--- a/core/sprite/stabilize.py
++++ b/core/sprite/stabilize.py
+@@ -29,6 +29,7 @@ ANCHORS = ("bottom_center", "center", "top_left", "top_center", "bottom_left")
+ DEJITTER_METHODS = ("phase", "centroid")
+ MIN_PHASE_RESPONSE = 0.02      # cv2.phaseCorrelate response below this is noise
+ MAX_SHIFT_FRACTION = 0.25      # never move a frame more than a quarter of its size
++CROP_LOSS_WARN_FRACTION = 0.05  # log an aspect crop that drops more of a frame than this
+ 
+ 
+ def has_transparency(frame: Path) -> bool:
+@@ -120,6 +121,105 @@ def fit_size(content: Size, cell: Size, *, allow_upscale: bool = True) -> Size:
+     return (max(1, int(round(w * scale))), max(1, int(round(h * scale))))
+ 
+ 
++def aspect_crop_box(content: Size, cell: Size, anchor: str,
++                    protect: Optional[Rect] = None) -> Rect:
++    """Largest box inside ``content`` with the aspect of ``cell``, placed by ``anchor``.
++
++    A profile that crops to the cell aspect trims a frame to the cell's
++    proportions before it scales it, so the output fills the cell. A
++    proportional fit alone letterboxes: a 1280x720 frame fitted into a
++    256x256 cell becomes 256x144 content between transparent bars. Cropped
++    first, the same frame becomes 720x720 and then scales to a full 256x256.
++
++    The box keeps the edge its anchor keeps in :func:`anchor_offset`:
++    ``bottom_center`` keeps the bottom edge and centers horizontally, so a
++    character's feet stay planted. Content already at the cell aspect returns
++    the full box.
++
++    ``protect`` names a rect the box must contain -- the subject. The crop
++    trims margin, never the subject. The stabilize stage emits the content
++    bbox of a whole action, so a standing character fills the frame top to
++    bottom; cropping that to a square cell would cut the head off. When the
++    subject is too large for the ideal box, the box grows along the
++    constrained axis until it covers the subject, and the scale that follows
++    letterboxes whatever aspect is left. Pass ``None`` for a frame with no
++    transparency, where there is no subject to protect and the crop is free.
++    """
++    w, h = int(content[0]), int(content[1])
++    cw, ch = int(cell[0]), int(cell[1])
++    if w < 1 or h < 1 or cw < 1 or ch < 1:
++        raise ValueError(f"sizes must be positive: content={content} cell={cell}")
++    # Cross-multiplied integers, so an exact-aspect frame never rounds through
++    # a float ratio into a one-pixel-narrower crop.
++    if w * ch > h * cw:            # content is wider than the cell: trim width
++        bw, bh = max(1, min(w, (h * cw) // ch)), h
++    elif w * ch < h * cw:          # content is taller than the cell: trim height
++        bw, bh = w, max(1, min(h, (w * ch) // cw))
++    else:
++        bw, bh = w, h
++    if protect is None:
++        x, y = anchor_offset(anchor, (bw, bh), (w, h))
++        return (x, y, bw, bh)
++    px, py, pw, ph = (int(v) for v in protect)
++    # Grow the box to the subject's size, then slide it so the subject is inside.
++    # The growth uses the subject's width and height, never its far edge: a
++    # subject at x=200 that is 240 wide needs a 240-wide box, not a 440-wide one.
++    bw = min(w, max(bw, pw))
++    bh = min(h, max(bh, ph))
++    x, y = anchor_offset(anchor, (bw, bh), (w, h))
++    x = min(max(x, px + pw - bw), px)
++    y = min(max(y, py + ph - bh), py)
++    x = min(max(x, 0), w - bw)
++    y = min(max(y, 0), h - bh)
++    return (x, y, bw, bh)
++
++
++def aspect_crop_gain(content: Size, cell: Size, anchor: str,
++                     *, allow_upscale: bool, protect: Optional[Rect] = None) -> Optional[Rect]:
++    """The :func:`aspect_crop_box` rect, or ``None`` when the crop buys no cell coverage.
++
++    The crop exists to let the scale that follows cover more of the cell. A
++    crop that does not improve that coverage only deletes pixels, so it is
++    dropped. With ``upscale_small`` off (the default of both shipped
++    profiles) a crop that lands below the cell size cannot improve coverage
++    at all: a 300x100 frame cropped to 100x100 lands in a 256x256 cell at
++    100x100, where the uncropped frame reaches 256x85. ``None`` also comes
++    back when the content already carries the cell aspect, and when
++    ``protect`` leaves no margin to trim.
++    """
++    x, y, w, h = aspect_crop_box(content, cell, anchor, protect=protect)
++    size = (int(content[0]), int(content[1]))
++    if (w, h) == size:
++        return None
++    before = fit_size(size, cell, allow_upscale=allow_upscale)
++    after = fit_size((w, h), cell, allow_upscale=allow_upscale)
++    if after[0] * after[1] <= before[0] * before[1]:
++        return None
++    return (x, y, w, h)
++
++
++def subject_bbox(frames: Sequence[Path]) -> Optional[Rect]:
++    """The rect the aspect crop must keep: the union alpha bbox of ``frames``.
++
++    One rect covers the whole action, so every frame takes the same crop box
++    and the character does not shift inside the cell between frames.
++
++    A fully opaque action returns its whole frame, not ``None``. Alpha is the
++    only signal that separates the subject from its margin, so without alpha
++    there is no way to tell which pixels are safe to drop -- an opaque
++    1280x720 plate whose keying failed and an opaque 400x650 character look
++    the same here. The crop then trims nothing and the scale letterboxes,
++    which loses no pixel. ``None`` means "crop is unconstrained" and only a
++    caller that already knows the frame carries no subject passes it.
++    """
++    if not frames:
++        return None
++    if not has_transparency(frames[0]):
++        with Image.open(frames[0]) as im:
++            return (0, 0, im.size[0], im.size[1])
++    return union_alpha_bbox(frames)
++
++
+ RESAMPLE_METHODS = {
+     "lanczos": Image.Resampling.LANCZOS,
+     "nearest": Image.Resampling.NEAREST,
+@@ -134,7 +234,8 @@ def _resample_filter(method: str) -> Image.Resampling:
+ 
+ def crop_and_pad(frames: Sequence[Path], out_dir: Path, bbox: Rect, cell: Size,
+                  anchor: str = "bottom_center", pad_px: int = 0,
+-                 *, upscale_small: bool = True, resample_method: str = "lanczos",
++                 *, upscale_small: bool = True, crop_to_aspect: bool = False,
++                 protect: Optional[Rect] = None, resample_method: str = "lanczos",
+                  stage: str = "stabilize", progress: ProgressFn = no_progress,
+                  token: Optional[CancelToken] = None) -> List[Path]:
+     """Crop every frame to ``bbox`` (+pad), scale proportionally into ``cell``, anchor.
+@@ -147,6 +248,18 @@ def crop_and_pad(frames: Sequence[Path], out_dir: Path, bbox: Rect, cell: Size,
+     inside the cell. ``stage`` names the caller's stage in progress events
+     -- ``hd_runner`` passes ``"hd"`` so its per-frame progress does not
+     report as ``"stabilize"``.
++
++    ``crop_to_aspect`` adds a second crop, to the cell's proportions
++    (:func:`aspect_crop_box`), between the bbox crop and the resize, so the
++    content fills the cell instead of sitting between transparent bars.
++    ``protect`` names the subject rect that crop must keep, in the
++    coordinates of the bbox+pad crop -- :func:`subject_bbox` builds it from
++    the whole action, so every frame takes the same crop box and the
++    animation does not shift. Without it the crop would cut the head off a
++    standing character in a square cell. :func:`aspect_crop_gain` also drops
++    the crop for a frame the following scale cannot cover more of the cell
++    with, and a crop that drops more than ``CROP_LOSS_WARN_FRACTION`` of a
++    frame logs one warning per call.
+     """
+     if anchor not in ANCHORS:
+         raise ValueError(f"Unknown anchor {anchor!r}; use one of {ANCHORS}")
+@@ -160,6 +273,7 @@ def crop_and_pad(frames: Sequence[Path], out_dir: Path, bbox: Rect, cell: Size,
+     resample = _resample_filter(resample_method)
+     written: List[Path] = []
+     total = len(frames)
++    warned_crop = False
+     for index, path in enumerate(frames, start=1):
+         check(token)
+         with Image.open(path) as im:
+@@ -167,6 +281,21 @@ def crop_and_pad(frames: Sequence[Path], out_dir: Path, bbox: Rect, cell: Size,
+         # Expand by pad on a transparent canvas so the crop never reads outside the image.
+         crop = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), (0, 0, 0, 0))
+         crop.paste(rgba.crop((x, y, x + w, y + h)), (pad, pad))
++        if crop_to_aspect:
++            box = aspect_crop_gain(crop.size, cell, anchor, allow_upscale=upscale_small,
++                                   protect=protect)
++            if box is not None:
++                ax, ay, aw, ah = box
++                lost = 1.0 - (aw * ah) / float(crop.width * crop.height)
++                if lost > CROP_LOSS_WARN_FRACTION and not warned_crop:
++                    warned_crop = True
++                    logger.warning(
++                        "%s: the crop to the %dx%d cell aspect drops %.0f%% of each %dx%d frame "
++                        "(%dx%d kept, anchor %s). The subject rect is protected, so what goes is "
++                        "margin. Turn off the profile's crop_to_cell_aspect setting to keep the "
++                        "margin, or give the profile a cell with the aspect of the content.",
++                        stage, cw, ch, 100.0 * lost, crop.width, crop.height, aw, ah, anchor)
++                crop = crop.crop((ax, ay, ax + aw, ay + ah))
+         target = fit_size(crop.size, cell, allow_upscale=upscale_small)
+         if target != crop.size:
+             crop = crop.resize(target, resample)
+diff --git a/gui/sprite/export_dialog.py b/gui/sprite/export_dialog.py
+index f431b5f..26a29f3 100644
+--- a/gui/sprite/export_dialog.py
++++ b/gui/sprite/export_dialog.py
+@@ -15,10 +15,13 @@ from dataclasses import dataclass
+ from pathlib import Path
+ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+ 
+-from PySide6.QtCore import Qt, Signal
+-from PySide6.QtWidgets import (QCheckBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout,
+-                               QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
+-                               QProgressBar, QPushButton, QSpinBox, QVBoxLayout, QWidget)
++from PySide6.QtCore import QEvent, QObject, QPointF, Qt, Signal
++from PySide6.QtGui import QGuiApplication, QWheelEvent
++from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QCheckBox, QComboBox, QDialog,
++                               QDoubleSpinBox, QFileDialog, QFormLayout, QFrame, QGroupBox,
++                               QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar,
++                               QPushButton, QScrollArea, QSlider, QSpinBox, QVBoxLayout,
++                               QWidget)
+ 
+ from core.paths import get_data_paths
+ from core.sprite.exporters.aseprite_json import export_aseprite_json
+@@ -46,9 +49,50 @@ DEFAULT_TEMPLATE = "{title}_{tag}_{frame01}.png"
+ SETTINGS_PREFIX = "sprite/export/"
+ SPLITTER_KEY = SETTINGS_PREFIX + "splitter"
+ CLOSE_SHUTDOWN_TIMEOUT_MS = 5000  # on_dialog_close's bound before it falls back to join_orphans()
++CONSOLE_MIN_HEIGHT = 140          # the export log stays readable even after a stale splitter restore
++OPTIONS_MIN_HEIGHT = 200          # ... and so does the options pane above it
++SCREEN_FRACTION = 0.9             # cap _apply_minimum_size against the available screen
+ 
+ FormatFn = Callable[[SheetMeta, Path], List[Path]]
+ 
++# The value editors that consume a wheel event even without focus. QAbstractSpinBox covers
++# QSpinBox and QDoubleSpinBox; the engine preset combo and any later slider join them.
++WHEEL_GUARDED_TYPES = (QAbstractSpinBox, QComboBox, QSlider)
++
++
++class WheelGuard(QObject):
++    """Send a wheel over an unfocused value editor to the options pane instead.
++
++    The options pane scrolls, so a user wheels over it. A spin box or combo box
++    accepts a wheel event whether or not it has focus, so the gesture silently
++    edits `columns`, `extrude`, a pivot or the engine preset -- values that
++    `_save_settings` persists and that change the exported sheet.
++
++    The filter forwards the event to the scroll area's viewport rather than
++    merely ignoring it: Qt propagates an unaccepted wheel event up the parent
++    chain only for a spontaneous event, so an ignore alone would drop the
++    gesture on the floor in every other delivery path. Forwarding scrolls the
++    pane exactly once, because returning True also stops the propagation that
++    would otherwise reach the same viewport. A focused editor keeps its wheel,
++    which is what a user who clicked into the field expects.
++    """
++
++    def __init__(self, scroll_area: QScrollArea, parent: Optional[QObject] = None):
++        super().__init__(parent)
++        self._scroll_area = scroll_area
++
++    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
++        if event.type() != QEvent.Wheel or obj.hasFocus():
++            return False
++        viewport = self._scroll_area.viewport()
++        global_pos = event.globalPosition()
++        forwarded = QWheelEvent(
++            QPointF(viewport.mapFromGlobal(global_pos.toPoint())), global_pos,
++            event.pixelDelta(), event.angleDelta(), event.buttons(), event.modifiers(),
++            event.phase(), event.inverted(), event.source())
++        QApplication.sendEvent(viewport, forwarded)
++        return True
++
+ 
+ @dataclass
+ class ExportFormat:
+@@ -283,15 +327,20 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
+         # every checkbox that exists at that point AND to every later `register_format` call, so
+         # a sub-project-6 format that registers after construction still restores checked/unchecked.
+         self._wanted_formats: Optional[set] = None
++        self._sized_from_content = False   # guards the one-shot re-measure in showEvent
+         self.setWindowTitle(f"Export sprites — {project.name}")
+         self.setModal(True)
+-        self.setMinimumSize(660, 680)
+         self._build()
+         for fmt in BUILTIN_FORMATS:
+             self.register_format(fmt.id, fmt.label, fmt.fn, needs_sheet=fmt.needs_sheet,
+                                  takes_template=fmt.takes_template, checked=fmt.id == "grid")
+         register_extra_formats(self)
+         install_engine_presets(self)
++        self._guard_wheel_over_value_editors()
++        # Only now does the options pane hold every row, so only now can its size hint answer
++        # how large the dialog must be. A minimum set in _build() would miss the formats that
++        # register_extra_formats/install_engine_presets add, and the Formats group would clip.
++        self._apply_minimum_size()
+         self._load_settings()
+         self.logMessage.connect(self.console.log)
+         self.purge_check.setChecked(prefs.purge_after_export_enabled())
+@@ -302,7 +351,8 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
+     # ----- UI ---------------------------------------------------------
+     def _build(self) -> None:
+         layout = QVBoxLayout(self)
+-        top = QWidget()
++        self.options_widget = QWidget()
++        top = self.options_widget
+         self.options_layout = QVBoxLayout(top)
+         self.options_layout.setContentsMargins(0, 0, 0, 0)
+ 
+@@ -391,13 +441,27 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
+         self.progress_bar.setVisible(False)
+         self.options_layout.addWidget(self.progress_bar)
+ 
++        # The options pane scrolls instead of squeezing its group boxes. The splitter used to
++        # compress `top` below its own minimumSizeHint, which clipped the Formats checkbox rows
++        # both ways; inside a resizable scroll area every group box keeps its size hint.
++        self.options_scroll = QScrollArea()
++        self.options_scroll.setWidgetResizable(True)
++        self.options_scroll.setFrameShape(QFrame.NoFrame)
++        self.options_scroll.setMinimumHeight(OPTIONS_MIN_HEIGHT)
++        self.options_scroll.setWidget(top)
++
+         self.console = DialogStatusConsole("Export log")
++        self.console.setMinimumHeight(CONSOLE_MIN_HEIGHT)
+         self.splitter = standard_splitter(Qt.Vertical, self)
+-        self.splitter.addWidget(top)
++        # Explicit, not inherited: a restored-but-stale splitter state must not collapse either
++        # pane, and both panes carry a minimum height so setSizes/restoreState cannot zero one.
++        self.splitter.setChildrenCollapsible(False)
++        self.splitter.addWidget(self.options_scroll)
+         self.splitter.addWidget(self.console)
+         self.splitter.setStretchFactor(0, 0)
+         self.splitter.setStretchFactor(1, 1)
+-        if not restore_splitter(self.settings, SPLITTER_KEY, self.splitter):
++        self._splitter_restored = restore_splitter(self.settings, SPLITTER_KEY, self.splitter)
++        if not self._splitter_restored:
+             self.splitter.setSizes([500, 180])
+         layout.addWidget(self.splitter, 1)
+ 
+@@ -411,6 +475,70 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
+         buttons.addWidget(self.export_btn)
+         layout.addLayout(buttons)
+ 
++    def _guard_wheel_over_value_editors(self) -> None:
++        """Install `WheelGuard` on every value editor inside the scrolling options pane.
++
++        The sweep runs after `register_extra_formats` and `install_engine_presets`, so a
++        widget either of them adds -- the engine preset combo -- is guarded too. The focus
++        policy drops from `WheelFocus` to `StrongFocus` for the same reason: a wheel must
++        not hand an editor the focus it needs to accept the next wheel.
++        """
++        self._wheel_guard = WheelGuard(self.options_scroll, self)
++        for widget_type in WHEEL_GUARDED_TYPES:
++            for widget in self.options_widget.findChildren(widget_type):
++                widget.setFocusPolicy(Qt.StrongFocus)
++                widget.installEventFilter(self._wheel_guard)
++
++    def _apply_minimum_size(self) -> None:
++        """Derive the dialog minimum from the real content, then cap it to the screen.
++
++        The old hardcoded 660x680 was a guess made before `register_extra_formats` and
++        `install_engine_presets` added their rows, so the Formats group opened clipped. The
++        width below reserves the vertical scroll bar as well, so the options pane never needs
++        a horizontal scroll bar at the minimum width. Call this only after every
++        `register_format` of the constructor has run.
++
++        The `updateGeometry()` sweep is required: a checkbox that `register_format` appends
++        after `_build` leaves the parent layout holding a stale cached size for the Formats
++        group until a layout request is delivered, and no event loop runs inside `__init__`.
++        `showEvent` calls this a second time, because style polish raises the hints again.
++        """
++        for child in self.options_widget.findChildren(QWidget):
++            child.updateGeometry()
++        self.options_widget.updateGeometry()
++        self.options_layout.activate()
++        hint = self.options_widget.sizeHint()
++        wanted_width = max(hint.width(), self.options_widget.minimumSizeHint().width())
++        frame = 2 * self.options_scroll.frameWidth()
++        scroll_bar = self.options_scroll.verticalScrollBar().sizeHint().width()
++        margins = self.layout().contentsMargins()
++        width = wanted_width + scroll_bar + frame + margins.left() + margins.right()
++        height = (hint.height() + frame + self.console.minimumHeight()
++                  + self.splitter.handleWidth() + self.export_btn.sizeHint().height()
++                  + margins.top() + margins.bottom() + 2 * self.layout().spacing())
++
++        screen = self.screen() or QGuiApplication.primaryScreen()
++        if screen is not None:
++            available = screen.availableGeometry()
++            width = min(width, int(available.width() * SCREEN_FRACTION))
++            height = min(height, int(available.height() * SCREEN_FRACTION))
++        self.setMinimumSize(width, height)
++        logger.debug("Sprite export dialog minimum size: %dx%d (options hint %dx%d)",
++                     width, height, hint.width(), hint.height())
++
++    def showEvent(self, event):
++        """Re-measure once on the first show, when style polish has settled the size hints."""
++        super().showEvent(event)
++        if not self._sized_from_content:
++            self._sized_from_content = True
++            self._apply_minimum_size()
++            if not self._splitter_restored:
++                # The stretch factors send every extra pixel to the console, so the fallback
++                # sizes set in _build (when the dialog was still unsized) leave the options
++                # pane at its minimum. Hand it the measured content height instead.
++                options = self.options_widget.sizeHint().height() + 2 * self.options_scroll.frameWidth()
++                self.splitter.setSizes([options, CONSOLE_MIN_HEIGHT])
++
+     # ----- format registry (sub-project 6 hook) -----------------------
+     def register_format(self, id: str, label: str, fn: FormatFn, *, needs_sheet: bool = False,
+                         takes_template: bool = False, checked: bool = False) -> QCheckBox:
+diff --git a/gui/sprite/image_route_dialog.py b/gui/sprite/image_route_dialog.py
+index 4e7c4ba..25d5b77 100644
+--- a/gui/sprite/image_route_dialog.py
++++ b/gui/sprite/image_route_dialog.py
+@@ -245,7 +245,7 @@ class ImageRouteDialog(WorkerHost, DialogCleanupMixin, QDialog):
+                     paths = edit_chain(provider, Path(character), action, extract_dir, frames=frames,
+                                        pose_instructions=steps, plate_color=project.plate_color, model=model,
+                                        log=log, token=token, matte_pairs=matte)
+-                progress("image_route", 2, 3, "Running pipeline to stabilize")
++                progress("image_route", 2, 3, "Running pipeline through the profile stages")
+                 duration_ms = round(1000 / max(1, action.fps))
+                 action.frames = [
+                     FrameMeta(name=f"{project.name}_{action.name}_{i:02d}", source_path=p, frame=(0, 0, 0, 0),
+@@ -260,7 +260,12 @@ class ImageRouteDialog(WorkerHost, DialogCleanupMixin, QDialog):
+                               note=f"image route {mode}: {len(paths)} frame(s), {edits} edit(s)",
+                               provider=provider_id, model=model_used, seconds=float(edits))
+                 recorded = True
+-                run_pipeline(project, action, upto="stabilize", progress=progress, token=token)
++                # Through the profile stages: this job ends with status
++                # "processed", so the user can export straight from here. A
++                # stabilize-only run writes no hd/pixel directory and
++                # sheet_meta() then falls back to the stabilize PNG, which
++                # ships raw frames under both profile names.
++                run_pipeline(project, action, upto="pixel", progress=progress, token=token)
+             except Cancelled:
+                 if not recorded:
+                     record_partial_spend(project, action, mode=mode, provider=provider_id, model=model_used,
+diff --git a/gui/sprite/processing_panel.py b/gui/sprite/processing_panel.py
+index 511d437..3bcf044 100644
+--- a/gui/sprite/processing_panel.py
++++ b/gui/sprite/processing_panel.py
+@@ -135,11 +135,22 @@ class ProfileEditor(QGroupBox):
+                                       "instead of padding it; the pixel stage reports the case in pixel.json")
+         form.addRow("Small sources:", self.upscale_small)
+ 
++        self.crop_to_cell_aspect = QCheckBox("Crop to the cell proportions (fills the cell)")
++        self.crop_to_cell_aspect.setToolTip(
++            "On by default. The frame is cropped toward the cell's proportions before it is "
++            "scaled, so the sprite fills the cell instead of sitting between transparent bars. "
++            "The crop trims margin only and never cuts the character: the union alpha box of the "
++            "whole action is protected, so a tall character keeps its head. A frame with no "
++            "alpha is protected whole, because nothing marks its margin. Turn this off to keep "
++            "the margin too.")
++        form.addRow("Fill cell:", self.crop_to_cell_aspect)
++
+         self.preset.currentIndexChanged.connect(self._on_preset)
+         self.dither.currentIndexChanged.connect(self._on_dither)
+         for spin in (self.width, self.height, self.threshold, self.defringe, self.palette_size):
+             spin.valueChanged.connect(self._on_value_changed)
+-        for box in (self.enabled, self.binary_alpha, self.palette_lock, self.upscale_small):
++        for box in (self.enabled, self.binary_alpha, self.palette_lock, self.upscale_small,
++                    self.crop_to_cell_aspect):
+             box.toggled.connect(self._on_value_changed)
+ 
+     def _on_rebuild_clicked(self) -> None:
+@@ -166,7 +177,7 @@ class ProfileEditor(QGroupBox):
+     def load(self, profile: OutputProfile) -> None:
+         with _blocked(self.enabled, self.preset, self.width, self.height, self.binary_alpha,
+                       self.threshold, self.defringe, self.palette_size, self.dither,
+-                      self.palette_lock, self.upscale_small):
++                      self.palette_lock, self.upscale_small, self.crop_to_cell_aspect):
+             self.enabled.setChecked(profile.enabled)
+             match = next((i for i, (_l, size) in enumerate(CELL_PRESETS)
+                           if tuple(size) == tuple(profile.cell_size)), None)
+@@ -183,6 +194,8 @@ class ProfileEditor(QGroupBox):
+             self.dither_warning.setVisible(profile.dither == "floyd")
+             self.palette_lock.setChecked(profile.palette_lock)
+             self.upscale_small.setChecked(bool(getattr(profile, "upscale_small", False)))
++            self.crop_to_cell_aspect.setChecked(
++                bool(getattr(profile, "crop_to_cell_aspect", False)))
+ 
+     def store(self, profile: OutputProfile) -> None:
+         profile.enabled = self.enabled.isChecked()
+@@ -194,6 +207,7 @@ class ProfileEditor(QGroupBox):
+         profile.dither = self.dither.currentData()
+         profile.palette_lock = self.palette_lock.isChecked()
+         profile.upscale_small = self.upscale_small.isChecked()
++        profile.crop_to_cell_aspect = self.crop_to_cell_aspect.isChecked()
+ 
+ 
+ class ProcessingPanel(WorkerHost, QWidget):
+diff --git a/gui/sprite/queue_panel.py b/gui/sprite/queue_panel.py
+index dd911b5..8e080d0 100644
+--- a/gui/sprite/queue_panel.py
++++ b/gui/sprite/queue_panel.py
+@@ -255,7 +255,13 @@ class QueuePanel(WorkerHost, QGroupBox):
+             card.status = "rendered"
+             card.error = None
+             try:
+-                run_pipeline(project, card, upto="stabilize", progress=progress, token=token,
++                # Through the profile stages, not just stabilize: a refine
++                # replaces the clip, and each profile runner clears its own
++                # directory only when it runs. A stabilize-only re-run would
++                # leave the previous clip's hd/pixel PNGs in place, and
++                # sheet_meta() prefers those files by name, so the export would
++                # ship the frames the refine just replaced.
++                run_pipeline(project, card, upto="pixel", progress=progress, token=token,
+                              force=True)
+             except Cancelled:
+                 raise
+diff --git a/tests/sprite/generation/test_gen_queue.py b/tests/sprite/generation/test_gen_queue.py
+index 92f89e6..5c6ae37 100644
+--- a/tests/sprite/generation/test_gen_queue.py
++++ b/tests/sprite/generation/test_gen_queue.py
+@@ -6,9 +6,14 @@ import pytest
+ 
+ from core.sprite.generation import queue as queue_mod
+ from core.sprite.generation.errors import ProviderError, QuotaExceeded, SafetyRefusal
+-from core.sprite.generation.queue import BACKOFF_SECONDS, MAX_RETRIES, ActionQueue
++from core.sprite.generation.queue import (
++    BACKOFF_SECONDS,
++    MAX_RETRIES,
++    PIPELINE_UPTO,
++    ActionQueue,
++)
+ from core.sprite.generation.video_route import RenderRequest
+-from core.sprite.pipeline import CancelToken, Cancelled
++from core.sprite.pipeline import PROFILE_STAGES, STAGES, CancelToken, Cancelled
+ from core.sprite.project import ClipRecord, CostEntry
+ 
+ 
+@@ -36,7 +41,7 @@ def harness(monkeypatch, make_project, make_action):
+ 
+     def fake_pipeline(project, action, *, upto="pixel", progress=None, token=None, force=False):
+         state["pipelines"].append((action.id, upto))
+-        return {"stabilize": []}
++        return {"stabilize": [], "hd": [], "pixel": []}
+ 
+     monkeypatch.setattr(queue_mod, "render_action", fake_render)
+     monkeypatch.setattr(queue_mod, "run_pipeline", fake_pipeline)
+@@ -63,6 +68,29 @@ def test_constants():
+     assert BACKOFF_SECONDS == (2.0, 4.0, 8.0) and MAX_RETRIES == 3
+ 
+ 
++def test_pipeline_upto_reaches_the_profile_stages(harness):
++    """Regression: the queue used to stop at 'stabilize'.
++
++    A run that stops there writes no stages/<action_id>/hd or /pixel directory,
++    and SpriteProject.sheet_meta() then falls back to the stabilize PNG, so
++    every export ships raw frames under both profile names.
++    """
++    stop = STAGES.index(PIPELINE_UPTO)
++    assert set(PROFILE_STAGES) <= set(STAGES[:stop + 1])
++    project, q = harness["build"]()
++    q.enqueue(["a1"])
++    q.run()
++    assert harness["pipelines"] == [("a1", "pixel")]
++
++
++def test_post_process_logs_the_stages_that_produced_frames(harness):
++    project, q = harness["build"]()
++    q.enqueue(["a1"])
++    q.run()
++    assert any("Frames ready for 'walk' (stages: stabilize, hd, pixel)" in line
++               for line in harness["logs"])
++
++
+ def test_enqueue_marks_queued_and_dedupes(harness):
+     project, q = harness["build"]()
+     q.enqueue(["a1", "a2", "a1"])
+@@ -85,7 +113,7 @@ def test_run_renders_in_order_runs_pipeline_and_records_cost(harness):
+     q.enqueue(["a1", "a2"])
+     results = q.run()
+     assert [r.action.id for r in harness["renders"]] == ["a1", "a2"]
+-    assert harness["pipelines"] == [("a1", "stabilize"), ("a2", "stabilize")]
++    assert harness["pipelines"] == [("a1", "pixel"), ("a2", "pixel")]
+     assert set(results) == {"a1", "a2"}
+     assert all(isinstance(r, ClipRecord) for r in results.values())
+     for action in project.actions:
+diff --git a/tests/sprite/gui/test_export_dialog.py b/tests/sprite/gui/test_export_dialog.py
+index 2525cea..8f28bcb 100644
+--- a/tests/sprite/gui/test_export_dialog.py
++++ b/tests/sprite/gui/test_export_dialog.py
+@@ -4,7 +4,10 @@ import time
+ from pathlib import Path
+ 
+ import pytest
++from PySide6.QtCore import QPoint, QPointF, Qt
++from PySide6.QtGui import QGuiApplication, QWheelEvent
+ from PySide6.QtTest import QTest
++from PySide6.QtWidgets import QApplication
+ 
+ import gui.sprite.export_dialog as ed
+ from core.sprite.exporters.grid import GridOptions
+@@ -483,3 +486,149 @@ def test_out_dir_persistence_is_per_project(qapp, tmp_path, monkeypatch):
+     dialog_a_again = ExportDialog(project_a)
+     assert dialog_a_again.out_dir_edit.text() == str(tmp_path / "custom_export")
+     _close(dialog_a_again)
++
++
++# ----- layout: the dialog must be legible at its own minimum size ---------
++
++
++def _shown_at_minimum(dialog):
++    """Show `dialog`, shrink it to its own minimum, and let Qt finish the layout.
++
++    The minimum is measured twice — once at the end of `__init__`, once on the first
++    `showEvent` — so the test must show the dialog before it reads `minimumSize()`.
++    """
++    dialog.show()
++    for _ in range(5):
++        QApplication.processEvents()
++    dialog.resize(dialog.minimumSize())
++    for _ in range(5):
++        QApplication.processEvents()
++    return dialog
++
++
++def test_format_checkboxes_are_not_clipped_at_minimum_size(qapp, project):
++    """Every Formats row keeps its full height at the dialog's minimum size.
++
++    The options pane used to sit bare in the splitter, which compressed it below its own
++    minimumSizeHint; the last rows ("Godot 4 SpriteFrames", "Aseprite file") were sliced in
++    half. The QScrollArea now scrolls instead of squeezing.
++    """
++    dialog = _shown_at_minimum(ExportDialog(project))
++    assert set(dialog.format_checks) >= {"grid", "godot_tres", "aseprite_native"}
++    for fmt_id, box in dialog.format_checks.items():
++        assert box.height() >= box.sizeHint().height(), f"format row '{fmt_id}' is clipped"
++    _close(dialog)
++
++
++def test_options_pane_needs_no_horizontal_scroll_at_minimum_width(qapp, project):
++    """The minimum width covers the widest label plus the vertical scroll bar.
++
++    "Sprite sheet PNG (+ Aseprite JSON sidecar)" and the sub-project-6 label "Godot 4
++    SpriteFrames (.tres + sheet PNG)" are the long ones; clipping them horizontally was the
++    other half of the reported bug.
++    """
++    dialog = _shown_at_minimum(ExportDialog(project))
++    widest = max(box.sizeHint().width() for box in dialog.format_checks.values())
++    assert dialog.options_scroll.viewport().width() >= widest
++    assert not dialog.options_scroll.horizontalScrollBar().isVisible()
++    _close(dialog)
++
++
++def test_splitter_cannot_collapse_either_pane(qapp, project):
++    """A stale saved splitter state must not hide the options pane or the export log."""
++    dialog = _shown_at_minimum(ExportDialog(project))
++    assert not dialog.splitter.childrenCollapsible()
++
++    dialog.splitter.setSizes([0, 10_000])
++    QApplication.processEvents()
++    assert dialog.splitter.sizes()[0] >= ed.OPTIONS_MIN_HEIGHT
++
++    dialog.splitter.setSizes([10_000, 0])
++    QApplication.processEvents()
++    assert dialog.splitter.sizes()[1] >= ed.CONSOLE_MIN_HEIGHT
++    _close(dialog)
++
++
++def test_minimum_size_grows_with_a_late_registered_format(qapp, project):
++    """A format registered after `__init__` still gets a legible row once the dialog re-shows.
++
++    `_apply_minimum_size` runs after `register_extra_formats`/`install_engine_presets`, and
++    again on the first show, so the tall label below cannot be clipped either.
++    """
++    dialog = ExportDialog(project)
++    dialog.register_format("custom_fmt", "A deliberately long custom export format label (.xyz)",
++                           lambda meta, out_dir: [])
++    _shown_at_minimum(dialog)
++    box = dialog.format_checks["custom_fmt"]
++    assert box.height() >= box.sizeHint().height()
++    assert dialog.options_scroll.viewport().width() >= box.sizeHint().width()
++    _close(dialog)
++
++
++def test_minimum_size_never_exceeds_the_available_screen(qapp, project):
++    """Requirement: the computed minimum is capped, so the dialog always fits on screen."""
++    dialog = _shown_at_minimum(ExportDialog(project))
++    available = QGuiApplication.primaryScreen().availableGeometry()
++    assert dialog.minimumWidth() <= available.width()
++    assert dialog.minimumHeight() <= available.height()
++    _close(dialog)
++
++
++def _wheel_at(widget, delta):
++    """One wheel notch over the centre of `widget`."""
++    centre = widget.rect().center()
++    return QWheelEvent(QPointF(centre), QPointF(widget.mapToGlobal(centre)),
++                       QPoint(0, delta), QPoint(0, delta),
++                       Qt.NoButton, Qt.NoModifier, Qt.NoScrollPhase, False)
++
++
++def test_wheel_over_an_unfocused_spin_box_scrolls_instead_of_editing(qapp, project):
++    """D11 regression: the scrolling options pane turned a stray wheel into an edit.
++
++    `columns` and `extrude` reach the exported sheet layout and `_save_settings`
++    persists them, and the pivot spins go into the Aseprite/Godot metadata, so a
++    wheel over an unfocused editor must not change any of them. The gesture must
++    still reach the pane, so the scroll bar moves instead.
++    """
++    dialog = _shown_at_minimum(ExportDialog(project))
++    bar = dialog.options_scroll.verticalScrollBar()
++    assert bar.maximum() > 0, "the pane must be scrollable for this test to mean anything"
++    editors = [dialog.columns, dialog.extrude, dialog.border, dialog.shape, dialog.inner,
++               dialog.pivot_x_spin, dialog.pivot_y_spin, dialog.engine_preset_box.combo]
++    for editor in editors:
++        assert not editor.hasFocus()
++        reads = (editor.currentIndex if hasattr(editor, "currentIndex") else editor.value)
++        before = reads()
++        bar.setValue(0)
++        QApplication.sendEvent(editor, _wheel_at(editor, -120))
++        QApplication.processEvents()
++        assert reads() == before, f"a wheel changed {editor.objectName() or editor}"
++        assert bar.value() > 0, "the wheel must scroll the options pane"
++    _close(dialog)
++
++
++def test_a_focused_spin_box_keeps_the_wheel(qapp, project):
++    """The guard is about focus, not about disabling the wheel: a user who clicked
++    into the field still scrolls its value."""
++    dialog = _shown_at_minimum(ExportDialog(project))
++    dialog.columns.setFocus(Qt.MouseFocusReason)
++    QApplication.processEvents()
++    assert dialog.columns.hasFocus()
++    before = dialog.columns.value()
++    QApplication.sendEvent(dialog.columns, _wheel_at(dialog.columns, 120))
++    assert dialog.columns.value() == before + 1
++    _close(dialog)
++
++
++def test_every_value_editor_in_the_options_pane_is_wheel_guarded(qapp, project):
++    """Root cause, not one widget: every spin box, combo and slider inside the
++    scrolling pane must carry the guard, including a late one from
++    `install_engine_presets`."""
++    dialog = _shown_at_minimum(ExportDialog(project))
++    found = []
++    for widget_type in ed.WHEEL_GUARDED_TYPES:
++        found.extend(dialog.options_widget.findChildren(widget_type))
++    assert len(found) >= 8
++    for widget in found:
++        assert widget.focusPolicy() == Qt.StrongFocus, widget
++    _close(dialog)
+diff --git a/tests/sprite/gui/test_image_route_dialog.py b/tests/sprite/gui/test_image_route_dialog.py
+index 2e3ce5e..b52abbb 100644
+--- a/tests/sprite/gui/test_image_route_dialog.py
++++ b/tests/sprite/gui/test_image_route_dialog.py
+@@ -83,7 +83,7 @@ def test_sheet_job_fills_frames_and_runs_pipeline(qapp, tmp_path, monkeypatch):
+     assert action.frames[0].duration_ms == round(1000 / 12)
+     assert action.clip is None and action.status == "processed"
+     ird.run_pipeline.assert_called_once()
+-    assert ird.run_pipeline.call_args.kwargs["upto"] == "stabilize"
++    assert ird.run_pipeline.call_args.kwargs["upto"] == "pixel"
+     ird.record_actual.assert_called_once()
+     ledger_kwargs = ird.record_actual.call_args.kwargs
+     assert "image route sheet" in ledger_kwargs["note"]
+diff --git a/tests/sprite/gui/test_processing_panel.py b/tests/sprite/gui/test_processing_panel.py
+index 0ecd1c4..7fcb639 100644
+--- a/tests/sprite/gui/test_processing_panel.py
++++ b/tests/sprite/gui/test_processing_panel.py
+@@ -110,6 +110,25 @@ def test_profile_editor_floyd_warning_and_custom_size(panel):
+     assert getattr(profile, "upscale_small", None) is True
+ 
+ 
++def test_profile_editor_exposes_the_cell_aspect_crop(panel):
++    """The crop changes what an export looks like, so the user must see and set it.
++
++    It starts on for every profile, and the editor round-trips it both ways.
++    """
++    widget, project, _ = panel
++    editor = widget.profile_editors["hd"]
++    profile = next(p for p in project.profiles if p.name == "hd")
++    assert profile.crop_to_cell_aspect is True
++    assert editor.crop_to_cell_aspect.isChecked() is True
++
++    editor.crop_to_cell_aspect.setChecked(False)
++    assert profile.crop_to_cell_aspect is False
++
++    profile.crop_to_cell_aspect = True
++    editor.load(profile)
++    assert editor.crop_to_cell_aspect.isChecked() is True
++
++
+ def test_run_pipeline_uses_worker_and_emits(panel, monkeypatch):
+     widget, project, action = panel
+     calls = []
+diff --git a/tests/sprite/gui/test_queue_panel.py b/tests/sprite/gui/test_queue_panel.py
+index d1f1d0c..a96fc6e 100644
+--- a/tests/sprite/gui/test_queue_panel.py
++++ b/tests/sprite/gui/test_queue_panel.py
+@@ -208,7 +208,7 @@ def test_refine_replaces_clip_and_reruns_pipeline(qapp, fake_config, fake_projec
+     wait_for_worker(panel)
+     assert calls["instruction"] == "make the cape swing"
+     assert calls["out"] == fake_project.project_dir / "clips" / "a1.r1.mp4"
+-    assert calls["upto"] == "stabilize" and calls["force"] is True and calls["action"] == "a1"
++    assert calls["upto"] == "pixel" and calls["force"] is True and calls["action"] == "a1"
+     assert fake_project.actions[0].clip is new_clip
+     assert fake_project.actions[0].status == "rendered"
+     assert changed
+diff --git a/tests/sprite/test_pipeline.py b/tests/sprite/test_pipeline.py
+index ff31518..8da4b58 100644
+--- a/tests/sprite/test_pipeline.py
++++ b/tests/sprite/test_pipeline.py
+@@ -199,6 +199,7 @@ def test_hd_runner_honours_upscale_small_and_upscale_method(tmp_path, alpha_fram
+         assert stab.size == (90, 24)
+     # upscale_small=False: content across all frames keeps its native
+     # (stabilized) footprint instead of being enlarged to fill the cell.
++    # crop_to_cell_aspect is off, so the 90x24 strip keeps all 90 columns.
+     _, _, w, h = union_alpha_bbox(out["hd"])
+     assert (w, h) == (90, 24)
+ 
+@@ -397,6 +398,146 @@ def test_pipeline_extracts_from_a_clip(tmp_path, synthetic_mp4):
+     assert len(action.frames) == 3
+ 
+ 
++# --- hd fills its cell only when the profile asks (crop to the cell aspect) ---
++
++def _wide_stabilize_frames(directory, count=3, size=(640, 360)):
++    """Opaque 16:9 "stabilized" frames: a red body between blue and green bars.
++
++    hd reads the stabilize output, so these stand in for it directly. The
++    content fills the frame edge to edge, which is what a real stabilized
++    frame looks like after the union-bbox crop.
++    """
++    directory.mkdir(parents=True, exist_ok=True)
++    bar = size[0] // 8
++    paths = []
++    for index in range(count):
++        im = Image.new("RGBA", size, (200, 40, 40, 255))
++        im.paste(Image.new("RGBA", (bar, size[1]), (40, 40, 200, 255)), (0, 0))
++        im.paste(Image.new("RGBA", (bar, size[1]), (40, 200, 40, 255)), (size[0] - bar, 0))
++        path = directory / f"{index + 1:04d}.png"
++        im.save(path, format="PNG")
++        paths.append(path)
++    return paths
++
++
++def _margin_stabilize_frames(directory, count=3, size=(640, 360), subject_w=240):
++    """16:9 frames whose subject sits in transparent margin.
++
++    This is the shape the aspect crop exists for: the margin is transparent,
++    so `subject_bbox` can tell it apart from the character and the crop has
++    something safe to trim.
++    """
++    directory.mkdir(parents=True, exist_ok=True)
++    left = (size[0] - subject_w) // 2
++    paths = []
++    for index in range(count):
++        im = Image.new("RGBA", size, (0, 0, 0, 0))
++        im.paste(Image.new("RGBA", (subject_w, size[1]), (200, 40, 40, 255)), (left, 0))
++        path = directory / f"{index + 1:04d}.png"
++        im.save(path, format="PNG")
++        paths.append(path)
++    return paths
++
++
++def test_hd_runner_crops_the_transparent_margin_to_fill_the_cell(tmp_path):
++    """With crop_to_cell_aspect on, the crop trims margin so the subject grows.
++
++    A 640x360 frame in a 256x256 cell letterboxes to 256x144 of content. The
++    crop takes the transparent margin down to 360x360 first, so the same
++    subject reaches the full 256 rows of the cell. `subject_bbox` protects the
++    character, so only margin is lost.
++    """
++    project, action = _project(tmp_path)
++    assert project.profiles[0].cell_size == (256, 256)
++    assert project.profiles[0].upscale_small is False  # a downscale still fills the cell
++    assert project.profiles[0].crop_to_cell_aspect is True
++    frames = _margin_stabilize_frames(tmp_path / "stab")
++    out = pipeline.hd_runner(project, action, frames, tmp_path / "hd", no_progress, None)
++
++    assert len(out) == 3
++    boxes = []
++    for path in out:
++        with Image.open(path) as im:
++            assert im.size == (256, 256)
++            boxes.append(im.getchannel("A").getbbox())
++    # One crop box for the whole action: the subject does not shift between frames.
++    assert len(set(boxes)) == 1
++    x0, y0, x1, y1 = boxes[0]
++    # The crop reached the cell aspect, so the subject spans every row of the cell.
++    assert (y0, y1) == (0, 256)
++
++    # The same frames without the crop letterbox instead: 640x360 -> 256x144.
++    project.profiles[0].crop_to_cell_aspect = False
++    plain = pipeline.hd_runner(project, action, frames, tmp_path / "hd_plain", no_progress, None)
++    with Image.open(plain[0]) as im:
++        px0, py0, px1, py1 = im.getchannel("A").getbbox()
++    assert (py1 - py0) == 144
++    assert (y1 - y0) > (py1 - py0)      # the crop bought real cell coverage
++    assert (x1 - x0) > (px1 - px0)
++
++
++def test_hd_runner_crop_never_drops_a_column_of_an_opaque_frame(tmp_path):
++    """Default project: the crop keeps every pixel of a frame with no alpha.
++
++    The stabilize stage hands hd the content's own bbox, so an unconstrained
++    crop to a square cell would delete the top of a standing character.
++    `subject_bbox` protects the whole frame when there is no alpha to mark the
++    margin, so the crop trims nothing and the scale letterboxes instead.
++    """
++    project, action = _project(tmp_path)
++    assert project.profiles[0].crop_to_cell_aspect is True
++    frames = _wide_stabilize_frames(tmp_path / "stab", count=1)
++    out = pipeline.hd_runner(project, action, frames, tmp_path / "hd", no_progress, None)
++    with Image.open(out[0]) as im:
++        assert im.size == (256, 256)
++        # 640x360 fitted into 256x256 is 256x144, planted on the bottom edge.
++        assert im.getchannel("A").getbbox() == (0, 112, 256, 256)
++        # Both side bars survive: no column of the source was discarded.
++        pixels = list(im.convert("RGB").getdata())
++        assert max(g for _, g, _ in pixels) > 150
++        assert max(b for _, _, b in pixels) > 150
++
++
++def test_hd_runner_keeps_a_tall_character_whole_by_default(tmp_path):
++    """D1/D5 regression: a tall sprite must not lose its head to the cell aspect.
++
++    The reported failure ran a 400x650 character through the default hd
++    profile and got a 256x256 cell whose top 250 source rows -- the head --
++    were gone. The head must reach the output.
++    """
++    project, action = _project(tmp_path)
++    directory = tmp_path / "stab"
++    directory.mkdir(parents=True, exist_ok=True)
++    im = Image.new("RGBA", (400, 650), (40, 40, 200, 255))     # body
++    im.paste(Image.new("RGBA", (400, 130), (200, 40, 40, 255)), (0, 0))   # head
++    src = directory / "0001.png"
++    im.save(src, format="PNG")
++
++    out = pipeline.hd_runner(project, action, [src], tmp_path / "hd", no_progress, None)
++    with Image.open(out[0]) as result:
++        head = sum(1 for r, g, _b in result.convert("RGB").getdata() if r > 150 and g < 120)
++    assert head > 0
++
++
++def test_hd_runner_skips_a_crop_that_cannot_fill_the_cell(tmp_path):
++    """D2/D7/D10 regression: with upscale_small off, the crop is pure loss.
++
++    A 160x90 frame cropped to 90x90 still cannot reach a 200x200 cell,
++    because fit_size caps the scale at 1.0. The crop would delete 44% of the
++    pixels and leave the cell emptier, so aspect_crop_gain drops it.
++    """
++    project, action = _project(tmp_path)
++    project.profiles[0].cell_size = (200, 200)
++    project.profiles[0].crop_to_cell_aspect = True
++    assert project.profiles[0].upscale_small is False
++    frames = _wide_stabilize_frames(tmp_path / "stab", count=1, size=(160, 90))
++    out = pipeline.hd_runner(project, action, frames, tmp_path / "hd", no_progress, None)
++    with Image.open(out[0]) as im:
++        assert im.size == (200, 200)
++        # The whole 160x90 frame, centred horizontally and planted on the bottom edge.
++        assert im.getchannel("A").getbbox() == (20, 110, 180, 200)
++
++
+ def test_hd_alpha_post_pass_is_skipped_when_binary_alpha_is_off(tmp_path, alpha_frames, monkeypatch):
+     """Minor 2 regression: hd's soft-alpha default must not re-encode every
+     frame through a no-op apply_profile_alpha."""
+diff --git a/tests/sprite/test_pipeline_pixel.py b/tests/sprite/test_pipeline_pixel.py
+index c33abac..8dd5c31 100644
+--- a/tests/sprite/test_pipeline_pixel.py
++++ b/tests/sprite/test_pipeline_pixel.py
+@@ -73,6 +73,176 @@ def test_pixel_stage_writes_fitted_binary_quantized_frames(tmp_path):
+     assert manifest["warnings"] == []
+ 
+ 
++def write_wide_frames(tmp_path, count=3, size=(256, 144)):
++    """Opaque 16:9 frames: a red body between a blue left bar and a green right bar.
++
++    A stabilized frame carries content edge to edge, so a 16:9 source must be
++    cropped to the cell proportions before the integer fit.
++    """
++    src = tmp_path / "wide"
++    src.mkdir()
++    bar = size[0] // 8
++    paths = []
++    for i in range(count):
++        arr = np.zeros((size[1], size[0], 4), dtype=np.uint8)
++        arr[:, :] = (200, 40, 40, 255)
++        arr[:, :bar] = (40, 40, 200, 255)
++        arr[:, size[0] - bar:] = (40, 200, 40, 255)
++        path = src / f"{i + 1:04d}.png"
++        Image.fromarray(arr).save(path)
++        paths.append(path)
++    return paths
++
++
++def write_margin_frames(tmp_path, count=3, size=(256, 144), subject_w=96):
++    """16:9 frames whose red subject sits in transparent margin.
++
++    The aspect crop only trims margin, so a meaningful crop test needs alpha
++    that marks which pixels are margin.
++    """
++    src = tmp_path / "margin"
++    src.mkdir()
++    left = (size[0] - subject_w) // 2
++    paths = []
++    for i in range(count):
++        arr = np.zeros((size[1], size[0], 4), dtype=np.uint8)
++        arr[:, left:left + subject_w] = (200, 40, 40, 255)
++        path = src / f"{i + 1:04d}.png"
++        Image.fromarray(arr).save(path)
++        paths.append(path)
++    return paths
++
++
++def test_pixel_stage_crops_the_margin_and_shares_one_scale(tmp_path):
++    """With crop_to_cell_aspect on, the crop trims margin so the subject grows, and
++    every frame of the action must still reduce by the same integer factor or the
++    animation jitters."""
++    inputs = write_margin_frames(tmp_path)
++    project = make_project(tmp_path, make_profile(cell_size=(64, 64), palette_size=None,
++                                                  crop_to_cell_aspect=True))
++    out_dir = tmp_path / "pixel"
++    outputs = run_pixel_stage(project, make_action(), inputs, out_dir, no_progress, None)
++
++    manifest = json.loads((out_dir / "pixel.json").read_text(encoding="utf-8"))
++    # 256x144 crops to 144x144, which reduces by 3 (ceil(144 / 64)) to 48x48.
++    # Uncropped it would reduce by 4 (ceil(256 / 64)), so the crop buys coverage.
++    assert manifest["scale"] == 3
++    assert manifest["cell_size"] == [64, 64]
++    boxes = []
++    for path in outputs:
++        img = Image.open(path)
++        assert img.size == (64, 64)
++        boxes.append(img.getchannel("A").getbbox())
++    # One shared scale means one content size and one position on every frame.
++    assert len(set(boxes)) == 1
++    x0, y0, x1, y1 = boxes[0]
++    assert (y1 - y0) == 48                  # 144 source rows reduced by 3
++
++    # The subject survived the crop whole: 96 source columns at scale 3.
++    assert (x1 - x0) == 32
++
++
++def test_pixel_stage_crop_never_drops_a_column_of_an_opaque_frame(tmp_path):
++    """D6/D9 regression: the default pixel profile must keep every source pixel.
++
++    The stabilize stage hands the pixel stage a character's own bbox, so an
++    unconstrained crop to the square cell deletes the head of a tall sprite.
++    `subject_bbox` protects the whole frame when there is no alpha to mark the
++    margin, so both side bars of this wide frame survive and the manifest
++    carries no crop warning.
++    """
++    inputs = write_wide_frames(tmp_path, count=1)
++    profile = make_profile(cell_size=(64, 64), palette_size=None)
++    assert profile.crop_to_cell_aspect is True
++    project = make_project(tmp_path, profile)
++    out_dir = tmp_path / "pixel"
++    outputs = run_pixel_stage(project, make_action(), inputs, out_dir, no_progress, None)
++
++    manifest = json.loads((out_dir / "pixel.json").read_text(encoding="utf-8"))
++    assert manifest["scale"] == 4                       # ceil(256 / 64), the whole 256x144 frame
++    assert not any("crop_to_cell_aspect" in text for text in manifest["warnings"])
++    img = Image.open(outputs[0])
++    opaque = np.asarray(img)[np.asarray(img)[..., 3] == 255][:, :3]
++    assert opaque[:, 1].max() > 150 and opaque[:, 2].max() > 150
++
++
++def test_pixel_stage_keeps_a_tall_character_whole_by_default(tmp_path):
++    """D6 regression: a 400x650 character exported a headless 64x64 pixel sprite."""
++    src = tmp_path / "tall"
++    src.mkdir()
++    arr = np.zeros((650, 400, 4), dtype=np.uint8)
++    arr[:, :] = (40, 40, 200, 255)          # body
++    arr[:130, :] = (200, 40, 40, 255)       # head
++    path = src / "0001.png"
++    Image.fromarray(arr).save(path)
++
++    project = make_project(tmp_path, make_profile(cell_size=(64, 64), palette_size=None))
++    outputs = run_pixel_stage(project, make_action(), [path], tmp_path / "pixel",
++                              no_progress, None)
++    out = np.asarray(Image.open(outputs[0]).convert("RGBA"))
++    head = out[(out[..., 0] > 150) & (out[..., 1] < 120) & (out[..., 3] == 255)]
++    assert head.size > 0
++
++
++def test_pixel_stage_resolution_warning_names_the_source_frame_size(tmp_path):
++    """D3/D8 regression: the check ran on the cropped frame, so it reported a size
++    the user never produced and routed wide frames into the paid upscale path."""
++    src = tmp_path / "wide200"
++    src.mkdir()
++    arr = np.zeros((40, 200, 4), dtype=np.uint8)
++    arr[:, :] = (200, 40, 40, 255)
++    path = src / "0001.png"
++    Image.fromarray(arr).save(path)
++
++    project = make_project(tmp_path, make_profile(cell_size=(64, 64), palette_size=None,
++                                                  crop_to_cell_aspect=True))
++    out_dir = tmp_path / "pixel"
++    run_pixel_stage(project, make_action(), [path], out_dir, no_progress, None)
++    manifest = json.loads((out_dir / "pixel.json").read_text(encoding="utf-8"))
++    # 200x40 is wider than the 64x64 cell, so it is not "smaller than the cell".
++    assert not any("smaller than the pixel cell" in text for text in manifest["warnings"])
++
++
++def test_pixel_stage_crop_does_not_route_a_wide_frame_into_the_upscaler(tmp_path, monkeypatch):
++    """D8 regression: with upscale_small on, the cropped 40x40 frame entered
++    upscale_then_fit -- a paid network call per frame for stability_api."""
++    import core.sprite.pixelart as pixelart
++
++    src = tmp_path / "wide200"
++    src.mkdir()
++    arr = np.zeros((40, 200, 4), dtype=np.uint8)
++    arr[:, :] = (200, 40, 40, 255)
++    path = src / "0001.png"
++    Image.fromarray(arr).save(path)
++
++    calls = []
++    real = pixelart.upscale_then_fit
++    monkeypatch.setattr(pixelart, "upscale_then_fit",
++                        lambda image, cell, anchor, **kw: calls.append(image.size) or
++                        real(image, cell, anchor, **kw))
++    project = make_project(tmp_path, make_profile(cell_size=(64, 64), palette_size=None,
++                                                  upscale_small=True,
++                                                  crop_to_cell_aspect=True))
++    run_pixel_stage(project, make_action(), [path], tmp_path / "pixel", no_progress, None)
++    assert calls == []
++
++
++def test_hd_and_pixel_outputs_are_not_the_same_size_for_one_action(tmp_path):
++    """Regression: every exporter used to write frames at their native source
++    size, so hd and pixel came out identical. Each profile stage must now
++    deliver its own cell."""
++    inputs = write_wide_frames(tmp_path, count=2)
++    project = make_project(tmp_path, make_profile(cell_size=(64, 64), palette_size=None))
++    action = make_action()
++    hd_out = pipeline_mod.hd_runner(project, action, inputs, tmp_path / "hd", no_progress, None)
++    pixel_out = run_pixel_stage(project, action, inputs, tmp_path / "pixel", no_progress, None)
++
++    with Image.open(hd_out[0]) as hd_img, Image.open(pixel_out[0]) as pixel_img:
++        assert hd_img.size == (256, 256)
++        assert pixel_img.size == (64, 64)
++        assert hd_img.size != pixel_img.size
++
++
+ def test_pixel_stage_reuses_locked_palette(tmp_path):
+     inputs = write_frames(tmp_path)
+     profile = make_profile(locked_palette=["#000000", "#FFFFFF"])
+@@ -170,6 +340,8 @@ def test_pixel_stage_second_run_with_fewer_frames_removes_stale_output(tmp_path)
+ 
+ 
+ def test_pixel_stage_is_registered_at_code_version_2():
++    """The cell-aspect crop needs no bump: it is a profile field, so it rides the
++    settings fingerprint and a toggle re-runs the stage on its own."""
+     assert STAGE_RUNNERS["pixel"] is run_pixel_stage
+     assert STAGE_SETTINGS["pixel"] is pixel_stage_settings
+     assert STAGE_CODE_VERSION["pixel"] == 2
+@@ -186,6 +358,13 @@ def test_pixel_settings_drive_the_fingerprint(tmp_path):
+     profile.upscale_small = True
+     assert stage_fingerprint(project, action, "pixel") != base
+     profile.upscale_small = False
++    # crop_to_cell_aspect rides the same fingerprint, so the stage re-runs on a
++    # toggle without a code_version bump.
++    assert settings["crop_to_cell_aspect"] is True
++    profile.crop_to_cell_aspect = False
++    assert stage_fingerprint(project, action, "pixel") != base
++    profile.crop_to_cell_aspect = True
++    assert stage_fingerprint(project, action, "pixel") == base
+     profile.locked_palette = ["#112233"]
+     assert stage_fingerprint(project, action, "pixel") != base
+     profile.locked_palette = None
+diff --git a/tests/sprite/test_project.py b/tests/sprite/test_project.py
+index 618fb7d..e287748 100644
+--- a/tests/sprite/test_project.py
++++ b/tests/sprite/test_project.py
+@@ -1,4 +1,5 @@
+ import json
++import logging
+ import shutil
+ import threading
+ from pathlib import Path
+@@ -161,6 +162,76 @@ def test_sheet_meta_points_frames_at_the_profile_stage(tmp_path):
+         project.sheet_meta("nope")
+ 
+ 
++def test_sheet_meta_warns_once_per_action_when_the_profile_stage_is_missing(tmp_path, caplog):
++    """The fallback is invisible in the export, so it must be visible in the log.
++
++    D4 regression: one warning per *action*, never one per call. A call with
++    one good action and two broken ones told the user about one of the two,
++    and the export silently mixed cell-size frames with raw stabilize frames.
++    One line per frame is equally wrong: a 24-frame action would write 24.
++    """
++    project = _build(tmp_path / "sprites" / "P_1")
++    stabilize = project.project_dir / "stages" / "a1" / "stabilize"
++    project.actions[0].frames += [
++        FrameMeta(name=f"walk_{i:02d}", source_path=_write(stabilize / f"{i:04d}.png"),
++                  frame=(0, 0, 32, 32), source_size=(32, 32))
++        for i in (2, 3, 4)
++    ]
++    for action_id, name in (("a2", "jump"), ("a3", "idle")):
++        card = ActionCard(id=action_id, name=name, prompt=name)
++        card.frames = [FrameMeta(name=f"{name}_00",
++                                 source_path=_write(project.project_dir / "stages" / action_id /
++                                                    "stabilize" / "0001.png"),
++                                 frame=(0, 0, 32, 32), source_size=(32, 32))]
++        project.actions.append(card)
++
++    with caplog.at_level(logging.WARNING, logger="core.sprite.project"):
++        meta = project.sheet_meta("pixel")
++
++    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
++    assert len(warnings) == 3                      # one per broken action, not one per call
++    assert [name for name in ("walk", "jump", "idle")
++            if any(f"action '{name}'" in text for text in warnings)] == ["walk", "jump", "idle"]
++    assert str(project.project_dir / "stages" / "a1" / "pixel") in warnings[0]
++    # The fallback itself is unchanged: every frame still points at stabilize.
++    assert [f.source_path.parent.name for f in meta.frames] == ["stabilize"] * 6
++
++
++def test_sheet_meta_warns_once_per_action_not_once_per_frame(tmp_path, caplog):
++    """A 24-frame action still writes one line, not 24."""
++    project = _build(tmp_path / "sprites" / "P_1")
++    stabilize = project.project_dir / "stages" / "a1" / "stabilize"
++    project.actions[0].frames += [
++        FrameMeta(name=f"walk_{i:02d}", source_path=_write(stabilize / f"{i:04d}.png"),
++                  frame=(0, 0, 32, 32), source_size=(32, 32))
++        for i in range(2, 25)
++    ]
++    with caplog.at_level(logging.WARNING, logger="core.sprite.project"):
++        project.sheet_meta("pixel")
++    assert len([r for r in caplog.records if r.levelno == logging.WARNING]) == 1
++
++
++def test_sheet_meta_warning_names_a_disabled_profile_as_the_cause(tmp_path, caplog):
++    """D12: 'run the pipeline again' can never create the directory of a disabled
++    profile, because run_pipeline skips one. The message must say so."""
++    project = _build(tmp_path / "sprites" / "P_1")
++    project.profile("pixel").enabled = False
++    with caplog.at_level(logging.WARNING, logger="core.sprite.project"):
++        project.sheet_meta("pixel")
++    text = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING][0]
++    assert "is disabled" in text and "Enable the profile" in text
++    assert "Run the pipeline through the profile stages, then export again." not in text
++
++
++def test_sheet_meta_does_not_warn_when_the_profile_stage_is_present(tmp_path, caplog):
++    project = _build(tmp_path / "sprites" / "P_1")
++    hd_file = _write(project.project_dir / "stages" / "a1" / "hd" / "0001.png")
++    with caplog.at_level(logging.WARNING, logger="core.sprite.project"):
++        meta = project.sheet_meta("hd")
++    assert meta.frames[0].source_path == hd_file
++    assert [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING] == []
++
++
+ def test_purge_intermediates_recycles_stages_and_clips(tmp_path, monkeypatch):
+     project = _build(tmp_path / "sprites" / "P_1")
+     recycled = []
+diff --git a/tests/sprite/test_stabilize.py b/tests/sprite/test_stabilize.py
+index 0da5c92..a2e9a8f 100644
+--- a/tests/sprite/test_stabilize.py
++++ b/tests/sprite/test_stabilize.py
+@@ -5,6 +5,8 @@ from core.sprite.pipeline import CancelToken, Cancelled
+ from core.sprite.stabilize import (
+     ANCHORS,
+     anchor_offset,
++    aspect_crop_box,
++    aspect_crop_gain,
+     crop_and_pad,
+     fit_size,
+     has_transparency,
+@@ -54,6 +56,136 @@ def test_anchor_offset_rejects_unknown_names():
+     assert ANCHORS == ("bottom_center", "center", "top_left", "top_center", "bottom_left")
+ 
+ 
++# --- aspect crop (crop to the cell proportions, then fit) ---------------------
++
++def test_aspect_crop_box_trims_the_long_axis():
++    # 16:9 into a square cell: the full height survives, the width is trimmed.
++    assert aspect_crop_box((1280, 720), (256, 256), "bottom_center") == (280, 0, 720, 720)
++    # 9:16 into a square cell: the full width survives, the height is trimmed
++    # from the top because bottom_center keeps the bottom edge.
++    assert aspect_crop_box((720, 1280), (256, 256), "bottom_center") == (0, 560, 720, 720)
++    # A square source into a 16:9 cell trims the height instead.
++    assert aspect_crop_box((720, 720), (320, 180), "bottom_center") == (0, 315, 720, 405)
++
++
++def test_aspect_crop_box_is_a_no_op_at_the_cell_aspect():
++    """Content already at the cell aspect keeps every pixel, whatever the anchor."""
++    for anchor in ANCHORS:
++        assert aspect_crop_box((640, 360), (16, 9), anchor) == (0, 0, 640, 360)
++        assert aspect_crop_box((256, 256), (64, 64), anchor) == (0, 0, 256, 256)
++
++
++@pytest.mark.parametrize("anchor,expected_x", [
++    ("bottom_center", 400), ("center", 400), ("top_left", 0),
++    ("top_center", 400), ("bottom_left", 0),
++])
++def test_aspect_crop_box_horizontal_anchor(anchor, expected_x):
++    """A wide source trims width; the horizontal half of the anchor places the box."""
++    assert aspect_crop_box((1200, 400), (100, 100), anchor) == (expected_x, 0, 400, 400)
++
++
++@pytest.mark.parametrize("anchor,expected_y", [
++    ("bottom_center", 800), ("center", 400), ("top_left", 0),
++    ("top_center", 0), ("bottom_left", 800),
++])
++def test_aspect_crop_box_vertical_anchor(anchor, expected_y):
++    """A tall source trims height; bottom anchors keep the feet, top anchors the head."""
++    assert aspect_crop_box((400, 1200), (100, 100), anchor) == (0, expected_y, 400, 400)
++
++
++def test_aspect_crop_box_rejects_bad_input():
++    with pytest.raises(ValueError):
++        aspect_crop_box((0, 10), (4, 4), "center")
++    with pytest.raises(ValueError):
++        aspect_crop_box((10, 10), (4, -1), "center")
++    with pytest.raises(ValueError):
++        aspect_crop_box((10, 10), (4, 4), "upper_right")
++
++
++def _wide_frame(path, size=(160, 90), bar=20):
++    """One opaque 16:9 frame: red body between a blue left bar and a green right bar."""
++    im = Image.new("RGBA", size, (200, 40, 40, 255))
++    im.paste(Image.new("RGBA", (bar, size[1]), (40, 40, 200, 255)), (0, 0))
++    im.paste(Image.new("RGBA", (bar, size[1]), (40, 200, 40, 255)), (size[0] - bar, 0))
++    path.parent.mkdir(parents=True, exist_ok=True)
++    im.save(path, format="PNG")
++    return path
++
++
++def test_aspect_crop_gain_returns_none_when_the_crop_cannot_fill_the_cell():
++    """D2/D7/D10 regression: the crop only earns its loss when the scale can then fill.
++
++    With upscale off, a crop that lands below the cell size buys nothing:
++    fit_size caps the scale at 1.0, so the content sits at its native size
++    either way and the crop has only deleted pixels.
++    """
++    # 300x100 -> 100x100 cannot reach a 256x256 cell without an upscale.
++    assert aspect_crop_gain((300, 100), (256, 256), "bottom_center", allow_upscale=False) is None
++    # The same crop is worth it when the scale may enlarge it.
++    assert aspect_crop_gain((300, 100), (256, 256), "bottom_center",
++                            allow_upscale=True) == (100, 0, 100, 100)
++    # A crop that still covers the cell fills it by a downscale alone.
++    assert aspect_crop_gain((1280, 720), (256, 256), "bottom_center",
++                            allow_upscale=False) == (280, 0, 720, 720)
++    # Content already at the cell aspect has nothing to gain either.
++    assert aspect_crop_gain((640, 360), (16, 9), "center", allow_upscale=True) is None
++
++
++def test_crop_and_pad_warns_once_when_the_aspect_crop_drops_a_large_share(tmp_path, caplog):
++    """D1: a crop that removes most of the frame must not be silent."""
++    frames = [_wide_frame(tmp_path / "src" / f"{i:04d}.png") for i in range(1, 4)]
++    with caplog.at_level("WARNING", logger="core.sprite.stabilize"):
++        crop_and_pad(frames, tmp_path / "out", (0, 0, 160, 90), (64, 64), crop_to_aspect=True)
++    lines = [r.message for r in caplog.records if "cell aspect" in r.message]
++    assert len(lines) == 1                       # one line for the action, not one per frame
++    assert "44%" in lines[0] and "crop_to_cell_aspect" in lines[0]
++
++
++def test_crop_and_pad_letterboxes_by_default_and_fills_the_cell_when_cropping(tmp_path):
++    """The default keeps the documented letterbox; crop_to_aspect removes it."""
++    src = _wide_frame(tmp_path / "src" / "0001.png")
++    boxed = crop_and_pad([src], tmp_path / "boxed", (0, 0, 160, 90), (64, 64))
++    filled = crop_and_pad([src], tmp_path / "filled", (0, 0, 160, 90), (64, 64),
++                          crop_to_aspect=True)
++    with Image.open(boxed[0]) as im:
++        assert im.size == (64, 64)
++        # 160x90 fitted into 64x64 is 64x36 of content with transparent bars.
++        assert im.getchannel("A").getbbox() == (0, 28, 64, 64)
++    with Image.open(filled[0]) as im:
++        assert im.size == (64, 64)
++        assert im.getchannel("A").getbbox() == (0, 0, 64, 64)
++        # The 90x90 crop sits inside the red body, so neither side bar survives.
++        pixels = list(im.convert("RGB").getdata())
++        assert max(g for _, g, _ in pixels) < 120
++        assert max(b for _, _, b in pixels) < 120
++
++
++def test_crop_and_pad_skips_the_aspect_crop_when_it_cannot_fill_the_cell(tmp_path):
++    """D2/D10 regression: with upscale_small=False the crop deleted 44% of the
++    frame and still left the cell 55% empty, so it is skipped."""
++    src = _wide_frame(tmp_path / "src" / "0001.png")
++    out = crop_and_pad([src], tmp_path / "small", (0, 0, 160, 90), (200, 200),
++                       crop_to_aspect=True, upscale_small=False)
++    with Image.open(out[0]) as im:
++        assert im.size == (200, 200)
++        # The whole 160x90 frame, centred horizontally and sitting on the bottom edge.
++        assert im.getchannel("A").getbbox() == (20, 110, 180, 200)
++        # Both side bars survive: no column was discarded.
++        pixels = list(im.convert("RGB").getdata())
++        assert max(g for _, g, _ in pixels) > 150
++        assert max(b for _, _, b in pixels) > 150
++
++
++def test_crop_and_pad_aspect_crop_fills_the_cell_when_upscale_small_is_on(tmp_path):
++    """The same input with upscale_small=True: the crop can reach the cell, so it runs."""
++    src = _wide_frame(tmp_path / "src" / "0001.png")
++    out = crop_and_pad([src], tmp_path / "grown", (0, 0, 160, 90), (200, 200),
++                       crop_to_aspect=True, upscale_small=True)
++    with Image.open(out[0]) as im:
++        assert im.size == (200, 200)
++        assert im.getchannel("A").getbbox() == (0, 0, 200, 200)
++
++
+ def test_crop_and_pad_scales_proportionally_and_anchors(tmp_path, alpha_frames):
+     bbox = union_alpha_bbox(alpha_frames)
+     out = crop_and_pad(alpha_frames, tmp_path / "cells", bbox, (64, 64), anchor="bottom_center", pad_px=0)

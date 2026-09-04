@@ -1863,6 +1863,9 @@ class WorkspaceWidget(QWidget):
         # Create new project
         self.current_project = VideoProject(name=project_name)
         self.project_name.setText(self.current_project.name)
+        # The new project has no file yet. Clear the auto-load key so the
+        # next launch does not reload the project the user just left.
+        self._remember_last_project(None)
 
         # Set default LLM provider based on gcloud auth status or Google API key
         default_provider = get_default_llm_provider(self.config)
@@ -1877,6 +1880,49 @@ class WorkspaceWidget(QWidget):
         self.update_ui_state()
         self.project_changed.emit(self.current_project)
     
+    def _coerce_legacy_video_provider(self) -> bool:
+        """Move a project saved with the removed OpenAI Sora provider to Gemini Omni.
+
+        Updates the combo AND the in-memory project, so the next save persists
+        the new provider. Returns True when a coercion happened.
+        """
+        saved_provider = self.current_project.video_provider
+        if saved_provider not in ("sora", "openai sora"):
+            return False
+        self.logger.warning(
+            "Project video_provider '%s' refers to removed OpenAI Sora; "
+            "coercing to Gemini Omni", saved_provider
+        )
+        index = self.video_provider_combo.findText("Gemini Omni")
+        if index >= 0:
+            self.video_provider_combo.setCurrentIndex(index)
+        self.current_project.video_provider = "gemini omni"
+        self.current_project.video_model = None  # Sora model ids mean nothing to Omni
+        get_dialog_manager(self).show_warning(
+            "Provider Removed",
+            "This project used the OpenAI Sora video provider, which has been "
+            "removed from ImageAI.\n\nThe provider has been switched to Gemini Omni. "
+            "Please save the project to apply this change."
+        )
+        return True
+
+    def _remember_last_project(self, project_path: Optional[Path]):
+        """Record the project that startup auto-load reopens.
+
+        ``None`` clears the key. Every path that changes which project the
+        user works on (open, load, save, save-as, new) calls this, so the
+        key never points at a project the user already moved away from.
+        """
+        from PySide6.QtCore import QSettings
+        settings = QSettings("ImageAI", "VideoProjects")
+        if project_path is None:
+            settings.remove("last_project")
+            self.logger.info("Cleared last_project in QSettings")
+        else:
+            settings.setValue("last_project", str(project_path))
+            self.logger.info(f"Saved last_project to QSettings: {project_path}")
+        settings.sync()  # Force write to disk
+
     def auto_load_last_project(self):
         """Auto-load the last opened project if enabled"""
         self.logger.info("=== AUTO-LOAD TRIGGERED ===")
@@ -1955,15 +2001,7 @@ class WorkspaceWidget(QWidget):
             self.project_changed.emit(self.current_project)
             self.status_label.setText(f"Loaded: {self.current_project.name}")
 
-            # Save as last opened project
-            from PySide6.QtCore import QSettings
-            settings = QSettings("ImageAI", "VideoProjects")
-            self.logger.info(f"Saving last_project to QSettings: {project_path}")
-            settings.setValue("last_project", str(project_path))
-            settings.sync()  # Force write to disk
-            # Verify it was saved
-            saved_value = settings.value("last_project")
-            self.logger.info(f"Verified last_project in QSettings: {saved_value}")
+            self._remember_last_project(project_path)
         except (ValueError, FileNotFoundError) as e:
             # Handle corrupted/empty project files
             self.logger.error(f"Failed to load project from {project_path}: {e}", exc_info=True)
@@ -2008,15 +2046,7 @@ class WorkspaceWidget(QWidget):
                 self.update_ui_state()
                 self.project_changed.emit(self.current_project)
 
-                # Save as last opened project
-                from PySide6.QtCore import QSettings
-                settings = QSettings("ImageAI", "VideoProjects")
-                self.logger.info(f"Saving last_project to QSettings: {filename}")
-                settings.setValue("last_project", str(filename))
-                settings.sync()  # Force write to disk
-                # Verify it was saved
-                saved_value = settings.value("last_project")
-                self.logger.info(f"Verified last_project in QSettings: {saved_value}")
+                self._remember_last_project(Path(filename))
             except Exception as e:
                 self.logger.error(f"Failed to open project: {e}", exc_info=True)
                 dialog_manager = get_dialog_manager(self)
@@ -2034,7 +2064,8 @@ class WorkspaceWidget(QWidget):
             self.update_project_from_ui()
             self.logger.info(f"Saving Ken Burns: {self.current_project.ken_burns}")
 
-            self.project_manager.save_project(self.current_project)
+            saved_path = self.project_manager.save_project(self.current_project)
+            self._remember_last_project(saved_path)
             num_scenes = len(self.current_project.scenes) if self.current_project.scenes else 0
             self.status_label.setText(f"Project saved: {self.current_project.name} ({num_scenes} scenes)")
             self.project_changed.emit(self.current_project)
@@ -2076,8 +2107,9 @@ class WorkspaceWidget(QWidget):
                 new_project.project_dir = None
                 
                 # Save the new project (this will create a new directory)
-                self.project_manager.save_project(new_project)
-                
+                saved_path = self.project_manager.save_project(new_project)
+                self._remember_last_project(saved_path)
+
                 # Set it as current project
                 self.current_project = new_project
                 self.project_name.setText(new_project.name)
@@ -7687,20 +7719,7 @@ class WorkspaceWidget(QWidget):
                             if model_index >= 0:
                                 self.veo_model_combo.setCurrentIndex(model_index)
                 elif saved_provider in ("sora", "openai sora"):
-                    # Sora has been removed — coerce to Gemini Omni
-                    self.logger.warning(
-                        "Project video_provider '%s' refers to removed OpenAI Sora; "
-                        "coercing to Gemini Omni", saved_provider
-                    )
-                    index = self.video_provider_combo.findText("Gemini Omni")
-                    if index >= 0:
-                        self.video_provider_combo.setCurrentIndex(index)
-                    get_dialog_manager(self).show_warning(
-                        "Provider Removed",
-                        "This project used the OpenAI Sora video provider, which has been "
-                        "removed from ImageAI.\n\nThe provider has been switched to Gemini Omni. "
-                        "Please save the project to apply this change."
-                    )
+                    self._coerce_legacy_video_provider()
                 elif saved_provider in ("omni", "gemini omni"):
                     index = self.video_provider_combo.findText("Gemini Omni")
                     if index >= 0:

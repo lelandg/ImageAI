@@ -686,6 +686,10 @@ class MainWindow(QMainWindow):
         self.tab_video = QWidget()  # Placeholder widget
         self._video_tab_loaded = False  # Track if real video tab is loaded
 
+        # Placeholder for the Sprite tab — loaded lazily like the Video tab
+        self.tab_sprite = QWidget()
+        self._sprite_tab_loaded = False
+
         # Create layout tab
         try:
             from gui.layout import LayoutTab
@@ -707,10 +711,11 @@ class MainWindow(QMainWindow):
 
         # Add tabs
         self.tabs.addTab(self.tab_generate, "🎨 Image")
-        self.tabs.addTab(self.tab_templates, "📝 Templates")
+        self.tabs.addTab(self.tab_sprite, "🎮 Sprite")
         self.tabs.addTab(self.tab_video, "🎬 Video")
         self.tabs.addTab(self.tab_layout, "📖 Layout")
         self.tabs.addTab(self.tab_settings, "⚙️ Settings")
+        self.tabs.addTab(self.tab_templates, "📝 Templates")
         self.tabs.addTab(self.tab_help, "❓ Help")
         self.tabs.addTab(self.tab_history, "📜 History")  # Always add history tab
 
@@ -1473,6 +1478,11 @@ class MainWindow(QMainWindow):
             f"border: 1px solid {BORDER_CYAN}; background-color: {NAVY_LIGHT};"
         )
         self.output_image_label.setScaledContents(False)  # We handle scaling manually
+
+        # Right-click: Send to Sprite (the label had no context menu before)
+        self.output_image_label.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.output_image_label.customContextMenuRequested.connect(
+            self._show_output_image_context_menu)
 
         # Midjourney command display widget
         self.midjourney_command_widget = QWidget()
@@ -3459,6 +3469,8 @@ For more detailed information, please refer to the full documentation.
 
         # --- Connect signals ---
         self.history_view.doubleClicked.connect(self._on_history_item_double_clicked)
+        self.history_view.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.history_view.customContextMenuRequested.connect(self._show_history_context_menu)
         self.btn_load_history.clicked.connect(self._load_selected_history)
         self.btn_clear_history.clicked.connect(self._clear_history)
 
@@ -3619,6 +3631,57 @@ For more detailed information, please refer to the full documentation.
         
         return -1
     
+    def _restore_provider_and_model(self, provider: str, model: str) -> None:
+        """Apply a saved provider/model pair to the combo boxes.
+
+        The provider comes first. A provider change rebuilds the model list, so
+        a model applied before the provider is discarded and the previous
+        provider's model stays selected.
+        """
+        if provider:
+            current = str(self.current_provider or "").lower()
+            if provider.lower() != current:
+                idx = self.provider_combo.findText(provider)
+                if idx < 0:
+                    idx = self.provider_combo.findText(
+                        provider, Qt.MatchFixedString
+                    )
+                if idx >= 0:
+                    self.provider_combo.setCurrentIndex(idx)
+                else:
+                    logger.warning(
+                        f"Provider '{provider}' is not in the provider list; "
+                        f"keeping '{self.current_provider}'"
+                    )
+
+        if model:
+            idx = self._find_model_in_combo(model)
+            if idx >= 0:
+                self.model_combo.setCurrentIndex(idx)
+            else:
+                logger.warning(
+                    f"Model '{model}' is not available for provider "
+                    f"'{self.current_provider}'; keeping "
+                    f"'{self.model_combo.currentData()}'"
+                )
+
+    def _model_matches_provider(self, model_id: str, provider_name: str) -> bool:
+        """True when provider_name publishes model_id.
+
+        The check is advisory. An unknown provider or a provider that cannot
+        list its models returns True, so the provider itself reports the error.
+        """
+        if not model_id:
+            return False
+        try:
+            provider = get_provider(provider_name, {"api_key": ""})
+            if hasattr(provider, 'get_models_with_details'):
+                return model_id in (provider.get_models_with_details() or {})
+            return model_id in (provider.get_models() or {})
+        except Exception as e:
+            logger.debug(f"Cannot verify model '{model_id}' for '{provider_name}': {e}")
+            return True
+
     def _update_model_list(self):
         """Update model combo box based on current provider."""
         self.model_combo.clear()
@@ -4230,7 +4293,20 @@ For more detailed information, please refer to the full documentation.
     
     def _on_provider_changed(self, provider: str):
         """Handle provider change from Settings tab."""
-        self.current_provider = provider.lower()
+        provider = provider.lower()
+
+        # Run the Image tab handler. That handler owns the rest of a provider
+        # change: the API key, the model list and the dependent widgets. The
+        # Settings combo alone left the model combo on the previous provider's
+        # models, so the next generation sent a foreign model id (for example
+        # gpt-image-2 to Google, which answers 404).
+        if hasattr(self, 'image_provider_combo'):
+            self.image_provider_combo.blockSignals(True)
+            self.image_provider_combo.setCurrentText(provider)
+            self.image_provider_combo.blockSignals(False)
+        self._on_image_provider_changed(provider)
+
+        self.current_provider = provider
         self.config.set("provider", self.current_provider)
         self.save_config()
 
@@ -5331,6 +5407,21 @@ For more detailed information, please refer to the full documentation.
         if not model:
             # Fallback to text if no data is stored (for backward compatibility)
             model = self.model_combo.currentText()
+
+        # The model combo must hold a model of the current provider. A stale
+        # combo sends a foreign model id to the API and wastes a paid call.
+        if not self._model_matches_provider(model, self.current_provider):
+            logger.warning(
+                f"Model '{model}' does not belong to provider "
+                f"'{self.current_provider}'; rebuilding the model list"
+            )
+            self._update_model_list()
+            model = self.model_combo.currentData() or self.model_combo.currentText()
+            self._append_to_console(
+                f"Model did not match provider {self.current_provider}. "
+                f"Using {model} instead.",
+                "#ffaa00",  # Orange
+            )
         
         # Gather all generation parameters
         kwargs = {}
@@ -7814,6 +7905,20 @@ For more detailed information, please refer to the full documentation.
                 except Exception as e:
                     logger.error(f"Error saving layout session: {e}")
 
+            # Stop sprite workers and persist the sprite tab layout
+            if getattr(self, "_sprite_tab_loaded", False) and hasattr(self.tab_sprite, "shutdown"):
+                try:
+                    if not self.tab_sprite.shutdown():
+                        # A worker outlived the bounded join. Destroying the
+                        # widget tree now would abort the process with
+                        # "QThread: Destroyed while thread is still running",
+                        # so wait it out instead.
+                        logger.warning("A sprite worker did not stop in time; "
+                                       "waiting for it to finish before close")
+                        self.tab_sprite.join_orphans()
+                except Exception as e:
+                    logger.error(f"Error shutting down sprite tab: {e}")
+
             # Save window geometry
             geo = {
                 "x": self.x(),
@@ -7976,17 +8081,10 @@ For more detailed information, please refer to the full documentation.
                     prompt = history_item.get('prompt', '')
                     self.prompt_edit.setPlainText(prompt)
 
-                    model = history_item.get('model', '')
-                    if model:
-                        idx = self._find_model_in_combo(model)
-                        if idx >= 0:
-                            self.model_combo.setCurrentIndex(idx)
-
-                    provider = history_item.get('provider', '')
-                    if provider and provider != self.current_provider:
-                        idx = self.provider_combo.findText(provider)
-                        if idx >= 0:
-                            self.provider_combo.setCurrentIndex(idx)
+                    self._restore_provider_and_model(
+                        history_item.get('provider', ''),
+                        history_item.get('model', ''),
+                    )
 
                     if hasattr(self, 'imagen_reference_widget'):
                         if 'imagen_references' in history_item:
@@ -8099,6 +8197,11 @@ For more detailed information, please refer to the full documentation.
             self.logger.info("Triggering video tab lazy load...")
             self._load_video_tab()
 
+        # Lazy load sprite tab on first access
+        if current_widget == self.tab_sprite and not self._sprite_tab_loaded:
+            self.logger.info("Triggering sprite tab lazy load...")
+            self._load_sprite_tab()
+
         # If switching to help tab, trigger a minimal scroll to fix rendering
         if current_widget == self.tab_help:
             self._trigger_help_render()
@@ -8159,6 +8262,9 @@ For more detailed information, please refer to the full documentation.
             if hasattr(real_video_tab, 'add_to_history_signal'):
                 real_video_tab.add_to_history_signal.connect(self.add_to_history)
                 self.logger.info("STEP 5: Connected add_to_history_signal")
+            if hasattr(real_video_tab, 'sendToSpriteRequested'):
+                real_video_tab.sendToSpriteRequested.connect(self._on_send_to_sprite)
+                self.logger.info("STEP 5: Connected sendToSpriteRequested signal")
             self.logger.info("STEP 5: Signal connections complete")
 
             # Step 6: Replace placeholder tab
@@ -8206,7 +8312,84 @@ For more detailed information, please refer to the full documentation.
             error_msg = f"Failed to load video tab: {str(e)}\n\n{traceback.format_exc()}"
             self.logger.error(f"VIDEO TAB LOAD ERROR:\n{error_msg}")
             QMessageBox.warning(self, "Video Tab Error", error_msg)
-    
+
+    def _load_sprite_tab(self):
+        """Lazy-load the Sprite tab on first activation (mirrors _load_video_tab)."""
+        if getattr(self, "_sprite_tab_loaded", False):
+            return
+        try:
+            from gui.sprite import SpriteTab
+            real_tab = SpriteTab(config=self.config)
+            real_tab.addToHistoryRequested.connect(self.add_to_history)
+            index = self.tabs.indexOf(self.tab_sprite)
+            self.tabs.removeTab(index)
+            self.tabs.insertTab(index, real_tab, "🎮 Sprite")
+            self.tabs.setCurrentIndex(index)
+            self.tab_sprite = real_tab
+            self._sprite_tab_loaded = True
+            self.logger.info("Sprite tab loaded")
+        except Exception as e:
+            import traceback
+            error_msg = f"Failed to load sprite tab: {str(e)}\n\n{traceback.format_exc()}"
+            self.logger.error(f"SPRITE TAB LOAD ERROR:\n{error_msg}")
+            QMessageBox.warning(self, "Sprite Tab Error", error_msg)
+
+    def _on_send_to_sprite(self, path):
+        """Route an image path into the Sprite tab as its character source."""
+        try:
+            path = Path(path)
+        except TypeError:
+            self.logger.error(f"Send to Sprite: invalid path {path!r}")
+            return
+        if not path.exists():
+            from gui.dialog_utils import show_error
+            show_error(self, "Send to Sprite", f"Image not found: {path}")
+            return
+        if not self._sprite_tab_loaded:
+            self._load_sprite_tab()
+        if not self._sprite_tab_loaded:
+            return  # load failed; already logged and shown
+        self.tabs.setCurrentWidget(self.tab_sprite)
+        self.tab_sprite.set_character_source(path)
+
+    def _build_send_to_sprite_menu(self, path, parent=None):
+        """One-action context menu shared by the Image result and the History table."""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(parent)
+        # Without this the C++ QMenu stays a child of the label/view after
+        # exec() and every right-click leaks one (final review, Minor 6).
+        menu.setAttribute(Qt.WA_DeleteOnClose)
+        action = menu.addAction("Send to Sprite")
+        exists = False
+        if path:
+            try:
+                exists = Path(path).exists()
+            except (TypeError, OSError):
+                exists = False
+        action.setEnabled(exists)
+        action.triggered.connect(lambda _checked=False, p=path: self._on_send_to_sprite(p))
+        return menu
+
+    def _show_output_image_context_menu(self, pos):
+        path = getattr(self, "_last_displayed_image_path", None)
+        menu = self._build_send_to_sprite_menu(path, self.output_image_label)
+        menu.exec(self.output_image_label.mapToGlobal(pos))
+
+    def _history_path_at(self, pos):
+        index = self.history_view.indexAt(pos)
+        if not index.isValid():
+            return None
+        source_index = self.history_proxy.mapToSource(index)
+        entry = self.history_model.get_entry(source_index.row())
+        return entry.get("path") if isinstance(entry, dict) else None
+
+    def _show_history_context_menu(self, pos):
+        path = self._history_path_at(pos)
+        if not path:
+            return
+        menu = self._build_send_to_sprite_menu(path, self.history_view)
+        menu.exec(self.history_view.viewport().mapToGlobal(pos))
+
     def _trigger_help_render(self):
         """Trigger rendering by doing a minimal scroll."""
         if hasattr(self, 'help_browser') and hasattr(self.help_browser, 'verticalScrollBar'):

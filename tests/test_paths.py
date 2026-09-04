@@ -193,6 +193,7 @@ def test_accessors_sit_under_the_right_roots(tmp_path):
     assert dp.styles() == images / "styles"
     assert dp.characters() == images / "Characters"
     assert dp.midjourney_cache() == images / "midjourney_web_cache"
+    assert dp.sprite_projects() == images / "sprites"
 
     assert dp.video_projects() == video / "video_projects"
     assert dp.video_cache("thumbnails") == video / "cache" / "thumbnails"
@@ -204,6 +205,7 @@ def test_accessors_sit_under_the_right_roots(tmp_path):
 
     assert dp.logs() == tmp_path / "logs"
     assert dp.history_file("prompt") == tmp_path / "prompt_history.json"
+    assert dp.sprite_configs() == tmp_path / "sprite_configs.json"
 
 
 def test_config_file_never_moves(tmp_path):

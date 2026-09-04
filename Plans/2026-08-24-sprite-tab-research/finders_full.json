@@ -1,0 +1,1442 @@
+[
+ {
+  "key": "sheet-formats",
+  "summary": "Two metadata-carrying formats dominate sprite-sheet interchange, and both share the same frame geometry vocabulary. The Aseprite export JSON (written by `aseprite --sheet out.png --data out.json --format json-hash|json-array`) stores per frame: \"frame\" {x,y,w,h} (rect on the sheet), \"rotated\", \"trimmed\", \"spriteSourceSize\" {x,y,w,h} (trim offset inside the untrimmed canvas), \"sourceSize\" {w,h}, and \"duration\" in milliseconds \u2014 verified against a real export (labs.phaser.io paladin.json). Its \"meta\" block adds \"frameTags\" [{name, from, to, direction}] with direction \"forward\" | \"reverse\" | \"pingpong\" | \"pingpong_reverse\" (plus a \"repeat\" count in Aseprite 1.3+), optional \"layers\" and \"slices\" (slices carry bounds, 9-patch center, and pivot). TexturePacker's generic \"JSON (hash)\" / \"JSON (array)\" formats use the identical frame fields but replace \"duration\" with an optional normalized \"pivot\" {x,y}; its Phaser 3 exporter instead writes \"anchor\" and wraps everything in a \"textures\" array (one entry per multipack page, each with its own image/size/scale). PixiJS consumes the same hash format plus an \"animations\" block ({\"walk\": [\"walk01.png\", ...]}) that feeds AnimatedSprite directly; meta.scale maps to resolution and meta.related_multi_packs/linkedSheets handle multipack. The native binary .aseprite format (128-byte header, magic 0xA5E0; chunk types Layer 0x2004, Cel 0x2005 zlib-compressed, Tags 0x2018, Palette 0x2019, User Data 0x2020, Slice 0x2022) is moderately complex but is worth considering as a later feature because Unity's official com.unity.2d.aseprite package imports .aseprite files directly into sliced sprites + Animation Clips with per-frame timings, and Aseprite itself becomes a round-trip editor for ImageAI output.\n\nEngine expectations split into three camps. JSON-atlas engines: Phaser 3 (`load.atlas` auto-detects hash vs array; `load.aseprite` + `anims.createFromAseprite` builds animations straight from Aseprite JSON frameTags and durations) and PixiJS (hash + animations block). Editor-slicing engines: Unity (Sprite Mode = Multiple; Sprite Editor slices via Automatic, Grid By Cell Size, or Grid By Cell Count; per-sprite name/rect/pivot/border) and Godot 4, which has no native JSON atlas import \u2014 you either grid-slice in the SpriteFrames editor (\"Add frames from a Sprite Sheet\"), use Sprite2D hframes/vframes/frame with AnimationPlayer, or install the TexturePacker .tpsheet plugin that generates AtlasTexture .tres files. Godot's SpriteFrames stores named animations with per-animation FPS + loop and per-frame relative duration multipliers (duration 2.0 shows twice as long), so millisecond durations must be converted (pick FPS, express frames as multiples). Text-format engines: libGDX's .atlas lists per region xy/size/orig/offset/rotate/index (name_N suffixes become index; findRegions(name) returns ordered animation frames). Unreal Paper2D imports a .paper2dsprites JSON (TexturePacker's UE exporter) and auto-creates sprites + a Flipbook. Conclusion for broadest compatibility: export (a) a plain uniform-grid PNG (universal fallback \u2014 Unity, Godot, RPG Maker, and every engine can slice a grid), (b) TexturePacker-style JSON hash with pivot, and (c) Aseprite-style JSON \u2014 those three cover essentially every engine and tool.\n\nGrid conventions worth shipping as presets: RPG Maker MV/MZ character sheets are 4 rows (down, left, right, up) \u00d7 3 columns (middle column = idle, outer columns = step frames), default 48x48 cells; a full sheet holds 8 characters in a 4\u00d72 arrangement (576\u00d7384), and the engine infers cell size as width/12 \u00d7 height/8 \u2014 a \"$\" filename prefix marks a single-character sheet (144\u00d7192, width/3 \u00d7 height/4) and \"!\" marks objects that skip the 6 px vertical lift. The LPC \"universal spritesheet\" uses 64\u00d764 frames on an 832\u00d71344 canvas (13 cols \u00d7 21 rows): spellcast 7f, thrust 8f, walk 9f (column 0 = idle stance), slash 6f, shoot 13f \u2014 each in 4 direction rows ordered up, left, down, right \u2014 plus one 6-frame hurt/die row; LPC art is dual-licensed GPL 3.0 + CC-BY-SA 3.0 (attribution obligations if shipped). For animated single-file exports: GIF (256 colors/frame, 1-bit transparency, delay in 1/100 s \u2014 browsers clamp delays \u226410 ms to 100 ms, so 20 ms/50 fps is the reliable floor; disposal methods 1=none, 2=restore-background, 3=restore-previous; NETSCAPE2.0 loop extension) is for chat/forum previews only; APNG (acTL/fcTL/fdAT chunks, delay_num/delay_den rational delays, full 8-bit alpha, PNG-fallback first frame, ~96% browser support) is the best lossless preview with real transparency; animated WebP (ANIM loop count + ANMF per-frame 24-bit millisecond duration, per-frame lossy-or-lossless, alpha, 16383px max) is the smallest web-delivery option. A good internal model must track, per frame: sheet rect, rotated flag, trim offset + untrimmed sourceSize, normalized pivot, duration in ms; per tag: name, frame range, direction/loop mode, repeat count; plus optional slices/9-patch and a palette for indexed export \u2014 that superset losslessly projects onto every format above.",
+  "key_facts": [
+   "Aseprite JSON frame entry (verified real export): {\"frame\":{\"x\",\"y\",\"w\",\"h\"},\"rotated\":bool,\"trimmed\":bool,\"spriteSourceSize\":{\"x\",\"y\",\"w\",\"h\"},\"sourceSize\":{\"w\",\"h\"},\"duration\":83} \u2014 duration is per-frame in milliseconds",
+   "Aseprite meta block: app, version, image, format \"RGBA8888\", size {w,h}, scale \"1\"; frameTags entries are {\"name\",\"from\",\"to\",\"direction\"} with direction values forward | reverse | pingpong | pingpong_reverse (Aseprite 1.3 adds a \"repeat\" count); slices carry bounds, 9-patch center, and pivot",
+   "Aseprite CLI: --sheet out.png --data out.json --format json-hash|json-array; --sheet-type horizontal|vertical|rows|columns|packed; --list-tags/--list-slices/--list-layers gate what lands in meta; padding via --border-padding / --shape-padding / --inner-padding; filename-format placeholders {title} {tag} {frame} {tagframe} {duration} {layer}",
+   "Native .aseprite format: little-endian, 128-byte header magic 0xA5E0, per-frame header magic 0xF1FA; chunks: Layer 0x2004, Cel 0x2005 (zlib/DEFLATE pixel data), Tags 0x2018 (loop direction bytes 0=forward 1=reverse 2=pingpong 3=pingpong-reverse), Palette 0x2019, User Data 0x2020, Slice 0x2022, Tileset 0x2023; color depths 8bpp indexed / 16bpp grayscale / 32bpp RGBA \u2014 a writer is moderate effort (binary structs + zlib), and worth it mainly because Unity consumes the format",
+   "Unity's official 2D Aseprite Importer package (com.unity.2d.aseprite, Unity 2022.2+) imports .aseprite/.ase directly: individual frame timings, tags become Animation Clips (repeating per tag setting), layer groups/opacity, generates a read-only Animator Controller",
+   "TexturePacker generic JSON hash/array frame fields are identical to Aseprite's geometry fields but with optional normalized \"pivot\":{\"x\":0.5,\"y\":0.5} instead of duration; meta adds smartupdate hash; exporter list includes JSON hash/array, XML, Unity (.tpsheet), Godot (.tpsheet), Phaser, Pixi, cocos2d plist, LibGDX, Unreal Paper2D, Spine, EaselJS, CSS, SpriteKit, MonoGame",
+   "TexturePacker Phaser 3 exporter: per-frame \"anchor\" (not pivot), and a single JSON with a \"textures\" ARRAY (one entry per multipack page, each with own image/size/scale/frames) \u2014 loaded via this.load.multiatlas; it is the only TexturePacker format supporting pivot editing + single-file multipack + normal-map packing",
+   "TexturePacker trim modes: None, Trim (keeps sourceSize reference), CropKeepPos, Crop (resets position), Polygon; algorithms MaxRects/Grid/Basic/Polygon; --enable-rotation packs frames rotated 90\u00b0 (consumer must support \"rotated\":true \u2014 safest default is rotation OFF)",
+   "Phaser 3: this.load.atlas(key, png, json) auto-detects JSON hash vs array; this.load.aseprite(key, png, json) + this.anims.createFromAseprite(key) builds animations from Aseprite frameTags with per-frame durations \u2014 exporting Aseprite JSON gives Phaser animation import for free",
+   "PixiJS Spritesheet JSON: frames hash with frame/spriteSourceSize/sourceSize/anchor per frame, plus \"animations\":{\"enemy\":[\"enemy1.png\",\"enemy2.png\"]} consumed by new AnimatedSprite(sheet.animations[name]); meta.scale maps to texture resolution; multipack via linked sheets (meta.related_multi_packs in TexturePacker pixi output)",
+   "Godot 4 SpriteFrames resource: named animations, per-animation speed in FPS + loop, per-frame texture + RELATIVE duration multiplier (\"a frame with duration 2.0 is displayed twice as long as 1.0\") \u2014 converting per-frame ms requires choosing an FPS and expressing frames as multiples (GCD of durations works)",
+   "Godot 4 has NO native JSON atlas import: options are (a) SpriteFrames editor \"Add frames from a Sprite Sheet\" grid slicer (set horizontal/vertical counts), (b) Sprite2D properties hframes/vframes/frame + AnimationPlayer, (c) CodeAndWeb's TexturePacker Importer plugin reading .tpsheet into AtlasTexture .tres files \u2014 or ImageAI could emit a .tres SpriteFrames/AtlasTexture text resource directly (AtlasTexture = atlas + region Rect2 + margin Rect2, margin restores trim offsets)",
+   "Unity manual slicing: Sprite Mode = Multiple, Sprite Editor Slice menu: Automatic, Grid By Cell Size, Grid By Cell Count (with offset/padding); pivot presets or Custom in normalized coords; per-sprite name/rect/pivot/border(9-slice); pixel art wants Pixels Per Unit matched to cell, Filter Mode = Point, Compression = None",
+   "libGDX .atlas text format per region: rotate, xy: x,y, size: w,h, orig: origW,origH, offset: left,bottom, index: n (plus split/pad for ninepatch); filenames ending _N store N as index; atlas.findRegions(\"walk\") returns index-ordered frames for new Animation(frameDuration, regions); newer libGDX also reads a compact format (bounds:/offsets:) \u2014 write the legacy field-per-line form for max compatibility",
+   "Unreal Paper2D: TexturePacker's \"UnrealEngine - Paper2d\" exporter writes a .paper2dsprites JSON; importing it creates the texture, extracts per-frame Sprite assets, and auto-generates a Flipbook (importer assumes all sprites are animation frames); recommended Border/Shape padding 0 for flipbook workflows",
+   "RPG Maker MV/MZ character sheet: per character 3 columns \u00d7 4 rows, row order down/left/right/up, middle column = standing pose, outer columns = step frames; default cell 48\u00d748 \u2192 single char 144\u00d7192, full sheet 8 characters (4 across \u00d7 2 down) = 576\u00d7384; engine infers cell size (sheet width/12 \u00d7 height/8; \"$\"-prefixed = single char, width/3 \u00d7 height/4), so larger cells work if proportions hold; \"!\" prefix disables the 6 px vertical lift for doors/objects",
+   "LPC universal spritesheet: 64\u00d764 frames, 832\u00d71344 sheet = 13 columns \u00d7 21 rows; blocks top-to-bottom: spellcast 7 frames, thrust 8, walk 9 (column 0 = idle stance), slash 6, shoot 13 \u2014 each block is 4 direction rows ordered up, left, down, right \u2014 plus one hurt/die row of 6 frames; assets dual-licensed GPL 3.0 + CC-BY-SA 3.0 (ImageAI-generated sheets can use the LAYOUT freely; shipping LPC art itself triggers attribution/share-alike)",
+   "GIF: max 256 colors per frame (local color tables allow >256 per file), 1-bit transparency (GCE transparent index), delay = 16-bit value in 1/100 s; browsers clamp delays \u2264 1 cs (\u226410 ms) to 100 ms, so 2 cs = 20 ms = 50 fps is the practical minimum; disposal methods: 1 = do not dispose, 2 = restore to background, 3 = restore to previous; looping via NETSCAPE2.0 application extension (loop count 0 = infinite)",
+   "APNG: acTL (num_frames, num_plays), fcTL per frame (x/y offset, delay_num/delay_den \u2014 delay_den 0 means 100, i.e. delays are rational seconds), fdAT data; dispose_op none/background/previous + blend_op source/over; full 8-bit (or 16-bit) alpha; unsupported decoders fall back to the first PNG image; supported by Firefox 3+, Safari 8+, Chrome 59+, Edge \u2014 ~96% of browsers",
+   "Animated WebP: VP8X + ANIM chunk (background color, 16-bit loop count, 0 = infinite) + one ANMF per frame (frame x/y stored in 2-px units, width/height minus one, 24-bit frame duration in MILLISECONDS, alpha-blend vs overwrite flag, dispose-to-background flag); frames individually lossy or lossless, full alpha either way; canvas max 16383\u00d716383; Chrome 32+, Firefox 65+, Safari 14+; Pillow writes it via save(save_all=True, duration=, loop=)",
+   "Minimum internal per-frame metadata superset that projects losslessly onto every format above: sheet rect (x,y,w,h) + rotated flag; trim offset (x,y) + untrimmed sourceSize (w,h); normalized pivot (x,y); duration in integer ms; per-tag: name, from/to frame range, direction (forward/reverse/pingpong/pingpong_reverse), repeat count (0 = infinite); optional: slices/9-patch borders, palette for indexed export, tag color/user-data"
+  ],
+  "feature_ideas": [
+   {
+    "name": "Uniform grid sheet export",
+    "description": "Compose frames onto a fixed-cell grid PNG with configurable cell size, margin, spacing, columns, and row-per-animation ordering, plus optional power-of-two canvas. Every engine (Unity, Godot, RPG Maker, libGDX) can slice a clean grid, so this is the universal no-metadata fallback.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "core",
+    "depends_on": "internal frame metadata model; Pillow"
+   },
+   {
+    "name": "Aseprite-JSON metadata export",
+    "description": "Write json-hash and json-array data files matching Aseprite's export exactly: per-frame frame/rotated/trimmed/spriteSourceSize/sourceSize/duration(ms) and meta.frameTags with direction forward/reverse/pingpong/pingpong_reverse. Unlocks Phaser's load.aseprite + anims.createFromAseprite and every Aseprite-aware tool for free.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "core",
+    "depends_on": "internal frame metadata model"
+   },
+   {
+    "name": "TexturePacker-JSON export (hash + array, pivot)",
+    "description": "Emit the generic TexturePacker JSON hash/array with normalized per-frame pivot and a PixiJS 'animations' block mapping tag names to frame-name arrays. This one file serves Phaser load.atlas, PixiJS AnimatedSprite, melonJS, PlayCanvas, and most web engines.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "core",
+    "depends_on": "internal frame metadata model"
+   },
+   {
+    "name": "Animated GIF export",
+    "description": "Per-tag GIF export with palette quantization (256 colors), 1-bit transparency handling against a chosen matte, disposal-method control, and a UI warning that browser floors make 20 ms (50 fps) the minimum reliable frame delay. Right for chat/forum/README previews, wrong for game data.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "core",
+    "depends_on": "Pillow"
+   },
+   {
+    "name": "APNG export",
+    "description": "Full-alpha lossless animation with rational per-frame delays (delay_num/delay_den) and a sensible first-frame PNG fallback. The best-looking preview format for sprites with soft alpha edges; ~96% browser support.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "high",
+    "depends_on": "Pillow (save_all APNG support) or pyapng"
+   },
+   {
+    "name": "Animated WebP export",
+    "description": "Smallest web-delivery animation: per-frame millisecond durations, loop count, alpha with per-frame lossy or lossless encoding. Offer lossless as the default for pixel art.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "high",
+    "depends_on": "Pillow WebP with libwebp"
+   },
+   {
+    "name": "Godot SpriteFrames .tres export",
+    "description": "Directly generate a Godot 4 text resource containing AtlasTexture sub-resources (atlas + region + margin restoring trim offsets) and SpriteFrames animations with per-animation FPS, loop flag, and per-frame duration multipliers converted from millisecond timings. Godot has no native JSON atlas import, so this saves users the manual grid-slice step entirely.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "high",
+    "depends_on": "internal frame metadata model; ms-to-FPS/multiplier conversion"
+   },
+   {
+    "name": "Engine export preset picker",
+    "description": "A single dropdown (Unity, Godot 4, Phaser 3, PixiJS, Unreal Paper2D, libGDX, RPG Maker MZ, LPC, Web preview) that pre-selects format, grid vs packed layout, padding, pivot convention, and file naming, with a short 'how to import' note per engine. Removes the format-knowledge burden from users.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "high",
+    "depends_on": "the individual exporters"
+   },
+   {
+    "name": "RPG Maker MV/MZ character sheet preset",
+    "description": "Assemble walk cycles into the 3x4 (down/left/right/up, middle column idle) layout at 48x48 or custom cell size, emitting either a $-prefixed single-character sheet (144x192) or a full 4x2 eight-character sheet (576x384), with the ! prefix option for objects. Correct proportions matter because the engine infers cell size from sheet dimensions.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "high",
+    "depends_on": "grid sheet export; direction-aware animation tagging"
+   },
+   {
+    "name": "Trim + packed-atlas assembly",
+    "description": "Trim transparent borders per frame, record trim offsets (spriteSourceSize) and untrimmed sourceSize, and pack with a MaxRects-style algorithm (rotation off by default for compatibility, optional 90-degree rotation with the rotated flag). Cuts texture memory heavily for character animation frames.",
+    "category": "Frame Processing",
+    "priority_hint": "high",
+    "depends_on": "internal frame metadata model; a rectpack library or in-repo MaxRects"
+   },
+   {
+    "name": "Internal frame metadata model + project sidecar",
+    "description": "A dataclass model tracking, per frame: sheet rect, rotated, trim offset, sourceSize, normalized pivot, duration in ms; per tag: name, range, direction, repeat; plus slices and palette. Persist it in the Sprite tab's project JSON (matching ImageAI's sidecar convention) so every exporter is a pure projection of one source of truth.",
+    "category": "Project & Workflow Integration",
+    "priority_hint": "core",
+    "depends_on": "nothing external"
+   },
+   {
+    "name": "Pivot/anchor editor",
+    "description": "Set a pivot per tag or per frame by clicking on the frame (with presets: center, bottom-center for platformer feet), stored normalized 0-1 and exported as TexturePacker pivot, Phaser anchor, or baked into grid alignment. Consistent pivots are what stop sprites from 'sliding' between animation frames in-engine.",
+    "category": "Editing & Preview",
+    "priority_hint": "high",
+    "depends_on": "frame metadata model; preview widget"
+   },
+   {
+    "name": "Animation preview player",
+    "description": "In-tab playback honoring per-frame millisecond durations and loop modes (forward, reverse, pingpong), with tag selection, onion-skin overlay, and a checkerboard alpha background. Users must validate timing before export because engines will reproduce exactly what the metadata says.",
+    "category": "Editing & Preview",
+    "priority_hint": "high",
+    "depends_on": "QTimer-based player; frame metadata model"
+   },
+   {
+    "name": "LPC universal sheet preset",
+    "description": "Assemble generated walk/slash/thrust/cast/bow/hurt actions into the standard 832x1344 LPC layout (64x64 cells, 4 direction rows up/left/down/right per action, fixed frame counts). Instantly compatible with the large LPC tooling ecosystem; note the layout is free to use while LPC art assets are GPL 3.0 + CC-BY-SA 3.0.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "nice",
+    "depends_on": "grid sheet export; per-direction generation"
+   },
+   {
+    "name": "libGDX .atlas export",
+    "description": "Write the legacy line-based .atlas text format (xy/size/orig/offset/rotate/index per region) using name_N index suffixes so atlas.findRegions(name) returns ordered animation frames. Covers libGDX and the Godot/LittleKt importers that read the same format.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "nice",
+    "depends_on": "packed-atlas assembly"
+   },
+   {
+    "name": "Starling/Sparrow XML + cocos2d plist export",
+    "description": "Generic XML TextureAtlas (SubTexture entries with x/y/width/height/frameX/frameY) and cocos2d-style plist for older toolchains. Low effort once the metadata model exists, but niche demand.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "later",
+    "depends_on": "internal frame metadata model"
+   },
+   {
+    "name": "Unreal Paper2D .paper2dsprites export",
+    "description": "Emit the Paper2D JSON descriptor so Unreal auto-creates the texture, per-frame Sprite assets, and a Flipbook on import. Use zero border/shape padding per the Paper2D workflow recommendation.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "later",
+    "depends_on": "packed or grid assembly"
+   },
+   {
+    "name": "Native .aseprite file writer",
+    "description": "Write a real .aseprite file (header magic 0xA5E0; Layer 0x2004, zlib Cel 0x2005, Tags 0x2018, Palette 0x2019, Slice 0x2022 chunks) with one layer, one cel per frame, and tags with loop directions. Payoff: Unity's official com.unity.2d.aseprite importer consumes it directly (frames to clips, tags, timings), and users get lossless round-trip editing in Aseprite; moderate binary-format effort, pure-Python feasible (struct + zlib).",
+    "category": "Advanced/Later",
+    "priority_hint": "later",
+    "depends_on": "internal frame metadata model"
+   },
+   {
+    "name": "Duration-to-FPS reconciliation helper",
+    "description": "When a target (Godot animation FPS, GIF centisecond delays, fixed-FPS engines) cannot express arbitrary millisecond durations, compute the best base FPS (GCD of durations) and per-frame multipliers or repeats, and show the user the rounding error before export.",
+    "category": "Advanced/Later",
+    "priority_hint": "nice",
+    "depends_on": "frame metadata model"
+   }
+  ],
+  "sources": [
+   "https://github.com/aseprite/aseprite/blob/main/docs/ase-file-specs.md",
+   "https://www.aseprite.org/docs/cli/",
+   "https://labs.phaser.io/assets/animations/aseprite/paladin.json",
+   "https://www.codeandweb.com/texturepacker/documentation/texture-settings",
+   "https://docs.phaser.io/api-documentation/class/loader-filetypes-atlasjsonfile",
+   "https://pixijs.download/dev/docs/assets.Spritesheet.html",
+   "https://docs.godotengine.org/en/stable/classes/class_spriteframes.html",
+   "https://docs.godotengine.org/en/stable/tutorials/2d/2d_sprite_animation.html",
+   "https://docs.unity3d.com/Manual/sprite/sprite-editor/sprite-editor-window-reference-landing.html",
+   "https://docs.unity3d.com/Packages/com.unity.2d.aseprite@4.0/manual/index.html",
+   "https://libgdx.com/wiki/tools/texture-packer",
+   "https://github.com/makrohn/Universal-LPC-spritesheet",
+   "https://github.com/liberatedpixelcup/Universal-LPC-Spritesheet-Character-Generator/blob/master/README.md",
+   "https://www.codeandweb.com/texturepacker/tutorials/how-to-create-sprite-sheets-with-unreal-paper2d",
+   "https://godotengine.org/asset-library/asset/1503",
+   "https://github.com/CodeAndWeb/texturepacker-godot-plugin",
+   "https://omori-modding.gitbook.io/wiki/rpgmaker/common-notetags-and-filename/rpg-maker-sprite-sheet-formats",
+   "https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Formats/Image_types",
+   "https://bugzilla.mozilla.org/show_bug.cgi?id=232822",
+   "https://www.tumblr.com/nullsleep/16524517190/animated-gif-minimum-frame-delay-browser",
+   "https://github.com/melonjs/melonjs/wiki/How-to-use-Texture-Atlas-with-TexturePacker"
+  ]
+ },
+ {
+  "key": "pixelart-conventions",
+  "summary": "Sprite sizing follows hardware history. 8x8 is the hardware tile unit on NES/Game Boy/Master System; playable characters there are metasprites of 16x16 (small NES Mario, Game Boy heroes) to 16x32. The 16-bit era (SNES/Genesis) uses 16x16 to 32x32 characters built from 8x8 4bpp tiles, with SNES hardware sprite sizes of 8x8, 16x16, 32x32, and 64x64. 24x24 and 16x24 are common JRPG field-sprite sizes; 48x48 is the RPG Maker MV/MZ grid; 64x64 covers large characters and bosses; 96x96-128x128 covers fighting-game and \"large HD\" characters (CPS-2/SNK fighters are ~100-200 px tall). Tiles standardize on 8x8 (8-bit), 16x16 (16-bit and modern indie default), 32x32, and 48x48 (RPG Maker). Modern \"HD pixel art\" games pick a 16:9 canvas that integer-scales to 1080p: 320x180 (x6, Celeste), 384x216 (x5), 480x270 (x4, Hyper Light Drifter), 640x360 (x3); Shovel Knight uses 400x240. So the Sprite tab should offer a size-preset dropdown (8/16/24/32/48/64/96/128 + rectangular 16x32, 16x24, 32x64) with era/genre labels, plus a canvas/integer-scale calculator.\n\nAnimation timing in pixel art is per-frame milliseconds, not a global fps. Aseprite is the reference tool: each frame stores a WORD duration in milliseconds in the frame header (default 100 ms = 10 fps; the old file-header \"speed\" field is deprecated), and its exported JSON sheet data carries `\"duration\"` per frame plus `frameTags`. Conventional rates: 12 fps is the community default (\"animating on twos\" = every other frame of 24 fps film; \"on threes\" = 8 fps); walk cycles use 4/6/8 frames at ~10-12 fps; idles run slower (150-300 ms holds); attacks mix long anticipation holds (100-200 ms) with 1-2 fast strike frames (30-70 ms). GIF export quantizes delays to centiseconds and browsers clamp tiny delays, so a GIF preview needs a rounding warning. Color counts also follow hardware: Game Boy = 4 shades (3 + transparent for objects, BGP/OBP0/OBP1 registers); NES = 64-entry master palette, 8 palettes x 3 colors + shared backdrop = ~25 simultaneous colors (sprites get 4 palettes of 3 + transparent); SNES = 8 sprite palettes of 15 colors + transparent index 0, from 256-entry CGRAM, 15-bit BGR (32,768 colors); Genesis = 4 palettes x 15+1 from 512. Modern norms are 8-32 colors per character. Limiting colors is what makes AI output read as one style: it forces shared ramps across all action clips, kills per-frame quantization flicker, and enables palette-swap variants.\n\nPalette file formats are all small and easy to implement. GIMP .gpl: text; line 1 `GIMP Palette`, optional `Name: `, optional `Columns: ` (0-255), `#` comments, then `R G B name` with 0-255 ints. JASC .pal: text; `JASC-PAL`, `0100`, color count (e.g. 256), then `R G B` lines 0-255. Adobe .act: raw binary, 768 bytes = 256 RGB triples; optional 4-byte footer = 2-byte color count + 2-byte transparency index (772 bytes total). Adobe .aco: big-endian binary; v1 = version word, count word, then per color a 2-byte colorspace ID (0=RGB, 1=HSB, 2=CMYK, 7=Lab, 8=Grayscale) + four 16-bit components (RGB scaled 0-65535); v2 appends a 4-byte length + UTF-16BE name per color. Adobe .ase: big-endian; signature `ASEF`, version 2x int16 (1.0), int32 block count; blocks 0xC001 group start / 0xC002 group end / 0x0001 color entry; color entry = name, 4-char model (`RGB `, `CMYK`, `LAB `, `Gray`), float32 components, int16 type (0 global, 1 spot, 2 normal). paint.net .txt: text, up to 96 colors, one `AARRGGBB` hex per line, `;` comments. Lospec .hex: one bare RRGGBB per line, no `#`. Lospec also has a free JSON API \u2014 `https://lospec.com/palette-list/{slug}.json` returns `{name, author, colors:[hex...]}` (plus a .csv variant and a `lospec-palette://` URI scheme) \u2014 ideal for a built-in curated-palette browser over its ~4,400 palettes with color-count and tag filters.\n\nTransparency and rendering conventions: modern output is PNG RGBA with binary alpha (0 or 255 \u2014 crisp pixel art avoids semi-transparent edge pixels, so chroma-keyed AI frames must be alpha-thresholded). Legacy color-key uses magenta #FF00FF (chosen because it is RGB/BGR-symmetric and almost never appears in art) or green; indexed formats use palette index 0 as transparent (NES/SNES/GB hardware, GIF transparent-color index, old engines like SDL SetColorKey / DirectDraw / RPG Maker 2000-2003). A colorkey/index-0 export option is still needed for retro engines, homebrew, and GIF. Scaling must be nearest-neighbor at integer factors only; the project's \"scaled proportionally, never cropped or distorted\" rule maps cleanly onto pixel art: downscale AI frames to the sprite grid at the largest integer-fitting size, then center-pad with transparent pixels to fill the cell (same pattern as the existing Gemini reference-image handling) \u2014 never stretch to the cell. Dithering: error-diffusion (Floyd-Steinberg) produces per-frame noise that shimmers (\"dither crawl\") across animation frames, so quantization should default to no dither, offer ordered/Bayer (2x2/4x4/8x8) as an option, and warn against error diffusion for animations. Outlines are a style choice: none, solid black, or \"sel-out\" (selective outline \u2014 outline shaded relative to the adjacent fill, lighter where the form catches light); a simple auto-darken outline pass is enough for v1.",
+  "key_facts": [
+   "Character sprite size presets that match real conventions: 8x8 (tile unit / ultra-low-res), 16x16 (NES/GB heroes, small Mario), 16x32 (big NES Mario), 16x24/24x24 (JRPG field sprites), 32x32 (SNES/Genesis + modern indie default), 48x48 (RPG Maker MV/MZ grid), 64x64 (large chars/bosses), 96x96-128x128 (fighting-game scale).",
+   "SNES hardware sprite sizes: 8x8, 16x16, 32x32, 64x64 (plus 16x32, 32x64 rectangles); all sprites are 4bpp = 15 colors + transparent index 0, selecting one of 8 sprite palettes in the upper half of 256-entry CGRAM; master color space is 15-bit BGR (32,768 colors).",
+   "NES: 64-entry master palette (~54 visually distinct); 4 background + 4 sprite palettes of 3 colors each plus one shared backdrop color = ~25 simultaneous colors; entry 0 of every sprite palette is transparent; hardware sprites are 8x8 or 8x16.",
+   "Game Boy (DMG): 4 shades via BGP/OBP0/OBP1 registers; object color 0 is always transparent so sprites get 3 usable shades. Game Boy Color: 8 BG + 8 OBJ palettes, 4 colors each, RGB555 15-bit color.",
+   "Modern HD-pixel canvas presets are 16:9 integer divisors of 1920x1080: 320x180 (x6, Celeste), 384x216 (x5), 480x270 (x4, Hyper Light Drifter), 640x360 (x3); Shovel Knight uses 400x240. Tiles: 8x8, 16x16 (modern default), 32x32, 48x48.",
+   "Aseprite stores animation timing as per-frame duration: a WORD in milliseconds in each frame header of the .aseprite/.ase file; the file-header 'speed' WORD is DEPRECATED in favor of per-frame durations; default frame duration is 100 ms (10 fps).",
+   "Aseprite color depths: 32bpp RGBA, 16bpp grayscale, 8bpp indexed; new palette chunk 0x2019 supports per-color alpha, old chunk 0x0004 is RGB-only max 256 colors.",
+   "Pixel-art timing conventions: 12 fps community default = 'animating on twos' (half of 24 fps film); 'on threes' = 8 fps; walk cycles are 4/6/8 frames at ~10-12 fps; key poses hold 3-4 frames, transitions 1-2 frames; one indie guide default is 10 fps (= Aseprite's 100 ms).",
+   "GIF stores frame delay in centiseconds (10 ms steps) and browsers clamp very small delays, so per-frame ms durations get rounded on GIF export \u2014 show a warning.",
+   "GIMP .gpl format: line 1 magic 'GIMP Palette'; optional 'Name: <utf-8>'; optional 'Columns: <0-255>' (0 = variable); '#' starts a comment; color lines are 'R G B optional name' with integers 0-255, sRGB, no alpha.",
+   "JASC .pal format: line 1 'JASC-PAL', line 2 version '0100', line 3 color count (e.g. '256'), then one 'R G B' line per color, values 0-255, space-separated.",
+   "Adobe .act format: raw binary, 768 bytes = 256 x 3 bytes RGB in order; optional 4-byte footer makes 772 bytes: 2-byte number of colors then 2-byte transparency color index (both big-endian).",
+   "Adobe .aco format: big-endian; v1 = uint16 version(1), uint16 count, then per color uint16 colorspace (0=RGB, 1=HSB, 2=CMYK, 7=Lab, 8=Grayscale) + 4 x uint16 components with RGB scaled 0-65535 (divide by 257 for 8-bit); v2 block repeats colors and appends uint32 name length + UTF-16BE name; files often contain v1 then v2 blocks.",
+   "Adobe .ase (Swatch Exchange): big-endian; signature 'ASEF'; version 2 x int16 (1, 0); int32 block count; block types 0xC001 group start, 0xC002 group end, 0x0001 color entry; color entry carries UTF-16BE name, 4-char color model ('RGB ', 'CMYK', 'LAB ', 'Gray'), float32 components (RGB 3 floats 0.0-1.0), and int16 color type (0=global, 1=spot, 2=normal).",
+   "paint.net palette .txt: plain text, up to 96 colors (missing slots fill with FFFFFFFF), one 8-hex-digit AARRGGBB per line, lines starting with ';' are comments.",
+   "Lospec .hex download: one bare RRGGBB hex string per line, no '#' prefix. Lospec palette API: GET https://lospec.com/palette-list/{slug}.json returns {\"name\", \"author\", \"colors\": [\"574368\", ...]}; .csv variant = name,author,hex,hex,...; 404 returns {error: \"file not found\"}; lospec-palette:// URI scheme exists for app registration; ~4,433 palettes, filterable by exact/max/min color count and tags (e.g. 'hardware', 'gameboy').",
+   "Magenta #FF00FF is the classic colorkey because it is symmetric in RGB vs BGR and almost never occurs in real art; SDL_SetColorKey/DirectDraw DDBLT_KEYSRC are the legacy consumers; indexed formats use palette index 0 (or GIF transparent color index) as transparent.",
+   "Crisp pixel-art convention: binary alpha only (0 or 255) \u2014 chroma-keyed AI frames have soft alpha edges that must be thresholded, and colorkey export requires no semi-transparent pixels at all.",
+   "Scaling rules: nearest-neighbor only, integer factors only (set 'integer scale' in engines); the project's no-crop/no-distort rule maps to: downscale to the largest integer-fitting size inside the sprite cell, center on a transparent canvas of the cell size \u2014 same pattern as the existing Gemini reference-image aspect handling.",
+   "Sprite-sheet hygiene: keep a 1 px transparent border/padding (or edge extrusion) around each frame to prevent texture bleeding at scale.",
+   "Error-diffusion dithering (Floyd-Steinberg) is temporally unstable across animation frames (dither crawl); default quantization for sprites should be dither=none, with optional ordered/Bayer 2x2/4x4/8x8; Pillow's Image.quantize supports MEDIANCUT/MAXCOVERAGE/FASTOCTREE methods and Dither.NONE vs FLOYDSTEINBERG.",
+   "Sel-out (selective outlining) = outline shaded relative to the neighboring fill color \u2014 darker where the form is dark, lighter where lit \u2014 instead of a uniform black outline; a stylistic option, not a default.",
+   "Aseprite's exported JSON sheet data (--data) carries frames[].duration in ms and meta.frameTags [{name, from, to, direction}] \u2014 the natural interchange target for per-action animation tags."
+  ],
+  "feature_ideas": [
+   {
+    "name": "Sprite size preset dropdown",
+    "category": "Source & Character Setup",
+    "description": "Preset character/tile sizes (8, 16, 16x24, 24, 16x32, 32, 48, 64, 96, 128 px) labeled by era/genre (NES hero, SNES/indie standard, RPG Maker 48x48 grid, fighting-game large). Sets the target cell size that the whole downstream pipeline quantizes and pads to.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Canvas & integer-scale calculator",
+    "category": "Editing & Preview",
+    "description": "Pick a game canvas (320x180, 384x216, 400x240, 480x270, 640x360) and see the integer scale factor to 720p/1080p/4K, plus how tall the chosen sprite is relative to the canvas. Prevents users from picking sizes that cannot integer-scale cleanly.",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Per-frame duration model (ms, Aseprite-compatible)",
+    "category": "Editing & Preview",
+    "description": "Store animation timing as milliseconds per frame (default 100 ms), with a global-fps convenience setter that fills all frames. Matches how Aseprite and its JSON export represent time, and allows hold frames (anticipation 150-200 ms, strike frames 30-70 ms).",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Timing templates: on-twos / on-threes / per-action fps",
+    "category": "AI Animation Generation",
+    "description": "Per-action-type fps presets applied at frame-extraction time: walk/run 10-12 fps, idle 6-8 fps with long holds, attack variable timing. Includes 'animate on twos' (12 fps) and 'on threes' (8 fps) labels so the extracted frame count matches pixel-art convention instead of the video's 24/30 fps.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Hardware palette presets",
+    "category": "Pixel-Art Conversion",
+    "description": "One-click constraint sets: Game Boy (4 shades, 3+transparent for sprites), NES (3+transparent per sprite palette from the 64-color master), SNES/Genesis (15+transparent), GBA. Applies both the color count and the actual hardware master palette when quantizing.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Per-sprite color limit (8/16/32) with shared palette lock",
+    "category": "Pixel-Art Conversion",
+    "description": "Quantize every action clip of a character to one shared palette built from the union of all frames, at a user-chosen count (8/16/32). This is the single biggest lever for style coherence and eliminates per-frame palette flicker across AI-generated clips.",
+    "priority_hint": "core",
+    "depends_on": "Pillow Image.quantize (MEDIANCUT/MAXCOVERAGE/FASTOCTREE)"
+   },
+   {
+    "name": "Palette file import/export (.gpl, .pal, .act, .aco, .ase, .txt, .hex)",
+    "category": "Project & Workflow Integration",
+    "description": "Read/write GIMP .gpl, JASC .pal, Adobe .act (768/772-byte with transparency footer), Adobe .aco v1+v2, Adobe .ase, paint.net .txt (AARRGGBB), and Lospec .hex. All formats are tiny text/binary layouts documented in this research; pure-Python implementation, no dependency needed.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Lospec palette browser",
+    "category": "Pixel-Art Conversion",
+    "description": "Search and pull curated palettes live via the Lospec JSON API (lospec.com/palette-list/{slug}.json returning name/author/colors), with color-count and tag filters. Gives users ~4,400 proven palettes without leaving the app; cache downloads locally.",
+    "priority_hint": "nice",
+    "depends_on": "existing HTTP stack; palette import feature"
+   },
+   {
+    "name": "Binary-alpha threshold after chroma key",
+    "category": "Frame Processing",
+    "description": "After background removal, threshold the alpha channel to 0/255 with an adjustable cutoff and optional 1px de-fringe. Crisp pixel art has no semi-transparent pixels, and colorkey/indexed exports require binary alpha; AI frames always come back with soft edges.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Colorkey / indexed export option",
+    "category": "Sheet Assembly & Export",
+    "description": "Export sheets as indexed PNG/BMP with palette index 0 transparent, or flatten onto a colorkey (magenta #FF00FF default, green or custom picker). Still required by retro engines, homebrew toolchains (SDL colorkey, RPG Maker 2000/2003), and GIF's transparent-index model.",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Nearest-neighbor everywhere + pixel-perfect preview",
+    "category": "Editing & Preview",
+    "description": "All zoom/preview rendering uses nearest-neighbor at integer zoom steps (100%-1600%) with an optional pixel-grid overlay and checkerboard transparency background. Any smoothing filter instantly destroys the pixel-art look, so the preview path must never interpolate.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Fit-and-pad integer downscale (no-crop compliant)",
+    "category": "Pixel-Art Conversion",
+    "description": "Downscale AI frames to the sprite cell at the largest integer-fitting ratio (box filter), then center on a transparent canvas of the exact cell size. Honors the project rule 'scaled proportionally, never cropped or distorted' using the same pattern as the existing Gemini reference-image aspect handling.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Dither mode selector (default: none)",
+    "category": "Pixel-Art Conversion",
+    "description": "Quantization offers dither = none (default), ordered/Bayer 2x2/4x4/8x8; error-diffusion (Floyd-Steinberg) is available only with a warning because it shimmers frame-to-frame in animation ('dither crawl'). Ordered dither is deterministic per pixel position, so it stays stable across frames.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Outline post-pass: none / black / sel-out",
+    "category": "Pixel-Art Conversion",
+    "description": "Optional 1px outline generation around the sprite silhouette: uniform black, or sel-out (outline auto-darkened ~20-30% from the adjacent fill color, per pixel-art convention). Cheap to compute from the binary alpha mask and makes AI output read as hand-pixeled.",
+    "priority_hint": "later"
+   },
+   {
+    "name": "Aseprite-compatible JSON + PNG sheet export",
+    "category": "Sheet Assembly & Export",
+    "description": "Export the sprite sheet PNG plus Aseprite-style JSON data: frames[].duration in milliseconds and meta.frameTags [{name, from, to, direction}] with one tag per action (idle, walk, attack...). This is the de-facto interchange format engines and importers already parse.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Sheet padding, extrusion, and power-of-two options",
+    "category": "Sheet Assembly & Export",
+    "description": "Configurable spacing/margin (default 1px transparent border per frame), optional edge extrusion, and optional power-of-two sheet dimensions. Prevents texture bleeding when engines scale or mipmap the atlas.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Animated GIF/APNG preview export with timing warning",
+    "category": "Sheet Assembly & Export",
+    "description": "Render any action to a looping GIF or APNG for sharing. GIF delays quantize to centiseconds and browsers clamp tiny delays, so the exporter rounds per-frame ms and surfaces the drift; APNG keeps exact ms and full alpha.",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Palette-swap variant generator",
+    "category": "Advanced/Later",
+    "description": "Once sprites are indexed to a locked palette, generate recolored variants (team colors, damage flash, night versions) by remapping palette entries \u2014 the classic reason hardware limited colors per sprite. Exports each variant as a separate sheet or as palette files.",
+    "priority_hint": "later",
+    "depends_on": "shared palette lock + indexed export"
+   },
+   {
+    "name": "Per-action prompt timing hints for video generation",
+    "category": "AI Animation Generation",
+    "description": "When generating action clips (Veo/Omni), derive the requested clip length from the target frame count and fps preset (e.g. 8-frame walk at 12 fps = ~0.7s loop, ask for 2-3 loops), and inject 'seamless loop, no camera movement' constraints. Aligns the video step with the frame-extraction math instead of guessing.",
+    "priority_hint": "high",
+    "depends_on": "timing templates; existing veo_client/omni_client"
+   },
+   {
+    "name": "@2x/@4x pre-scaled PNG export",
+    "category": "Sheet Assembly & Export",
+    "description": "Optionally export nearest-neighbor pre-scaled copies (2x/4x) of sheets and single frames alongside the 1x master, for store pages, itch.io covers, and engines without integer-scale settings. Integer factors only, never fractional.",
+    "priority_hint": "nice"
+   }
+  ],
+  "sources": [
+   "https://www.aseprite.org/docs/frame-duration/",
+   "https://github.com/aseprite/aseprite/blob/main/docs/ase-file-specs.md",
+   "https://lospec.com/palette-list",
+   "https://lospec.com/palettes/api",
+   "https://developer.gimp.org/core/standards/gpl/",
+   "https://liero.nl/lierohack/docformats/other-jasc.html",
+   "https://www.selapa.net/swatches/colors/fileformats.php",
+   "https://www.cyotek.com/blog/reading-photoshop-color-swatch-aco-files-using-csharp",
+   "https://community.adobe.com/t5/photoshop-ecosystem-discussions/768-byte-color-table/m-p/13657882",
+   "https://www.nesdev.org/wiki/PPU_palettes",
+   "https://gbdev.io/pandocs/Palettes.html",
+   "https://snes.nesdev.org/wiki/Sprites",
+   "https://paint.net/doc/latest/WorkingWithPalettes.html",
+   "https://screwloose-games.github.io/documentation/content/guides/art/pixel_art/pixel_art_guide.html",
+   "https://forums.nesdev.org/viewtopic.php?t=13096",
+   "https://lospec.com/articles/pixel-art-outlines-part-2-using-color/",
+   "https://pixnote.net/en/learn/outlines/",
+   "https://pixnote.net/en/learn/animation/",
+   "https://www.pixel-editor.com/articles/sprite-animation-fundamentals"
+  ]
+ },
+ {
+  "key": "tool-survey",
+  "feature_ideas": [
+   {
+    "name": "Character reference slot with chroma normalization",
+    "category": "Source & Character Setup",
+    "description": "Accept a character image, then optionally re-generate it on a flat solid-color background via Nano Banana edit before animation. Nim's whole pipeline assumes a green-screen source; Spritely's docs tell users to generate art 'with solid color backgrounds' first.",
+    "priority_hint": "core",
+    "depends_on": "existing Gemini image-edit path"
+   },
+   {
+    "name": "Chroma color picker for generation",
+    "category": "Source & Character Setup",
+    "description": "Let the user pick the key color (default green #00FF00) used in generation prompts, so it never collides with the character's palette. Mirrors Nim's CHROMA color picker.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Canvas size presets and anchoring",
+    "category": "Source & Character Setup",
+    "description": "Target sprite canvas presets (Spritely offers 24\u20131024 px) plus manual size, with left/center/right and top/center/bottom anchoring. Scaling stays proportional per the ImageAI hard rule.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Character consistency pack (turnaround refs)",
+    "category": "Source & Character Setup",
+    "description": "Store a small reference set (front/side/back or a character sheet) reused as reference images for every action generation so all clips share one character. Nano Banana's character-faithful editing is the enabler.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Action prompt-card generator",
+    "category": "AI Animation Generation",
+    "description": "An LLM expands a one-line brief ('sidescroller set with attack, jump...') into editable per-action cards with snake_case names (idle_ready, walk_forward, hurt, shield_block), a 1\u201315 s duration, and loop constraints baked into the prompt ('seamless loop, no camera movement, no new shadows'). This is the heart of Nim's Animate Studio UX.",
+    "priority_hint": "core",
+    "depends_on": "core/llm_params.py + resolve_model()"
+   },
+   {
+    "name": "Per-action video clip rendering",
+    "category": "AI Animation Generation",
+    "description": "Render one short clip per action card through the existing Veo/Omni clients, with a queue, per-card status, and per-card re-render. Nim exposes a model dropdown (Imagine 1.5, Wan 2.7) at 720p; ours exposes Veo vs Omni.",
+    "priority_hint": "core",
+    "depends_on": "core/video/veo_client.py, core/video/omni_client.py"
+   },
+   {
+    "name": "Direct multi-frame sheet generation (image models)",
+    "category": "AI Animation Generation",
+    "description": "Alternative path that skips video: prompt Nano Banana for an N-frame sheet in one image, or chain iterative edits (GPT Image 2 / Nano Banana) frame-by-frame. PixelLab proved demand for direct AI sprite-sheet generation.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Action preset library",
+    "category": "AI Animation Generation",
+    "description": "Canned action sets per game genre: sidescroller (idle, walk, run, jump, fall, attack, hurt, death), top-down, fighting. Seeds the prompt-card generator so users start from a checklist instead of prose.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Conversational per-action refine",
+    "category": "AI Animation Generation",
+    "description": "Re-roll or refine a single action clip with a follow-up instruction, reusing the Omni conversational-refine capability already in the CLI.",
+    "priority_hint": "nice",
+    "depends_on": "Omni refine path"
+   },
+   {
+    "name": "Frame extraction with Nth-frame and range controls",
+    "category": "Frame Processing",
+    "description": "Extract frames from each clip: every Nth frame (Nim's default is 'FRAMES: Every 8'), target FPS (Spritely defaults 30), and start/end trim. ffmpeg layer already exists.",
+    "priority_hint": "core",
+    "depends_on": "ffmpeg rendering layer"
+   },
+   {
+    "name": "Chroma key with tolerance slider, local or cloud",
+    "category": "Frame Processing",
+    "description": "Click-to-pick key color plus a tolerance slider (Spritely uses 0=precise to 150=aggressive; Nim calls it TOL) applied to all frames, with a Local (numpy/PIL) vs Cloud processing toggle like Nim's.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Despill and halo removal",
+    "category": "Frame Processing",
+    "description": "Post-key edge cleanup: remove green spill and semi-transparent halo pixels. Spritely ships 'halo removal' as a named polish step; without it AI clips key badly.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "AI background removal fallback",
+    "category": "Frame Processing",
+    "description": "For sources that were not shot on chroma, offer model-based background removal (rembg-style or provider endpoint) per frame. Covers Nim's 'Remove background' button for arbitrary inputs.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Auto-crop and common-bounds stabilization",
+    "category": "Frame Processing",
+    "description": "Trim each frame to content, then compute one shared bounding box per action tag anchored bottom-center so feet stay planted across frames. Fixes the jitter video-derived frames always have; equivalent to TexturePacker 'trim' plus a stable pivot.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Duplicate-frame detection",
+    "category": "Frame Processing",
+    "description": "Detect identical or near-identical extracted frames and offer to drop them. TexturePacker's 'alias detection' and Free Texture Packer's 'detect identical' show this is expected in packers.",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Pixelation downscale to sprite resolution",
+    "category": "Pixel-Art Conversion",
+    "description": "Downscale frames to a target sprite size (e.g. 32/64/128 px) with nearest-neighbor or k-centroid style reduction to get a pixel-art look from photoreal AI frames.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Color quantization with dither toggle",
+    "category": "Pixel-Art Conversion",
+    "description": "Reduce each action (or the whole set) to N colors with optional ordered dithering, matching Aseprite's RGB-to-Indexed conversion concept. Quantizing across all frames of a tag keeps flicker out.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Palette panel with GPL/PAL load-save and remap",
+    "category": "Pixel-Art Conversion",
+    "description": "A palette strip showing the current color set; load/save GIMP .gpl and JASC .pal; apply one palette across every action so the whole sprite set matches. Aseprite's 'Remap' is the reference behavior.",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Lospec palette import",
+    "category": "Pixel-Art Conversion",
+    "description": "Fetch community palettes (DB16/DB32 etc.) by name or file for the quantization step. Popular in Aseprite/Pixelorama workflows.",
+    "priority_hint": "later"
+   },
+   {
+    "name": "Grid sprite sheet export with padding controls",
+    "category": "Sheet Assembly & Export",
+    "description": "Export horizontal/vertical/rows/columns sheets with border, shape (between-frame), and inner padding plus optional trim \u2014 the exact control set of Aseprite's exporter (--border-padding, --shape-padding, --inner-padding, --trim).",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Aseprite-compatible JSON metadata",
+    "category": "Sheet Assembly & Export",
+    "description": "Emit json-hash and json-array metadata with frames, durations, sourceSize, and frameTags (with direction) exactly as Aseprite does \u2014 it is the de-facto interchange format engines and loaders already parse.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Per-tag export with filename templates",
+    "category": "Sheet Assembly & Export",
+    "description": "Export each action separately using templates with placeholders modeled on Aseprite: {title}, {tag}, {frame}, zero-padded {frame01}, {tagframe} \u2014 e.g. hero_{tag}_{frame01}.png.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "GIF export per action",
+    "category": "Sheet Assembly & Export",
+    "description": "Animated GIF per tag for quick sharing/preview, like Piskel and GraphicsGale. APNG and animated WebP follow later (Pixelorama exports APNG).",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Engine-specific exporters (Godot, Phaser, Unity)",
+    "category": "Sheet Assembly & Export",
+    "description": "Godot SpriteFrames .tres, Phaser 3 atlas JSON, Unity-friendly output. TexturePacker ships 48+ exporters; Free Texture Packer ships json/xml/css/pixi.js/godot/phaser/cocos2d \u2014 start with Godot and Phaser.",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Existing-sheet import and slicing",
+    "category": "Sheet Assembly & Export",
+    "description": "Import a sprite sheet and slice it by cell size or rows\u00d7columns back into frames \u2014 needed to round-trip Nano Banana's multi-frame sheet output. ShoeBox 'Read Sprites'/'Extract Sprites' and Piskel's spritesheet import are the references.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Packed atlas mode (MaxRects) with extrude and multipack",
+    "category": "Sheet Assembly & Export",
+    "description": "Space-efficient packed atlases with rotation, 1-2 px extrude to stop texture bleeding, and multipack overflow. Python rectpack (MIT) can supply the algorithm.",
+    "priority_hint": "later"
+   },
+   {
+    "name": "Animation preview player",
+    "category": "Editing & Preview",
+    "description": "Play/pause per action with FPS control, loop modes forward/reverse/ping-pong (Aseprite's three tag directions), zoom with pixel grid at high zoom, and a checkerboard alpha background.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Frame strip management",
+    "category": "Editing & Preview",
+    "description": "Thumbnail strip per action: drag to reorder, duplicate, delete, insert, and per-frame duration in ms \u2014 the universal baseline across Aseprite, Piskel, Pixelorama, and GraphicsGale.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Onion skin overlay",
+    "category": "Editing & Preview",
+    "description": "Ghost previous/next frames with configurable count and tint (Aseprite F3 behavior) to judge motion smoothness when culling or reordering AI frames.",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Single-frame fix via Image tab round-trip",
+    "category": "Editing & Preview",
+    "description": "Send one bad frame to the existing image-edit pipeline (Nano Banana inpaint/edit) and return the fixed frame in place. Replaces the pixel-editor role that Aseprite fills, with AI editing instead of brushes.",
+    "priority_hint": "high",
+    "depends_on": "existing image tab / provider edit path"
+   },
+   {
+    "name": "Sprite project file with provenance sidecars",
+    "category": "Project & Workflow Integration",
+    "description": "A JSON project format holding actions, prompts, model choices, key settings, and frame lists, plus per-asset .json metadata sidecars per the ImageAI hard rule. Aseprite/Piskel/Pixelorama all have native project formats for the same reason.",
+    "priority_hint": "core",
+    "depends_on": "core/paths.py get_data_paths()"
+   },
+   {
+    "name": "CLI parity for the sprite pipeline",
+    "category": "Project & Workflow Integration",
+    "description": "Headless commands mirroring the tab (generate actions, extract, key, export) the way Aseprite's CLI and Pixelorama's command-line bulk export work; matches the repo's existing --video/--layout CLI convention.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Batch queue with status console and cost estimate",
+    "category": "Project & Workflow Integration",
+    "description": "Per-action job queue with real-time status console (repo dialog convention) and a pre-flight estimate of clip count \u00d7 duration before spending video-model credits.",
+    "priority_hint": "high",
+    "depends_on": "gui/llm_utils.py DialogStatusConsole"
+   },
+   {
+    "name": "Directional sprite sets (4/8-way)",
+    "category": "Advanced/Later",
+    "description": "Generate the same action in 4 or 8 facing directions for top-down games; PixelLab markets 'up to 8 directions' as a headline AI feature.",
+    "priority_hint": "later"
+   },
+   {
+    "name": "Skeleton/pose-guided animation",
+    "category": "Advanced/Later",
+    "description": "Pose or skeleton control over generated animation (PixelLab's skeleton tool). Big differentiator, heavy lift.",
+    "priority_hint": "later"
+   },
+   {
+    "name": "9-patch slices and per-slice pivots",
+    "category": "Advanced/Later",
+    "description": "Named slice regions with 9-patch centers and pivots exported in JSON, as Aseprite slices and TexturePacker's pivot editor do \u2014 mostly relevant for UI sprites, not characters.",
+    "priority_hint": "later"
+   },
+   {
+    "name": "Tileset/tilemap support",
+    "category": "Advanced/Later",
+    "description": "Tile extraction and tiled-pattern preview (Pro Motion NG's tile map engine, Aseprite 1.3 tilemaps). A different product surface; defer.",
+    "priority_hint": "later"
+   }
+  ],
+  "key_facts": [
+   "Aseprite CLI sheet export flags: --sheet, --data, --format (json-hash default | json-array), --sheet-type (horizontal|vertical|rows|columns|packed), --split-layers, --split-tags, --split-slices, --border-padding, --shape-padding, --inner-padding, --trim.",
+   "Aseprite filename-format placeholders: {title}, {layer}, {tag}, {frame}, padded {frame01}/{frame000}, {tagframe} (frame index within the current tag), {extension}.",
+   "Aseprite tag animation directions are exactly three: Forward, Reverse, Ping-pong; tags carry a name and are created via Frame > Tags > New Tag (F2).",
+   "Aseprite slices (Slice tool, Shift+C) store bounds, an optional 9-patch center rectangle, and a per-slice pivot; all are emitted in the sprite-sheet JSON 'slices' section.",
+   "Aseprite onion skinning toggles with F3; configuration (previous/next frame counts, red/blue tint) lives under the Configure Timeline icon.",
+   "Aseprite license: GPLv2 until 2016-08-26, then a proprietary EULA \u2014 source-available, personal compile allowed, redistribution forbidden; NOT open source.",
+   "LibreSprite is GPL-2.0, forked from Aseprite's last GPLv2 commit; features: real-time animation preview, onion skinning, built-in + custom palettes, layers/frames, tiled drawing mode.",
+   "Piskel is Apache-2.0 (web + desktop Win/macOS/Linux); live preview with on-the-fly frame-delay adjustment; exports animated GIF, PNG spritesheet, and ZIP of PNGs; uses gif.js/supergif/jszip.",
+   "Pixelorama is MIT, built on Godot 4.7.1; timeline has frame tags, onion skinning, audio synchronization, and draw-while-playing; exports PNG, animated PNG (APNG), spritesheets, GIF, and video; has CLI bulk-export automation and per-layer/frame/cel user metadata.",
+   "Pro Motion NG (commercial + feature-limited Free Edition): sprite-sheet read/write (PNG/BMP), palette-based color cycling, 25+ paint modes, onion skinning/light table, tile-map engine, palette editor with range operations; formats gif/bmp/png/tga/fli/flc.",
+   "GraphicsGale became freeware 2017-06-18 (Windows, v2.11.03); real-time animation preview while editing; onion skin shows previous AND next frames; native .gal format; imports/exports .ico/.gif/.avi/.cur/.ani; exports sprite sheets or per-frame files.",
+   "TexturePacker Pro: $49.99 perpetual single-user license with 1 year of updates (Win/macOS/Linux + CI/Docker); packing algorithms Grid, Basic, MaxRects, Polygon; trim + alias detection (identical-sprite dedup); multipack; 9-patch; pivot-point editor with animation preview; 48+ data exporters (Unity, Godot, Phaser, libGDX, Unreal, generic JSON/XML); image outputs incl. PNG-8 (pngquant), WebP, KTX, PVR/PVRTC, ETC1/ETC2, DXT1/DXT5, ASTC, Basis; Zopfli compression.",
+   "ShoeBox (free, Adobe AIR, Win/macOS) tool list: Pack Sprites, Read Sprites, Extract Sprites, Ani Frames (GIF/SWF/PNG-sequence to frames), Frame Sheet, Bitmap Font (AngelCode .fnt), Split PSD, Extract Tiles, Texture Ripper, Sprite Pivots (bulk pivot editing), Slice 9, Mask Image.",
+   "Free Texture Packer is MIT; web app + desktop (Win/Mac/Linux) + CLI/webpack/gulp/grunt modules; exporters: json (hash/array), xml, css, pixi.js, godot, phaser, cocos2d; features rotation, trim, multipack, detect-identical, TinyPNG, split-sheet tool; custom exporters via mustache templates receiving rects/config/appInfo.",
+   "Spritely (video-to-spritesheet, $30 one-time after 5 free exports): click-any-color chroma key with tolerance slider 0 (precise) to 150 (aggressive); every-Nth-frame extraction; default 30 FPS; start/end range; canvas presets 24\u20131024 px; left/center/right + top/center/bottom positioning; optional halo removal; transparent-PNG sheet or ZIP output.",
+   "Nim.video Animate Studio has no public docs; observed UI (from maintainer): per-action prompt cards (attack_jump, idle_ready, walk_forward, hurt, shield_block, sword_attack, walk; 1\u201315 s; 'seamless loop, no camera movement, no new shadows'), model picker (Imagine 1.5 / Wan 2.7, 720p), 'FRAMES: Every 8' extraction, 'Corridor Key' vs 'Chroma Key' toggle, CHROMA color picker, TOL tolerance slider, Cloud/Local processing, 'Remove background' button.",
+   "AI-adjacent ecosystem: PixelLab (pixellab.ai) ships a web app AND an Aseprite plugin with text-prompt generation, skeleton-based animation control, up-to-8-direction character generation, inpainting, and sprite-sheet output; Aseprite and Pixelorama themselves ship no AI features.",
+   "Table-stakes derived from the survey: frame strip (reorder/duplicate/delete/per-frame ms duration), named action tags with forward/reverse/ping-pong loop modes, FPS-controlled looping preview with pixel-grid zoom, chroma key with color pick + tolerance, Nth-frame extraction, grid sheet export with border/shape/inner padding + trim, Aseprite-compatible JSON (json-hash/json-array with frameTags), per-tag export with {tag}_{frame} filename templates, GIF export, sheet import/slicing, and a project file with metadata.",
+   "Deferrable power-user extras: MaxRects/polygon packed atlases, multipack, extrude/rotation, alias dedup, 9-patch slices and per-sprite pivot editors, palette remap/.gpl/.pal round-trip, APNG/WebP/video export, engine-specific exporters beyond 1-2, color cycling, tilemaps, bitmap fonts, onion-skin drawing tools."
+  ],
+  "sources": [
+   "https://www.aseprite.org/docs/",
+   "https://www.aseprite.org/docs/cli/",
+   "https://www.aseprite.org/docs/animation/",
+   "https://www.aseprite.org/docs/tags/",
+   "https://www.aseprite.org/docs/onion-skinning/",
+   "https://www.aseprite.org/docs/slices/",
+   "https://www.aseprite.org/docs/sprite-sheet/",
+   "https://www.aseprite.org/faq/",
+   "https://github.com/LibreSprite/LibreSprite",
+   "https://github.com/piskelapp/piskel",
+   "https://www.piskelapp.com/",
+   "https://github.com/Orama-Interactive/Pixelorama",
+   "https://www.cosmigo.com/promotion/features",
+   "https://www.cosmigo.com/pixel_animation_software/features",
+   "https://graphicsgale.com/us/",
+   "https://www.codeandweb.com/texturepacker/features",
+   "https://www.codeandweb.com/store/texturepacker-single",
+   "https://renderhjs.net/shoebox/",
+   "https://github.com/odrick/free-tex-packer",
+   "https://spritely.gamemaker.academy/",
+   "https://www.pixellab.ai/",
+   "https://nim.video/"
+  ],
+  "summary": "Across the six editors and three packers surveyed, a remarkably stable feature core repeats. Every animation-capable editor (Aseprite, LibreSprite, Piskel, Pixelorama, GraphicsGale, Pro Motion NG) ships: a frame timeline with reorder/duplicate/delete and per-frame duration in milliseconds; a real-time looping preview with FPS/delay control; onion skinning; layers; a palette panel; and both animated-GIF and sprite-sheet export. Aseprite defines the interchange conventions the whole ecosystem copies: named frame tags with exactly three loop directions (Forward, Reverse, Ping-pong), sheet types horizontal/vertical/rows/columns/packed, three padding knobs (border/shape/inner) plus trim, JSON metadata in json-hash or json-array form carrying frameTags and durations, and filename templates with {tag}/{frame}/{frame01}/{tagframe} placeholders. Its slices add 9-patch centers and per-slice pivots to the JSON. Licensing splits the field: Aseprite is proprietary source-available (EULA since 2016), LibreSprite (GPL-2.0), Piskel (Apache-2.0), Pixelorama (MIT), and Free Texture Packer (MIT) are open, GraphicsGale is freeware, Pro Motion NG and TexturePacker ($49.99 perpetual) are commercial with free tiers.\n\nThe packers show what \"export done well\" means beyond a grid: TexturePacker's Grid/Basic/MaxRects/Polygon algorithms, trim with alias (duplicate-sprite) detection, extrude, multipack, pivot-point editing with animation preview, 48+ engine exporters, and compressed image outputs (PNG-8/WebP/KTX/PVR/ETC/ASTC); Free Texture Packer covers the open-source subset (json/xml/css/pixi.js/godot/phaser/cocos2d plus mustache-template custom exporters); ShoeBox contributes the utility checklist our pipeline actually needs \u2014 extract sprites from sheets, convert GIF/sequences to frames, bulk pivot editing, 9-slice. Since we generate frames rather than draw them, the packer feature set matters more to us than the drawing feature set.\n\nThe AI-adjacent field validates the exact Nim-style pipeline we plan. Spritely ($30 one-time) is a shipping video-to-spritesheet product whose controls map 1:1 onto Nim's: click-to-pick chroma color, tolerance slider 0-150, every-Nth-frame extraction, 30 FPS default, canvas presets 24-1024 px, anchor positioning, and halo removal. PixelLab ships AI pixel-art generation with skeleton-based animation, 8-direction characters, and inpainting \u2014 notably as an Aseprite plugin, showing AI slots into existing sprite workflows rather than replacing them. Aseprite and Pixelorama themselves have added no AI features. Nim's Animate Studio remains undocumented publicly; the maintainer's UI observations (prompt cards per action, Imagine 1.5/Wan 2.7 at 720p, FRAMES: Every 8, Corridor Key vs Chroma Key, TOL, Cloud/Local) are the only spec.\n\nConclusion \u2014 table-stakes for a credible sprite tool given our generate-then-process scope: frame strip management (reorder/duplicate/delete, per-frame ms), named action tags with forward/reverse/ping-pong, an FPS-controlled looping preview with pixel-grid zoom and checkerboard alpha, chroma key (color pick + tolerance, local processing), Nth-frame/FPS/range extraction, auto-trim, grid sheet export with the three Aseprite padding knobs, Aseprite-compatible JSON (json-hash/json-array + frameTags), per-tag export with {tag}_{frame} templates, GIF export, sheet import/slicing (to round-trip Nano Banana sheet output), and a project file with provenance metadata. Deferrable power-user extras: MaxRects/polygon packing, multipack, extrude/rotation, alias dedup, pivot/9-patch editors, palette remap and .gpl/.pal round-trip, APNG/WebP, engine exporters beyond Godot/Phaser, color cycling, tilemaps, bitmap fonts, and any hand-drawing tools \u2014 the editors already own that ground, and interop (their JSON formats) beats reimplementation."
+ },
+ {
+  "key": "ai-animation",
+  "summary": "The Nim.video \"Animate Studio\" pipeline the screenshot shows is fully reproducible from public parts. Its \"Corridor Key\" toggle refers to CorridorKey, an open-source neural green-screen keyer that Niko Pueringer of Corridor Digital released in early 2026 (GitHub: nikopueringer/CorridorKey, 14.6k stars). Unlike a plain color-distance chroma key, CorridorKey takes the RGB footage plus a coarse alpha hint and predicts the true un-multiplied foreground color and a clean linear alpha per pixel, so motion blur, hair, and translucent edges survive. It runs locally on 6-8 GB VRAM (CUDA/ROCm/MPS/MLX), outputs linear EXR (Matte/FG/Processed folders), and carries a custom CC BY-NC-SA-style license: processing images for commercial projects is allowed, but repackaging it or selling inference as a paid API is not (commercial integration requires an agreement with Corridor). Nim's other model choices check out too: \"Imagine 1.5\" is xAI's grok-imagine-video-1.5 (1-15 s clips at 24 fps, 480p/720p/1080p, image-to-video with references \u2014 matching the 1-15 s per-action cards), and Wan 2.7 is Alibaba's April-2026 Apache-2.0 open-weights release (27B MoE, up to 1080p/15 s); Wan 2.2 (Apache-2.0, 720p@24fps, I2V-A14B) runs a 5 s clip on a single 24 GB consumer GPU.\n\nDedicated sprite generators split into pixel-art-native and general tools. Retro Diffusion's rd-animation (on Replicate and Scenario) generates style-consistent pixel sprites/spritesheets from text plus optional reference images, with fixed style/size combos: four_angle_walking and four_angle_walking_idle at 48px, small_sprites at 32px (batch <= 16), any_animation at 64px, big_animation at 128px, plus a forced-palette input. PixelLab.ai exposes the richest API: POST /v2/animate-with-skeleton (skeleton-pose-driven, <= 128x128), /v2/animate-with-text (64x64, 4 frames, ~$0.016), /v2/animate-with-text-v3 (start/end frame conditioning, <= 256x256, up to 16 frames), /v2/rotate and /v2/generate-8-rotations-v3 (4/8-direction views, <= 256x256), all with transparent-PNG output, plus an Aseprite plugin. Scenario's differentiator is custom LoRA training (15-50 reference images, ~20-40 min) for style lock across hundreds of generations; it generates stills, and sheet assembly is left to the user. Rosebud PixelVibe generates 2D assets (sprites, tiles, portraits) but lists sprite animation as an upcoming feature; OpenArt's sprite tool is noted for simple UX but limited frame control. Adjacent utilities (Ludo.ai, Spritesheets.ai) ship \"Fix Loop\" and \"Fix Framing\" repairs and export PNG sheets with JSON/XML atlas metadata \u2014 good features to copy.\n\nOn the image-model route: gemini-2.5-flash-image is now the \"legacy\" Nano Banana (1K only) and Google's docs steer users to newer models; gemini-3-pro-image / gemini-3-pro-image-preview (\"Nano Banana Pro\") exists with 1K/2K/4K output, 10 aspect ratios, and explicit consistency inputs (up to 6 object images, 5 character-consistency images, 3 style references). Neither emits an alpha channel. The documented workarounds are (a) prompt a flat chroma green background \"#00FF00, no gradients/shadows\" and key it with HSV thresholds (~22 deg hue tolerance; never write \"transparent\" in the prompt \u2014 it paints a checkerboard), or (b) difference matting: generate the same image on white then edit only the background to black, and recover fractional alpha from the per-pixel difference. Multi-frame sheets in one generation work (\"6-frame side-view walk cycle, horizontal sprite sheet, consistent proportions\") but grid spacing needs verification/slicing. OpenAI's gpt-image-2 (released 2026-04-21) does the opposite: background=\"transparent\" entered API preview on 2026-08-20 (requires output_format png or webp), with community-reported flaws \u2014 alpha caps at 252-254 instead of 255, grey halo edges, RGB leakage outside the alpha; it supports quality low/medium/high, n up to 10, and custom WIDTHxHEIGHT sizes (divisible by 16, aspect 1:3-3:1, max 3840x2160), which makes wide horizontal sprite strips natively addressable.\n\nFor the video route, Veo 3.1 (already wrapped by core/video/veo_client.py's family) generates 4/6/8 s clips at 24 fps in 720p/1080p/4K (4K only at 8 s), supports image-to-video, FIRST&LAST-frame bridging, up to 3 reference images, and +7 s extensions (720p) to ~148 s. The consensus prompt pattern for sprite clips is exactly what Nim's cards show: one action verb phrase + \"seamless loop, no camera movement, no new shadows,\" a static flat chroma background, and \"character stays centered\"; known failure modes are background color drift, invented contact shadows, slow camera drift, character morphing over longer clips, and loops that do not close (mitigate with first-frame==last-frame conditioning and short 4-8 s clips). Frames are then extracted at a stride (\"every 8\" in Nim; 6-frame walk / 4-frame idle cycles are a cited sweet spot). For raising frame counts afterward, RIFE is pip-installable as rife-ncnn-vulkan-python (SWIG wrapper over the ncnn-Vulkan build; needs Vulkan), Practical-RIFE (MIT) is the maintained model line, and Google's FILM (google-research/frame-interpolation, Apache-2.0, TF2) has PyTorch inference ports (e.g. dajes/frame-interpolation-pytorch).",
+  "key_facts": [
+   "CorridorKey (github.com/nikopueringer/CorridorKey) inputs RGB footage + a coarse alpha hint and outputs straight un-multiplied foreground RGB plus a linear alpha channel; outputs are 16/32-bit linear EXR in /Matte, /FG, /Processed folders plus /Comp PNG previews",
+   "CorridorKey checkpoints are ~300 MB safetensors (CorridorKey_v1.0, CorridorKeyBlue_v1.0 for blue screens, auto-downloaded); minimum 6-8 GB VRAM; installs via uv (uv sync --extra cuda|mlx|rocm), not pip; CUDA/ROCm/MPS/MLX backends; screen color auto-detected or forced with --screen-color green|blue",
+   "CorridorKey license: custom CC BY-NC-SA 4.0 variant \u2014 commercial use of the OUTPUT allowed, but repackaging the tool or offering paid API inference is forbidden; commercial software integration requires an agreement via contact@corridordigital.com; corridorkey.app is a third-party cloud SaaS front-end",
+   "CorridorKey optional alpha-hint generators: GVM (~80 GB VRAM, BSD-2-Clause), VideoMaMa (24 GB+, CC BY-NC 4.0 + Stability AI Community License), BiRefNet (lightweight); better hints yield better keys \u2014 hints can also come from Premiere/AE/Nuke masks",
+   "Nim.video's model menu maps to real models: 'Imagine 1.5' = xAI grok-imagine-video-1.5 (1-15 s clips, 24 fps, 480p/720p/1080p, image-to-video + reference images, extend-from-frame +6-10 s); 'Wan 2.7' = Alibaba's April-2026 Apache-2.0 open-weights 27B MoE (up to 1080p, 15 s)",
+   "Wan 2.2 (github.com/Wan-Video/Wan2.2) is Apache-2.0 open weights; Wan2.2-I2V-A14B does image-to-video at 720p/24fps; a 5 s 720p clip generates in ~9 min on a single 24 GB GPU",
+   "Veo 3.1: 4/6/8 s per generation at 24 fps; 720p/1080p/4K (4K restricted to 8 s clips); 16:9 and 9:16; extension adds 7 s per hop up to ~148 s total but requires 720p; REFERENCE mode accepts up to 3 images; FIRST&LAST mode bridges two frames",
+   "gemini-2.5-flash-image is now the 'legacy' Nano Banana (1K output only) and Google's docs recommend migrating; gemini-3-pro-image ('Nano Banana Pro', preview id gemini-3-pro-image-preview) offers 1K/2K/4K, aspect ratios 1:1,3:2,2:3,3:4,4:3,4:5,5:4,9:16,16:9,21:9, and accepts up to 6 object refs + 5 character-consistency refs + 3 style refs",
+   "No Gemini image model outputs an alpha channel; documented workarounds: (1) prompt 'solid flat chroma key green, exact hex #00FF00, no gradients/noise/shadows' then HSV-key (~22 deg hue tol, 0.3 min saturation) \u2014 never write 'transparent' in the prompt (paints a checkerboard); (2) white-bg/black-bg difference matting recovers true fractional alpha",
+   "Nano Banana one-shot sheet prompt pattern that works: 'Create a 6-frame side-view walk cycle... Horizontal sprite sheet... Consistent proportions' + explicit list of what must NOT change (face, hair, proportions); grid spacing is not guaranteed and needs verification/slicing",
+   "gpt-image-2 (model id gpt-image-2 / gpt-image-2-2026-04-21, launched 2026-04-21): quality auto|low|medium|high; n 1-10; sizes 1024x1024/1536x1024/1024x1536/auto or custom WIDTHxHEIGHT divisible by 16, aspect 1:3 to 3:1, max 3840x2160; output_format png|jpeg|webp; always-high input fidelity (passing input_fidelity fails)",
+   "gpt-image-2 background='transparent' entered API preview on 2026-08-20 (must set output_format png or webp); community-reported defects: alpha values 252-254 instead of 255, grey 'color key' halo edges, RGB imagery leaking outside the alpha boundary, transparency not preserved in edit mode",
+   "Retro Diffusion rd-animation (Replicate: retro-diffusion/rd-animation; also hosted on Scenario): text + optional reference images (guidance only, not init frames), optional forced palette; styles/sizes: rd_animation__four_angle_walking (48px), four_angle_walking_idle (48px), small_sprites (32px, batch <= 16), any_animation (64px), big_animation (128px); outputs spritesheets/GIFs",
+   "PixelLab API endpoints: POST /v2/animate-with-skeleton (<=128x128, ~$0.0136-0.0157), /v2/animate-with-text (64x64, 4 frames, $0.01565), /v2/animate-with-text-v3 (start/end frame conditioning, <=256x256, up to 16 frames), /v2/rotate (<=128x128), /v2/generate-8-rotations-v3 (<=256x256, ~$0.029-0.038), /v2/create-image-pixflux (<=400x400, transparent bg), /v2/create-image-bitforge (style-from-reference, <=200x200); transparent PNG across most endpoints; Aseprite plugin (v1.3.7+)",
+   "Scenario custom-model training: LoRA/SDXL fine-tune on 15-50 reference images, ~20-40 min; strongest for locking one art style across many generations; no built-in sheet assembly",
+   "Rosebud PixelVibe: 2D asset generation (character sprites, props, isometric tiles, GUI, portraits, skyboxes); sprite ANIMATION listed only as an upcoming feature; OpenArt sprite tooling has simple UX but limited frame control",
+   "Consensus sprite-clip prompt pattern (matches Nim's cards): action phrase + 'seamless loop, no camera movement, no new shadows' + static flat background + character centered; failure modes: background drift, invented shadows, camera drift, character morphing, non-closing loops; competitor repairs: Ludo.ai 'Fix Loop' and 'Fix Framing'",
+   "Frame-count conventions: Nim extracts 'FRAMES: Every 8'; testing across 50+ prototypes (seeles.ai) found 6-frame walk cycles and 4-frame idles the best smoothness/size balance",
+   "RIFE via pip: rife-ncnn-vulkan-python on PyPI (SWIG FFI over nihui/rife-ncnn-vulkan; requires Vulkan SDK; GPU-vendor-agnostic); model line Practical-RIFE (hzwer) is MIT-licensed; FILM: google-research/frame-interpolation is Apache-2.0 (TF2) with PyTorch inference ports (dajes/frame-interpolation-pytorch, TorchScript-compilable)",
+   "Sheet-export table stakes from competitors (Spritesheets.ai, SEELE): transparent PNG sheet + JSON and XML atlas files with frame positions/dimensions, uniform cell size, loop-ready cycles",
+   "ImageAI already owns most plumbing: core/video/veo_client.py + omni_client.py (generation, refs, extend, frame interpolation mentions), ffmpeg_renderer.py/ffmpeg_utils.py (frame extraction), image_processing.py, reference_manager.py, project.py \u2014 the Sprite tab is mostly orchestration over existing modules"
+  ],
+  "feature_ideas": [
+   {
+    "name": "Character intake + chroma-plate prep",
+    "category": "Source & Character Setup",
+    "description": "Accept a character image, then use Nano Banana edit to re-composite it onto a flat #00FF00 (or user-picked) chroma background with no shadows before any animation step. This mirrors Nim's green-screen input convention and makes every downstream key trivial.",
+    "priority_hint": "core",
+    "depends_on": "existing Google provider image-edit path"
+   },
+   {
+    "name": "Character turnaround sheet generator",
+    "category": "Source & Character Setup",
+    "description": "Generate front/side/back/3-4 views with gemini-3-pro-image using its character-consistency reference slots (up to 5 character refs), with an explicit do-not-change list (face, hair, proportions). The turnaround becomes the reference set for video and frame generation.",
+    "priority_hint": "high",
+    "depends_on": "gemini-3-pro-image availability in provider layer"
+   },
+   {
+    "name": "AI action-set planner (prompt cards)",
+    "category": "Source & Character Setup",
+    "description": "An LLM turns 'animation set for a sidescroller with attack, jump...' into editable per-action prompt cards (idle_ready, walk, attack_jump, hurt...), each pre-filled with the loop-safe template: 'seamless loop, no camera movement, no new shadows, character stays centered'. Exactly Nim's card step.",
+    "priority_hint": "core",
+    "depends_on": "gui/llm_utils.py + resolve_model()"
+   },
+   {
+    "name": "Video-route action rendering (Veo/Omni)",
+    "category": "AI Animation Generation",
+    "description": "Render each action card as a 4-8 s image-to-video clip from the chroma plate via the existing veo_client/omni_client, defaulting to 720p/24fps 16:9. Per-card duration and model choice, with the character image as the init/reference.",
+    "priority_hint": "core",
+    "depends_on": "core/video/veo_client.py, core/video/omni_client.py"
+   },
+   {
+    "name": "Loop-closure conditioning",
+    "category": "AI Animation Generation",
+    "description": "Use Veo 3.1 FIRST&LAST mode with the same frame as start and end to force closed loops, and offer an automatic tail-trim/crossfade fallback when a clip does not loop. Directly attacks the top failure mode (non-closing loops).",
+    "priority_hint": "high",
+    "depends_on": "Video-route action rendering"
+   },
+   {
+    "name": "Image-model frame generation (sheet or chain)",
+    "category": "AI Animation Generation",
+    "description": "Two video-free modes: one-shot sprite-sheet grid prompts (Nano Banana or gpt-image-2, which supports wide custom sizes up to 3:1 for horizontal strips), and iterative edit-chaining where each frame is an edit of the previous with a pose instruction. Cheaper and deterministic for 4-8 frame cycles.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Pixel-native animation backends (Retro Diffusion / PixelLab)",
+    "category": "AI Animation Generation",
+    "description": "Optional API backends for pixel-art games: Retro Diffusion rd-animation styles (48px 4-direction walk/idle, 32px small sprites, 64/128px any/big animation, forced palette) and PixelLab /v2/animate-with-text-v3 (up to 16 frames, 256x256) + /v2/generate-8-rotations-v3. Both return transparent output natively.",
+    "priority_hint": "nice",
+    "depends_on": "new provider adapters + API keys"
+   },
+   {
+    "name": "Local Wan 2.x backend",
+    "category": "Advanced/Later",
+    "description": "Wan 2.2 I2V-A14B is Apache-2.0 open weights and renders 5 s 720p/24fps clips on a single 24 GB GPU, giving a zero-API-cost video route for users with big GPUs. Fits the existing local Stable Diffusion provider pattern.",
+    "priority_hint": "later",
+    "depends_on": "GPU >= 24 GB; ComfyUI or diffusers runner"
+   },
+   {
+    "name": "Frame extraction with stride",
+    "category": "Frame Processing",
+    "description": "Extract frames from each action clip with an 'Every N' stride control (Nim default: every 8) plus start/end trim, via the existing ffmpeg layer. Shows resulting frame count and effective fps live.",
+    "priority_hint": "core",
+    "depends_on": "core/video/ffmpeg_utils.py"
+   },
+   {
+    "name": "Classic chroma key (local, instant)",
+    "category": "Frame Processing",
+    "description": "OpenCV/PIL HSV keyer with chroma color picker, tolerance (TOL) slider, despill, and edge feather \u2014 the fast default that needs no model. Defaults tuned to the documented values (~22 deg hue tolerance, 0.3 min saturation).",
+    "priority_hint": "core"
+   },
+   {
+    "name": "CorridorKey integration (local + guidance)",
+    "category": "Frame Processing",
+    "description": "Drive a user-installed CorridorKey for physically-accurate mattes (straight FG + linear alpha, keeps motion blur); ImageAI shells out to its CLI and imports the EXR/PNG results. License requires this stay a bring-your-own-install integration \u2014 ImageAI must not resell inference.",
+    "priority_hint": "nice",
+    "depends_on": "user installs CorridorKey (uv, 6-8 GB VRAM); EXR read via OpenEXR/imageio"
+   },
+   {
+    "name": "ML background removal (rembg) for non-chroma sources",
+    "category": "Frame Processing",
+    "description": "Per-frame ML matting (pip-installable rembg with BiRefNet/U2-Net models) for characters that were never on a green screen, matching Nim's 'Remove background' button and its Cloud/Local toggle.",
+    "priority_hint": "high",
+    "depends_on": "onnxruntime"
+   },
+   {
+    "name": "Difference matting for image-model frames",
+    "category": "Frame Processing",
+    "description": "Generate the frame on white, edit only the background to black, and recover true fractional alpha from the per-pixel difference \u2014 the documented workaround for Gemini's missing alpha channel that keeps soft edges.",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "AI frame interpolation (RIFE/FILM)",
+    "category": "Frame Processing",
+    "description": "Raise frame counts after extraction (e.g. 6 -> 12 -> 24) with RIFE (rife-ncnn-vulkan-python, Vulkan, vendor-agnostic) or FILM (Apache-2.0, PyTorch ports). Interpolate before keying so mattes stay consistent.",
+    "priority_hint": "high",
+    "depends_on": "pip: rife-ncnn-vulkan-python or torch FILM port"
+   },
+   {
+    "name": "Frame stabilization + dedup",
+    "category": "Frame Processing",
+    "description": "Align the character centroid/bounding box across frames to cancel camera-drift jitter, and drop near-duplicate frames. Counters the two remaining video-model failure modes after loop closure.",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Pixelation + palette pipeline",
+    "category": "Pixel-Art Conversion",
+    "description": "Convert extracted frames to pixel art: proportional downscale to a target sprite size, shared-palette extraction, per-frame palette remap, optional dithering and outline. A shared palette across frames is what makes AI frames read as one sprite.",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Sprite-sheet packer + atlas metadata",
+    "category": "Sheet Assembly & Export",
+    "description": "Pack keyed frames into a uniform-cell grid (one row per action), with padding/trim controls, and emit JSON + XML atlas files with frame positions/dimensions like Spritesheets.ai/TexturePacker. Plus the project-standard .json sidecar with full generation provenance.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Engine export presets",
+    "category": "Sheet Assembly & Export",
+    "description": "Presets for Godot/Unity import conventions, per-action GIF/APNG previews, horizontal strip export, and Aseprite-compatible layouts. Transparent PNG output is table stakes across every competitor.",
+    "priority_hint": "high",
+    "depends_on": "Sprite-sheet packer"
+   },
+   {
+    "name": "Animation preview player",
+    "category": "Editing & Preview",
+    "description": "Loop each action at a chosen fps over a checkerboard, with onion-skin overlay and side-by-side compare of keyer settings. Live TOL scrubbing re-keys the visible frame instantly.",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Per-frame surgery",
+    "category": "Editing & Preview",
+    "description": "Delete/reorder/duplicate frames and regenerate a single bad frame via image edit using neighbors as references \u2014 the practical fix for one morphed frame without re-rendering the clip.",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Sprite project + cross-tab + CLI parity",
+    "category": "Project & Workflow Integration",
+    "description": "A resumable sprite project (character, action cards, clips, frames, sheets) following core/video/project.py patterns and get_data_paths(); Send-to-Sprite from the Image tab; a --sprite CLI mirroring the --video contract with --json output. Full LLM request/response logging per house rules.",
+    "priority_hint": "high",
+    "depends_on": "core/paths.py, cli/parser.py"
+   },
+   {
+    "name": "Cost estimator per action set",
+    "category": "Project & Workflow Integration",
+    "description": "Before batch generation, show estimated cost across the chosen route (e.g. 7 actions x 8 s Veo vs one gpt-image-2 sheet vs PixelLab cents-per-animation) so users pick a route deliberately.",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Skeleton/pose-driven animation",
+    "category": "Advanced/Later",
+    "description": "PixelLab-style skeleton posing: user poses a rig per keyframe and the model fills the drawing. Highest-control path but needs a pose editor UI; PixelLab's /v2/animate-with-skeleton could power a first version.",
+    "priority_hint": "later"
+   },
+   {
+    "name": "Multi-direction sprite sets",
+    "category": "Advanced/Later",
+    "description": "Generate 4/8-direction versions of each action for top-down/isometric games via turnaround references (Nano Banana) or PixelLab /v2/generate-8-rotations-v3, keeping one shared palette and cell size.",
+    "priority_hint": "later",
+    "depends_on": "Character turnaround sheet generator"
+   }
+  ],
+  "sources": [
+   "https://github.com/nikopueringer/CorridorKey",
+   "https://hackaday.com/2026/03/18/corridorkey-is-what-you-get-when-artists-make-ai-tools/",
+   "https://www.corridorkey.app/",
+   "https://nim.video/",
+   "https://replicate.com/retro-diffusion/rd-animation",
+   "https://help.scenario.com/en/articles/retro-diffusion-models-the-essentials/",
+   "https://www.scenario.com/blog/ai-sprite-generator",
+   "https://www.pixellab.ai/pixellab-api",
+   "https://www.pixellab.ai/docs/ways-to-use-pixellab",
+   "https://lab.rosebud.ai/ai-game-assets",
+   "https://ludo.ai/features/sprite-generator",
+   "https://www.spritesheets.ai/",
+   "https://www.seeles.ai/resources/blogs/how-to-animate-sprite-sheets-ai-game-development",
+   "https://ai.google.dev/gemini-api/docs/image-generation",
+   "https://www.philschmid.de/generate-stickers",
+   "https://jidefr.medium.com/generating-transparent-background-images-with-nano-banana-pro-2-1866c88a33c5",
+   "https://lab.rosebud.ai/blog/how-to-create-a-sprite-sheet-with-ai-using-google-gemini-and-nano-banana-easy-guide",
+   "https://developers.openai.com/api/reference/python/resources/images/methods/generate",
+   "https://community.openai.com/t/transparent-backgrounds-are-now-available-in-preview-for-gpt-image-2-in-the-api/1391541",
+   "https://x.ai/news/grok-imagine-video-1-5",
+   "https://github.com/Wan-Video/Wan2.2",
+   "https://venice.ai/models/wan-2-7",
+   "https://fal.ai/models/fal-ai/veo3.1",
+   "https://www.aifreeapi.com/en/posts/veo-3-extend-video-length",
+   "https://pypi.org/project/rife-ncnn-vulkan-python/",
+   "https://github.com/hzwer/Practical-RIFE",
+   "https://github.com/google-research/frame-interpolation",
+   "https://github.com/dajes/frame-interpolation-pytorch"
+  ]
+ },
+ {
+  "key": "chroma-matting",
+  "summary": "Classic chroma keying is best implemented as color-distance keying in YCbCr (YCrCb in OpenCV), not RGB/HSV thresholding: convert with cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb), measure Euclidean distance in the (Cr,Cb) chroma plane from the key color, and map distance through a two-threshold ramp \u2014 dist < tol_a gives alpha 0, dist > tol_b gives alpha 255, linear (or smoothstep) in between. Keying on chroma only ignores luminance, so wrinkles/shadows in an AI-generated green field key cleanly; HSV inRange (green hue roughly 40\u201380 in OpenCV's 0\u2013179 H scale) works as a quick mode but breaks on dark greens. ffmpeg (already bundled by the app) provides the same thing as filters: chromakey (YUV-space; options color, similarity 0.01\u20131.0, blend 0.0\u20131.0 where blend>0 yields graded alpha), colorkey (RGB-space equivalent), and a despill filter (type green|blue, mix = spillmap generation, expand = residual spill removal, per-channel red/green/blue with green=-1 for greenscreen, brightness, alpha). Despill in Python is per-pixel green clamping \u2014 the canonical expressions are g>(r+b)/2?(r+b)/2:g (average), g>(2*b+r)/3 (double-blue average), g>r?r:g / g>b?b:g (limit variants); compute the spill matte as the difference between original and despilled, desaturate it, and add it back to restore edge luminance. Anti-aliased edges from AI images are mixed pixels: after soft-ramp alpha + despill, apply color decontamination F=(C\u2212(1\u2212\u03b1)\u00b7K)/\u03b1, then choke (cv2.erode on the mask) and feather (cv2.GaussianBlur on alpha), with morphological open for despeckle.\n\nFor AI matting, rembg (MIT, Python >=3.11 <3.14, pip install \"rembg[cpu]\" pulling onnxruntime which is MIT with wheels on all desktop platforms) is the practical desktop choice. Verified ONNX weights from its release assets: u2netp 4.4 MB (fast, lowest quality), silueta 42.1 MB, u2net 167.8 MB, isnet-general-use 170.4 MB, isnet-anime 167.9 MB (best fit for cel/sprite content), birefnet-general-lite 213.6 MB, birefnet-general 927.6 MB, bria-rmbg-2.0 976.9 MB (BRIA license \u2014 paid agreement for commercial use; avoid as default). API: new_session(model_name) + remove(data, session=..., alpha_matting=True, alpha_matting_foreground_threshold=240, alpha_matting_background_threshold=10, alpha_matting_erode_size=10, post_process_mask, only_mask, bgcolor); models auto-download to ~/.rembg/models/. CPU reality: u2net/isnet run ~1\u20133 s per frame; BiRefNet-class models take several seconds to ~15 s per frame on CPU (transparent-background/InSPyReNet benchmarks at ~16.5 s/image CPU) \u2014 fine for a batch job with a progress bar, not for live preview. transparent-background (MIT, InSPyReNet ACCV 2022) is an alternative but drags in full PyTorch; rembg's onnxruntime path is lighter for ImageAI. Interactive segmentation: rembg ships SAM (vit_b encoder 342.6 MB, quantized 103.8 MB) and mobile_sam (encoder 26.9 MB, quantized 10.5 MB) with point/box prompts \u2014 MobileSAM is the only variant comfortably interactive on CPU (~10M params, near-SAM quality at mIoU ~0.74). ViTMatte trimap-matting ONNX models (vitmatte-small 109.1 MB) also sit in rembg's release assets for edge-quality refinement.\n\nFrame extraction: every-Nth-frame is -vf \"select='not(mod(n,8))'\" with -fps_mode vfr (formerly -vsync vfr \u2014 without it ffmpeg duplicates frames to fill a constant-rate output); n is the zero-based frame number. fps=12 resamples to a constant rate instead (decodes everything, duplicates/drops as needed) \u2014 better when the user thinks in \"output FPS\" rather than \"every 8th frame\"; select+vfr is faster for sparse pulls. Scene-aware extraction uses select='gt(scene,0.4)' (scene is a 0\u20131 new-scene likelihood) or PySceneDetect (BSD-3-Clause, detect(path, ContentDetector(threshold=27.0)), backends OpenCV/PyAV/MoviePy, and it can auto-use imageio-ffmpeg's bundled binary). Since ImageAI already owns core/video/ffmpeg_utils.py, extraction should reuse it; imageio-ffmpeg (BSD-2-Clause, ~60 MiB wheels bundling ffmpeg 7.x) and PyAV (binary wheels bundle FFmpeg libs) remain pip-only fallbacks. Frame cleanup: auto-crop via the alpha channel (cv2.findNonZero + cv2.boundingRect, or PIL getbbox) but take the union bbox across an action's frames, then re-pad to a uniform canvas anchored bottom-center so feet stay planted; de-jitter with skimage.registration.phase_cross_correlation(ref, moving, upsample_factor=10) for 1/10-pixel translation estimates applied via scipy.ndimage.shift or cv2.warpAffine \u2014 run it on the alpha masks (not RGB) so background drift can't bias the shift; alpha-centroid alignment (cv2.moments: cx=m10/m00) is the cheap fallback and the right tool when limbs move but the body core should stay fixed. Background drift itself is best neutralized by keying/matting each frame independently, or by median-stacking frames to estimate the static background and differencing.\n\n\"Corridor Key\" is real and documented: CorridorKey by Niko Pueringer (Corridor Digital), released Feb 2026, github.com/nikopueringer/CorridorKey. It is a two-stage pipeline \u2014 an alpha-hint model (GVM, VideoMaMa, or BiRefNet) produces a coarse mask, then a ~300 MB neural \"unmixer\" checkpoint predicts straight (unpremultiplied) foreground color and linear alpha per pixel at native 2048\u00d72048, handling hair/motion-blur/translucency, with a classic despill-strength (0\u201310) post filter. Crucially for ImageAI: it is CC BY-NC-SA 4.0 (commercial incorporation requires permission), not pip-installable (uv-managed clone), and wants 6\u20138 GB VRAM minimum \u2014 so it cannot be embedded, but its *technique* (matting model for alpha hint + unmix/decontaminate against the estimated key color + despill) is exactly reproducible with rembg/isnet-anime + the decontamination formula above, and Nim's \"Corridor Key\" toggle is almost certainly this style of ML matting versus classic chroma distance.",
+  "key_facts": [
+   "Classic keyer: convert BGR->YCrCb (cv2.COLOR_BGR2YCrCb), alpha from Euclidean distance in the (Cr,Cb) plane to the key color's (Cr,Cb); two thresholds tol_a (fully transparent below) and tol_b (fully opaque above) with a linear/smoothstep ramp between = Nim-style TOL + softness controls",
+   "HSV quick-key: cv2.inRange on H around 40-80 (OpenCV H is 0-179), S and V floors ~40; fails on dark/desaturated greens where YCbCr distance still works",
+   "Canonical despill expressions: average g>(r+b)/2?(r+b)/2:g; double-blue (2*b+r)/3; double-red (b+2*r)/3; blue-limit g>b?b:g; red-limit g>r?r:g (Ben McEwan, benmcewan.com/blog/understanding-despill-algorithms)",
+   "Luminance restore after despill: diff = original - despilled, desaturate diff to grayscale, add back to despilled result (prevents darkened edges)",
+   "Edge decontamination for anti-aliased AI edges: F = (C - (1-alpha)*K) / alpha where K is the key color (unmix/unpremultiply); apply only where 0<alpha<1",
+   "Edge choke = cv2.erode on binary mask (1-2 px kernel); feather = cv2.GaussianBlur on the alpha channel; despeckle = cv2.morphologyEx MORPH_OPEN; these three map to a minimal 'edge' control group",
+   "ffmpeg chromakey filter: YUV-space; options color, similarity (0.01=exact color only .. 1.0=everything), blend (0.0=binary alpha, >0=graded transparency), yuv flag; colorkey is the RGB-space twin; both usable through the app's existing core/video/ffmpeg_utils.py",
+   "ffmpeg despill filter options: type=green|blue, mix (spillmap generation), expand (residual spill removal), red/green/blue channel controls (green should be -1 for greenscreen), brightness, alpha",
+   "rembg: MIT license, Python >=3.11,<3.14, install as pip install \"rembg[cpu]\" (onnxruntime) or \"rembg[gpu]\" (onnxruntime-gpu); models auto-download to ~/.rembg/models/",
+   "rembg API: new_session(model_name); remove(input, session=..., alpha_matting=True, alpha_matting_foreground_threshold=240, alpha_matting_background_threshold=10, alpha_matting_erode_size=10, post_process_mask=..., only_mask=..., bgcolor=...)",
+   "Verified rembg model ONNX sizes (GitHub release v0.0.0 assets): u2netp 4.4 MB, silueta 42.1 MB, u2net 167.8 MB, u2net_human_seg 167.8 MB, isnet-anime 167.9 MB, isnet-general-use 170.4 MB, birefnet-general-lite 213.6 MB, birefnet-general 927.6 MB, BiRefNet_HR-general 1048 MB, bria-rmbg-2.0 976.9 MB",
+   "isnet-anime is the model to default for cel/sprite-style characters; bria-rmbg (RMBG-2.0) requires a paid BRIA license for commercial use \u2014 do not make it the default",
+   "SAM in rembg: sam_vit_b encoder 342.6 MB (quant 103.8 MB) + decoder 15.7 MB, mobile_sam encoder 26.9 MB (quant 10.5 MB); supports point and box prompts; MobileSAM (~10M params, mIoU ~0.74, ~2-4 pts below full SAM) is the only CPU-interactive variant",
+   "ViTMatte trimap-matting ONNX models exist in rembg's release assets: vitmatte-small-composition-1k 109.1 MB, vitmatte-base 379.5 MB",
+   "transparent-background (InSPyReNet): MIT license, modes base [1024x1024] / fast [384x384] / base-nightly, Remover(mode=..., device=..., ckpt=...).process(img, type='rgba'|'map'|'green'|'blur'|'overlay', threshold=...); requires full PyTorch (torch>=1.7.1, torchvision, timm, kornia); ~16.5 s/image CPU inference benchmark",
+   "BiRefNet upstream (ZhengPeng7/BiRefNet) is MIT licensed; CPU inference is seconds-per-image, 17 FPS at 1024x1024 only on an RTX 4090 FP16",
+   "Every-Nth-frame extraction: -vf \"select='not(mod(n,8))'\" -fps_mode vfr out_%04d.png (n = zero-based frame number; -fps_mode vfr replaces deprecated -vsync vfr; omitting it duplicates frames to fill CFR output)",
+   "FPS resampling: -vf fps=12 decodes all frames and duplicates/drops to a constant rate; select+vfr is faster for sparse extraction, fps= matches a 'target FPS' mental model",
+   "Scene-aware extraction: -vf \"select='gt(scene,0.4)'\" (scene = 0-1 new-scene likelihood), or PySceneDetect (BSD-3-Clause): detect(path, ContentDetector(threshold=27.0)); backends OpenCV/PyAV/MoviePy and it can use imageio-ffmpeg's bundled binary",
+   "imageio-ffmpeg: BSD-2-Clause, wheels ~60 MiB bundling the ffmpeg binary (7.x) for win x86-64, macOS arm64/x86-64, manylinux x86-64/aarch64; irrelevant here since ImageAI already bundles ffmpeg via core/video/ffmpeg_utils.py but is the pip-only fallback",
+   "Auto-crop: bbox from alpha via cv2.findNonZero(alpha)+cv2.boundingRect (or PIL Image.getbbox()); use the UNION bbox across all frames of one action, then re-pad every frame to one uniform canvas anchored bottom-center so the sprite's feet stay planted",
+   "De-jitter: skimage.registration.phase_cross_correlation(reference_image, moving_image, upsample_factor=10) registers to 1/upsample_factor pixel; apply shift with scipy.ndimage.shift or cv2.warpAffine; run on alpha masks so background drift cannot bias the estimate; alpha-centroid (cv2.moments m10/m00, m01/m00) is the cheap fallback",
+   "CorridorKey (github.com/nikopueringer/CorridorKey, Niko Pueringer/Corridor Digital, Feb 2026): two-stage = alpha hint (GVM BSD-2-Clause / VideoMaMa CC BY-NC-4.0 / BiRefNet) -> ~300 MB neural unmixer predicting straight FG color + linear alpha at 2048x2048; despill strength 0-10; outputs EXR matte/FG/premult",
+   "CorridorKey license is CC BY-NC-SA 4.0 (commercial incorporation requires direct permission), NOT pip-installable (uv-managed git clone), 6-8 GB VRAM minimum, CPU 'supported but slow' \u2014 cannot be embedded in ImageAI; reproduce its concept with matting-model alpha hint + unmix formula + despill instead",
+   "onnxruntime: MIT license, official wheels for Windows/macOS/Linux x64 and arm64 \u2014 the only heavyweight dependency rembg needs on CPU"
+  ],
+  "feature_ideas": [
+   {
+    "name": "YCbCr color-distance keyer",
+    "category": "Frame Processing",
+    "description": "Classic chroma key computing Euclidean distance in the (Cr,Cb) plane with two thresholds: TOL (fully keyed) and softness (ramp to opaque), matching Nim's CHROMA color picker + TOL slider. Luminance-independent, so it survives shaded/uneven AI-generated green fields; pure OpenCV+NumPy, real-time on CPU.",
+    "priority_hint": "core",
+    "depends_on": "opencv-python, numpy"
+   },
+   {
+    "name": "Despill filter suite",
+    "category": "Frame Processing",
+    "description": "Post-key green/blue spill removal offering the standard algorithms (average, double-blue/red average, limit) plus automatic luminance restoration by adding back the desaturated despill difference. Prevents the green fringe that otherwise haloes every extracted sprite frame.",
+    "priority_hint": "core",
+    "depends_on": "YCbCr keyer (shares mask)"
+   },
+   {
+    "name": "Edge choke, feather, and despeckle controls",
+    "category": "Frame Processing",
+    "description": "Three-slider edge group: choke (mask erode), feather (Gaussian blur on alpha), despeckle (morphological open). Handles the anti-aliased mixed pixels AI image/video models produce at character silhouettes and removes stray keyed specks.",
+    "priority_hint": "high",
+    "depends_on": "opencv-python"
+   },
+   {
+    "name": "Edge color decontamination (unmix)",
+    "category": "Frame Processing",
+    "description": "CorridorKey-style unmixing on semi-transparent edge pixels: F=(C-(1-a)K)/a against the sampled key color, recovering true foreground color in hair/motion-blur edges instead of gray-green fringe. Cheap NumPy math layered on any keyer or matting output.",
+    "priority_hint": "high",
+    "depends_on": "any alpha source (keyer or rembg)"
+   },
+   {
+    "name": "AI background removal (rembg)",
+    "category": "Frame Processing",
+    "description": "One-click 'Remove background' with a model dropdown (u2netp 4 MB fast, isnet-anime for cel/sprite characters, isnet-general-use, birefnet-general-lite; size shown per model) running on CPU via onnxruntime. Works when the source has no green screen at all \u2014 the 'Corridor Key' toggle position in the Nim UI.",
+    "priority_hint": "core",
+    "depends_on": "rembg[cpu] (MIT), onnxruntime; models auto-download to ~/.rembg/models/"
+   },
+   {
+    "name": "Alpha-matting edge refinement",
+    "category": "Frame Processing",
+    "description": "Optional rembg alpha_matting pass (foreground_threshold=240, background_threshold=10, erode_size=10) that converts a hard segmentation mask into a soft matte for hair and thin limbs. Exposed as a single 'Refine edges' checkbox with the three advanced numbers behind a disclosure.",
+    "priority_hint": "nice",
+    "depends_on": "rembg (pymatting extra)"
+   },
+   {
+    "name": "Every-Nth-frame extractor",
+    "category": "Frame Processing",
+    "description": "Nim's 'FRAMES: Every 8' control: -vf select='not(mod(n,N))' -fps_mode vfr through the existing ffmpeg_utils layer, writing numbered PNGs. Fast because ffmpeg skips undecoded frames; N slider 1-30 with a computed 'yields ~X frames at Y fps' readout.",
+    "priority_hint": "core",
+    "depends_on": "core/video/ffmpeg_utils.py (already in repo)"
+   },
+   {
+    "name": "Target-FPS frame resampling",
+    "category": "Frame Processing",
+    "description": "Alternate extraction mode using -vf fps=12 so users think in output framerate instead of frame stride \u2014 the natural unit for game animation (8/10/12/24 fps presets). Duplicates/drops frames to a constant rate, giving even temporal spacing regardless of source fps.",
+    "priority_hint": "high",
+    "depends_on": "core/video/ffmpeg_utils.py"
+   },
+   {
+    "name": "Union-bbox auto-crop + uniform canvas re-pad",
+    "category": "Frame Processing",
+    "description": "Crops all frames of an action to the union of their alpha bounding boxes, then re-pads to one uniform canvas with a selectable anchor (bottom-center default so feet stay planted). This is the step that turns loose keyed frames into consistent, engine-ready sprite cells.",
+    "priority_hint": "core",
+    "depends_on": "opencv-python or PIL; alpha channel from keyer/rembg"
+   },
+   {
+    "name": "Sub-pixel frame de-jitter",
+    "category": "Frame Processing",
+    "description": "Aligns jittery AI-generated frames using skimage phase_cross_correlation (upsample_factor=10, run on alpha masks so background drift can't bias it), with alpha-centroid alignment as the fast fallback. Removes the wobble that makes video-derived sprite loops look unstable.",
+    "priority_hint": "high",
+    "depends_on": "scikit-image, scipy; auto-crop stage"
+   },
+   {
+    "name": "Background-drift suppression",
+    "category": "Frame Processing",
+    "description": "For sequences where the AI slowly mutates the 'solid' background: estimate the static background by median-stacking frames, then key each frame against the per-pixel estimate instead of one global color. Rescues clips a fixed-color key would fail on.",
+    "priority_hint": "nice",
+    "depends_on": "numpy; classic keyer"
+   },
+   {
+    "name": "ffmpeg-native key preview",
+    "category": "Editing & Preview",
+    "description": "Instant whole-clip preview using ffmpeg's built-in chromakey (color/similarity/blend) + despill filters before any per-frame Python processing \u2014 one subprocess renders a keyed preview video for scrubbing. Maps 1:1 to the final per-frame pipeline parameters.",
+    "priority_hint": "nice",
+    "depends_on": "core/video/ffmpeg_utils.py"
+   },
+   {
+    "name": "Click-to-segment touch-up (MobileSAM)",
+    "category": "Editing & Preview",
+    "description": "Interactive fix for frames the automatic key got wrong: click points or drag a box and MobileSAM (27 MB encoder, CPU-interactive) adds/removes regions from the alpha mask via rembg's sam session. The escape hatch that keeps users out of an external editor.",
+    "priority_hint": "nice",
+    "depends_on": "rembg sam/mobile_sam models"
+   },
+   {
+    "name": "Chroma-ready prompt injection",
+    "category": "Source & Character Setup",
+    "description": "When the sprite pipeline is active, auto-append background directives to generation prompts ('solid chroma green background #00FF00, flat lighting, no shadows on background, no camera movement, seamless loop') and record the key color in the frame's JSON sidecar so the keyer auto-picks it.",
+    "priority_hint": "high",
+    "depends_on": "existing prompt pipeline + metadata sidecar convention"
+   },
+   {
+    "name": "Scene-change and duplicate-frame culling",
+    "category": "Advanced/Later",
+    "description": "Optional extraction filters: drop near-duplicate frames (ffmpeg mpdecimate or perceptual hash) and split on scene cuts via select='gt(scene,0.4)' or PySceneDetect ContentDetector(threshold=27.0), so idle loops don't waste sheet cells on identical frames.",
+    "priority_hint": "later",
+    "depends_on": "scenedetect (BSD-3) optional; ffmpeg"
+   },
+   {
+    "name": "Model manager with size/license gating",
+    "category": "Project & Workflow Integration",
+    "description": "Settings-integrated downloader for matting models showing size before download (u2netp 4 MB to birefnet-general 928 MB), storing them under the app's configurable storage root via get_data_paths(), and flagging non-commercial weights (bria-rmbg) so the default stays MIT-clean.",
+    "priority_hint": "high",
+    "depends_on": "rembg model URLs; core/paths.py DataPaths"
+   },
+   {
+    "name": "CorridorKey external-tool bridge",
+    "category": "Advanced/Later",
+    "description": "Detect a user-installed CorridorKey checkout and offer it as a premium keying backend for green/blue-screen video (two-stage neural unmixer, ~300 MB checkpoints, 6-8 GB VRAM). Cannot be bundled: CC BY-NC-SA 4.0 and not pip-installable, so integration is launch-and-import only.",
+    "priority_hint": "later",
+    "depends_on": "user-managed CorridorKey install (uv, PyTorch, GPU)"
+   }
+  ],
+  "sources": [
+   "https://github.com/danielgatis/rembg",
+   "https://api.github.com/repos/danielgatis/rembg/releases/tags/v0.0.0",
+   "https://pypi.org/project/rembg/",
+   "https://benmcewan.com/blog/understanding-despill-algorithms",
+   "https://learn.foundry.com/nuke/content/comp_environment/keying_with_ultimatte/adjusting_spill_controls.html",
+   "https://github.com/plemeri/transparent-background",
+   "https://github.com/ZhengPeng7/BiRefNet",
+   "https://huggingface.co/ZhengPeng7/BiRefNet",
+   "https://github.com/nikopueringer/CorridorKey",
+   "https://nofilmschool.com/corridorkey-ai-chroma-keyer",
+   "https://hackaday.com/2026/03/18/corridorkey-is-what-you-get-when-artists-make-ai-tools/",
+   "https://ffmpeg.org/ffmpeg-filters.html",
+   "https://ayosec.github.io/ffmpeg-filters-docs/7.1/Filters/Video/chromakey.html",
+   "https://ayosec.github.io/ffmpeg-filters-docs/7.1/Filters/Video/despill.html",
+   "https://scikit-image.org/docs/stable/api/skimage.registration.html",
+   "https://scikit-image.org/docs/stable/auto_examples/registration/plot_register_translation.html",
+   "https://github.com/Breakthrough/PySceneDetect",
+   "https://www.scenedetect.com/docs/latest/api.html",
+   "https://pypi.org/project/imageio-ffmpeg/",
+   "https://docs.ultralytics.com/models/mobile-sam",
+   "https://arxiv.org/html/2306.14289"
+  ]
+ },
+ {
+  "key": "python-libs",
+  "summary": "The sprite pipeline can be built almost entirely on Pillow + opencv-python + one small pure-Python packer, with zero new binary dependencies. Pillow's Image.quantize(colors\u2264256, method, kmeans, dither) covers palette reduction: Quantize.MEDIANCUT and Quantize.MAXCOVERAGE are highest quality but reject RGBA input (Pillow silently falls back to FASTOCTREE for RGBA \u2014 relevant because sprite frames are RGBA after chroma key), and Quantize.LIBIMAGEQUANT is compiled OUT of all official Pillow wheels because libimagequant is GPLv3 (check at runtime with PIL.features.check_feature(\"libimagequant\")). Dither is only Dither.NONE or Dither.FLOYDSTEINBERG. For animated export, Pillow saves GIF (per-frame duration/disposal lists, transparency index, optimize), APNG since 7.1.0 (save_all + append_images, default_image, per-frame disposal 0-2 and blend 0-1), and animated WebP (save_all, lossless flag, quality, method 0-6). GIF transparency has documented traps: disposal=2 + optimize=True can corrupt delta frames (Pillow issue #7787) and palette remapping can invalidate the transparency index (#6260) \u2014 the export path needs a tested \"transparent GIF\" recipe (disposal=2, optimize off or careful palette pinning).\n\nFor quantization beyond Pillow, the Wanadev \"imagequant\" PyPI package (v1.1.5) is the real libimagequant: wheels for Windows/manylinux/musllinux/macOS, CPython 3.10-3.14, clean API (quantize_pil_image with dithering_level 0.0-1.0, max_colors, min/max_quality). License is the trap: the binding is BSD-3-Clause but the bundled libimagequant is GPLv3-or-later (or paid commercial) \u2014 ship it only as an optional, runtime-detected extra, never a hard dependency. pyxelate (sedthh, MIT, 1.7k stars) does attractive HOG-based pixel-art conversion with Bayer/Atkinson/Floyd-Steinberg dithering, but is NOT pip-installable \u2014 the PyPI name \"pyxelate\" is a 2026 placeholder squat (\"Reserved name placeholder. No functionality\") and the real project installs only from git and pins heavy deps (scikit-learn, scikit-image, numba). Recommend reimplementing the useful ideas (integer downscale \u2192 quantize \u2192 ordered dither) in-house rather than depending on it. scikit-learn KMeans works but is a ~30MB dependency for something Pillow's kmeans refinement parameter already approximates.\n\nAtlas packing: rectpack (Apache-2.0, pure Python, v0.2.2 from 2021-11-24) is the only real option and it's sufficient \u2014 MaxRects (MaxRectsBssf/Bl/Baf/Blsf), Skyline (6 variants incl. waste-map), and Guillotine (18 variants), offline/online modes, sort heuristics, rotation flag, rect_list() returning (bin, x, y, w, h, rid). It's unmaintained-but-stable and tiny; vendoring is viable under Apache-2.0. Palette files are mostly trivial to hand-roll: .gpl is plain text (Pillow even ships a PIL.GimpPaletteFile reader), JASC .pal is 3 header lines + \"R G B\" rows, .act is a fixed 768-byte RGB table (+optional 4-byte count/transparency footer), Lospec .hex is one hex color per line; only Adobe .ase is a real binary format \u2014 the MIT \"swatch\" package (v0.4.0, 2014, read+write) exists but is old enough that hand-rolling or vendoring is equally sensible. Aseprite's exported spritesheet JSON (frames + meta.frameTags/slices) is a simple documented shape \u2014 hand-roll the writer; the PyPI/GitHub .ase parsers (py_aseprite, asepriteio, aseprite-reader) target the binary format and are too niche to depend on.\n\nPreview: QMovie plays GIF natively and animated WebP via the qwebp imageformats plugin shipped in PySide6 wheels (community reports stutter on WebP), but APNG is not supported at all \u2014 Qt's PNG handler reads only the first frame (third-party QtApng plugin exists but isn't practical for PySide6). The reliable approach is a custom QTimer + QPixmap frame player over the in-memory frame list: exact FPS, frame stepping, ping-pong, onion skin, and no format decode in the loop. For pixel-art zoom, render with nearest-neighbor: QPixmap.scaled(..., Qt.FastTransformation) or leave QPainter.SmoothPixmapTransform unset; QGraphicsPixmapItem.setTransformationMode(Qt.FastTransformation) for graphics-view scenes. GIF optimization: pygifsicle (MIT, v1.1.0) is only a subprocess wrapper requiring the gifsicle system binary \u2014 disallowed per constraints; there is no pure-Python equivalent of gifsicle's inter-frame optimization, but Pillow already writes only the changed rect of subsequent frames and optimize=True prunes unused palette entries, which is good enough for sprite-preview GIFs (game engines consume the PNG sheet/atlas, not the GIF).",
+  "key_facts": [
+   "Pillow Image.quantize signature: quantize(colors=256, method=None, kmeans=0, palette=None, dither=Dither.FLOYDSTEINBERG); colors max 256",
+   "Quantize.MEDIANCUT and Quantize.MAXCOVERAGE do NOT support RGBA input; Pillow silently uses FASTOCTREE for RGBA \u2014 sprite frames with alpha always get FASTOCTREE unless flattened first",
+   "Quantize.LIBIMAGEQUANT is excluded from ALL official Pillow wheels (Windows, manylinux, macOS) because libimagequant is GPLv3; detect at runtime via PIL.features.check_feature(feature=\"libimagequant\")",
+   "Pillow dither options are only Dither.NONE and Dither.FLOYDSTEINBERG (no ordered/Bayer dithering built in)",
+   "Pillow GIF save: duration and disposal accept a single int or a per-frame list/tuple (milliseconds; disposal 0-3); loop=0 means infinite; transparency=palette index; palette= raw bytes up to 768 bytes",
+   "Pillow GIF pitfall (issue #7787): disposal=2 combined with optimize=True can produce corrupt delta frames when the background color index is missing from a frame's palette; workaround is optimize=False or non-2 disposal",
+   "Pillow GIF pitfall (issue #6260): internal remap_palette during multi-frame save can change/invalidate info[\"transparency\"] index \u2014 transparent animated GIFs need an explicit tested recipe",
+   "Pillow APNG write support exists since Pillow 7.1.0 (2020-04-01): save PNG with save_all=True + append_images; params default_image (bool), duration, loop (0=infinite), disposal 0-2, blend 0-1; per-frame lists must match total frame count exactly",
+   "Pillow animated WebP: save_all + append_images with duration/loop, lossless (bool), quality 0-100 (default 80), method 0-6 (default 4); requires libwebp >= 0.5.0 (official wheels bundle it)",
+   "PyPI package 'imagequant' (Wanadev imagequant-python) v1.1.5: real libimagequant bindings; wheels for Windows, manylinux + musllinux, macOS (x86_64/arm64/universal2), CPython 3.10-3.14; API imagequant.quantize_pil_image(img, dithering_level=0.0-1.0, max_colors=1-256, min_quality=0-100, max_quality=0-100)",
+   "LICENSE TRAP: the imagequant binding code is BSD-3-Clause but the bundled libimagequant library is GPLv3-or-later (or paid commercial license) \u2014 usable only as an optional user-installed extra, never as a hard dependency of a non-GPL app",
+   "pyxelate (sedthh/pyxelate, MIT, 1.7k stars) is NOT on PyPI \u2014 the PyPI name 'pyxelate' 0.0.1 (2026-07-05) is a placeholder squat with 'No functionality'; real install is pip install git+https://github.com/sedthh/pyxelate.git with heavy pinned deps (scikit-learn, scikit-image, numba)",
+   "pyxelate features worth copying in-house: Bayer-ordered, Atkinson, naive and Floyd-Steinberg dithering; palette transfer via sklearn-style fit/transform; built-in retro palettes (PICO-8, Apple II)",
+   "rectpack v0.2.2 (2021-11-24), Apache-2.0, pure Python, dev status Alpha, single maintainer (secnot); stable/unmaintained \u2014 vendorable",
+   "rectpack algorithms: MaxRectsBl/MaxRectsBssf/MaxRectsBaf/MaxRectsBlsf; SkylineBl/SkylineBlWm/SkylineMwf/SkylineMwfl/SkylineMwfWm/SkylineMwflWm; 18 Guillotine variants; newPacker(mode=PackingMode.Offline, pack_algo=..., sort_algo=SORT_AREA, rotation=bool); rect_list() yields (bin, x, y, w, h, rid)",
+   ".gpl (GIMP palette) is plain text: 'GIMP Palette' magic line, optional Name:/Columns:, '#' comments, then 'R G B name' rows \u2014 Pillow ships a reader (PIL.GimpPaletteFile); hand-rolling a writer is ~10 lines",
+   "JASC .pal is trivial text: line1 'JASC-PAL', line2 '0100', line3 color count, then 'R G B' per line; .act is raw binary: 768 bytes of RGB triplets, optional 4-byte footer = 2-byte BE color count + 2-byte BE transparency index; Lospec .hex = one RRGGBB per line",
+   "Adobe .ase (Swatch Exchange) is the only nontrivial palette format (big-endian chunked binary, float32 components, RGB/CMYK/LAB/Gray); PyPI 'swatch' v0.4.0 (MIT, 2014) parses AND writes it \u2014 old but the format is frozen; vendoring or hand-rolling equally viable",
+   "QMovie (Qt6) supports whatever QImageReader plugins provide: GIF animation is built-in; animated WebP works via the qwebp plugin shipped in PySide6 wheels (known stutter reports); frameCount() can return 0 for some formats; no reverse playback",
+   "Qt6 has NO APNG support \u2014 the built-in PNG handler reads only the first frame; third-party QtApng plugin (jurplel/QtApng) exists for C++ Qt but is impractical for PySide6 \u2014 do not plan APNG preview via QMovie, use a custom player",
+   "Reliable preview = custom QTimer + QLabel/QGraphicsView player over in-memory QPixmaps: exact FPS control, frame step, ping-pong, onion skin; convert frames once via PIL ImageQt or QImage.fromData",
+   "Pixel-crisp zoom: QPixmap.scaled(size, Qt.KeepAspectRatio, Qt.FastTransformation) = nearest-neighbor; in custom paint, do NOT set QPainter.SmoothPixmapTransform (unset = nearest); QGraphicsPixmapItem.setTransformationMode(Qt.FastTransformation)",
+   "pygifsicle v1.1.0 (MIT, 2024-07-06) REQUIRES the external gifsicle system binary (apt-get install gifsicle / manual Windows port) \u2014 violates the no-system-binary constraint; no pure-Python gifsicle equivalent exists",
+   "Pillow's own GIF writer already does inter-frame delta encoding (writes only the changed rectangle of subsequent frames) and optimize=True prunes unused palette colors \u2014 acceptable for preview GIFs; engines consume PNG sheets anyway",
+   "Aseprite spritesheet JSON (hash or array flavor) is a simple documented shape: frames{filename: {frame:{x,y,w,h}, rotated, trimmed, spriteSourceSize, sourceSize, duration}}, meta{app, version, image, size, scale, frameTags[{name,from,to,direction}], layers, slices} \u2014 hand-roll the writer; existing libs (py_aseprite, asepriteio, PyPI aseprite-reader) parse the BINARY .ase format and are niche/low-activity",
+   "opencv-python (already acceptable) covers chroma key: cv2.cvtColor to HSV + cv2.inRange with tolerance, cv2.morphologyEx cleanup, plus green-spill suppression on RGB channels \u2014 no new dependency needed"
+  ],
+  "feature_ideas": [
+   {
+    "name": "Green-screen chroma key with tolerance + despill",
+    "description": "Local background removal for extracted frames using OpenCV HSV inRange with a color picker and tolerance slider (mirrors Nim's CHROMA/TOL controls), morphological cleanup, and green-spill suppression. Outputs RGBA frames ready for quantization.",
+    "category": "Frame Processing",
+    "depends_on": "opencv-python (already acceptable), numpy",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Every-Nth frame extraction from action clips",
+    "description": "Pull sprite frames from Veo/Omni-generated clips via the existing ffmpeg layer (\"FRAMES: Every 8\" style stride, plus start/end trim). No new dependency; feeds the frame list that every downstream stage consumes.",
+    "category": "Frame Processing",
+    "depends_on": "existing ffmpeg video subsystem",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Palette quantization engine (Pillow)",
+    "description": "Reduce frames to N<=256 colors with selectable method (MEDIANCUT/MAXCOVERAGE/FASTOCTREE) and Floyd-Steinberg/none dithering. Must flatten or handle RGBA explicitly since MEDIANCUT/MAXCOVERAGE reject alpha and Pillow silently falls back to FASTOCTREE.",
+    "category": "Pixel-Art Conversion",
+    "depends_on": "Pillow (already shipped)",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Optional libimagequant high-quality mode",
+    "description": "Runtime-detected optional extra using the Wanadev imagequant wheels (quantize_pil_image with dithering_level/max_colors/quality band) for pngquant-grade palettes. Must be opt-in and user-installed: bundled libimagequant is GPLv3-or-commercial, so it cannot be a hard dependency.",
+    "category": "Pixel-Art Conversion",
+    "depends_on": "pip install imagequant (GPL-flagged optional)",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Fixed-palette mapping + palette file import",
+    "description": "Quantize all frames of all actions to one shared palette (Pillow quantize(palette=img)) so the whole sprite set is consistent, with import of .gpl/.pal/.act/.hex (trivial hand-rolled parsers) and .ase (vendor the MIT swatch parser or hand-roll). Includes built-in retro palettes like PICO-8.",
+    "category": "Pixel-Art Conversion",
+    "depends_on": "Pillow; optional vendored swatch for .ase",
+    "priority_hint": "high"
+   },
+   {
+    "name": "In-house pixel-art downscaler with ordered dithering",
+    "description": "Integer downscale-to-sprite-size plus Bayer-ordered and Atkinson dithering implemented in numpy (Pillow only offers Floyd-Steinberg). Borrows pyxelate's ideas without depending on it \u2014 pyxelate is git-only (its PyPI name is squatted) and drags in scikit-learn/scikit-image/numba.",
+    "category": "Pixel-Art Conversion",
+    "depends_on": "numpy (via opencv), Pillow",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Grid sprite-sheet assembly",
+    "description": "Compose frames into a fixed-cell grid sheet (rows = actions, columns = frames) with configurable cell size, padding, and alignment, exported as RGBA PNG plus a JSON map. Pure Pillow paste operations.",
+    "category": "Sheet Assembly & Export",
+    "depends_on": "Pillow",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Packed atlas export (MaxRects)",
+    "description": "Tightly packed texture atlas via rectpack (MaxRectsBssf default, rotation toggle, power-of-two bin option) with frame trim-to-bbox before packing and per-frame source offsets recorded in the JSON metadata. rectpack is pure Python Apache-2.0; vendor it since upstream is dormant.",
+    "category": "Sheet Assembly & Export",
+    "depends_on": "rectpack 0.2.2 (vendor)",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Transparent animated GIF export (safe recipe)",
+    "description": "Per-action GIF preview export with per-frame duration lists, disposal=2, and a pinned palette that dodges Pillow's documented transparency traps (optimize+disposal=2 corruption #7787, transparency-index remap #6260). Ship as a tested helper, not raw save() calls.",
+    "category": "Sheet Assembly & Export",
+    "depends_on": "Pillow",
+    "priority_hint": "high"
+   },
+   {
+    "name": "APNG and animated WebP export",
+    "description": "Full-color animated previews without GIF's 256-color limit: APNG via Pillow>=7.1.0 (save_all, default_image, disposal/blend) and animated WebP (lossless flag, quality, method). WebP files preview in-app via QMovie; APNG will not (Qt can't read it) \u2014 document that.",
+    "category": "Sheet Assembly & Export",
+    "depends_on": "Pillow",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Aseprite-compatible JSON metadata writer",
+    "description": "Hand-rolled writer for Aseprite's spritesheet JSON (frames hash with frame/spriteSourceSize/sourceSize/duration, meta.frameTags per action, direction forward/pingpong) so sheets drop into Godot/Unity/Phaser importers that already speak this dialect. No dependency worth taking \u2014 existing PyPI libs target the binary .ase format.",
+    "category": "Project & Workflow Integration",
+    "depends_on": "stdlib json only",
+    "priority_hint": "high"
+   },
+   {
+    "name": "QTimer frame player preview",
+    "description": "Custom playback widget (QTimer + cached QPixmaps) as the primary animation preview: exact FPS spinner, frame step, loop/ping-pong, scrub bar. More reliable than QMovie (no APNG in Qt, WebP stutter reports) and works on in-memory frames before any export.",
+    "category": "Editing & Preview",
+    "depends_on": "PySide6",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Pixel-grid zoom view",
+    "description": "Nearest-neighbor zoom (Qt.FastTransformation / SmoothPixmapTransform off) with optional pixel grid lines and checkerboard alpha background, in a QGraphicsView so pan/zoom is free. Essential for judging quantization and dithering results at sprite scale.",
+    "category": "Editing & Preview",
+    "depends_on": "PySide6",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Onion-skin and loop-seam checker",
+    "description": "Overlay adjacent frames at reduced opacity in the preview, and a seam meter that diffs last-vs-first frame (numpy MSE) to grade how 'seamless loop' each AI clip really is \u2014 directly supports the per-action prompt cards that request seamless loops.",
+    "category": "Editing & Preview",
+    "depends_on": "numpy, PySide6",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "Source normalization for character input",
+    "description": "Prepare the input character image: auto-detect backdrop color by border sampling, center on a transparent square canvas of the target aspect (per the existing no-crop/no-distort rule), and report if the image lacks a clean chroma backdrop before sending to video/image models.",
+    "category": "Source & Character Setup",
+    "depends_on": "Pillow, opencv-python",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Per-action clip generation from prompt cards",
+    "description": "Drive the existing Veo/Omni clients with one short prompt card per action (idle, walk, attack...), each rendered against the green-screen source image \u2014 the Nim Animate Studio pipeline step. Library-side this is pure reuse of core/video plus the LLM prompt-card generator.",
+    "category": "AI Animation Generation",
+    "depends_on": "core/video/veo_client.py, core/video/omni_client.py, gui/llm_utils.py",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Local AI background removal fallback",
+    "description": "For sources without a clean green screen, offer rembg-style local matting (MIT, onnxruntime-based) as an optional install alongside chroma key \u2014 mirrors Nim's Corridor-Key-vs-Chroma-Key toggle. Verify wheel weight and model download UX before committing.",
+    "category": "Advanced/Later",
+    "depends_on": "rembg + onnxruntime (optional, needs verification pass)",
+    "priority_hint": "later"
+   },
+   {
+    "name": "Opportunistic gifsicle post-optimization",
+    "description": "If a gifsicle binary is already on PATH, offer an optional post-export optimize pass (pygifsicle or direct subprocess); never require it \u2014 pygifsicle is only a wrapper around the system binary, which is out-of-bounds as a dependency. Pillow's delta-frame writing is the default.",
+    "category": "Advanced/Later",
+    "depends_on": "system gifsicle if present (never required)",
+    "priority_hint": "later"
+   }
+  ],
+  "sources": [
+   "https://pillow.readthedocs.io/en/stable/reference/Image.html",
+   "https://pillow.readthedocs.io/en/stable/handbook/image-file-formats.html",
+   "https://pillow.readthedocs.io/en/stable/releasenotes/7.1.0.html",
+   "https://pillow.readthedocs.io/en/stable/installation/basic-installation.html",
+   "https://pillow.readthedocs.io/en/stable/reference/features.html",
+   "https://github.com/python-pillow/Pillow/issues/7787",
+   "https://github.com/python-pillow/Pillow/issues/6260",
+   "https://pypi.org/pypi/imagequant/json",
+   "https://github.com/wanadev/imagequant-python",
+   "https://pypi.org/project/rectpack/",
+   "https://github.com/secnot/rectpack",
+   "https://github.com/sedthh/pyxelate",
+   "https://pypi.org/pypi/pyxelate/json",
+   "https://pypi.org/pypi/swatch/json",
+   "https://pypi.org/pypi/pygifsicle/json",
+   "https://doc.qt.io/qt-6/qmovie.html",
+   "https://doc.qt.io/qt-6/qtimageformats-index.html",
+   "https://github.com/jurplel/QtApng",
+   "https://github.com/Eiyeron/py_aseprite",
+   "https://github.com/joeyspacerocks/asepriteio",
+   "https://pypi.org/project/aseprite-reader/"
+  ]
+ },
+ {
+  "key": "repo-audit",
+  "summary": "Tab architecture: gui/main_window.py builds all tabs in `_init_ui` (main_window.py:667-728). Simple tabs are bare QWidgets initialized by `_init_*_tab` methods; complex tabs are self-contained QWidget subclasses in their own package \u2014 `LayoutTab` (gui/layout/layout_tab.py:30, ~20 modules) is constructed eagerly with `config` and added via `self.tabs.addTab(self.tab_layout, \"\ud83d\udcd6 Layout\")` (line 712), while the Video tab uses a lazy pattern: a placeholder QWidget is added at startup and `_load_video_tab` (main_window.py:8116) swaps in `VideoProjectTab(config, providers_dict)` (gui/video/video_project_tab.py:1572) on first tab activation. Cross-tab handoff already exists: LayoutTab emits `sendToImageRequested`/`fillAllRequested` signals that MainWindow connects (lines 700-704) and routes through `_on_layout_send_to_image` (6293) / `_maybe_place_image_in_layout` (6331) \u2014 the exact template for \"Send to Sprite tab\". A Sprite tab should be a `gui/sprite/` package with a `SpriteTab(QWidget)`, lazy-loaded like Video.\n\nProviders: OpenAIProvider (providers/openai.py) is capability-table driven (MODEL_CAPS at line 46) and ALREADY exposes gpt-image's `background` parameter \u2014 `generate()` forwards `background` in {transparent, opaque, auto} for gpt-image-1.5 (lines 515-518) and {transparent, white, black} for gpt-image-1/mini (547-550), and raises `_UnsupportedParam` at line 244 if transparent is requested on a model whose caps say `supports_transparent_bg: False` \u2014 note the table marks gpt-image-2 as NOT supporting transparent bg (\"Use gpt-image-1.5 or gpt-image-1 for alpha PNG output\"). `edit_image` (821) supports multi-reference lists + alpha-PNG mask inpainting but does NOT forward `background`; adding it there is a ~5-line change gated on the caps table. GoogleProvider sets aspect ratio via `image_config={'aspect_ratio': ...}` / `types.ImageConfig` in both `generate()` (797-870) and `edit_image()` (1832-1877), accepts `reference_image`/`reference_images` kwargs, auto-centers mismatched-aspect references on a transparent canvas (`apply_transparent_canvas_fix`, google.py:70; inline version at 882-960), and has `edit_image_region` (1907) plus a conversational `create_chat_session` (242) for style-consistent multi-edit \u2014 ideal for iterative frame-by-frame sprite generation with Nano Banana. Gemini has no transparent-background parameter; a Sprite \"background\" option maps to: OpenAI native param, Gemini via green-screen prompting + local keying.\n\nVideo pipeline: VeoClient (core/video/veo_client.py) takes `VeoGenerationConfig` (line 66) with `image` (start frame \u2192 image-to-video), `last_frame` (Veo 3.1 frame interpolation \u2014 perfect for seamless loops: pass the same image as start and end), up to 3 `reference_images`, durations locked to 8s (veo-3.1) or 4/6/8s (veo-3.1-fast), aspect 16:9/9:16/1:1, 720p/1080p, fps 24; plus `generate_batch` (1023), `extend_video` (767), `concatenate_clips` (1055). OmniClient (core/video/omni_client.py) takes `OmniGenerationConfig` (81) with tasks text_to_video/image_to_video/reference_to_video/edit (auto-inferred), \u22643 reference images, aspect 16:9|9:16 only, 720p/24fps, ~3-10s, and conversational refinement via `previous_interaction_id`. Frame extraction today is SINGLE-frame only: OpenCV first/last-frame extractors in gui/video/workspace_widget.py (5484/5536), a playhead extractor (4394), ffmpeg `extract_thumbnail` (-vframes 1) in ffmpeg_renderer.py:610, and a standalone root script extract_all_last_frames.py:48. There is NO \"every-N-frames / fps X\" extractor \u2014 that's a small new helper best placed in core/video/ using `get_ffmpeg_path()` (ffmpeg_utils.py:310, with auto-install via FFmpegManager) and `fps=`/`select=` filters. Image ops that exist: auto_crop_solid_borders / crop_to_aspect_ratio / detect_aspect_ratio (core/image_utils.py:11/127/196), upscale_image with Lanczos/Real-ESRGAN/Stability-API methods (core/upscaling.py:39), ImageProcessor crop/blur/face-detect/saliency (core/video/image_processing.py), and ReferenceImageCompositor's transparent-canvas grid/horizontal/vertical arrangement (core/reference/image_compositor.py:17) \u2014 a ready starting point for sprite-sheet assembly. There is NO chroma-key, rembg, or palette-quantization code anywhere (only ad-hoc color quantization for style analysis in ai_face_editor.py:688/749 and an SVG color_threshold); the keying/quantize stage is greenfield.\n\nCharacter animator & contracts: core/character_animator/segmenter.py `BodyPartSegmenter` (42) uses MediaPipe (pose 33-landmark + face-mesh 478-landmark; SAM2 optional at 95) and produces per-region masks with `extract_layer_image` (551) \u2014 MediaPipe is already a dependency and its selfie-segmentation model is the natural local background-removal path (cloud path: Gemini edit \"remove background\"). `AIFaceEditor` (ai_face_editor.py:66) is the template for AI frame editing: provider-pluggable Gemini/OpenAI region edits with disk caching, style extraction (619), validation (561), conversation sessions for consistency (965), and batch viseme generation (844) \u2014 its architecture maps 1:1 to \"generate N action frames consistently, cache, validate\". Cross-cutting contracts the Sprite tab must follow: `LLMResponseParser` (core/llm_parsing.py:15, re-exported from gui/llm_utils.py), `DialogStatusConsole` (gui/llm_utils.py:15) + `LiteLLMHandler` (89) with full request/response logging; `resolve_model()` (core/llm_models.py:63) \u2014 never hardcode model IDs; `LLMParams` (core/llm_params.py:67); paths ONLY via `get_data_paths()` (core/paths.py:296) \u2014 add a `sprite_projects()` accessor under Group.IMAGES or Group.VIDEO (guard test tests/test_no_hardcoded_paths.py fails inline paths); metadata sidecars via write_image_sidecar/read_image_sidecar (core/utils.py:193/223) with filenames from sanitize_stub_from_prompt (250); project persistence modeled on `VideoProject.save/load` dataclass-JSON (core/video/project.py:476/794/812) and portable zip export on layout's .iaibundle (core/layout/bundle_io.py:94/169). CLI: cli/parser.py defines grouped flags (--layout-* at 182, --video at 231), cli/runner.py dispatches by flag to lazily-imported `cli/commands/*.py` run functions (240-253), and cli/commands/video.py shows the contract a --sprite command should copy: build_*_config helpers, human output \u2192 stderr, pure-stdout `--json` payload via `_report` (232), and a .json sidecar next to the output (224).",
+  "key_facts": [
+   "gui/main_window.py:667-728 \u2014 _init_ui creates QTabWidget; addTab calls at 709-715; new Sprite tab registers here",
+   "gui/main_window.py:8116 \u2014 _load_video_tab: lazy-load pattern (placeholder QWidget swapped for VideoProjectTab on first activation via _on_tab_changed at 8098); the pattern a heavy Sprite tab should copy",
+   "gui/layout/layout_tab.py:30 \u2014 LayoutTab(QWidget) with config kwarg: the eager complex-tab-as-package pattern (gui/layout/ has ~20 modules)",
+   "gui/main_window.py:700-704, 6293, 6331 \u2014 cross-tab handoff: LayoutTab.sendToImageRequested signal \u2192 _on_layout_send_to_image \u2192 generated image routed back by region id; template for 'Send to Sprite'",
+   "providers/openai.py:46 \u2014 MODEL_CAPS capability table; rule: never add per-model if-branches outside this dict",
+   "providers/openai.py:61 \u2014 gpt-image-2 caps: supports_transparent_bg=False, supports_mask=True, supports_multi_reference=True, custom sizes up to 3840px edge (multiple of 16, aspect \u22643.0)",
+   "providers/openai.py:80,99 \u2014 gpt-image-1.5 and gpt-image-1: supports_transparent_bg=True (alpha PNG output)",
+   "providers/openai.py:244 \u2014 generate() raises _UnsupportedParam for background=transparent on unsupporting models; 515-518 forwards background\u2208{transparent,opaque,auto} for gpt-image-1.5; 547-550 background\u2208{transparent,white,black} for gpt-image-1/mini",
+   "providers/openai.py:821 \u2014 edit_image(image bytes|path|list, prompt, mask=alpha-PNG, ...) multi-reference edits; does NOT forward background \u2014 adding it is a small caps-gated change",
+   "providers/openai.py:1070,1124 \u2014 _create_alpha_mask + edit_image_region: rectangle-region inpainting via transparent-alpha mask",
+   "providers/openai.py:1273,1329 \u2014 generate_viseme_batch and submit_batch_job (OpenAI Batch API): existing multi-frame batch patterns",
+   "providers/google.py:70 \u2014 apply_transparent_canvas_fix(image_bytes, target_aspect): centers a reference on a transparent canvas of target aspect (module-level, reusable)",
+   "providers/google.py:797-870 \u2014 generate() sets aspect via types.ImageConfig(aspect_ratio=...) with dict fallback; supported ratios include 1:1..21:9; NBP image_size for gemini-3-pro",
+   "providers/google.py:882-883 \u2014 generate() accepts reference_image / reference_images kwargs (prompt first, then images per Google docs)",
+   "providers/google.py:1832 \u2014 edit_image accepts bytes|path|list (multi-reference compose) and applies image_config aspect_ratio; 1907 edit_image_region with use_conversation for style consistency",
+   "providers/google.py:242-278 \u2014 create_chat_session(model, aspect_ratio): conversational editing session \u2014 iterative frame-by-frame sprite generation with character consistency",
+   "core/video/veo_client.py:66 \u2014 VeoGenerationConfig: image=start frame (image-to-video), last_frame=end frame (Veo 3.1 interpolation \u2192 seamless loops), reference_images \u22643, duration 8s fixed (veo-3.1) or 4/6/8s (veo-3.1-fast), aspect 16:9|9:16|1:1, 720p/1080p, fps 24, seed",
+   "core/video/veo_client.py:612,767,1023,1055 \u2014 generate_video (sync wrapper), extend_video, generate_batch(configs, max_concurrent=3), concatenate_clips",
+   "core/video/omni_client.py:81,210 \u2014 OmniGenerationConfig + MODEL_CONSTRAINTS: tasks text_to_video/image_to_video/reference_to_video/edit (auto-inferred), \u22643 refs, aspect 16:9|9:16 only, 720p, 24fps, ~3-10s, delivery inline|uri, conversational edit via previous_interaction_id",
+   "NO every-N-frames extractor exists \u2014 only single-frame: gui/video/workspace_widget.py:5484/5536 (OpenCV cv2.VideoCapture first/last frame), :4394 (_extract_frame_at_playhead), core/video/ffmpeg_renderer.py:610 (extract_thumbnail, -vframes 1), extract_all_last_frames.py:48 (root script)",
+   "core/video/ffmpeg_utils.py:18,310,320 \u2014 FFmpegManager singleton (detect/auto-install ffmpeg), get_ffmpeg_path(), ensure_ffmpeg(); base for a new extract_frames(video, every_n|fps) helper",
+   "core/video/ffmpeg_renderer.py:439,715 \u2014 _create_video_from_images (frames\u2192video, fps param) and get_video_info (ffprobe); reusable for sprite preview clips",
+   "core/image_utils.py:11,127,196 \u2014 auto_crop_solid_borders (variance-based border trim \u2014 useful post-chroma-key), crop_to_aspect_ratio, detect_aspect_ratio",
+   "core/upscaling.py:39,84,118,181 \u2014 upscale_image(bytes, w, h, method): Lanczos / Real-ESRGAN (local) / Stability API",
+   "core/video/image_processing.py:16 \u2014 ImageProcessor: crop_box calc, crop_image, blurred background, Ken Burns path, detect_faces (OpenCV), saliency map",
+   "core/reference/image_compositor.py:17 \u2014 ReferenceImageCompositor: transparent square canvas + grid/horizontal/vertical arrangement of RGBA cells with PNG-transparency save \u2014 near-ready sprite-sheet assembler",
+   "NO chroma-key, rembg, or palette-quantization code exists anywhere (grep chroma|rembg|quantiz: only ad-hoc color quantization for style analysis in ai_face_editor.py:688/749 and svg_exporter color_threshold) \u2014 keying + pixel-art quantize stages are greenfield",
+   "core/character_animator/segmenter.py:42 \u2014 BodyPartSegmenter: MediaPipe pose (33 landmarks) + face mesh (478), optional SAM2 (_init_sam:95), per-region masks, extract_layer_image:551; MediaPipe already a dependency \u2192 local background removal path (selfie segmentation) is an add, not a new dep",
+   "core/character_animator/ai_face_editor.py:66 \u2014 AIFaceEditor: provider-pluggable (Gemini generate_content multimodal at 398; OpenAI images.edit + alpha mask at 471), disk result caching (239-251), style extraction (619), edit validation (561), conversation session for consistency (965), generate_all_visemes batch (844) \u2014 architectural template for consistent AI frame generation",
+   "core/llm_parsing.py:15 \u2014 LLMResponseParser (Markdown-fence-tolerant JSON parsing; re-exported at gui/llm_utils.py:9); gui/llm_utils.py:15 DialogStatusConsole (required in LLM dialogs), :89 LiteLLMHandler (full request/response logging contract)",
+   "core/llm_models.py:63 \u2014 resolve_model(provider_id, family, static_default) \u2014 never hardcode claude-*/gpt-*/gemini-* IDs; core/llm_params.py:67 LLMParams owns all chat params",
+   "core/paths.py:88,296 \u2014 DataPaths + get_data_paths(); Group enum {IMAGES, VIDEO, MODELS, SETTINGS} at :63; video_projects() at :229; sprite work needs a new accessor (e.g. sprite_projects()) \u2014 tests/test_no_hardcoded_paths.py fails inline paths",
+   "core/utils.py:188,193,223 \u2014 sidecar_path / write_image_sidecar / read_image_sidecar: every generated image gets image.png.json sidecar (open-ended fields); sanitize_filename:14, sanitize_stub_from_prompt:250 for prompt-derived filenames",
+   "core/batch_manager.py:126 \u2014 BatchManager for Google Gemini Batch API (50% discount, ~24h async) with persisted BatchJob state",
+   "core/video/project.py:476,794,812 \u2014 VideoProject dataclass with Scene list, save(path)/load(path) JSON round-trip, project_dir subfolders (frames/, first_frames/) \u2014 model for SpriteProject",
+   "core/layout/bundle_io.py:94,169 \u2014 export_bundle/import_bundle: .iaibundle zip (manifest + doc + assets, zip-slip-safe extract) \u2014 model for portable .sprite bundle export",
+   "cli/parser.py:182-227 (--layout-design/-fill/-export group), :231+ (--video group: --video-provider omni|veo, --video-model, refs, extend, delivery); cli/runner.py:240-253 dispatches flags to lazily-imported cli/commands/*.run_*_cmd \u2014 a --sprite flag group + cli/commands/sprite.py follows this exactly",
+   "cli/commands/video.py:23,224,232 \u2014 CLI contract: human output \u2192 stderr (stdout pure for --json), result payload JSON to stdout via _report, .json sidecar written next to output video"
+  ],
+  "feature_ideas": [
+   {
+    "name": "Send to Sprite tab",
+    "description": "Add 'Send to Sprite' from the Image tab, History tab, and Video reference library, routing the current image in as the sprite character source. Copies the existing LayoutTab sendToImageRequested signal/slot handoff (main_window.py:700-704, 6293).",
+    "category": "Project & Workflow Integration",
+    "priority_hint": "core",
+    "depends_on": "SpriteTab widget"
+   },
+   {
+    "name": "Character source with transparent-canvas normalization",
+    "description": "Accept any character image and auto-pad it to the target aspect on a transparent canvas before sending to video/image models, reusing apply_transparent_canvas_fix (providers/google.py:70) and crop/detect helpers in core/image_utils.py.",
+    "category": "Source & Character Setup",
+    "priority_hint": "core"
+   },
+   {
+    "name": "Green-screen / transparent character generation preset",
+    "description": "One-click 'prepare for sprites': regenerate or edit the character onto a flat chroma background (Gemini edit_image prompt) or directly with alpha via OpenAI background=transparent (gpt-image-1.5/1, already wired in generate(); small addition to edit_image).",
+    "category": "Source & Character Setup",
+    "priority_hint": "high",
+    "depends_on": "providers/openai.py edit_image background param (small change)"
+   },
+   {
+    "name": "AI action-card generator",
+    "description": "LLM turns 'sidescroller set with attack, jump, idle...' into one prompt card per action (name, duration, loop/no-loop, motion prompt with 'seamless loop, no camera movement'). Uses LiteLLMHandler + LLMParams + resolve_model + LLMResponseParser + DialogStatusConsole per house contracts.",
+    "category": "AI Animation Generation",
+    "priority_hint": "core",
+    "depends_on": "gui/llm_utils.py, core/llm_params.py, core/llm_models.py"
+   },
+   {
+    "name": "Per-action clip rendering via Omni image-to-video",
+    "description": "Render each action card as a short clip from the character image using OmniClient task=image_to_video (or reference_to_video with up to 3 refs), 720p, conversational refine via previous_interaction_id for retries.",
+    "category": "AI Animation Generation",
+    "priority_hint": "core",
+    "depends_on": "core/video/omni_client.py"
+   },
+   {
+    "name": "Veo 3.1 loop-perfect clips (same start/end frame)",
+    "description": "For loops, drive VeoGenerationConfig with image=character frame and last_frame=same image so Veo 3.1 frame interpolation returns to pose \u2014 seamless walk/idle cycles. Batch all actions with generate_batch(max_concurrent=3).",
+    "category": "AI Animation Generation",
+    "priority_hint": "high",
+    "depends_on": "core/video/veo_client.py"
+   },
+   {
+    "name": "Direct frame-sheet generation with Nano Banana",
+    "description": "Skip video: generate an N-frame animation sheet in one gemini-2.5-flash-image call (aspect via image_config), or iteratively edit frame-by-frame in a create_chat_session for character consistency \u2014 the AIFaceEditor viseme loop (ai_face_editor.py:844) is the working template.",
+    "category": "AI Animation Generation",
+    "priority_hint": "high",
+    "depends_on": "providers/google.py edit_image + chat session"
+   },
+   {
+    "name": "GPT-Image alpha frame generation",
+    "description": "Generate individual sprite frames with native transparency using gpt-image-1.5 background=transparent (no keying needed); multi-reference edit keeps the character faithful across frames.",
+    "category": "AI Animation Generation",
+    "priority_hint": "nice",
+    "depends_on": "providers/openai.py"
+   },
+   {
+    "name": "Frame extractor (every N / fps X)",
+    "description": "New core/video helper extract_frames(video, every_n=8 | fps=..., out_dir) mirroring Nim's 'FRAMES: Every 8'. Build on FFmpegManager auto-install + fps/select filters, or the cv2.VideoCapture pattern from workspace_widget.py:5484; nothing like it exists yet.",
+    "category": "Frame Processing",
+    "priority_hint": "core",
+    "depends_on": "core/video/ffmpeg_utils.py"
+   },
+   {
+    "name": "Chroma key with color picker + tolerance",
+    "description": "New keying module (color picker, TOL tolerance slider, spill suppression) \u2014 greenfield: no chroma code exists in the repo. NumPy/PIL distance-in-color-space keying locally; pair with auto_crop_solid_borders for tight sprite bounds.",
+    "category": "Frame Processing",
+    "priority_hint": "core",
+    "depends_on": "numpy/PIL (already deps)"
+   },
+   {
+    "name": "Local background removal via MediaPipe segmentation",
+    "description": "'Remove background' button backed by MediaPipe (already a dependency through BodyPartSegmenter) selfie-segmentation, with optional SAM2 refinement (segmenter.py:95) \u2014 the local alternative when the source isn't green-screen. Cloud fallback: Gemini edit 'remove the background'.",
+    "category": "Frame Processing",
+    "priority_hint": "high",
+    "depends_on": "core/character_animator/segmenter.py deps"
+   },
+   {
+    "name": "Frame upscale/downscale to sprite resolution",
+    "description": "Batch-resize extracted frames to target sprite size with upscale_image (Lanczos/Real-ESRGAN/Stability) honoring the always-proportional rule; pad to power-of-two canvas on transparency.",
+    "category": "Frame Processing",
+    "priority_hint": "high",
+    "depends_on": "core/upscaling.py"
+   },
+   {
+    "name": "Palette quantization + pixelation",
+    "description": "Convert frames to pixel-art: downscale-nearest, quantize to N-color palette (PIL Image.quantize; shared palette across all frames of an action for flicker-free animation), optional outline pass. No existing implementation \u2014 new module.",
+    "category": "Pixel-Art Conversion",
+    "priority_hint": "high"
+   },
+   {
+    "name": "Sprite sheet assembler",
+    "description": "Pack processed frames into grid sheets on a transparent canvas \u2014 extend ReferenceImageCompositor's grid/row layout (core/reference/image_compositor.py) with fixed cell size, per-action rows, and a JSON atlas (frame rects, fps, loop flags) for engine import.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "core",
+    "depends_on": "core/reference/image_compositor.py"
+   },
+   {
+    "name": "Engine export presets (Godot/Unity/Aseprite JSON + GIF preview)",
+    "description": "Export atlas metadata in engine-friendly formats plus an animated GIF/WebP/MP4 preview per action (frames\u2192video via FFmpegRenderer._create_video_from_images). Every artifact gets the standard .json sidecar via write_image_sidecar.",
+    "category": "Sheet Assembly & Export",
+    "priority_hint": "nice",
+    "depends_on": "core/video/ffmpeg_renderer.py, core/utils.py"
+   },
+   {
+    "name": "AI frame retouch (fix one bad frame)",
+    "description": "Right-click a frame \u2192 describe the fix \u2192 region edit via GoogleProvider.edit_image_region or OpenAI mask inpainting, with AIFaceEditor-style caching/validation so a retry doesn't cost a re-render of the whole clip.",
+    "category": "Editing & Preview",
+    "priority_hint": "high",
+    "depends_on": "providers google/openai edit_image_region"
+   },
+   {
+    "name": "Onion-skin loop preview player",
+    "description": "In-tab animation preview cycling frames at chosen fps with loop toggle and onion-skin overlay; thumbnails via extract_thumbnail; dialog follows DialogStatusConsole + Ctrl+Enter/Escape shortcut conventions.",
+    "category": "Editing & Preview",
+    "priority_hint": "nice"
+   },
+   {
+    "name": "SpriteProject save/load + storage location",
+    "description": "SpriteProject dataclass (character source, action cards, clips, frames, processing settings, sheets) with JSON save/load modeled on VideoProject (core/video/project.py:476), stored under a new get_data_paths().sprite_projects() accessor (guard test enforces no inline paths); portable .iaibundle-style zip export via the bundle_io pattern.",
+    "category": "Project & Workflow Integration",
+    "priority_hint": "core",
+    "depends_on": "core/paths.py accessor addition"
+   },
+   {
+    "name": "--sprite CLI",
+    "description": "CLI group (--sprite-actions, --sprite-render, --sprite-process, --sprite-sheet) added to cli/parser.py, dispatched from cli/runner.py to cli/commands/sprite.py, copying the video command's contract: stderr progress, pure-stdout --json payload, .json sidecar next to outputs.",
+    "category": "Project & Workflow Integration",
+    "priority_hint": "high",
+    "depends_on": "cli/parser.py, cli/runner.py"
+   },
+   {
+    "name": "Batch/async generation & cost estimates",
+    "description": "Queue all action clips through VeoClient.generate_batch or Gemini BatchManager (50% discount) with per-action cost preview via VeoClient.estimate_cost before submitting a full animation set.",
+    "category": "Advanced/Later",
+    "priority_hint": "later",
+    "depends_on": "core/batch_manager.py, core/video/veo_client.py"
+   },
+   {
+    "name": "Puppet-layer sprite source (segmented body parts)",
+    "description": "Use BodyPartSegmenter's pose/face-mesh masks to split the character into layers (limbs, head) for skeletal-animation export or targeted per-part edits \u2014 reuses the whole character_animator stack.",
+    "category": "Advanced/Later",
+    "priority_hint": "later",
+    "depends_on": "core/character_animator/"
+   }
+  ],
+  "sources": [
+   "/mnt/d/Documents/Code/GitHub/ImageAI/Docs/CodeMap.md",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/gui/main_window.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/gui/layout/layout_tab.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/gui/video/video_project_tab.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/gui/video/workspace_widget.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/gui/llm_utils.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/providers/openai.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/providers/google.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/video/veo_client.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/video/omni_client.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/video/ffmpeg_utils.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/video/ffmpeg_renderer.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/video/image_processing.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/video/project.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/image_utils.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/upscaling.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/reference/image_compositor.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/character_animator/segmenter.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/character_animator/ai_face_editor.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/font_generator/segmentation.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/paths.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/utils.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/llm_models.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/llm_params.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/llm_parsing.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/batch_manager.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/core/layout/bundle_io.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/cli/parser.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/cli/runner.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/cli/commands/video.py",
+   "/mnt/d/Documents/Code/GitHub/ImageAI/extract_all_last_frames.py"
+  ]
+ }
+]

@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QTextCursor, QFont, QTextCharFormat, QColor
 
 from core.llm_parsing import LLMResponseParser  # noqa: F401 — back-compat re-export
+from core.logging_config import SecretRedactionFilter
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -125,6 +126,9 @@ class LiteLLMHandler:
 
                 console_handler = LiteLLMConsoleHandler()
                 console_handler.setFormatter(py_logging.Formatter('%(message)s'))
+                # This handler runs before propagation to the root logger, so
+                # it needs its own redaction filter.
+                console_handler.addFilter(SecretRedactionFilter())
                 litellm_logger.addHandler(console_handler)
 
             litellm.drop_params = True  # Drop unsupported params

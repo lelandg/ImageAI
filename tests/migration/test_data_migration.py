@@ -735,6 +735,20 @@ def test_moving_video_takes_only_the_video_cache(tmp_path, paths):
     assert (tmp_path / "cache" / "ai_visemes" / "f.bin").exists()
 
 
+def test_moving_models_takes_the_rembg_cache(tmp_path, paths):
+    """The sprite matting models live in cache/rembg and belong to the Models group."""
+    _populate(tmp_path / "cache", ["rembg", "video"], size=32)
+    _populate(tmp_path, ["weights"], size=32)
+    dest = tmp_path / "dest"
+
+    result = move_group(Group.MODELS, dest, paths=paths)
+
+    assert result.ok, result.error
+    assert (dest / "cache" / "rembg" / "f.bin").exists()
+    assert not (dest / "cache" / "video").exists()
+    assert (tmp_path / "cache" / "video" / "f.bin").exists()
+
+
 def test_models_takes_only_its_own_cache_when_the_video_root_differs(tmp_path):
     """A different Video root must not turn the whole cache into Models data.
 

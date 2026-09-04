@@ -17,8 +17,48 @@ class ImageProvider(ABC):
         """
         self.config = config
         self.api_key = config.get("api_key")
-        self.auth_mode = config.get("auth_mode", "api-key")
-    
+        self.auth_mode = self._normalize_auth_mode(config.get("auth_mode"))
+
+    @staticmethod
+    def _normalize_auth_mode(mode: Optional[str]) -> str:
+        """Map every spelling of an auth mode to its canonical value.
+
+        Callers send ``api_key`` (the ConfigManager default), ``API Key`` and
+        ``Google Cloud Account`` (display labels), ``api-key`` and ``gcloud``
+        (canonical). ``None`` and ``""`` mean the default, ``api-key``. Any
+        other value is returned as is. The provider compares modes to decide
+        whether to drop its client, so two spellings of one mode must compare
+        equal.
+        """
+        if mode in (None, "", "api_key", "API Key"):
+            return "api-key"
+        if mode == "Google Cloud Account":
+            return "gcloud"
+        return mode
+
+    def reconfigure(self, config: Dict[str, Any]) -> bool:
+        """Apply new credentials to a live instance.
+
+        Applies ``api_key`` only when the new value is non-empty. Applies
+        ``auth_mode`` when present and different after normalization, so
+        ``api_key`` and ``api-key`` never count as a change. Returns True
+        when either value changed. Subclasses that hold an SDK client
+        override this to drop the client on a change; the cache keeps the
+        instance.
+        """
+        changed = False
+        new_key = config.get("api_key")
+        if new_key and new_key != self.api_key:
+            self.api_key = new_key
+            changed = True
+        raw_mode = config.get("auth_mode")
+        if raw_mode:
+            new_mode = self._normalize_auth_mode(raw_mode)
+            if new_mode != self.auth_mode:
+                self.auth_mode = new_mode
+                changed = True
+        return changed
+
     @abstractmethod
     def generate(
         self,

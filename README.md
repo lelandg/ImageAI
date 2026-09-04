@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.46.0**
+**Version 0.47.1**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **Chameleon Labs Discord - Support, AI Art & Community: [Chameleon Labs Discord](https://discord.gg/chameleonlabs)**
@@ -27,6 +27,7 @@
   - [Templates Tab](#templates-tab)
   - [Video Tab](#video-tab)
   - [Layout/Books Tab (NEW!)](#layoutbooks-tab-new)
+  - [Sprite Tab](#sprite-tab)
   - [Settings Tab](#settings-tab)
   - [History Tab](#history-tab)
   - [Help Tab](#help-tab)
@@ -1157,6 +1158,199 @@ Comic Strip: "Monday Morning"
 - Use Layout tab's theme colors to match your generated images
 - Export at 300 DPI for print-quality results
 - Test with low-DPI preview before final high-res export
+
+#### Sprite Tab
+
+The Sprite tab turns one character image into a game-ready sprite sheet. The tab is labeled **🎮 Sprite** and loads on the first click. The workflow is: import a character, write action cards, render a clip or an image sequence per action, process the frames into cells, then export the sheet for a game engine.
+
+**Project Toolbar**:
+- **New…**: Create a project. ImageAI asks for a name and makes the project directory.
+- **Open…**: Open a `project.iasprite.json` file.
+- **Save** / **Save As…**: Write the project JSON. The tab also autosaves after every card edit and every finished job.
+- **Generation Settings…**: Open the video generation settings for this project (see below).
+- **Export…**: Open the export dialog. The button stays disabled while a processing job runs.
+- **Title label**: Shows the project name and its directory. It reads `No project — click New… or send a character image here` when no project is open.
+- **Sprite console**: The status console at the bottom logs every job, warning and error. The splitter positions are saved between sessions.
+
+**Character Panel** (top left):
+- **Drop area**: Drag a PNG, JPEG, WebP, BMP or GIF onto the panel. **Browse…** opens a file dialog instead.
+- **Analysis readout**: Reports the pixel size, whether the image has alpha, and the border color with `uniform` or `mixed`.
+- **Plate color**: The background color ImageAI asks the image model and the video model for. The default is `#00FF00`. The models often drift from the request, so keying samples the real background of each clip instead of trusting this value.
+- **Make chroma plate**: Asks Google Gemini to place the character on a flat chroma plate. The plate is the reference for every later render.
+- **Generate turnaround**: Asks Google Gemini for front, side, back and three-quarter views.
+- **Cancel**: Stops the running character job.
+- **Send to Sprite**: Right-click the result image in the Image tab, or a row in the History tab, and choose **Send to Sprite**. The tab creates a project when none is open.
+- The panel needs a Google API key. A missing key is reported before any job starts.
+
+**Action Cards Panel** (middle left):
+- **Brief**: One line that describes the character, for example `a small armored knight with a red cape`.
+- **Genre**: Picks the action checklist. `sidescroller` asks for idle, walk, run, jump, fall, attack, hurt and death. `top_down` and `fighting` use their own checklists.
+- **LLM provider**: Picks the chat provider that writes the cards. The choice is remembered.
+- **Generate cards** (Ctrl+Enter): Asks the LLM for the checklist and adds one card per action. **Cancel** stops the call.
+- **Card table**: Name, Prompt, Seconds, Loop, Frames, FPS and Status. Every cell except Status is editable. A name must be unique snake_case. Seconds accepts 1-15, Frames accepts 1-64, and FPS accepts 1-60. A rejected value reverts and the console names the reason.
+- **Row buttons**: **Render** queues the card. **Re-render** resets the status and queues it again. **Refine…** sends a conversational instruction to the model, and it works only for a rendered Omni clip. **Render (image)** opens the image route dialog.
+- **Add card**, **Remove selected**, **Render all**: Render all queues every draft and failed card.
+- **Hint line**: Shows the suggested clip length for the selected card, for example `walk: 8 frames @ 12 fps → suggested clip 2 s on omni`.
+
+**Generation Settings Dialog**:
+- **Configuration**: Named configurations with **Load**, **Save as…** and **Delete**. The `Default` configuration cannot be deleted.
+- **Provider**: `omni` or `veo`. **Model** accepts a provider model ID or `(provider default)`.
+- **Resolution**: `720p` or `1080p`. **Aspect ratio**: `16:9`, `9:16` or `1:1`.
+- **Clip duration**: 1-15 seconds. **Clip FPS**: 1-60. The presets are 8, 12, 24, 30 and 60.
+- **Loop conditioning**: Veo only. It conditions the first and last frame and forces an 8-second clip.
+- **Plate color**, **Attach turnaround views as references**, **Include audio** (Veo only).
+- **Estimated cost per action**: Reads `unknown` when no verified rate exists. ImageAI never shows a guessed price.
+
+**Render Queue Panel** (bottom left):
+- **Queue table**: Action, Status, Est. cost and Actual cost. The status tooltip carries the error text of a failed card.
+- **Sheet estimate**: The total for every card, plus a count of the actions without a verified rate.
+- **Start** (Ctrl+Enter), **Cancel**, **Retry selected**: Retry accepts failed cards only. A cancel keeps the provider operation ID for recovery.
+- Each rendered clip lands in `clips/<action_id>.mp4`. A refine writes `clips/<action_id>.r<N>.mp4`.
+- The queue finishes an action with the whole processing pipeline, including both profile stages. The completion line names the stages that produced frames, for example `Frames ready for 'walk' (stages: extract, key, cleanup, alpha, stabilize, hd, pixel)`. A disabled profile is visible by its absence from that list.
+
+**Frame Strip** (top right):
+- **Duplicate** (Ctrl+D), **Delete** (Delete), **Insert…**, **Overrides…**, **Export frame…**.
+- Delete removes frames from the list only. The PNG files stay on disk.
+- **Overrides…** sets a per-frame key color, tolerance and softness.
+- **Duration**: Sets the duration of the selected frames in milliseconds. Press Enter to apply.
+- Drag a thumbnail to reorder the animation. Right-click a thumbnail for the same tools plus **Retouch…**.
+- Every edit pushes an undo snapshot. Ctrl+Z undoes it and Ctrl+Y redoes it.
+
+**Preview Player** (middle right):
+- **Source**: `cells` shows the working frames. `hd` and `pixel` show the output of that profile stage.
+- **Tag**: Limits playback to one action, or plays all frames.
+- **Transport**: First, previous, play/pause, next and last. The loop mode button cycles forward, reverse and ping-pong.
+- **FPS readout**: Shows the effective rate and adds `(variable)` when the frame durations differ.
+- **Loop seam**: Shows the mean RGBA difference between the last frame and the first frame. `0` is a perfect loop.
+- **Pixel view**: The player draws through a pixel view with integer nearest-neighbor zoom, a pixel grid and a checkerboard behind the alpha. Drag a rectangle to select a region for a retouch. The processing panel's **Pick…** button turns the view into a color picker.
+
+**Processing Panel** (bottom right):
+- **Extraction**: Mode is `every N frames`, `target fps` or `exactly N frames`. Every N, Target fps and Exact N set the value for the chosen mode. Trim drops seconds from the start and the end. **Cull duplicate frames** removes near-identical frames above the threshold. The estimate line reports the frame count the current settings yield.
+- **Key / matte**: Method is `chroma key`, `ML matte` or `none (source has alpha)`. Key color accepts `#RRGGBB`. Leave it empty and ImageAI samples the clip's own border color, so a plate that came back muted, white or gray still keys; the log names the sampled color. A muted key gets a tighter tolerance automatically, so grays and whites in the character stay opaque. Uniform bars at the frame edges (a pillarboxed 1:1 clip inside black) are removed too. **Pick…** reads the color from a click in the preview. Tolerance and softness set the chroma range. Despill is `none`, `average`, `double` or `limit`. **Edge decontaminate** removes spill on the keyed edge. Choke, feather and despeckle clean the alpha edge in pixels. The ML row picks `mediapipe` or `rembg`, picks the rembg model, and reports which backends are installed. **Install…** opens the ML install dialog.
+- **Output profiles**: One editor per profile. See the next section.
+- **Stabilize**: Anchor is `bottom_center`, `center`, `top_left`, `top_center` or `bottom_left`. **De-jitter** registers every frame to the first frame by `phase` or `centroid`. It is off by default. Turn it on for footage with camera jitter only: on pose animation the alignment shifts the character. A shift never moves the character off the frame. Pad adds pixels around the content box.
+- **Force re-run**: Ignores the stage cache and runs every stage again.
+- **Preview key on clip**: Writes an ffmpeg chroma key preview of the clip and opens it.
+- **Run pipeline** (Ctrl+Enter): Runs the pipeline for the selected card. **Cancel** stops it.
+
+**Output Profiles**:
+
+Every project starts with two profiles, and both are enabled.
+
+| Profile | Cell size | Alpha | Palette | Dither |
+|---------|-----------|-------|---------|--------|
+| `hd` | 256×256 | The anti-aliased alpha of the keying stages | True color | none |
+| `pixel` | 64×64 | Binary alpha, threshold 128 | 32 colors, shared by every frame of an action | none |
+
+Each profile editor holds these controls:
+- **Enabled**: The pipeline skips a disabled profile, and the export cannot fill it.
+- **Cell size**: A preset from 8×8 to 1024×1024, or `Custom…` with your own width and height.
+- **Alpha**: **Binary alpha** makes every pixel either opaque or transparent at the threshold. Defringe trims edge pixels.
+- **Palette size**: The shared palette size. `0` keeps true color.
+- **Dither**: `none`, `bayer2`, `bayer4`, `bayer8` or `floyd`. Floyd-Steinberg dither changes the pattern between frames, so the animation can crawl.
+- **Palette lock** and **Rebuild palette**: A locked palette remaps new frames to the stored colors. Rebuild palette clears the lock and runs the pipeline again, so the palette is built from the current frames.
+- **Small sources**: **Upscale sources smaller than the cell** enlarges a small frame before the integer fit. It is off by default, so a small frame keeps its native size inside the cell.
+
+**The Pipeline, Stage by Stage**:
+
+1. **extract** — Cuts frames out of the clip with the extraction settings. An imported PNG sequence or sheet takes the place of this stage.
+2. **key** — Estimates the alpha and removes the spill, by chroma key or by ML matte. Per-frame overrides apply here.
+3. **cleanup** — Chokes, feathers and despeckles the alpha edge.
+4. **alpha** — Decontaminates the remaining spill on the keyed edge and writes the final RGBA.
+5. **stabilize** — Crops every frame to the same union content box plus the pad and anchors it, so every frame keeps a fixed position. De-jitter runs only when you turn it on. No resampling happens here. This stage also rebuilds the frame list, and it keeps your per-frame durations, pivots and overrides.
+6. **hd** — Scales the stabilized frames into the `hd` cell.
+7. **pixel** — Fits the stabilized frames into the `pixel` cell with one integer reduce factor, applies the binary alpha, and quantizes to the shared palette.
+
+Each stage reads the previous stage's PNGs and writes its own directory. ImageAI records a fingerprint of the upstream stage, the stage settings and the stage code version. A stage whose fingerprint still matches is skipped, so a second run only redoes the work a setting changed. **Force re-run** overrides the cache.
+
+**Files on Disk**:
+
+A project lives under the Images storage root, in `sprites/<slug>_<timestamp>/`:
+
+```
+<Images root>/sprites/knight_20260901_143012/
+├── project.iasprite.json        # the whole project: cards, settings, frames, cost ledger
+├── source/
+│   ├── character.png            # the normalized character image
+│   ├── plate.png                # the chroma plate
+│   └── turnaround/              # front.png, side.png, back.png, three_quarter.png
+├── clips/
+│   ├── <action_id>.mp4          # the rendered clip
+│   ├── <action_id>.r1.mp4       # a refined clip
+│   └── <action_id>_sheet.png    # the image-route sheet
+├── stages/<action_id>/
+│   ├── extract/  key/  cleanup/  alpha/  stabilize/
+│   ├── hd/                      # the hd cells
+│   └── pixel/                   # the pixel cells plus pixel.json
+└── exports/
+    ├── hd/                      # sheet PNG, JSON, GIF, PNG sequence
+    └── pixel/
+```
+
+The stage frames keep the same file name from `extract` to `pixel`, so you can compare one frame across the stages. `stages/<action_id>/pixel/pixel.json` records the reduce factor, the palette, the anchor and every warning the pixel stage raised.
+
+**Frame Retouch**:
+- Right-click a frame in the strip and choose **Retouch…**.
+- **Instruction**: What to change, for example `fix the left hand: five fingers, same glove`.
+- **Provider**: Google Gemini or OpenAI gpt-image. **Model** accepts a model ID or stays empty for the provider default.
+- **Region**: The rectangle you dragged in the pixel view, or the whole frame. **Clear region** drops it.
+- **Neighbors**: The previous and the next frame go to the model as references, so the retouch matches the animation.
+- **Retouch** (Ctrl+Enter) runs the call. The result is written as a new file, so the source frame is never overwritten. The frame list keeps an undo snapshot.
+- A retouch is refused while a processing job runs, because that job rewrites the frame list.
+
+**Render (image) — the Image Route**:
+
+The image route builds the frames from an image model instead of a video model. Use it when a video clip is too expensive or too soft.
+- **Mode**: `Sheet (one image, sliced)` asks for one contact sheet and cuts it into frames. `Edit chain (one edit per frame)` edits the character once per pose.
+- **Provider** and **Model**: Google Gemini or OpenAI gpt-image.
+- **Frames**: 2-24 frames.
+- **Render white + black plates and difference-matte**: Edit chain only. It doubles the provider calls and it buys a clean alpha from the difference of the two plates.
+- **Pose steps**: One pose per line. **Generate pose steps** asks the LLM to write them. Leave the field empty to let the render ask for them.
+- **Render** (Ctrl+Enter) runs the route and then runs the pipeline through the profile stages, so you can export straight from here.
+- A previous set of extracted frames is moved aside to `extract.prev-<timestamp>`, never deleted.
+- Every provider call is written to the cost ledger, including the calls a cancelled or failed render already paid for.
+
+**Export Dialog**:
+- **Profiles**: Pick `hd`, `pixel` or both. Each profile gets its own output directory.
+- **Engine preset**: Unity, Godot 4, Phaser 3, PixiJS, Unreal Engine 5 (Paper2D), libGDX, RPG Maker MZ, and a web preview. A preset sets the formats, the grid padding, the pivot and the file template, and it prints the import steps for that engine below the picker.
+- **Formats**: Sprite sheet PNG (with an Aseprite JSON sidecar), Aseprite JSON, TexturePacker JSON, PNG sequence per tag, animated GIF per tag, Godot 4 SpriteFrames (`.tres`), and a native Aseprite file.
+- **Output**: The directory, the frame file template (`{title}`, `{tag}`, `{frame}`, `{frame01}`), and the normalized pivot. The default pivot is `x 0.5, y 1.0`, which is the bottom center.
+- **Sheet grid**: Columns (`0` gives one row per tag), border, shape, inner and extrude padding in pixels, a power-of-two sheet option, and integer scales such as `1,2,4` for `@2x` and `@4x` copies.
+- **Purge intermediates after export**: Sends `clips/` and `stages/` to the recycle bin after a successful export. The dialog asks for a confirmation the first time, and the choice is sticky.
+- **Export log**: The console reports every file written. The options pane scrolls, so no row is ever clipped.
+- The export runs any profile stage that is missing or stale before it writes, and refuses to start while the render queue runs. When a stage cannot run, the export falls back to the stabilize frames and writes one warning per action in the console and the log, so a sheet never carries the wrong cell size in silence.
+
+**How a Frame Fills its Cell**:
+- ImageAI never distorts a frame. One scale factor applies to both axes.
+- The `hd` and `pixel` stages scale the stabilized frame into the cell and pad the rest with transparent pixels. Nothing is cropped away. The stabilize stage already trimmed the frame to the content box of the whole action, so the character fills the cell as far as its own proportions allow.
+- Bars beside a character mean the character's proportions differ from the cell's. Give the profile a cell with the proportions of your character to remove them. A 498×588 character fills a 216×256 `hd` cell exactly.
+- A clip whose keying removed nothing keeps every pixel of the plate. The key stage warns when that happens and names the color it sampled, so check the log before you export.
+- The `pixel` profile uses one integer reduce factor for every frame of an action. Square pixels and a steady animation are the reason. The PNG is exactly the cell size, and the content inside it is the largest integer reduction that fits.
+
+**Optional ML Backends**:
+- The **Install…** button in the Key / matte group installs `mediapipe` and `rembg` into the running Python environment.
+- `mediapipe` removes a background with no model download. `rembg` downloads its model (isnet-anime, 168 MB, MIT) on first use.
+- `rembg` needs Python 3.11-3.13. The dialog drops it on any other version and says so.
+- Restart ImageAI after the install, so the new backends load.
+
+**Keyboard Shortcuts**:
+
+| Key | Where | Action |
+|-----|-------|--------|
+| Space | Preview player | Play / pause |
+| `,` / `.` | Preview player | Previous / next frame |
+| Home / End | Preview player | First / last frame |
+| L | Preview player | Cycle loop mode |
+| `+` / `=` / `-` | Preview player | Zoom in / zoom in / zoom out |
+| Ctrl+0 | Preview player | Zoom 100% |
+| G | Preview player | Toggle the pixel grid |
+| Delete | Frame strip | Delete the selected frames |
+| Ctrl+D | Frame strip | Duplicate the frame |
+| Ctrl+Z | Sprite tab | Undo |
+| Ctrl+Y or Ctrl+Shift+Z | Sprite tab | Redo |
+| Ctrl+Enter | Panel or dialog | Run the primary action |
+
+Each shortcut works while the focus is inside its own working area. A focused button or text field elsewhere in the tab keeps its own keys.
 
 #### Settings Tab
 - **Provider Selection**: Switch between Google, OpenAI, Stability AI, and Local SD

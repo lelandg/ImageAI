@@ -469,9 +469,12 @@ class ConfigManager:
     
     def get_auth_mode(self, provider: str = "google") -> str:
         """Get authentication mode for a provider."""
+        # "api-key" is the canonical spelling (see _normalize_auth_mode). The
+        # providers compare this value against their own auth_mode; a second
+        # spelling made every cache hit look like a credential change.
         if provider == "google":
-            return self.config.get("auth_mode", "api_key")
-        return "api_key"
+            return self.config.get("auth_mode", "api-key")
+        return "api-key"
     
     def set_auth_mode(self, provider: str, mode: str) -> None:
         """Set authentication mode for a provider."""

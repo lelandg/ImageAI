@@ -1,0 +1,187 @@
+# tests/sprite/test_engine_presets.py
+import dataclasses
+import json
+from pathlib import Path
+
+import numpy as np
+import pytest
+from PIL import Image
+
+from core.sprite.exporters import engine_presets as engine_presets_mod
+from core.sprite.exporters.engine_presets import (
+    ATLAS_FORMATS, ENGINE_PRESETS, FORMAT_IDS, EnginePreset,
+    export_with_preset, fps_reconciliation, with_pivot,
+)
+from core.sprite.exporters.grid import GridOptions
+from core.sprite.models import FrameMeta, SheetMeta, TagMeta
+
+
+def _on_disk_recursive(out_dir: Path) -> list:
+    return sorted(str(p.relative_to(out_dir)) for p in Path(out_dir).rglob("*") if p.is_file())
+
+
+def _png(path: Path, shade: int) -> Path:
+    arr = np.zeros((8, 8, 4), dtype=np.uint8)
+    arr[2:6, 2:6] = (shade, 40, 200, 255)
+    Image.fromarray(arr).save(path)
+    return path
+
+
+def _meta(tmp_path: Path, durations=(100, 100, 100, 100)) -> SheetMeta:
+    frames = []
+    for i, ms in enumerate(durations):
+        p = _png(tmp_path / f"{i + 1:04d}.png", 30 * i)
+        frames.append(FrameMeta(name=f"hero_{i}", source_path=p, frame=(0, 0, 8, 8),
+                                sprite_source_size=(0, 0, 8, 8), source_size=(8, 8), duration_ms=ms))
+    tags = [TagMeta(name="walk", from_index=0, to_index=1), TagMeta(name="idle", from_index=2, to_index=3)]
+    return SheetMeta(title="hero", frames=frames, tags=tags, cell_size=(8, 8))
+
+
+def test_every_preset_is_well_formed():
+    assert set(ENGINE_PRESETS) == {"unity", "godot4", "phaser3", "pixijs", "unreal", "libgdx", "rpgmaker_mz", "web_preview"}
+    for pid, preset in ENGINE_PRESETS.items():
+        assert isinstance(preset, EnginePreset) and preset.id == pid
+        assert preset.formats and set(preset.formats) <= set(FORMAT_IDS)
+        assert isinstance(preset.grid, GridOptions)
+        assert 0.0 <= preset.pivot[0] <= 1.0 and 0.0 <= preset.pivot[1] <= 1.0
+        assert preset.name_template.endswith(".png")
+        sentences = [s for s in preset.how_to_import.replace("\n", " ").split(". ") if s.strip()]
+        assert 2 <= len(sentences) <= 5, pid
+        assert preset.json_layout in ("hash", "array")
+
+
+def test_godot4_preset_writes_png_and_tres(tmp_path):
+    out = tmp_path / "out"
+    written = export_with_preset(_meta(tmp_path), "godot4", out)
+    names = {p.name for p in written}
+    assert {"hero.png", "hero.tres", "hero.tres.json"} <= names
+    tres = (out / "hero.tres").read_text(encoding="utf-8")
+    assert 'path="res://hero.png"' in tres and tres.count('[sub_resource type="AtlasTexture"') == 4
+    assert all(p.exists() for p in written)
+
+
+def test_phaser3_preset_writes_atlas_json(tmp_path):
+    written = export_with_preset(_meta(tmp_path), "phaser3", tmp_path / "out")
+    assert (tmp_path / "out" / "hero.atlas.json").exists()
+    assert (tmp_path / "out" / "hero.png").exists()
+    assert (tmp_path / "out" / "hero.atlas.json") in written
+
+
+def test_web_preview_writes_gif_per_tag_and_frames(tmp_path):
+    written = export_with_preset(_meta(tmp_path), "web_preview", tmp_path / "out")
+    names = {p.name for p in written}
+    assert {"hero_walk.gif", "hero_idle.gif"} <= names
+    assert (tmp_path / "out" / "hero_walk.gif.json").exists()
+    assert any(p.parent.name == "frames" for p in written)
+    assert not (tmp_path / "out" / "hero.png").exists()  # no atlas format requested
+
+
+def test_unknown_preset_raises():
+    with pytest.raises(ValueError):
+        export_with_preset(SheetMeta(title="x", frames=[], tags=[]), "gamemaker", Path("."))
+
+
+def test_atlas_formats_subset():
+    assert ATLAS_FORMATS <= set(FORMAT_IDS)
+
+
+def test_with_pivot_copies_and_sets_every_frame(tmp_path):
+    meta = _meta(tmp_path)
+    pivoted = with_pivot(meta, (0.25, 0.75))
+    assert all(f.pivot == (0.25, 0.75) for f in pivoted.frames)
+    assert all(f.pivot == (0.5, 1.0) for f in meta.frames)      # original untouched
+
+
+def test_fps_reconciliation_godot_reports_drift_and_unrolling(tmp_path):
+    meta = _meta(tmp_path, durations=(100, 133, 100, 100))
+    meta.tags[0].direction = "pingpong"
+    meta.tags[0].to_index = 2
+    notes = fps_reconciliation(meta, "godot")
+    assert any("drift" in n for n in notes)
+    assert any("unrolled" in n for n in notes)
+
+
+def test_fps_reconciliation_godot_clean_when_uniform(tmp_path):
+    assert fps_reconciliation(_meta(tmp_path), "godot") == []
+
+
+def test_fps_reconciliation_gif_clamp_and_rounding(tmp_path):
+    meta = _meta(tmp_path, durations=(15, 105, 100, 100))
+    notes = fps_reconciliation(meta, "gif")
+    assert any("frame 1" in n and "20 ms" in n for n in notes)
+    assert any("frame 2" in n and "rounds" in n for n in notes)
+
+
+def test_fps_reconciliation_unknown_target(tmp_path):
+    with pytest.raises(ValueError):
+        fps_reconciliation(_meta(tmp_path), "unity")
+
+
+def test_manifest_matches_every_file_on_disk_for_atlas_preset(tmp_path):
+    """The returned list is the export manifest: it must name every file written, no more, no less."""
+    out = tmp_path / "out"
+    written = export_with_preset(_meta(tmp_path), "phaser3", out)
+    reported = sorted(str(p.relative_to(out)) for p in written)
+    assert reported == _on_disk_recursive(out)
+    # both grid sidecars are present, not just the first one found on disk
+    assert "hero.json" in reported and "hero.png.json" in reported
+
+
+def test_manifest_matches_every_file_on_disk_for_web_preview_preset(tmp_path):
+    """web_preview contains png_sequence; its manifest must equal disk exactly, sidecars included."""
+    out = tmp_path / "out"
+    written = export_with_preset(_meta(tmp_path), "web_preview", out)
+    reported = sorted(str(p.relative_to(out)) for p in written)
+    assert reported == _on_disk_recursive(out)
+    # every frame PNG's sidecar is reported, not just the PNG itself
+    assert "frames/hero_walk_01.png.json" in reported
+    assert "frames/hero_idle_02.png.json" in reported
+
+
+def test_gif_sidecar_frame_count_reflects_pingpong_unrolling(tmp_path):
+    """A ping-pong tag's GIF holds more frames than to_index - from_index + 1; the sidecar must agree."""
+    meta = _meta(tmp_path)
+    meta.tags = [TagMeta(name="walk", from_index=0, to_index=3, direction="pingpong")]
+    written = export_with_preset(meta, "web_preview", tmp_path / "out")
+    sidecar = tmp_path / "out" / "hero_walk.gif.json"
+    assert sidecar in written
+    data = json.loads(sidecar.read_text(encoding="utf-8"))
+    # 4 forward frames + the 2 reflected middle frames == 6, not to_index - from_index + 1 == 4
+    assert data["frames"] == 6
+    assert data["direction"] == "pingpong"
+    assert data["title"] == "hero"
+    assert data["tag"] == "walk"
+    assert data["profile"] == meta.profile
+    assert data["app"] == meta.app
+    assert data["version"] == meta.version
+    # export_gif's own fields (durations_ms/loop/warnings/timestamp) survive the merge
+    assert "durations_ms" in data and "timestamp" in data
+
+
+def test_manifest_includes_every_scale_sheet_and_its_sidecars(tmp_path, monkeypatch):
+    """Presets whose GridOptions carries multiple scales must report every @Nx PNG + its two sidecars."""
+    base = ENGINE_PRESETS["phaser3"]
+    scaled_grid = dataclasses.replace(base.grid, scales=(1, 2))
+    scaled_preset = dataclasses.replace(base, grid=scaled_grid)
+    monkeypatch.setitem(engine_presets_mod.ENGINE_PRESETS, "phaser3", scaled_preset)
+
+    out = tmp_path / "out"
+    written = export_with_preset(_meta(tmp_path), "phaser3", out)
+    names = {p.name for p in written}
+    assert {"hero.png", "hero.json", "hero.png.json",
+            "hero@2x.png", "hero@2x.json", "hero@2x.png.json"} <= names
+    reported = sorted(str(p.relative_to(out)) for p in written)
+    assert reported == _on_disk_recursive(out)
+
+
+def test_gif_filename_sanitizes_the_tag_name(tmp_path):
+    """PR #45 review, security: the title is sanitised but the tag was not, so a tag
+    named ``walk/../../escaped`` wrote its GIF outside the export directory."""
+    meta = _meta(tmp_path)
+    meta.tags[0] = TagMeta(name="walk/../../escaped", from_index=0, to_index=1)
+    out = tmp_path / "out"
+    written = export_with_preset(meta, "web_preview", out)
+    gifs = [p for p in written if p.suffix == ".gif"]
+    assert gifs and all(p.parent == out for p in gifs)
+    assert not (tmp_path / "escaped.gif").exists()
+    assert "hero_walk_.._.._escaped.gif" in {p.name for p in gifs}
