@@ -66,12 +66,13 @@ def _stub(monkeypatch, tab_cls=_FakeSpriteTab):
     return MainWindow, stub
 
 
-def test_init_ui_adds_sprite_placeholder_after_layout(qapp):
+def test_init_ui_adds_sprite_placeholder_after_image(qapp):
     from gui.main_window import MainWindow
 
     source = inspect.getsource(MainWindow._init_ui)
     assert "self._sprite_tab_loaded = False" in source
-    assert source.index('"📖 Layout"') < source.index('"🎮 Sprite"') < source.index('"⚙️ Settings"')
+    # Tab order since 2026-09-04: Image, Sprite, Video, Layout, Settings, ...
+    assert source.index('"🎨 Image"') < source.index('"🎮 Sprite"') < source.index('"🎬 Video"')
     changed = inspect.getsource(MainWindow._on_tab_changed)
     assert "self.tab_sprite" in changed and "_load_sprite_tab" in changed
     close = inspect.getsource(MainWindow.closeEvent)

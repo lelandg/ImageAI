@@ -711,11 +711,11 @@ class MainWindow(QMainWindow):
 
         # Add tabs
         self.tabs.addTab(self.tab_generate, "🎨 Image")
-        self.tabs.addTab(self.tab_templates, "📝 Templates")
+        self.tabs.addTab(self.tab_sprite, "🎮 Sprite")
         self.tabs.addTab(self.tab_video, "🎬 Video")
         self.tabs.addTab(self.tab_layout, "📖 Layout")
-        self.tabs.addTab(self.tab_sprite, "🎮 Sprite")
         self.tabs.addTab(self.tab_settings, "⚙️ Settings")
+        self.tabs.addTab(self.tab_templates, "📝 Templates")
         self.tabs.addTab(self.tab_help, "❓ Help")
         self.tabs.addTab(self.tab_history, "📜 History")  # Always add history tab
 
@@ -3631,6 +3631,57 @@ For more detailed information, please refer to the full documentation.
         
         return -1
     
+    def _restore_provider_and_model(self, provider: str, model: str) -> None:
+        """Apply a saved provider/model pair to the combo boxes.
+
+        The provider comes first. A provider change rebuilds the model list, so
+        a model applied before the provider is discarded and the previous
+        provider's model stays selected.
+        """
+        if provider:
+            current = str(self.current_provider or "").lower()
+            if provider.lower() != current:
+                idx = self.provider_combo.findText(provider)
+                if idx < 0:
+                    idx = self.provider_combo.findText(
+                        provider, Qt.MatchFixedString
+                    )
+                if idx >= 0:
+                    self.provider_combo.setCurrentIndex(idx)
+                else:
+                    logger.warning(
+                        f"Provider '{provider}' is not in the provider list; "
+                        f"keeping '{self.current_provider}'"
+                    )
+
+        if model:
+            idx = self._find_model_in_combo(model)
+            if idx >= 0:
+                self.model_combo.setCurrentIndex(idx)
+            else:
+                logger.warning(
+                    f"Model '{model}' is not available for provider "
+                    f"'{self.current_provider}'; keeping "
+                    f"'{self.model_combo.currentData()}'"
+                )
+
+    def _model_matches_provider(self, model_id: str, provider_name: str) -> bool:
+        """True when provider_name publishes model_id.
+
+        The check is advisory. An unknown provider or a provider that cannot
+        list its models returns True, so the provider itself reports the error.
+        """
+        if not model_id:
+            return False
+        try:
+            provider = get_provider(provider_name, {"api_key": ""})
+            if hasattr(provider, 'get_models_with_details'):
+                return model_id in (provider.get_models_with_details() or {})
+            return model_id in (provider.get_models() or {})
+        except Exception as e:
+            logger.debug(f"Cannot verify model '{model_id}' for '{provider_name}': {e}")
+            return True
+
     def _update_model_list(self):
         """Update model combo box based on current provider."""
         self.model_combo.clear()
@@ -4242,7 +4293,20 @@ For more detailed information, please refer to the full documentation.
     
     def _on_provider_changed(self, provider: str):
         """Handle provider change from Settings tab."""
-        self.current_provider = provider.lower()
+        provider = provider.lower()
+
+        # Run the Image tab handler. That handler owns the rest of a provider
+        # change: the API key, the model list and the dependent widgets. The
+        # Settings combo alone left the model combo on the previous provider's
+        # models, so the next generation sent a foreign model id (for example
+        # gpt-image-2 to Google, which answers 404).
+        if hasattr(self, 'image_provider_combo'):
+            self.image_provider_combo.blockSignals(True)
+            self.image_provider_combo.setCurrentText(provider)
+            self.image_provider_combo.blockSignals(False)
+        self._on_image_provider_changed(provider)
+
+        self.current_provider = provider
         self.config.set("provider", self.current_provider)
         self.save_config()
 
@@ -5343,6 +5407,21 @@ For more detailed information, please refer to the full documentation.
         if not model:
             # Fallback to text if no data is stored (for backward compatibility)
             model = self.model_combo.currentText()
+
+        # The model combo must hold a model of the current provider. A stale
+        # combo sends a foreign model id to the API and wastes a paid call.
+        if not self._model_matches_provider(model, self.current_provider):
+            logger.warning(
+                f"Model '{model}' does not belong to provider "
+                f"'{self.current_provider}'; rebuilding the model list"
+            )
+            self._update_model_list()
+            model = self.model_combo.currentData() or self.model_combo.currentText()
+            self._append_to_console(
+                f"Model did not match provider {self.current_provider}. "
+                f"Using {model} instead.",
+                "#ffaa00",  # Orange
+            )
         
         # Gather all generation parameters
         kwargs = {}
@@ -8002,17 +8081,10 @@ For more detailed information, please refer to the full documentation.
                     prompt = history_item.get('prompt', '')
                     self.prompt_edit.setPlainText(prompt)
 
-                    model = history_item.get('model', '')
-                    if model:
-                        idx = self._find_model_in_combo(model)
-                        if idx >= 0:
-                            self.model_combo.setCurrentIndex(idx)
-
-                    provider = history_item.get('provider', '')
-                    if provider and provider != self.current_provider:
-                        idx = self.provider_combo.findText(provider)
-                        if idx >= 0:
-                            self.provider_combo.setCurrentIndex(idx)
+                    self._restore_provider_and_model(
+                        history_item.get('provider', ''),
+                        history_item.get('model', ''),
+                    )
 
                     if hasattr(self, 'imagen_reference_widget'):
                         if 'imagen_references' in history_item:
