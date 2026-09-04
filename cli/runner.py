@@ -1,5 +1,6 @@
 """CLI runner for ImageAI."""
 
+import logging
 import sys
 from pathlib import Path
 from typing import Optional, Tuple, List
@@ -9,6 +10,8 @@ from core.utils import read_readme_text, extract_api_key_help
 from core.lyrics_to_prompts import LyricsToPromptsGenerator, load_lyrics_from_file
 from core.llm_models import resolve_model
 from providers import get_provider, preload_provider
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_api_key(
@@ -189,9 +192,9 @@ def handle_lyrics_to_prompts(args) -> int:
         return 0
 
     except Exception as e:
-        print(f"Error during generation: {e}")
-        import traceback
-        traceback.print_exc()
+        # The log handlers redact secrets. A raw traceback on stderr does not.
+        logger.exception("Error during generation")
+        print(f"Error during generation: {e}", file=sys.stderr)
         return 3
 
 

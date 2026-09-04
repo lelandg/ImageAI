@@ -22,6 +22,7 @@ from .dialog_utils import OperationGuardMixin, guard_operation
 from .history_widget import DialogHistoryWidget
 from core.discord_rpc import discord_rpc, ActivityState
 from core.llm_params import validate_params
+from core.logging_config import SecretRedactionFilter
 from core.paths import get_data_paths
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,9 @@ class LLMWorker(QObject):
                 litellm_logger = py_logging.getLogger("LiteLLM")
                 console_handler = LiteLLMConsoleHandler()
                 console_handler.setFormatter(py_logging.Formatter('%(message)s'))
+                # This handler runs before propagation to the root logger, so
+                # it needs its own redaction filter.
+                console_handler.addFilter(SecretRedactionFilter())
                 litellm_logger.addHandler(console_handler)
 
                 litellm.drop_params = True  # Drop unsupported params
