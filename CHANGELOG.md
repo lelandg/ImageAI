@@ -7,6 +7,96 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.47.0] - 2026-09-04
+
+### Added
+- **Sprite tab.** A new tab turns one character image into game-ready sprite
+  animations. The Character panel takes the source image, normalizes it onto a
+  transparent canvas, builds a chroma plate and an optional turnaround pack.
+  Action cards come from an LLM contract (Strict v1.0, with a tolerant parser)
+  or by hand, and a sequential render queue sends each card to Gemini Omni or
+  Veo with loop conditioning, cost rows and mid-render cancel.
+- **Sprite processing pipeline.** Stages run in order and cache by fingerprint:
+  ffmpeg frame extraction (every N, target fps, exact N), chroma key from
+  (Cb,Cr) distance with despill and edge decontamination, ML matting backends
+  (mediapipe, rembg) with an install dialog, difference mattes from white and
+  black pairs, alpha choke, feather and despeckle, a stabilize stage that crops
+  every frame to one union content box, an `hd` profile and a `pixel` profile
+  with integer fit, shared palette, palette lock and none, Bayer or Floyd
+  dither.
+- **Sprite frame workspace.** Frame strip with reorder, duplicate, delete,
+  insert, per-frame overrides and undo snapshots. Preview player with loop
+  modes and a seam meter. Pixel view with integer zoom, grid, checkerboard and
+  color pick. Non-destructive AI retouch of a region or a whole frame through
+  Gemini or gpt-image, with provenance.
+- **Sprite image route.** Sheet generation through an image model (Gemini
+  aspect kwarg, gpt-image 3:1 custom size), slicing, an edit chain with
+  optional matte pairs, and Sprite Pose Steps as a strict LLM contract with a
+  fallback.
+- **Sprite export.** PNG sequences, transparent GIF, grid sheets with an
+  Aseprite JSON sidecar, TexturePacker JSON, Godot 4 SpriteFrames `.tres`, a
+  native `.aseprite` writer, and eight engine presets that export in one call
+  and reconcile fps. Every written file gets a sidecar and the manifest lists
+  them all.
+- Sprite projects persist as `project.iasprite.json` with a project manager,
+  named generation configs, a cost ledger and a snapshot undo stack. Sprite
+  storage paths join the migration journal.
+- The Help tab renders the new Sprite section of the README, and a test guards
+  every TOC anchor against both the app slugger and GitHub's.
+- Veo and Omni polling loops take a `cancel_check` hook.
+
+### Changed
+- Tab order is Image, Sprite, Video, Layout, Settings, Templates, Help,
+  History.
+- De-jitter in the sprite stabilize stage is off by default. It registers
+  every frame to the first frame by its alpha mask, which removes camera
+  jitter but shifts a character whose pose changes. Turn it on for footage
+  with camera jitter only. When it is on, a shift can never move a subject
+  pixel off the canvas.
+- The sprite render queue stops at the stabilize stage on purpose; export runs
+  the missing or stale `hd` and `pixel` stages itself, because the pixel stage
+  locks the project palette on its first run.
+- The chroma key samples the clip's own border color when no key color is
+  set, so a plate that came back muted, white or gray still keys. Neutral keys
+  use luminance, pillarbox bars are cleared, and a muted key gets a clamped
+  tolerance. The key stage warns when the key removes under 1% of a frame.
+- Aspect ratios offered for sprite renders are the ones the chosen provider
+  accepts; an illegal ratio is refused before a worker starts.
+
+### Fixed
+- Sprite exports lost part of the character. The de-jitter step pushed frames
+  off the fixed canvas (one frame lost 20% of its opaque pixels). See Changed.
+- A provider change from the Settings combo left the model list on the
+  previous provider, so the next generation sent a foreign model id (for
+  example gpt-image-2 to Google, which answers 404). The Settings combo now
+  runs the Image tab handler, saved provider and model pairs restore provider
+  first, and a model that does not belong to the current provider is refused
+  before a paid call.
+- A cached provider ignored new credentials. `get_provider()` cache hits now
+  reconfigure the instance and drop its SDK client, every Google and OpenAI
+  entry point rebuilds the client lazily, and every spelling of an auth mode
+  normalizes to one value. This ends the "No client configured" error after a
+  key was added in Settings.
+- API keys could reach the log. Every log sink now redacts secrets, the
+  LiteLLM console handlers in the GUI carry their own filter, and the CLI
+  lyrics path no longer prints a raw traceback to stderr.
+- The Video tab showed the "Provider Removed" dialog at every start. Only the
+  open paths wrote the last-project key; New Project and Save now maintain
+  it, and a project saved with Sora moves to Gemini Omni in the project file.
+- Sprite export dialog: the options pane scrolls, the dialog keeps a minimum
+  width only, and its geometry persists.
+- Sprite action cards resolve a real chat model through the model registry
+  instead of the family name.
+- Many worker lifetime fixes in the sprite GUI: finished workers are freed,
+  orphaned workers survive garbage collection and count as busy until reaped,
+  panel workers shut down before a project switch, and stale worker events
+  are dropped after release.
+- `write_image_sidecar` catches real exceptions on its failure path.
+
+### Documentation
+- Root-level guides (Veo duration, HuggingFace auth, Linux video tab, MIDI
+  karaoke, Ollama setup, video tab logging) moved into `Notes/`.
+
 ## [0.46.0] - 2026-08-24
 
 ### Removed
