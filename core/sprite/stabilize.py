@@ -229,9 +229,9 @@ def limit_shift_to_canvas(alpha: np.ndarray, dy: float, dx: float) -> Tuple[floa
 
     The stabilize crop is the union alpha bbox with ``pad_px`` 0 by default, so
     subject pixels sit on the canvas edge. A registration shift that pushes
-    them off the canvas destroys the frame; on pose animation the estimate is
-    wrong anyway (rock_3 frame 7 lost 20 % of the character). Each axis is
-    clamped independently to the room left between the bbox and the edge.
+    them off the canvas destroys the frame, and on pose animation the estimate
+    is wrong anyway. Each axis is clamped independently to the room left
+    between the bbox and the edge.
     """
     a = np.asarray(alpha)
     rows = np.flatnonzero(a.any(axis=1))
@@ -241,8 +241,9 @@ def limit_shift_to_canvas(alpha: np.ndarray, dy: float, dx: float) -> Tuple[floa
     h, w = a.shape[:2]
     top, bottom = int(rows[0]), int(rows[-1]) + 1
     left, right = int(cols[0]), int(cols[-1]) + 1
-    ldy = max(-float(top), min(float(h - bottom), float(dy)))
-    ldx = max(-float(left), min(float(w - right), float(dx)))
+    # float(-top), not -float(top): the int negation gives 0, not -0.0 in the log.
+    ldy = max(float(-top), min(float(h - bottom), float(dy)))
+    ldx = max(float(-left), min(float(w - right), float(dx)))
     return ldy, ldx
 
 
@@ -272,7 +273,8 @@ def dejitter(frames: Sequence[Path], out_dir: Path, method: str = "phase", *,
     may be the input directory: each frame is read before its own output file
     is written, and a frame's own file is never touched before that frame has
     been read, so no frame is overwritten before use. Shifts are clamped to
-    MAX_SHIFT_FRACTION of the frame size.
+    MAX_SHIFT_FRACTION of the frame size, then limited by
+    ``limit_shift_to_canvas`` so no subject pixel leaves the canvas.
     """
     if method not in DEJITTER_METHODS:
         raise ValueError(f"Unknown dejitter method {method!r}; choose one of {DEJITTER_METHODS}")

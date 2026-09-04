@@ -14,9 +14,9 @@ import re
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from PIL import Image
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
-from PIL import Image
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
                                QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar,
                                QPushButton, QScrollArea, QSlider, QSpinBox, QVBoxLayout,

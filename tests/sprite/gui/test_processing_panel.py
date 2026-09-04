@@ -67,6 +67,9 @@ def test_extract_mode_and_stabilize_write_back(panel):
     assert project.extraction.mode == "target_fps"
     widget.target_fps.setValue(15)
     assert project.extraction.target_fps == 15
+    # De-jitter is off by default, so toggle on first: the write-back must run.
+    widget.dejitter.setChecked(True)
+    assert project.stabilize.dejitter is True
     widget.dejitter.setChecked(False)
     assert project.stabilize.dejitter is False
     widget.anchor.setCurrentIndex(widget.anchor.findData("center"))
