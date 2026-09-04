@@ -9,6 +9,9 @@ from gui.sprite.generation_settings_dialog import (
     PROVIDER_DEFAULT_LABEL, GenerationSettingsDialog, model_choices,
 )
 
+VEO_STD = "veo-3.1-generate-001"
+VEO_FAST = "veo-3.1-fast-generate-001"
+
 
 def _dialog(tmp_path, settings=None):
     store = NamedConfigStore(tmp_path / "configs.json")
@@ -44,6 +47,71 @@ def test_provider_switch_repopulates_models(qapp, tmp_path):
     items = [dialog.model_combo.itemText(i) for i in range(dialog.model_combo.count())]
     assert items == [PROVIDER_DEFAULT_LABEL] + model_choices("omni")
     assert not dialog.audio_check.isEnabled()
+
+
+def _aspects(dialog):
+    return [dialog.aspect_combo.itemText(i) for i in range(dialog.aspect_combo.count())]
+
+
+def test_omni_offers_no_square(qapp, tmp_path):
+    dialog, _ = _dialog(tmp_path)
+    assert dialog.provider_combo.currentText() == "omni"
+    assert _aspects(dialog) == ["16:9", "9:16"]
+    assert dialog.aspect_note.text() == ""
+
+
+def test_veo_standard_offers_square(qapp, tmp_path):
+    dialog, _ = _dialog(tmp_path, GenerationSettings(provider="veo", model=VEO_STD))
+    assert "1:1" in _aspects(dialog)
+    dialog.aspect_combo.setCurrentText("1:1")
+    assert dialog.settings().aspect_ratio == "1:1"
+
+
+def test_veo_fast_hides_square(qapp, tmp_path):
+    dialog, _ = _dialog(tmp_path, GenerationSettings(provider="veo", model=VEO_STD,
+                                                     aspect_ratio="1:1"))
+    assert dialog.aspect_combo.currentText() == "1:1"
+    dialog.model_combo.setCurrentText(VEO_FAST)
+    assert "1:1" not in _aspects(dialog)
+    assert dialog.aspect_combo.currentText() == "16:9"
+    assert dialog.settings().aspect_ratio == "16:9"
+
+
+def test_provider_switch_remaps_square_and_logs(qapp, tmp_path, caplog):
+    dialog, _ = _dialog(tmp_path, GenerationSettings(provider="veo", model=VEO_STD,
+                                                     aspect_ratio="1:1"))
+    with caplog.at_level("INFO", logger=gsd.__name__):
+        dialog.provider_combo.setCurrentText("omni")
+    assert dialog.aspect_combo.currentText() == "16:9"
+    assert any(r.levelno == 20 and "1:1" in r.getMessage() for r in caplog.records)
+    assert "1:1" in dialog.aspect_note.text()
+    # Going back to a model that allows 1:1 clears the note; the choice stays 16:9.
+    dialog.provider_combo.setCurrentText("veo")
+    assert dialog.aspect_combo.currentText() == "16:9"
+    assert dialog.aspect_note.text() == ""
+
+
+def test_set_settings_with_illegal_aspect_remaps(qapp, tmp_path):
+    # The sprite-alpha project: provider omni with a saved 1:1 aspect.
+    dialog, _ = _dialog(tmp_path, GenerationSettings(provider="omni", aspect_ratio="1:1"))
+    assert dialog.settings().aspect_ratio == "16:9"
+    assert "1:1" in dialog.aspect_note.text()
+
+
+def test_hand_pick_clears_the_remap_note(qapp, tmp_path):
+    dialog, _ = _dialog(tmp_path, GenerationSettings(provider="omni", aspect_ratio="1:1"))
+    assert "1:1" in dialog.aspect_note.text()
+    dialog.aspect_combo.setCurrentText("9:16")
+    assert dialog.settings().aspect_ratio == "9:16"
+    assert dialog.aspect_note.text() == ""
+
+
+def test_set_settings_with_a_legal_aspect_clears_an_old_note(qapp, tmp_path):
+    dialog, _ = _dialog(tmp_path, GenerationSettings(provider="omni", aspect_ratio="1:1"))
+    assert "1:1" in dialog.aspect_note.text()
+    dialog.set_settings(GenerationSettings(provider="omni", aspect_ratio="16:9"))
+    assert dialog.settings().aspect_ratio == "16:9"
+    assert dialog.aspect_note.text() == ""
 
 
 def test_custom_model_text_is_kept(qapp, tmp_path):

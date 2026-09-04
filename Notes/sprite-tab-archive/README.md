@@ -17,6 +17,7 @@ is not in this archive; it had not started.
 | `global-constraints.md`, `preflight-scan.md` | Sub-project 6's seam contract list and its pre-flight verification scan. |
 | `implementer-contract.md`, `reviewer-contract.md` | The standing contracts every agent in the chain followed. |
 | `*.diff` | The two review packages the sub-project 6 reviews cite by line. Every other diff package is regenerable with `git diff`. |
+| `2026-09-01-opus-crop-export-changes.patch` | The reverted 2026-09-01 diff (cell-aspect crop, queue flip, dialog sizing); kept for reference, not reapplied. |
 
 Completion summaries live one level up: `Notes/2026-08-30-sprite-image-route-complete.md`,
 `Notes/2026-08-30-sprite-gui-b-complete.md`, `Notes/2026-08-30-sprite-gui-a-complete.md`.

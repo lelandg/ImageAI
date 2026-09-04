@@ -1,4 +1,5 @@
 """Tests for core/sprite/generation/queue.py (batch queue, G6 retries, G2 cancel)."""
+import logging
 import threading
 from pathlib import Path
 
@@ -6,9 +7,14 @@ import pytest
 
 from core.sprite.generation import queue as queue_mod
 from core.sprite.generation.errors import ProviderError, QuotaExceeded, SafetyRefusal
-from core.sprite.generation.queue import BACKOFF_SECONDS, MAX_RETRIES, ActionQueue
+from core.sprite.generation.queue import (
+    BACKOFF_SECONDS,
+    MAX_RETRIES,
+    PIPELINE_UPTO,
+    ActionQueue,
+)
 from core.sprite.generation.video_route import RenderRequest
-from core.sprite.pipeline import CancelToken, Cancelled
+from core.sprite.pipeline import PROFILE_STAGES, STAGES, CancelToken, Cancelled, PipelineError
 from core.sprite.project import ClipRecord, CostEntry
 
 
@@ -85,6 +91,8 @@ def test_run_renders_in_order_runs_pipeline_and_records_cost(harness):
     q.enqueue(["a1", "a2"])
     results = q.run()
     assert [r.action.id for r in harness["renders"]] == ["a1", "a2"]
+    # One run per card, up to stabilize. The queue never runs a profile
+    # stage: pixel would lock the project palette from untuned keying.
     assert harness["pipelines"] == [("a1", "stabilize"), ("a2", "stabilize")]
     assert set(results) == {"a1", "a2"}
     assert all(isinstance(r, ClipRecord) for r in results.values())
@@ -219,6 +227,36 @@ def test_cancel_during_backoff_stops_within_one_slice(harness):
     assert project.actions[0].status == "queued"
     assert q.pending == ["a1"]
     assert sum(harness["sleeps"]) < 0.5
+
+
+def test_pipeline_upto_stops_before_the_profile_stages():
+    """The queue stops at stabilize. The pixel stage locks the project-wide
+    palette on its first run (core.sprite.pixelart.ensure_palette), so a
+    queue-driven run would bake the first card's untuned keying into every
+    later card. The Processing panel and the export own the profile stages."""
+    assert PIPELINE_UPTO == "stabilize"
+    stop = STAGES.index(PIPELINE_UPTO)
+    assert not any(stage in STAGES[:stop + 1] for stage in PROFILE_STAGES)
+
+
+def test_queue_never_runs_a_profile_stage(harness, monkeypatch):
+    """One pipeline call per card, and never one that reaches hd or pixel."""
+    project, q = harness["build"]()
+
+    def pipeline(project, action, *, upto="pixel", progress=None, token=None, force=False):
+        harness["pipelines"].append((action.id, upto))
+        assert upto not in PROFILE_STAGES, f"queue ran profile stage {upto!r}"
+        action.status = "processed"
+        return {"stabilize": [Path("0000.png")]}
+
+    monkeypatch.setattr(queue_mod, "run_pipeline", pipeline)
+    q.enqueue(["a1"])
+    results = q.run()
+    assert isinstance(results["a1"], ClipRecord)
+    action = project.actions[0]
+    assert action.status == "processed" and action.error is None
+    assert harness["pipelines"] == [("a1", "stabilize")]
+    assert project.profile("pixel") is None or project.profile("pixel").locked_palette is None
 
 
 def test_pipeline_failure_keeps_rendered_status(harness, monkeypatch):

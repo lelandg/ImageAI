@@ -291,3 +291,80 @@ def test_run_pixel_stage_raises_pipeline_error_on_bad_profile_field(tmp_path, ca
             run_pixel_stage(project, make_action(), inputs, tmp_path / "pixel", no_progress, None)
     assert str(bad_value) in excinfo.value.user_message
     assert any(str(bad_value) in record.message for record in caplog.records)
+
+
+def test_pixel_stage_scale_comes_from_the_whole_frame_not_the_subject(tmp_path):
+    """1280x720 frames fit a 64x64 cell at the shared integer scale 1/20.
+
+    Regression guard for the padded-fit contract on the pixel stage default
+    path. A cell-aspect crop was tried on 2026-09-01. It gained 0-1.4% on the
+    three real projects and the user rejected the crop. The subject has
+    transparent margin on every side: a subject that touches the frame
+    edges makes the protect rect equal the frame, and that crop was a no-op
+    on such input, so the old edge-to-edge fixture could not detect it.
+    Against the crop the scale was 12 and the bbox differed.
+    """
+    from core.sprite.project import default_profiles
+
+    src = tmp_path / "stabilized"
+    src.mkdir()
+    inputs = []
+    for i in range(2):
+        arr = np.zeros((720, 1280, 4), dtype=np.uint8)
+        arr[35:685, 440:840] = (200, 40, 40, 255)
+        path = src / f"{i + 1:04d}.png"
+        Image.fromarray(arr).save(path)
+        inputs.append(path)
+    project = SpriteProject(name="proj", project_dir=tmp_path / "proj")
+    project.profiles = default_profiles()          # pixel cell 64x64, palette 32
+    project.stabilize = StabilizeSettings(anchor="bottom_center")
+    out_dir = tmp_path / "pixel"
+
+    outputs = run_pixel_stage(project, make_action(), inputs, out_dir, no_progress, None)
+
+    manifest = json.loads((out_dir / "pixel.json").read_text(encoding="utf-8"))
+    assert manifest["scale"] == 20
+    assert len(outputs) == 2
+    for path in outputs:
+        with Image.open(path) as im:
+            assert im.size == (64, 64)
+            alpha = np.asarray(im.getchannel("A"))
+        # 1280x720 / 20 = 64x36, bottom-center: rows 28..63. The subject at
+        # rows 35..685, cols 440..840 lands at rows 30..61, cols 22..41.
+        assert Image.fromarray(alpha).getbbox() == (22, 30, 42, 62)
+
+
+def test_pixel_stage_keeps_every_row_of_a_portrait_frame(tmp_path):
+    """498x588 frames fit a 128x128 cell at scale 1/5 with no row lost.
+
+    Regression guard for the padded-fit contract (sprite-3's frame size).
+    The bars sit inside a transparent margin, so a crop of either axis
+    changes the bbox; the scale alone would survive a crop that only trims
+    height.
+    """
+    src = tmp_path / "stabilized"
+    src.mkdir()
+    inputs = []
+    for i in range(2):
+        arr = np.zeros((588, 498, 4), dtype=np.uint8)
+        # A vertical bar (rows 40..548) and a horizontal bar (cols 30..468).
+        arr[40:548, 100 + 5 * i:400 + 5 * i] = (200, 40, 40, 255)
+        arr[200:300, 30:468] = (200, 40, 40, 255)
+        path = src / f"{i + 1:04d}.png"
+        Image.fromarray(arr).save(path)
+        inputs.append(path)
+    project = make_project(tmp_path, make_profile(cell_size=(128, 128)))
+    out_dir = tmp_path / "pixel"
+
+    outputs = run_pixel_stage(project, make_action(), inputs, out_dir, no_progress, None)
+
+    manifest = json.loads((out_dir / "pixel.json").read_text(encoding="utf-8"))
+    assert manifest["scale"] == 5
+    for path in outputs:
+        with Image.open(path) as im:
+            assert im.size == (128, 128)
+            alpha = np.asarray(im.getchannel("A"))
+        # ceil(498 / 5) x ceil(588 / 5) = 100x118 at (14, 10), bottom-center.
+        # Bars: cols 30..468 -> 6..93 (+14 = 20..108); rows 40..548 -> 8..109
+        # (+10 = 18..120).
+        assert Image.fromarray(alpha).getbbox() == (20, 18, 108, 120)

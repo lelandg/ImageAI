@@ -11,6 +11,7 @@ from typing import Callable, Optional
 
 from PIL import Image
 
+from core.sprite import keying
 from core.sprite.generation._common import emit, now_iso
 from core.sprite.generation.errors import ProviderError, classify_provider_error
 from core.sprite.generation.prompts import color_name, normalize_hex
@@ -18,6 +19,8 @@ from core.sprite.pipeline import CancelToken
 from core.utils import write_image_sidecar
 
 logger = logging.getLogger(__name__)
+
+PLATE_DRIFT_TOLERANCE = 0.2   # same scale as KeySettings.tolerance (Cb/Cr distance / 255)
 
 PLATE_PROMPT = ("Place this exact character on a flat solid {color_name} background {hex}. "
                 "Remove all shadows and reflections. Do not change the character.")
@@ -75,6 +78,19 @@ def make_chroma_plate(provider, character: Path, out_png: Path,
         out_png.parent.mkdir(parents=True, exist_ok=True)
         rgba.save(out_png, format="PNG")
         size = list(rgba.size)
+        measured = keying.estimate_key_color(rgba)
+
+    # The model does not always honor the exact color. Record what it made, and
+    # say so: keying samples the clip border, so a drifted plate still keys.
+    drift = keying.key_distance(keying.hex_to_rgb(measured.color), keying.hex_to_rgb(hex_color))
+    if measured.uniformity < keying.KEY_AUTO_MIN_UNIFORMITY:
+        emit(logger, log, f"Plate background is not one color ({measured.uniformity:.0%} agrees "
+                          f"with {measured.color}). Keying may need an explicit key color.",
+             level="warning")
+    elif drift > PLATE_DRIFT_TOLERANCE:
+        emit(logger, log, f"Plate background measured {measured.color}, not the requested "
+                          f"{hex_color} (drift {drift:.2f}). Keying samples the clip border, so "
+                          f"the sampled color is used automatically.", level="warning")
 
     write_image_sidecar(out_png, {
         "kind": "chroma_plate",
@@ -83,6 +99,8 @@ def make_chroma_plate(provider, character: Path, out_png: Path,
         "model": model_id,
         "aspect_ratio": aspect_ratio,
         "plate_color": hex_color,
+        "measured_color": measured.color,
+        "measured_uniformity": round(measured.uniformity, 4),
         "source": str(character),
         "size": size,
         "response_texts": list(texts),

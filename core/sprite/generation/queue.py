@@ -2,9 +2,18 @@
 
 Renders queued cards one at a time with ``render_action``, retries
 retryable errors with exponential backoff, never retries a safety refusal,
-runs the processing pipeline up to ``stabilize`` after each clip, writes a
-``CostEntry`` row per rendered clip, and honors the cancel token between
-jobs, inside jobs (through ``render_action``), and during backoff waits.
+runs the processing pipeline after each clip, writes a ``CostEntry`` row per
+rendered clip, and honors the cancel token between jobs, inside jobs
+(through ``render_action``), and during backoff waits.
+
+The post-render pipeline stops at ``PIPELINE_UPTO`` (``stabilize``); a
+failure there sets ``action.error``. The queue never runs a profile stage.
+The ``pixel`` stage locks the project-wide palette on its first run
+(``core.sprite.pixelart.ensure_palette``), so a queue-driven run would lock
+the palette from the first card's untuned keying before the user adjusts
+anything. The Processing panel runs the profile stages on demand, and the
+export runs any missing profile stage through
+``core.sprite.pipeline.ensure_profile_stages``.
 
 Thread-safety: ``run()`` is meant to execute on a worker thread (5a's
 ``SpriteWorker`` QThread) while ``enqueue``/``retry`` are called from the GUI
@@ -43,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 BACKOFF_SECONDS = (2.0, 4.0, 8.0)
 MAX_RETRIES = len(BACKOFF_SECONDS)
-PIPELINE_UPTO = "stabilize"
+PIPELINE_UPTO = "stabilize"  # never a profile stage: pixel locks the project palette
 _SLEEP_SLICE = 0.2  # backoff waits sleep in slices this long so a cancel is seen promptly
 
 QueueResult = Dict[str, Union[ClipRecord, SpriteGenerationError]]
@@ -230,9 +239,10 @@ class ActionQueue:
                 raise Cancelled(f"cancelled while waiting to retry '{action.name}'")
 
     def _post_process(self, action: ActionCard) -> None:
+        """Run the pipeline up to ``PIPELINE_UPTO`` (stabilize); a failure marks the card."""
         try:
-            run_pipeline(self.project, action, upto=PIPELINE_UPTO,
-                         progress=self.progress, token=self.token)
+            outputs = run_pipeline(self.project, action, upto=PIPELINE_UPTO,
+                                   progress=self.progress, token=self.token)
         except Cancelled:
             raise
         except Exception as exc:  # noqa: BLE001 - the clip is safe; report and continue
@@ -240,9 +250,9 @@ class ActionQueue:
             emit(logger, self.log, f"Pipeline for '{action.name}' failed after render: {exc}. "
                                    f"The clip is saved; run the pipeline again from the "
                                    f"processing panel.", level="error")
-        else:
-            emit(logger, self.log, f"Frames ready for '{action.name}' "
-                                   f"(pipeline up to '{PIPELINE_UPTO}')")
+            return
+        stages = ", ".join(outputs) or "none"
+        emit(logger, self.log, f"Frames ready for '{action.name}' (stages: {stages})")
 
     def _save(self) -> None:
         if self.project.project_dir is None:

@@ -62,7 +62,7 @@ def _isolated_export_settings():
 def project(tmp_path, monkeypatch):
     project, _action = make_project(tmp_path)
     monkeypatch.setattr(SpriteProject, "sheet_meta",
-                        lambda self, profile: sheet_from_action(self.actions[0], profile))
+                        lambda self, profile, warn=True: sheet_from_action(self.actions[0], profile))
     monkeypatch.setattr(ed.prefs, "purge_after_export_enabled", lambda: False)
     monkeypatch.setattr(ed.prefs, "set_purge_after_export", lambda value: None)
     monkeypatch.setattr(ed.prefs, "confirm_purge", lambda parent: True)
@@ -483,3 +483,230 @@ def test_out_dir_persistence_is_per_project(qapp, tmp_path, monkeypatch):
     dialog_a_again = ExportDialog(project_a)
     assert dialog_a_again.out_dir_edit.text() == str(tmp_path / "custom_export")
     _close(dialog_a_again)
+
+
+# --- T4: the options pane scrolls; the format rows never get squeezed ----------------
+def _settle(dialog, width: int, height: int) -> None:
+    """Show `dialog` at the given size and pump the layout until it settles."""
+    from PySide6.QtWidgets import QApplication
+    dialog.show()
+    dialog.resize(width, height)
+    for _ in range(5):
+        QApplication.processEvents()
+
+
+def _format_rows_keep_their_hint(dialog) -> None:
+    for fmt_id, box in dialog.format_checks.items():
+        assert box.height() >= box.sizeHint().height(), (
+            f"format row '{fmt_id}' squeezed to {box.height()} px "
+            f"(hint {box.sizeHint().height()} px)")
+
+
+def test_format_rows_keep_their_height_at_the_old_opening_size(qapp, project):
+    """Problem 2: at the old 660x680 opening size the splitter squeezed the format
+    checkboxes below their size hint (3-4 px clipped) until the window grew."""
+    dialog = ExportDialog(project)
+    _settle(dialog, 660, 680)
+    _format_rows_keep_their_hint(dialog)
+    _close(dialog)
+
+
+def test_options_pane_scrolls_instead_of_squeezing(qapp, project):
+    """When the dialog is too short for the options, the pane scrolls; rows keep their hint."""
+    dialog = ExportDialog(project)
+    _settle(dialog, 660, 480)
+    assert dialog.options_scroll.verticalScrollBar().maximum() > 0
+    _format_rows_keep_their_hint(dialog)
+    _close(dialog)
+
+
+def test_dialog_minimum_fits_a_laptop_screen(qapp, project):
+    dialog = ExportDialog(project)
+    _settle(dialog, 660, 720)  # the layout's minimum is only known once it is shown
+    assert dialog.minimumSize().height() <= 600
+    assert dialog.minimumWidth() == 660
+    _close(dialog)
+
+
+def test_unreadable_saved_geometry_falls_back_to_the_default_size(qapp, project, caplog):
+    """A foreign value under the geometry key must not break the dialog."""
+    settings = ed.prefs.sprite_settings()
+    settings.setValue(ed.GEOMETRY_KEY, "not a QByteArray")
+    settings.sync()
+    with caplog.at_level("WARNING", logger="gui.sprite.export_dialog"):
+        dialog = ExportDialog(project)
+    assert dialog.width() >= 660 and dialog.height() > 0
+    assert any("geometry" in r.message for r in caplog.records)
+    _close(dialog)
+
+
+def test_first_open_size_fits_the_screen(qapp, project):
+    from PySide6.QtGui import QGuiApplication
+    dialog = ExportDialog(project)
+    available = QGuiApplication.primaryScreen().availableGeometry()
+    assert dialog.height() <= available.height()
+    assert dialog.width() >= 660
+    _close(dialog)
+
+
+def test_geometry_round_trip(qapp, project):
+    """Mirror of test_settings_round_trip for the window geometry."""
+    dialog = ExportDialog(project)
+    _settle(dialog, 700, 750)
+    _close(dialog)  # persists the geometry
+    again = ExportDialog(project)
+    assert again.settings.value(ed.SETTINGS_PREFIX + "geometry") is not None
+    assert (again.width(), again.height()) == (700, 750)
+    _close(again)
+
+
+def test_late_registered_format_row_is_not_clipped(qapp, project):
+    """A format registered after construction (sub-project 6) gets its full row height too."""
+    dialog = ExportDialog(project)
+    box = dialog.register_format("late_fmt", "Late format (.late)", lambda meta, out_dir: [])
+    _settle(dialog, 660, 680)
+    assert box.height() >= box.sizeHint().height()
+    _format_rows_keep_their_hint(dialog)
+    _close(dialog)
+
+
+# --- T3: run_export guarantees the profile stages before it reads sheet_meta -------
+from PIL import Image  # noqa: E402
+
+from core.sprite.pipeline import register_external_frames, run_pipeline, stage_dir  # noqa: E402
+from core.sprite.project import ActionCard  # noqa: E402
+from core.sprite.slicing import import_png_sequence  # noqa: E402
+
+
+def _install_recorder(monkeypatch, events, reasons=None, ran=False):
+    """Stand in for ensure_profile_stages. ``ran`` marks the fingerprints as changed,
+    the way a real stage run does, so the export saves the project."""
+    def recorder(project, action, profiles, *, progress=no_progress, token=None):
+        events.append(("ensure", action.id, list(profiles)))
+        if ran:
+            for name in profiles:
+                project.stage_fingerprints.setdefault(action.id, {})[name] = "ran"
+        return dict(reasons or {})
+
+    monkeypatch.setattr(ed, "ensure_profile_stages", recorder)
+    return recorder
+
+
+def test_run_export_ensures_profile_stages_per_action_before_sheet_meta(project, tmp_path, monkeypatch):
+    project.actions.append(ActionCard(id="act2", name="idle", prompt="idle"))  # no frames
+    events = []
+    _install_recorder(monkeypatch, events)
+    real_sheet_meta = SpriteProject.sheet_meta
+
+    def sheet_meta(self, profile, warn=True):
+        events.append(("sheet_meta", profile))
+        return real_sheet_meta(self, profile)
+
+    monkeypatch.setattr(SpriteProject, "sheet_meta", sheet_meta)
+    req = _request(project, tmp_path, ["hd", "pixel"], ["png_sequence"])
+    run_export(req, _formats("png_sequence"), log=lambda m: None, progress=no_progress, token=CancelToken())
+    assert events == [("ensure", "act1", ["hd"]), ("sheet_meta", "hd"),
+                      ("ensure", "act1", ["pixel"]), ("sheet_meta", "pixel")]
+
+
+def test_run_export_logs_every_ensure_reason_and_still_writes(project, tmp_path, monkeypatch, caplog):
+    events = []
+    _install_recorder(monkeypatch, events, reasons={"hd": "stabilize output is stale"})
+    logs = []
+    req = _request(project, tmp_path, ["hd"], ["png_sequence"])
+    with caplog.at_level("WARNING", logger="gui.sprite.export_dialog"):
+        files = run_export(req, _formats("png_sequence"), log=logs.append,
+                           progress=no_progress, token=CancelToken())
+    assert len(files) == 8
+    assert any("stabilize output is stale" in line and "walk" in line for line in logs)
+    assert any("stabilize output is stale" in r.message for r in caplog.records)
+
+
+def test_run_export_sends_reasons_at_warning_level(project, tmp_path, monkeypatch):
+    """A two-argument log callback (the dialog's) gets WARNING for a reason; the
+    ordinary lines stay INFO."""
+    _install_recorder(monkeypatch, [], reasons={"hd": "stabilize output is stale"})
+    logs = []
+    req = _request(project, tmp_path, ["hd"], ["png_sequence"])
+    run_export(req, _formats("png_sequence"), log=lambda m, level="INFO": logs.append((level, m)),
+               progress=no_progress, token=CancelToken())
+    levels = {level for level, line in logs if "stabilize output is stale" in line}
+    assert levels == {"WARNING"}
+    assert any(level == "INFO" and line.startswith("Wrote ") for level, line in logs)
+
+
+def test_run_export_saves_the_project_after_the_helper(project, tmp_path, monkeypatch):
+    events = []
+    _install_recorder(monkeypatch, events, ran=True)
+    monkeypatch.setattr(SpriteProject, "save", lambda self, path=None: events.append(("save",)))
+    req = _request(project, tmp_path, ["hd"], ["png_sequence"])
+    run_export(req, _formats("png_sequence"), log=lambda m: None, progress=no_progress, token=CancelToken())
+    assert events[:2] == [("ensure", "act1", ["hd"]), ("save",)]
+
+
+def test_run_export_does_not_save_when_no_stage_ran(project, tmp_path, monkeypatch):
+    """Every profile output is current: the fingerprints did not change, so no save."""
+    events = []
+    _install_recorder(monkeypatch, events)
+    monkeypatch.setattr(SpriteProject, "save", lambda self, path=None: events.append(("save",)))
+    req = _request(project, tmp_path, ["hd", "pixel"], ["png_sequence"])
+    run_export(req, _formats("png_sequence"), log=lambda m: None, progress=no_progress, token=CancelToken())
+    assert ("save",) not in events
+    assert [e for e in events if e[0] == "ensure"] == [("ensure", "act1", ["hd"]),
+                                                       ("ensure", "act1", ["pixel"])]
+
+
+def test_run_export_skips_the_helper_for_a_project_without_a_directory(project, tmp_path, monkeypatch):
+    events = []
+    _install_recorder(monkeypatch, events, ran=True)
+    monkeypatch.setattr(SpriteProject, "save", lambda self, path=None: events.append(("save",)))
+    project.project_dir = None
+    req = _request(project, tmp_path, ["hd"], ["png_sequence"])
+    files = run_export(req, _formats("png_sequence"), log=lambda m: None,
+                       progress=no_progress, token=CancelToken())
+    assert len(files) == 8
+    assert events == []
+
+
+def test_run_export_save_failure_is_logged_not_raised(project, tmp_path, monkeypatch, caplog):
+    _install_recorder(monkeypatch, [], ran=True)
+
+    def broken(self, path=None):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(SpriteProject, "save", broken)
+    logs = []
+    req = _request(project, tmp_path, ["hd"], ["png_sequence"])
+    with caplog.at_level("WARNING", logger="gui.sprite.export_dialog"):
+        files = run_export(req, _formats("png_sequence"), log=lambda m, level="INFO": logs.append((level, m)),
+                           progress=no_progress, token=CancelToken())
+    assert len(files) == 8
+    assert any(level == "WARNING" and "Could not save the project" in line and "disk full" in line
+               for level, line in logs)
+    assert any("disk full" in r.message for r in caplog.records)
+
+
+def test_run_export_end_to_end_writes_hd_cell_sized_frames(tmp_path, alpha_frames):
+    """Regression for problem 1: an export must carry the profile cell size (256x256 hd)
+    even when the user never ran the hd stage from the Processing panel."""
+    project = SpriteProject(name="e2e")
+    project.project_dir = tmp_path / "proj"
+    project.project_dir.mkdir()
+    action = ActionCard(id="a1", name="walk", prompt="walk")
+    project.actions = [action]
+    import_png_sequence(alpha_frames, stage_dir(project, action, "extract"))
+    register_external_frames(project, action)
+    run_pipeline(project, action, upto="stabilize")
+    assert not stage_dir(project, action, "hd").exists()
+    with Image.open(action.frames[0].source_path) as im:
+        assert im.size != (256, 256)  # the stabilize frames are native size
+
+    req = _request(project, tmp_path, ["hd"], ["png_sequence"])
+    files = run_export(req, _formats("png_sequence"), log=lambda m: None,
+                       progress=no_progress, token=CancelToken())
+    pngs = [Path(p) for p in files if Path(p).suffix == ".png"]
+    assert len(pngs) == 12
+    for png in pngs:
+        with Image.open(png) as im:
+            assert im.size == (256, 256), png.name
+    assert (project.project_dir / "project.iasprite.json").exists()

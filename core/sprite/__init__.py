@@ -50,6 +50,7 @@ from .pipeline import (
     ProgressFn,
     SettingsFn,
     StageRunner,
+    ensure_profile_stages,
     identity_runner,
     is_stage_current,
     list_frames,
@@ -100,7 +101,8 @@ __all__ = [
     # pipeline
     "PROFILE_STAGES", "STAGE_CODE_VERSION", "STAGE_RUNNERS", "STAGE_SETTINGS", "STAGES",
     "UPSTREAM", "CancelToken", "Cancelled", "PipelineError", "ProgressFn", "SettingsFn",
-    "StageRunner", "identity_runner", "is_stage_current", "list_frames", "no_progress",
+    "StageRunner", "ensure_profile_stages", "identity_runner", "is_stage_current", "list_frames",
+    "no_progress",
     "record_fingerprint", "register_external_frames", "register_stage", "run_pipeline",
     "stage_dir", "stage_fingerprint", "stage_settings",
     # extract / slicing / stabilize

@@ -430,3 +430,149 @@ def test_hd_alpha_post_pass_runs_and_honours_cancel_with_progress(tmp_path, alph
     alpha_events = [e for e in seen if e[3].startswith("hd: alpha")]
     assert len(alpha_events) == 2, "the post-pass must stop as soon as the token is cancelled"
     assert "hd" not in project.stage_fingerprints.get("a1", {})
+
+
+# --- ensure_profile_stages (T3: export guarantees the profile stages) -------------
+import logging  # noqa: E402
+
+from core.sprite.pipeline import ensure_profile_stages, hd_stage_settings  # noqa: E402
+
+
+def _stabilized(tmp_path, alpha_frames):
+    project, action = _project(tmp_path)
+    import_png_sequence(alpha_frames, stage_dir(project, action, "extract"))
+    register_external_frames(project, action)
+    run_pipeline(project, action, upto="stabilize")
+    return project, action
+
+
+def _dir_snapshot(directory):
+    """(dir mtime, {name: (size, mtime)}) so a rerun is visible even if content matches."""
+    files = {p.name: (p.stat().st_size, p.stat().st_mtime_ns) for p in pipeline.list_frames(directory)}
+    return directory.stat().st_mtime_ns, files
+
+
+def test_ensure_profile_stages_runs_both_profiles_and_leaves_upstream_alone(tmp_path, alpha_frames):
+    project, action = _stabilized(tmp_path, alpha_frames)
+    frames_before = [(f.name, f.source_path, f.duration_ms) for f in action.frames]
+    upstream = {s: _dir_snapshot(stage_dir(project, action, s)) for s in ("key", "cleanup", "alpha", "stabilize")}
+    assert not stage_dir(project, action, "hd").exists()
+    assert not stage_dir(project, action, "pixel").exists()
+
+    reasons = ensure_profile_stages(project, action, ["hd", "pixel"])
+
+    assert reasons == {}
+    assert len(pipeline.list_frames(stage_dir(project, action, "hd"))) == 12
+    assert len(pipeline.list_frames(stage_dir(project, action, "pixel"))) == 12
+    assert is_stage_current(project, action, "hd")
+    assert is_stage_current(project, action, "pixel")
+    assert [(f.name, f.source_path, f.duration_ms) for f in action.frames] == frames_before
+    for stage, snapshot in upstream.items():
+        assert _dir_snapshot(stage_dir(project, action, stage)) == snapshot, stage
+
+
+def test_ensure_profile_stages_refuses_when_stabilize_is_stale(tmp_path, alpha_frames):
+    project, action = _stabilized(tmp_path, alpha_frames)
+    frames_before = list(action.frames)
+    project.stabilize.pad_px = 3  # stabilize fingerprint no longer matches
+    reasons = ensure_profile_stages(project, action, ["hd", "pixel"])
+    assert set(reasons) == {"hd", "pixel"}
+    for reason in reasons.values():
+        assert "stale" in reason and "Processing panel" in reason
+    assert not stage_dir(project, action, "hd").exists()
+    assert not stage_dir(project, action, "pixel").exists()
+    assert action.frames == frames_before
+
+
+def test_ensure_profile_stages_skips_disabled_unknown_and_rendering(tmp_path, alpha_frames):
+    project, action = _stabilized(tmp_path, alpha_frames)
+    project.profiles[1].enabled = False
+    reasons = ensure_profile_stages(project, action, ["pixel", "nope"])
+    assert "disabled" in reasons["pixel"]
+    assert "nope" in reasons["nope"]
+    assert not stage_dir(project, action, "pixel").exists()
+    # The queue sets "rendered" before its post-render pipeline starts, so every
+    # status the queue holds must refuse, not only "rendering".
+    for status in ("queued", "rendering", "rendered"):
+        action.status = status
+        reasons = ensure_profile_stages(project, action, ["hd"])
+        assert status in reasons["hd"] and "render queue" in reasons["hd"], status
+        assert not stage_dir(project, action, "hd").exists()
+    action.status = "processed"
+    assert ensure_profile_stages(project, action, ["hd"]) == {}
+    assert stage_dir(project, action, "hd").exists()
+
+
+def test_ensure_profile_stages_second_call_runs_nothing(tmp_path, alpha_frames):
+    project, action = _stabilized(tmp_path, alpha_frames)
+    assert ensure_profile_stages(project, action, ["hd", "pixel"]) == {}
+    events = []
+    assert ensure_profile_stages(project, action, ["hd", "pixel"],
+                                 progress=lambda *a: events.append(a)) == {}
+    assert events == []
+
+
+def test_ensure_profile_stages_reruns_a_stale_profile_at_the_new_cell_size(tmp_path, alpha_frames):
+    project, action = _stabilized(tmp_path, alpha_frames)
+    assert ensure_profile_stages(project, action, ["hd"]) == {}
+    with Image.open(pipeline.list_frames(stage_dir(project, action, "hd"))[0]) as im:
+        assert im.size == (256, 256)
+    project.profiles[0].cell_size = (48, 48)
+    assert not is_stage_current(project, action, "hd")
+    assert ensure_profile_stages(project, action, ["hd"]) == {}
+    assert is_stage_current(project, action, "hd")
+    for path in pipeline.list_frames(stage_dir(project, action, "hd")):
+        with Image.open(path) as im:
+            assert im.size == (48, 48)
+
+
+def test_ensure_profile_stages_reports_a_failed_profile_and_writes_the_other(tmp_path, alpha_frames,
+                                                                             registry, caplog):
+    project, action = _stabilized(tmp_path, alpha_frames)
+
+    def boom(project, action, input_frames, out_dir, progress, token):
+        raise PipelineError("hd exploded")
+
+    register_stage("hd", boom, hd_stage_settings, code_version=STAGE_CODE_VERSION["hd"])
+    with caplog.at_level(logging.ERROR, logger="core.sprite.pipeline"):
+        reasons = ensure_profile_stages(project, action, ["hd", "pixel"])
+    assert reasons == {"hd": "hd exploded"}
+    assert any("hd exploded" in r.message for r in caplog.records)
+    assert "hd" not in project.stage_fingerprints["a1"]
+    assert is_stage_current(project, action, "pixel")
+    assert len(pipeline.list_frames(stage_dir(project, action, "pixel"))) == 12
+
+
+def test_ensure_profile_stages_reports_any_exception_and_writes_the_other(tmp_path, alpha_frames,
+                                                                          registry, caplog):
+    """A truncated PNG or a stage-dir OSError is not a PipelineError; it must
+    still leave the other profiles exportable and log the traceback."""
+    project, action = _stabilized(tmp_path, alpha_frames)
+
+    def broken_disk(project, action, input_frames, out_dir, progress, token):
+        raise OSError("stages/a1/hd: disk full")
+
+    register_stage("hd", broken_disk, hd_stage_settings, code_version=STAGE_CODE_VERSION["hd"])
+    with caplog.at_level(logging.ERROR, logger="core.sprite.pipeline"):
+        reasons = ensure_profile_stages(project, action, ["hd", "pixel"])
+    assert reasons == {"hd": "stages/a1/hd: disk full"}
+    failures = [r for r in caplog.records if "disk full" in r.message]
+    assert failures and failures[0].exc_info is not None
+    assert failures[0].exc_info[0] is OSError
+    assert "hd" not in project.stage_fingerprints["a1"]
+    assert is_stage_current(project, action, "pixel")
+    assert len(pipeline.list_frames(stage_dir(project, action, "pixel"))) == 12
+
+
+def test_ensure_profile_stages_lets_cancel_propagate(tmp_path, alpha_frames, registry):
+    """A cancel is not a profile failure: it stops the export, and no reason is recorded."""
+    project, action = _stabilized(tmp_path, alpha_frames)
+
+    def cancelled(project, action, input_frames, out_dir, progress, token):
+        raise Cancelled("user pressed Stop")
+
+    register_stage("hd", cancelled, hd_stage_settings, code_version=STAGE_CODE_VERSION["hd"])
+    with pytest.raises(Cancelled):
+        ensure_profile_stages(project, action, ["hd", "pixel"])
+    assert "hd" not in project.stage_fingerprints["a1"]
+    assert not stage_dir(project, action, "pixel").exists()

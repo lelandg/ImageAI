@@ -29,7 +29,7 @@ from core.sprite.generation.errors import ProviderError, classify_provider_error
 from core.sprite.generation.prompts import inject_chroma, strip_render_terms
 from core.sprite.pipeline import CancelToken, Cancelled, ProgressFn, no_progress
 from core.sprite.project import ActionCard, ClipRecord, ExtractionSettings, GenerationSettings
-from core.sprite.timing import snap_duration
+from core.sprite.timing import legal_aspect_ratios, snap_duration
 
 if TYPE_CHECKING:
     from core.video.omni_client import OmniClient, OmniGenerationConfig
@@ -47,6 +47,25 @@ class RenderRequest:
     refs: List[Path]
     settings: GenerationSettings
     out_mp4: Path
+
+
+def validate_generation_settings(settings: GenerationSettings) -> Optional[str]:
+    """One user-facing message when ``settings`` cannot render, else ``None``.
+
+    The queue calls this before it starts a worker. The provider configs keep
+    their own checks; this one runs first so the user sees the problem before
+    any card leaves the ``queued`` state.
+    """
+    provider = (settings.provider or "").strip().lower()
+    try:
+        legal = legal_aspect_ratios(provider, settings.model)
+    except ValueError as exc:
+        return f"{exc} Open Generation Settings to change it."
+    if settings.aspect_ratio in legal:
+        return None
+    target = f"{provider}/{settings.model}" if settings.model else provider
+    return (f"Aspect ratio {settings.aspect_ratio} is not supported by {target}. "
+            f"Use one of {', '.join(legal)}. Open Generation Settings to change it.")
 
 
 def omni_prompt(req: RenderRequest, duration_s: int) -> str:

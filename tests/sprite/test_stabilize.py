@@ -1,3 +1,4 @@
+import numpy as np
 import pytest
 from PIL import Image
 
@@ -133,3 +134,55 @@ def test_crop_and_pad_cancel_and_validation(tmp_path, alpha_frames):
         crop_and_pad(alpha_frames, tmp_path / "c", (0, 0, 8, 8), (0, 8))
     with pytest.raises(ValueError):
         crop_and_pad(alpha_frames, tmp_path / "c", (0, 0, 8, 8), (8, 8), anchor="nope")
+
+
+def _margin_frame(path, subject=(35, 685, 440, 840)):
+    """A 1280x720 frame whose subject has transparent margin on every side.
+
+    A crop toward the cell aspect changes the padded-fit result only when the
+    subject does not touch the frame edges: a protect rect that equals the
+    full frame makes the crop a no-op, so an edge-to-edge subject cannot
+    detect the crop.
+    """
+    top, bottom, left, right = subject
+    frame = np.zeros((720, 1280, 4), dtype=np.uint8)
+    frame[top:bottom, left:right] = (200, 40, 40, 255)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(frame).save(path)
+    return path
+
+
+def test_crop_and_pad_full_frame_bbox_never_drops_subject_pixels(tmp_path):
+    """The hd stage scales the whole stabilized frame into the cell; it never crops.
+
+    Regression guard for the padded-fit contract on the hd stage default
+    path. A cell-aspect crop was tried on 2026-09-01 (default on in
+    ``hd_runner``, off in ``crop_and_pad``). It gained 0-1.4% on the three
+    real projects and the user rejected the crop. This test drives
+    ``hd_runner`` with ``default_profiles()``, so a default-on crop anywhere
+    in the stage fails it: against that crop the solid bbox was
+    (54, 10, 202, 246). A call to ``crop_and_pad`` with an explicit
+    full-frame bbox cannot see such a crop, so the test goes through the stage.
+    """
+    from core.sprite.pipeline import hd_runner, no_progress
+    from core.sprite.project import ActionCard, SpriteProject, StabilizeSettings, default_profiles
+
+    src = _margin_frame(tmp_path / "src" / "0001.png")
+    project = SpriteProject(name="p", project_dir=tmp_path / "proj")
+    project.profiles = default_profiles()
+    project.stabilize = StabilizeSettings(anchor="bottom_center")
+    action = ActionCard(id="a1", name="walk", prompt="walk")
+
+    out = hd_runner(project, action, [src], tmp_path / "hd", no_progress, None)
+
+    with Image.open(out[0]) as im:
+        assert im.size == (256, 256)
+        alpha = np.asarray(im.getchannel("A"))
+    # 1280x720 scaled by 256/1280 = 0.2 gives 256x144 at y=112 (bottom anchor).
+    # The subject at rows 35..685, cols 440..840 lands at rows 119..249 and
+    # cols 88..168 of the cell. Lanczos ringing adds faint alpha at the edges,
+    # so the pin is the solid (alpha >= 128) bbox.
+    solid = (alpha >= 128).astype(np.uint8) * 255
+    assert Image.fromarray(solid).getbbox() == (88, 119, 168, 249)
+    # Every subject row survives: 650 rows * 0.2 = 130 rows, 119..248.
+    assert int((solid.any(axis=1)).sum()) == 130

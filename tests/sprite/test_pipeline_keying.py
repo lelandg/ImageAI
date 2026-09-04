@@ -1,3 +1,4 @@
+import json
 import uuid
 from pathlib import Path
 
@@ -77,7 +78,7 @@ def test_changed_override_changes_the_key_fingerprint(tmp_path):
     assert pipeline.stage_fingerprint(project, action, "key") != before
     settings = pipeline.STAGE_SETTINGS["key"](project, action)
     assert settings["overrides"][1] == {"softness": 0.3}
-    assert settings["key_color"] == "#00C800"
+    assert settings["key_color"] == "auto"   # sampled from the clip at run time
 
 
 def test_cleanup_settings_change_only_cleanup_and_later(tmp_path):
@@ -205,3 +206,114 @@ def test_alpha_runner_rejects_a_bad_key_color_override(tmp_path, caplog):
                                   pipeline.no_progress, None)
     assert info.value.user_message
     assert "rgb(0,200,0)" in caplog.text
+
+
+def _seed_extract_field(project: SpriteProject, action: ActionCard, field) -> list:
+    """Like ``_seed_extract`` but with a flat (no gradient) field of ``field`` color."""
+    out = pipeline.stage_dir(project, action, "extract")
+    paths = []
+    for i, c in enumerate(CENTERS):
+        rgb, _cov = disc_on_field(center=c, field=field, gradient=False)
+        paths.append(write_png(out / f"{i + 1:04d}.png", rgb))
+    project.stage_fingerprints.setdefault(action.id, {})["extract"] = \
+        pipeline.stage_fingerprint(project, action, "extract")
+    action.frames = [FrameMeta(name=f"walk_{i:02d}", source_path=p, frame=(0, 0, 0, 0))
+                     for i, p in enumerate(paths)]
+    project.actions.append(action)
+    return paths
+
+
+def test_key_stage_warns_when_the_key_color_is_not_in_the_clip(tmp_path, caplog):
+    """T9: a wrong key color removes almost nothing; the key stage says so and
+    names the color it sampled from the clip. The alpha result does not change."""
+    project = _project(tmp_path)
+    project.plate_color = "#00FF00"
+    project.key.key_color = "#00FF00"   # explicit: auto sampling would key this clip
+    action = _action()
+    _seed_extract_field(project, action, field=(118, 188, 103))
+    reports = []
+    with caplog.at_level("WARNING", logger="core.sprite.pipeline"):
+        result = pipeline.run_pipeline(project, action, upto="key",
+                                       progress=lambda s, d, t, m: reports.append((s, m)))
+    warnings = [r for r in caplog.records if r.levelname == "WARNING" and "Key color" in r.getMessage()]
+    assert len(warnings) == 1
+    text = warnings[0].getMessage()
+    assert "#00FF00" in text and "#76BC67" in text
+    assert "Keying settings" in text
+    # The runner reports the warning last, after every per-frame line, so the
+    # per-frame lines do not overwrite it. Only run_pipeline's "done" follows.
+    key_reports = [m for s, m in reports if s == "key"]
+    assert "#76BC67" in key_reports[-2] and key_reports[-1] == "key: done"
+    assert all("#76BC67" not in m for m in key_reports[:-2])
+    # Warning only: the key result stays as the wrong key produced it (nothing removed).
+    assert _rgba(result["key"][0])[:, :, 3].min() == 255
+
+
+def test_key_stage_stays_silent_when_the_key_color_matches_the_clip(tmp_path, caplog):
+    project = _project(tmp_path)
+    project.plate_color = "#00FF00"
+    action = _action()
+    _seed_extract_field(project, action, field=(0, 255, 0))
+    with caplog.at_level("WARNING", logger="core.sprite.pipeline"):
+        result = pipeline.run_pipeline(project, action, upto="key")
+    assert not [r for r in caplog.records if r.levelname == "WARNING" and "Key color" in r.getMessage()]
+    assert _rgba(result["key"][0])[:, :, 3].min() == 0
+
+
+def test_key_stage_samples_the_clip_when_no_key_color_is_set(tmp_path, caplog):
+    """Out of the box: the plate asked for #00FF00, the clip came back #89C55F.
+    The key stage samples the clip border, keys on that, and says so."""
+    project = _project(tmp_path)
+    project.plate_color = "#00FF00"
+    assert project.key.key_color is None
+    action = _action()
+    _seed_extract_field(project, action, field=(137, 197, 95))
+    reports = []
+    with caplog.at_level("INFO", logger="core.sprite.pipeline"):
+        result = pipeline.run_pipeline(project, action, upto="alpha",
+                                       progress=lambda s, d, t, m: reports.append((s, m)))
+    keyed = _rgba(result["key"][0])
+    assert keyed[0, 0, 3] == 0 and keyed[-1, -1, 3] == 0      # the field is gone
+    assert keyed[24, 32, 3] == 255                             # the disc stays
+    assert not [r for r in caplog.records if r.levelname == "WARNING" and "removed" in r.getMessage()]
+    sampled = [r.getMessage() for r in caplog.records if "#89C55F" in r.getMessage()]
+    assert sampled and "#00FF00" in sampled[0]
+    assert any("#89C55F" in m for s, m in reports if s == "key")
+    report = json.loads((pipeline.stage_dir(project, action, "key") / "key.json").read_text())
+    assert report["key_color"] == "#89C55F" and report["auto"] is True
+    # The alpha stage decontaminates against the same sampled color and keeps the result.
+    final = _rgba(result["alpha"][0])
+    assert final[0, 0, 3] == 0 and final[24, 32, 3] == 255
+
+
+def test_key_stage_falls_back_to_the_plate_color_when_the_border_is_not_one_color(tmp_path, caplog):
+    project = _project(tmp_path)
+    project.plate_color = "#00FF00"
+    action = _action()
+    out = pipeline.stage_dir(project, action, "extract")
+    rng = np.random.default_rng(3)
+    paths = [write_png(out / f"{i + 1:04d}.png", rng.integers(0, 256, size=(48, 64, 3), dtype=np.uint8))
+             for i in range(2)]
+    project.stage_fingerprints.setdefault(action.id, {})["extract"] = \
+        pipeline.stage_fingerprint(project, action, "extract")
+    action.frames = [FrameMeta(name=f"walk_{i:02d}", source_path=p, frame=(0, 0, 0, 0))
+                     for i, p in enumerate(paths)]
+    project.actions.append(action)
+    with caplog.at_level("WARNING", logger="core.sprite.pipeline"):
+        pipeline.run_pipeline(project, action, upto="key")
+    texts = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert any("not one color" in t and "#00FF00" in t for t in texts)
+    report = json.loads((pipeline.stage_dir(project, action, "key") / "key.json").read_text())
+    assert report["key_color"] == "#00FF00" and report["auto"] is False
+
+
+def test_explicit_key_color_is_not_overridden_by_sampling(tmp_path):
+    project = _project(tmp_path)
+    project.plate_color = "#00FF00"
+    project.key.key_color = "#00FF00"
+    action = _action()
+    _seed_extract_field(project, action, field=(137, 197, 95))
+    result = pipeline.run_pipeline(project, action, upto="key")
+    assert _rgba(result["key"][0])[:, :, 3].min() == 255   # wrong explicit key removes nothing
+    report = json.loads((pipeline.stage_dir(project, action, "key") / "key.json").read_text())
+    assert report["key_color"] == "#00FF00" and report["auto"] is False

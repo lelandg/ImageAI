@@ -106,3 +106,28 @@ def test_make_plate_raises_after_the_provider_call_when_cancelled(png_file, tmp_
         make_chroma_plate(provider, png_file(), tmp_path / "p.png", token=token)
     assert provider.edit_image.call_count == 1
     assert not (tmp_path / "p.png").exists()  # no half-written plate, no sidecar
+
+
+def test_make_plate_measures_the_real_background_and_warns_on_drift(png_file, tmp_path):
+    """The model returned a muted green (#89C55F) for a #00FF00 request."""
+    src = png_file()
+    provider = _provider(images=[_png_bytes((137, 197, 95))])
+    out = tmp_path / "source" / "plate.png"
+    seen = []
+    make_chroma_plate(provider, src, out, "#00ff00", log=seen.append)
+    meta = json.loads(out.with_suffix(".png.json").read_text(encoding="utf-8"))
+    assert meta["measured_color"] == "#89C55F"
+    assert meta["measured_uniformity"] == 1.0
+    joined = "\n".join(seen)
+    assert "#89C55F" in joined and "#00FF00" in joined and "samples the clip" in joined
+
+
+def test_make_plate_stays_quiet_when_the_background_matches(png_file, tmp_path):
+    src = png_file()
+    provider = _provider(images=[_png_bytes((0, 255, 0))])
+    out = tmp_path / "source" / "plate.png"
+    seen = []
+    make_chroma_plate(provider, src, out, "#00ff00", log=seen.append)
+    meta = json.loads(out.with_suffix(".png.json").read_text(encoding="utf-8"))
+    assert meta["measured_color"] == "#00FF00"
+    assert not any("drift" in line or "samples the clip" in line for line in seen)

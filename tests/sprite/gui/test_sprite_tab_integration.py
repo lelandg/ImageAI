@@ -11,6 +11,10 @@ from gui_synthetic import make_frames, make_project
 class _StubQueue(QObject):
     statusChanged = Signal()
 
+    def is_busy(self):
+        """The real QueuePanel is a WorkerHost; the export gate asks it this."""
+        return False
+
 
 class _StubTab(QWidget):
     """Implements the 5a SpriteTab contract that FramesWorkspace consumes."""
@@ -255,7 +259,7 @@ def test_player_source_switch_uses_sheet_meta(qapp, tmp_path, monkeypatch):
     from gui_synthetic import sheet_from_action
     seen = []
 
-    def fake_sheet(self, profile):
+    def fake_sheet(self, profile, warn=True):
         seen.append(profile)
         return sheet_from_action(self.actions[0], profile)
 
@@ -270,7 +274,7 @@ def test_player_source_switch_uses_sheet_meta(qapp, tmp_path, monkeypatch):
 def test_player_source_switch_reports_a_failing_profile(qapp, tmp_path, monkeypatch):
     from core.sprite.project import SpriteProject
 
-    def broken_sheet(self, profile):
+    def broken_sheet(self, profile, warn=True):
         raise RuntimeError("no pixel stage")
 
     monkeypatch.setattr(SpriteProject, "sheet_meta", broken_sheet)
@@ -473,6 +477,31 @@ def test_export_is_refused_while_the_panel_runs(qapp, tmp_path, monkeypatch):
         qapp.processEvents()
     assert not workspace.panel.is_busy()
     assert workspace.export_btn.isEnabled()          # re-enabled once the panel is idle
+    assert workspace.open_export_dialog() is not None
+    assert opened == [project]
+    workspace.shutdown()
+
+
+def test_export_is_refused_while_the_render_queue_runs(qapp, tmp_path, monkeypatch):
+    # The queue worker runs run_pipeline on every rendered card, and the export runs the
+    # missing profile stages itself (ensure_profile_stages). QueuePanel is a separate
+    # WorkerHost from ProcessingPanel, so the panel gate alone leaves both threads
+    # writing stages/<id>/hd and /pixel at once.
+    tab, workspace, project, action = _workspace(qapp, tmp_path, monkeypatch)
+    opened = []
+
+    def factory(proj, parent):
+        opened.append(proj)
+        return _FakeDialog(proj, parent)
+
+    monkeypatch.setattr(workspace, "export_dialog_factory", factory)
+    monkeypatch.setattr(tab.queue_panel, "is_busy", lambda: True)
+
+    assert workspace.open_export_dialog() is None
+    assert opened == []
+    assert ("Wait for the render queue to finish before exporting", "WARNING") in tab.log_calls
+
+    monkeypatch.setattr(tab.queue_panel, "is_busy", lambda: False)
     assert workspace.open_export_dialog() is not None
     assert opened == [project]
     workspace.shutdown()

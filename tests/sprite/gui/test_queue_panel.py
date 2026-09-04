@@ -130,6 +130,24 @@ def test_start_requires_api_key(qapp, fake_project, monkeypatch):
     assert seen and "api key" in seen[0].lower() and panel._worker is None
 
 
+def test_start_refuses_illegal_aspect_before_worker(qapp, fake_config, fake_project, monkeypatch):
+    seen = []
+    monkeypatch.setattr(qp, "show_error",
+                        lambda parent, title, message, exception=None: seen.append(message))
+    _FakeQueue.instances.clear()
+    fake_project.generation.aspect_ratio = "1:1"   # provider omni: not legal
+    panel = _panel(fake_config, fake_project, monkeypatch)
+    lines = []
+    panel.logMessage.connect(lambda m, level: lines.append((level, m)))
+    panel.enqueue(["a1"])
+    panel.start()
+    assert len(seen) == 1 and "1:1" in seen[0] and "16:9" in seen[0]
+    assert panel._worker is None
+    assert _FakeQueue.instances == []
+    assert fake_project.actions[0].status == "queued"
+    assert ("ERROR", seen[0]) in lines
+
+
 def test_cancel_stops_queue_without_error_dialog(qapp, fake_config, fake_project, monkeypatch,
                                                  wait_for_worker):
     seen = []

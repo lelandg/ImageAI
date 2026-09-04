@@ -9,6 +9,7 @@ from core.sprite.generation.video_route import (
     RenderRequest,
     build_omni_config,
     build_veo_config,
+    validate_generation_settings,
 )
 from core.sprite.project import GenerationSettings
 from core.video.veo_client import VeoModel
@@ -64,6 +65,26 @@ def test_omni_config_rejects_unsupported_aspect(request_for):
     req = request_for("omni", aspect_ratio="4:3")
     with pytest.raises(ProviderError, match="aspect"):
         build_omni_config(req)
+
+
+def test_validate_generation_settings_reports_illegal_aspect():
+    message = validate_generation_settings(GenerationSettings(provider="omni", aspect_ratio="1:1"))
+    assert message is not None
+    assert "1:1" in message and "omni" in message and "16:9" in message
+    fast = validate_generation_settings(GenerationSettings(provider="veo", model=VEO_FAST,
+                                                           aspect_ratio="1:1"))
+    assert fast is not None and VEO_FAST in fast
+
+
+def test_validate_generation_settings_accepts_legal_aspect():
+    assert validate_generation_settings(GenerationSettings(provider="omni", aspect_ratio="16:9")) is None
+    assert validate_generation_settings(GenerationSettings(provider="veo", model=VEO_STD,
+                                                           aspect_ratio="1:1")) is None
+
+
+def test_validate_generation_settings_reports_unknown_provider():
+    message = validate_generation_settings(GenerationSettings(provider="sora"))
+    assert message is not None and "sora" in message
 
 
 # --- Veo ----------------------------------------------------------------------

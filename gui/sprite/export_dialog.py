@@ -10,15 +10,18 @@ intermediates go to the recycle bin afterwards through
 """
 from __future__ import annotations
 
+import inspect
 import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QCheckBox, QDialog, QDoubleSpinBox, QFileDialog, QFormLayout,
                                QGroupBox, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
-                               QProgressBar, QPushButton, QSpinBox, QVBoxLayout, QWidget)
+                               QProgressBar, QPushButton, QScrollArea, QSpinBox, QVBoxLayout,
+                               QWidget)
 
 from core.paths import get_data_paths
 from core.sprite.exporters.aseprite_json import export_aseprite_json
@@ -27,7 +30,7 @@ from core.sprite.exporters.grid import GridOptions, export_grid
 from core.sprite.exporters.png_sequence import export_png_sequence
 from core.sprite.exporters.texturepacker_json import export_texturepacker_json
 from core.sprite.models import SheetMeta
-from core.sprite.pipeline import CancelToken, ProgressFn
+from core.sprite.pipeline import CancelToken, ProgressFn, ensure_profile_stages
 from core.sprite.project import SpriteProject
 from core.utils import sidecar_path
 from gui.common.dialog_conventions import (DialogCleanupMixin, bind_primary_action,
@@ -45,6 +48,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_TEMPLATE = "{title}_{tag}_{frame01}.png"
 SETTINGS_PREFIX = "sprite/export/"
 SPLITTER_KEY = SETTINGS_PREFIX + "splitter"
+GEOMETRY_KEY = SETTINGS_PREFIX + "geometry"
+DEFAULT_SIZE = QSize(660, 900)      # first-open size; bounded to the screen in __init__
+SCREEN_MARGIN_PX = 80               # room for the title bar and the taskbar
 CLOSE_SHUTDOWN_TIMEOUT_MS = 5000  # on_dialog_close's bound before it falls back to join_orphans()
 
 FormatFn = Callable[[SheetMeta, Path], List[Path]]
@@ -220,8 +226,66 @@ def validate_grid_options(opts: GridOptions) -> List[str]:
     return problems
 
 
+LogFn = Callable[..., None]
+"""``log(message)`` or ``log(message, level)``; ``run_export`` accepts both."""
+
+
+def _accepts_level(log: LogFn) -> bool:
+    """True when ``log`` takes a second positional argument (the level)."""
+    try:
+        params = list(inspect.signature(log).parameters.values())
+    except (TypeError, ValueError):
+        return False
+    positional = [p for p in params
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+    return len(positional) >= 2 or any(p.kind == p.VAR_POSITIONAL for p in params)
+
+
+def _log_at(log: LogFn, message: str, level: str) -> None:
+    """Send ``message`` through ``log`` at ``level``; a one-argument callback gets the text only."""
+    if _accepts_level(log):
+        log(message, level)
+    else:
+        log(message)
+
+
+def _fingerprint_snapshot(project: SpriteProject) -> Dict[str, Dict[str, str]]:
+    return {action_id: dict(stages) for action_id, stages in project.stage_fingerprints.items()}
+
+
+def _ensure_profile_outputs(project: SpriteProject, profile: str, *, log: LogFn,
+                            progress: ProgressFn, token: CancelToken) -> None:
+    """Run the missing profile stage for every action with frames, then save (T3).
+
+    A reason the helper returns is logged and shown; the export still runs
+    with whatever ``sheet_meta`` finds. The project is saved only when a
+    stage ran (the fingerprints changed). A save error is logged, never raised.
+    """
+    if project.project_dir is None:
+        return
+    actions = [action for action in project.actions if action.frames]
+    if not actions:
+        return
+    before = _fingerprint_snapshot(project)
+    for action in actions:
+        token.raise_if_cancelled()
+        reasons = ensure_profile_stages(project, action, [profile], progress=progress, token=token)
+        for name, reason in reasons.items():
+            message = f"Profile '{name}', action '{action.name}': {reason}"
+            _log_at(log, message, "WARNING")
+            logger.warning(message)
+    if _fingerprint_snapshot(project) == before:
+        return
+    try:
+        project.save()
+    except Exception as exc:  # noqa: BLE001 - never lose an export over a save error
+        message = f"Could not save the project: {exc}"
+        _log_at(log, message, "WARNING")
+        logger.warning(message)
+
+
 def run_export(request: ExportRequest, formats: Sequence[ExportFormat], *,
-               log: Callable[[str], None], progress: ProgressFn,
+               log: LogFn, progress: ProgressFn,
                token: CancelToken) -> List[Path]:
     """Export every selected profile with every selected format. No Qt; runs in the worker."""
     written: List[Path] = []
@@ -236,6 +300,7 @@ def run_export(request: ExportRequest, formats: Sequence[ExportFormat], *,
 
     for index, profile in enumerate(request.profiles):
         token.raise_if_cancelled()
+        _ensure_profile_outputs(request.project, profile, log=log, progress=progress, token=token)
         meta = request.project.sheet_meta(profile)
         if not meta.frames:
             log(f"Profile '{profile}': no frames; skipped")
@@ -285,7 +350,9 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         self._wanted_formats: Optional[set] = None
         self.setWindowTitle(f"Export sprites — {project.name}")
         self.setModal(True)
-        self.setMinimumSize(660, 680)
+        # Width only. A minimum height made the dialog taller than a laptop screen and still
+        # let the splitter squeeze the option rows; the options pane scrolls instead.
+        self.setMinimumWidth(660)
         self._build()
         for fmt in BUILTIN_FORMATS:
             self.register_format(fmt.id, fmt.label, fmt.fn, needs_sheet=fmt.needs_sheet,
@@ -293,6 +360,7 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         register_extra_formats(self)
         install_engine_presets(self)
         self._load_settings()
+        self._restore_geometry()
         self.logMessage.connect(self.console.log)
         self.purge_check.setChecked(prefs.purge_after_export_enabled())
         self.purge_check.toggled.connect(self._on_purge_toggled)
@@ -391,14 +459,22 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         self.progress_bar.setVisible(False)
         self.options_layout.addWidget(self.progress_bar)
 
+        # The splitter cannot compress a scroll area below its viewport minimum, so the
+        # option rows keep their size hint and the pane scrolls instead (the Processing
+        # panel uses the same pattern).
+        self.options_scroll = QScrollArea()
+        self.options_scroll.setWidgetResizable(True)
+        self.options_scroll.setFrameShape(QScrollArea.NoFrame)
+        self.options_scroll.setWidget(top)
+
         self.console = DialogStatusConsole("Export log")
         self.splitter = standard_splitter(Qt.Vertical, self)
-        self.splitter.addWidget(top)
+        self.splitter.addWidget(self.options_scroll)
         self.splitter.addWidget(self.console)
-        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(0, 3)
         self.splitter.setStretchFactor(1, 1)
         if not restore_splitter(self.settings, SPLITTER_KEY, self.splitter):
-            self.splitter.setSizes([500, 180])
+            self.splitter.setSizes([660, 180])
         layout.addWidget(self.splitter, 1)
 
         buttons = QHBoxLayout()
@@ -464,7 +540,8 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         if not profiles:
             return None
         try:
-            return self.project.sheet_meta(profiles[0])
+            # A preview; run_export warns about a fallback when it matters.
+            return self.project.sheet_meta(profiles[0], warn=False)
         except Exception as exc:
             logger.error("sheet_meta(%s) failed: %s", profiles[0], exc, exc_info=True)
             self.console.log(f"Cannot build sheet for '{profiles[0]}': {exc}", "ERROR")
@@ -538,8 +615,8 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         self.console.log(f"Export: profiles={request.profiles} formats={request.formats} → {request.out_dir}")
         logger.info("Sprite export start: %s", request)
 
-        def log(message: str) -> None:
-            self.logMessage.emit(message, "INFO")
+        def log(message: str, level: str = "INFO") -> None:
+            self.logMessage.emit(message, level)
 
         def job(progress, token):
             return run_export(request, formats, log=log, progress=progress, token=token)
@@ -621,6 +698,24 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
             for fmt_id, box in self.format_checks.items():
                 box.setChecked(fmt_id in self._wanted_formats)
 
+    def _restore_geometry(self) -> None:
+        """Restore the saved window geometry, or open at a size that fits the screen."""
+        geometry = self.settings.value(GEOMETRY_KEY)
+        if geometry is not None:
+            try:
+                if self.restoreGeometry(geometry):
+                    return
+            except (TypeError, ValueError) as exc:
+                # A stale or foreign value in the settings store; fall through to the default size.
+                logger.warning("Sprite export dialog: saved geometry is unreadable (%s); "
+                               "using the default size", exc)
+        screen = self.screen() or QGuiApplication.primaryScreen()
+        available = screen.availableGeometry()
+        size = DEFAULT_SIZE.boundedTo(QSize(available.width(), available.height() - SCREEN_MARGIN_PX))
+        self.resize(size)
+        logger.debug("Sprite export dialog: first-open size %dx%d (screen %dx%d)",
+                     size.width(), size.height(), available.width(), available.height())
+
     def _save_settings(self) -> None:
         put = prefs.set_pref
         put(SETTINGS_PREFIX + f"out_dir/{_project_settings_key(self.project)}", self.out_dir_edit.text())
@@ -646,3 +741,4 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
             self.join_orphans()
         self._save_settings()
         persist_splitter(self.settings, SPLITTER_KEY, self.splitter)
+        self.settings.setValue(GEOMETRY_KEY, self.saveGeometry())

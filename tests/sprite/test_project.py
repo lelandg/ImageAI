@@ -250,3 +250,126 @@ def test_manager_defaults_to_the_sprite_projects_path(tmp_path, monkeypatch):
 
     monkeypatch.setattr(paths_mod, "get_data_paths", lambda: FakePaths())
     assert SpriteProjectManager().base_dir == tmp_path / "S" / "sprites"
+
+
+# --- sheet_meta fallback warnings (T3: the fallback is never silent) ----------------
+import logging  # noqa: E402
+
+
+def _two_action_project(tmp_path):
+    project = _build(tmp_path / "sprites" / "P_warn")
+    second = ActionCard(id="a2", name="run", prompt="run cycle")
+    second.frames = [
+        FrameMeta(name=f"run_{i:02d}",
+                  source_path=_write(project.project_dir / "stages" / "a2" / "stabilize" / f"{i + 1:04d}.png"),
+                  frame=(0, 0, 32, 32), source_size=(32, 32))
+        for i in range(3)
+    ]
+    project.actions.append(second)
+    return project
+
+
+def _fallback_warnings(caplog):
+    return [r for r in caplog.records if r.levelno == logging.WARNING and "native size" in r.message]
+
+
+def test_sheet_meta_warns_once_per_action_when_the_profile_dir_is_missing(tmp_path, caplog):
+    project = _two_action_project(tmp_path)
+    with caplog.at_level(logging.WARNING, logger="core.sprite.project"):
+        project.sheet_meta("hd")
+    warnings = _fallback_warnings(caplog)
+    assert len(warnings) == 2  # one per action, not one per frame
+    assert "'walk'" in warnings[0].message and "'run'" in warnings[1].message
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="core.sprite.project"):
+        project.sheet_meta("hd")
+    assert len(_fallback_warnings(caplog)) == 2  # every call warns again
+
+
+def test_sheet_meta_warning_names_project_action_profile_and_directory(tmp_path, caplog):
+    project = _build(tmp_path / "sprites" / "P_warn")
+    project.profiles[0].cell_size = (128, 96)
+    with caplog.at_level(logging.WARNING, logger="core.sprite.project"):
+        project.sheet_meta("hd")
+    (record,) = _fallback_warnings(caplog)
+    text = record.message
+    assert "Hero Sprite" in text
+    assert "'walk'" in text
+    assert "Export of hd" in text
+    assert str(project.project_dir / "stages" / "a1" / "hd") in text
+    assert "128x96" in text
+    assert "is missing or incomplete" in text
+    assert "Run the pipeline" in text
+
+
+def test_sheet_meta_warns_when_a_frame_has_no_source_path(tmp_path, caplog):
+    project = _build(tmp_path / "sprites" / "P_warn")
+    _write(project.project_dir / "stages" / "a1" / "hd" / "0001.png")
+    project.actions[0].frames[0].source_path = None
+    with caplog.at_level(logging.WARNING, logger="core.sprite.project"):
+        meta = project.sheet_meta("hd")
+    (record,) = _fallback_warnings(caplog)
+    assert "'walk'" in record.message
+    assert meta.frames[0].source_path is None
+
+
+def test_sheet_meta_warn_false_keeps_the_fallback_silent(tmp_path, caplog):
+    """A preview (player, dialog) passes warn=False; the export keeps the default."""
+    project = _two_action_project(tmp_path)
+    with caplog.at_level(logging.WARNING, logger="core.sprite.project"):
+        meta = project.sheet_meta("hd", warn=False)
+    assert _fallback_warnings(caplog) == []
+    assert len(meta.frames) == len(project.actions[0].frames) + 3
+
+
+def test_sheet_meta_does_not_warn_when_the_profile_frames_exist(tmp_path, caplog):
+    project = _build(tmp_path / "sprites" / "P_warn")
+    _write(project.project_dir / "stages" / "a1" / "hd" / "0001.png")
+    with caplog.at_level(logging.WARNING, logger="core.sprite.project"):
+        meta = project.sheet_meta("hd")
+    assert _fallback_warnings(caplog) == []
+    assert meta.frames[0].source_path == project.project_dir / "stages" / "a1" / "hd" / "0001.png"
+
+
+def test_sheet_meta_does_not_warn_for_a_disabled_profile(tmp_path, caplog):
+    project = _build(tmp_path / "sprites" / "P_warn")
+    project.profiles[1].enabled = False
+    with caplog.at_level(logging.WARNING, logger="core.sprite.project"):
+        meta = project.sheet_meta("pixel")
+    assert _fallback_warnings(caplog) == []
+    assert meta.frames[0].source_path == project.actions[0].frames[0].source_path
+
+
+def test_legacy_crop_to_cell_aspect_key_is_ignored():
+    """A saved ``crop_to_cell_aspect`` key loads inert and never saves back.
+
+    sprite-alpha's project file on disk carries this key from 2026-09-01. The
+    crop gained 0-1.4% on real data and the user rejected the crop, so the
+    profile has no such field. Do not reintroduce the field, not as an opt-in.
+    """
+    data = default_profiles()[0].to_dict()
+    data["crop_to_cell_aspect"] = True
+    profile = OutputProfile.from_dict(data)
+    assert profile.cell_size == (256, 256)
+    assert not hasattr(profile, "crop_to_cell_aspect")
+    assert "crop_to_cell_aspect" not in profile.to_dict()
+    assert profile == default_profiles()[0]
+
+
+def test_project_round_trip_drops_legacy_crop_key(tmp_path):
+    """from_dict/to_dict drops ``crop_to_cell_aspect`` from both profiles.
+
+    Same reason as the profile test: the crop gained 0-1.4% on real data and
+    the user rejected the crop. A legacy key must not survive a save.
+    """
+    project = _build(tmp_path / "proj")
+    data = project.to_dict()
+    assert [p["name"] for p in data["profiles"]] == ["hd", "pixel"]
+    for entry in data["profiles"]:
+        entry["crop_to_cell_aspect"] = True
+    loaded = SpriteProject.from_dict(data)
+    saved = loaded.to_dict()
+    assert [p["name"] for p in saved["profiles"]] == ["hd", "pixel"]
+    assert all("crop_to_cell_aspect" not in p for p in saved["profiles"])
+    assert "crop_to_cell_aspect" not in json.dumps(saved)
+    assert loaded.profiles == project.profiles

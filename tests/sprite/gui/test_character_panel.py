@@ -125,6 +125,56 @@ def test_make_plate_runs_in_worker_and_records_plate(qapp, fake_config, fake_pro
     assert calls["token"] is not None and hasattr(calls["token"], "raise_if_cancelled")
 
 
+def test_make_plate_reaches_model_through_stale_cached_provider(qapp, fake_config, fake_project,
+                                                                png, monkeypatch, wait_for_worker):
+    """A provider cached with an empty key must still reach the model after the key is set.
+
+    Uses the real ``get_provider`` so the cache-hit path is exercised end to end.
+    """
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    import providers
+    import providers.google as google_mod
+
+    def _fake_response(data):
+        part = SimpleNamespace(text=None, inline_data=SimpleNamespace(data=data))
+        cand = SimpleNamespace(content=SimpleNamespace(parts=[part]), finish_reason="STOP")
+        return SimpleNamespace(candidates=[cand])
+
+    built = []
+
+    def factory(**kwargs):
+        client = MagicMock()
+        client.api_key = kwargs.get("api_key")
+        client.models.generate_content.return_value = _fake_response(png.read_bytes())
+        built.append(client)
+        return client
+
+    providers.clear_provider_cache()
+    monkeypatch.setattr(google_mod, "genai", SimpleNamespace(Client=factory))
+    monkeypatch.setattr(google_mod, "GENAI_AVAILABLE", True)
+    monkeypatch.setattr(google_mod, "rate_limiter", MagicMock())
+    try:
+        stale = providers.get_provider("google", {"api_key": ""})
+        assert stale.client is None
+
+        seen = _capture_errors(monkeypatch)
+        panel = CharacterPanel(fake_config)
+        fake_project.character_source = png
+        panel.set_project(fake_project)
+        panel.make_plate()
+        wait_for_worker(panel)
+
+        assert seen == []
+        assert built and built[-1].api_key == fake_config.api_key
+        built[-1].models.generate_content.assert_called_once()
+        assert fake_project.plate_path == fake_project.project_dir / "source" / "plate.png"
+        assert fake_project.plate_path.exists()
+    finally:
+        providers.clear_provider_cache()
+
+
 def test_worker_failure_is_shown_and_logged(qapp, fake_config, fake_project, png,
                                             monkeypatch, wait_for_worker):
     def boom(*a, **k):

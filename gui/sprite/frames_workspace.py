@@ -170,7 +170,8 @@ class FramesWorkspace(QObject):
             tags = [TagMeta(name=action.name, from_index=0, to_index=max(0, len(frames) - 1))]
         else:
             try:
-                meta = project.sheet_meta(source)
+                # The player is a preview; the export warns about a fallback.
+                meta = project.sheet_meta(source, warn=False)
             except Exception as exc:  # noqa: BLE001 - reported, never raised out of a slot
                 logger.error("sheet_meta(%s) failed: %s", source, exc, exc_info=True)
                 self.tab.log(f"Cannot load profile '{source}': {exc}", "ERROR")
@@ -309,9 +310,12 @@ class FramesWorkspace(QObject):
         `deleteLater()` runs after `exec()` returns, so the object the caller receives
         is still readable; sub-project 6 registers its export formats on it.
 
-        The export is refused while the processing panel runs. `run_pipeline` rewrites
-        `action.frames`, the locked palette and the stage directories that the export
-        reads, and no lock guards `SpriteProject` (final review, Important 3).
+        The export is refused while the processing panel or the render queue runs.
+        `run_pipeline` rewrites `action.frames`, the locked palette and the stage
+        directories that the export reads, and no lock guards `SpriteProject` (final
+        review, Important 3). The queue runs `run_pipeline` on its own worker thread
+        after every clip, and the export itself runs the missing profile stages
+        (`ensure_profile_stages`), so the queue must be idle too.
         """
         project = self.tab.current_project
         if project is None:
@@ -324,6 +328,10 @@ class FramesWorkspace(QObject):
             logger.warning("Export refused: the %r job is still running", label)
             self.tab.log(f"Wait for the running {label} job to finish before exporting",
                          "WARNING")
+            return None
+        if self.tab.queue_panel.is_busy():
+            logger.warning("Export refused: the render queue is still running")
+            self.tab.log("Wait for the render queue to finish before exporting", "WARNING")
             return None
         open_dialog = self._export_dialog
         if open_dialog is not None:

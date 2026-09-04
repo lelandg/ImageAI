@@ -18,8 +18,10 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from core.llm_models import get_all_provider_ids, get_provider_display_name, resolve_model
-from core.sprite.generation.action_cards import GENRE_CHECKLISTS, generate_action_cards
+from core.llm_models import get_all_provider_ids, get_provider_display_name
+from core.sprite.generation.action_cards import (
+    GENRE_CHECKLISTS, default_chat_model, generate_action_cards,
+)
 from core.sprite.project import ActionCard
 from core.sprite.timing import suggest_clip_duration
 from gui.common.dialog_conventions import bind_primary_action
@@ -418,7 +420,13 @@ class ActionCardsPanel(WorkerHost, QGroupBox):
             return
         genre = self.genre_combo.currentText()
         provider = self.llm_provider()
-        model = resolve_model(provider, "chat")
+        try:
+            # Registry id per provider family; "chat" is not a registry family.
+            model = default_chat_model(provider)
+        except Exception as exc:  # noqa: BLE001 - surface every resolver failure
+            logger.error("Chat model resolution failed for %s: %s", provider, exc)
+            self._on_failed(f"Cannot pick a chat model for {provider}: {exc}")
+            return
         config_key = self._config_key_for(provider)
         api_key = self.config.get_api_key(config_key)
         auth_mode = self.config.get_auth_mode(config_key)

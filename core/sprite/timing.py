@@ -40,6 +40,28 @@ def legal_durations(provider: str, model: str) -> Tuple[int, ...]:
     raise ValueError(f"Unknown sprite video provider {provider!r}. Use 'omni' or 'veo'.")
 
 
+def legal_aspect_ratios(provider: str, model: str) -> Tuple[str, ...]:
+    """Aspect ratios the provider accepts for ``model``.
+
+    Veo: an empty or unknown model id falls back to the standard model's
+    list, the same way ``legal_durations`` does.
+    """
+    name = (provider or "").strip().lower()
+    if name == "veo":
+        from core.video.veo_client import VeoClient, VeoModel
+        try:
+            veo_model = VeoModel(model) if model else VeoModel.VEO_3_1_GENERATE
+        except ValueError:
+            veo_model = VeoModel.VEO_3_1_GENERATE
+        constraints = VeoClient.MODEL_CONSTRAINTS.get(veo_model) \
+            or VeoClient.MODEL_CONSTRAINTS[VeoModel.VEO_3_1_GENERATE]
+        return tuple(constraints["aspect_ratios"])
+    if name == "omni":
+        from core.video.omni_client import OmniClient
+        return tuple(OmniClient.MODEL_CONSTRAINTS["aspect_ratios"])
+    raise ValueError(f"Unknown sprite video provider {provider!r}. Use 'omni' or 'veo'.")
+
+
 def suggest_clip_duration(target_frames: int, fps: int, provider: str, model: str) -> int:
     """Shortest legal duration that holds at least two loops, else the longest."""
     needed = 2.0 * loop_seconds(target_frames, fps)

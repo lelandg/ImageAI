@@ -502,14 +502,18 @@ class SpriteProject:
                 frame.source_path = fix(frame.source_path)
         return count
 
-    def sheet_meta(self, profile: str) -> SheetMeta:
+    def sheet_meta(self, profile: str, *, warn: bool = True) -> SheetMeta:
         """Build the SheetMeta for one output profile.
 
         ``ActionCard.frames`` is the single frame list (order, timing, pivot).
         Each entry's ``source_path`` names the stabilize-stage PNG. The
         profile stages write a file of the same name under
         ``stages/<action_id>/<profile>/``; when that file exists the sheet
-        points at it, otherwise it falls back to the stabilize PNG.
+        points at it, otherwise it falls back to the stabilize PNG. The
+        fallback logs one warning per action for an enabled profile, because
+        the export then carries native-size frames, not the profile cell (T3).
+        A frame with no ``source_path`` counts as a fallback too. Pass
+        ``warn=False`` from a preview; the export keeps the warning.
         """
         prof = self.profile(profile)
         if prof is None:
@@ -520,12 +524,19 @@ class SpriteProject:
             if not action.frames:
                 continue
             start = len(frames)
+            fell_back = False
+            profile_dir = (self.project_dir / "stages" / action.id / profile
+                           if self.project_dir is not None else None)
             for frame in action.frames:
                 src = frame.source_path
-                if src is not None and self.project_dir is not None:
-                    candidate = self.project_dir / "stages" / action.id / profile / src.name
+                if src is None:
+                    fell_back = True
+                elif profile_dir is not None:
+                    candidate = profile_dir / src.name
                     if candidate.exists():
                         src = candidate
+                    else:
+                        fell_back = True
                 frames.append(FrameMeta(
                     name=frame.name,
                     source_path=src,
@@ -538,6 +549,13 @@ class SpriteProject:
                     pivot=frame.pivot,
                     overrides=dict(frame.overrides),
                 ))
+            if warn and fell_back and prof.enabled:
+                cell = f"{prof.cell_size[0]}x{prof.cell_size[1]}"
+                logger.warning(
+                    f"Sprite project '{self.name}': Export of {profile} for '{action.name}' uses "
+                    f"the stabilize frames at native size because {profile_dir} is missing or "
+                    f"incomplete. Run the pipeline to get {cell} frames."
+                )
             tags.append(TagMeta(
                 name=action.name,
                 from_index=start,

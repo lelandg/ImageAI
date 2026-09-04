@@ -21,9 +21,9 @@ import json
 import logging
 import shutil
 import threading
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from PIL import Image
 
@@ -186,7 +186,17 @@ def extract_stage_settings(project: SpriteProject, action: ActionCard) -> Dict[s
 
 
 def _effective_key_settings(project: SpriteProject):
-    return keying.resolve_key_settings(project.key, project.plate_color)
+    """The project's key settings. ``key_color`` None means "sample the clip".
+
+    The plate color is the request sent to the image model, not a measurement.
+    The key stage samples the clip border (``keying.auto_key_color``) and
+    writes the result to ``stages/<id>/key/key.json`` for the alpha stage.
+    """
+    return project.key
+
+
+def _auto_key_marker(settings) -> Any:
+    return settings.key_color or "auto"
 
 
 def _frame_override_list(project: SpriteProject, action: ActionCard) -> List[Dict[str, Any]]:
@@ -206,7 +216,7 @@ def _frame_override_list(project: SpriteProject, action: ActionCard) -> List[Dic
 def key_stage_settings(project: SpriteProject, action: ActionCard) -> Dict[str, Any]:
     s = _effective_key_settings(project)
     return {
-        "method": s.method, "key_color": s.key_color, "tolerance": s.tolerance,
+        "method": s.method, "key_color": _auto_key_marker(s), "tolerance": s.tolerance,
         "softness": s.softness, "despill": s.despill, "ml_backend": s.ml_backend,
         "ml_model": s.ml_model, "ml_refine_edges": s.ml_refine_edges,
         "overrides": _frame_override_list(project, action),
@@ -221,7 +231,8 @@ def cleanup_stage_settings(project: SpriteProject, action: ActionCard) -> Dict[s
 def alpha_stage_settings(project: SpriteProject, action: ActionCard) -> Dict[str, Any]:
     s = _effective_key_settings(project)
     return {
-        "method": s.method, "key_color": s.key_color, "edge_decontaminate": s.edge_decontaminate,
+        "method": s.method, "key_color": _auto_key_marker(s),
+        "edge_decontaminate": s.edge_decontaminate,
         "overrides": _frame_override_list(project, action),
     }
 
@@ -359,20 +370,109 @@ def extract_runner(project: SpriteProject, action: ActionCard, input_frames: Lis
 
 def key_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
                out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
-    """Estimate alpha and despill every frame (chroma, ml, or none; per-frame overrides apply)."""
+    """Estimate alpha and despill every frame (chroma, ml, or none; per-frame overrides apply).
+
+    With no explicit key color the stage samples the first frame's border
+    (``keying.auto_key_color``) and keys every frame on that one color. The
+    choice is written to ``out_dir/key.json`` so the alpha stage
+    decontaminates against the same color.
+    """
     settings = _effective_key_settings(project)
     _reset_dir(out_dir)
     outputs: List[Path] = []
     total = len(input_frames)
+    warning: Optional[str] = None
+    auto = False
+    note: Optional[str] = None
+    if settings.method == "chroma" and not settings.key_color and input_frames:
+        with Image.open(input_frames[0]) as first:
+            color, note, level, auto = keying.auto_key_color(first, project.plate_color,
+                                                             tolerance=settings.tolerance)
+        settings = replace(settings, key_color=color)
+        (logger.warning if level == "warning" else logger.info)(note)
+        progress("key", 0, total, note)
+    if settings.method == "chroma" and settings.key_color:
+        key_rgb = keying.parse_key_color(settings.key_color, context="key color")
+        tol, soft, clamped = keying.effective_key_tolerance(key_rgb, settings.tolerance,
+                                                            settings.softness)
+        if clamped:
+            clamp_note = (f"Key color {settings.key_color} is muted (chroma "
+                          f"{keying.key_chroma(key_rgb):.2f}); tolerance {settings.tolerance} / "
+                          f"softness {settings.softness} reduced to {tol:.3f} / {soft:.3f} so "
+                          f"grays and whites in the subject stay opaque.")
+            logger.info(clamp_note)
+            progress("key", 0, total, clamp_note)
+    write_key_report(out_dir, settings, auto=auto, plate_color=project.plate_color, note=note)
     for index, src in enumerate(input_frames):
         check(token)
         overrides = keying.frame_overrides(action.frames, index)
-        rgb, alpha, _key = keying.key_pass(Image.open(src), settings, overrides, frame_name=src.name)
+        image = Image.open(src)
+        rgb, alpha, key_rgb = keying.key_pass(image, settings, overrides, frame_name=src.name)
         dst = out_dir / src.name
         keying.compose_rgba(rgb, alpha).save(dst)
         outputs.append(dst)
+        if index == 0 and key_rgb is not None:
+            warning = key_self_check(image, alpha, key_rgb)
+            if warning:
+                logger.warning(warning)
         progress("key", index + 1, total, f"key {src.name}")
+    if warning:
+        # Last, so the per-frame lines do not overwrite the warning in the status line.
+        progress("key", total, total, warning)
     return outputs
+
+
+KEY_REPORT_NAME = "key.json"
+
+
+def write_key_report(out_dir: Path, settings: Any, *, auto: bool, plate_color: str,
+                     note: Optional[str]) -> Path:
+    """Record the key color the stage used, for the alpha stage and the GUI."""
+    report = out_dir / KEY_REPORT_NAME
+    out_dir.mkdir(parents=True, exist_ok=True)
+    report.write_text(json.dumps({
+        "method": settings.method, "key_color": settings.key_color, "auto": bool(auto),
+        "plate_color": plate_color, "note": note,
+    }, indent=2), encoding="utf-8")
+    return report
+
+
+def read_key_color(project: SpriteProject, action: ActionCard) -> Optional[str]:
+    """The key color the key stage recorded, or None when there is no report."""
+    report = stage_dir(project, action, "key") / KEY_REPORT_NAME
+    if not report.exists():
+        return None
+    try:
+        data = json.loads(report.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.warning("Cannot read %s: %s", report, exc)
+        return None
+    color = data.get("key_color")
+    return str(color) if color else None
+
+
+KEY_SELF_CHECK_MIN_TRANSPARENT = 0.01
+
+
+def key_self_check(image: Image.Image, alpha: Any, key_rgb: Sequence[int]) -> Optional[str]:
+    """Return a warning when the key removed almost none of ``image``; else None.
+
+    Warning only. The alpha result is not changed. ``alpha`` is the float
+    0..1 key-pass output; a pixel counts as removed when it rounds to 0.
+    The border color comes from the top-left corner of the input frame, so
+    the user can paste it into Keying settings.
+    """
+    import numpy as np
+    a_u8 = np.clip(np.round(np.asarray(alpha, dtype=np.float32) * 255.0), 0, 255)
+    if a_u8.size == 0:
+        return None
+    transparent = float((a_u8 == 0).mean())
+    if transparent >= KEY_SELF_CHECK_MIN_TRANSPARENT:
+        return None
+    sampled = keying.pick_key_color(image, (0, 0), radius=2)
+    return (f"Key color {keying.rgb_to_hex(key_rgb)} removed {transparent * 100:.2f}% of the "
+            f"frame; the clip background samples as {sampled}. "
+            "Set the key color in Keying settings.")
 
 
 def cleanup_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
@@ -396,6 +496,13 @@ def alpha_runner(project: SpriteProject, action: ActionCard, input_frames: List[
                  out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
     """Decontaminate spill on the keyed edges (chroma only) and finalize the RGBA."""
     settings = _effective_key_settings(project)
+    if settings.method == "chroma" and not settings.key_color:
+        recorded = read_key_color(project, action)
+        if recorded is None:
+            logger.warning("Alpha stage for action '%s': no key report from the key stage; "
+                           "decontaminating against the plate color %s",
+                           action.name, project.plate_color)
+        settings = replace(settings, key_color=recorded or project.plate_color)
     _reset_dir(out_dir)
     outputs: List[Path] = []
     total = len(input_frames)
@@ -469,9 +576,11 @@ def hd_runner(project: SpriteProject, action: ActionCard, input_frames: List[Pat
 
 
 register_stage("extract", extract_runner, extract_stage_settings)
-register_stage("key", key_runner, key_stage_settings, code_version=2)
+# key code_version 4, alpha 3: the key color is sampled from the clip when none is set,
+# and the bar detector tolerates noise (4).
+register_stage("key", key_runner, key_stage_settings, code_version=4)
 register_stage("cleanup", cleanup_runner, cleanup_stage_settings, code_version=2)
-register_stage("alpha", alpha_runner, alpha_stage_settings, code_version=2)
+register_stage("alpha", alpha_runner, alpha_stage_settings, code_version=3)
 register_stage("stabilize", stabilize_runner, stabilize_stage_settings, code_version=2)
 register_stage("hd", hd_runner, hd_stage_settings, code_version=2)
 register_stage("pixel", identity_runner, pixel_stage_settings)
@@ -509,14 +618,16 @@ def _sync_frames(action: ActionCard, frames: List[Path]) -> None:
 
 def run_pipeline(project: SpriteProject, action: ActionCard, *, upto: str = "pixel",
                  progress: ProgressFn = no_progress, token: Optional[CancelToken] = None,
-                 force: bool = False) -> Dict[str, List[Path]]:
+                 force: bool = False,
+                 profiles: Optional[Sequence[str]] = None) -> Dict[str, List[Path]]:
     """Run every registered stage up to and including ``upto``; return stage -> frames.
 
     Each stage's runner receives the previous stage's output list (``[]`` for
     ``extract``). Cached stages are skipped unless ``force`` is set. A disabled
-    profile stage is skipped and absent from the result. After ``stabilize``
-    runs, ``action.frames`` is rebuilt from its output. ``project.stage_fingerprints``
-    is updated in place; the caller saves the project.
+    profile stage is skipped and absent from the result. ``profiles`` limits
+    the profile stages that run (default: every enabled profile). After
+    ``stabilize`` runs, ``action.frames`` is rebuilt from its output.
+    ``project.stage_fingerprints`` is updated in place; the caller saves the project.
     """
     if upto not in STAGES:
         raise ValueError(f"Unknown stage: {upto!r}")
@@ -529,6 +640,8 @@ def run_pipeline(project: SpriteProject, action: ActionCard, *, upto: str = "pix
         if stage in PROFILE_STAGES:
             prof = project.profile(stage)
             if prof is None or not prof.enabled:
+                continue
+            if profiles is not None and stage not in profiles:
                 continue
         runner = STAGE_RUNNERS.get(stage)
         if runner is None:
@@ -557,3 +670,72 @@ def run_pipeline(project: SpriteProject, action: ActionCard, *, upto: str = "pix
     if action.frames and action.status in ("rendered", "draft"):
         action.status = "processed"
     return outputs
+
+
+STALE_STABILIZE_REASON = ("stabilize output is stale; run the pipeline from the Processing panel. "
+                          "A rerun rebuilds the frame list from the new stabilize output.")
+# The render queue holds these statuses from enqueue until its post-render
+# pipeline returns (which sets "processed"); see ensure_profile_stages.
+QUEUE_OWNED_STATUSES = ("queued", "rendering", "rendered")
+
+
+def ensure_profile_stages(project: SpriteProject, action: ActionCard, profiles: Sequence[str], *,
+                          progress: ProgressFn = no_progress,
+                          token: Optional[CancelToken] = None) -> Dict[str, str]:
+    """Run each missing or stale profile stage for ``action``. Return profile -> reason.
+
+    The export calls this before it reads ``sheet_meta``, so an export carries
+    the profile cell size (T3). An empty dict means every profile output is
+    current. A profile that cannot run keeps its reason instead:
+
+    - the profile is unknown or disabled;
+    - the ``stabilize`` output is stale (a rerun would call ``_sync_frames``
+      and restore frames the user deleted, so this helper never reruns it);
+    - the action is ``queued``, ``rendering`` or ``rendered``: the render
+      queue owns the stage directories until its post-render pipeline sets
+      ``processed``. The queue sets ``rendered`` before that pipeline starts,
+      so ``rendering`` alone does not cover the window. A card that stays
+      ``rendered`` has a failed stabilize, and the stale-stabilize rule above
+      skips it already, so the wider check costs nothing;
+    - the stage raised (logged with the traceback; the other profiles still
+      run). ``Cancelled`` is not a failure and propagates to the caller.
+
+    Only the named profile stage runs; the upstream stages are cache hits.
+    """
+    reasons: Dict[str, str] = {}
+    if project.project_dir is None:
+        return {name: "the project has no directory yet" for name in profiles}
+    for name in profiles:
+        prof = project.profile(name)
+        if prof is None:
+            reasons[name] = f"profile '{name}' does not exist"
+            continue
+        if not prof.enabled:
+            reasons[name] = f"profile '{name}' is disabled"
+            continue
+        if name not in PROFILE_STAGES:
+            reasons[name] = f"profile '{name}' has no stage"
+            continue
+        if not is_stage_current(project, action, "stabilize"):
+            reasons[name] = STALE_STABILIZE_REASON
+            continue
+        if action.status in QUEUE_OWNED_STATUSES:
+            reasons[name] = (f"action '{action.name}' is still {action.status}; "
+                             f"the render queue owns its stage directories")
+            continue
+        if is_stage_current(project, action, name):
+            continue
+        try:
+            run_pipeline(project, action, upto=name, progress=progress, token=token,
+                         profiles=(name,))
+        except Cancelled:
+            raise
+        except Exception as exc:  # noqa: BLE001 - one profile must not abort the others
+            message = exc.user_message if isinstance(exc, PipelineError) else str(exc)
+            logger.error(
+                f"Profile stage '{name}' failed for action '{action.name}' "
+                f"in sprite project '{project.name}': {message}",
+                exc_info=True,
+            )
+            reasons[name] = message
+    return reasons

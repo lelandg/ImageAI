@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from core.sprite.generation.cost import estimate_action, estimate_project
 from core.sprite.generation.errors import SpriteGenerationError
 from core.sprite.generation.queue import ActionQueue
-from core.sprite.generation.video_route import refine_action
+from core.sprite.generation.video_route import refine_action, validate_generation_settings
 from core.sprite.pipeline import Cancelled, run_pipeline
 from core.sprite.project import ActionCard
 from gui.common.dialog_conventions import bind_primary_action
@@ -187,6 +187,12 @@ class QueuePanel(WorkerHost, QGroupBox):
               [card.id for card in self._cards() if card.status == "queued"]
         if not ids:
             self.logMessage.emit("Nothing queued — press Render on a card first.", "WARNING")
+            return
+        problem = validate_generation_settings(self.project.generation)
+        if problem:
+            # Cards stay "queued"; the user fixes the settings and presses Start again.
+            self.logMessage.emit(problem, "ERROR")
+            show_error(self, "Sprite queue", problem)
             return
         credentials = self._google_credentials()
         if credentials is None:

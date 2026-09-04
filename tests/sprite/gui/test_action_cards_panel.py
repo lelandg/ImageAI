@@ -2,11 +2,12 @@
 """ActionCardsPanel: brief → cards, editable table, per-card render/refine."""
 import threading
 
+import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 import gui.sprite.action_cards_panel as acp
-from core.sprite.generation.action_cards import ActionCardDraft
+from core.sprite.generation.action_cards import ActionCardDraft, default_chat_model
 from gui.sprite.action_cards_panel import (
     COL_ACTIONS, COL_FPS, COL_LOOP, COL_NAME, COL_SECONDS, COL_STATUS, ActionCardsPanel,
 )
@@ -116,7 +117,7 @@ def test_generate_cards_appends_unique_names(qapp, fake_config, fake_project, mo
                                 target_frames=10, fps=12)]
 
     monkeypatch.setattr(acp, "generate_action_cards", fake_generate)
-    monkeypatch.setattr(acp, "resolve_model", lambda provider, family: "chat-model")
+    monkeypatch.setattr(acp, "default_chat_model", lambda provider: "chat-model")
     panel = _panel(fake_config, fake_project)
     panel.brief_edit.setText("a brave knight")
     panel.genre_combo.setCurrentText("sidescroller")
@@ -160,7 +161,7 @@ def test_generate_cards_reads_the_google_key_under_its_config_name(qapp, fake_pr
                                 target_frames=6, fps=12)]
 
     monkeypatch.setattr(acp, "generate_action_cards", fake_generate)
-    monkeypatch.setattr(acp, "resolve_model", lambda provider, family: "chat-model")
+    monkeypatch.setattr(acp, "default_chat_model", lambda provider: "chat-model")
     panel = _panel(KeyConfig(), fake_project)
     index = panel.llm_combo.findData("gemini")
     assert index >= 0, "the LLM combo no longer offers the gemini provider id"
@@ -189,7 +190,7 @@ def test_cancel_button_cancels_running_generation(qapp, fake_config, fake_projec
         return []
 
     monkeypatch.setattr(acp, "generate_action_cards", blocking_generate)
-    monkeypatch.setattr(acp, "resolve_model", lambda provider, family: "chat-model")
+    monkeypatch.setattr(acp, "default_chat_model", lambda provider: "chat-model")
     panel = _panel(fake_config, fake_project)
     panel.logMessage.connect(lambda m, level: lines.append((level, m)))
     assert not panel.cancel_btn.isEnabled()   # idle: nothing to cancel
@@ -208,6 +209,67 @@ def test_cancel_button_cancels_running_generation(qapp, fake_config, fake_projec
     assert panel.generate_btn.isEnabled() and not panel.cancel_btn.isEnabled()
     assert panel.progress.isHidden()
     assert not panel.is_busy()
+
+
+def _recording_generate(captured):
+    def fake_generate(brief, genre, **kwargs):
+        captured.update(kwargs)
+        return [ActionCardDraft(name="idle", prompt="stands still", duration_s=4, loop=True,
+                                target_frames=6, fps=12)]
+    return fake_generate
+
+
+def _select_provider(panel, provider_id):
+    index = panel.llm_combo.findData(provider_id)
+    assert index >= 0, f"the LLM combo no longer offers the {provider_id} provider id"
+    panel.llm_combo.setCurrentIndex(index)
+    assert panel.llm_provider() == provider_id
+
+
+@pytest.mark.parametrize("provider_id", ["gemini", "openai"])
+def test_generate_cards_resolves_a_real_chat_model(qapp, fake_config, fake_project, monkeypatch,
+                                                   wait_for_worker, provider_id):
+    """T6: the model is a registry id, never the family name "chat" (cf. 0a655b4)."""
+    captured = {}
+    lines = []
+    monkeypatch.setattr(acp, "generate_action_cards", _recording_generate(captured))
+    panel = _panel(fake_config, fake_project)
+    panel.logMessage.connect(lambda m, level: lines.append(m))
+    _select_provider(panel, provider_id)
+    panel.brief_edit.setText("a brave knight")
+    panel.generate_cards()
+    wait_for_worker(panel)
+    expected = default_chat_model(provider_id)
+    assert captured["provider"] == provider_id
+    assert captured["model"] == expected
+    assert captured["model"] != "chat"
+    # The status line names the resolved id so the log shows what was asked.
+    assert any(f"{provider_id}/{expected}" in line for line in lines)
+
+
+def test_generate_cards_reports_a_provider_without_a_chat_model(qapp, fake_config, fake_project,
+                                                                monkeypatch):
+    """No default chat model: no worker, and the error reaches the log and the dialog."""
+    shown = []
+    lines = []
+    called = []
+
+    def no_model(provider):
+        raise ValueError(f"No default chat model for provider {provider!r}.")
+
+    monkeypatch.setattr(acp, "default_chat_model", no_model)
+    monkeypatch.setattr(acp, "generate_action_cards",
+                        lambda *a, **k: called.append(1) or [])
+    monkeypatch.setattr(acp, "show_error",
+                        lambda parent, title, message, exception=None: shown.append(message))
+    panel = _panel(fake_config, fake_project)
+    panel.logMessage.connect(lambda m, level: lines.append((level, m)))
+    panel.brief_edit.setText("a brave knight")
+    panel.generate_cards()
+    assert panel._worker is None and not called
+    assert shown and "No default chat model" in shown[0]
+    assert any(level == "ERROR" and "No default chat model" in m for level, m in lines)
+    assert panel.generate_btn.isEnabled() and not panel.is_busy()
 
 
 def test_generate_cards_requires_brief(qapp, fake_config, fake_project, monkeypatch):

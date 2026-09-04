@@ -4,6 +4,7 @@ import pytest
 from core.sprite.project import ExtractionSettings
 from core.sprite.timing import (
     frames_per_clip,
+    legal_aspect_ratios,
     legal_durations,
     loop_seconds,
     ms_to_fps,
@@ -32,6 +33,16 @@ def test_legal_durations_per_provider():
     assert legal_durations("omni", "") == tuple(range(3, 11))
     with pytest.raises(ValueError):
         legal_durations("sora", "")
+
+
+def test_legal_aspect_ratios_per_provider():
+    assert legal_aspect_ratios("omni", "") == ("16:9", "9:16")
+    assert "1:1" in legal_aspect_ratios("veo", "")
+    assert "1:1" in legal_aspect_ratios("veo", VEO_STD)
+    assert "1:1" not in legal_aspect_ratios("veo", VEO_FAST)
+    assert legal_aspect_ratios("veo", "no-such-model") == legal_aspect_ratios("veo", VEO_STD)
+    with pytest.raises(ValueError):
+        legal_aspect_ratios("sora", "")
 
 
 def test_suggest_duration_gives_at_least_two_loops():

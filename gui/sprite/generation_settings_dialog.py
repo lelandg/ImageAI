@@ -8,7 +8,8 @@ estimator has no verified rate (decision 8: never a guess).
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+import math
+from typing import List, Optional, Sequence
 
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
 from core.sprite.configs import DEFAULT_NAME, NamedConfigStore
 from core.sprite.generation.cost import estimate_action
 from core.sprite.project import ActionCard, GenerationSettings
+from core.sprite.timing import legal_aspect_ratios
 from core.video.omni_client import OmniModel
 from core.video.veo_client import VeoModel
 from gui.common.dialog_conventions import DialogCleanupMixin, bind_primary_action, set_default_button
@@ -29,7 +31,6 @@ logger = logging.getLogger(__name__)
 
 PROVIDERS = ("omni", "veo")
 RESOLUTIONS = ("720p", "1080p")
-ASPECT_RATIOS = ("16:9", "9:16", "1:1")
 PROVIDER_DEFAULT_LABEL = "(provider default)"
 GEOMETRY_KEY = "sprite/gen_settings_geometry"
 
@@ -39,6 +40,32 @@ def model_choices(provider: str) -> List[str]:
     if provider == "veo":
         return [model.value for model in VeoModel]
     return [OmniModel.default_id()]
+
+
+def _aspect_value(text: str) -> Optional[float]:
+    """``"16:9"`` -> 16/9; ``None`` when the text is not ``w:h``."""
+    try:
+        width, height = (float(part) for part in text.split(":", 1))
+    except (ValueError, AttributeError):
+        return None
+    if width <= 0 or height <= 0:
+        return None
+    return width / height
+
+
+def closest_aspect(wanted: str, legal: Sequence[str]) -> str:
+    """Legal ratio nearest to ``wanted`` in log(w/h) distance. Tie -> first entry."""
+    target = _aspect_value(wanted)
+    if target is None:
+        return legal[0]
+
+    def distance(candidate: str) -> float:
+        value = _aspect_value(candidate)
+        if value is None:
+            return math.inf
+        return round(abs(math.log(value) - math.log(target)), 6)
+
+    return min(legal, key=distance)
 
 
 class GenerationSettingsDialog(DialogCleanupMixin, QDialog):
@@ -90,8 +117,11 @@ class GenerationSettingsDialog(DialogCleanupMixin, QDialog):
         self.resolution_combo.addItems(RESOLUTIONS)
         form.addRow("Resolution:", self.resolution_combo)
         self.aspect_combo = QComboBox()
-        self.aspect_combo.addItems(ASPECT_RATIOS)
+        self.aspect_combo.setToolTip("Only the ratios the chosen provider and model accept.")
         form.addRow("Aspect ratio:", self.aspect_combo)
+        self.aspect_note = QLabel("")
+        self.aspect_note.setWordWrap(True)
+        form.addRow("", self.aspect_note)
         self.duration_spin = QSpinBox()
         self.duration_spin.setRange(1, 15)
         self.duration_spin.setSuffix(" s")
@@ -124,6 +154,10 @@ class GenerationSettingsDialog(DialogCleanupMixin, QDialog):
         buttons.addWidget(self.cancel_btn)
         root.addLayout(buttons)
 
+        for signal in (self.model_combo.currentTextChanged, self.model_combo.editTextChanged):
+            signal.connect(lambda _text: self._refill_aspects())
+        # The refill blocks this signal, so only a hand pick clears the remap note.
+        self.aspect_combo.currentTextChanged.connect(lambda _text: self.aspect_note.setText(""))
         for signal in (self.model_combo.currentTextChanged, self.model_combo.editTextChanged,
                        self.resolution_combo.currentTextChanged, self.duration_spin.valueChanged,
                        self.audio_check.toggled):
@@ -140,6 +174,7 @@ class GenerationSettingsDialog(DialogCleanupMixin, QDialog):
             self.model_combo.addItem(model_id)
         self.model_combo.blockSignals(False)
         self._select_model(current)
+        self._refill_aspects()
         is_veo = provider == "veo"
         self.audio_check.setEnabled(is_veo)
         self.loop_check.setEnabled(is_veo)
@@ -159,6 +194,49 @@ class GenerationSettingsDialog(DialogCleanupMixin, QDialog):
         text = self.model_combo.currentText().strip()
         return "" if text == PROVIDER_DEFAULT_LABEL else text
 
+    # -- aspect ratios -----------------------------------------------------
+
+    def _aspect_items(self) -> List[str]:
+        return [self.aspect_combo.itemText(i) for i in range(self.aspect_combo.count())]
+
+    def _refill_aspects(self, requested: Optional[str] = None) -> None:
+        """Offer only the legal ratios; remap the wanted one when it is not legal.
+
+        ``requested`` is the ratio to apply (``set_settings``); by default the
+        current combo text is kept. A remap is logged and shown under the
+        combo. The note stays until the legal list or the choice changes.
+        """
+        provider = self.provider_combo.currentText()
+        try:
+            legal = list(legal_aspect_ratios(provider, self._model_text()))
+        except ValueError as exc:
+            logger.error("Aspect ratio list unavailable for %s: %s", provider, exc)
+            return
+        wanted = self.aspect_combo.currentText() if requested is None else requested
+        # An explicit request always goes through, so its note is set or cleared.
+        if requested is None and self._aspect_items() == legal and wanted in legal \
+                and wanted == self.aspect_combo.currentText():
+            return
+        if wanted in legal:
+            chosen = wanted
+        elif not wanted:
+            chosen = legal[0]
+        else:
+            chosen = closest_aspect(wanted, legal)
+        self.aspect_combo.blockSignals(True)
+        self.aspect_combo.clear()
+        self.aspect_combo.addItems(legal)
+        self.aspect_combo.setCurrentText(chosen)
+        self.aspect_combo.blockSignals(False)
+        if wanted and chosen != wanted:
+            target = f"{provider}/{self._model_text() or 'default model'}"
+            note = f"{wanted} is not supported by {target}; using {chosen}."
+            logger.info("Sprite generation settings: aspect ratio %s remapped to %s "
+                        "(legal for %s: %s)", wanted, chosen, target, ", ".join(legal))
+            self.aspect_note.setText(note)
+        else:
+            self.aspect_note.setText("")
+
     # -- settings <-> widgets ---------------------------------------------
 
     def set_settings(self, settings: GenerationSettings) -> None:
@@ -167,7 +245,9 @@ class GenerationSettingsDialog(DialogCleanupMixin, QDialog):
         self._on_provider_changed(provider)  # populate even when the text did not change
         self._select_model(settings.model)
         self.resolution_combo.setCurrentText(settings.resolution)
-        self.aspect_combo.setCurrentText(settings.aspect_ratio)
+        # A non-editable combo keeps its old value on an unknown text, so the
+        # requested ratio goes through the remap instead of setCurrentText().
+        self._refill_aspects(settings.aspect_ratio)
         self.duration_spin.setValue(int(settings.duration_s))
         self.fps_spin.setValue(int(settings.fps))
         self.loop_check.setChecked(bool(settings.loop_conditioning))

@@ -16,15 +16,16 @@ from typing import Any, Callable, Dict, Optional
 
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
+from PIL import Image
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
                                QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar,
                                QPushButton, QScrollArea, QSlider, QSpinBox, QVBoxLayout,
                                QWidget)
 
 from core.sprite.extract import estimate_frame_count, probe_video
-from core.sprite.keying import ffmpeg_chromakey_preview
+from core.sprite.keying import KEY_AUTO_MIN_UNIFORMITY, estimate_key_color, ffmpeg_chromakey_preview
 from core.sprite.matting import REMBG_MODELS, available_backends
-from core.sprite.pipeline import run_pipeline, stage_dir
+from core.sprite.pipeline import list_frames, run_pipeline, stage_dir
 from core.sprite.pixelart import FLOYD_WARNING
 from core.sprite.presets import CELL_PRESETS, CUSTOM_CELL_LABEL
 from core.sprite.project import ActionCard, OutputProfile, SpriteProject
@@ -299,8 +300,10 @@ class ProcessingPanel(WorkerHost, QWidget):
                                                "none": "none (source has alpha)"})
         form.addRow("Method:", self.key_method)
         self.key_color_edit = QLineEdit()
-        self.key_color_edit.setPlaceholderText("plate color")
-        self.key_color_edit.setToolTip("#RRGGBB; empty = the project's plate color")
+        self.key_color_edit.setPlaceholderText("auto (sampled from the clip)")
+        self.key_color_edit.setToolTip(
+            "#RRGGBB. Empty = sample the clip's border color automatically. The plate color "
+            "is only the request sent to the model; the clip often drifts from it.")
         self.pick_btn = QPushButton("Pick…")
         self.pick_btn.setAutoDefault(False)
         self.pick_btn.setToolTip("Click a pixel in the preview to pick the key color")
@@ -707,6 +710,29 @@ class ProcessingPanel(WorkerHost, QWidget):
             self.cancel_running()
             self.logMessage.emit("Cancel requested…", "WARNING")
 
+    def _sampled_key_color(self, action: ActionCard) -> Optional[str]:
+        """The clip border color, from the first extracted frame, for the ffmpeg preview.
+
+        Same rule as the key stage: the clip wins over the requested plate
+        color. None when no extract output exists yet or the border is not
+        one color.
+        """
+        project = self._project
+        if project is None:
+            return None
+        frames = list_frames(stage_dir(project, action, "extract"))
+        if not frames:
+            return None
+        try:
+            with Image.open(frames[0]) as first:
+                estimate = estimate_key_color(first, tolerance=project.key.tolerance)
+        except (OSError, ValueError) as exc:
+            logger.warning("Cannot sample the key color from %s: %s", frames[0], exc)
+            return None
+        if estimate.uniformity < KEY_AUTO_MIN_UNIFORMITY:
+            return None
+        return estimate.color
+
     def preview_key_on_clip(self) -> None:
         project, action = self._project, self._action
         if project is None or action is None:
@@ -720,7 +746,7 @@ class ProcessingPanel(WorkerHost, QWidget):
         if not self._check_key_color_field():
             return
         key = project.key
-        color = key.key_color or project.plate_color
+        color = key.key_color or self._sampled_key_color(action) or project.plate_color
         video = Path(clip.path)
         out_mp4 = stage_dir(project, action, "key") / "preview_chromakey.mp4"
 
