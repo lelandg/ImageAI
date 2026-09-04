@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.47.1] - 2026-09-04
+
+### Fixed
+- A cancel during a re-render left the card stuck at "rendering" and out of
+  the queue. The queue now tracks whether the current run produced a clip
+  instead of reading the old clip record that a re-queued card keeps.
+- Veo loop conditioning applied to every card, so a one-shot action (attack,
+  hurt, death) was rendered with the plate as first and last frame and forced
+  to 8 s. It now applies only when the action loops, as the Omni path already
+  did, and the clip record stores the applied value.
+- Deleting a sprite project removed whatever directory the project file sat
+  in. A project file opened from another folder could delete that folder.
+  Delete now refuses any directory outside the sprite projects root and
+  sends the directory to the recycle bin when the platform has one.
+- Frame-strip edits (delete, reorder, duration) were not saved, and closing
+  the tab did not autosave. Both paths now persist the project.
+- The processing panel's Run pipeline and the Render (image) route could
+  start while the render queue ran the same pipeline on its own thread. Both
+  now refuse until the queue is idle, as export already did.
+
+### Security
+- A sprite action id from a project file is validated as one path segment
+  (letters, digits, `_`, `-`; 1 to 64 characters) on load and again before
+  any stage directory is removed, so a crafted id cannot reach outside the
+  project.
+- Engine-preset GIF file names sanitize the tag name, so a tag containing a
+  path separator cannot write outside the export directory.
+- The repo `AGENTS.md` again states the prompt-injection rule for issue and PR
+  text, the `pull_request_target` ban, the no-credentials-in-shell rule and
+  the log-every-user-facing-error rule.
+
 ## [0.47.0] - 2026-09-04
 
 ### Added
