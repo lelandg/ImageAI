@@ -230,6 +230,40 @@ class GoogleProvider(ImageProvider):
         elif self.api_key:
             self._init_api_key_client()
 
+    def reconfigure(self, config: Dict[str, Any]) -> bool:
+        """Apply new credentials. Drop the client so the next call rebuilds it."""
+        changed = super().reconfigure(config)
+        if changed:
+            self.client = None
+            self._client_mode = None
+            self._last_chat_session = None
+            logger.info("Google credentials changed; client will be rebuilt on next use")
+        return changed
+
+    def _ensure_client(self) -> Any:
+        """Build the SDK client for the current auth mode when it is missing.
+
+        Every entry point calls this first and uses the returned client, not
+        ``self.client``. ``reconfigure()`` can null ``self.client`` from
+        another thread while a call is in flight. A cached provider can
+        receive a key or an auth mode after construction.
+        """
+        expected_mode = "gcloud" if self.auth_mode == "gcloud" else "api_key"
+        if self.client and self._client_mode != expected_mode:
+            logger.info(f"Auth mode changed from {self._client_mode} to {expected_mode}, reinitializing client")
+            self.client = None
+            self._client_mode = None
+        if self.client:
+            return self.client
+        if self.auth_mode == "gcloud":
+            self._init_gcloud_client(raise_on_error=True)
+            return self.client
+        if not self.api_key:
+            logger.error("No API key configured for Google provider")
+            raise ValueError("No API key configured for Google provider")
+        self._init_api_key_client()
+        return self.client
+
     def get_last_chat_session(self):
         """
         Get the last chat session for multi-turn editing.
@@ -258,8 +292,7 @@ class GoogleProvider(ImageProvider):
         """
         global genai, types
 
-        if not self.client:
-            raise ValueError("Client not initialized")
+        client = self._ensure_client()
 
         # Lazy import types
         if types is None:
@@ -288,7 +321,7 @@ class GoogleProvider(ImageProvider):
         # Create chat session
         config = types.GenerateContentConfig(**config_kwargs)
 
-        chat = self.client.chats.create(model=model, config=config)
+        chat = client.chats.create(model=model, config=config)
         self._last_chat_session = chat
 
         logger.info(f"Created chat session for multi-turn editing with model {model}")
@@ -299,6 +332,7 @@ class GoogleProvider(ImageProvider):
         global genai, types
         
         if not GENAI_AVAILABLE:
+            logger.error("Google GenAI library not installed")
             raise ImportError(
                 "Google GenAI library not installed. "
                 "Run: pip install google-generativeai"
@@ -329,6 +363,7 @@ class GoogleProvider(ImageProvider):
         global aiplatform, google_auth_default, DefaultCredentialsError, genai, types
         
         if not GCLOUD_AVAILABLE:
+            logger.error("Google Cloud AI Platform not installed")
             if raise_on_error:
                 raise ImportError(
                     "Google Cloud AI Platform not installed. "
@@ -354,6 +389,7 @@ class GoogleProvider(ImageProvider):
             if not project:
                 project = self._get_gcloud_project_id()
             if not project:
+                logger.error("No Google Cloud project found")
                 if raise_on_error:
                     raise ValueError(
                         "No Google Cloud project found. "
@@ -376,6 +412,7 @@ class GoogleProvider(ImageProvider):
             return True
             
         except DefaultCredentialsError as e:
+            logger.error(f"Google Cloud authentication failed: {e}")
             if raise_on_error:
                 raise RuntimeError(
                 f"Google Cloud authentication failed.\n\n"
@@ -507,23 +544,7 @@ class GoogleProvider(ImageProvider):
         **kwargs
     ) -> Tuple[List[str], List[bytes]]:
         """Generate images using Google Gemini models."""
-        # Check if client needs re-initialization due to auth mode change
-        # This handles the case where user switches between gcloud and API key at runtime
-        expected_mode = "gcloud" if self.auth_mode == "gcloud" else "api_key"
-        if self.client and self._client_mode != expected_mode:
-            logger.info(f"Auth mode changed from {self._client_mode} to {expected_mode}, reinitializing client")
-            self.client = None
-            self._client_mode = None
-
-        if not self.client:
-            if self.auth_mode == "gcloud":
-                # Try to initialize gcloud client, raise error if it fails
-                self._init_gcloud_client(raise_on_error=True)
-            else:
-                # Initialize API key client
-                if not self.api_key:
-                    raise ValueError("No API key configured for Google provider")
-                self._init_api_key_client()
+        client = self._ensure_client()
 
         model = model or self.get_default_model()
         resolved_model = self.resolve_model_alias(model)
@@ -1017,13 +1038,13 @@ class GoogleProvider(ImageProvider):
 
                 # Call API with proper config parameter for new SDK
                 if config:
-                    response = self.client.models.generate_content(
+                    response = client.models.generate_content(
                         model=model,
                         contents=contents,
                         config=config
                     )
                 else:
-                    response = self.client.models.generate_content(
+                    response = client.models.generate_content(
                         model=model,
                         contents=contents,
                     )
@@ -1245,13 +1266,13 @@ class GoogleProvider(ImageProvider):
             # Fallback: try again with config (maybe first attempt had transient issue)
             try:
                 if config:
-                    response = self.client.models.generate_content(
+                    response = client.models.generate_content(
                         model=model,
                         contents=contents,
                         config=config
                     )
                 else:
-                    response = self.client.models.generate_content(
+                    response = client.models.generate_content(
                         model=model,
                         contents=contents,
                     )
@@ -1476,10 +1497,9 @@ class GoogleProvider(ImageProvider):
             
             try:
                 # Try a minimal generation
-                if not self.client:
-                    self._init_api_key_client()
-                
-                response = self.client.models.generate_content(
+                client = self._ensure_client()
+
+                response = client.models.generate_content(
                     model=self.get_default_model(),
                     contents="Test",
                 )
@@ -1837,8 +1857,7 @@ class GoogleProvider(ImageProvider):
         **kwargs
     ) -> Tuple[List[str], List[bytes]]:
         """Edit an image (or compose from multiple references) with Google Gemini."""
-        if not self.client:
-            raise ValueError("No client configured")
+        client = self._ensure_client()
 
         model = model or self.get_default_model()
         texts: List[str] = []
@@ -1878,13 +1897,13 @@ class GoogleProvider(ImageProvider):
         try:
             # Gemini can process images as input
             if config:
-                response = self.client.models.generate_content(
+                response = client.models.generate_content(
                     model=model,
                     contents=[prompt, *self._edit_input_parts(image)],
                     config=config,
                 )
             else:
-                response = self.client.models.generate_content(
+                response = client.models.generate_content(
                     model=model,
                     contents=[prompt, *self._edit_input_parts(image)],
                 )
@@ -1934,13 +1953,7 @@ class GoogleProvider(ImageProvider):
         """
         global genai, types
 
-        if not self.client:
-            if self.auth_mode == "gcloud":
-                self._init_gcloud_client(raise_on_error=True)
-            elif self.api_key:
-                self._init_api_key_client()
-            else:
-                raise ValueError("No client configured")
+        client = self._ensure_client()
 
         if types is None:
             from google.genai import types
@@ -1982,7 +1995,7 @@ class GoogleProvider(ImageProvider):
                 import io
 
                 # Prepare image as Part
-                response = self.client.models.generate_content(
+                response = client.models.generate_content(
                     model=model,
                     contents=[
                         types.Part.from_bytes(data=image, mime_type="image/png"),
@@ -2035,13 +2048,7 @@ class GoogleProvider(ImageProvider):
         """
         global genai, types
 
-        if not self.client:
-            if self.auth_mode == "gcloud":
-                self._init_gcloud_client(raise_on_error=True)
-            elif self.api_key:
-                self._init_api_key_client()
-            else:
-                raise ValueError("No client configured")
+        client = self._ensure_client()
 
         if types is None:
             from google.genai import types
@@ -2066,7 +2073,7 @@ class GoogleProvider(ImageProvider):
                 response_modalities=["IMAGE", "TEXT"],
             )
 
-            self._last_chat_session = self.client.chats.create(
+            self._last_chat_session = client.chats.create(
                 model=model,
                 config=config,
             )
@@ -2144,11 +2151,7 @@ class GoogleProvider(ImageProvider):
             logger.info(f"Duration snapped: {duration}s -> {snapped_duration}s")
 
         try:
-            # Initialize Google Cloud client if not already done
-            if self.auth_mode == "gcloud" and not self.client:
-                self._init_gcloud_client(raise_on_error=True)
-            elif not self.client:
-                raise ValueError("No client configured for video generation")
+            client = self._ensure_client()
 
             # Prepare video generation request
             # NOTE: This is a placeholder - actual Vertex AI Video API integration needed

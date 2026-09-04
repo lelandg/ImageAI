@@ -149,11 +149,10 @@ def get_provider(name: str, config: Optional[Dict[str, Any]] = None, use_cache: 
     
     # Check cache first
     if use_cache and name in _PROVIDER_CACHE:
-        # Update config if provided
+        # Apply new credentials to the cached instance. The provider drops
+        # its SDK client on a change and rebuilds it on the next call.
         if config:
-            cached = _PROVIDER_CACHE[name]
-            cached.api_key = config.get('api_key', cached.api_key)
-            cached.auth_mode = config.get('auth_mode', cached.auth_mode)
+            _PROVIDER_CACHE[name].reconfigure(config)
         return _PROVIDER_CACHE[name]
     
     # Create new provider instance

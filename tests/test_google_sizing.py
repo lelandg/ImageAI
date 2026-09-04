@@ -121,6 +121,56 @@ class TestDebugImageLocation:
         assert written, "no debug image was written under the configured root"
 
 
+class TestLazyClientInit:
+    """Every entry point builds the client when it is missing."""
+
+    ENTRY_POINTS = ["edit_image", "edit_image_region", "generate_video",
+                    "create_chat_session", "validate_auth", "start_edit_session"]
+
+    @pytest.mark.parametrize("entry", ENTRY_POINTS)
+    def test_entry_point_builds_client_when_missing(self, provider, monkeypatch,
+                                                    tmp_path, entry):
+        import providers.google as google_mod
+
+        built = []
+
+        def factory(**kwargs):
+            client = MagicMock()
+            client.api_key = kwargs.get("api_key")
+            client.models.generate_content.return_value = _fake_response(_png_bytes())
+            built.append(client)
+            return client
+
+        monkeypatch.setattr(google_mod, "genai", SimpleNamespace(Client=factory))
+        monkeypatch.setattr(google_mod, "GENAI_AVAILABLE", True)
+        provider = GoogleProvider({"api_key": "k", "auth_mode": "api-key"})
+        provider.client = None
+        provider._client_mode = None
+        png = _png_bytes()
+
+        if entry == "edit_image":
+            provider.edit_image(png, "edit it", "gemini-2.5-flash-image")
+        elif entry == "edit_image_region":
+            provider.edit_image_region(png, (0, 0, 4, 4), "edit it",
+                                       model="gemini-2.5-flash-image")
+        elif entry == "generate_video":
+            frame = tmp_path / "frame.png"
+            frame.write_bytes(png)
+            provider.generate_video("a clip", frame, 6.0)
+        elif entry == "create_chat_session":
+            provider.create_chat_session("gemini-3-pro-image-preview")
+        elif entry == "validate_auth":
+            ok, msg = provider.validate_auth()
+            assert ok, msg
+        elif entry == "start_edit_session":
+            assert provider.start_edit_session(png)
+
+        assert built, f"{entry} did not build a client"
+        assert provider.client is built[-1]
+        assert built[-1].api_key == "k"
+        assert provider._client_mode == "api_key"
+
+
 class TestEditImageSizing:
     def test_explicit_size_builds_image_config(self, provider):
         texts, images = provider.edit_image(
