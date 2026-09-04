@@ -184,3 +184,9 @@ the log filter that keeps `record.exc_info`, and the pytest guard on `copy_log_o
 
 Commit ids: none. Nothing from this work is committed. The commit, the version bump and the
 single PR stay with sub-project 7.
+
+## 2026-09-04: de-jitter cropped the character
+
+The rock_3 export frames were cut off by the `dejitter` step, not by the crop. De-jitter now
+defaults to off and never pushes subject pixels off the canvas. Details, evidence and
+verification: `Notes/2026-09-04-sprite-dejitter-crop-fix.md`.

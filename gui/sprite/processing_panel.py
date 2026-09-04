@@ -386,6 +386,10 @@ class ProcessingPanel(WorkerHost, QWidget):
         self.anchor = _combo(ANCHORS)
         form.addRow("Anchor:", self.anchor)
         self.dejitter = QCheckBox("De-jitter")
+        self.dejitter.setToolTip(
+            "Register every frame to the first frame by its alpha mask. Use it for footage "
+            "with camera jitter only. Off by default: on pose animation (headbang, arm swing) "
+            "the alignment shifts the character, and the shift can move it off the frame.")
         self.dejitter_method = _combo(DEJITTER_METHODS)
         jitter_row = QHBoxLayout()
         jitter_row.addWidget(self.dejitter)

@@ -224,6 +224,28 @@ def estimate_shift(ref_alpha: np.ndarray, mov_alpha: np.ndarray, method: str) ->
     return -float(dy), -float(dx)
 
 
+def limit_shift_to_canvas(alpha: np.ndarray, dy: float, dx: float) -> Tuple[float, float]:
+    """Reduce ``(dy, dx)`` so the alpha bbox of ``alpha`` stays inside the canvas.
+
+    The stabilize crop is the union alpha bbox with ``pad_px`` 0 by default, so
+    subject pixels sit on the canvas edge. A registration shift that pushes
+    them off the canvas destroys the frame; on pose animation the estimate is
+    wrong anyway (rock_3 frame 7 lost 20 % of the character). Each axis is
+    clamped independently to the room left between the bbox and the edge.
+    """
+    a = np.asarray(alpha)
+    rows = np.flatnonzero(a.any(axis=1))
+    cols = np.flatnonzero(a.any(axis=0))
+    if rows.size == 0 or cols.size == 0:
+        return float(dy), float(dx)
+    h, w = a.shape[:2]
+    top, bottom = int(rows[0]), int(rows[-1]) + 1
+    left, right = int(cols[0]), int(cols[-1]) + 1
+    ldy = max(-float(top), min(float(h - bottom), float(dy)))
+    ldx = max(-float(left), min(float(w - right), float(dx)))
+    return ldy, ldx
+
+
 def translate_rgba(rgba: np.ndarray, dy: float, dx: float) -> np.ndarray:
     """Sub-pixel translate an RGBA uint8 image. Premultiplied sampling avoids dark fringes."""
     src = np.asarray(rgba).astype(np.float32)
@@ -282,6 +304,11 @@ def dejitter(frames: Sequence[Path], out_dir: Path, method: str = "phase", *,
         if (cdy, cdx) != (dy, dx):
             logger.warning("dejitter %s: clamped shift (%.2f, %.2f) to (%.2f, %.2f)",
                            path.name, dy, dx, cdy, cdx)
+        fdy, fdx = limit_shift_to_canvas(mov_alpha, cdy, cdx)
+        if (fdy, fdx) != (cdy, cdx):
+            logger.warning("dejitter %s: shift (%.2f, %.2f) would push the subject off the "
+                           "canvas; limited to (%.2f, %.2f)", path.name, cdy, cdx, fdy, fdx)
+        cdy, cdx = fdy, fdx
         dst = out_dir / path.name
         Image.fromarray(translate_rgba(rgba, cdy, cdx)).save(dst)
         outputs.append(dst)

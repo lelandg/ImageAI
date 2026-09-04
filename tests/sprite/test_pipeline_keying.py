@@ -107,7 +107,7 @@ def test_stabilize_settings_include_dejitter_flags(tmp_path):
     project = _project(tmp_path)
     action = _action()
     settings = pipeline.STAGE_SETTINGS["stabilize"](project, action)
-    assert settings["stabilize"]["dejitter"] is True and settings["stabilize"]["dejitter_method"] == "phase"
+    assert settings["stabilize"]["dejitter"] is False and settings["stabilize"]["dejitter_method"] == "phase"
 
 
 def test_stabilize_dejitters_when_enabled(tmp_path):

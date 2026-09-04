@@ -581,7 +581,8 @@ register_stage("extract", extract_runner, extract_stage_settings)
 register_stage("key", key_runner, key_stage_settings, code_version=4)
 register_stage("cleanup", cleanup_runner, cleanup_stage_settings, code_version=2)
 register_stage("alpha", alpha_runner, alpha_stage_settings, code_version=3)
-register_stage("stabilize", stabilize_runner, stabilize_stage_settings, code_version=2)
+# stabilize 3: dejitter limits every shift so no subject pixel leaves the canvas.
+register_stage("stabilize", stabilize_runner, stabilize_stage_settings, code_version=3)
 register_stage("hd", hd_runner, hd_stage_settings, code_version=2)
 register_stage("pixel", identity_runner, pixel_stage_settings)
 

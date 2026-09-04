@@ -55,7 +55,7 @@ def test_defaults_match_the_design():
     k = KeySettings()
     assert (k.method, k.tolerance, k.softness, k.despill, k.ml_backend, k.ml_model) == ("chroma", 0.20, 0.10, "average", "mediapipe", "isnet-anime")
     s = StabilizeSettings()
-    assert (s.anchor, s.dejitter, s.dejitter_method, s.pad_px) == ("bottom_center", True, "phase", 0)
+    assert (s.anchor, s.dejitter, s.dejitter_method, s.pad_px) == ("bottom_center", False, "phase", 0)
     p = OutputProfile(name="hd")
     assert (p.enabled, p.cell_size, p.binary_alpha, p.alpha_threshold, p.dither, p.palette_lock) == (True, (64, 64), False, 128, "none", True)
     profiles = default_profiles()

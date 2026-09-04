@@ -1228,7 +1228,7 @@ The Sprite tab turns one character image into a game-ready sprite sheet. The tab
 - **Extraction**: Mode is `every N frames`, `target fps` or `exactly N frames`. Every N, Target fps and Exact N set the value for the chosen mode. Trim drops seconds from the start and the end. **Cull duplicate frames** removes near-identical frames above the threshold. The estimate line reports the frame count the current settings yield.
 - **Key / matte**: Method is `chroma key`, `ML matte` or `none (source has alpha)`. Key color accepts `#RRGGBB`. Leave it empty and ImageAI samples the clip's own border color, so a plate that came back muted, white or gray still keys; the log names the sampled color. A muted key gets a tighter tolerance automatically, so grays and whites in the character stay opaque. Uniform bars at the frame edges (a pillarboxed 1:1 clip inside black) are removed too. **Pick…** reads the color from a click in the preview. Tolerance and softness set the chroma range. Despill is `none`, `average`, `double` or `limit`. **Edge decontaminate** removes spill on the keyed edge. Choke, feather and despeckle clean the alpha edge in pixels. The ML row picks `mediapipe` or `rembg`, picks the rembg model, and reports which backends are installed. **Install…** opens the ML install dialog.
 - **Output profiles**: One editor per profile. See the next section.
-- **Stabilize**: Anchor is `bottom_center`, `center`, `top_left`, `top_center` or `bottom_left`. **De-jitter** aligns the frames by `phase` or `centroid`. Pad adds pixels around the content box.
+- **Stabilize**: Anchor is `bottom_center`, `center`, `top_left`, `top_center` or `bottom_left`. **De-jitter** registers every frame to the first frame by `phase` or `centroid`. It is off by default. Turn it on for footage with camera jitter only: on pose animation the alignment shifts the character. A shift never moves the character off the frame. Pad adds pixels around the content box.
 - **Force re-run**: Ignores the stage cache and runs every stage again.
 - **Preview key on clip**: Writes an ffmpeg chroma key preview of the clip and opens it.
 - **Run pipeline** (Ctrl+Enter): Runs the pipeline for the selected card. **Cancel** stops it.
@@ -1257,7 +1257,7 @@ Each profile editor holds these controls:
 2. **key** — Estimates the alpha and removes the spill, by chroma key or by ML matte. Per-frame overrides apply here.
 3. **cleanup** — Chokes, feathers and despeckles the alpha edge.
 4. **alpha** — Decontaminates the remaining spill on the keyed edge and writes the final RGBA.
-5. **stabilize** — Crops every frame to the union content box plus the pad, anchors it, and de-jitters the sequence. No resampling happens here. This stage also rebuilds the frame list, and it keeps your per-frame durations, pivots and overrides.
+5. **stabilize** — Crops every frame to the same union content box plus the pad and anchors it, so every frame keeps a fixed position. De-jitter runs only when you turn it on. No resampling happens here. This stage also rebuilds the frame list, and it keeps your per-frame durations, pivots and overrides.
 6. **hd** — Scales the stabilized frames into the `hd` cell.
 7. **pixel** — Fits the stabilized frames into the `pixel` cell with one integer reduce factor, applies the binary alpha, and quantizes to the shared palette.
 

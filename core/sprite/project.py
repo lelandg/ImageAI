@@ -143,8 +143,12 @@ class KeySettings:
 
 @dataclass
 class StabilizeSettings:
+    """``dejitter`` is off by default: it registers every frame to frame 1 by
+    its alpha mask, which removes camera jitter but mangles pose animation
+    (a headbang reads as a 100 px shift). Generated clips ask for a locked
+    camera, so the union-bbox crop alone gives a fixed frame and position."""
     anchor: str = "bottom_center"
-    dejitter: bool = True
+    dejitter: bool = False
     dejitter_method: str = "phase"
     pad_px: int = 0
 

@@ -180,3 +180,48 @@ def test_requirements_declare_the_dejitter_deps():
     names = {line.split("#")[0].strip().split(">=")[0].lower() for line in text.splitlines()
              if line.strip() and not line.startswith("#")}
     assert {"scikit-image", "scipy"} <= names
+
+
+# --- content-loss guard -----------------------------------------------------------------
+# A stabilize crop is the union alpha bbox with pad_px 0 by default, so subject pixels sit
+# on the canvas edge. A registration shift must never push those pixels off the canvas: on
+# pose animation the estimate is wrong anyway (rock_3 frame 7 lost 20 % of the character).
+
+def _disc_with_edge_dot(center, dot_x0: int, dot_x1: int) -> np.ndarray:
+    rgba = disc_rgba(center=center)
+    rgba[22:26, dot_x0:dot_x1, :3] = (220, 40, 40)
+    rgba[22:26, dot_x0:dot_x1, 3] = 255
+    return rgba
+
+
+def test_limit_shift_to_canvas_keeps_the_alpha_bbox_inside():
+    alpha = _alpha(_disc_with_edge_dot((10.0, 24.0), 58, 60))      # bbox right edge = 60 of 64
+    assert stabilize.limit_shift_to_canvas(alpha, 0.0, 16.0) == (0.0, 4.0)
+    assert stabilize.limit_shift_to_canvas(alpha, 0.0, -30.0) == (0.0, 0.0)   # disc touches x=0
+    assert stabilize.limit_shift_to_canvas(alpha, -3.0, 2.0) == (-3.0, 2.0)   # fits: unchanged
+
+
+def test_dejitter_refuses_a_shift_that_would_push_the_subject_off_the_canvas(tmp_path, caplog):
+    ref = _disc_with_edge_dot((40.0, 24.0), 62, 64)
+    mov = _disc_with_edge_dot((10.0, 24.0), 62, 64)                # dot already on the edge
+    paths = [write_png(tmp_path / "in" / "0001.png", ref), write_png(tmp_path / "in" / "0002.png", mov)]
+    with caplog.at_level("WARNING"):
+        out = stabilize.dejitter(paths, tmp_path / "out", "centroid")
+    got = _alpha(np.asarray(Image.open(out[1])))
+    assert abs(float(got.sum()) - float(_alpha(mov).sum())) < 1e-3   # every subject pixel kept
+    c_in, c_out = centroid(_alpha(mov)), centroid(got)
+    assert abs(c_out[1] - c_in[1]) < 0.3 and abs(c_out[0] - c_in[0]) < 0.3
+    assert "canvas" in caplog.text.lower()
+
+
+def test_dejitter_limits_a_shift_to_what_the_canvas_can_hold(tmp_path, caplog):
+    ref = _disc_with_edge_dot((40.0, 24.0), 58, 60)
+    mov = _disc_with_edge_dot((10.0, 24.0), 58, 60)                # 4 px of room on the right
+    paths = [write_png(tmp_path / "in" / "0001.png", ref), write_png(tmp_path / "in" / "0002.png", mov)]
+    with caplog.at_level("WARNING"):
+        out = stabilize.dejitter(paths, tmp_path / "out", "centroid")
+    got = _alpha(np.asarray(Image.open(out[1])))
+    assert abs(float(got.sum()) - float(_alpha(mov).sum())) < 0.01 * float(_alpha(mov).sum())
+    c_in, c_out = centroid(_alpha(mov)), centroid(got)
+    assert abs((c_out[1] - c_in[1]) - 4.0) < 0.3 and abs(c_out[0] - c_in[0]) < 0.3
+    assert "canvas" in caplog.text.lower()
