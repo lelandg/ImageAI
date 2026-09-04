@@ -180,7 +180,9 @@ def test_purge_intermediates_recycles_stages_and_clips(tmp_path, monkeypatch):
     assert project.stage_fingerprints == {}
 
 
-def test_manager_creates_lists_loads_and_deletes(tmp_path):
+def test_manager_creates_lists_loads_and_deletes(tmp_path, monkeypatch):
+    # delete_project recycles when it can; keep the test run out of the real trash.
+    monkeypatch.setattr("core.sprite.project.send_to_recycle_bin", lambda p: shutil.rmtree(p) or True)
     manager = SpriteProjectManager(base_dir=tmp_path / "sprites")
     project = manager.create_project("My Hero!")
     assert project.project_dir.parent == tmp_path / "sprites"
@@ -373,3 +375,54 @@ def test_project_round_trip_drops_legacy_crop_key(tmp_path):
     assert all("crop_to_cell_aspect" not in p for p in saved["profiles"])
     assert "crop_to_cell_aspect" not in json.dumps(saved)
     assert loaded.profiles == project.profiles
+
+
+def test_delete_project_refuses_a_directory_outside_the_manager_base(tmp_path, monkeypatch):
+    """PR #45 review, blocking 3: ``load()`` sets ``project_dir = path.parent`` for any
+    opened file, so a project file copied into ~/Downloads must not make
+    ``delete_project`` remove ~/Downloads. The base directory itself is never a project."""
+    monkeypatch.setattr("core.sprite.project.send_to_recycle_bin", lambda p: shutil.rmtree(p) or True)
+    manager = SpriteProjectManager(base_dir=tmp_path / "sprites")
+    elsewhere = tmp_path / "Downloads"
+    project = _build(elsewhere)
+    project.save()
+    loaded = SpriteProject.load(elsewhere / PROJECT_FILE_NAME)
+    assert loaded.project_dir == elsewhere
+    assert manager.delete_project(loaded) is False
+    assert (elsewhere / PROJECT_FILE_NAME).exists()
+    base = SpriteProject(name="base")
+    base.project_dir = manager.base_dir
+    assert manager.delete_project(base) is False
+    assert manager.base_dir.exists()
+
+
+def test_delete_project_prefers_the_recycle_bin_and_falls_back_to_rmtree(tmp_path, monkeypatch):
+    calls = []
+    manager = SpriteProjectManager(base_dir=tmp_path / "sprites")
+    project = manager.create_project("Recycled")
+    monkeypatch.setattr("core.sprite.project.send_to_recycle_bin",
+                        lambda p: calls.append(p) or shutil.rmtree(p) or True)
+    assert manager.delete_project(project) is True
+    assert calls == [project.project_dir] and not project.project_dir.exists()
+
+    from core.recycle_bin import RecycleBinError
+    project = manager.create_project("Fallback")
+
+    def failing(p):
+        raise RecycleBinError("no trash here")
+    monkeypatch.setattr("core.sprite.project.send_to_recycle_bin", failing)
+    assert manager.delete_project(project) is True
+    assert not project.project_dir.exists()
+
+
+@pytest.mark.parametrize("bad", ["../../..", "a/b", "a\\b", ".", "..", "x y", "a" * 65])
+def test_action_card_rejects_an_id_that_is_not_a_single_path_segment(bad):
+    """PR #45 review, security: ``pipeline.stage_dir`` joins the id into a path that every
+    runner rmtree's, so a crafted id in a shared project file must be refused on load."""
+    with pytest.raises(ValueError):
+        ActionCard.from_dict({"id": bad, "name": "walk", "prompt": "p"})
+
+
+def test_action_card_accepts_generated_and_short_ids():
+    for good in (ActionCard.new_id(), "a1", "walk-cycle_2"):
+        assert ActionCard.from_dict({"id": good, "name": "walk", "prompt": "p"}).id == good

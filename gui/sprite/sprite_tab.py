@@ -442,6 +442,9 @@ class SpriteTab(QWidget):
         workspace_stopped = self.frames_workspace.shutdown()
         stopped = [panel.shutdown()
                    for panel in (self.character_panel, self.action_cards_panel, self.queue_panel)]
+        # Persist the open project once the workers are stopped, so an edit made
+        # after the last autosave survives the close (PR #45 review).
+        self._autosave()
         self._persist_splitters()
         return workspace_stopped and all(stopped)
 

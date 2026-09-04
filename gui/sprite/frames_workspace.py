@@ -65,6 +65,9 @@ class FramesWorkspace(QObject):
         tab.preview_player = self.player
         tab.pixel_view = self.view
         tab.processing_panel = self.panel
+        # The render queue runs run_pipeline on its own thread; the panel's Run
+        # must not start a second run on the same action meanwhile.
+        self.panel.set_busy_guard(lambda: "render queue" if tab.queue_panel.is_busy() else None)
         tab.undo_controller = self.undo_controller
         tab.undo_stack = SnapshotStack()          # replaced per action in _set_action
         tab.refresh_frames = self.refresh_frames  # sub-project 6 calls tab.refresh_frames()
@@ -154,6 +157,9 @@ class FramesWorkspace(QObject):
         action.frames = self.strip.frames()
         self.tab.log(f"Frames updated for '{action.name}': {len(action.frames)}")
         self._reload_player()
+        # A strip edit is a project edit: persist it the way apply_frames does,
+        # or a delete/reorder/duration change is lost on close (PR #45 review).
+        self.tab.save_current_project()
 
     def _reload_player(self) -> None:
         action = self._action

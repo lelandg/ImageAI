@@ -172,3 +172,16 @@ def test_manifest_includes_every_scale_sheet_and_its_sidecars(tmp_path, monkeypa
             "hero@2x.png", "hero@2x.json", "hero@2x.png.json"} <= names
     reported = sorted(str(p.relative_to(out)) for p in written)
     assert reported == _on_disk_recursive(out)
+
+
+def test_gif_filename_sanitizes_the_tag_name(tmp_path):
+    """PR #45 review, security: the title is sanitised but the tag was not, so a tag
+    named ``walk/../../escaped`` wrote its GIF outside the export directory."""
+    meta = _meta(tmp_path)
+    meta.tags[0] = TagMeta(name="walk/../../escaped", from_index=0, to_index=1)
+    out = tmp_path / "out"
+    written = export_with_preset(meta, "web_preview", out)
+    gifs = [p for p in written if p.suffix == ".gif"]
+    assert gifs and all(p.parent == out for p in gifs)
+    assert not (tmp_path / "escaped.gif").exists()
+    assert "hero_walk_.._.._escaped.gif" in {p.name for p in gifs}

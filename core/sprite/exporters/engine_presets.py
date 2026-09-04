@@ -173,7 +173,9 @@ def _write_png_sequence(meta: SheetMeta, out_dir: Path, title: str, preset: Engi
 def _write_gif(meta: SheetMeta, out_dir: Path, title: str, preset: EnginePreset) -> List[Path]:
     paths: List[Path] = []
     for tag in meta.tags:
-        out = export_gif(meta, tag, out_dir / f"{title}_{tag.name}.gif")
+        # The title is sanitised by the caller; the tag name is user text and
+        # must not carry a path separator into the file name (PR #45 review).
+        out = export_gif(meta, tag, out_dir / f"{title}_{sanitize_filename(tag.name)}.gif")
         # export_gif already wrote a sidecar with the correct unrolled frame
         # count plus durations_ms/loop/warnings/timestamp -- merge the preset
         # fields into it instead of overwriting, and derive "frames" the same

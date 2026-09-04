@@ -364,3 +364,25 @@ def test_enqueue_from_another_thread_while_run_is_mid_job(harness, make_action, 
     assert project.actions[0].status == "rendered"
     assert project.actions[1].status == "rendered"
     assert q.pending == []
+
+
+def test_cancel_during_a_re_render_requeues_the_card(harness):
+    """PR #45 review, blocking 1: a card rendered once keeps its old clip record
+    when it is re-queued (``enqueue`` never clears ``action.clip``), so the cancel
+    branch must not read "this run produced a clip" from ``action.clip``. Before
+    the fix the card stayed at ``rendering`` and was not re-queued."""
+    token = CancelToken()
+    project, q = harness["build"](token=token)
+    q.enqueue(["a1"])
+    q.run()
+    walk = project.actions[0]
+    assert walk.status == "rendered" and walk.clip is not None
+    old_clip = walk.clip
+
+    harness["outcomes"] = [Cancelled("render of 'walk' cancelled")]
+    q.enqueue(["a1"])
+    results = q.run()
+    assert walk.status == "queued"
+    assert q.pending == ["a1"]
+    assert walk.clip is old_clip                      # the previous clip is kept
+    assert isinstance(results["a1"], ProviderError) and results["a1"].retryable is True

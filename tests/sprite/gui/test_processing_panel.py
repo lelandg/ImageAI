@@ -511,3 +511,21 @@ def test_queued_probe_release_never_waits_on_the_new_worker(qapp, tmp_path, monk
         gate.set()
         widget.shutdown()
         assert widget.join_orphans(10000)
+
+
+def test_run_pipeline_is_refused_while_an_external_job_runs(panel, monkeypatch):
+    """PR #45 review, blocking 5: the render queue runs run_pipeline on the queue
+    thread; a second run on the same action from this panel is a second writer to
+    the same stage directories. The workspace installs a guard that names the
+    external job; the panel refuses while it returns a label."""
+    widget, project, action = panel
+    started, logs = [], []
+    monkeypatch.setattr(widget, "_start", lambda job, on_done, label: started.append(label) or True)
+    widget.logMessage.connect(lambda message, level: logs.append((message, level)))
+    widget.set_busy_guard(lambda: "render queue")
+    widget.run_pipeline()
+    assert started == []
+    assert ("Wait for the render queue to finish before running the pipeline", "WARNING") in logs
+    widget.set_busy_guard(lambda: None)
+    widget.run_pipeline()
+    assert started == ["Pipeline"]

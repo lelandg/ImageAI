@@ -379,3 +379,15 @@ def test_trim_to_loop_copies_when_tail_is_already_seamless(tmp_path, monkeypatch
     clip.write_bytes(b"full")
     out, score = trim_to_loop(clip, tmp_path / "a1.loop.mp4", seam_threshold=0.08)
     assert out.read_bytes() == b"full" and score == 0.0
+
+
+def test_veo_loop_conditioning_is_skipped_for_a_non_looping_action(request_for, make_action):
+    """PR #45 review, blocking 2: the setting defaults to True, so a one-shot card
+    (attack, hurt, death) was rendered with image=last_frame=plate and forced to
+    8 s. Loop conditioning applies only when the action itself loops, the way the
+    Omni prompt path already reads ``action.loop``."""
+    req = request_for("veo", model=VEO_FAST, loop_conditioning=True, resolution="720p")
+    req.action = make_action(loop=False, duration_s=5)
+    cfg = build_veo_config(req)
+    assert cfg.image is None and cfg.last_frame is None
+    assert cfg.duration == 6

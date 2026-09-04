@@ -669,10 +669,29 @@ class ProcessingPanel(WorkerHost, QWidget):
     def _on_install_finished(self, _ok: bool) -> None:
         self.refresh_backends()
 
+    # Names an external job that must finish before this panel runs the pipeline
+    # (the render queue runs run_pipeline on its own thread, and two writers to
+    # the same stage directories leave action.status/frames last-writer-wins).
+    # The workspace installs it; None means no guard (PR #45 review).
+    _busy_guard: Optional[Callable[[], Optional[str]]] = None
+
+    def set_busy_guard(self, guard: Optional[Callable[[], Optional[str]]]) -> None:
+        self._busy_guard = guard
+
+    def _external_job(self) -> Optional[str]:
+        guard = self._busy_guard
+        return guard() if guard is not None else None
+
     def run_pipeline(self) -> None:
         project, action = self._project, self._action
         if project is None or action is None:
             self._warn("Run pipeline", "Select an action card first.")
+            return
+        external = self._external_job()
+        if external:
+            logger.warning("Run pipeline refused: the %s is still running", external)
+            self.logMessage.emit(f"Wait for the {external} to finish before running the pipeline",
+                                 "WARNING")
             return
         self._write_back()
         if not self._check_key_color_field():

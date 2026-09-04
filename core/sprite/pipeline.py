@@ -28,7 +28,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from PIL import Image
 
 from .models import FrameMeta
-from .project import ActionCard, SpriteProject
+from .project import ActionCard, SpriteProject, validate_action_id
 from core.sprite import keying
 
 logger = logging.getLogger(__name__)
@@ -135,6 +135,8 @@ def stage_dir(project: SpriteProject, action: ActionCard, stage: str) -> Path:
         raise ValueError("project_dir is not set")
     if stage not in STAGES:
         raise ValueError(f"Unknown stage: {stage!r}")
+    # Every runner rmtree's this directory; the id must stay one path segment.
+    validate_action_id(action.id)
     return project.project_dir / "stages" / action.id / stage
 
 

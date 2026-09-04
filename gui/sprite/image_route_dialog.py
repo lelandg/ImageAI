@@ -425,6 +425,12 @@ def open_image_route_dialog(tab, action: ActionCard, *, exec_dialog: bool = True
         logger.warning("Image route refused: the %r job is still running", label)
         tab.console.log(f"Wait for the running {label} job to finish before rendering", "WARNING")
         return None
+    # The render queue is a second WorkerHost that runs run_pipeline on every
+    # rendered card; the same second-writer hazard applies (PR #45 review).
+    if tab.queue_panel.is_busy():
+        logger.warning("Image route refused: the render queue is still running")
+        tab.console.log("Wait for the render queue to finish before rendering", "WARNING")
+        return None
     dialog = ImageRouteDialog(project, action, provider_factory=tab.make_provider,
                               pose_fn=_make_pose_fn(tab), parent=tab)
     dialog.rendered.connect(lambda _paths, a=action, d=dialog: _on_rendered(tab, a, d))

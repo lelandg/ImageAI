@@ -576,3 +576,12 @@ def test_ensure_profile_stages_lets_cancel_propagate(tmp_path, alpha_frames, reg
         ensure_profile_stages(project, action, ["hd", "pixel"])
     assert "hd" not in project.stage_fingerprints["a1"]
     assert not stage_dir(project, action, "pixel").exists()
+
+
+def test_stage_dir_refuses_an_action_id_that_escapes_the_project(tmp_path):
+    """PR #45 review, security: every runner rmtree's ``stage_dir``; a crafted
+    ``id`` in a shared project file must never resolve outside ``stages/``."""
+    project = SpriteProject(name="x", project_dir=tmp_path)
+    action = ActionCard(id="../../escape", name="w", prompt="p")
+    with pytest.raises(ValueError):
+        stage_dir(project, action, "extract")

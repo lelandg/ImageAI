@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 import threading
 import uuid
@@ -18,7 +19,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.recycle_bin import send_to_recycle_bin
+from core.recycle_bin import RecycleBinError, send_to_recycle_bin
 from core.utils import sanitize_filename
 
 from .models import FrameMeta, SheetMeta, Size, TagMeta
@@ -254,6 +255,23 @@ class ClipRecord:
         )
 
 
+ACTION_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,64}")
+
+
+def validate_action_id(action_id: str) -> str:
+    """Return ``action_id`` when it is one safe path segment; raise ``ValueError``.
+
+    ``pipeline.stage_dir`` joins the id into ``stages/<id>/<stage>`` and every
+    runner removes that directory before it writes, so an id from a shared or
+    hand-edited project file must never contain a separator or ``..``. The
+    generator produces ``uuid4().hex``; tests use short names like ``a1``.
+    """
+    if not isinstance(action_id, str) or not ACTION_ID_RE.fullmatch(action_id):
+        raise ValueError(
+            f"Sprite action id {action_id!r} is not valid: use 1-64 letters, digits, '_' or '-'")
+    return action_id
+
+
 @dataclass
 class ActionCard:
     id: str
@@ -291,7 +309,7 @@ class ActionCard:
     def from_dict(cls, data: Dict[str, Any]) -> "ActionCard":
         clip = data.get("clip")
         return cls(
-            id=str(data.get("id") or cls.new_id()),
+            id=validate_action_id(str(data.get("id") or cls.new_id())),
             name=str(data.get("name", "")),
             prompt=str(data.get("prompt", "")),
             duration_s=int(data.get("duration_s", 8)),
@@ -685,13 +703,39 @@ class SpriteProjectManager:
         return None
 
     def delete_project(self, project: SpriteProject) -> bool:
-        if not project.project_dir or not project.project_dir.exists():
-            logger.warning(f"Sprite project directory not found: {project.project_dir}")
+        """Delete a project directory that lives under ``base_dir``.
+
+        ``SpriteProject.load`` sets ``project_dir`` to the parent of whatever
+        file was opened, so a project file copied into another folder would
+        otherwise make this remove that folder (PR #45 review). The directory
+        goes to the recycle bin when the platform has one; otherwise it is
+        removed for good.
+        """
+        project_dir = project.project_dir
+        if not project_dir or not project_dir.exists():
+            logger.warning(f"Sprite project directory not found: {project_dir}")
             return False
         try:
-            shutil.rmtree(project.project_dir)
+            resolved = project_dir.resolve()
+            base = self.base_dir.resolve()
+            inside = resolved != base and resolved.is_relative_to(base)
         except OSError as exc:
-            logger.error(f"Failed to delete sprite project {project.project_dir}: {exc}")
+            logger.error(f"Cannot resolve sprite project directory {project_dir}: {exc}")
             return False
-        logger.info(f"Deleted sprite project '{project.name}' at {project.project_dir}")
+        if not inside:
+            logger.error(f"Refusing to delete {project_dir}: it is not a project directory "
+                         f"under {self.base_dir}")
+            return False
+        try:
+            recycled = send_to_recycle_bin(project_dir)
+        except RecycleBinError as exc:
+            logger.warning(f"Recycle bin unavailable for {project_dir} ({exc}); deleting")
+            recycled = False
+        if not recycled:
+            try:
+                shutil.rmtree(project_dir)
+            except OSError as exc:
+                logger.error(f"Failed to delete sprite project {project_dir}: {exc}")
+                return False
+        logger.info(f"Deleted sprite project '{project.name}' at {project_dir}")
         return True

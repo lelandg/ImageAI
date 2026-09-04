@@ -269,6 +269,8 @@ class _FakeTab(QWidget):
         self.providers = []
         self.frames_workspace = SimpleNamespace(apply_frames=self._apply_frames,
                                                 panel=panel or _IdlePanel())
+        # The render queue is a second WorkerHost; the image route checks it too.
+        self.queue_panel = SimpleNamespace(is_busy=lambda: False)
 
     def track(self, action):
         """Register a card apply_frames may target while the tab shows another one."""
@@ -544,3 +546,15 @@ def test_shutdown_timeout_keeps_the_worker_as_an_orphan(qapp, tmp_path, monkeypa
         for _ in range(3):
             qapp.processEvents()
     assert not dialog.is_busy()             # reaped on its own terminal signal
+
+
+def test_image_route_is_refused_while_the_render_queue_runs(qapp, tmp_path):
+    """PR #45 review, blocking 5: the queue thread runs run_pipeline on every rendered
+    card; the image route renames the extract stage aside and runs a second pipeline."""
+    action = _action()
+    tab = _FakeTab(tmp_path, action)
+    tab.queue_panel = SimpleNamespace(is_busy=lambda: True)
+    assert ird.open_image_route_dialog(tab, action, exec_dialog=False) is None
+    assert ("Wait for the render queue to finish before rendering", "WARNING") in tab.log_calls
+    tab.queue_panel = SimpleNamespace(is_busy=lambda: False)
+    assert ird.open_image_route_dialog(tab, action, exec_dialog=False) is not None

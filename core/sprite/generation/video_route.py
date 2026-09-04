@@ -109,7 +109,10 @@ def build_veo_config(req: RenderRequest, *,
         choices = ", ".join(m.value for m in VeoModel)
         raise ProviderError(f"Unknown Veo model {model_id!r}. Choices: {choices}") from exc
 
-    loop_conditioning = bool(req.settings.loop_conditioning)
+    # Only a looping action gets the plate as first and last frame. A one-shot
+    # card (attack, hurt, death) cannot end on the idle pose, and the setting
+    # defaults to True. The Omni prompt path reads ``action.loop`` the same way.
+    loop_conditioning = bool(req.settings.loop_conditioning) and bool(req.action.loop)
     duration = snap_duration(req.action.duration_s, "veo", model.value,
                              loop_conditioning=loop_conditioning)
     if loop_conditioning:
@@ -243,7 +246,7 @@ def render_action(req: RenderRequest, *, api_key: Optional[str], auth_mode: str 
             "image": str(cfg.image) if cfg.image else None,
             "last_frame": str(cfg.last_frame) if cfg.last_frame else None,
             "reference_images": [str(p) for p in (cfg.reference_images or [])],
-            "loop_conditioning": bool(req.settings.loop_conditioning),
+            "loop_conditioning": cfg.last_frame is not None,   # the applied value
             "loop": action.loop,
             "auth_mode": auth_mode,
         })

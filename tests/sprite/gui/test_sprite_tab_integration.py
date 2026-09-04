@@ -623,3 +623,48 @@ def test_real_sprite_tab_shutdown_reports_a_workspace_orphan(qapp, monkeypatch):
     assert tab.shutdown() is False          # the caller must join_orphans() before teardown
     monkeypatch.setattr(tab.frames_workspace, "shutdown", lambda: True)
     assert tab.shutdown() is True
+
+
+def test_strip_edit_saves_the_project(qapp, tmp_path, monkeypatch):
+    """PR #45 review, blocking 4: a delete, reorder or duration edit in the strip
+    must reach disk the way ``apply_frames`` does, or it is lost on close."""
+    tab, workspace, project, action = _workspace(qapp, tmp_path, monkeypatch)
+    assert tab.saved == []
+    workspace.strip.select_index(1)
+    workspace.strip.delete_selected()
+    assert [f.name for f in action.frames] == ["frame_00", "frame_02", "frame_03"]
+    assert tab.saved == [project]
+    workspace.shutdown()
+
+
+def test_run_pipeline_is_refused_while_the_render_queue_runs(qapp, tmp_path, monkeypatch):
+    """PR #45 review, blocking 5: the queue thread runs run_pipeline on every rendered
+    card; the panel's Run must not start a second run on the same action meanwhile."""
+    tab, workspace, project, action = _workspace(qapp, tmp_path, monkeypatch)
+    started = []
+    monkeypatch.setattr(workspace.panel, "_start",
+                        lambda job, on_done, label: started.append(label) or True)
+    monkeypatch.setattr(tab.queue_panel, "is_busy", lambda: True)
+    workspace.panel.run_pipeline()
+    assert started == []
+    assert ("Wait for the render queue to finish before running the pipeline", "WARNING") in tab.log_calls
+    monkeypatch.setattr(tab.queue_panel, "is_busy", lambda: False)
+    workspace.panel.run_pipeline()
+    assert started == ["Pipeline"]
+    workspace.shutdown()
+
+
+def test_real_sprite_tab_shutdown_autosaves(qapp, monkeypatch):
+    """PR #45 review, blocking 4: close must persist the open project, so an edit
+    made after the last autosave survives."""
+    from pathlib import Path
+    import gui.sprite.processing_panel as pp
+    monkeypatch.setattr(pp, "available_backends", lambda: {"mediapipe": False, "rembg": False})
+    from gui.sprite.sprite_tab import SpriteTab
+    tab = SpriteTab(_FakeConfig())
+    tab.new_project_named("close")
+    saved = tab.save_project()
+    assert saved is not None and Path(saved).exists()
+    Path(saved).unlink()
+    assert tab.shutdown() is True
+    assert Path(saved).exists()                      # written again on close

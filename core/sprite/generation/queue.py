@@ -154,6 +154,10 @@ class ActionQueue:
             if popped is None:
                 break
             action_id, action = popped
+            # True once THIS run stored a clip record. ``enqueue`` keeps the old
+            # ``action.clip`` on a re-render, so the cancel branch cannot read
+            # "did this run produce a clip" from the action (PR #45 review).
+            produced = False
             try:
                 # Provider call and pipeline run happen with the lock released
                 # so a slow render never blocks a concurrent enqueue().
@@ -161,6 +165,7 @@ class ActionQueue:
                 with self._lock:
                     action.clip = record
                     action.status = "rendered"
+                    produced = True
                 entry = record_actual(self.project, action, None, note="rendered")
                 emit(logger, self.log, f"Cost: '{action.name}' estimated ${entry.estimated_usd} "
                                        f"({entry.seconds:.0f}s {entry.provider}/{entry.model})")
@@ -170,9 +175,9 @@ class ActionQueue:
             except Cancelled as exc:
                 requeue_count: Optional[int] = None
                 with self._lock:
-                    if action.clip is None:
-                        # No clip yet: put the card back where it can be
-                        # picked up again instead of dropping it silently.
+                    if not produced:
+                        # No clip from this run: put the card back where it can
+                        # be picked up again instead of dropping it silently.
                         action.status = "queued"
                         action.error = f"cancelled: {exc}"
                         self.pending.insert(0, action_id)
@@ -180,7 +185,7 @@ class ActionQueue:
                             f"Render of '{action.name}' was cancelled. {exc}", retryable=True)
                         requeue_count = len(self.pending)
                     else:
-                        # The clip already exists (e.g. cancelled during the
+                        # This run's clip exists (cancelled during the
                         # post-render pipeline stage); nothing to re-queue.
                         action.error = f"cancelled after render: {exc}"
                 if requeue_count is not None:
