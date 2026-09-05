@@ -1,6 +1,6 @@
 # Sprite CLI implementation and acceptance
 
-Last updated: 2026-09-05 11:26
+Last updated: 2026-09-05 11:45
 
 ## Result
 
@@ -48,7 +48,7 @@ to the checked-in sample (SHA-256
 
 ## Validation and boundaries
 
-- Sprite suite: **799 passed, one skipped** with real local image/video processing
+- Sprite suite: **811 passed, one skipped** with real local image/video processing
   and exporters, plus mocked provider failure/cancellation tests.
 - Image sidecar, storage-path and related Sprite GUI integration: **49 passed**.
 - Isolated frame-strip GUI suite: **20 passed**, including preservation of internal
@@ -76,6 +76,23 @@ to the checked-in sample (SHA-256
 has editable requests and copy buttons for every command. `Docs/CodeMap.md` is
 regenerated while excluding runtime caches, generated tests and local tool trees.
 
-Implementation is ready for committed-code review and the
-version manager's minor release. PR creation, automated review and merge remain
-pending until their actual results can be recorded.
+Independent local Codex review found three defects, all corrected before push:
+metadata-only undo removed the clip reference; immediate SIGINT bypassed accepted
+remote-operation recovery; and nonfinite saved values escaped the JSON error
+boundary. Follow-up review found no remaining actionable findings, with 33
+independently run project/history tests passing. The final Sprite suite passed
+811 tests with one skip. Strict dispatcher mypy, scoped Ruff and compilation of
+the changed modules passed after the fixes.
+
+History restoration now copies retained raw stage generations, preserving original
+video references, keying settings, fingerprints and unprocessed imports. Metadata
+undo avoids media changes. Cooperative cancellation saves accepted video job IDs;
+a second interrupt can force exit. Invalid response values produce a JSON error.
+
+A local Claude review was rejected by automatic approval review as source-code
+egress without explicit destination authorization. The independent local Codex
+review was completed instead. The configured automated PR review is still a
+required publication gate.
+
+The version manager dry run selected minor release 0.49.0. PR publication,
+automated review and merge remain pending until their results are available.

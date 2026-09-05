@@ -73,10 +73,16 @@ def _progress(stage, done, total, message):
 @contextmanager
 def _cancellation(token):
     previous = signal.getsignal(signal.SIGINT)
+    interrupts = 0
 
     def cancel(_signum, _frame):
+        nonlocal interrupts
+        interrupts += 1
         token.cancel()
-        raise KeyboardInterrupt
+        # Let a polling provider return its accepted remote operation ID so
+        # video_route can save the recovery sidecar before raising Cancelled.
+        if interrupts > 1:
+            raise KeyboardInterrupt
 
     signal.signal(signal.SIGINT, cancel)
     try:
@@ -92,7 +98,7 @@ def _project_lock(project):
     path = project.project_dir.with_name("." + project.project_dir.name + ".sprite-cli.lock")
     with path.open("a+b") as handle:
         handle.seek(0)
-        if os.name == "nt":
+        if sys.platform == "win32":
             import msvcrt
             if path.stat().st_size == 0:
                 handle.write(b"0")
@@ -111,7 +117,7 @@ def _project_lock(project):
         try:
             yield
         finally:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 handle.seek(0)
                 msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             else:
@@ -327,12 +333,21 @@ def _archive_snapshot(snapshot, action_id, old_stages, archive):
     for action in snapshot["actions"]:
         if action["id"] != action_id:
             continue
+        roots = snapshot.setdefault("_cli_stage_roots", {})
+        recorded_root = roots.get(action_id)
+        # Before its first process, an import has extract files but no FrameMeta
+        # entries. Retain that generation explicitly, including empty extracts.
+        moved = (not action["frames"] and recorded_root is None) or (
+            recorded_root is not None and Path(recorded_root) == old_stages)
         for frame in action["frames"]:
             if frame["source_path"]:
                 try:
                     frame["source_path"] = str(Path(archive) / Path(frame["source_path"]).relative_to(old_stages))
+                    moved = True
                 except ValueError:
                     pass
+        if moved:
+            roots[action_id] = str(archive)
 
 
 def _archive_history(history, action_id, old_stages, archive):
@@ -341,8 +356,81 @@ def _archive_history(history, action_id, old_stages, archive):
             _archive_snapshot(snapshot, action_id, old_stages, archive)
 
 
-def _undo(project, operation):
+def _frame_sources(action):
+    """Only ordered media identities require restoring a stage generation."""
+    return [frame.source_path for frame in action.frames]
+
+
+def _restore_generation(project, action, token, source_root=None):
+    """Restore archived raw stages without baking away the original clip/keying.
+
+    History frame paths identify the retained generation. Copy it into a fresh
+    candidate so a later forced process cannot overwrite another undo snapshot.
+    Empty frame lists can still have an unprocessed import or a source clip.
+    """
+    import shutil
+    from cli.commands.sprite_generation import _candidate, _promote
+    from core.sprite.pipeline import stage_dir
+
+    live = stage_dir(project, action, "extract").parent
+    source = None
+    token.raise_if_cancelled()
+    if action.frames:
+        roots = set()
+        for frame in action.frames:
+            if not frame.source_path or not frame.source_path.is_file():
+                raise ValueError("Cannot restore frame history: a retained frame is missing")
+            try:
+                relative = frame.source_path.relative_to(live.parent)
+            except ValueError:
+                raise ValueError("Cannot restore frame history: its processing stages are unavailable") from None
+            root = relative.parts[0]
+            if root != action.id and not root.startswith(action.id + ".prev-"):
+                raise ValueError("Cannot restore frame history: its processing stages are unavailable")
+            roots.add(live.parent / root)
+        if len(roots) != 1:
+            raise ValueError("Cannot restore frame history: frames reference different processing generations")
+        source = roots.pop()
+    elif source_root is not None:
+        try:
+            relative = Path(source_root).relative_to(live.parent)
+        except ValueError:
+            raise ValueError("Cannot restore frame history: its processing stages are unavailable") from None
+        if (len(relative.parts) != 1 or (relative.name != action.id
+                and not relative.name.startswith(action.id + ".prev-"))):
+            raise ValueError("Cannot restore frame history: its processing stages are unavailable")
+        source = live.parent / relative
+        if not source.is_dir():
+            raise ValueError("Cannot restore frame history: its retained processing stages are missing")
+
+    candidate, card = _candidate(project, action)
+    destination = stage_dir(candidate, card, "extract").parent
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if source is not None:
+        def copy_file(src, dest):
+            token.raise_if_cancelled()
+            return shutil.copy2(src, dest)
+
+        shutil.copytree(source, destination, copy_function=copy_file)
+    else:
+        (destination / "extract").mkdir(parents=True)
+    card.frames = copy.deepcopy(action.frames)
+    for frame in card.frames:
+        assert source is not None
+        frame.source_path = destination / frame.source_path.relative_to(source)
+    card.clip = copy.deepcopy(action.clip)
+    card.status = action.status
+    previous_error = action.error
+    candidate.stage_fingerprints[action.id] = copy.deepcopy(project.stage_fingerprints.get(action.id, {}))
+    token.raise_if_cancelled()
+    archived = _promote(project, action, candidate, card)
+    action.error = previous_error
+    return archived, source
+
+
+def _undo(project, operation, token):
     from core.sprite.project import SpriteProject
+    token.raise_if_cancelled()
     history = _read_history(project)
     if history.get("expected") != _digest(project.to_dict()):
         raise ValueError("Project changed since the last CLI edit; old undo history cannot be applied")
@@ -350,20 +438,27 @@ def _undo(project, operation):
         raise ValueError(f"Nothing to {operation}")
     opposite = "redo" if operation == "undo" else "undo"
     opposite_snapshot = project.to_dict()
-    restored = SpriteProject.from_dict(history[operation].pop())
+    snapshot = history[operation].pop()
+    restored = SpriteProject.from_dict(snapshot)
     restored.project_dir = project.project_dir
-    # Restore media generations as well as metadata after frame insertion/baking.
+    # Metadata edits must keep the original clip and per-frame keying contract.
+    # Structural edits restore the raw stages saved before their RGBA bake.
     for action in restored.actions:
         current = project.action_by_id(action.id)
-        if (current and current.to_dict()["frames"] != action.to_dict()["frames"]
-                and all(f.source_path and f.source_path.is_file() for f in action.frames)):
-            from cli.commands.sprite_generation import bake_working_frames
-            from core.sprite.pipeline import CancelToken, stage_dir
+        if current:
+            from core.sprite.pipeline import stage_dir
             old_stages = stage_dir(project, current, "extract").parent
-            baked = bake_working_frames(restored, action, action.frames,
-                                       progress=_progress, token=CancelToken())
-            _archive_snapshot(opposite_snapshot, action.id, old_stages, baked["archive"])
-            _archive_history(history, action.id, old_stages, baked["archive"])
+            source_root = snapshot.get("_cli_stage_roots", {}).get(action.id)
+            if (_frame_sources(current) == _frame_sources(action)
+                    and (source_root is None or Path(source_root) == old_stages)):
+                continue
+            archive, source = _restore_generation(restored, action, token, source_root)
+            _archive_snapshot(opposite_snapshot, action.id, old_stages, archive)
+            _archive_history(history, action.id, old_stages, archive)
+            if source is not None and source != old_stages:
+                # Snapshots of this same generation now share the live paths;
+                # a subsequent duration/pivot/override undo stays metadata-only.
+                _archive_history(history, action.id, source, old_stages)
     history[opposite].append(opposite_snapshot)
     history["expected"] = _digest(restored.to_dict())
     restored.save()
@@ -446,7 +541,7 @@ def _execute(args, data, token):
             project = copy_project(project, data["name"], _manager(args))
             return _inspect(project)
         if operation in ("undo", "redo"):
-            return _inspect(_undo(project, operation))
+            return _inspect(_undo(project, operation, token))
         if operation == "edit":
             _settings(project, data)
             result = {}
@@ -507,7 +602,7 @@ def _execute(args, data, token):
                     _write_json(_history_path(project), history)
         result["project"] = str(project.project_file())
         result["modified"] = project.modified
-        record = project.project_dir / "runs" / f"{operation}-{datetime.now():%Y%m%d_%H%M%S}-{uuid.uuid4().hex[:8]}.json"
+        record = project.project_file().parent / "runs" / f"{operation}-{datetime.now():%Y%m%d_%H%M%S}-{uuid.uuid4().hex[:8]}.json"
         _write_json(record, {"operation": operation, "result": result})
         result["run_record"] = str(record)
         return result
@@ -526,10 +621,12 @@ def run_sprite_cmd(args):
         with redirect_stdout(sys.stderr), _cancellation(token):
             data = _read_request(args)
             result.update(_execute(args, data, token))
-    except (KeyboardInterrupt, Cancelled):
+            token.raise_if_cancelled()
+    except (KeyboardInterrupt, Cancelled) as exc:
         token.cancel()
-        logger.warning("Sprite operation cancelled")
-        result.update(status="cancelled", error="Sprite operation cancelled")
+        message = redact_secrets(str(exc)) or "Sprite operation cancelled"
+        logger.warning("Sprite operation cancelled: %s", message)
+        result.update(status="cancelled", error=message)
         exit_code = 130
     except (ValueError, KeyError, FileNotFoundError) as exc:
         message = redact_secrets(str(exc))
@@ -547,7 +644,14 @@ def run_sprite_cmd(args):
         result.update(status="error", error=message)
         exit_code = 3
     result["exit_code"] = exit_code
-    output = json.dumps(result, ensure_ascii=False, default=_json_default, allow_nan=False)
+    try:
+        output = json.dumps(result, ensure_ascii=False, default=_json_default, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        message = "Sprite response could not be encoded as JSON: " + redact_secrets(str(exc))
+        logger.error(message)
+        exit_code = 3
+        output = json.dumps({"status": "error", "operation": args.sprite,
+                             "error": message, "exit_code": exit_code}, ensure_ascii=False)
     print(output, file=sys.stdout if getattr(args, "json", False) else sys.stderr)
     return exit_code
 

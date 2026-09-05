@@ -175,3 +175,65 @@ def test_delete_respects_writer_lock(monkeypatch, capsys, tmp_path):
         assert code == 2
         assert "Another Sprite CLI" in result["error"]
         assert project.project_file().is_file()
+
+
+@pytest.mark.parametrize('invalid', [float('nan'), float('inf'), float('-inf')])
+def test_nonfinite_existing_project_returns_json_error(monkeypatch, capsys, tmp_path, invalid):
+    project = SpriteProjectManager(tmp_path).create_project('Invalid legacy value')
+    document = json.loads(project.project_file().read_text())
+    document['key']['tolerance'] = invalid
+    project.project_file().write_text(json.dumps(document))
+    code, result = invoke(monkeypatch, capsys, tmp_path, 'inspect', project=project.project_file())
+    assert code == 3
+    assert result['status'] == 'error'
+    assert 'encoded as JSON' in result['error']
+
+
+@pytest.mark.parametrize('provider', ['omni', 'veo'])
+def test_first_sigint_preserves_accepted_video_operation(monkeypatch, capsys, tmp_path, provider):
+    import signal
+    from types import SimpleNamespace
+    from core.sprite.generation import video_route
+    from core.sprite.project import ActionCard, GenerationSettings
+
+    source = tmp_path / 'source.png'
+    Image.new('RGB', (32, 18), 'green').save(source)
+    request = video_route.RenderRequest(
+        ActionCard('cancel', 'cancel', 'the character pauses'), source, [],
+        GenerationSettings(provider=provider, aspect_ratio='16:9'), tmp_path / 'accepted.mp4')
+
+    class AcceptedClient:
+        def generate_video(self, *args, cancel_check):
+            signal.raise_signal(signal.SIGINT)
+            assert cancel_check()
+            return SimpleNamespace(success=False, error='cancelled',
+                                   interaction_id='accepted-operation', operation_id='accepted-operation')
+
+    monkeypatch.setattr(video_route, '_make_omni_client', lambda *_: AcceptedClient())
+    monkeypatch.setattr(video_route, '_make_veo_client', lambda *_: AcceptedClient())
+
+    def execute(_args, _data, token):
+        return video_route.render_action(request, api_key=None, token=token)
+
+    monkeypatch.setattr('cli.commands.sprite._execute', execute)
+    code, result = invoke(monkeypatch, capsys, tmp_path, 'inspect')
+    assert code == 130
+    assert result['status'] == 'cancelled'
+    assert 'accepted-operation' in result['error']
+    saved = json.loads(video_route.clip_sidecar_path(request.out_mp4).read_text())
+    assert saved['operation_id'] == 'accepted-operation'
+    assert saved['status'] == 'cancelled'
+
+
+def test_second_sigint_forces_interrupt_and_restores_handler():
+    import signal
+    from cli.commands.sprite import _cancellation
+    from core.sprite.pipeline import CancelToken
+
+    previous = signal.getsignal(signal.SIGINT)
+    token = CancelToken()
+    with pytest.raises(KeyboardInterrupt), _cancellation(token):
+        signal.raise_signal(signal.SIGINT)
+        assert token.cancelled
+        signal.raise_signal(signal.SIGINT)
+    assert signal.getsignal(signal.SIGINT) is previous

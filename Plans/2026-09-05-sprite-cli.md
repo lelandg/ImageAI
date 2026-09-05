@@ -1,6 +1,6 @@
 # Sprite CLI implementation checklist
 
-**Last Updated:** 2026-09-05 11:26
+**Last Updated:** 2026-09-05 11:45
 **Status:** In Progress
 **Progress:** 6/8 tasks complete
 
@@ -35,7 +35,7 @@ Use the existing Sprite engine and project format so GUI and CLI interoperate.
 - 36 discoverable operations cover project/library management, settings, actions,
   durable frame editing/history, all generation routes, imports, processing,
   seven export formats, eight engine presets and optional backend tools.
-- Sprite core suite: 799 passed, one skipped. Integration checks: 49 passed.
+- Sprite core suite: 811 passed, one skipped. Integration checks: 49 passed.
   Isolated frame-strip GUI suite: 20 passed.
 - Existing `rock_3` project was copied before processing and exporting all formats.
 - Created Lumen with two generated animations. The selected credited GIF and its

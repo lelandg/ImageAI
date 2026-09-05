@@ -1,6 +1,6 @@
 # ImageAI CodeMap
 
-Last Updated: 2026-09-05 11:27:46
+Last Updated: 2026-09-05 11:45:40
 
 ## Quick Navigation
 - Main Application: `main.py`
@@ -78,7 +78,7 @@ ImageAI/
 │   ├── Character-Animator-Guide.md  # 199 lines
 │   ├── ChatGPT Lyric Generator for aisonggenerator.ai.md  # 153 lines
 │   ├── Claude Desktop Instructions.md  # 361 lines
-│   ├── CodeMap.md  # 1234 lines
+│   ├── CodeMap.md  # 1193 lines
 │   ├── CodeMap_Generator.md  # 24 lines
 │   ├── CodeReview-2025-10-19.md  # 169 lines
 │   ├── CodeReview-2025-11-14.md  # 499 lines
@@ -103,7 +103,7 @@ ImageAI/
 │   ├── Reference-System-Implementation-Summary.md  # 520 lines
 │   ├── Reference-UI-Implementation.md  # 647 lines
 │   ├── Scene-Batching-Implementation.md  # 269 lines
-│   ├── Sprite-CLI-Guide.md  # 244 lines
+│   ├── Sprite-CLI-Guide.md  # 250 lines
 │   ├── Storage-Locations-Known-Issues.md  # 172 lines
 │   ├── Suno-Package-Support.md  # 333 lines
 │   ├── UI-Improvements-TODO.md  # 342 lines
@@ -216,7 +216,7 @@ ImageAI/
 │   ├── 2026-09-04-sprite-background-implementation.md  # 46 lines
 │   ├── 2026-09-04-sprite-dejitter-crop-fix.md  # 70 lines
 │   ├── 2026-09-04-sprite-gif-background-and-artifacts.md  # 80 lines
-│   ├── 2026-09-05-Sprite-CLI-Validation.md  # 79 lines
+│   ├── 2026-09-05-Sprite-CLI-Validation.md  # 98 lines
 │   ├── 2026-09-05-rock-3-export-dimensions.md  # 38 lines
 │   ├── 2026-09-05-sprite-projects-and-startup.md  # 75 lines
 │   ├── 2026-09-05-sprite-release.md  # 27 lines
@@ -449,7 +449,7 @@ ImageAI/
 │   ├── commands/
 │   │   ├── __init__.py  # 0 lines
 │   │   ├── layout.py  # 258 lines
-│   │   ├── sprite.py  # 562 lines
+│   │   ├── sprite.py  # 666 lines
 │   │   ├── sprite_generation.py  # 707 lines
 │   │   ├── sprite_media.py  # 519 lines
 │   │   ├── sprite_utilities.py  # 233 lines
@@ -934,9 +934,9 @@ ImageAI/
 │   │   ├── test_aseprite_native.py  # 115 lines
 │   │   ├── test_background_geometry.py  # 69 lines
 │   │   ├── test_cli_generation.py  # 486 lines
-│   │   ├── test_cli_history.py  # 84 lines
+│   │   ├── test_cli_history.py  # 247 lines
 │   │   ├── test_cli_media.py  # 244 lines
-│   │   ├── test_cli_project.py  # 177 lines
+│   │   ├── test_cli_project.py  # 239 lines
 │   │   ├── test_cli_schema.py  # 102 lines
 │   │   ├── test_cli_utilities.py  # 167 lines
 │   │   ├── test_dejitter.py  # 227 lines

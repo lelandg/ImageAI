@@ -241,4 +241,10 @@ actions or stage checkpoints may already be committed. Correct the request or
 provider issue and resume deliberately; do not automatically retry a paid call
 without checking its project record and outputs.
 
+The first Ctrl+C requests cooperative cancellation so video clients can save an
+accepted remote operation ID in the clip sidecar. The cancelled JSON result
+retains the provider's recovery message. A second Ctrl+C forces interruption and
+may prevent that recovery record from being saved. A remote job can continue
+running after local cancellation.
+
 CLI media implementation, guide and offline workbench: **Codex (OpenAI)**.
