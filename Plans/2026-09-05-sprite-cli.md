@@ -1,8 +1,8 @@
 # Sprite CLI implementation checklist
 
-**Last Updated:** 2026-09-05 11:45
-**Status:** In Progress
-**Progress:** 6/8 tasks complete
+**Last Updated:** 2026-09-05 11:47
+**Status:** Implementation complete; release tracked in PR #52
+**Progress:** 8/8 implementation and publication tasks complete
 
 ## Overview
 
@@ -18,8 +18,13 @@ Use the existing Sprite engine and project format so GUI and CLI interoperate.
 - [x] Verify contracts and regression tests, including malformed inputs and cancellation.
 - [x] Test an independent copy of an existing Sprite project.
 - [x] Generate an original self-themed project with two animations; inspect and credit a repository GIF sample.
-- [~] Document commands, refresh CodeMap, run local reviews and release checks, bump version through version manager.
-- [ ] Push one feature PR, reconcile automated review, merge when green, and notify the user.
+- [x] Document commands, refresh CodeMap, run local reviews and release checks, bump version through version manager.
+- [x] Push one feature PR with validation evidence and the credited sample.
+
+Release gate: [PR #52](https://github.com/lelandg/ImageAI/pull/52) is the
+authoritative record of automated review and merge status. The final task
+response records completion after green checks and merge; publication alone
+does not satisfy that gate.
 
 ## Decisions
 

@@ -1,6 +1,6 @@
 # ImageAI CodeMap
 
-Last Updated: 2026-09-05 11:45:40
+Last Updated: 2026-09-05 11:47:10
 
 ## Quick Navigation
 - Main Application: `main.py`
@@ -216,7 +216,7 @@ ImageAI/
 │   ├── 2026-09-04-sprite-background-implementation.md  # 46 lines
 │   ├── 2026-09-04-sprite-dejitter-crop-fix.md  # 70 lines
 │   ├── 2026-09-04-sprite-gif-background-and-artifacts.md  # 80 lines
-│   ├── 2026-09-05-Sprite-CLI-Validation.md  # 98 lines
+│   ├── 2026-09-05-Sprite-CLI-Validation.md  # 104 lines
 │   ├── 2026-09-05-rock-3-export-dimensions.md  # 38 lines
 │   ├── 2026-09-05-sprite-projects-and-startup.md  # 75 lines
 │   ├── 2026-09-05-sprite-release.md  # 27 lines
@@ -349,7 +349,7 @@ ImageAI/
 │   ├── 2026-08-29-sprite-tab-design.md  # 889 lines
 │   ├── 2026-08-29-sprite-video-route-plan.md  # 4581 lines
 │   ├── 2026-09-04-sprite-background-modes.md  # 31 lines
-│   ├── 2026-09-05-sprite-cli.md  # 46 lines
+│   ├── 2026-09-05-sprite-cli.md  # 51 lines
 │   ├── 2026-09-05-sprite-ui-ux.md  # 36 lines
 │   ├── AICharacterGenerator.md  # 310 lines
 │   ├── CharacterAnimatorPuppetAutomation.md  # 419 lines
@@ -1029,7 +1029,7 @@ ImageAI/
 ├── weights/
 │   ├── character_animator/
 ├── AGENTS.md  # 73 lines
-├── CHANGELOG.md  # 1832 lines
+├── CHANGELOG.md  # 1844 lines
 ├── CLAUDE.md  # 6 lines
 ├── COMMIT_MESSAGE.txt  # 32 lines
 ├── CONTRIBUTING.md  # 62 lines

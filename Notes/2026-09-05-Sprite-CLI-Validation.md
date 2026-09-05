@@ -1,6 +1,6 @@
 # Sprite CLI implementation and acceptance
 
-Last updated: 2026-09-05 11:45
+Last updated: 2026-09-05 11:47
 
 ## Result
 
@@ -94,5 +94,11 @@ egress without explicit destination authorization. The independent local Codex
 review was completed instead. The configured automated PR review is still a
 required publication gate.
 
-The version manager dry run selected minor release 0.49.0. PR publication,
-automated review and merge remain pending until their results are available.
+The version manager applied minor release **0.49.0** in commit `6ddc7ea` and
+created the local release tag. The CLI reports `imageai 0.49.0`. All branch commits
+were verified as belonging to this feature before publication.
+
+[PR #52](https://github.com/lelandg/ImageAI/pull/52) contains the feature, fixes,
+documentation and sample. Its comments and checks are the authoritative record
+of the configured automated review and merge result. Merge requires that review
+to land and the checks to be green; the release tag is published after merge.
