@@ -209,6 +209,10 @@ def run_cli(args) -> int:
         Exit code (0 for success)
     """
     # Get provider and auth mode
+    if getattr(args, "sprite", None):
+        from cli.commands.sprite import run_sprite_cmd
+        return run_sprite_cmd(args)
+
     provider = (getattr(args, "provider", None) or "google").strip().lower()
     auth_mode = getattr(args, "auth_mode", "api-key")
 
@@ -431,7 +435,7 @@ def run_cli(args) -> int:
                       + (" (smart merge)" if styled.meta["smart_merge_used"] else ""),
                       file=sys.stderr)
 
-            ref_paths = []  # bound when `references` is non-empty; pre-init for narrowing
+            ref_paths: List[Path] = []  # bound when `references` is non-empty
             mask_path = getattr(args, "mask", None)
             stream_partials = bool(getattr(args, "stream_partials", False))
             submit_batch = bool(getattr(args, "batch", False))
@@ -444,6 +448,49 @@ def run_cli(args) -> int:
                     print(f"Mask file not found: {mp}")
                     return 2
                 mask_bytes = mp.read_bytes()
+
+            # All image destinations share provenance, including explicit paths
+            # and streaming previews. Read requested options from args: quality
+            # is popped from kwargs before generate() below.
+            from datetime import datetime
+            from core.utils import write_image_sidecar
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            def save_generated_image(path, image_bytes, **extra):
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(image_bytes)
+                except OSError:
+                    logger.exception("Could not save generated image to %s", path)
+                    raise
+                meta = {
+                    "prompt": original_prompt,
+                    "effective_prompt": args.prompt,
+                    "provider": provider,
+                    "model": model,
+                    "timestamp": timestamp,
+                    # None records provider-selected dimensions honestly when
+                    # no size was passed, rather than inventing 1024x1024.
+                    "size": user_size,
+                    "quality": getattr(args, "quality", None) or (
+                        None if references else "auto" if stream_partials else "standard"),
+                    "num_images": int(getattr(args, "num_images", 1) or 1),
+                    **{name: getattr(args, name) for name in (
+                        "output_format", "output_compression", "moderation", "custom_size",
+                    ) if getattr(args, name, None) is not None},
+                }
+                if references:
+                    meta["reference_images"] = [str(p.resolve()) for p in ref_paths]
+                elif kwargs.get("reference_images"):
+                    meta["reference_images"] = [str(p) for p in kwargs["reference_images"]]
+                if mask_path:
+                    meta["mask"] = str(Path(mask_path).expanduser().resolve())
+                if style_meta:
+                    meta["style_applied"] = style_meta
+                meta.update(extra)
+                # The shared writer uses image.ext.json and logs sidecar I/O
+                # failures without discarding an already-generated image.
+                write_image_sidecar(path, meta)
 
             print(f"Generating with {provider} ({model})...")
 
@@ -503,7 +550,7 @@ def run_cli(args) -> int:
 
                 def on_partial(idx, png_bytes):
                     p = Path(f"{stem}.p{idx}{_ext}")
-                    p.write_bytes(png_bytes)
+                    save_generated_image(p, png_bytes, partial=True, partial_index=idx)
                     print(f"  partial {idx} -> {p}", file=sys.stderr)
 
                 kwargs.update({"stream": True, "partial_images": 2, "on_partial": on_partial})
@@ -537,46 +584,24 @@ def run_cli(args) -> int:
             if images:
                 if args.out:
                     out_path = Path(args.out).expanduser().resolve()
-                    out_path.parent.mkdir(parents=True, exist_ok=True)
-                    out_path.write_bytes(images[0])
+                    save_generated_image(out_path, images[0], image_index=1)
                     print(f"Saved image to {out_path}")
                     if len(images) > 1:
-                        stem = out_path.stem
+                        output_stem = out_path.stem
                         ext = out_path.suffix or ".png"
                         for i, img_data in enumerate(images[1:], start=2):
-                            numbered_path = out_path.with_name(f"{stem}_{i}{ext}")
-                            numbered_path.write_bytes(img_data)
+                            numbered_path = out_path.with_name(f"{output_stem}_{i}{ext}")
+                            save_generated_image(numbered_path, img_data, image_index=i)
                             print(f"Saved image to {numbered_path}")
                 else:
                     config = ConfigManager()
                     images_dir = config.get_images_dir()
-                    from datetime import datetime
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     stub = sanitize_filename(args.prompt, max_len=60)
                     for i, img_data in enumerate(images, start=1):
                         filename = f"{stub}_{timestamp}_{i}.png"
                         img_path = images_dir / filename
-                        img_path.write_bytes(img_data)
+                        save_generated_image(img_path, img_data, image_index=i)
                         print(f"Saved image to {img_path}")
-                        meta = {
-                            "prompt": original_prompt,
-                            "provider": provider,
-                            "model": model,
-                            "timestamp": timestamp,
-                            **{k: kwargs[k] for k in (
-                                "quality", "output_format", "output_compression",
-                                "moderation", "custom_size",
-                            ) if k in kwargs},
-                        }
-                        if references:
-                            meta["reference_images"] = [str(p) for p in ref_paths]
-                        if mask_path:
-                            meta["mask"] = str(mask_path)
-                        if style_meta:
-                            meta["style_applied"] = style_meta
-                        sidecar_path = img_path.with_suffix(".png.json")
-                        import json
-                        sidecar_path.write_text(json.dumps(meta, indent=2), encoding="utf-8")
 
             return 0
 

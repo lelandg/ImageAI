@@ -23,7 +23,7 @@ def copy_project(project: SpriteProject, name: str,
         if destination.is_relative_to(source):
             raise ValueError("The project library cannot be inside the source project.")
         for item in source.iterdir():
-            if item.name == project.project_file().name:
+            if item.name in (project.project_file().name, ".sprite-cli.lock"):
                 continue
             target = destination / item.name
             if item.is_dir():

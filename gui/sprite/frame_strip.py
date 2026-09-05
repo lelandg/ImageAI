@@ -410,8 +410,11 @@ class FrameStrip(QWidget):
         if not indices:
             return
         self._snapshot("overrides")
+        from core.sprite.keying import OVERRIDE_KEYS
         for index in indices:
-            self._frames[index].overrides = dict(overrides)
+            retained = {key: value for key, value in self._frames[index].overrides.items()
+                        if key not in OVERRIDE_KEYS}
+            self._frames[index].overrides = {**retained, **overrides}
         self._emit_changed()
 
     def edit_overrides_for_selected(self) -> None:

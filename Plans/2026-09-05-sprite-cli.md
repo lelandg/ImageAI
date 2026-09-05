@@ -1,8 +1,8 @@
 # Sprite CLI implementation checklist
 
-**Last Updated:** 2026-09-05 10:48
+**Last Updated:** 2026-09-05 11:26
 **Status:** In Progress
-**Progress:** 1/8 tasks complete
+**Progress:** 6/8 tasks complete
 
 ## Overview
 
@@ -13,12 +13,12 @@ Use the existing Sprite engine and project format so GUI and CLI interoperate.
 ## Implementation tasks
 
 - [x] Inspect existing work and create `codex/sprite-cli` from `origin/main`.
-- [~] Map GUI features and implement project, action, settings, and frame editing.
-- [~] Implement generation, references, imports, processing, previews, and exports.
-- [ ] Verify contracts and regression tests, including malformed inputs and cancellation.
-- [ ] Test an independent copy of an existing Sprite project.
-- [ ] Generate an original self-themed project with two animations; inspect and credit a repository GIF sample.
-- [ ] Document commands, refresh CodeMap, run local reviews and release checks, bump version through version manager.
+- [x] Map GUI features and implement project, action, settings, and frame editing.
+- [x] Implement generation, references, imports, processing, previews, and exports.
+- [x] Verify contracts and regression tests, including malformed inputs and cancellation.
+- [x] Test an independent copy of an existing Sprite project.
+- [x] Generate an original self-themed project with two animations; inspect and credit a repository GIF sample.
+- [~] Document commands, refresh CodeMap, run local reviews and release checks, bump version through version manager.
 - [ ] Push one feature PR, reconcile automated review, merge when green, and notify the user.
 
 ## Decisions
@@ -29,3 +29,18 @@ Use the existing Sprite engine and project format so GUI and CLI interoperate.
 - `--json` reserves stdout for exactly one result. Human progress and full provider logs use stderr.
 - Existing projects are tested through independent copies to preserve the user's accepted outputs.
 - Use the Windows `.venv` runtime. No system packages or global configuration changes.
+
+## Acceptance evidence
+
+- 36 discoverable operations cover project/library management, settings, actions,
+  durable frame editing/history, all generation routes, imports, processing,
+  seven export formats, eight engine presets and optional backend tools.
+- Sprite core suite: 799 passed, one skipped. Integration checks: 49 passed.
+  Isolated frame-strip GUI suite: 20 passed.
+- Existing `rock_3` project was copied before processing and exporting all formats.
+- Created Lumen with two generated animations. The selected credited GIF and its
+  source assets are in `SampleData/SpriteCLI/`; the public CLI rebuild produces
+  a byte-identical GIF without provider calls.
+- Full-project mypy comparison: 1,248 current diagnostics versus 1,249 baseline;
+  no added diagnostics. New CLI modules pass scoped mypy and Ruff.
+- See `Notes/2026-09-05-Sprite-CLI-Validation.md` for boundaries and release status.

@@ -670,6 +670,21 @@ python main.py --provider stability -s -k "YOUR_STABILITY_KEY"
 python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
 ```
 
+### Sprite workflow for agents and scripts
+
+The entire Sprite workflow is available through `--sprite`: project creation and
+copying, settings and frame edits, action cards, generation, processing, previews,
+and all seven export formats. `--sprite schema --json` lists the JSON request
+contracts; `--sprite-data` accepts a JSON file or `-` for stdin. Results use one
+JSON document on stdout with `--json`; progress and provider logs go to stderr.
+
+See the [Sprite CLI guide](Docs/Sprite-CLI-Guide.md) and the offline
+[command workbench](Docs/Sprite-CLI-Workbench.html), which builds copyable commands
+and downloadable requests for Windows, macOS, and Linux.
+
+The [Lumen sample](SampleData/SpriteCLI/README.md) was created and animated by
+Codex through the CLI as a live workflow test.
+
 ### Generate video (CLI)
 
 Single-clip video generation with Gemini Omni or Veo:

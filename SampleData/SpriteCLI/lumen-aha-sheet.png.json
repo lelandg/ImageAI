@@ -1,0 +1,20 @@
+{
+  "prompt": "A 8-frame aha constellation animation of this exact character as one horizontal sprite sheet: 8 equal cells in a single row from left to right, one key pose per cell, in play order. Same character, same art style, same scale, and the same position inside every cell. No labels, no numbers, no cell borders, no text. A delightful looping eureka gesture: the paper nautilus bows its head, then perks up as the amber star inside its glass shell blooms into a tiny constellation of five golden stars connected by fine gold lines. Its antenna lights up and it lifts one little brass foot in a wave. The constellation quietly folds back into one amber star and the creature returns to the starting pose. Keep the creature fully visible, stationary, fixed camera, solid chroma green background #00FF00, flat even lighting, no shadows on the background, no camera movement, character stays centered, seamless loop, ends in the same pose it starts",
+  "provider": "google",
+  "model": "gemini-2.5-flash-image",
+  "timestamp": "2026-09-05T11:01:02",
+  "route": "image_sheet",
+  "action": "aha_constellation",
+  "action_id": "39225a83f6464c638fd66d0bec2947b5",
+  "frames": 8,
+  "plate_color": "#00FF00",
+  "params": {
+    "aspect_ratio": "21:9"
+  },
+  "background_mode": "solid",
+  "reference_images": [
+    "lumen-source.png"
+  ],
+  "observed_frames": 6,
+  "creative_credit": "Codex (OpenAI): concept, prompts, CLI implementation and visual QA"
+}

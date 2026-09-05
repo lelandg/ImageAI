@@ -423,6 +423,15 @@ def key_runner(project: SpriteProject, action: ActionCard, input_frames: List[Pa
     for index, src in enumerate(input_frames):
         check(token)
         overrides = keying.frame_overrides(action.frames, index)
+        # A durable frame edit can import already-processed RGBA. Re-keying
+        # those pixels discards the accepted alpha and applies despill twice.
+        if overrides.get("baked_rgba") is True:
+            dst = out_dir / src.name
+            with Image.open(src) as image:
+                image.convert("RGBA").save(dst)
+            outputs.append(dst)
+            progress("key", index + 1, total, f"key {src.name}: baked RGBA")
+            continue
         image = Image.open(src)
         rgb, alpha, key_rgb = keying.key_pass(image, settings, overrides, frame_name=src.name)
         dst = out_dir / src.name
@@ -503,7 +512,8 @@ def cleanup_runner(project: SpriteProject, action: ActionCard, input_frames: Lis
     for index, src in enumerate(input_frames):
         check(token)
         rgb, alpha = keying.split_rgba(Image.open(src))
-        alpha = keying.cleanup_pass(alpha, project.key)
+        if keying.frame_overrides(action.frames, index).get("baked_rgba") is not True:
+            alpha = keying.cleanup_pass(alpha, project.key)
         dst = out_dir / src.name
         keying.compose_rgba(rgb, alpha).save(dst)
         outputs.append(dst)
@@ -529,6 +539,13 @@ def alpha_runner(project: SpriteProject, action: ActionCard, input_frames: List[
     total = len(input_frames)
     for index, src in enumerate(input_frames):
         check(token)
+        if keying.frame_overrides(action.frames, index).get("baked_rgba") is True:
+            dst = out_dir / src.name
+            with Image.open(src) as image:
+                image.convert("RGBA").save(dst)
+            outputs.append(dst)
+            progress("alpha", index + 1, total, f"alpha {src.name}: baked RGBA")
+            continue
         eff = keying.apply_overrides(settings, keying.frame_overrides(action.frames, index), frame_name=src.name)
         key_rgb = (keying.parse_key_color(eff.key_color, context=src.name)
                   if (eff.method == "chroma" and eff.key_color) else None)

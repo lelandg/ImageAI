@@ -129,6 +129,23 @@ def test_apply_overrides(qapp, tmp_path):
     assert undo.can_undo("act1")
 
 
+def test_apply_overrides_preserves_baked_metadata_and_undo(qapp, tmp_path):
+    strip, undo = _strip(tmp_path, 2)
+    original = {"baked_rgba": True, "source_revision": "accepted-2",
+                "tolerance": 0.2, "key_color": "#00FF00"}
+    strip.frames()[0].overrides = dict(original)
+    strip.apply_overrides([0], {"softness": 0.15})
+    assert strip.frames()[0].overrides == {
+        "baked_rgba": True, "source_revision": "accepted-2", "softness": 0.15}
+    assert strip.frames()[1].overrides == {}
+    strip.apply_overrides([0], {})
+    assert strip.frames()[0].overrides == {"baked_rgba": True, "source_revision": "accepted-2"}
+    strip.set_frames(undo.undo("act1", strip.frames()))
+    assert strip.frames()[0].overrides["softness"] == 0.15
+    strip.set_frames(undo.undo("act1", strip.frames()))
+    assert strip.frames()[0].overrides == original
+
+
 def test_overrides_dialog_values_only_enabled_fields(qapp):
     dialog = FrameOverridesDialog({"tolerance": 0.25})
     assert dialog.tolerance_on.isChecked()
