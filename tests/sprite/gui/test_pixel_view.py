@@ -137,3 +137,27 @@ def test_checkerboard_brush_is_textured(qapp):
     brush = checkerboard_brush(4)
     assert brush.style() == Qt.TexturePattern
     assert brush.texture().width() == 8
+
+
+def test_fit_zoom_shortcuts_never_reverse_direction(qapp):
+    view = PixelView()
+    view.resize(400, 300)
+    view.show()
+    view.set_auto_fit(True)
+    view.set_image(QImage(1600, 1200, QImage.Format_RGBA8888))
+    qapp.processEvents()
+    small = view.zoom()
+    assert small < MIN_ZOOM
+    view.zoom_out()
+    assert view.zoom() <= small
+    view.zoom_in()
+    assert view.zoom() > small
+    view.set_auto_fit(True)
+    view.set_image(_image())
+    large = view.zoom()
+    assert large > MAX_ZOOM
+    view.zoom_in()
+    assert view.zoom() >= large
+    view.zoom_out()
+    assert view.zoom() < large
+    view.close()

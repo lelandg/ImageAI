@@ -122,7 +122,15 @@ class PreviewPlayer(QWidget):
         layout.addLayout(top)
 
         self.view = PixelView()
+        self.view.set_auto_fit(True)
         layout.addWidget(self.view, 1)
+
+        self.size_btn = QPushButton("Original size (1×)")
+        self.size_btn.setAutoDefault(False)
+        self.size_btn.setToolTip("Show at 100% with scrolling; click again to fit the preview")
+        self.size_btn.clicked.connect(self._toggle_size)
+        self.view.fitModeChanged.connect(self._sync_size_button)
+        top.addWidget(self.size_btn)
 
         controls = QHBoxLayout()
         self.first_btn = QPushButton("|<")
@@ -154,6 +162,18 @@ class PreviewPlayer(QWidget):
         self.index_label = QLabel("0 / 0")
         controls.addWidget(self.index_label)
         layout.addLayout(controls)
+
+    def _toggle_size(self) -> None:
+        if self.view.auto_fit():
+            self.view.zoom_reset()
+        else:
+            self.view.set_auto_fit(True)
+
+    def _sync_size_button(self, fitting: bool) -> None:
+        self.size_btn.setText("Original size (1×)" if fitting else "Fit to panel")
+        self.size_btn.setToolTip(
+            "Show at 100% with scrolling; click again to fit the preview" if fitting
+            else "Scale the whole frame to fit, following panel resizing")
 
     # ----- data -------------------------------------------------------
     def set_frames(self, frames: Sequence[FrameMeta]) -> None:

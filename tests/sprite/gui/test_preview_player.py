@@ -7,6 +7,54 @@ from gui.sprite.preview_player import (MODES, PreviewPlayer, loop_seam_score, ne
 from gui_synthetic import make_frames, write_frame_png
 
 
+def test_preview_fits_splitter_and_toggles_original_size(qapp, tmp_path):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QSplitter, QWidget
+
+    splitter = QSplitter(Qt.Vertical)
+    player = PreviewPlayer()
+    splitter.addWidget(player)
+    splitter.addWidget(QWidget())
+    splitter.resize(900, 900)
+    player.set_frames(make_frames(tmp_path, 2, size=(64, 48)))
+    splitter.show()
+    splitter.setSizes([300, 600])
+    qapp.processEvents()
+    small = player.view.transform().m11()
+    splitter.setSizes([600, 300])
+    qapp.processEvents()
+    assert player.view.transform().m11() > small > 1
+    assert player.view.transform().m11() == player.view.transform().m22()
+    player.size_btn.click()
+    assert player.view.zoom() == 1
+    assert player.size_btn.text() == "Fit to panel"
+    splitter.setSizes([400, 500])
+    player.step_forward()
+    qapp.processEvents()
+    assert player.current_index() == 1
+    assert player.view.transform().m11() == 1
+    player.size_btn.click()
+    assert player.view.auto_fit()
+    assert player.view.transform().m11() > 1
+    player.view.zoom_reset()  # Ctrl+0 uses the same method.
+    assert player.size_btn.text() == "Fit to panel"
+    player.size_btn.click()
+    player.set_frames(make_frames(tmp_path / "large", 1, size=(1600, 1200)))
+    qapp.processEvents()
+    assert 0 < player.view.zoom() < 1
+    rect = player.view.transform().mapRect(player.view.sceneRect())
+    assert rect.width() <= player.view.viewport().width() + 1
+    assert rect.height() <= player.view.viewport().height() + 1
+    player.size_btn.click()
+    qapp.processEvents()
+    assert player.view.horizontalScrollBar().maximum() > 0
+    assert player.view.verticalScrollBar().maximum() > 0
+    player.set_frames([])
+    player.size_btn.click()
+    assert player.view.image() is None
+    splitter.close()
+
+
 def test_next_index_modes():
     assert next_index(2, 0, 3, "forward", 1) == (3, 1)
     assert next_index(3, 0, 3, "forward", 1) == (0, 1)

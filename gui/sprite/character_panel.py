@@ -1,7 +1,7 @@
 """Character intake panel: drop/browse → normalize → chroma plate → turnaround.
 
 All PIL and provider work runs inside a SpriteWorker; the GUI thread only
-paints one thumbnail. Output layout (design §1.6):
+paints the reference image. Output layout (design §1.6):
 ``<project_dir>/source/character.png``, ``source/plate.png``,
 ``source/turnaround/<view>.png``.
 """
@@ -13,10 +13,10 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import QMimeData, Qt, Signal
-from PySide6.QtGui import QColor, QPixmap
+from PySide6.QtGui import QColor, QImage, QPixmap
 from PySide6.QtWidgets import (
     QColorDialog, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QProgressBar,
-    QPushButton, QVBoxLayout,
+    QPushButton, QSizePolicy, QVBoxLayout,
 )
 
 from core.sprite.generation.plate import make_chroma_plate
@@ -29,7 +29,6 @@ from providers import get_provider
 logger = logging.getLogger(__name__)
 
 IMAGE_SUFFIXES = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif")
-THUMB_SIZE = 200
 DROP_HINT = "Drop a character image here\nor click Browse…"
 
 
@@ -43,6 +42,35 @@ def paths_from_mime(mime: QMimeData) -> List[Path]:
         if local and Path(local).suffix.lower() in IMAGE_SUFFIXES:
             paths.append(Path(local))
     return paths
+
+
+class ReferenceImageLabel(QLabel):
+    """Fit the original pixmap on resize without feeding its size into the layout."""
+
+    def __init__(self, parent=None):
+        super().__init__(DROP_HINT, parent)
+        self._source_pixmap = QPixmap()
+        self.setAlignment(Qt.AlignCenter)
+        self.setMinimumSize(80, 80)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
+        self.setStyleSheet("border: 2px dashed #888; padding: 8px;")
+
+    def setPixmap(self, pixmap: QPixmap | QImage) -> None:
+        self._source_pixmap = QPixmap.fromImage(pixmap) if isinstance(pixmap, QImage) else pixmap
+        self._rescale()
+
+    def _rescale(self) -> None:
+        if self._source_pixmap.isNull():
+            super().setPixmap(QPixmap())
+            self.setText(DROP_HINT)
+        else:
+            super().setPixmap(self._source_pixmap.scaled(
+                self.contentsRect().size(), Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._rescale()
 
 
 class CharacterPanel(WorkerHost, QGroupBox):
@@ -67,11 +95,8 @@ class CharacterPanel(WorkerHost, QGroupBox):
     def _build(self) -> None:
         root = QVBoxLayout(self)
 
-        self.drop_label = QLabel(DROP_HINT)
-        self.drop_label.setAlignment(Qt.AlignCenter)
-        self.drop_label.setMinimumHeight(THUMB_SIZE)
-        self.drop_label.setStyleSheet("border: 2px dashed #888; padding: 8px;")
-        root.addWidget(self.drop_label)
+        self.drop_label = ReferenceImageLabel()
+        root.addWidget(self.drop_label, 1)
 
         row = QHBoxLayout()
         self.browse_btn = QPushButton("Browse…")
@@ -130,8 +155,7 @@ class CharacterPanel(WorkerHost, QGroupBox):
         if path and Path(path).exists():
             pixmap = QPixmap(str(path))
             if not pixmap.isNull():
-                self.drop_label.setPixmap(pixmap.scaled(
-                    THUMB_SIZE, THUMB_SIZE, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                self.drop_label.setPixmap(pixmap)
                 return
         self.drop_label.setPixmap(QPixmap())
         self.drop_label.setText(DROP_HINT)

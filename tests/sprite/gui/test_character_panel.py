@@ -10,6 +10,39 @@ import gui.sprite.character_panel as cp
 from gui.sprite.character_panel import CharacterPanel, paths_from_mime
 
 
+def test_reference_follows_splitter_and_can_shrink_again(qapp, fake_config, png):
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QSplitter, QWidget
+
+    splitter = QSplitter(Qt.Vertical)
+    panel = CharacterPanel(fake_config)
+    splitter.addWidget(panel)
+    splitter.addWidget(QWidget())
+    splitter.resize(720, 900)
+    panel._show_thumbnail(png)
+    splitter.show()
+    splitter.setSizes([350, 550])
+    qapp.processEvents()
+    small = panel.drop_label.pixmap().size()
+    splitter.setSizes([650, 250])
+    qapp.processEvents()
+    large = panel.drop_label.pixmap().size()
+    assert large.height() > small.height()
+    assert large.width() > 200
+    assert abs(large.width() / large.height() - 64 / 48) < 0.02
+    assert large.width() <= panel.drop_label.contentsRect().width()
+    assert large.height() <= panel.drop_label.contentsRect().height()
+    splitter.setSizes([350, 550])
+    qapp.processEvents()
+    assert panel.drop_label.pixmap().size() == small
+    panel._show_thumbnail(None)
+    splitter.setSizes([650, 250])
+    qapp.processEvents()
+    assert panel.drop_label.text() == cp.DROP_HINT
+    assert panel.drop_label.pixmap().isNull()
+    splitter.close()
+
+
 def _analysis(size=(64, 48)):
     return types.SimpleNamespace(has_alpha=False, border_color="#FFFFFF",
                                  border_uniform=True, size=size)

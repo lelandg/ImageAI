@@ -1,6 +1,6 @@
 """Nearest-neighbor zoom view for one sprite frame (design Section 4.5).
 
-Integer zoom 1-16x, a pixel grid at zoom >= 4, a fixed-size checkerboard behind
+Integer zoom 1-16x or optional automatic fit, a pixel grid at zoom >= 4, a fixed-size checkerboard behind
 the transparent areas, and a click-to-pick mode for the key color.
 """
 from __future__ import annotations
@@ -11,7 +11,7 @@ from typing import Optional, Tuple, Union
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import QGraphicsPixmapItem, QGraphicsScene, QGraphicsView
 
 logger = logging.getLogger(__name__)
@@ -47,10 +47,11 @@ def qimage_to_rgba(image: QImage) -> np.ndarray:
 
 
 class PixelView(QGraphicsView):
-    """QGraphicsView that shows one image with integer nearest-neighbor zoom."""
+    """Nearest-neighbor image view with manual integer zoom and optional auto-fit."""
 
     colorPicked = Signal(str)
-    zoomChanged = Signal(int)
+    zoomChanged = Signal(float)
+    fitModeChanged = Signal(bool)
     gridToggled = Signal(bool)
     selectionChanged = Signal(object)   # Optional[Rect]
 
@@ -62,7 +63,8 @@ class PixelView(QGraphicsView):
         self._item.setTransformationMode(Qt.FastTransformation)
         self._scene.addItem(self._item)
         self._image: Optional[QImage] = None
-        self._zoom = 1
+        self._zoom = 1.0
+        self._auto_fit = False
         self._grid = True
         self._pick_mode = False
         self._select_mode = False
@@ -98,6 +100,8 @@ class PixelView(QGraphicsView):
         else:
             self._item.setPixmap(QPixmap.fromImage(image))
             self._scene.setSceneRect(QRectF(0, 0, image.width(), image.height()))
+        if self._auto_fit:
+            self._apply_fit()
         self.viewport().update()
         return True
 
@@ -105,10 +109,11 @@ class PixelView(QGraphicsView):
         return self._image
 
     # ----- zoom -------------------------------------------------------
-    def zoom(self) -> int:
+    def zoom(self) -> float:
         return self._zoom
 
     def set_zoom(self, zoom: int) -> None:
+        self.set_auto_fit(False)
         zoom = max(MIN_ZOOM, min(MAX_ZOOM, int(zoom)))
         self._zoom = zoom
         self.resetTransform()
@@ -117,9 +122,13 @@ class PixelView(QGraphicsView):
         self.viewport().update()
 
     def zoom_in(self) -> None:
+        if self._zoom >= MAX_ZOOM:
+            return
         self.set_zoom(next((z for z in ZOOM_STEPS if z > self._zoom), MAX_ZOOM))
 
     def zoom_out(self) -> None:
+        if self._zoom <= MIN_ZOOM:
+            return
         self.set_zoom(next((z for z in reversed(ZOOM_STEPS) if z < self._zoom), MIN_ZOOM))
 
     def zoom_reset(self) -> None:
@@ -128,11 +137,44 @@ class PixelView(QGraphicsView):
     def fit_zoom(self) -> int:
         """Largest integer zoom that keeps the whole image inside the viewport."""
         if self._image is None or self._image.width() == 0 or self._image.height() == 0:
-            return self._zoom
+            return int(self._zoom)
         vw, vh = self.viewport().width(), self.viewport().height()
         zoom = min(vw // self._image.width(), vh // self._image.height())
         self.set_zoom(max(MIN_ZOOM, min(MAX_ZOOM, zoom)))
-        return self._zoom
+        return int(self._zoom)
+
+    def auto_fit(self) -> bool:
+        return self._auto_fit
+
+    def set_auto_fit(self, enabled: bool) -> None:
+        """Track viewport/frame size; manual zoom commands leave fit mode."""
+        changed = self._auto_fit != bool(enabled)
+        self._auto_fit = bool(enabled)
+        policy = (Qt.ScrollBarPolicy.ScrollBarAlwaysOff if enabled
+                  else Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.setHorizontalScrollBarPolicy(policy)
+        self.setVerticalScrollBarPolicy(policy)
+        if enabled:
+            self._apply_fit()
+        if changed:
+            self.fitModeChanged.emit(self._auto_fit)
+
+    def _apply_fit(self) -> None:
+        if self._image is None or self._image.isNull():
+            return
+        size = self.viewport().size()
+        if size.width() <= 0 or size.height() <= 0:
+            return
+        self._zoom = min(size.width() / self._image.width(),
+                         size.height() / self._image.height())
+        self.setTransform(QTransform().scale(self._zoom, self._zoom))
+        self.centerOn(self._item)
+        self.zoomChanged.emit(self._zoom)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if self._auto_fit:
+            self._apply_fit()
 
     # ----- grid -------------------------------------------------------
     def grid_visible(self) -> bool:
