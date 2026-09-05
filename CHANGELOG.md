@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.48.0] - 2026-09-05
+
+### Added
+- Sprite background choices now include preserved source backgrounds, transparency, and a chosen solid GIF color. Solid exports reserve the exact background palette color and record the selection in metadata.
+- Sprite projects can be searched and opened by name, copied with their media using Save As, and restored when the Sprite tab is reopened. Managed project references follow changes to the image-storage root.
+
+### Fixed
+- Original-background exports now honor the same crop, padding, anchor, and exact HD/pixel canvas sizes as other modes, including profile palette and upscaling settings.
+- Background changes invalidate affected processing caches, and export refuses unavailable or stale profile output instead of silently using old frames.
+- Opening a lazy tab no longer triggers initialization of neighboring tabs. Malformed project listings and failed project copies are handled without losing existing projects.
+
+### Changed
+- Layout and Help initialize when first opened, with startup timing checkpoints recorded in the application log.
+
 ## [0.47.1] - 2026-09-04
 
 ### Fixed
