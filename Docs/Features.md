@@ -234,6 +234,21 @@ Show your ImageAI activity in Discord status.
 
 ## CLI Reference
 
+### Sprite automation
+
+- Create, inspect, validate, copy, and edit projects shared with the Sprite tab.
+- Edit action cards and frame order, timing, pivots, and key overrides; undo and
+  redo CLI metadata edits across invocations.
+- Generate action cards, reference plates, turnarounds, video, image sheets,
+  edit chains, refinements, loop trims, and retouched frames.
+- Import video, PNG sequences, or sheets; process the same cached stages as the GUI.
+- Export HD and pixel profiles to sheets, Aseprite/TexturePacker JSON, PNG sequences,
+  GIF, Godot resources, and native Aseprite, with engine presets and custom settings.
+- Discover JSON request schemas and consume structured results with stable exit codes.
+
+Read the [Sprite CLI guide](Sprite-CLI-Guide.md) or open the offline
+[command workbench](Sprite-CLI-Workbench.html).
+
 ```bash
 # Generate image
 python main.py -p "A sunset over mountains" -o sunset.png

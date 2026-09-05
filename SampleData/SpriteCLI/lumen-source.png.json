@@ -1,0 +1,12 @@
+{
+  "prompt": "Character design for Lumen, the patient compiler: a tiny curious mechanical nautilus built from warm ivory folded paper and fine brass ribs. Its spiral shell contains a luminous cyan glass miniature observatory with a single amber star. Three small jointed brass feet, one delicate antenna ending in a square cursor, tiny expressive dark eyes in the paper head. It represents a coding assistant that turns tangled questions into constellations. Charming original stop-motion miniature, crisp toy-like forms and clean silhouette, copper and ivory with cyan light, no green anywhere on the subject. Entire creature centered with generous empty margin, three-quarter side view, isolated on perfectly flat saturated pure green chroma backdrop, no cast shadow, no ground line, no text, no lettering, no logos.",
+  "provider": "google",
+  "model": "gemini-2.5-flash-image",
+  "timestamp": "2026-09-05T10:58:05",
+  "size": [
+    1024,
+    1024
+  ],
+  "creative_credit": "Codex (OpenAI)",
+  "metadata_note": "Reconstructed from the saved source request and file timestamp after discovering the old explicit-output CLI omitted sidecars; that path is fixed in this release."
+}

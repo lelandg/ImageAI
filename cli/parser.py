@@ -323,4 +323,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Show API key setup instructions"
     )
     
+    from cli.commands.sprite import add_sprite_arguments
+    add_sprite_arguments(parser)
     return parser

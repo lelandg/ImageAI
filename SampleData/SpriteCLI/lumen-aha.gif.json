@@ -1,0 +1,26 @@
+{
+  "title": "Lumen - Aha constellation",
+  "creative_credit": "Codex (OpenAI)",
+  "image_provider": "google",
+  "model": "gemini-2.5-flash-image",
+  "source_image": "lumen-source.png",
+  "source_sheet": "lumen-aha-sheet.png",
+  "size": [
+    320,
+    320
+  ],
+  "frames": 5,
+  "durations_ms": [
+    160,
+    160,
+    160,
+    160,
+    160
+  ],
+  "background": {
+    "mode": "solid",
+    "color": "#14253D"
+  },
+  "processing": "Import sheet 6x1; chroma key; stabilize with 8px padding; remove first defective pose; bake remaining five frames; export HD GIF.",
+  "prompt": "A 8-frame aha constellation animation of this exact character as one horizontal sprite sheet: 8 equal cells in a single row from left to right, one key pose per cell, in play order. Same character, same art style, same scale, and the same position inside every cell. No labels, no numbers, no cell borders, no text. A delightful looping eureka gesture: the paper nautilus bows its head, then perks up as the amber star inside its glass shell blooms into a tiny constellation of five golden stars connected by fine gold lines. Its antenna lights up and it lifts one little brass foot in a wave. The constellation quietly folds back into one amber star and the creature returns to the starting pose. Keep the creature fully visible, stationary, fixed camera, solid chroma green background #00FF00, flat even lighting, no shadows on the background, no camera movement, character stays centered, seamless loop, ends in the same pose it starts"
+}

@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.48.0**
+**Version 0.49.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **Chameleon Labs Discord - Support, AI Art & Community: [Chameleon Labs Discord](https://discord.gg/chameleonlabs)**
@@ -669,6 +669,21 @@ python main.py -s -k "YOUR_KEY"  # Save to config
 python main.py --provider stability -s -k "YOUR_STABILITY_KEY"
 python main.py -K ~/keys/api.txt -p "Ocean waves"  # Use from file
 ```
+
+### Sprite workflow for agents and scripts
+
+The entire Sprite workflow is available through `--sprite`: project creation and
+copying, settings and frame edits, action cards, generation, processing, previews,
+and all seven export formats. `--sprite schema --json` lists the JSON request
+contracts; `--sprite-data` accepts a JSON file or `-` for stdin. Results use one
+JSON document on stdout with `--json`; progress and provider logs go to stderr.
+
+See the [Sprite CLI guide](Docs/Sprite-CLI-Guide.md) and the offline
+[command workbench](Docs/Sprite-CLI-Workbench.html), which builds copyable commands
+and downloadable requests for Windows, macOS, and Linux.
+
+The [Lumen sample](SampleData/SpriteCLI/README.md) was created and animated by
+Codex through the CLI as a live workflow test.
 
 ### Generate video (CLI)
 

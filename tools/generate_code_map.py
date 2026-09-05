@@ -26,6 +26,8 @@ DOCS_PATH = REPO_ROOT / "Docs" / "CodeMap.md"
 EXCLUDE_DIRS = {
     ".git", ".idea", ".venv", ".venv_linux", "__pycache__",
     "Screenshots", "Debug", ".junie", ".claude",
+    ".agents", ".codex", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    "test_output", "_Research", "_screenshots", "_transfer", ".remember",
 }
 EXCLUDE_FILES = {"screenshot_20250912.png"}
 
@@ -58,7 +60,7 @@ def count_lines(path: Path) -> int:
 
 
 def tree_structure_with_counts(root: Path) -> str:
-    lines: list[str] = ["``\nImageAI/"]
+    lines: list[str] = ["```text\nImageAI/"]
 
     def walk(dir_path: Path, prefix: str = ""):
         # List dirs and files

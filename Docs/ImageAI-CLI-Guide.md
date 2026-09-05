@@ -1,5 +1,10 @@
 # ImageAI CLI Guide
 
+For Sprite projects and animation workflows, see the
+[Sprite CLI guide](Sprite-CLI-Guide.md) and offline
+[command workbench](Sprite-CLI-Workbench.html). The entry point is `--sprite`;
+`--sprite schema --json` exposes every operation's JSON request contract.
+
 Everything the ImageAI command line can do — from a one-liner image to scripted,
 agent-driven image **and** video generation. All of it runs through a single
 entry point: `python main.py`.
