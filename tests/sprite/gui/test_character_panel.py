@@ -239,3 +239,19 @@ def test_paths_from_mime_filters_images(qapp, tmp_path):
     mime.setUrls([QUrl.fromLocalFile(str(tmp_path / "a.png")),
                   QUrl.fromLocalFile(str(tmp_path / "b.txt"))])
     assert paths_from_mime(mime) == [tmp_path / "a.png"]
+
+
+
+def test_original_background_disables_plate_generation(qapp, fake_config, fake_project, png, monkeypatch):
+    fake_project.background.mode = "original"
+    fake_project.character_source = png
+    panel = CharacterPanel(fake_config)
+    panel.set_project(fake_project)
+    assert not panel.plate_btn.isEnabled()
+    assert not panel.plate_color_btn.isEnabled()
+    assert not panel.turnaround_btn.isEnabled()
+    calls = []
+    monkeypatch.setattr(panel, "_ready_for_provider", lambda what: calls.append(what))
+    panel.make_plate()
+    panel.generate_turnaround()
+    assert calls == []

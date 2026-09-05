@@ -16,8 +16,8 @@ from typing import Any, Callable, Dict, Optional
 
 from PIL import Image
 from PySide6.QtCore import Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
+from PySide6.QtGui import QColor, QDesktopServices
+from PySide6.QtWidgets import (QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QFormLayout, QGroupBox,
                                QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar,
                                QPushButton, QScrollArea, QSlider, QSpinBox, QVBoxLayout,
                                QWidget)
@@ -207,6 +207,7 @@ class ProcessingPanel(WorkerHost, QWidget):
 
     pipelineFinished = Signal(str)
     settingsChanged = Signal()
+    backgroundChanged = Signal()
     logMessage = Signal(str, str)
     exportRequested = Signal()
 
@@ -235,16 +236,116 @@ class ProcessingPanel(WorkerHost, QWidget):
         scroll.setWidgetResizable(True)
         body = QWidget()
         self._body_layout = QVBoxLayout(body)
+        self._body_layout.addWidget(self._build_background())
         self._body_layout.addWidget(self._build_extraction())
-        self._body_layout.addWidget(self._build_key())
+        self.key_box = self._build_key()
+        self._body_layout.addWidget(self.key_box)
         self.profiles_box = QGroupBox("Output profiles")
         self.profiles_layout = QVBoxLayout(self.profiles_box)
         self._body_layout.addWidget(self.profiles_box)
-        self._body_layout.addWidget(self._build_stabilize())
+        self.stabilize_box = self._build_stabilize()
+        self._body_layout.addWidget(self.stabilize_box)
         self._body_layout.addStretch()
         scroll.setWidget(body)
         outer.addWidget(scroll, 1)
         outer.addWidget(self._build_actions())
+
+    def _build_background(self) -> QGroupBox:
+        self.background_box = QGroupBox("Background")
+        form = QFormLayout(self.background_box)
+        self.background_mode = _combo(("transparent", "original", "solid"), {
+            "transparent": "Transparent", "original": "Keep original background",
+            "solid": "Solid color (GIF)",
+        })
+        form.addRow("Output:", self.background_mode)
+        self.background_color = QLineEdit("#FFFFFF")
+        self.background_color.setPlaceholderText("#RRGGBB")
+        self.background_color.setMaxLength(7)
+        self.background_pick_btn = QPushButton("Choose color…")
+        self.background_pick_btn.setAutoDefault(False)
+        row = QHBoxLayout()
+        row.addWidget(self.background_color)
+        row.addWidget(self.background_pick_btn)
+        form.addRow("GIF color:", row)
+        self.background_help = QLabel()
+        self.background_help.setWordWrap(True)
+        form.addRow(self.background_help)
+        self.background_mode.currentIndexChanged.connect(self._on_background_changed)
+        self.background_color.editingFinished.connect(self._on_background_changed)
+        self.background_pick_btn.clicked.connect(self._pick_background_color)
+        return self.background_box
+
+    def _pick_background_color(self) -> None:
+        color = QColorDialog.getColor(QColor(self.background_color.text()), self, "GIF background color")
+        if color.isValid():
+            self.background_color.setText(color.name().upper())
+            self._on_background_changed()
+
+    def _on_background_changed(self, *_args) -> None:
+        project = self._project
+        if self._loading or project is None:
+            return
+        mode = self.background_mode.currentData()
+        text = self.background_color.text().strip()
+        if mode == project.background.mode and text.upper() == project.background.color:
+            return
+        busy = self._background_busy_guard() if self._background_busy_guard else self._external_job()
+        if self.is_busy() or busy:
+            with _blocked(self.background_mode, self.background_color):
+                self.background_mode.setCurrentIndex(self.background_mode.findData(project.background.mode))
+                self.background_color.setText(project.background.color)
+            self._warn("Background", f"Wait for the {busy or 'processing job'} to finish before changing the background.")
+            return
+        if mode == "solid" and not HEX_RE.fullmatch(text):
+            self.background_color.setStyleSheet("border: 1px solid #c44;")
+            self._warn("Background color", f"{text!r} is not #RRGGBB")
+            return
+        old_mode = project.background.mode
+        project.background.mode = mode
+        if HEX_RE.fullmatch(text):
+            project.background.color = text.upper()
+        self.background_color.setStyleSheet("")
+        self._sync_background_controls()
+        self.settingsChanged.emit()
+        self.backgroundChanged.emit()
+        if old_mode != mode:
+            message = f"Background: {self.background_mode.currentText()}. Run pipeline to refresh existing frames."
+            logger.info(message)
+            self.logMessage.emit(message, "INFO")
+
+    def validate_background(self) -> bool:
+        """Commit pending color input before processing/export; reject invalid values."""
+        if self._project is None:
+            return False
+        mode = self.background_mode.currentData()
+        text = self.background_color.text().strip()
+        if mode == "solid" and not HEX_RE.fullmatch(text):
+            self._warn("Background color", f"{text!r} is not #RRGGBB")
+            return False
+        self._on_background_changed()
+        return self._project.background.mode == mode
+
+    def _sync_background_controls(self) -> None:
+        mode = self._project.background.mode if self._project is not None else "transparent"
+        original = mode == "original"
+        self.background_color.setEnabled(mode == "solid")
+        self.background_pick_btn.setEnabled(mode == "solid")
+        self.key_box.setEnabled(not original)
+        self.stabilize_box.setEnabled(True)
+        self.background_help.setText({
+            "original": "Keeps the source background and skips background removal. Crop, padding, "
+                        "anchor, and output profiles still apply, including the exact canvas size. "
+                        "Existing green clips stay green.",
+            "transparent": "Removes the background using the method below, or keeps existing source alpha.",
+            "solid": "Removes the old background, then fills it with this color in GIF exports. "
+                     "Editable PNG frames retain transparency.",
+        }[mode])
+        for editor in self.profile_editors.values():
+            for control in (editor.binary_alpha, editor.threshold, editor.defringe,
+                            editor.palette_size, editor.dither, editor.palette_lock, editor.rebuild_btn):
+                control.setEnabled(True)
+        self.preview_btn.setEnabled(self._project is not None and self._action is not None
+                                    and not self.is_busy() and not original)
 
     def _build_extraction(self) -> QGroupBox:
         box = QGroupBox("Extraction")
@@ -297,7 +398,7 @@ class ProcessingPanel(WorkerHost, QWidget):
         box = QGroupBox("Key / matte")
         form = QFormLayout(box)
         self.key_method = _combo(KEY_METHODS, {"chroma": "chroma key", "ml": "ML matte",
-                                               "none": "none (source has alpha)"})
+                                               "none": "none (use existing pixels / alpha)"})
         form.addRow("Method:", self.key_method)
         self.key_color_edit = QLineEdit()
         self.key_color_edit.setPlaceholderText("auto (sampled from the clip)")
@@ -489,6 +590,9 @@ class ProcessingPanel(WorkerHost, QWidget):
             return
         self._loading = True
         try:
+            with _blocked(self.background_mode, self.background_color):
+                self.background_mode.setCurrentIndex(self.background_mode.findData(project.background.mode))
+                self.background_color.setText(project.background.color)
             ex = project.extraction
             with _blocked(self.extract_mode, self.every_n, self.target_fps, self.exact_n,
                           self.trim_start, self.trim_end, self.cull, self.cull_threshold):
@@ -533,6 +637,7 @@ class ProcessingPanel(WorkerHost, QWidget):
                 self.profile_editors[profile.name] = editor
         finally:
             self._loading = False
+        self._sync_background_controls()
         self._update_estimate()
 
     def _key_color_value(self) -> Optional[str]:
@@ -552,6 +657,8 @@ class ProcessingPanel(WorkerHost, QWidget):
         log-only warning per keystroke; this re-reads the live field text so the two
         commit points show and log the refusal instead of running against the plate.
         """
+        if self._project is not None and self._project.background.mode == "original":
+            return True
         text = self.key_color_edit.text().strip()
         if text and not HEX_RE.match(text):
             self._warn("Key color", f"{text!r} is not #RRGGBB")
@@ -635,6 +742,8 @@ class ProcessingPanel(WorkerHost, QWidget):
         primary = getattr(self, "_primary", None)
         if primary is not None:
             primary.set_enabled(ready)
+        self.background_box.setEnabled(self._project is not None and not self.is_busy())
+        self._sync_background_controls()
 
     def _on_worker_idle(self) -> None:
         """A worker orphaned by a timed-out ``shutdown()`` finally stopped.
@@ -674,6 +783,10 @@ class ProcessingPanel(WorkerHost, QWidget):
     # the same stage directories leave action.status/frames last-writer-wins).
     # The workspace installs it; None means no guard (PR #45 review).
     _busy_guard: Optional[Callable[[], Optional[str]]] = None
+    _background_busy_guard: Optional[Callable[[], Optional[str]]] = None
+
+    def set_background_busy_guard(self, guard: Callable[[], Optional[str]]) -> None:
+        self._background_busy_guard = guard
 
     def set_busy_guard(self, guard: Optional[Callable[[], Optional[str]]]) -> None:
         self._busy_guard = guard
@@ -695,6 +808,8 @@ class ProcessingPanel(WorkerHost, QWidget):
             return
         self._write_back()
         if not self._check_key_color_field():
+            return
+        if not self.validate_background():
             return
         force = self.force_check.isChecked()
 
@@ -758,6 +873,9 @@ class ProcessingPanel(WorkerHost, QWidget):
 
     def preview_key_on_clip(self) -> None:
         project, action = self._project, self._action
+        if project is not None and project.background.mode == "original":
+            self.logMessage.emit("Keep original background skips chroma preview. Run pipeline to preview the preserved frames.", "INFO")
+            return
         if project is None or action is None:
             self._warn("Preview key", "Select an action card first.")
             return
@@ -804,6 +922,8 @@ class ProcessingPanel(WorkerHost, QWidget):
         # from the fitted binary-alpha frames — the same frames the quantizer uses.
         profile.locked_palette = None
         self.logMessage.emit(f"Palette lock cleared for '{profile.name}'; re-running the pipeline", "INFO")
+        if not self.validate_background():
+            return
         force = self.force_check.isChecked()
 
         def job(progress, token):

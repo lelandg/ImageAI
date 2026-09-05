@@ -80,3 +80,22 @@ def test_normalize_keeps_matching_aspect_unchanged(tmp_path):
 def test_normalize_rejects_missing_file(tmp_path):
     with pytest.raises(FileNotFoundError):
         normalize_source(tmp_path / "nope.png", tmp_path / "out.png")
+
+
+
+def test_preserve_background_intake_keeps_all_pixels_and_size(tmp_path):
+    import json
+    from PIL import Image
+    from core.sprite.source import normalize_source
+    source = tmp_path / "source.png"
+    out = tmp_path / "character.png"
+    image = Image.new("RGB", (30, 40), (51, 87, 192))
+    image.putpixel((0, 0), (255, 1, 2))
+    image.save(source)
+    normalize_source(source, out, aspect_ratio="16:9", preserve_background=True)
+    with Image.open(out) as actual:
+        assert actual.size == image.size
+        assert actual.convert("RGB").tobytes() == image.tobytes()
+        assert actual.getchannel("A").getextrema() == (255, 255)
+    meta = json.loads(out.with_suffix(".png.json").read_text())
+    assert meta["padded"] is False and meta["preserve_background"] is True

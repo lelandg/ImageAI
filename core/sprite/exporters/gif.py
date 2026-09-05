@@ -1,7 +1,7 @@
-"""Transparent GIF export with the safe Pillow recipe (design section 4.1).
+"""GIF export with preserved, transparent, or solid backgrounds.
 
 Recipe, regression-tested: every frame is quantized to 255 colours, index
-255 is reserved for transparency, ``disposal=2`` clears each frame before
+255 is reserved for transparency (or the exact solid background), ``disposal=2`` clears each frame before
 the next, ``optimize=False`` keeps Pillow from merging palettes, and every
 duration is clamped to at least 20 ms because browsers treat shorter delays
 as 100 ms.
@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional, Tuple
 
-from PIL import Image
+from PIL import Image, ImageChops
 
 from core.utils import sidecar_path
 
@@ -85,9 +86,50 @@ def to_palette_frame(image: Image.Image) -> Image.Image:
     return quantized
 
 
+def normalize_background_color(color: str) -> str:
+    """Validate the portable RGB color accepted by the GIF export API."""
+    if not isinstance(color, str) or re.fullmatch(r"#[0-9a-fA-F]{6}", color) is None:
+        logger.error("Invalid GIF background color: %r", color)
+        raise ValueError("Background color must be a hex RGB color such as #FFFFFF")
+    return color.upper()
+
+
+def to_solid_palette_frame(image: Image.Image, color: str) -> Image.Image:
+    """Composite before quantization and reserve index 255 for the exact background."""
+    rgba = image.convert("RGBA")
+    background = Image.new("RGBA", rgba.size, color)
+    rgb = Image.alpha_composite(background, rgba).convert("RGB")
+    quantized = rgb.quantize(colors=255, method=Image.Quantize.MEDIANCUT,
+                             dither=Image.Dither.NONE)
+    palette = (quantized.getpalette() or [])[:255 * 3]
+    palette += [0] * (255 * 3 - len(palette)) + list(background.getpixel((0, 0))[:3])
+    quantized.putpalette(palette)
+    difference = ImageChops.difference(rgb, background.convert("RGB"))
+    red, green, blue = difference.split()
+    exact = ImageChops.lighter(ImageChops.lighter(red, green), blue).point(
+        lambda value: 255 if value == 0 else 0)
+    quantized.paste(255, mask=exact)
+    return quantized
+
+
 def export_gif(meta: SheetMeta, tag: TagMeta, out_gif: Path, *, loop: int = 0,
-               warnings: Optional[List[str]] = None) -> Path:
-    """Write one tag as a looping transparent GIF. Collects warnings when a list is given."""
+               warnings: Optional[List[str]] = None,
+               background_color: Optional[str] = None,
+               background_mode: str = "transparent") -> Path:
+    """Write one tag as GIF, optionally composited onto an exact solid RGB color.
+
+    Original mode preserves source alpha when present, and omits transparency
+    altogether for opaque inputs. Default calls retain the transparent recipe.
+    """
+    if background_mode not in ("transparent", "original", "solid"):
+        logger.error("Unknown GIF background mode: %r", background_mode)
+        raise ValueError(f"Unknown background mode: {background_mode!r}")
+    if background_color is not None:
+        background_color = normalize_background_color(background_color)
+        background_mode = "solid"
+    elif background_mode == "solid":
+        logger.error("Solid GIF background mode requires background_color")
+        raise ValueError("Solid background mode requires background_color")
     out_gif = Path(out_gif)
     out_gif.parent.mkdir(parents=True, exist_ok=True)
     frames = ordered_frames(meta, tag)
@@ -99,16 +141,22 @@ def export_gif(meta: SheetMeta, tag: TagMeta, out_gif: Path, *, loop: int = 0,
     if warnings is not None:
         warnings.extend(notes)
     palette_frames: List[Image.Image] = []
+    has_alpha = False
     for frame in frames:
         if frame.source_path is None or not Path(frame.source_path).exists():
             raise FileNotFoundError(f"Frame '{frame.name}' has no source PNG: {frame.source_path}")
         with Image.open(frame.source_path) as im:
-            palette_frames.append(to_palette_frame(im))
+            has_alpha = has_alpha or im.convert("RGBA").getchannel("A").getextrema()[0] < ALPHA_CUTOFF
+            palette_frames.append(to_solid_palette_frame(im, background_color)
+                                  if background_color else to_palette_frame(im))
     first, rest = palette_frames[0], palette_frames[1:]
+    options = {"background": 255} if background_color else {}
+    if background_mode == "transparent" or (background_mode == "original" and has_alpha):
+        options["transparency"] = TRANSPARENT_INDEX
     first.save(
         out_gif, format="GIF", save_all=True, append_images=rest,
         duration=durations, loop=loop, disposal=2, optimize=False,
-        transparency=TRANSPARENT_INDEX,
+        **options,
     )
     sidecar_path(out_gif).write_text(json.dumps({
         "type": "sprite_gif",
@@ -118,10 +166,13 @@ def export_gif(meta: SheetMeta, tag: TagMeta, out_gif: Path, *, loop: int = 0,
         "frames": len(frames),
         "durations_ms": durations,
         "loop": loop,
+        "background_mode": background_mode,
+        "background_color": background_color,
         "warnings": notes,
         "app": meta.app,
         "version": meta.version,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
     }, indent=2), encoding="utf-8")
-    logger.info(f"Wrote GIF {out_gif} ({len(frames)} frames, tag '{tag.name}')")
+    logger.info("Wrote GIF %s (%d frames, tag '%s', background=%s, color=%s)",
+                out_gif, len(frames), tag.name, background_mode, background_color)
     return out_gif

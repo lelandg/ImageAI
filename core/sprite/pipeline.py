@@ -277,7 +277,20 @@ def stage_settings(project: SpriteProject, action: ActionCard, stage: str) -> Di
     """The registered settings for a stage (empty dict when none is registered)."""
     if stage not in STAGES:
         raise ValueError(f"Unknown stage: {stage!r}")
+    if stage != "extract" and keeps_original_background(project):
+        # Only settings actually applied belong in the original-frame cache.
+        # Solid and transparent modes deliberately share the existing keyed
+        # cache: the solid color is applied by the exporter, not these stages.
+        settings: Dict[str, Any] = {"background": "original"}
+        if stage == "stabilize" or stage in PROFILE_STAGES:
+            settings.update(STAGE_SETTINGS.get(stage, _no_settings)(project, action))
+        return settings
     return STAGE_SETTINGS.get(stage, _no_settings)(project, action)
+
+
+def keeps_original_background(project: SpriteProject) -> bool:
+    """Whether background removal and its edge cleanup are bypassed."""
+    return project.background.mode == "original"
 
 
 def stage_fingerprint(project: SpriteProject, action: ActionCard, stage: str) -> str:
@@ -379,6 +392,8 @@ def key_runner(project: SpriteProject, action: ActionCard, input_frames: List[Pa
     choice is written to ``out_dir/key.json`` so the alpha stage
     decontaminates against the same color.
     """
+    if keeps_original_background(project):
+        return identity_runner(project, action, input_frames, out_dir, progress, token)
     settings = _effective_key_settings(project)
     _reset_dir(out_dir)
     outputs: List[Path] = []
@@ -480,6 +495,8 @@ def key_self_check(image: Image.Image, alpha: Any, key_rgb: Sequence[int]) -> Op
 def cleanup_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
                    out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
     """Choke/feather/despeckle the alpha the ``key`` stage produced."""
+    if keeps_original_background(project):
+        return identity_runner(project, action, input_frames, out_dir, progress, token)
     _reset_dir(out_dir)
     outputs: List[Path] = []
     total = len(input_frames)
@@ -497,6 +514,8 @@ def cleanup_runner(project: SpriteProject, action: ActionCard, input_frames: Lis
 def alpha_runner(project: SpriteProject, action: ActionCard, input_frames: List[Path],
                  out_dir: Path, progress: ProgressFn, token: Optional[CancelToken]) -> List[Path]:
     """Decontaminate spill on the keyed edges (chroma only) and finalize the RGBA."""
+    if keeps_original_background(project):
+        return identity_runner(project, action, input_frames, out_dir, progress, token)
     settings = _effective_key_settings(project)
     if settings.method == "chroma" and not settings.key_color:
         recorded = read_key_color(project, action)
@@ -584,8 +603,8 @@ register_stage("key", key_runner, key_stage_settings, code_version=4)
 register_stage("cleanup", cleanup_runner, cleanup_stage_settings, code_version=2)
 register_stage("alpha", alpha_runner, alpha_stage_settings, code_version=3)
 # stabilize 3: dejitter limits every shift so no subject pixel leaves the canvas.
-register_stage("stabilize", stabilize_runner, stabilize_stage_settings, code_version=3)
-register_stage("hd", hd_runner, hd_stage_settings, code_version=2)
+register_stage("stabilize", stabilize_runner, stabilize_stage_settings, code_version=4)
+register_stage("hd", hd_runner, hd_stage_settings, code_version=3)
 register_stage("pixel", identity_runner, pixel_stage_settings)
 
 

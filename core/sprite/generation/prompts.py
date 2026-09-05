@@ -80,3 +80,16 @@ def inject_chroma(prompt: str, plate_color: str, *, loop: bool) -> str:
     if loop:
         parts.append(LOOP_SUFFIX)
     return ", ".join(parts)
+
+
+def background_prompt(prompt: str, plate_color: str, *, loop: bool,
+                      background_mode: str = "transparent") -> str:
+    """Keep source scenery when requested; otherwise prepare a removable plate."""
+    if background_mode != "original":
+        return inject_chroma(prompt, plate_color, loop=loop)
+    parts = [strip_render_terms(prompt),
+             "Preserve the original reference image background, including its colors and scenery. "
+             "Keep the camera fixed and the framing unchanged"]
+    if loop:
+        parts.append(LOOP_SUFFIX)
+    return ", ".join(part for part in parts if part)

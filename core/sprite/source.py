@@ -66,8 +66,9 @@ def analyze_source(image: Path) -> SourceAnalysis:
                           border_uniform=uniform, size=(width, height))
 
 
-def normalize_source(image: Path, out_png: Path, aspect_ratio: str = "16:9") -> Path:
-    """Pad the character onto a transparent canvas of ``aspect_ratio``.
+def normalize_source(image: Path, out_png: Path, aspect_ratio: str = "16:9", *,
+                     preserve_background: bool = False) -> Path:
+    """Pad to ``aspect_ratio``, or keep the complete original canvas and background.
 
     Writes an RGBA PNG to ``out_png`` plus a ``.json`` sidecar. Raises
     ``FileNotFoundError`` when ``image`` is missing.
@@ -79,7 +80,8 @@ def normalize_source(image: Path, out_png: Path, aspect_ratio: str = "16:9") -> 
         raise FileNotFoundError(f"Character image not found: {image}")
     out_png = Path(out_png)
     raw = image.read_bytes()
-    fixed = apply_transparent_canvas_fix(raw, aspect_ratio, logger_instance=logger)
+    fixed = raw if preserve_background else apply_transparent_canvas_fix(
+        raw, aspect_ratio, logger_instance=logger)
 
     with Image.open(io.BytesIO(fixed)) as img:
         rgba = img.convert("RGBA")
@@ -93,6 +95,7 @@ def normalize_source(image: Path, out_png: Path, aspect_ratio: str = "16:9") -> 
         "source": str(image),
         "aspect_ratio": aspect_ratio,
         "padded": fixed is not raw,
+        "preserve_background": preserve_background,
         "size": [width, height],
         "source_has_alpha": analysis.has_alpha,
         "source_border_color": analysis.border_color,

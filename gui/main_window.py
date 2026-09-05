@@ -143,6 +143,8 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
+        from time import perf_counter
+        startup_started = perf_counter()
         import logging
         self.logger = logging.getLogger(__name__)
         self.config = ConfigManager()
@@ -184,6 +186,7 @@ class MainWindow(QMainWindow):
         print("Scanning image history...")
         self.history_paths: List[Path] = scan_disk_history(project_only=True)
         print(f"Found {len(self.history_paths)} images in history")
+        self.logger.info("Startup: history scan complete at %.3fs", perf_counter() - startup_started)
 
         self.history = []  # Initialize empty history list
         self.history_loaded_count = 0  # Track how many items are loaded
@@ -215,6 +218,7 @@ class MainWindow(QMainWindow):
         # Create UI first so we have status bar
         print("Creating user interface...")
         self._init_ui()
+        self.logger.info("Startup: initial tabs ready at %.3fs", perf_counter() - startup_started)
         self.status_bar.showMessage("Initializing application...")
         QApplication.processEvents()
 
@@ -253,6 +257,7 @@ class MainWindow(QMainWindow):
         QApplication.processEvents()
         self._restore_geometry()
         self._restore_ui_state()
+        self.logger.info("Startup: session restored at %.3fs", perf_counter() - startup_started)
 
         # Initialize Midjourney watcher if enabled
         self._init_midjourney_watcher()
@@ -280,6 +285,7 @@ class MainWindow(QMainWindow):
         self._start_config_health_timer()
 
         print("Application ready!")
+        self.logger.info("Startup: application ready at %.3fs", perf_counter() - startup_started)
         self.status_bar.showMessage("Ready")
         QApplication.processEvents()
 
@@ -690,24 +696,16 @@ class MainWindow(QMainWindow):
         self.tab_sprite = QWidget()
         self._sprite_tab_loaded = False
 
-        # Create layout tab
-        try:
-            from gui.layout import LayoutTab
-            self.tab_layout = LayoutTab(config=self.config)
-            logger.info("Layout tab created successfully")
-        except Exception as e:
-            logger.error(f"Failed to create layout tab: {e}", exc_info=True)
-            self.tab_layout = QWidget()  # Fallback placeholder
+        # Layout restores and renders its document only when first opened.
+        self.tab_layout = QWidget()
+        self._layout_tab_loaded = False
+        self._help_tab_loaded = False
 
         # Phase 5b: cross-tab handoff. The Layout tab asks us to open the Image
         # tab pre-configured for a region; we route the generated image back into
         # that region by id (see _on_layout_send_to_image / _maybe_place_image_in_layout).
         self._pending_layout_region_id = None
         self._layout_fill_plan = None  # FillPlan driving layout-complete mode
-        if hasattr(self.tab_layout, "sendToImageRequested"):
-            self.tab_layout.sendToImageRequested.connect(self._on_layout_send_to_image)
-        if hasattr(self.tab_layout, "fillAllRequested"):
-            self.tab_layout.fillAllRequested.connect(self._on_layout_fill_all)
 
         # Add tabs
         self.tabs.addTab(self.tab_generate, "🎨 Image")
@@ -722,7 +720,6 @@ class MainWindow(QMainWindow):
         self._init_generate_tab()
         self._init_templates_tab()
         self._init_settings_tab()
-        self._init_help_tab()
         self._init_history_tab()  # Always init history tab
         
         # Connect tab change signal to handle help tab rendering
@@ -8202,9 +8199,15 @@ For more detailed information, please refer to the full documentation.
             self.logger.info("Triggering sprite tab lazy load...")
             self._load_sprite_tab()
 
+        if current_widget == self.tab_layout and not self._layout_tab_loaded:
+            self._load_layout_tab()
+
         # If switching to help tab, trigger a minimal scroll to fix rendering
         if current_widget == self.tab_help:
-            self._trigger_help_render()
+            if not self._help_tab_loaded:
+                self._load_help_tab()
+            if self._help_tab_loaded:
+                self._trigger_help_render()
 
         # If switching to history tab, check for new images not created by us
         if current_widget == self.tab_history:
@@ -8218,6 +8221,8 @@ For more detailed information, please refer to the full documentation.
 
     def _load_video_tab(self):
         """Lazy load the video tab when first accessed."""
+        if self._video_tab_loaded:
+            return
         self.logger.info("=== _LOAD_VIDEO_TAB CALLED ===")
         self.logger.info(f"Thread ID: {__import__('threading').current_thread().ident}")
         self.logger.info(f"Current platform: {__import__('sys').platform}")
@@ -8270,11 +8275,15 @@ For more detailed information, please refer to the full documentation.
             # Step 6: Replace placeholder tab
             self.logger.info("STEP 6: Replacing placeholder tab...")
             self.logger.info(f"STEP 6a: Removing placeholder tab at index {video_index}")
-            self.tabs.removeTab(video_index)
-            self.logger.info(f"STEP 6b: Inserting real video tab at index {video_index}")
-            self.tabs.insertTab(video_index, real_video_tab, "🎬 Video")
-            self.logger.info(f"STEP 6c: Setting current index to {video_index}")
-            self.tabs.setCurrentIndex(video_index)
+            from PySide6.QtCore import QSignalBlocker
+            placeholder = self.tab_video
+            with QSignalBlocker(self.tabs):
+                self.tabs.removeTab(video_index)
+                self.tabs.insertTab(video_index, real_video_tab, "🎬 Video")
+                self.tab_video = real_video_tab
+                self._video_tab_loaded = True
+                self.tabs.setCurrentIndex(video_index)
+            placeholder.deleteLater()
             self.logger.info("STEP 6: Tab replacement complete")
 
             # Step 7: Update references
@@ -8322,17 +8331,74 @@ For more detailed information, please refer to the full documentation.
             real_tab = SpriteTab(config=self.config)
             real_tab.addToHistoryRequested.connect(self.add_to_history)
             index = self.tabs.indexOf(self.tab_sprite)
-            self.tabs.removeTab(index)
-            self.tabs.insertTab(index, real_tab, "🎮 Sprite")
-            self.tabs.setCurrentIndex(index)
-            self.tab_sprite = real_tab
-            self._sprite_tab_loaded = True
+            from PySide6.QtCore import QSignalBlocker
+            placeholder = self.tab_sprite
+            with QSignalBlocker(self.tabs):
+                self.tabs.removeTab(index)
+                self.tabs.insertTab(index, real_tab, "🎮 Sprite")
+                self.tab_sprite = real_tab
+                self._sprite_tab_loaded = True
+                self.tabs.setCurrentIndex(index)
+            placeholder.deleteLater()
             self.logger.info("Sprite tab loaded")
         except Exception as e:
             import traceback
             error_msg = f"Failed to load sprite tab: {str(e)}\n\n{traceback.format_exc()}"
             self.logger.error(f"SPRITE TAB LOAD ERROR:\n{error_msg}")
             QMessageBox.warning(self, "Sprite Tab Error", error_msg)
+
+    def _load_help_tab(self):
+        """Build the documentation browser on demand; allow retry after failure."""
+        if self._help_tab_loaded:
+            return
+        from PySide6.QtCore import QSignalBlocker
+
+        placeholder = self.tab_help
+        real_tab = QWidget()
+        self.tab_help = real_tab
+        try:
+            self._init_help_tab()
+        except Exception as exc:
+            self.tab_help = placeholder
+            real_tab.deleteLater()
+            self.logger.exception("Failed to load Help tab")
+            QMessageBox.warning(self, "Help Tab Error", f"Could not open Help: {exc}")
+            return
+        index = self.tabs.indexOf(placeholder)
+        with QSignalBlocker(self.tabs):
+            self.tabs.removeTab(index)
+            self.tabs.insertTab(index, real_tab, "❓ Help")
+            self._help_tab_loaded = True
+            self.tabs.setCurrentIndex(index)
+        placeholder.deleteLater()
+        self.logger.info("Help tab loaded")
+
+    def _load_layout_tab(self):
+        """Restore Layout on demand, keeping placeholder swaps invisible to tabs."""
+        if self._layout_tab_loaded:
+            return
+        try:
+            from PySide6.QtCore import QSignalBlocker
+            from gui.layout import LayoutTab
+
+            real_tab = LayoutTab(config=self.config)
+            if hasattr(real_tab, "sendToImageRequested"):
+                real_tab.sendToImageRequested.connect(self._on_layout_send_to_image)
+            if hasattr(real_tab, "fillAllRequested"):
+                real_tab.fillAllRequested.connect(self._on_layout_fill_all)
+            placeholder = self.tab_layout
+            index = self.tabs.indexOf(placeholder)
+            with QSignalBlocker(self.tabs):
+                self.tabs.removeTab(index)
+                self.tabs.insertTab(index, real_tab, "📖 Layout")
+                self.tab_layout = real_tab
+                self._layout_tab_loaded = True
+                self.tabs.setCurrentIndex(index)
+            placeholder.deleteLater()
+            self.logger.info("Layout tab loaded")
+        except Exception as exc:
+            self.logger.exception("Failed to load Layout tab")
+            QMessageBox.warning(self, "Layout Tab Error", f"Could not open Layout: {exc}")
 
     def _on_send_to_sprite(self, path):
         """Route an image path into the Sprite tab as its character source."""

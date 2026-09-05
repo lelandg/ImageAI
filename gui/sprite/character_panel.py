@@ -111,8 +111,13 @@ class CharacterPanel(WorkerHost, QGroupBox):
         has_project = self.project is not None
         has_source = has_project and bool(getattr(self.project, "character_source", None))
         self.browse_btn.setEnabled(has_project and not busy)
-        self.plate_btn.setEnabled(has_source and not busy)
-        self.turnaround_btn.setEnabled(has_source and not busy)
+        original = has_project and self.project.background.mode == "original"
+        self.plate_btn.setEnabled(has_source and not busy and not original)
+        self.plate_color_btn.setEnabled(not busy and not original)
+        self.turnaround_btn.setEnabled(has_source and not busy and not original)
+        self.plate_btn.setToolTip("Not needed when keeping the original background." if original else "")
+        self.turnaround_btn.setToolTip(
+            "Original background mode uses the character image directly." if original else "")
         self.cancel_btn.setEnabled(busy)
         self.setAcceptDrops(has_project and not busy)
 
@@ -175,11 +180,15 @@ class CharacterPanel(WorkerHost, QGroupBox):
             return
         out_png = Path(self.project.project_dir) / "source" / "character.png"
         aspect = getattr(self.project.generation, "aspect_ratio", "16:9")
+        preserve_background = self.project.background.mode == "original"
 
         def job(progress, token):
             progress("source", 0, 0, f"Normalizing {path.name}")
             out_png.parent.mkdir(parents=True, exist_ok=True)
-            out = normalize_source(path, out_png, aspect_ratio=aspect)
+            if preserve_background:
+                out = normalize_source(path, out_png, aspect_ratio=aspect, preserve_background=True)
+            else:
+                out = normalize_source(path, out_png, aspect_ratio=aspect)
             token.raise_if_cancelled()
             return Path(out), analyze_source(Path(out))
 
@@ -187,6 +196,9 @@ class CharacterPanel(WorkerHost, QGroupBox):
         self._begin("normalize", job, self._on_source_done)
 
     def make_plate(self) -> None:
+        if self.project is not None and self.project.background.mode == "original":
+            self.logMessage.emit("Keeping the original background; no chroma plate is needed.", "INFO")
+            return
         if not self._ready_for_provider("chroma plate"):
             return
         character = Path(self.project.character_source)
@@ -208,6 +220,9 @@ class CharacterPanel(WorkerHost, QGroupBox):
         self._begin("plate", job, self._on_plate_done)
 
     def generate_turnaround(self) -> None:
+        if self.project is not None and self.project.background.mode == "original":
+            self.logMessage.emit("Original background mode uses the character image directly.", "INFO")
+            return
         if not self._ready_for_provider("turnaround"):
             return
         character = Path(self.project.character_source)

@@ -529,3 +529,64 @@ def test_run_pipeline_is_refused_while_an_external_job_runs(panel, monkeypatch):
     widget.set_busy_guard(lambda: None)
     widget.run_pipeline()
     assert started == ["Pipeline"]
+
+
+
+def test_original_background_disables_cleanup_and_preserves_preferences(panel):
+    widget, project, _ = panel
+    widget.tolerance.setValue(33)
+    widget.dejitter.setChecked(True)
+    changes = []
+    widget.backgroundChanged.connect(lambda: changes.append(project.background.mode))
+    widget.background_mode.setCurrentIndex(widget.background_mode.findData("original"))
+    assert project.background.mode == "original"
+    assert not widget.key_box.isEnabled()
+    assert widget.stabilize_box.isEnabled()
+    assert not widget.preview_btn.isEnabled()
+    assert widget.profile_editors["pixel"].palette_size.isEnabled()
+    assert "exact canvas size" in widget.background_help.text()
+    assert project.key.tolerance == 0.33 and project.stabilize.dejitter
+    widget.background_mode.setCurrentIndex(widget.background_mode.findData("transparent"))
+    assert widget.key_box.isEnabled() and widget.stabilize_box.isEnabled()
+    assert widget.profile_editors["pixel"].palette_size.isEnabled()
+    assert project.key.tolerance == 0.33 and project.stabilize.dejitter
+    assert changes == ["original", "transparent"]
+
+
+def test_solid_color_commits_validated_hex_and_reloads(panel, monkeypatch):
+    widget, project, _ = panel
+    widget.background_mode.setCurrentIndex(widget.background_mode.findData("solid"))
+    widget.background_color.setText("#a1B2c3")
+    assert widget.validate_background()
+    assert project.background.color == "#A1B2C3"
+    widget.set_project(project)
+    assert widget.background_mode.currentData() == "solid"
+    assert widget.background_color.text() == "#A1B2C3"
+    shown = []
+    monkeypatch.setattr(pp.QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a)))
+    widget.background_color.setText("bad")
+    assert not widget.validate_background()
+    assert project.background.color == "#A1B2C3"
+    assert shown
+
+
+def test_background_change_blocked_while_external_job_uses_project(panel, monkeypatch):
+    widget, project, _ = panel
+    widget.set_background_busy_guard(lambda: "render queue")
+    shown = []
+    monkeypatch.setattr(pp.QMessageBox, "warning", staticmethod(lambda *a, **k: shown.append(a)))
+    widget.background_mode.setCurrentIndex(widget.background_mode.findData("original"))
+    assert project.background.mode == "transparent"
+    assert widget.background_mode.currentData() == "transparent"
+    assert shown
+
+
+def test_original_background_ignores_unused_invalid_key_and_skips_preview(panel, monkeypatch):
+    widget, project, _ = panel
+    widget.background_mode.setCurrentIndex(widget.background_mode.findData("original"))
+    widget.key_color_edit.setText("invalid")
+    assert widget._check_key_color_field()
+    called = []
+    monkeypatch.setattr(pp, "ffmpeg_chromakey_preview", lambda *a, **k: called.append(1))
+    widget.preview_key_on_clip()
+    assert not called and not widget.is_busy()

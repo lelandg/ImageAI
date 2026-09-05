@@ -78,6 +78,35 @@ def _reanchored(path: Optional[Path], project_dir: Optional[Path]) -> Optional[P
 # --- settings dataclasses ---------------------------------------------------
 
 
+BACKGROUND_MODES = ("transparent", "original", "solid")
+
+
+@dataclass
+class BackgroundSettings:
+    """Project-wide background intent; solid compositing happens at GIF export."""
+
+    mode: str = "transparent"
+    color: str = "#FFFFFF"
+
+    def __post_init__(self) -> None:
+        if self.mode not in BACKGROUND_MODES:
+            message = f"Unknown sprite background mode: {self.mode!r}"
+            logger.error(message)
+            raise ValueError(message)
+        if not isinstance(self.color, str) or re.fullmatch(r"#[0-9a-fA-F]{6}", self.color) is None:
+            message = f"Sprite background color must be #RRGGBB: {self.color!r}"
+            logger.error(message)
+            raise ValueError(message)
+        self.color = self.color.upper()
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "BackgroundSettings":
+        return cls(**{k: v for k, v in (data or {}).items() if k in cls.__dataclass_fields__})
+
+
 @dataclass
 class GenerationSettings:
     provider: str = "omni"
@@ -376,6 +405,7 @@ class SpriteProject:
     cost_ledger: List[CostEntry] = field(default_factory=list)
     created: str = field(default_factory=_now)
     modified: str = field(default_factory=_now)
+    background: BackgroundSettings = field(default_factory=BackgroundSettings)
 
     # -- lookups ---------------------------------------------------------
 
@@ -410,6 +440,7 @@ class SpriteProject:
             "genre_preset": self.genre_preset,
             "actions": [a.to_dict() for a in self.actions],
             "generation": self.generation.to_dict(),
+            "background": self.background.to_dict(),
             "extraction": self.extraction.to_dict(),
             "key": self.key.to_dict(),
             "stabilize": self.stabilize.to_dict(),
@@ -434,6 +465,7 @@ class SpriteProject:
             genre_preset=str(data.get("genre_preset", "sidescroller")),
             actions=[ActionCard.from_dict(a) for a in data.get("actions", [])],
             generation=GenerationSettings.from_dict(data.get("generation") or {}),
+            background=BackgroundSettings.from_dict(data.get("background") or {}),
             extraction=ExtractionSettings.from_dict(data.get("extraction") or {}),
             key=KeySettings.from_dict(data.get("key") or {}),
             stabilize=StabilizeSettings.from_dict(data.get("stabilize") or {}),
@@ -586,12 +618,14 @@ class SpriteProject:
                 repeat=0 if action.loop else 1,
                 fps_hint=action.fps,
             ))
+        cell_size = prof.cell_size
+        palette = list(prof.locked_palette) if prof.locked_palette and prof.palette_size else None
         return SheetMeta(
             title=self.slug,
             frames=frames,
             tags=tags,
-            cell_size=prof.cell_size,
-            palette=list(prof.locked_palette) if prof.locked_palette and prof.palette_size else None,
+            cell_size=cell_size,
+            palette=palette,
             profile=profile,
         )
 
@@ -661,15 +695,21 @@ class SpriteProjectManager:
                 continue
             try:
                 data = json.loads(project_file.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError) as exc:
+                if not isinstance(data, dict):
+                    raise ValueError("project metadata must be an object")
+                if not isinstance(data.get("name", "Untitled"), str):
+                    raise ValueError("project name must be text")
+                if not isinstance(data.get("actions", []), list):
+                    raise ValueError("project actions must be a list")
+            except (OSError, ValueError) as exc:
                 logger.warning(f"Failed to read sprite project {project_file}: {exc}")
                 continue
             projects.append({
                 "name": data.get("name", "Untitled"),
                 "slug": project_dir.name,
                 "path": project_file,
-                "created": data.get("created"),
-                "modified": data.get("modified"),
+                "created": data.get("created") if isinstance(data.get("created"), str) else None,
+                "modified": data.get("modified") if isinstance(data.get("modified"), str) else None,
                 "actions": len(data.get("actions", [])),
             })
         projects.sort(key=lambda p: p.get("modified") or "", reverse=True)

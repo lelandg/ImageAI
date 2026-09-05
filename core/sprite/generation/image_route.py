@@ -17,7 +17,7 @@ from PIL import Image
 from core.sprite.generation._common import emit
 from core.sprite.generation.errors import ProviderError, classify_provider_error
 from core.sprite.generation.pose_steps import generate_pose_instructions  # noqa: F401 — re-export (design §4.6)
-from core.sprite.generation.prompts import inject_chroma
+from core.sprite.generation.prompts import background_prompt
 from core.sprite.models import Size
 from core.sprite.pipeline import CancelToken
 from core.sprite.project import ActionCard
@@ -148,7 +148,8 @@ def openai_edit_size(model: str, size: Size) -> str:
 
 # --------------------------------------------------------------------------- sheet route
 
-def sheet_prompt(action: ActionCard, frames: int, plate_color: str) -> str:
+def sheet_prompt(action: ActionCard, frames: int, plate_color: str, *,
+                 background_mode: str = "transparent") -> str:
     """Prompt for one horizontal strip; chroma suffix and loop hint come from inject_chroma."""
     label = action.name.replace("_", " ")
     base = (
@@ -158,7 +159,7 @@ def sheet_prompt(action: ActionCard, frames: int, plate_color: str) -> str:
         "No labels, no numbers, no cell borders, no text. "
         f"{action.prompt.strip()}"
     )
-    return inject_chroma(base, plate_color, loop=action.loop)
+    return background_prompt(base, plate_color, loop=action.loop, background_mode=background_mode)
 
 
 def generate_sheet(
@@ -169,6 +170,7 @@ def generate_sheet(
     *,
     frames: int,
     plate_color: str,
+    background_mode: str = "transparent",
     model: Optional[str] = None,
     log: LogFn = logger.info,
     token: Optional[CancelToken] = None,
@@ -183,7 +185,7 @@ def generate_sheet(
         raise FileNotFoundError(character)
     kind = provider_kind(provider)
     model = model or provider.get_default_model()
-    prompt = sheet_prompt(action, frames, plate_color)
+    prompt = sheet_prompt(action, frames, plate_color, background_mode=background_mode)
     if kind == "openai":
         size = openai_sheet_size(model)
         params: Dict = {"size": size, "n": 1}
@@ -201,6 +203,7 @@ def generate_sheet(
         "prompt": prompt, "provider": kind, "model": model, "timestamp": _timestamp(),
         "route": "image_sheet", "action": action.name, "action_id": action.id,
         "frames": frames, "plate_color": plate_color, "params": params,
+        "background_mode": background_mode,
         "reference_images": [str(character)],
     })
     emit(logger, log, f"[image route] sheet saved: {out}")
@@ -214,23 +217,29 @@ def slice_generated_sheet(
     plate_color: str,
     *,
     log: LogFn = logger.info,
+    background_mode: str = "transparent",
 ) -> List[Path]:
     """Cut a generated sheet into ``frames`` PNGs (guess the grid; fall back to one row)."""
     sheet_png = Path(sheet_png)
-    with Image.open(sheet_png) as img:
-        guess = guess_grid(img.convert("RGBA"), key_color=plate_color)
     columns, rows = frames, 1
-    if guess.confidence >= MIN_GRID_CONFIDENCE and guess.columns * guess.rows == frames:
-        columns, rows = guess.columns, guess.rows
-        emit(logger, log, f"[image route] grid detected: {columns}x{rows} (confidence {guess.confidence:.2f})")
+    if background_mode != "original":
+        with Image.open(sheet_png) as img:
+            guess = guess_grid(img.convert("RGBA"), key_color=plate_color)
+        if guess.confidence >= MIN_GRID_CONFIDENCE and guess.columns * guess.rows == frames:
+            columns, rows = guess.columns, guess.rows
+            emit(logger, log, f"[image route] grid detected: {columns}x{rows} (confidence {guess.confidence:.2f})")
+        else:
+            emit(logger, log, f"[image route] grid guess {guess.columns}x{guess.rows} "
+                              f"(confidence {guess.confidence:.2f}) rejected; slicing {frames}x1")
     else:
-        emit(logger, log, f"[image route] grid guess {guess.columns}x{guess.rows} "
-                          f"(confidence {guess.confidence:.2f}) rejected; slicing {frames}x1")
+        # Scenery can contain the key color and must not be mistaken for cell gutters.
+        emit(logger, log, f"[image route] preserving backgrounds in the requested {frames}x1 layout")
     paths = list(slice_sheet(sheet_png, Path(out_dir), columns, rows))
     for index, path in enumerate(paths, start=1):
         write_image_sidecar(path, {
             "route": "image_sheet", "source_sheet": str(sheet_png), "cell_index": index,
             "columns": columns, "rows": rows, "timestamp": _timestamp(),
+            "background_mode": background_mode,
         })
     return paths
 
@@ -249,6 +258,7 @@ def edit_chain(
     frames: int,
     pose_instructions: Sequence[str],
     plate_color: str,
+    background_mode: str = "transparent",
     model: Optional[str] = None,
     log: LogFn = logger.info,
     token: Optional[CancelToken] = None,
@@ -261,6 +271,8 @@ def edit_chain(
     ``*.png`` in the stage directory and must see the frames alone. Each plate keeps its
     own ``.json`` sidecar, and the composed frame's sidecar lists both plate paths.
     """
+    if background_mode == "original":
+        matte_pairs = False
     if frames < 1:
         raise ValueError("frames must be >= 1")
     if len(pose_instructions) != frames:
@@ -299,9 +311,10 @@ def edit_chain(
                 # buys the black one (same convention as retouch_frame).
                 if token is not None:
                     token.raise_if_cancelled()
-                prompt = inject_chroma(STEP_PROMPT.format(instruction=instruction.strip()), color, loop=False)
+                prompt = background_prompt(STEP_PROMPT.format(instruction=instruction.strip()), color,
+                                           loop=False, background_mode=background_mode)
                 prompts[color] = prompt
-                params: Dict = {"step": k, "plate": color}
+                params: Dict = {"step": k, "plate": color, "background_mode": background_mode}
                 refs = [character_bytes, prev_bytes]
                 if kind == "openai":
                     size = openai_edit_size(model, char_size)
@@ -346,6 +359,7 @@ def edit_chain(
                 "timestamp": _timestamp(), "route": "image_edit_chain",
                 "action": action.name, "action_id": action.id, "step": k, "of": frames,
                 "pose": instruction, "plate_color": plate_color, "matte_pairs": matte_pairs,
+                "background_mode": background_mode,
                 "plates": plate_paths,
                 "reference_images": [str(character), str(prev_reference_path)],
             })

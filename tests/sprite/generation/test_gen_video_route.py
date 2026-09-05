@@ -391,3 +391,30 @@ def test_veo_loop_conditioning_is_skipped_for_a_non_looping_action(request_for, 
     cfg = build_veo_config(req)
     assert cfg.image is None and cfg.last_frame is None
     assert cfg.duration == 6
+
+
+@pytest.mark.parametrize("provider", ["omni", "veo"])
+@pytest.mark.parametrize("loop", [False, True])
+def test_original_background_uses_source_without_chroma_refs(request_for, make_action, provider, loop):
+    req = request_for(provider, refs=2)
+    req.background_mode = "original"
+    req.action = make_action(loop=loop)
+    cfg = build_omni_config(req) if provider == "omni" else build_veo_config(req)
+    assert "Preserve the original reference image background" in cfg.prompt
+    assert "chroma" not in cfg.prompt and "#00FF00" not in cfg.prompt
+    assert (LOOP_SUFFIX in cfg.prompt) == loop
+    if provider == "omni":
+        assert cfg.reference_images == [req.plate]
+    else:
+        assert cfg.image == req.plate
+        assert cfg.last_frame == (req.plate if loop else None)
+        assert cfg.reference_images is None
+
+
+def test_original_background_is_recorded_in_render_sidecar(request_for, monkeypatch):
+    _omni_client(monkeypatch)
+    req = request_for("omni")
+    req.background_mode = "original"
+    record = render_action(req, api_key="test")
+    assert record.params["background_mode"] == "original"
+    assert json.loads(req.out_mp4.with_suffix(".json").read_text())["params"]["background_mode"] == "original"

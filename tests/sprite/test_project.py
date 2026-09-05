@@ -426,3 +426,51 @@ def test_action_card_rejects_an_id_that_is_not_a_single_path_segment(bad):
 def test_action_card_accepts_generated_and_short_ids():
     for good in (ActionCard.new_id(), "a1", "walk-cycle_2"):
         assert ActionCard.from_dict({"id": good, "name": "walk", "prompt": "p"}).id == good
+
+
+@pytest.mark.parametrize("mode", ["original", "transparent", "solid"])
+def test_background_settings_persist_without_changing_key_settings(tmp_path, mode):
+    from core.sprite.project import BackgroundSettings
+    project = SpriteProject(name="Background", project_dir=tmp_path)
+    project.background = BackgroundSettings(mode=mode, color="#12aBcD")
+    project.key.method = "ml"
+    loaded = SpriteProject.load(project.save())
+    assert loaded.background.mode == mode
+    assert loaded.background.color == "#12ABCD"
+    assert loaded.key.method == "ml"
+
+
+def test_old_project_keeps_transparent_background_default():
+    project = SpriteProject.from_dict({"name": "legacy", "key": {"method": "none"}})
+    assert project.background.mode == "transparent"
+    assert project.key.method == "none"
+
+
+@pytest.mark.parametrize("data", [{"mode": "unknown"}, {"color": "white"}, {"color": "#FFFFF"}])
+def test_invalid_background_settings_logged_and_rejected(data, caplog):
+    from core.sprite.project import BackgroundSettings
+    with pytest.raises(ValueError):
+        BackgroundSettings.from_dict(data)
+    assert any(record.levelname == "ERROR" for record in caplog.records)
+
+
+
+@pytest.mark.parametrize("mode", ["original", "transparent", "solid"])
+def test_sheet_metadata_keeps_profile_canvas_and_palette_in_every_background(tmp_path, mode):
+    from PIL import Image
+    from core.sprite.project import BackgroundSettings
+
+    project = SpriteProject(name="Original", project_dir=tmp_path,
+                            background=BackgroundSettings(mode=mode))
+    src = tmp_path / "source.png"
+    Image.new("RGBA", (40, 24), "#123456").save(src)
+    frame = FrameMeta(name="one", source_path=src, frame=(0, 0, 80, 80), source_size=(80, 80))
+    project.actions = [ActionCard(id="one", name="one", prompt="idle", frames=[frame])]
+    profile = project.profile("pixel")
+    profile.locked_palette = ["#000000", "#FFFFFF"]
+    meta = project.sheet_meta("pixel", warn=False)
+    assert meta.cell_size == profile.cell_size
+    assert meta.palette == profile.locked_palette
+    assert meta.frames[0].source_size == (80, 80)
+    assert meta.frames[0].frame == (0, 0, 80, 80)
+    assert frame.source_size == (80, 80)  # export metadata must not mutate the edit history

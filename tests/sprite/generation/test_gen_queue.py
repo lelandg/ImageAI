@@ -386,3 +386,25 @@ def test_cancel_during_a_re_render_requeues_the_card(harness):
     assert q.pending == ["a1"]
     assert walk.clip is old_clip                      # the previous clip is kept
     assert isinstance(results["a1"], ProviderError) and results["a1"].retryable is True
+
+
+
+def test_original_background_queue_needs_source_not_plate(harness, png_file):
+    project, queue = harness["build"](plate=False, turnaround=True)
+    project.background.mode = "original"
+    project.character_source = png_file("original.png", color=(255, 255, 255, 255))
+    request = queue.build_request(project.actions[0])
+    assert request.background_mode == "original"
+    assert request.plate == project.character_source
+    assert request.refs == []
+    queue.enqueue([project.actions[0].id])
+    queue.run()
+    assert len(harness["renders"]) == 1
+
+
+def test_original_background_requires_source_even_with_old_plate(harness):
+    project, queue = harness["build"]()
+    project.background.mode = "original"
+    project.character_source = None
+    with pytest.raises(ProviderError, match="Import a character"):
+        queue.build_request(project.actions[0])

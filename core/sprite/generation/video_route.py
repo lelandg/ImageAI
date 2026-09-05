@@ -26,14 +26,14 @@ from core.sprite.extract import extract_frames
 from core.sprite.generation._common import emit, now_iso
 from core.sprite.generation.cost import estimate_action, price_per_second
 from core.sprite.generation.errors import ProviderError, classify_provider_error
-from core.sprite.generation.prompts import inject_chroma, strip_render_terms
+from core.sprite.generation.prompts import background_prompt, strip_render_terms
 from core.sprite.pipeline import CancelToken, Cancelled, ProgressFn, no_progress
 from core.sprite.project import ActionCard, ClipRecord, ExtractionSettings, GenerationSettings
 from core.sprite.timing import legal_aspect_ratios, snap_duration
 
 if TYPE_CHECKING:
     from core.video.omni_client import OmniClient, OmniGenerationConfig
-    from core.video.veo_client import VeoClient, VeoGenerationConfig, VeoModel
+    from core.video.veo_client import VeoClient, VeoGenerationConfig
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +47,7 @@ class RenderRequest:
     refs: List[Path]
     settings: GenerationSettings
     out_mp4: Path
+    background_mode: str = "transparent"
 
 
 def validate_generation_settings(settings: GenerationSettings) -> Optional[str]:
@@ -70,7 +71,8 @@ def validate_generation_settings(settings: GenerationSettings) -> Optional[str]:
 
 def omni_prompt(req: RenderRequest, duration_s: int) -> str:
     """Chroma-injected prompt with a plain-language duration hint (Omni has no duration field)."""
-    base = inject_chroma(req.action.prompt, req.settings.plate_color, loop=req.action.loop)
+    base = background_prompt(req.action.prompt, req.settings.plate_color, loop=req.action.loop,
+                             background_mode=req.background_mode)
     return f"{base}, about {duration_s} seconds long"
 
 
@@ -82,7 +84,7 @@ def build_omni_config(req: RenderRequest, *,
     if duration != req.action.duration_s:
         emit(logger, log, f"Omni: duration {req.action.duration_s}s snapped to {duration}s "
                           f"(legal range {OmniClient.MODEL_CONSTRAINTS['duration_range']})")
-    refs = [Path(req.plate)] + [Path(p) for p in req.refs]
+    refs = [Path(req.plate)] + ([Path(p) for p in req.refs] if req.background_mode != "original" else [])
     refs = refs[:MAX_REFERENCE_IMAGES]
     if len(req.refs) + 1 > MAX_REFERENCE_IMAGES:
         emit(logger, log, f"Omni: {len(req.refs)} reference image(s) plus the plate exceed "
@@ -130,8 +132,10 @@ def build_veo_config(req: RenderRequest, *,
                           f"using {allowed[0]}")
         resolution = allowed[0]
 
-    refs = [Path(p) for p in req.refs][:MAX_REFERENCE_IMAGES]
-    prompt = inject_chroma(req.action.prompt, req.settings.plate_color, loop=req.action.loop)
+    refs = ([Path(p) for p in req.refs][:MAX_REFERENCE_IMAGES]
+            if req.background_mode != "original" else [])
+    prompt = background_prompt(req.action.prompt, req.settings.plate_color, loop=req.action.loop,
+                               background_mode=req.background_mode)
     try:
         return VeoGenerationConfig(
             model=model,
@@ -141,7 +145,7 @@ def build_veo_config(req: RenderRequest, *,
             duration=duration,
             fps=req.settings.fps,
             include_audio=bool(req.settings.include_audio),
-            image=Path(req.plate) if loop_conditioning else None,
+            image=Path(req.plate) if loop_conditioning or req.background_mode == "original" else None,
             last_frame=Path(req.plate) if loop_conditioning else None,
             reference_images=refs or None,
         )
@@ -253,6 +257,7 @@ def render_action(req: RenderRequest, *, api_key: Optional[str], auth_mode: str 
     else:
         raise ProviderError(f"Unknown sprite video provider {provider!r}. Use 'omni' or 'veo'.")
 
+    params["background_mode"] = req.background_mode
     _log_request(log, provider, model_id, params, cfg.prompt, action)
     progress("render", 0, 0, f"{provider}: rendering '{action.name}'")
 

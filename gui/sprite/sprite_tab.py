@@ -14,10 +14,9 @@ from typing import Optional
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QDialog, QHBoxLayout, QInputDialog, QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
-from core.paths import get_data_paths
 from core.sprite.configs import NamedConfigStore
 from core.sprite.project import ActionCard, SpriteProject, SpriteProjectManager
 from gui.common.dialog_conventions import persist_splitter, restore_splitter, standard_splitter
@@ -34,7 +33,6 @@ from providers import get_provider
 
 logger = logging.getLogger(__name__)
 
-PROJECT_FILTER = "Sprite projects (*.iasprite.json)"
 SPLITTER_KEYS = {
     "main": "sprite/splitter_main",
     "left": "sprite/splitter_left",
@@ -73,6 +71,8 @@ class SpriteTab(QWidget):
         install_retouch(self)
         # Sub-project 6: "Render (image)" button on every action card row.
         install_image_route(self)
+        # Restore only when this lazy tab is constructed, after all panels listen.
+        self._restore_last_project()
 
     # -- build -------------------------------------------------------------
 
@@ -96,6 +96,7 @@ class SpriteTab(QWidget):
             toolbar.addWidget(button)
         toolbar.addStretch(1)
         self.title_label = QLabel()
+        self.title_label.setTextFormat(Qt.TextFormat.PlainText)
         toolbar.addWidget(self.title_label)
         root.addLayout(toolbar)
 
@@ -301,20 +302,55 @@ class SpriteTab(QWidget):
                 self.log(f"The {label} job is still finishing; it cannot start again "
                          "until it stops.", "WARNING")
 
-    def _apply_project(self, project: SpriteProject) -> None:
+    def _apply_project(self, project: SpriteProject, path=None) -> None:
         self._shutdown_panel_workers()
         self._project = project
         self.character_panel.set_project(project)
         self.action_cards_panel.set_project(project)
         self.queue_panel.set_project(project)
         self._sync_title()
-        self.log(f"Project: {project.name} ({project.project_dir})", "INFO")
+        self.log(f"Project: {project.name}", "INFO")
         self.projectChanged.emit()
+        self._remember_project(path or project.project_file())
+
+    def _remember_project(self, path) -> None:
+        path = Path(path)
+        if path.is_dir():
+            if self._project is None:
+                return
+            path = self._project.project_file()
+        # Relative references survive changes to the Images storage root.
+        try:
+            path = path.relative_to(self.project_manager.base_dir)
+        except ValueError:
+            pass
+        settings = sprite_settings()
+        settings.setValue("sprite/last_project", str(path))
+        settings.sync()
+
+    def _restore_last_project(self) -> None:
+        settings = sprite_settings()
+        saved = settings.value("sprite/last_project", "")
+        if not saved:
+            return
+        try:
+            if not isinstance(saved, str):
+                raise ValueError("Saved Sprite project reference must be text")
+            path = Path(saved)
+            if not path.is_absolute():
+                path = self.project_manager.base_dir / path
+            project = self.project_manager.load_project(path)
+            self._apply_project(project, path)
+        except Exception:
+            logger.exception("Could not restore last Sprite project: %s", saved)
+            self.log("Could not restore the last project. Choose Open… to select a project.", "WARNING")
+            # Keep the reference: a removable/network storage root may return.
+            # A successful New/Open/Save replaces it naturally.
 
     def _sync_title(self) -> None:
         has_project = self._project is not None
         if has_project:
-            self.title_label.setText(f"{self._project.name} — {self._project.project_dir}")
+            self.title_label.setText(self._project.name)
         else:
             self.title_label.setText(NO_PROJECT_TEXT)
         for button in (self.save_btn, self.save_as_btn, self.settings_btn):
@@ -324,7 +360,8 @@ class SpriteTab(QWidget):
         if self._project is None:
             return
         try:
-            self.project_manager.save_project(self._project)
+            saved = self.project_manager.save_project(self._project)
+            self._remember_project(saved)
         except Exception as exc:  # noqa: BLE001 - reported, never raised out of a slot
             self._report_error("save project", exc)
 
@@ -352,10 +389,14 @@ class SpriteTab(QWidget):
         return project
 
     def open_project(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open sprite project", str(get_data_paths().sprite_projects()), PROJECT_FILTER)
-        if path:
-            self.open_project_from(path)
+        from .project_dialog import SpriteProjectDialog
+
+        try:
+            dialog = SpriteProjectDialog(self.project_manager, self)
+            if dialog.exec() == QDialog.DialogCode.Accepted and dialog.selected_path():
+                self.open_project_from(dialog.selected_path())
+        except Exception as exc:
+            self._report_error("list projects", exc)
 
     def open_project_from(self, path) -> Optional[SpriteProject]:
         try:
@@ -363,7 +404,7 @@ class SpriteTab(QWidget):
         except Exception as exc:  # noqa: BLE001
             self._report_error("open project", exc)
             return None
-        self._apply_project(project)
+        self._apply_project(project, path)
         return project
 
     def save_project(self) -> Optional[Path]:
@@ -375,7 +416,8 @@ class SpriteTab(QWidget):
         except Exception as exc:  # noqa: BLE001
             self._report_error("save project", exc)
             return None
-        self.log(f"Saved → {saved}", "SUCCESS")
+        self._remember_project(saved)
+        self.log(f"Saved {self._project.name}", "SUCCESS")
         self._sync_title()
         return Path(saved)
 
@@ -383,10 +425,28 @@ class SpriteTab(QWidget):
         if self._project is None:
             show_warning(self, "Sprite", "There is no project to save.")
             return
-        start = str(self._project.project_dir or get_data_paths().sprite_projects())
-        path, _ = QFileDialog.getSaveFileName(self, "Save sprite project as", start, PROJECT_FILTER)
-        if path:
-            self.save_project_to(path)
+        name, ok = QInputDialog.getText(
+            self, "Save sprite project as", "Project name:",
+            text=f"{self._project.name} copy")
+        if ok and name.strip():
+            self.save_project_as_named(name.strip())
+
+    def save_project_as_named(self, name: str) -> Optional[SpriteProject]:
+        if self._project is None:
+            return None
+        if any(panel.is_busy() for panel in self._worker_panels()) or self.frames_workspace._export_dialog:
+            self.log("Wait for running jobs and close Export before copying the project.", "WARNING")
+            return None
+        try:
+            from core.sprite.project_copy import copy_project
+
+            project = copy_project(self._project, name, self.project_manager)
+            self._apply_project(project)
+            self.log(f"Saved {project.name}", "SUCCESS")
+            return project
+        except Exception as exc:
+            self._report_error("copy project", exc)
+            return None
 
     def save_project_to(self, path) -> Optional[Path]:
         if self._project is None:
@@ -396,7 +456,7 @@ class SpriteTab(QWidget):
         except Exception as exc:  # noqa: BLE001
             self._report_error("save project", exc)
             return None
-        self.log(f"Saved → {saved}", "SUCCESS")
+        self.log(f"Saved {self._project.name}", "SUCCESS")
         self._sync_title()
         return Path(saved)
 

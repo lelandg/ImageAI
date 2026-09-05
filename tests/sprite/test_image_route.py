@@ -382,3 +382,44 @@ def test_edit_chain_session_failure_survives_raising_log_sink(tmp_path):
                      pose_instructions=["a"], plate_color="#00FF00", log=flaky_log)
     assert len(out) == 1
     provider.reset_edit_session.assert_not_called()
+
+
+
+def test_original_background_sheet_keeps_source_background_instruction(tmp_path):
+    provider = _google()
+    out = generate_sheet(provider, _character(tmp_path), _action(), tmp_path / "sheet.png",
+                         frames=3, plate_color="#00FF00", background_mode="original")
+    prompt = provider.edit_image.call_args.args[1]
+    assert "Preserve the original reference image background" in prompt
+    assert "#00FF00" not in prompt and "chroma" not in prompt
+    assert "seamless loop" in prompt
+    meta = json.loads(out.with_suffix(".png.json").read_text())
+    assert meta["background_mode"] == "original"
+
+
+def test_original_background_edit_chain_skips_matte_pairs(tmp_path):
+    provider = _google()
+    paths = image_route.edit_chain(provider, _character(tmp_path), _action(), tmp_path / "frames",
+                                  frames=2, pose_instructions=["raise hand", "lower hand"],
+                                  plate_color="#00FF00", matte_pairs=True, background_mode="original")
+    assert len(paths) == provider.edit_image.call_count == 2
+    for call in provider.edit_image.call_args_list:
+        assert "Preserve the original reference image background" in call.args[1]
+        assert "chroma" not in call.args[1]
+    meta = json.loads(paths[0].with_suffix(".png.json").read_text())
+    assert meta["background_mode"] == "original" and meta["matte_pairs"] is False
+    assert meta["plates"] == []
+
+
+
+def test_original_background_sheet_slicing_ignores_chroma_grid(tmp_path, monkeypatch):
+    sheet = tmp_path / "scenery.png"
+    sheet.write_bytes(png_bytes())
+    monkeypatch.setattr(image_route, "guess_grid", MagicMock(side_effect=AssertionError("chroma grid used")))
+    paths = slice_generated_sheet(sheet, tmp_path / "frames", 3, "#00FF00", background_mode="original")
+    assert len(paths) == 3
+    with Image.open(sheet) as source:
+        for index, path in enumerate(paths):
+            with Image.open(path) as cell:
+                assert cell.size == (16, 16)
+                assert cell.tobytes() == source.crop((index * 16, 0, (index + 1) * 16, 16)).tobytes()
