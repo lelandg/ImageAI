@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-09-05
+
+### Added
+- Expose the complete Sprite workflow through 36 discoverable CLI operations with JSON request schemas, machine-readable results and explicit provider calls.
+- Create and edit projects, references, action cards and frames; retain persistent undo/redo and accepted RGBA edits across reprocessing.
+- Generate, import and process animations; export seven formats and eight engine presets, with previews, chromakey tools and optional ML backend management.
+- Add an offline command workbench, complete CLI guide and a credited Lumen GIF with source assets and a reproducible local CLI build.
+
+### Fixed
+- Preserve accepted media during failed or cancelled imports and generation, reject uncertain generated-sheet slicing, and guard project writes with OS locks.
+- Write metadata sidecars for explicit, numbered, automatic and streaming CLI image outputs.
+
 ## [0.48.0] - 2026-09-05
 
 ### Added
