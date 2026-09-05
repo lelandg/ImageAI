@@ -40,7 +40,7 @@ def test_to_dict_uses_plain_json_types():
     import json
     data = _sheet().to_dict()
     json.dumps(data)
-    assert data["frames"][0]["source_path"] == "/x/0.png"
+    assert data["frames"][0]["source_path"] == str(Path("/x/0.png"))
     assert data["frames"][0]["frame"] == [0, 0, 16, 16]
     assert data["tags"][0]["direction"] == "pingpong"
 

@@ -169,10 +169,10 @@ def test_pixel_stage_second_run_with_fewer_frames_removes_stale_output(tmp_path)
     assert sorted(p.name for p in out_dir.glob("*.png")) == ["0001.png"]
 
 
-def test_pixel_stage_is_registered_at_code_version_2():
+def test_pixel_stage_is_registered_at_code_version_3():
     assert STAGE_RUNNERS["pixel"] is run_pixel_stage
     assert STAGE_SETTINGS["pixel"] is pixel_stage_settings
-    assert STAGE_CODE_VERSION["pixel"] == 2
+    assert STAGE_CODE_VERSION["pixel"] == 3
 
 
 def test_pixel_settings_drive_the_fingerprint(tmp_path):

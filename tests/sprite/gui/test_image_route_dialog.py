@@ -15,7 +15,7 @@ from PySide6.QtWidgets import QWidget
 from core.sprite.generation.errors import ProviderError
 from core.sprite.models import FrameMeta
 from core.sprite.pipeline import Cancelled, CancelToken, no_progress
-from core.sprite.project import ActionCard, SpriteProject
+from core.sprite.project import ActionCard, BackgroundSettings, SpriteProject
 from gui.sprite import image_route_dialog as ird
 from gui.sprite.image_route_dialog import (
     ImageRouteDialog, archive_existing_frames, billed_units, install_image_route,
@@ -35,6 +35,7 @@ def _project(tmp_path):
     project.plate_path = None
     project.character_source = _png(tmp_path / "character.png")
     project.plate_color = "#00FF00"
+    project.background = BackgroundSettings()
     return project
 
 
@@ -558,3 +559,28 @@ def test_image_route_is_refused_while_the_render_queue_runs(qapp, tmp_path):
     assert ("Wait for the render queue to finish before rendering", "WARNING") in tab.log_calls
     tab.queue_panel = SimpleNamespace(is_busy=lambda: False)
     assert ird.open_image_route_dialog(tab, action, exec_dialog=False) is not None
+
+
+
+@pytest.mark.parametrize("route", ["sheet", "edit_chain"])
+def test_original_background_job_ignores_old_plate_and_matte(qapp, tmp_path, monkeypatch, route):
+    produced = [_png(tmp_path / "0001.png"), _png(tmp_path / "0002.png")]
+    _patch_core(monkeypatch, tmp_path, produced)
+    requests = []
+
+    def generator(provider, character, *args, **kwargs):
+        # Keep plain request data, not Qt-bound log callbacks, through teardown.
+        requests.append((character, kwargs["background_mode"], kwargs.get("matte_pairs")))
+        return tmp_path / "sheet.png" if route == "sheet" else produced
+
+    monkeypatch.setattr(ird, "generate_sheet" if route == "sheet" else "edit_chain", generator)
+    dialog = _dialog(tmp_path)
+    dialog.project.background.mode = "original"
+    dialog.project.plate_path = _png(tmp_path / "old-green-plate.png")
+    dialog.mode_combo.setCurrentIndex(0 if route == "sheet" else 1)
+    dialog._on_mode_changed(0)
+    assert not dialog.matte_check.isEnabled()
+    dialog.matte_check.setChecked(True)  # Build-job guard must also prevent matte work.
+    dialog.build_job()(no_progress, CancelToken())
+    assert requests == [(dialog.project.character_source, "original", False if route == "edit_chain" else None)]
+    dialog.close()

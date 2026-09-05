@@ -164,7 +164,10 @@ class ImageRouteDialog(WorkerHost, DialogCleanupMixin, QDialog):
 
     def _on_mode_changed(self, _index: int) -> None:
         chain = self.mode_combo.currentData() == "edit_chain"
-        self.matte_check.setEnabled(chain)
+        self.matte_check.setEnabled(chain and self.project.background.mode != "original")
+        if self.project.background.mode == "original":
+            self.matte_check.setChecked(False)
+            self.matte_check.setToolTip("Keeping the original background skips matte removal.")
         self.steps_edit.setEnabled(chain)
         self.steps_btn.setEnabled(chain and not self.is_busy())
 
@@ -203,13 +206,16 @@ class ImageRouteDialog(WorkerHost, DialogCleanupMixin, QDialog):
         provider_id = self.provider_combo.currentData()
         model = self.model_edit.text().strip() or None
         frames = self.frames_spin.value()
-        matte = self.matte_check.isChecked() and mode == "edit_chain"
+        background_mode = self.project.background.mode
+        matte = (self.matte_check.isChecked() and mode == "edit_chain"
+                 and background_mode != "original")
         typed_steps = self._typed_steps()
         project, action = self.project, self.action
         factory, pose_fn, log = self._provider_factory, self._pose_fn, self.logLine.emit
 
         def job(progress: ProgressFn, token: CancelToken) -> List[Path]:
-            character = project.plate_path or project.character_source
+            character = (project.character_source if background_mode == "original"
+                         else project.plate_path or project.character_source)
             if character is None or not Path(character).exists():
                 raise ProviderError("Import a character image first (Character panel).")
             provider = factory(provider_id)
@@ -232,10 +238,12 @@ class ImageRouteDialog(WorkerHost, DialogCleanupMixin, QDialog):
                     progress("image_route", 0, 3, "Generating sheet")
                     sheet_png = Path(project.project_dir) / "clips" / f"{action.id}_sheet.png"
                     sheet = generate_sheet(provider, Path(character), action, sheet_png, frames=frames,
-                                           plate_color=project.plate_color, model=model, log=log, token=token)
+                                           plate_color=project.plate_color, background_mode=background_mode,
+                                           model=model, log=log, token=token)
                     sheet_done = True
                     progress("image_route", 1, 3, "Slicing sheet")
-                    paths = slice_generated_sheet(sheet, extract_dir, frames, project.plate_color, log=log)
+                    paths = slice_generated_sheet(sheet, extract_dir, frames, project.plate_color, log=log,
+                                                  background_mode=background_mode)
                 else:
                     steps = typed_steps
                     if len(steps) != frames:
@@ -244,7 +252,7 @@ class ImageRouteDialog(WorkerHost, DialogCleanupMixin, QDialog):
                     progress("image_route", 1, 3, f"Edit chain: {frames} steps")
                     paths = edit_chain(provider, Path(character), action, extract_dir, frames=frames,
                                        pose_instructions=steps, plate_color=project.plate_color, model=model,
-                                       log=log, token=token, matte_pairs=matte)
+                                       log=log, token=token, matte_pairs=matte, background_mode=background_mode)
                 progress("image_route", 2, 3, "Running pipeline to stabilize")
                 duration_ms = round(1000 / max(1, action.fps))
                 action.frames = [

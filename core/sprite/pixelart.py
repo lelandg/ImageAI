@@ -344,7 +344,7 @@ def pixel_stage_settings(project: Any, action: Any) -> Dict[str, Any]:
     profile = project.profile("pixel")
     if profile is None or not profile.enabled:
         return {}
-    return asdict(profile)
+    return {**asdict(profile), "anchor": project.stabilize.anchor}
 
 
 def _validate_pixel_profile(profile: Any) -> None:
@@ -458,6 +458,5 @@ def run_pixel_stage(project: Any, action: Any, input_frames: List[Path], out_dir
 
 # Importing this module registers the stage. core/sprite/__init__.py imports it
 # after .pipeline, so this call replaces sub-project 1's identity runner.
-# code_version=2: the identity runner is version 1, and a real runner at the
-# same version with the same settings would reuse a stale identity output.
-register_stage("pixel", run_pixel_stage, settings_fn=pixel_stage_settings, code_version=2)
+# Version 3 applies the configured canvas and profile in every background mode.
+register_stage("pixel", run_pixel_stage, settings_fn=pixel_stage_settings, code_version=3)

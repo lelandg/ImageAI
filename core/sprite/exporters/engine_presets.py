@@ -5,7 +5,7 @@ import copy
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from core.sprite.exporters.aseprite_json import export_aseprite_json
 from core.sprite.exporters.gif import export_gif
@@ -170,12 +170,16 @@ def _write_png_sequence(meta: SheetMeta, out_dir: Path, title: str, preset: Engi
     return [p for png in pngs for p in (png, sidecar_path(png))]
 
 
-def _write_gif(meta: SheetMeta, out_dir: Path, title: str, preset: EnginePreset) -> List[Path]:
+def _write_gif(meta: SheetMeta, out_dir: Path, title: str, preset: EnginePreset, *,
+               background_color: Optional[str] = None,
+               background_mode: str = "transparent") -> List[Path]:
     paths: List[Path] = []
     for tag in meta.tags:
         # The title is sanitised by the caller; the tag name is user text and
         # must not carry a path separator into the file name (PR #45 review).
-        out = export_gif(meta, tag, out_dir / f"{title}_{sanitize_filename(tag.name)}.gif")
+        out = export_gif(meta, tag, out_dir / f"{title}_{sanitize_filename(tag.name)}.gif",
+                         loop=tag.repeat, background_color=background_color,
+                         background_mode=background_mode)
         # export_gif already wrote a sidecar with the correct unrolled frame
         # count plus durations_ms/loop/warnings/timestamp -- merge the preset
         # fields into it instead of overwriting, and derive "frames" the same
@@ -227,7 +231,9 @@ def _grid_output_paths(png: Path, scales: Tuple[int, ...]) -> List[Path]:
     return paths
 
 
-def export_with_preset(meta: SheetMeta, preset_id: str, out_dir: Path) -> List[Path]:
+def export_with_preset(meta: SheetMeta, preset_id: str, out_dir: Path, *,
+                       background_color: Optional[str] = None,
+                       background_mode: str = "transparent") -> List[Path]:
     """Run every exporter of ``preset_id`` into ``out_dir``; return the written paths."""
     preset = ENGINE_PRESETS.get(preset_id)
     if preset is None:
@@ -248,7 +254,12 @@ def export_with_preset(meta: SheetMeta, preset_id: str, out_dir: Path) -> List[P
         writer = FORMAT_WRITERS.get(fmt)
         if writer is None:
             raise ValueError(f"Preset {preset_id!r} names unknown format {fmt!r}")
-        written.extend(writer(laid, out_dir, title, preset))
+        if fmt == "gif":
+            written.extend(_write_gif(laid, out_dir, title, preset,
+                                  background_color=background_color,
+                                  background_mode=background_mode))
+        else:
+            written.extend(writer(laid, out_dir, title, preset))
     logger.info("Engine preset %s exported %d file(s) to %s", preset_id, len(written), out_dir)
     return written
 

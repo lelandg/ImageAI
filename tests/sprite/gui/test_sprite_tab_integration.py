@@ -16,6 +16,13 @@ class _StubQueue(QObject):
         return False
 
 
+class _StubCharacter(_StubQueue):
+    sync_count = 0
+
+    def _sync_enabled(self):
+        self.sync_count += 1
+
+
 class _StubTab(QWidget):
     """Implements the 5a SpriteTab contract that FramesWorkspace consumes."""
 
@@ -27,12 +34,16 @@ class _StubTab(QWidget):
         self._project = project
         self.console = DialogStatusConsole("Console")
         self.queue_panel = _StubQueue(self)
+        self.character_panel = _StubCharacter(self)
         self.placed = {}
         self.toolbar_buttons = []
         self.log_calls = []
         self.saved = []
         self._layout = QVBoxLayout(self)
         self._layout.addWidget(self.console)
+
+    def _autosave(self):
+        self.save_current_project()
 
     def save_current_project(self):
         self.saved.append(self._project)
@@ -668,3 +679,13 @@ def test_real_sprite_tab_shutdown_autosaves(qapp, monkeypatch):
     Path(saved).unlink()
     assert tab.shutdown() is True
     assert Path(saved).exists()                      # written again on close
+
+
+
+def test_background_change_updates_generation_controls_and_autosaves(qapp, tmp_path, monkeypatch):
+    tab, workspace, project, action = _workspace(qapp, tmp_path, monkeypatch)
+    workspace.panel.background_mode.setCurrentIndex(workspace.panel.background_mode.findData("original"))
+    assert project.background.mode == "original"
+    assert tab.character_panel.sync_count == 1
+    assert tab.saved == [project]
+    workspace.shutdown()

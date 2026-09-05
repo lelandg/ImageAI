@@ -68,6 +68,7 @@ class FramesWorkspace(QObject):
         # The render queue runs run_pipeline on its own thread; the panel's Run
         # must not start a second run on the same action meanwhile.
         self.panel.set_busy_guard(lambda: "render queue" if tab.queue_panel.is_busy() else None)
+        self.panel.set_background_busy_guard(self._background_job)
         tab.undo_controller = self.undo_controller
         tab.undo_stack = SnapshotStack()          # replaced per action in _set_action
         tab.refresh_frames = self.refresh_frames  # sub-project 6 calls tab.refresh_frames()
@@ -94,11 +95,26 @@ class FramesWorkspace(QObject):
         self.panel.pipelineFinished.connect(self._on_pipeline_finished)
         self.panel.logMessage.connect(tab.log)
         self.panel.exportRequested.connect(self.open_export_dialog)
+        self.panel.backgroundChanged.connect(self._on_background_changed)
         app = QApplication.instance()
         if app is not None:
             app.aboutToQuit.connect(self.shutdown)
 
     # ----- tab events -------------------------------------------------
+    def _background_job(self) -> Optional[str]:
+        if self.tab.queue_panel.is_busy():
+            return "render queue"
+        if self.tab.character_panel.is_busy():
+            return "character generation"
+        if self._export_dialog is not None:
+            return "export dialog"
+        return None
+
+    def _on_background_changed(self) -> None:
+        self.tab.character_panel._sync_enabled()
+        self.tab._autosave()
+        self.tab.projectChanged.emit()
+
     def current_action(self) -> Optional[ActionCard]:
         return self._action
 
@@ -343,6 +359,8 @@ class FramesWorkspace(QObject):
         if open_dialog is not None:
             logger.info("Export dialog is already open")
             return open_dialog
+        if not self.panel.validate_background():
+            return None
         dialog = self.export_dialog_factory(project, self.tab)
         self._export_dialog = dialog
         dialog.logMessage.connect(self.tab.log)

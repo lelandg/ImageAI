@@ -1,14 +1,16 @@
 import gc
+import json
 import threading
 import time
 from pathlib import Path
 
 import pytest
 from PySide6.QtTest import QTest
+from PySide6.QtCore import QSettings
 
 import gui.sprite.export_dialog as ed
 from core.sprite.exporters.grid import GridOptions
-from core.sprite.pipeline import CancelToken, no_progress
+from core.sprite.pipeline import STALE_STABILIZE_REASON, CancelToken, no_progress
 from core.sprite.project import SpriteProject
 from gui.sprite.export_dialog import (BUILTIN_FORMATS, DEFAULT_TEMPLATE, ExportDialog,
                                       ExportRequest, parse_scales, run_export, sheet_png_path)
@@ -39,7 +41,7 @@ def _wait_idle(dialog, timeout_s=10.0):
 
 
 @pytest.fixture(autouse=True)
-def _isolated_export_settings():
+def _isolated_export_settings(tmp_path, monkeypatch):
     """Important 7: tests must not see another test's persisted sprite/export/* keys.
 
     `tests/conftest.py` sandboxes QSettings into one session-scoped ini file with no
@@ -52,6 +54,11 @@ def _isolated_export_settings():
     same clean slate. `test_settings_round_trip` is unaffected: it exercises persistence
     across two `ExportDialog`s constructed within itself.
     """
+    # NativeFormat is the Windows registry: setPath cannot redirect it.
+    # Use an explicit INI file to exercise persistence without touching user preferences.
+    settings_file = str(tmp_path / "sprite-settings.ini")
+    monkeypatch.setattr(ed.prefs, "sprite_settings",
+                        lambda: QSettings(settings_file, QSettings.Format.IniFormat))
     settings = ed.prefs.sprite_settings()
     settings.remove(ed.SETTINGS_PREFIX.rstrip("/"))
     settings.sync()
@@ -63,6 +70,9 @@ def project(tmp_path, monkeypatch):
     project, _action = make_project(tmp_path)
     monkeypatch.setattr(SpriteProject, "sheet_meta",
                         lambda self, profile, warn=True: sheet_from_action(self.actions[0], profile))
+    # Unit tests provide their own sheet metadata; pipeline integration tests
+    # below use real stages or replace this helper with a recorder.
+    monkeypatch.setattr(ed, "ensure_profile_stages", lambda *args, **kwargs: {})
     monkeypatch.setattr(ed.prefs, "purge_after_export_enabled", lambda: False)
     monkeypatch.setattr(ed.prefs, "set_purge_after_export", lambda value: None)
     monkeypatch.setattr(ed.prefs, "confirm_purge", lambda parent: True)
@@ -191,6 +201,37 @@ def test_run_export_gif_per_tag(project, tmp_path):
                        progress=no_progress, token=CancelToken())
     assert [Path(p).name for p in files] == ["walk_walk.gif", "walk_walk.gif.json"]
     assert sorted(Path(p).name for p in files) == _on_disk(tmp_path / "out" / "pixel")
+
+
+@pytest.mark.parametrize("mode", ["solid", "original"])
+def test_run_export_gif_background_metadata_and_pixels(project, tmp_path, mode):
+    import json
+
+    project.background.mode = mode
+    project.background.color = "#123456"
+    for index, frame in enumerate(project.actions[0].frames):
+        source = Image.new("RGBA", (8, 8), (0, 255, 0, 255 if mode == "original" else 0))
+        source.putpixel((index + 2, 5), (240, 80, 20, 255))
+        source.save(frame.source_path)
+    request = _request(project, tmp_path, ["pixel"], ["gif"])
+    files = run_export(request, _formats("gif"), log=lambda m: None,
+                       progress=no_progress, token=CancelToken())
+    with Image.open(files[0]) as gif:
+        assert "transparency" not in gif.info
+        assert gif.convert("RGB").getpixel((0, 0)) == ((18, 52, 86) if mode == "solid" else (0, 255, 0))
+    metadata = json.loads(Path(files[1]).read_text())
+    assert metadata["background_mode"] == mode
+    assert metadata["background_color"] == ("#123456" if mode == "solid" else None)
+
+
+def test_export_dialog_displays_project_background(qapp, project):
+    project.background.mode = "solid"
+    project.background.color = "#123456"
+    dialog = ExportDialog(project)
+    assert "#123456" in dialog.background_label.text()
+    assert "GIF only" in dialog.background_label.text()
+    assert "Processing" in dialog.background_label.text()
+    _close(dialog)
 
 
 def test_run_export_applies_pivot_and_passes_filled_meta_to_plugins(project, tmp_path):
@@ -609,15 +650,16 @@ def test_run_export_ensures_profile_stages_per_action_before_sheet_meta(project,
                       ("ensure", "act1", ["pixel"]), ("sheet_meta", "pixel")]
 
 
-def test_run_export_logs_every_ensure_reason_and_still_writes(project, tmp_path, monkeypatch, caplog):
+def test_run_export_blocks_stale_processing_before_writing(project, tmp_path, monkeypatch, caplog):
     events = []
-    _install_recorder(monkeypatch, events, reasons={"hd": "stabilize output is stale"})
+    _install_recorder(monkeypatch, events, reasons={"hd": STALE_STABILIZE_REASON})
     logs = []
     req = _request(project, tmp_path, ["hd"], ["png_sequence"])
     with caplog.at_level("WARNING", logger="gui.sprite.export_dialog"):
-        files = run_export(req, _formats("png_sequence"), log=logs.append,
-                           progress=no_progress, token=CancelToken())
-    assert len(files) == 8
+        with pytest.raises(ValueError, match="Run the pipeline"):
+            run_export(req, _formats("png_sequence"), log=logs.append,
+                       progress=no_progress, token=CancelToken())
+    assert not req.out_dir.exists()
     assert any("stabilize output is stale" in line and "walk" in line for line in logs)
     assert any("stabilize output is stale" in r.message for r in caplog.records)
 
@@ -625,14 +667,15 @@ def test_run_export_logs_every_ensure_reason_and_still_writes(project, tmp_path,
 def test_run_export_sends_reasons_at_warning_level(project, tmp_path, monkeypatch):
     """A two-argument log callback (the dialog's) gets WARNING for a reason; the
     ordinary lines stay INFO."""
-    _install_recorder(monkeypatch, [], reasons={"hd": "stabilize output is stale"})
+    _install_recorder(monkeypatch, [], reasons={"hd": "profile is disabled"})
     logs = []
     req = _request(project, tmp_path, ["hd"], ["png_sequence"])
-    run_export(req, _formats("png_sequence"), log=lambda m, level="INFO": logs.append((level, m)),
-               progress=no_progress, token=CancelToken())
-    levels = {level for level, line in logs if "stabilize output is stale" in line}
+    with pytest.raises(ValueError, match="profile is disabled"):
+        run_export(req, _formats("png_sequence"), log=lambda m, level="INFO": logs.append((level, m)),
+                   progress=no_progress, token=CancelToken())
+    levels = {level for level, line in logs if "profile is disabled" in line}
     assert levels == {"WARNING"}
-    assert any(level == "INFO" and line.startswith("Wrote ") for level, line in logs)
+    assert not any(line.startswith("Wrote ") for _level, line in logs)
 
 
 def test_run_export_saves_the_project_after_the_helper(project, tmp_path, monkeypatch):
@@ -710,3 +753,97 @@ def test_run_export_end_to_end_writes_hd_cell_sized_frames(tmp_path, alpha_frame
         with Image.open(png) as im:
             assert im.size == (256, 256), png.name
     assert (project.project_dir / "project.iasprite.json").exists()
+
+
+def test_export_rejects_disabled_profile_with_old_background_outputs(tmp_path, alpha_frames):
+    project = SpriteProject(name="background")
+    project.project_dir = tmp_path / "project"
+    project.project_dir.mkdir()
+    action = ActionCard(id="a1", name="walk", prompt="walk")
+    project.actions = [action]
+    import_png_sequence(alpha_frames, stage_dir(project, action, "extract"))
+    register_external_frames(project, action)
+    run_pipeline(project, action, upto="hd")
+    assert list(stage_dir(project, action, "hd").glob("*.png"))
+    project.profile("hd").enabled = False
+    project.background.mode = "original"
+    run_pipeline(project, action, upto="stabilize")
+    request = _request(project, tmp_path, ["hd"], ["gif"])
+    with pytest.raises(ValueError, match="disabled"):
+        run_export(request, _formats("gif"), log=lambda m: None,
+                   progress=no_progress, token=CancelToken())
+    assert not request.out_dir.exists()
+
+
+def test_export_validates_mutated_background_settings(project, tmp_path, caplog):
+    project.background.mode = "solid"
+    project.background.color = "not a color"
+    request = _request(project, tmp_path, ["hd"], ["gif"])
+    with pytest.raises(ValueError, match="#RRGGBB"):
+        run_export(request, _formats("gif"), log=lambda m: None,
+                   progress=no_progress, token=CancelToken())
+    assert "not a color" in caplog.text
+    assert not request.out_dir.exists()
+
+
+@pytest.mark.parametrize("background_mode", ["transparent", "original", "solid"])
+@pytest.mark.parametrize("upscale_small", [False, True])
+@pytest.mark.parametrize("cells", [((256, 256), (64, 64)), ((120, 80), (48, 72))])
+def test_background_modes_export_exact_profile_canvases(
+        tmp_path, background_mode, upscale_small, cells):
+    """Background choice must not turn profile dimensions into resize bounds."""
+    project = SpriteProject(name="background_geometry", project_dir=tmp_path / "project")
+    project.background.mode = background_mode
+    project.background.color = "#123456"
+    project.key.method = "chroma"
+    project.key.key_color = "#00FF00"
+    project.stabilize.pad_px = 4
+    project.stabilize.anchor = "center"
+    action = ActionCard(id="a1", name="walk", prompt="walk")
+    project.actions = [action]
+    extracted = stage_dir(project, action, "extract")
+    extracted.mkdir(parents=True)
+    for index in range(2):
+        image = Image.new("RGBA", (160, 90), "#00FF00")
+        image.paste((220, 30 + index * 50, 40, 255), (30 + index, 20, 120 + index, 70))
+        image.save(extracted / f"{index + 1:04d}.png")
+    register_external_frames(project, action)
+    for name, cell in zip(("hd", "pixel"), cells):
+        profile = project.profile(name)
+        profile.cell_size = cell
+        profile.upscale_small = upscale_small
+        profile.upscale_method = "lanczos"
+
+    # Export must build both profile stages from current stabilization output.
+    run_pipeline(project, action, upto="stabilize")
+    formats = ["grid", "png_sequence", "gif"]
+    request = _request(project, tmp_path, ["hd", "pixel"], formats,
+                       grid=GridOptions(columns=2, shape_px=0))
+    files = run_export(request, _formats(*formats), log=lambda message: None,
+                       progress=no_progress, token=CancelToken())
+
+    for name, cell in zip(("hd", "pixel"), cells):
+        profile_dir = request.out_dir / name
+        meta = project.sheet_meta(name)
+        sheet_path = sheet_png_path(meta, profile_dir)
+        png_frames = [path for path in files
+                      if path.parent == profile_dir / "frames" and path.suffix == ".png"]
+        gifs = [path for path in files if path.parent == profile_dir and path.suffix == ".gif"]
+        assert len(png_frames) == 2
+        assert len(gifs) == 1
+        for path in png_frames + gifs:
+            with Image.open(path) as image:
+                assert image.size == cell, (background_mode, name, path.name)
+                if path.suffix == ".gif":
+                    assert image.n_frames == 2
+                    for frame_index in range(image.n_frames):
+                        image.seek(frame_index)
+                        assert image.size == cell
+        with Image.open(sheet_path) as sheet:
+            assert sheet.size == (2 * cell[0], cell[1])
+        sheet_json = json.loads(sheet_path.with_suffix(".json").read_text(encoding="utf-8"))
+        assert sheet_json["meta"]["size"] == {"w": 2 * cell[0], "h": cell[1]}
+        assert len(sheet_json["frames"]) == 2
+        for frame in sheet_json["frames"].values():
+            assert frame["sourceSize"] == {"w": cell[0], "h": cell[1]}
+            assert (frame["frame"]["w"], frame["frame"]["h"]) == cell

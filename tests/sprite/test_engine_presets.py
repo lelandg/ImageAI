@@ -81,6 +81,22 @@ def test_unknown_preset_raises():
         export_with_preset(SheetMeta(title="x", frames=[], tags=[]), "gamemaker", Path("."))
 
 
+def test_web_preview_solid_color_only_changes_gif(tmp_path):
+    meta = _meta(tmp_path)
+    meta.tags[0].repeat = 4
+    written = export_with_preset(meta, "web_preview", tmp_path / "out", background_color="#123456")
+    with Image.open(tmp_path / "out" / "hero_walk.gif") as gif:
+        assert gif.info["loop"] == 4
+        assert "transparency" not in gif.info
+        assert gif.convert("RGB").getpixel((0, 0)) == (18, 52, 86)
+    png = next(p for p in written if p.suffix == ".png")
+    with Image.open(png) as image:
+        assert image.convert("RGBA").getpixel((0, 0))[3] == 0
+    details = json.loads((tmp_path / "out" / "hero_walk.gif.json").read_text())
+    assert details["background_mode"] == "solid"
+    assert details["background_color"] == "#123456"
+
+
 def test_atlas_formats_subset():
     assert ATLAS_FORMATS <= set(FORMAT_IDS)
 
@@ -134,8 +150,8 @@ def test_manifest_matches_every_file_on_disk_for_web_preview_preset(tmp_path):
     reported = sorted(str(p.relative_to(out)) for p in written)
     assert reported == _on_disk_recursive(out)
     # every frame PNG's sidecar is reported, not just the PNG itself
-    assert "frames/hero_walk_01.png.json" in reported
-    assert "frames/hero_idle_02.png.json" in reported
+    assert str(Path("frames/hero_walk_01.png.json")) in reported
+    assert str(Path("frames/hero_idle_02.png.json")) in reported
 
 
 def test_gif_sidecar_frame_count_reflects_pingpong_unrolling(tmp_path):

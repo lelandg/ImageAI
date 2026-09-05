@@ -267,3 +267,87 @@ def test_export_gif_pingpong_and_reverse(tmp_path):
         assert gif.n_frames == 3 and gif.info["loop"] == 3
     with pytest.raises(ValueError):
         export_gif(meta, TagMeta(name="x", from_index=5, to_index=4), tmp_path / "x.gif")
+
+
+def test_solid_gif_blends_alpha_and_clears_moving_frames(tmp_path):
+    meta = _meta(tmp_path)
+    color = "#13579B"
+    for index, frame in enumerate(meta.frames[:3]):
+        source = Image.new("RGBA", (16, 16), (255, 0, 255, 0))
+        source.putpixel((index + 2, 5), (240, 80, 20, 255))
+        source.putpixel((index + 2, 6), (240, 80, 20, 128))
+        source.save(frame.source_path)
+    out = export_gif(meta, meta.tags[0], tmp_path / "solid.gif", loop=3, background_color=color)
+    with Image.open(out) as gif:
+        assert "transparency" not in gif.info
+        assert gif.info["loop"] == 3
+        assert gif.n_frames == 3
+        for index in range(3):
+            gif.seek(index)
+            assert gif.disposal_method == 2
+            assert gif.info["duration"] == 80
+            frame = gif.convert("RGBA")
+            expected = Image.new("RGBA", (16, 16), color)
+            with Image.open(meta.frames[index].source_path) as source:
+                expected = Image.alpha_composite(expected, source)
+            assert frame.tobytes() == expected.tobytes()
+    details = json.loads(out.with_suffix(".gif.json").read_text())
+    assert details["background_mode"] == "solid"
+    assert details["background_color"] == color
+    with Image.open(meta.frames[0].source_path) as source:
+        assert source.getpixel((0, 0))[3] == 0
+
+
+def test_solid_gif_keeps_exact_background_with_busy_palette(tmp_path):
+    meta = _meta(tmp_path, cell=32)
+    for frame in meta.frames[:3]:
+        source = Image.new("RGBA", (32, 32))
+        for y in range(31):
+            for x in range(31):
+                source.putpixel((x, y), (x * 8, y * 8, (x + y) * 4, 255))
+        source.save(frame.source_path)
+    with Image.open(export_gif(meta, meta.tags[0], tmp_path / "busy.gif",
+                               background_color="#13579B")) as gif:
+        assert gif.convert("RGB").getpixel((31, 31)) == (19, 87, 155)
+
+
+def test_original_opaque_gif_has_no_transparency(tmp_path):
+    meta = _meta(tmp_path)
+    for index, frame in enumerate(meta.frames[:3]):
+        source = Image.new("RGB", (16, 16), (0, 255, 0))
+        source.putpixel((index + 2, 5), (240, 80, 20))
+        source.save(frame.source_path)
+    with Image.open(export_gif(meta, meta.tags[0], tmp_path / "original.gif",
+                               background_mode="original")) as gif:
+        assert "transparency" not in gif.info
+        for index in range(3):
+            gif.seek(index)
+            assert gif.convert("RGBA").getpixel((0, 0)) == (0, 255, 0, 255)
+            with Image.open(meta.frames[index].source_path) as source:
+                assert gif.convert("RGB").tobytes() == source.tobytes()
+
+
+def test_original_gif_preserves_existing_alpha_threshold(tmp_path):
+    meta = _meta(tmp_path)
+    for index, frame in enumerate(meta.frames[:3]):
+        source = Image.new("RGBA", (16, 16), (0, 255, 0, 0))
+        source.putpixel((index + 2, 5), (240, 80, 20, 200))
+        source.putpixel((index + 2, 6), (240, 80, 20, 100))
+        source.save(frame.source_path)
+    with Image.open(export_gif(meta, meta.tags[0], tmp_path / "alpha.gif",
+                               background_mode="original")) as gif:
+        assert gif.info["transparency"] == 255
+        for index in range(3):
+            gif.seek(index)
+            frame = gif.convert("RGBA")
+            assert frame.getpixel((index + 2, 5)) == (240, 80, 20, 255)
+            assert frame.getpixel((index + 2, 6))[3] == 0
+            assert frame.getpixel((0, 0))[3] == 0
+
+
+@pytest.mark.parametrize("color", ["red", "#fff", "#11223344", "#xyzxyz", "112233"])
+def test_gif_rejects_invalid_background_color(tmp_path, color):
+    meta = _meta(tmp_path)
+    with pytest.raises(ValueError, match="hex RGB"):
+        export_gif(meta, meta.tags[0], tmp_path / "bad.gif", background_color=color)
+    assert not (tmp_path / "bad.gif").exists()

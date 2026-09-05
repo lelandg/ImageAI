@@ -94,16 +94,21 @@ class ActionQueue:
         return Path(self.project.project_dir) / "clips" / f"{action.id}.mp4"
 
     def build_request(self, action: ActionCard) -> RenderRequest:
-        plate = self.project.plate_path
+        background_mode = self.project.background.mode
+        plate = (self.project.character_source if background_mode == "original"
+                 else self.project.plate_path)
         if not plate or not Path(plate).exists():
+            if background_mode == "original":
+                raise ProviderError("Import a character image before rendering (Character panel).")
             raise ProviderError("Make the chroma plate before rendering (Character panel > Make chroma plate).")
         settings = self.project.generation
         refs: List[Path] = []
-        if settings.use_turnaround_refs:
+        if settings.use_turnaround_refs and background_mode != "original":
             refs = [Path(self.project.turnaround[view]) for view in VIEWS
                     if view in self.project.turnaround]
         return RenderRequest(action=action, plate=Path(plate), refs=refs,
-                             settings=settings, out_mp4=self.clip_path(action))
+                             settings=settings, out_mp4=self.clip_path(action),
+                             background_mode=background_mode)
 
     # -- queue operations ----------------------------------------------------
 

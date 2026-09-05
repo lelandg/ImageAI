@@ -31,7 +31,7 @@ from core.sprite.exporters.png_sequence import export_png_sequence
 from core.sprite.exporters.texturepacker_json import export_texturepacker_json
 from core.sprite.models import SheetMeta
 from core.sprite.pipeline import CancelToken, ProgressFn, ensure_profile_stages
-from core.sprite.project import SpriteProject
+from core.sprite.project import BackgroundSettings, SpriteProject
 from core.utils import sidecar_path
 from gui.common.dialog_conventions import (DialogCleanupMixin, bind_primary_action,
                                            persist_splitter, restore_splitter,
@@ -143,14 +143,17 @@ def format_png_sequence(meta: SheetMeta, out_dir: Path, template: str = DEFAULT_
     return files
 
 
-def format_gif(meta: SheetMeta, out_dir: Path) -> List[Path]:
+def format_gif(meta: SheetMeta, out_dir: Path, *, background_color: Optional[str] = None,
+               background_mode: str = "transparent") -> List[Path]:
     if not meta.tags:
         logger.warning("GIF export (%s): the sheet has no tags; nothing written", meta.profile)
         return []
     files: List[Path] = []
     for tag in meta.tags:
         out = Path(out_dir) / f"{meta.title}_{tag.name}.gif"
-        gif_path = Path(export_gif(meta, tag, out, loop=tag.repeat))
+        gif_path = Path(export_gif(meta, tag, out, loop=tag.repeat,
+                                   background_color=background_color,
+                                   background_mode=background_mode))
         files.append(gif_path)
         sidecar = sidecar_path(gif_path)
         if sidecar.exists():
@@ -257,9 +260,9 @@ def _ensure_profile_outputs(project: SpriteProject, profile: str, *, log: LogFn,
                             progress: ProgressFn, token: CancelToken) -> None:
     """Run the missing profile stage for every action with frames, then save (T3).
 
-    A reason the helper returns is logged and shown; the export still runs
-    with whatever ``sheet_meta`` finds. The project is saved only when a
-    stage ran (the fingerprints changed). A save error is logged, never raised.
+    Any unavailable stage blocks export rather than falling back to old
+    background processing, including disabled or failed profiles. The
+    project is saved only when a stage ran (the fingerprints changed).
     """
     if project.project_dir is None:
         return
@@ -274,6 +277,9 @@ def _ensure_profile_outputs(project: SpriteProject, profile: str, *, log: LogFn,
             message = f"Profile '{name}', action '{action.name}': {reason}"
             _log_at(log, message, "WARNING")
             logger.warning(message)
+            raise ValueError(f"Cannot export profile '{name}' for '{action.name}': {reason}. "
+                             "Enable the profile and Run the pipeline from the Processing panel, "
+                             "then export again.")
     if _fingerprint_snapshot(project) == before:
         return
     try:
@@ -291,6 +297,9 @@ def run_export(request: ExportRequest, formats: Sequence[ExportFormat], *,
     written: List[Path] = []
     total = len(request.profiles)
     needs_sheet = any(fmt.needs_sheet for fmt in formats)
+    background = BackgroundSettings(**request.project.background.to_dict())
+    background_color = background.color if background.mode == "solid" else None
+    log(f"Background: {background.mode}" + (f" ({background_color}); GIF only" if background_color else ""))
 
     def record(path: Path) -> None:
         path = Path(path)
@@ -320,7 +329,10 @@ def run_export(request: ExportRequest, formats: Sequence[ExportFormat], *,
         for fmt in formats:
             token.raise_if_cancelled()
             progress("export", index, total, f"{profile}: {fmt.label}")
-            if fmt.takes_template:
+            if fmt.id == "gif":
+                files = format_gif(meta, out_dir, background_color=background_color,
+                               background_mode=background.mode)
+            elif fmt.takes_template:
                 files = fmt.fn(meta, out_dir, template=request.template)
             else:
                 files = fmt.fn(meta, out_dir)
@@ -391,6 +403,15 @@ class ExportDialog(WorkerHost, DialogCleanupMixin, QDialog):
         self.notes_label.setWordWrap(True)
         self.notes_label.setStyleSheet("color: #888;")
         self.options_layout.addWidget(self.notes_label)
+
+        background = self.project.background
+        background_names = {"transparent": "Transparent", "original": "Keep original background",
+                            "solid": f"Solid color {background.color} (GIF only)"}
+        self.background_label = QLabel(
+            f"Background: {background_names[background.mode]}. "
+            "Change this in Processing. After switching original/background removal, run the pipeline again.")
+        self.background_label.setWordWrap(True)
+        self.options_layout.addWidget(self.background_label)
 
         output_box = QGroupBox("Output")
         output_form = QFormLayout(output_box)

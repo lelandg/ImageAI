@@ -6,7 +6,7 @@ import types
 import pytest
 from PySide6.QtWidgets import QApplication
 
-from core.sprite.project import ActionCard, GenerationSettings
+from core.sprite.project import BackgroundSettings, ActionCard, GenerationSettings
 
 
 class FakeConfig:
@@ -61,6 +61,7 @@ def fake_project(tmp_path):
             ActionCard(id="a2", name="walk", prompt="walk cycle", target_frames=8, fps=12),
         ],
         generation=GenerationSettings(),
+        background=BackgroundSettings(),
         cost_ledger=[],
         stage_fingerprints={},
     )
@@ -109,3 +110,22 @@ def _collect_dead_qt_objects_between_tests(qapp):
     for _ in range(3):
         qapp.processEvents()
     gc.collect()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_sprite_preferences(tmp_path, monkeypatch):
+    """Use an explicit INI store: NativeFormat is the Windows registry, not a path."""
+    import sys
+    from PySide6.QtCore import QSettings
+    from gui.sprite import prefs
+
+    original = prefs.sprite_settings
+    settings_file = str(tmp_path / "sprite-preferences.ini")
+
+    def temporary_settings():
+        return QSettings(settings_file, QSettings.Format.IniFormat)
+
+    # Cover modules that import the helper directly, including smoke-test aliases.
+    for module in list(sys.modules.values()):
+        if isinstance(module, types.ModuleType) and vars(module).get("sprite_settings") is original:
+            monkeypatch.setattr(module, "sprite_settings", temporary_settings)
