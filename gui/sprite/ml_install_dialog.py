@@ -74,7 +74,7 @@ class SpriteMLInstallDialog(DialogCleanupMixin, QDialog):
 
         info = QLabel("These packages install into the running Python environment:\n"
                       + "\n".join(f"  • {spec}" for spec in self._packages)
-                      + "\n\nmediapipe removes backgrounds with no model download. "
+                      + "\n\nmediapipe downloads its verified background-removal model (0.24 MB) on first use. "
                         "rembg downloads its model (isnet-anime, 168 MB, MIT) on first use.")
         info.setWordWrap(True)
         top_layout.addWidget(info)

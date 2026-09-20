@@ -1,5 +1,9 @@
 import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# Unit tests must never read or overwrite the developer's OS credentials.
+# Set this before importing core.security, which initializes keyring eagerly.
+if os.environ.get("IMAGEAI_LIVE_TESTS") != "1":
+    os.environ["PYTHON_KEYRING_BACKEND"] = "keyring.backends.null.Keyring"
 
 import pytest
 

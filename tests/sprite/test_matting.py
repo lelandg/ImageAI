@@ -50,6 +50,8 @@ def test_available_backends_reports_missing_modules(monkeypatch):
 
 
 def test_available_backends_sees_injected_modules(monkeypatch):
+    from core import mediapipe_tasks
+    monkeypatch.setattr(mediapipe_tasks, "mediapipe_available", lambda: True)
     monkeypatch.setitem(sys.modules, "mediapipe", _fake_module("mediapipe"))
     monkeypatch.setitem(sys.modules, "rembg", _fake_module("rembg"))
     assert matting.available_backends() == {"mediapipe": True, "rembg": True}
@@ -93,59 +95,62 @@ def test_ml_alpha_missing_backend_names_the_install(monkeypatch, caplog):
     assert "requirements-sprite-ml.txt" in info.value.user_message
 
 
-def test_ml_alpha_mediapipe_uses_selfie_segmentation(monkeypatch):
-    rgb, cov = disc_on_field()
+def _mock_tasks_segmenter(monkeypatch, mask):
+    from core import mediapipe_tasks
     seen = {}
 
-    class FakeSeg:
-        def __init__(self, model_selection):
-            seen["model_selection"] = model_selection
-
+    class FakeSegmenter:
         def __enter__(self):
             return self
 
         def __exit__(self, *exc):
-            return False
+            seen["closed"] = True
+            # The caller must own a copy before the task releases its memory.
+            mask[:] = 0
 
-        def process(self, array):
+        def segment(self, array):
             seen["shape"] = array.shape
-            return types.SimpleNamespace(segmentation_mask=cov.astype(np.float32))
+            return types.SimpleNamespace(confidence_masks=[
+                types.SimpleNamespace(numpy_view=lambda: mask),
+            ])
 
-    mp = _fake_module("mediapipe")
-    mp.solutions = types.SimpleNamespace(selfie_segmentation=types.SimpleNamespace(SelfieSegmentation=FakeSeg))
-    monkeypatch.setitem(sys.modules, "mediapipe", mp)
+    monkeypatch.setattr(matting, "_installed", lambda name: True)
+    monkeypatch.setattr(mediapipe_tasks, "create_image_segmenter", FakeSegmenter)
+    monkeypatch.setattr(mediapipe_tasks, "image_from_rgb", lambda rgb: rgb)
+    return seen
+
+
+@pytest.mark.parametrize("singleton_channel", [False, True])
+def test_ml_alpha_mediapipe_tasks_preserve_mask_after_close(monkeypatch, singleton_channel):
+    rgb, cov = disc_on_field()
+    native_mask = cov.astype(np.float32).copy()
+    if singleton_channel:
+        native_mask = native_mask[:, :, None]
+    seen = _mock_tasks_segmenter(monkeypatch, native_mask)
     alpha = matting.ml_alpha(Image.fromarray(rgb), "mediapipe", "", refine_edges=False)
     assert alpha.dtype == np.float32 and alpha.shape == cov.shape
-    assert seen["model_selection"] == 1 and seen["shape"] == rgb.shape
+    assert seen == {"shape": rgb.shape, "closed": True}
     assert np.allclose(alpha, cov)
 
 
 def test_ml_alpha_mediapipe_refine_edges_tightens_the_mask(monkeypatch):
     rgb, cov = disc_on_field()
-    soft = np.clip(cov * 0.6 + 0.2, 0, 1).astype(np.float32)   # blurry mask: 0.2 background, 0.8 subject
-
-    class FakeSeg:
-        def __init__(self, model_selection):
-            pass
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-        def process(self, array):
-            return types.SimpleNamespace(segmentation_mask=soft)
-
-    mp = _fake_module("mediapipe")
-    mp.solutions = types.SimpleNamespace(selfie_segmentation=types.SimpleNamespace(SelfieSegmentation=FakeSeg))
-    monkeypatch.setitem(sys.modules, "mediapipe", mp)
+    soft = np.clip(cov * 0.6 + 0.2, 0, 1).astype(np.float32)
+    _mock_tasks_segmenter(monkeypatch, soft.copy())
     raw = matting.ml_alpha(Image.fromarray(rgb), "mediapipe", "", refine_edges=False)
+    _mock_tasks_segmenter(monkeypatch, soft.copy())
     tight = matting.ml_alpha(Image.fromarray(rgb), "mediapipe", "", refine_edges=True)
-    # Means, not extremes: the 1 px blur leaves a small halo right next to the edge.
     assert tight[cov == 0].mean() < raw[cov == 0].mean() * 0.5
     assert tight[cov == 1].mean() > raw[cov == 1].mean()
     assert tight.min() >= 0.0 and tight.max() <= 1.0
+
+
+@pytest.mark.parametrize("mask", [np.zeros((1, 1)), np.full((4, 4), np.nan)])
+def test_ml_alpha_mediapipe_rejects_invalid_masks(monkeypatch, mask, caplog):
+    _mock_tasks_segmenter(monkeypatch, mask)
+    with pytest.raises(matting.MattingUnavailable, match="invalid segmentation mask"):
+        matting.ml_alpha(Image.new("RGB", (4, 4)), "mediapipe", "", refine_edges=False)
+    assert "invalid segmentation mask" in caplog.text
 
 
 def test_ml_alpha_rembg_sets_model_dir_and_caches_sessions(monkeypatch):
@@ -192,3 +197,16 @@ def test_ml_alpha_rembg_unknown_model_raises(monkeypatch):
     monkeypatch.setitem(sys.modules, "rembg", rembg)
     with pytest.raises(matting.MattingUnavailable):
         matting.ml_alpha(Image.new("RGB", (4, 4)), "rembg", "not-a-model", refine_edges=False)
+
+
+def test_mediapipe_first_use_network_failure_is_logged_and_actionable(monkeypatch, caplog):
+    from core import mediapipe_tasks
+    monkeypatch.setattr(matting, "_installed", lambda name: True)
+
+    def offline():
+        raise ConnectionError("model download unavailable offline")
+
+    monkeypatch.setattr(mediapipe_tasks, "create_image_segmenter", offline)
+    with pytest.raises(matting.MattingUnavailable, match="model download unavailable offline"):
+        matting.ml_alpha(Image.new("RGB", (4, 4)), "mediapipe", "", refine_edges=False)
+    assert "model download unavailable offline" in caplog.text

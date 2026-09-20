@@ -1,10 +1,12 @@
-protobuf>=4.25.3,<5  # Pinned for mediapipe compatibility; GetPrototype patch in main.py
-pillow
+-c requirements-security.txt
+
+protobuf>=5.29.6,<6  # Patched recursion limit; modern MediaPipe Tasks has no protobuf<5 pin
+pillow>=12.3.0
 google-genai>=2.9.0  # 2.9.0+: GeminiNextGen Interactions API w/ output_video (Gemini Omni video). NBP image_size (1K/2K/4K) still supported.
 google-cloud-aiplatform
 PySide6
 openai
-requests  # For Stability AI REST API
+requests>=2.33.0  # For Stability AI REST API
 markdown>=3.5  # For better help documentation rendering
 keyring>=24.0.0  # For secure API key storage (optional)
 
@@ -19,14 +21,13 @@ keyring>=24.0.0  # For secure API key storage (optional)
 
 # Video Project Feature Dependencies
 Jinja2>=3.1.0  # Template processing for prompt generation
-moviepy>=1.0.3  # Video processing and assembly
 imageio-ffmpeg>=0.4.9  # FFmpeg Python bindings
-litellm>=1.0.0  # Unified LLM provider interface
+litellm>=1.100.1,<2  # Unified LLM provider interface
 anthropic>=0.25.0  # Claude API support (optional for prompt generation)
 
 # MIDI Processing & Synchronization  
-setuptools>=70.0.0  # Required for pkg_resources (warning suppressed in main.py)
-pretty-midi>=0.2.10  # High-level MIDI analysis for timing extraction (latest available version)
+setuptools>=83.0.0  # Build dependency for pretty-midi
+pretty-midi>=0.2.11.post0  # High-level MIDI analysis for timing extraction (latest available version)
 mido>=1.3.2  # Low-level MIDI manipulation for detailed control
 
 # Optional dependencies for Local LLM support

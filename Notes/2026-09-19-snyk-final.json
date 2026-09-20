@@ -1,0 +1,534 @@
+{
+  "vulnerabilities": [],
+  "ok": true,
+  "dependencyCount": 109,
+  "org": "lelandg",
+  "policy": "# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.\nversion: v1.25.1\n# ignores vulnerabilities until expiry date; change duration by modifying expiry date\nignore:\n  SNYK-PYTHON-LITELLM-17391451:\n    - '*':\n        reason: >-\n          Approved SDK-only exception: ImageAI never starts LiteLLM proxy\n          authenticate_user endpoints; no upstream fixed version. See\n          Docs/Snyk-Exceptions.md.\n        expires: 2026-10-19T00:00:00.000Z\n        created: 2026-09-19T23:42:34.142Z\n        source: cli\n  SNYK-PYTHON-LITELLM-17393717:\n    - '*':\n        reason: >-\n          Approved SDK-only exception: ImageAI exposes no LiteLLM\n          /sso/debug/login or callback endpoints; no upstream fixed version. See\n          Docs/Snyk-Exceptions.md.\n        expires: 2026-10-19T00:00:00.000Z\n        created: 2026-09-19T23:42:42.775Z\n        source: cli\n  SNYK-PYTHON-LITELLM-17393719:\n    - '*':\n        reason: >-\n          Approved SDK-only exception: ImageAI does not run LiteLLM proxy OpenID\n          redirect/session handling; no upstream fixed version. See\n          Docs/Snyk-Exceptions.md.\n        expires: 2026-10-19T00:00:00.000Z\n        created: 2026-09-19T23:42:52.501Z\n        source: cli\npatch: {}\n",
+  "isPrivate": true,
+  "licensesPolicy": {
+    "severities": {},
+    "orgLicenseRules": {
+      "AGPL-1.0": {
+        "licenseType": "AGPL-1.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "AGPL-3.0": {
+        "licenseType": "AGPL-3.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "Artistic-1.0": {
+        "licenseType": "Artistic-1.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "Artistic-2.0": {
+        "licenseType": "Artistic-2.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "CDDL-1.0": {
+        "licenseType": "CDDL-1.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "CPOL-1.02": {
+        "licenseType": "CPOL-1.02",
+        "severity": "high",
+        "instructions": ""
+      },
+      "EPL-1.0": {
+        "licenseType": "EPL-1.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "GPL-2.0": {
+        "licenseType": "GPL-2.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "GPL-3.0": {
+        "licenseType": "GPL-3.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "LGPL-2.0": {
+        "licenseType": "LGPL-2.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "LGPL-2.1": {
+        "licenseType": "LGPL-2.1",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "LGPL-3.0": {
+        "licenseType": "LGPL-3.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "MPL-1.1": {
+        "licenseType": "MPL-1.1",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "MPL-2.0": {
+        "licenseType": "MPL-2.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "MS-RL": {
+        "licenseType": "MS-RL",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "SimPL-2.0": {
+        "licenseType": "SimPL-2.0",
+        "severity": "high",
+        "instructions": ""
+      }
+    }
+  },
+  "packageManager": "pip",
+  "ignoreSettings": {
+    "adminOnly": false,
+    "reasonRequired": false,
+    "disregardFilesystemIgnores": false,
+    "autoApproveIgnores": false,
+    "approvalWorkflowEnabled": false
+  },
+  "summary": "3 vulnerable dependency paths",
+  "filesystemPolicy": true,
+  "filtered": {
+    "ignore": [
+      {
+        "id": "SNYK-PYTHON-LITELLM-17391451",
+        "title": "Insufficient Session Expiration",
+        "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N/E:P",
+        "credit": [
+          "Edward-x"
+        ],
+        "semver": {
+          "vulnerable": [
+            "[0,]"
+          ]
+        },
+        "exploit": "Proof of Concept",
+        "fixedIn": [],
+        "patches": [],
+        "insights": {
+          "triageAdvice": null
+        },
+        "language": "python",
+        "severity": "high",
+        "cvssScore": 7.1,
+        "functions": [],
+        "malicious": false,
+        "isDisputed": false,
+        "moduleName": "litellm",
+        "references": [
+          {
+            "url": "https://gist.github.com/YLChen-007/39ed709ce322431658a05b951e91f278",
+            "title": "GitHub Gist"
+          },
+          {
+            "url": "https://github.com/BerriAI/litellm/blob/main/litellm/proxy/auth/login_utils.py%23L217",
+            "title": "Vulnerable Code"
+          },
+          {
+            "url": "https://github.com/BerriAI/litellm/blob/main/litellm/proxy/auth/login_utils.py%23L347",
+            "title": "Vulnerable Code"
+          }
+        ],
+        "cvssDetails": [
+          {
+            "assigner": "NVD",
+            "severity": "medium",
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+            "cvssV3BaseScore": 6.3,
+            "modificationTime": "2026-06-21T13:29:38.896552Z"
+          }
+        ],
+        "cvssSources": [
+          {
+            "type": "primary",
+            "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N/E:P",
+            "assigner": "Snyk",
+            "severity": "high",
+            "baseScore": 7.1,
+            "cvssVersion": "4.0",
+            "modificationTime": "2026-08-24T14:02:39.691695Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N/E:P",
+            "assigner": "Snyk",
+            "severity": "medium",
+            "baseScore": 6.5,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-08-24T14:02:39.691695Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+            "assigner": "NVD",
+            "severity": "medium",
+            "baseScore": 6.3,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-06-21T13:29:38.896552Z"
+          }
+        ],
+        "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Insufficient Session Expiration in the `authenticate_user` function. An attacker can gain unauthorized access or maintain access to sensitive information by exploiting session management flaws.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [GitHub Gist](https://gist.github.com/YLChen-007/39ed709ce322431658a05b951e91f278)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/blob/main/litellm/proxy/auth/login_utils.py#L217)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/blob/main/litellm/proxy/auth/login_utils.py#L347)\n",
+        "epssDetails": {
+          "percentile": "0.32828",
+          "probability": "0.00400",
+          "modelVersion": "v2026.06.15"
+        },
+        "identifiers": {
+          "CVE": [
+            "CVE-2026-12772"
+          ],
+          "CWE": [
+            "CWE-613"
+          ]
+        },
+        "packageName": "litellm",
+        "proprietary": false,
+        "creationTime": "2026-06-21T09:40:46.552580Z",
+        "functions_new": [],
+        "alternativeIds": [],
+        "disclosureTime": "2026-06-21T02:39:58Z",
+        "exploitDetails": {
+          "sources": [
+            "Snyk"
+          ],
+          "maturityLevels": [
+            {
+              "type": "secondary",
+              "level": "Proof of Concept",
+              "format": "CVSSv3"
+            },
+            {
+              "type": "primary",
+              "level": "Proof of Concept",
+              "format": "CVSSv4"
+            }
+          ]
+        },
+        "packageManager": "pip",
+        "publicationTime": "2026-06-21T10:12:25.209850Z",
+        "severityBasedOn": "CVSS",
+        "modificationTime": "2026-08-24T14:02:39.691695Z",
+        "socialTrendAlert": false,
+        "severityWithCritical": "high",
+        "from": [
+          "ImageAI@0.0.0",
+          "litellm@1.100.1"
+        ],
+        "upgradePath": [],
+        "isUpgradable": false,
+        "isPatchable": false,
+        "name": "litellm",
+        "version": "1.100.1",
+        "filtered": {
+          "ignored": [
+            {
+              "reason": "Approved SDK-only exception: ImageAI never starts LiteLLM proxy authenticate_user endpoints; no upstream fixed version. See Docs/Snyk-Exceptions.md.",
+              "expires": "2026-10-19T00:00:00.000Z",
+              "created": "2026-09-19T23:42:34.142Z",
+              "source": "cli",
+              "path": [
+                "*"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "SNYK-PYTHON-LITELLM-17393717",
+        "title": "Missing Authentication for Critical Function",
+        "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L/E:P",
+        "credit": [
+          "Eric-c"
+        ],
+        "semver": {
+          "vulnerable": [
+            "[0,]"
+          ]
+        },
+        "exploit": "Proof of Concept",
+        "fixedIn": [],
+        "patches": [],
+        "insights": {
+          "triageAdvice": null
+        },
+        "language": "python",
+        "severity": "medium",
+        "cvssScore": 6.9,
+        "functions": [],
+        "malicious": false,
+        "isDisputed": false,
+        "moduleName": "litellm",
+        "references": [
+          {
+            "url": "https://gist.github.com/YLChen-007/9b13c75a3a73187a4082cc6df0b100d3",
+            "title": "GitHub Gist"
+          },
+          {
+            "url": "https://github.com/BerriAI/litellm/blob/6437b812beb0267c49ab85b52f25ef1293f4b9f1/litellm/proxy/management_endpoints/ui_sso.py%23L4480",
+            "title": "Vulnerable Code"
+          }
+        ],
+        "cvssDetails": [
+          {
+            "assigner": "NVD",
+            "severity": "high",
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L",
+            "cvssV3BaseScore": 7.3,
+            "modificationTime": "2026-06-21T13:29:40.387718Z"
+          }
+        ],
+        "cvssSources": [
+          {
+            "type": "primary",
+            "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N/E:P",
+            "assigner": "Snyk",
+            "severity": "medium",
+            "baseScore": 6.9,
+            "cvssVersion": "4.0",
+            "modificationTime": "2026-08-24T14:02:39.693377Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L/E:P",
+            "assigner": "Snyk",
+            "severity": "high",
+            "baseScore": 7.3,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-08-24T14:02:39.693377Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L",
+            "assigner": "NVD",
+            "severity": "high",
+            "baseScore": 7.3,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-06-21T13:29:40.387718Z"
+          }
+        ],
+        "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Missing Authentication for Critical Function in the `/sso/debug/login` and `/sso/debug/callback` endpoints in the SSO Debug Flow. An attacker can gain unauthorized access and potentially manipulate sensitive information by sending crafted requests to the affected endpoint.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [GitHub Gist](https://gist.github.com/YLChen-007/9b13c75a3a73187a4082cc6df0b100d3)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/blob/6437b812beb0267c49ab85b52f25ef1293f4b9f1/litellm/proxy/management_endpoints/ui_sso.py#L4480)\n",
+        "epssDetails": {
+          "percentile": "0.53634",
+          "probability": "0.00795",
+          "modelVersion": "v2026.06.15"
+        },
+        "identifiers": {
+          "CVE": [
+            "CVE-2026-12795"
+          ],
+          "CWE": [
+            "CWE-306"
+          ]
+        },
+        "packageName": "litellm",
+        "proprietary": false,
+        "creationTime": "2026-06-22T09:34:30.045532Z",
+        "functions_new": [],
+        "alternativeIds": [],
+        "disclosureTime": "2026-06-21T10:10:29.636000Z",
+        "exploitDetails": {
+          "sources": [
+            "Snyk"
+          ],
+          "maturityLevels": [
+            {
+              "type": "secondary",
+              "level": "Proof of Concept",
+              "format": "CVSSv3"
+            },
+            {
+              "type": "primary",
+              "level": "Proof of Concept",
+              "format": "CVSSv4"
+            }
+          ]
+        },
+        "packageManager": "pip",
+        "publicationTime": "2026-06-22T09:34:30.244826Z",
+        "severityBasedOn": "CVSS",
+        "modificationTime": "2026-08-24T14:02:39.693377Z",
+        "socialTrendAlert": false,
+        "severityWithCritical": "medium",
+        "from": [
+          "ImageAI@0.0.0",
+          "litellm@1.100.1"
+        ],
+        "upgradePath": [],
+        "isUpgradable": false,
+        "isPatchable": false,
+        "name": "litellm",
+        "version": "1.100.1",
+        "filtered": {
+          "ignored": [
+            {
+              "reason": "Approved SDK-only exception: ImageAI exposes no LiteLLM /sso/debug/login or callback endpoints; no upstream fixed version. See Docs/Snyk-Exceptions.md.",
+              "expires": "2026-10-19T00:00:00.000Z",
+              "created": "2026-09-19T23:42:42.775Z",
+              "source": "cli",
+              "path": [
+                "*"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "SNYK-PYTHON-LITELLM-17393719",
+        "title": "Insufficient Session Expiration",
+        "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L/E:P",
+        "credit": [
+          "Eric-c"
+        ],
+        "semver": {
+          "vulnerable": [
+            "[0,]"
+          ]
+        },
+        "exploit": "Proof of Concept",
+        "fixedIn": [],
+        "patches": [],
+        "insights": {
+          "triageAdvice": null
+        },
+        "language": "python",
+        "severity": "medium",
+        "cvssScore": 5.3,
+        "functions": [],
+        "malicious": false,
+        "isDisputed": false,
+        "moduleName": "litellm",
+        "references": [
+          {
+            "url": "https://gist.github.com/YLChen-007/5fa8af12e1b183674d7ca96d852fb697",
+            "title": "GitHub Gist"
+          },
+          {
+            "url": "https://github.com/BerriAI/litellm/blob/6437b812beb0267c49ab85b52f25ef1293f4b9f1/litellm/proxy/management_endpoints/ui_sso.py%23L3231",
+            "title": "Vulnerable Code"
+          }
+        ],
+        "cvssDetails": [
+          {
+            "assigner": "NVD",
+            "severity": "medium",
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+            "cvssV3BaseScore": 6.3,
+            "modificationTime": "2026-06-21T13:29:40.803194Z"
+          }
+        ],
+        "cvssSources": [
+          {
+            "type": "primary",
+            "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N/E:P",
+            "assigner": "Snyk",
+            "severity": "medium",
+            "baseScore": 5.3,
+            "cvssVersion": "4.0",
+            "modificationTime": "2026-08-24T14:02:39.591427Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L/E:P",
+            "assigner": "Snyk",
+            "severity": "medium",
+            "baseScore": 6.3,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-08-24T14:02:39.591427Z"
+          },
+          {
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+            "assigner": "NVD",
+            "severity": "medium",
+            "baseScore": 6.3,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-06-21T13:29:40.803194Z"
+          }
+        ],
+        "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Insufficient Session Expiration in the `get_redirect_response_from_openid()` function of the SSO Authentication Flow process. An attacker can cause premature session termination by manipulating authentication responses remotely, potentially leading to unauthorized session expiration and disruption of user access.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [GitHub Gist](https://gist.github.com/YLChen-007/5fa8af12e1b183674d7ca96d852fb697)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/blob/6437b812beb0267c49ab85b52f25ef1293f4b9f1/litellm/proxy/management_endpoints/ui_sso.py#L3231)\n",
+        "epssDetails": {
+          "percentile": "0.44562",
+          "probability": "0.00570",
+          "modelVersion": "v2026.06.15"
+        },
+        "identifiers": {
+          "CVE": [
+            "CVE-2026-12796"
+          ],
+          "CWE": [
+            "CWE-613"
+          ]
+        },
+        "packageName": "litellm",
+        "proprietary": false,
+        "creationTime": "2026-06-22T09:46:49.344394Z",
+        "functions_new": [],
+        "alternativeIds": [],
+        "disclosureTime": "2026-06-21T11:11:42.153000Z",
+        "exploitDetails": {
+          "sources": [
+            "Snyk"
+          ],
+          "maturityLevels": [
+            {
+              "type": "secondary",
+              "level": "Proof of Concept",
+              "format": "CVSSv3"
+            },
+            {
+              "type": "primary",
+              "level": "Proof of Concept",
+              "format": "CVSSv4"
+            }
+          ]
+        },
+        "packageManager": "pip",
+        "publicationTime": "2026-06-22T09:46:49.646955Z",
+        "severityBasedOn": "CVSS",
+        "modificationTime": "2026-08-24T14:02:39.591427Z",
+        "socialTrendAlert": false,
+        "severityWithCritical": "medium",
+        "from": [
+          "ImageAI@0.0.0",
+          "litellm@1.100.1"
+        ],
+        "upgradePath": [],
+        "isUpgradable": false,
+        "isPatchable": false,
+        "name": "litellm",
+        "version": "1.100.1",
+        "filtered": {
+          "ignored": [
+            {
+              "reason": "Approved SDK-only exception: ImageAI does not run LiteLLM proxy OpenID redirect/session handling; no upstream fixed version. See Docs/Snyk-Exceptions.md.",
+              "expires": "2026-10-19T00:00:00.000Z",
+              "created": "2026-09-19T23:42:52.501Z",
+              "source": "cli",
+              "path": [
+                "*"
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "patch": []
+  },
+  "uniqueCount": 0,
+  "projectName": "ImageAI",
+  "displayTargetFile": "C:\\Users\\aboog\\.codex\\worktrees\\imageai-snyk-fixes\\ImageAI\\requirements.txt",
+  "hasUnknownVersions": false,
+  "path": "C:\\Users\\aboog\\.codex\\worktrees\\imageai-snyk-fixes\\ImageAI"
+}

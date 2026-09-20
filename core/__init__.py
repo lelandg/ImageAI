@@ -1,5 +1,9 @@
 """Core functionality for ImageAI."""
 
+from .platform_runtime import initialize_platform_runtime
+
+initialize_platform_runtime()
+
 from .config import ConfigManager, get_api_key_url
 from .constants import (
     APP_NAME,
