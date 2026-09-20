@@ -46,3 +46,5 @@ Review follow-up validation: final combined focused gate passed 103 tests with o
 ## Hosted resolver follow-up
 
 The hosted check for commit 1e16782 selected NumPy 1.21.3 through Pretty-MIDI 0.2.11.post0 and reported SNYK-PYTHON-NUMPY-2321964, SNYK-PYTHON-NUMPY-2321966, and SNYK-PYTHON-NUMPY-2321970. The tested local environment uses NumPy 2.5.3. An explicit NumPy >=1.26.4 requirement prevents the hosted resolver from selecting those vulnerable releases while retaining compatibility with older supported Python versions. No additional exceptions were added.
+
+The follow-up hosted scan still selected NumPy 1.21.3 because the organization defaults to Python 3.7. Snyk documents that this legacy mode omits incompatible dependencies rather than failing. The repository policy now selects Python 3.12, matching local validation, without changing organization defaults. Hosted SCM scans also omit constraint-file directives; local CLI scans retain the complete constrained environment. [Snyk SCM Python documentation](https://docs.snyk.io/supported-languages/supported-languages-list/python/scm-integrations-and-python) describes both behaviors.

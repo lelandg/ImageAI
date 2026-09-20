@@ -27,3 +27,7 @@ ignore:
         expires: 2026-10-19T00:00:00.000Z
         created: 2026-09-19T23:42:52.501Z
 patch: {}
+
+# Match the supported interpreter used for local security validation.
+language-settings:
+  python: '3.12'
