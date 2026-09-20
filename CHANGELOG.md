@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.49.1] - 2026-09-19
+
+### Fixed
+
+Upgrade direct and transitive dependency security floors, remove unused MoviePy so patched Pillow can install, and update Pretty-MIDI for current Setuptools. Migrate Sprite matting and Character Animator pose/face detection to MediaPipe Tasks so patched Protobuf is supported, with verified first-use model downloads and model-cache relocation support. Preserve alpha-mask and landmark output contracts and guard the reproduced Windows CPython 3.12 native import failure.
+
+Document three approved, expiring LiteLLM proxy advisory exceptions for ImageAI's SDK-only integration. Isolate ordinary tests from OS keyring credentials and correct a Windows-only test collection guard.
+
 ## [0.49.0] - 2026-09-05
 
 ### Added
