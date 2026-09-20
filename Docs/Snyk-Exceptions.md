@@ -15,3 +15,5 @@ ImageAI imports the SDK in gui/llm_utils.py and builds direct completion calls i
 Snyk reports no patched upstream version for these three advisories. The CLI-generated .snyk policy suppresses only their exact IDs for 30 days. Reassess them before expiration and remove these exceptions before adding a LiteLLM proxy or any corresponding inbound endpoint. Do not extend them automatically.
 
 A policy-filtered passing scan is not a zero-advisory raw scan. Retain an unfiltered scan with --ignore-policy when reviewing applicability. Package vulnerability presence and application exploitability are distinct claims.
+
+The same three expiring exceptions are applied to the SCM-imported Snyk project `lelandg/ImageAI:requirements.txt`. The hosted exceptions are disregarded once an upstream fix is available. Review both the repository policy and the project policy when resolving or renewing an exception.

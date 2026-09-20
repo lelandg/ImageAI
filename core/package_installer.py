@@ -2,8 +2,6 @@
 
 import subprocess
 import sys
-from core.mediapipe_tasks import MEDIAPIPE_SPEC
-
 import logging
 import requests
 import time
@@ -11,6 +9,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 from PySide6.QtCore import QThread, Signal, QObject
+
+from core.mediapipe_tasks import MEDIAPIPE_SPEC
 
 logger = logging.getLogger(__name__)
 

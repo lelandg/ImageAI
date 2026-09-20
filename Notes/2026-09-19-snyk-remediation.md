@@ -34,6 +34,11 @@ The user approved exactly three SDK-only LiteLLM proxy exceptions after reviewin
 
 - [Passing policy scan](2026-09-19-snyk-final.json)
 - [Unfiltered scan](2026-09-19-snyk-unfiltered.json)
-- [Intermediate four-finding scan](2026-09-19-snyk-after.json)
 
 Implementation and local verification are complete. Delivery proceeds through the version-manager patch release and the configured automated PR review; merge is authorized after reviews pass. GitHub records the delivery state.
+
+## PR review follow-up
+
+The configured CL PR Reviewer approved PR #53 without blockers. Follow-ups restore CodeMap symbols when the checkout lives under a .codex ancestor, pin verified model URLs to immutable version 1, declare packaging explicitly, and reduce/redact committed scan evidence. The hosted Snyk project now has exactly the three approved expiring exceptions, configured to stop ignoring once a fix is available. A fresh hosted check is required before merge.
+
+Review follow-up validation: final combined focused gate passed 103 tests with one platform skip; new helper mypy and scoped Ruff passed. Immutable model URLs downloaded bytes matching all three existing hashes. Model-mask and legacy-runtime error tests passed, and module-level availability mocking was removed.

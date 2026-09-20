@@ -528,7 +528,7 @@
   },
   "uniqueCount": 0,
   "projectName": "ImageAI",
-  "displayTargetFile": "C:\\Users\\aboog\\.codex\\worktrees\\imageai-snyk-fixes\\ImageAI\\requirements.txt",
+  "displayTargetFile": ".\\requirements.txt",
   "hasUnknownVersions": false,
-  "path": "C:\\Users\\aboog\\.codex\\worktrees\\imageai-snyk-fixes\\ImageAI"
+  "path": "."
 }

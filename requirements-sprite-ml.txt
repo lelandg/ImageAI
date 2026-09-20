@@ -1,3 +1,4 @@
+# Install alongside requirements.txt to apply the shared dependency security floors.
 # Optional ML background-removal backends for the Sprite tab (design §1.7).
 # Install: python -m pip install -r requirements-sprite-ml.txt
 # Or in the app: Sprite tab > Processing > Install ML backends.

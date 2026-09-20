@@ -1,18 +1,15 @@
 """Tasks API regression coverage without loading models or downloading assets."""
 
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
 from PIL import Image
 
 import core.mediapipe_tasks as tasks
-
-# Package availability checks should not load native MediaPipe in fake-Task tests.
-with patch.object(tasks, "import_mediapipe", return_value=SimpleNamespace()):
-    from core.character_animator import segmenter as segmenter_module
-    from core.character_animator.segmenter import BodyPartSegmenter
+from core.character_animator import segmenter as segmenter_module
+from core.character_animator.segmenter import BodyPartSegmenter
 
 
 @pytest.fixture

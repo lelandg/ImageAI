@@ -95,7 +95,7 @@ def test_ml_alpha_missing_backend_names_the_install(monkeypatch, caplog):
     assert "requirements-sprite-ml.txt" in info.value.user_message
 
 
-def _mock_tasks_segmenter(monkeypatch, mask):
+def _mock_tasks_segmenter(monkeypatch, mask, background_mask=None):
     from core import mediapipe_tasks
     seen = {}
 
@@ -110,9 +110,12 @@ def _mock_tasks_segmenter(monkeypatch, mask):
 
         def segment(self, array):
             seen["shape"] = array.shape
-            return types.SimpleNamespace(confidence_masks=[
+            masks = [
                 types.SimpleNamespace(numpy_view=lambda: mask),
-            ])
+            ]
+            if background_mask is not None:
+                masks.insert(0, types.SimpleNamespace(numpy_view=lambda: background_mask))
+            return types.SimpleNamespace(confidence_masks=masks)
 
     monkeypatch.setattr(matting, "_installed", lambda name: True)
     monkeypatch.setattr(mediapipe_tasks, "create_image_segmenter", FakeSegmenter)
@@ -131,6 +134,40 @@ def test_ml_alpha_mediapipe_tasks_preserve_mask_after_close(monkeypatch, singlet
     assert alpha.dtype == np.float32 and alpha.shape == cov.shape
     assert seen == {"shape": rgb.shape, "closed": True}
     assert np.allclose(alpha, cov)
+
+
+@pytest.mark.parametrize("singleton_channel", [False, True])
+def test_mediapipe_alpha_two_confidence_masks_selects_person_last(monkeypatch, singleton_channel):
+    rgb, cov = disc_on_field()
+    person = cov.astype(np.float32).copy()
+    background = 1.0 - person
+    if singleton_channel:
+        person = person[:, :, None]
+        background = background[:, :, None]
+    seen = _mock_tasks_segmenter(monkeypatch, person, background)
+
+    alpha = matting._mediapipe_alpha(rgb, refine_edges=False)
+
+    assert alpha.dtype == np.float32 and alpha.shape == cov.shape
+    assert seen == {"shape": rgb.shape, "closed": True}
+    np.testing.assert_allclose(alpha, cov)
+    assert not np.any(person), "The task released its native mask storage"
+
+
+def test_mediapipe_alpha_legacy_runtime_import_error_is_logged_and_actionable(monkeypatch, caplog):
+    from core import mediapipe_tasks
+
+    legacy = _fake_module("mediapipe")
+    legacy.__version__ = "0.10.21"
+    monkeypatch.setitem(sys.modules, "mediapipe", legacy)
+
+    with pytest.raises(matting.MattingUnavailable, match="Upgrade MediaPipe") as info:
+        matting._mediapipe_alpha(np.zeros((4, 4, 3), dtype=np.uint8), refine_edges=False)
+
+    assert isinstance(info.value.__cause__, ImportError)
+    assert mediapipe_tasks.MEDIAPIPE_SPEC in info.value.user_message
+    assert matting.INSTALL_HINT in info.value.user_message
+    assert "Upgrade MediaPipe" in caplog.text
 
 
 def test_ml_alpha_mediapipe_refine_edges_tightens_the_mask(monkeypatch):

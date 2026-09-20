@@ -5,10 +5,10 @@ Provides lazy-loaded flags indicating which AI modules are available.
 Follows the pattern from core/upscaling.py for REALESRGAN_AVAILABLE.
 """
 
-from core.mediapipe_tasks import MEDIAPIPE_SPEC, import_mediapipe
-
 import logging
 from typing import Dict, List, Tuple
+
+from core.mediapipe_tasks import MEDIAPIPE_SPEC, import_mediapipe
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ except ImportError:
 
 # Check MediaPipe for pose/face detection
 try:
-    mp = import_mediapipe()
+    import_mediapipe()
     POSE_DETECTION_AVAILABLE = True
     logger.debug("MediaPipe pose detection available")
 except ImportError:

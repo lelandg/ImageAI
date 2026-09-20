@@ -22,15 +22,15 @@ MEDIAPIPE_SPEC = "mediapipe>=1.0.1,<2"
 # Official Google model downloads, pinned by digest. Model changes require review.
 _MODELS = {
     "selfie": (
-        "image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite",
+        "image_segmenter/selfie_segmenter_landscape/float16/1/selfie_segmenter_landscape.tflite",
         "490e9ea734313e0de10fa0cd9e3c6133e36ea4db2b7a49bde9ef019f72796b8e",
     ),
     "pose": (
-        "pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task",
+        "pose_landmarker/pose_landmarker_heavy/float16/1/pose_landmarker_heavy.task",
         "64437af838a65d18e5ba7a0d39b465540069bc8aae8308de3e318aad31fcbc7b",
     ),
     "face": (
-        "face_landmarker/face_landmarker/float16/latest/face_landmarker.task",
+        "face_landmarker/face_landmarker/float16/1/face_landmarker.task",
         "64184e229b263107bc2b804c6625db1341ff2bb731874b0bcc2fe6544e0bc9ff",
     ),
 }

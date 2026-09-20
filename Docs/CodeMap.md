@@ -1,6 +1,6 @@
 # ImageAI CodeMap
 
-Last Updated: 2026-09-19 19:12:11
+Last Updated: 2026-09-19 19:35:03
 
 ## Quick Navigation
 - Main Application: `main.py`
@@ -38,7 +38,7 @@ ImageAI/
 │   ├── Character-Animator-Guide.md  # 199 lines
 │   ├── ChatGPT Lyric Generator for aisonggenerator.ai.md  # 153 lines
 │   ├── Claude Desktop Instructions.md  # 361 lines
-│   ├── CodeMap.md  # 987 lines
+│   ├── CodeMap.md  # 1073 lines
 │   ├── CodeMap_Generator.md  # 24 lines
 │   ├── CodeReview-2025-10-19.md  # 169 lines
 │   ├── CodeReview-2025-11-14.md  # 499 lines
@@ -64,7 +64,7 @@ ImageAI/
 │   ├── Reference-System-Implementation-Summary.md  # 520 lines
 │   ├── Reference-UI-Implementation.md  # 647 lines
 │   ├── Scene-Batching-Implementation.md  # 269 lines
-│   ├── Snyk-Exceptions.md  # 17 lines
+│   ├── Snyk-Exceptions.md  # 19 lines
 │   ├── Sprite-CLI-Guide.md  # 250 lines
 │   ├── Storage-Locations-Known-Issues.md  # 172 lines
 │   ├── Suno-Package-Support.md  # 333 lines
@@ -151,7 +151,7 @@ ImageAI/
 │   ├── 2026-09-05-sprite-projects-and-startup.md  # 75 lines
 │   ├── 2026-09-05-sprite-release.md  # 27 lines
 │   ├── 2026-09-05-sprite-ui-sizing.md  # 28 lines
-│   ├── 2026-09-19-snyk-remediation.md  # 39 lines
+│   ├── 2026-09-19-snyk-remediation.md  # 44 lines
 │   ├── BUGFIX_veo_duration_handling.md  # 195 lines
 │   ├── Bot_Animation_Ideas.md  # 66 lines
 │   ├── Claude-Interactions-colored.md  # 175 lines
@@ -693,7 +693,7 @@ ImageAI/
 │   └── __init__.py  # 2098 lines
 ├── tests/
 │   ├── character_animator/
-│   │   └── test_segmenter_tasks.py  # 147 lines
+│   │   └── test_segmenter_tasks.py  # 144 lines
 │   ├── gui/
 │   │   ├── test_dialog_conventions.py  # 229 lines
 │   │   ├── test_gui_paths.py  # 46 lines
@@ -841,7 +841,7 @@ ImageAI/
 │   │   ├── test_keying_cleanup.py  # 98 lines
 │   │   ├── test_keying_despill.py  # 67 lines
 │   │   ├── test_keying_ffmpeg.py  # 88 lines
-│   │   ├── test_matting.py  # 212 lines
+│   │   ├── test_matting.py  # 249 lines
 │   │   ├── test_matting_difference.py  # 39 lines
 │   │   ├── test_ml_install.py  # 52 lines
 │   │   ├── test_models.py  # 61 lines
@@ -898,6 +898,7 @@ ImageAI/
 │   ├── test_cli_image_sidecars.py  # 155 lines
 │   ├── test_config_data_roots.py  # 719 lines
 │   ├── test_config_io.py  # 447 lines
+│   ├── test_generate_code_map.py  # 36 lines
 │   ├── test_google_sizing.py  # 191 lines
 │   ├── test_live_llm_params.py  # 257 lines
 │   ├── test_llm_params.py  # 280 lines
@@ -910,7 +911,7 @@ ImageAI/
 │   ├── test_readme_help_anchors.py  # 73 lines
 │   └── test_utils_sidecar.py  # 57 lines
 ├── tools/
-│   ├── generate_code_map.py  # 239 lines
+│   ├── generate_code_map.py  # 237 lines
 ├── utils/
 │   ├── README.md  # 90 lines
 │   ├── diagnose_references.py  # 116 lines
@@ -919,7 +920,7 @@ ImageAI/
 │   └── update_reference_metadata.py  # 282 lines
 ├── weights/
 ├── AGENTS.md  # 73 lines
-├── CHANGELOG.md  # 1844 lines
+├── CHANGELOG.md  # 1852 lines
 ├── CLAUDE.md  # 6 lines
 ├── COMMIT_MESSAGE.txt  # 32 lines
 ├── CONTRIBUTING.md  # 62 lines
@@ -942,8 +943,8 @@ ImageAI/
 ├── migrate_history.py  # 304 lines
 ├── requirements-local-sd.txt  # 15 lines
 ├── requirements-security.txt  # 14 lines
-├── requirements-sprite-ml.txt  # 8 lines
-├── requirements.txt  # 58 lines
+├── requirements-sprite-ml.txt  # 9 lines
+├── requirements.txt  # 59 lines
 ├── secure_keys.py  # 106 lines
 ├── test_ollama.py  # 202 lines
 └── verify_ollama_ui.py  # 117 lines
@@ -980,7 +981,92 @@ ImageAI/
 - default_model_for_provider (from core.utils)
 
 ## Module Symbols (Top-Level)
-- (No modules parsed)
+- `core\layout\template_io.py`
+  - functions: export_template, import_template
+- `core\platform_runtime.py`
+  - functions: _without_wmi, initialize_platform_runtime
+- `core\video\midi_utils.py`
+  - functions: check_midi_available, get_midi_processor
+- `gui\layout\prompt_worker.py`
+  - classes: PromptSuggestWorker
+- `core\layout\fill_plan.py`
+  - classes: FillPlan
+- `core\project_tracker.py`
+  - functions: set_current_project, copy_project_on_exit
+- `gui\common\splitter_style.py`
+  - functions: apply_splitter_style
+- `core\sprite\ml_install.py`
+  - functions: python_supports_rembg, sprite_ml_packages, requirements_file, parse_requirements
+- `gui\layout\history_window.py`
+  - classes: HistoryWindow
+- `gui\layout\font_loader.py`
+  - classes: FontLoader
+  - functions: cached_families, _enumerate
+- `core\layout\project_io.py`
+  - functions: save_project, _resolve_image_refs, load_project
+- `gui\sprite\export_formats.py`
+  - functions: _stem, write_godot_tres, write_aseprite_native, register_extra_formats
+- `core\layout\page_sizes.py`
+  - functions: to_inches, preset_to_page_size, parse_size_text, load_custom_sizes, save_custom_size
+- `core\sprite\generation\_common.py`
+  - functions: emit, now_iso, redact_secrets
+- `gui\common\markdown_tables.py`
+  - functions: parse_markdown_table, extract_resolution_px
+- `core\layout\history.py`
+  - classes: History
+- `core\layout\geometry.py`
+  - functions: validate_segments, segments_bbox, translate_segments
+- `core\model_registry\__init__.py`
+  - functions: resolve, get_registry, context_window, available
+- `core\sprite\exporters\texturepacker_json.py`
+  - functions: frame_key, _frame_entry, texturepacker_document, export_texturepacker_json
+- `core\sprite\project_copy.py`
+  - functions: copy_project
+- `gui\sprite\prefs.py`
+  - functions: sprite_settings, _as_bool, get_pref, set_pref, purge_after_export_enabled, set_purge_after_export, confirm_purge
+- `core\layout\text_path.py`
+  - functions: validate_text_path, default_text_path, glyph_offsets
+- `providers\video\__init__.py`
+  - classes: LipSyncBackend
+  - functions: get_lipsync_provider, get_available_lipsync_backends
+- `core\image_size.py`
+  - functions: validate_custom_size, parse_size_string
+- `core\layout\overlay_ops.py`
+  - functions: _bbox_contains, _bbox_center, overlay_anchor_stranded, nearest_region_center, reposition_stranded_overlays
+- `gui\sprite\retouch_wiring.py`
+  - functions: apply_retouch, open_retouch_dialog, install_retouch
+- `core\sprite\exporters\aseprite_json.py`
+  - functions: frame_key, _frame_entry, aseprite_document, export_aseprite_json
+- `core\layout\styles.py`
+  - functions: _role, default_style_for, effective_text_style
+- `core\styles\models.py`
+  - classes: StyleDescriptor, Style
+- `core\sprite\undo.py`
+  - classes: FrameListSnapshot, SnapshotStack
+- `gui\sprite\project_dialog.py`
+  - classes: SpriteProjectDialog
+- `core\sprite\presets.py`
+  - functions: parse_cell_size, format_cell_size, integer_scale, integer_scale_table
+- `core\video\continuity_helper.py`
+  - classes: ContinuityHelper
+  - functions: get_continuity_helper
+- `gui\utils\stderr_suppressor.py`
+  - classes: SuppressStderr
+- `gui\sprite\engine_preset_box.py`
+  - classes: EnginePresetBox
+  - functions: install_engine_presets
+- `core\sprite\generation\prompts.py`
+  - functions: _parse_hex, normalize_hex, color_name, strip_render_terms, inject_chroma, background_prompt
+- `gui\layout\style_panel.py`
+  - classes: StylePanel
+- `gui\sprite\shortcuts.py`
+  - functions: resolve_target, _shortcut_parent, install_shortcuts
+- `gui\layout\canvas_widget.py`
+  - classes: CanvasWidget
+- `gui\sprite\undo_controller.py`
+  - classes: UndoController
+- `gui\styles\style_picker.py`
+  - classes: StylePickerWidget
 
 ## Notes
 - Refer to this map to quickly locate functions, classes, and modules.
