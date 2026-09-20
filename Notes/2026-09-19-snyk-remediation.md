@@ -20,7 +20,7 @@ The user approved exactly three SDK-only LiteLLM proxy exceptions after reviewin
 
 - Final policy-aware Snyk CLI 1.1307.3 scan: passed, 109 dependencies, zero unignored findings, exactly three ignored findings.
 - Unfiltered scan: exactly the three approved LiteLLM advisories; no Protobuf finding.
-- Dependency consistency: 132 installed packages compatible.
+- Dependency consistency: 133 installed packages compatible.
 - Focused migration, model-cache verification, optional installation UI, matting, and configuration tests: 98 passed, one Windows-specific skip. Earlier SDK, Sprite generation, exporters, CLI sidecars, and image processing gate: 207 passed (overlapping coverage, not an additive total).
 - Native Tasks inference with official assets: 512x512 alpha mask, 33x4 pose landmarks, 478x3 face landmarks; finite output and clean resource closure.
 - Scoped Ruff correctness checks and full application byte compilation passed. New shared modules pass mypy.
@@ -48,3 +48,7 @@ Review follow-up validation: final combined focused gate passed 103 tests with o
 The hosted check for commit 1e16782 selected NumPy 1.21.3 through Pretty-MIDI 0.2.11.post0 and reported SNYK-PYTHON-NUMPY-2321964, SNYK-PYTHON-NUMPY-2321966, and SNYK-PYTHON-NUMPY-2321970. The tested local environment uses NumPy 2.5.3. An explicit NumPy >=1.26.4 requirement prevents the hosted resolver from selecting those vulnerable releases while retaining compatibility with older supported Python versions. No additional exceptions were added.
 
 The follow-up hosted scan still selected NumPy 1.21.3 because the organization defaults to Python 3.7. Snyk documents that this legacy mode omits incompatible dependencies rather than failing. The repository policy now selects Python 3.12, matching local validation, without changing organization defaults. Hosted SCM scans also omit constraint-file directives; local CLI scans retain the complete constrained environment. [Snyk SCM Python documentation](https://docs.snyk.io/supported-languages/supported-languages-list/python/scm-integrations-and-python) describes both behaviors.
+
+With Python 3.12 selected, the hosted scan cleared all NumPy findings and identified SNYK-PYTHON-OPENCVPYTHON-5926695 at the declared OpenCV 4.8.0 floor. The requirement now starts at the patched 4.8.1.78 release. The validated local environment already uses OpenCV 5.0.0.93.
+
+Final local scan passes after the OpenCV floor update. The isolated environment now includes Hugging Face Xet 1.6.0, installed with the seven-day publication cutoff after Snyk identified its missing platform-dependent distribution. Its native import passes, and all 133 installed packages are compatible.
