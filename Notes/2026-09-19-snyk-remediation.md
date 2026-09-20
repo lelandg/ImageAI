@@ -42,3 +42,7 @@ Implementation and local verification are complete. Delivery proceeds through th
 The configured CL PR Reviewer approved PR #53 without blockers. Follow-ups restore CodeMap symbols when the checkout lives under a .codex ancestor, pin verified model URLs to immutable version 1, declare packaging explicitly, and reduce/redact committed scan evidence. The hosted Snyk project now has exactly the three approved expiring exceptions, configured to stop ignoring once a fix is available. A fresh hosted check is required before merge.
 
 Review follow-up validation: final combined focused gate passed 103 tests with one platform skip; new helper mypy and scoped Ruff passed. Immutable model URLs downloaded bytes matching all three existing hashes. Model-mask and legacy-runtime error tests passed, and module-level availability mocking was removed.
+
+## Hosted resolver follow-up
+
+The hosted check for commit 1e16782 selected NumPy 1.21.3 through Pretty-MIDI 0.2.11.post0 and reported SNYK-PYTHON-NUMPY-2321964, SNYK-PYTHON-NUMPY-2321966, and SNYK-PYTHON-NUMPY-2321970. The tested local environment uses NumPy 2.5.3. An explicit NumPy >=1.26.4 requirement prevents the hosted resolver from selecting those vulnerable releases while retaining compatibility with older supported Python versions. No additional exceptions were added.

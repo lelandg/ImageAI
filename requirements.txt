@@ -2,6 +2,7 @@
 
 protobuf>=5.29.6,<6  # Patched recursion limit; modern MediaPipe Tasks has no protobuf<5 pin
 pillow>=12.3.0
+numpy>=1.26.4  # Explicit safe floor for MIDI and image processing dependencies
 packaging>=26.3  # Runtime version/specifier validation for optional ML backends
 google-genai>=2.9.0  # 2.9.0+: GeminiNextGen Interactions API w/ output_video (Gemini Omni video). NBP image_size (1K/2K/4K) still supported.
 google-cloud-aiplatform
