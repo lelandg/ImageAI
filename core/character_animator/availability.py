@@ -8,6 +8,8 @@ Follows the pattern from core/upscaling.py for REALESRGAN_AVAILABLE.
 import logging
 from typing import Dict, List, Tuple
 
+from core.mediapipe_tasks import MEDIAPIPE_SPEC, import_mediapipe
+
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -34,7 +36,7 @@ except ImportError:
 
 # Check MediaPipe for pose/face detection
 try:
-    import mediapipe as mp
+    import_mediapipe()
     POSE_DETECTION_AVAILABLE = True
     logger.debug("MediaPipe pose detection available")
 except ImportError:
@@ -235,7 +237,7 @@ def get_feature_availability() -> Dict[str, Dict]:
             "name": "Pose & Face Detection",
             "available": POSE_DETECTION_AVAILABLE,
             "description": "MediaPipe for pose landmarks and face mesh",
-            "package": "mediapipe>=0.10.0,<0.10.15",  # Requires legacy mp.solutions API
+            "package": MEDIAPIPE_SPEC,
         },
         "ai_editing": {
             "name": "Cloud AI Editing",

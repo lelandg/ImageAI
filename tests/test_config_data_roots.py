@@ -624,6 +624,7 @@ def test_save_reports_an_unexpected_failure_instead_of_raising(
     assert any(record.levelno >= logging.ERROR for record in caplog.records)
 
 
+@pytest.mark.skipif(__import__("os").name == "nt", reason="Windows chmod does not enforce directory write permissions")
 @pytest.mark.skipif(hasattr(__import__("os"), "geteuid")
                     and __import__("os").geteuid() == 0,
                     reason="root ignores the directory mode")

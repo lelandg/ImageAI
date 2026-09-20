@@ -39,10 +39,8 @@ MAX_SYMBOLS_PER_FILE = 20
 def list_source_files(root: Path) -> list[Path]:
     files: list[Path] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        # prune excluded directories
-        parts = Path(dirpath).parts
-        if any(p in EXCLUDE_DIRS for p in parts):
-            continue
+        # Prune repository children, never the ancestors containing this checkout.
+        dirnames[:] = [name for name in dirnames if name not in EXCLUDE_DIRS]
         for name in filenames:
             if name in EXCLUDE_FILES:
                 continue
@@ -171,7 +169,7 @@ def collect_symbol_index(root: Path) -> list[tuple[str, list[str], list[str]]]:
             continue
         for path in base.rglob("*.py"):
             # Skip caches and excluded dirs
-            parts = path.parts
+            parts = path.relative_to(root).parent.parts
             if any(p in EXCLUDE_DIRS for p in parts):
                 continue
             py_files.append(path)

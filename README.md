@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.49.0**
+**Version 0.49.1**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **Chameleon Labs Discord - Support, AI Art & Community: [Chameleon Labs Discord](https://discord.gg/chameleonlabs)**
@@ -277,7 +277,7 @@
 
 ## 1. Requirements
 
-- Python 3.9+ (3.9 to 3.13 supported)
+- Python 3.10+ (3.10 to 3.13 supported)
 - Internet connection
 - Google account (for Gemini) or OpenAI account (for DALL·E)
 - Dependencies (auto-installed via requirements.txt):
@@ -1344,7 +1344,7 @@ The image route builds the frames from an image model instead of a video model. 
 
 **Optional ML Backends**:
 - The **Install…** button in the Key / matte group installs `mediapipe` and `rembg` into the running Python environment.
-- `mediapipe` removes a background with no model download. `rembg` downloads its model (isnet-anime, 168 MB, MIT) on first use.
+- `mediapipe` uses the Tasks API and downloads its verified selfie model (about 0.24 MB) on first use. Character Animator downloads pose and face models (about 33 MB combined) when first used. Models stay in the configured Models cache. Legacy MediaPipe installations are shown as unavailable until upgraded through **Install…**. `rembg` downloads its model (isnet-anime, 168 MB, MIT) on first use. See [MediaPipe Tasks migration](Docs/MediaPipe-Tasks.md).
 - `rembg` needs Python 3.11-3.13. The dialog drops it on any other version and says so.
 - Restart ImageAI after the install, so the new backends load.
 

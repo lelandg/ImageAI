@@ -1,0 +1,33 @@
+# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.
+version: v1.25.1
+# ignores vulnerabilities until expiry date; change duration by modifying expiry date
+ignore:
+  SNYK-PYTHON-LITELLM-17391451:
+    - '*':
+        reason: >-
+          Approved SDK-only exception: ImageAI never starts LiteLLM proxy
+          authenticate_user endpoints; no upstream fixed version. See
+          Docs/Snyk-Exceptions.md.
+        expires: 2026-10-19T00:00:00.000Z
+        created: 2026-09-19T23:42:34.142Z
+  SNYK-PYTHON-LITELLM-17393717:
+    - '*':
+        reason: >-
+          Approved SDK-only exception: ImageAI exposes no LiteLLM
+          /sso/debug/login or callback endpoints; no upstream fixed version. See
+          Docs/Snyk-Exceptions.md.
+        expires: 2026-10-19T00:00:00.000Z
+        created: 2026-09-19T23:42:42.775Z
+  SNYK-PYTHON-LITELLM-17393719:
+    - '*':
+        reason: >-
+          Approved SDK-only exception: ImageAI does not run LiteLLM proxy OpenID
+          redirect/session handling; no upstream fixed version. See
+          Docs/Snyk-Exceptions.md.
+        expires: 2026-10-19T00:00:00.000Z
+        created: 2026-09-19T23:42:52.501Z
+patch: {}
+
+# Match the supported interpreter used for local security validation.
+language-settings:
+  python: '3.12'

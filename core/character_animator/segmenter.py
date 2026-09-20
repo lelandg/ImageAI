@@ -67,29 +67,22 @@ class BodyPartSegmenter:
             return False
 
         try:
-            import mediapipe as mp
-
-            # Initialize pose detection
-            self._mp_pose = mp.solutions.pose.Pose(
-                static_image_mode=True,
-                model_complexity=2,  # Most accurate
-                enable_segmentation=True,
-                min_detection_confidence=0.5,
+            from core.mediapipe_tasks import (
+                create_face_landmarker,
+                create_pose_landmarker,
             )
 
-            # Initialize face mesh
-            self._mp_face_mesh = mp.solutions.face_mesh.FaceMesh(
-                static_image_mode=True,
-                max_num_faces=1,
-                refine_landmarks=True,  # Include iris landmarks
-                min_detection_confidence=0.5,
-            )
+            if self._mp_pose is None:
+                self._mp_pose = create_pose_landmarker()
+            if self._mp_face_mesh is None:
+                self._mp_face_mesh = create_face_landmarker()
 
             logger.info("MediaPipe pose and face detection initialized")
             return True
 
         except Exception as e:
             logger.error(f"Failed to initialize MediaPipe: {e}")
+            self.cleanup()
             return False
 
     def _init_sam(self):
@@ -165,20 +158,22 @@ class BodyPartSegmenter:
                 return None
 
         try:
+            from core.mediapipe_tasks import image_from_rgb
+
             # Convert to RGB numpy array
             img_array = np.array(image.convert("RGB"))
 
             # Process with MediaPipe
-            results = self._mp_pose.process(img_array)
+            results = self._mp_pose.detect(image_from_rgb(img_array))
 
-            if results.pose_landmarks is None:
+            if not results.pose_landmarks:
                 logger.warning("No pose detected in image")
                 return None
 
             # Extract landmarks as numpy array
             landmarks = np.array([
                 [lm.x * image.width, lm.y * image.height, lm.z, lm.visibility]
-                for lm in results.pose_landmarks.landmark
+                for lm in results.pose_landmarks[0]
             ])
 
             logger.info(f"Detected {len(landmarks)} pose landmarks")
@@ -203,23 +198,25 @@ class BodyPartSegmenter:
                 return None
 
         try:
+            from core.mediapipe_tasks import image_from_rgb
+
             # Convert to RGB numpy array
             img_array = np.array(image.convert("RGB"))
 
             # Process with MediaPipe
-            results = self._mp_face_mesh.process(img_array)
+            results = self._mp_face_mesh.detect(image_from_rgb(img_array))
 
-            if not results.multi_face_landmarks:
+            if not results.face_landmarks:
                 logger.warning("No face detected in image")
                 return None
 
             # Get first face
-            face_landmarks = results.multi_face_landmarks[0]
+            face_landmarks = results.face_landmarks[0]
 
             # Extract landmarks as numpy array
             landmarks = np.array([
                 [lm.x * image.width, lm.y * image.height, lm.z]
-                for lm in face_landmarks.landmark
+                for lm in face_landmarks
             ])
 
             logger.info(f"Detected {len(landmarks)} face landmarks")
@@ -594,13 +591,14 @@ class BodyPartSegmenter:
 
     def cleanup(self):
         """Release resources."""
-        if self._mp_pose is not None:
-            self._mp_pose.close()
-            self._mp_pose = None
-
-        if self._mp_face_mesh is not None:
-            self._mp_face_mesh.close()
-            self._mp_face_mesh = None
+        for attribute in ("_mp_pose", "_mp_face_mesh"):
+            task = getattr(self, attribute)
+            setattr(self, attribute, None)
+            if task is not None:
+                try:
+                    task.close()
+                except Exception:
+                    logger.exception("Failed to close MediaPipe task %s", attribute)
 
         self._sam_predictor = None
         self._initialized = False

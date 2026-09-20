@@ -1,6 +1,6 @@
 # ImageAI CodeMap
 
-Last Updated: 2026-09-05 11:47:10
+Last Updated: 2026-09-19 19:35:03
 
 ## Quick Navigation
 - Main Application: `main.py`
@@ -13,46 +13,6 @@ Last Updated: 2026-09-05 11:47:10
 
 ```text
 ImageAI/
-├── .superpowers/
-│   └── sdd/
-│       ├── HANDOFF.md  # 93 lines
-│       ├── final-fixes-report.md  # 103 lines
-│       ├── implementer-contract.md  # 27 lines
-│       ├── phase2-final-fixes-report.md  # 81 lines
-│       ├── phase2-task-1-report.md  # 197 lines
-│       ├── phase2-task-2-report.md  # 114 lines
-│       ├── phase2-task-3-report.md  # 100 lines
-│       ├── phase2-task-4-report.md  # 198 lines
-│       ├── phase2-task-5-report.md  # 88 lines
-│       ├── phase2-task-6-report.md  # 76 lines
-│       ├── phase2-task-7-report.md  # 78 lines
-│       ├── phase3-final-fixes-report.md  # 120 lines
-│       ├── phase3-task-1-report.md  # 153 lines
-│       ├── phase3-task-2-report.md  # 84 lines
-│       ├── phase3-task-3-report.md  # 69 lines
-│       ├── phase3-task-4-report.md  # 183 lines
-│       ├── phase3-task-5-report.md  # 91 lines
-│       ├── progress-subproject1-complete.md  # 39 lines
-│       ├── progress.md  # 38 lines
-│       ├── remove-sora-report.md  # 106 lines
-│       ├── reviewer-contract.md  # 21 lines
-│       ├── task-1-brief.md  # 206 lines
-│       ├── task-1-report.md  # 98 lines
-│       ├── task-2-brief.md  # 55 lines
-│       ├── task-2-report.md  # 104 lines
-│       ├── task-3-brief.md  # 93 lines
-│       ├── task-3-report.md  # 181 lines
-│       ├── task-4-brief.md  # 206 lines
-│       ├── task-4-report.md  # 70 lines
-│       ├── task-5-brief.md  # 125 lines
-│       ├── task-5-report.md  # 159 lines
-│       ├── task-6-brief.md  # 116 lines
-│       ├── task-6-report.md  # 103 lines
-│       ├── task-7-brief.md  # 78 lines
-│       ├── task-7-report.md  # 111 lines
-│       ├── task-8-brief.md  # 50 lines
-│       └── task-8-report.md  # 150 lines
-├── Characters/
 ├── Discord/
 │   ├── 2026-06-30-gemini-omni-video.md  # 20 lines
 │   ├── 2026-07-01-imageai-cli-and-skill.md  # 23 lines
@@ -78,7 +38,7 @@ ImageAI/
 │   ├── Character-Animator-Guide.md  # 199 lines
 │   ├── ChatGPT Lyric Generator for aisonggenerator.ai.md  # 153 lines
 │   ├── Claude Desktop Instructions.md  # 361 lines
-│   ├── CodeMap.md  # 1193 lines
+│   ├── CodeMap.md  # 1073 lines
 │   ├── CodeMap_Generator.md  # 24 lines
 │   ├── CodeReview-2025-10-19.md  # 169 lines
 │   ├── CodeReview-2025-11-14.md  # 499 lines
@@ -95,6 +55,7 @@ ImageAI/
 │   ├── LLM-Contracts.md  # 103 lines
 │   ├── LLM-Logging-Full-Content.md  # 136 lines
 │   ├── Linux-VM-Setup.md  # 185 lines
+│   ├── MediaPipe-Tasks.md  # 13 lines
 │   ├── Operation-Guard-System.md  # 281 lines
 │   ├── ProjectReview.md  # 183 lines
 │   ├── Reference-Image-Composite-Feature.md  # 190 lines
@@ -103,6 +64,7 @@ ImageAI/
 │   ├── Reference-System-Implementation-Summary.md  # 520 lines
 │   ├── Reference-UI-Implementation.md  # 647 lines
 │   ├── Scene-Batching-Implementation.md  # 269 lines
+│   ├── Snyk-Exceptions.md  # 19 lines
 │   ├── Sprite-CLI-Guide.md  # 250 lines
 │   ├── Storage-Locations-Known-Issues.md  # 172 lines
 │   ├── Suno-Package-Support.md  # 333 lines
@@ -116,40 +78,8 @@ ImageAI/
 │   ├── Wizard-Integration-Steps.md  # 528 lines
 │   ├── discord-beta-announcement.md  # 58 lines
 │   └── gcloud-install-guide.md  # 592 lines
-├── Fonts/
-├── Layouts/
 ├── Notes/
-│   ├── PostPrism.ai/
-│   │   ├── ImageAI_PostPrism - Transform Audio into Ready-to-Publish Content_files/
-│   │   ├── ImageAI_PostPrism_BlogPost.md  # 24 lines
-│   │   ├── ImageAI_PostPrism_CarouselOutline.md  # 41 lines
-│   │   ├── ImageAI_PostPrism_KeyQuotes.md  # 16 lines
-│   │   ├── ImageAI_PostPrism_KeyTakeaways.md  # 9 lines
-│   │   ├── ImageAI_PostPrism_NewsletterIntro.txt  # 6 lines
-│   │   └── ImageAI_PostPrism_ShowNotes.md  # 30 lines
-│   ├── discord-rich-presence-kit-AgentReady/
-│   │   ├── agent_tools/
-│   │   ├── assets/
-│   │   ├── docs/
-│   │   │   ├── AGENT.md  # 52 lines
-│   │   ├── examples/
-│   │   │   ├── example_app.py  # 28 lines
-│   │   │   ├── presence_cli.py  # 78 lines
-│   │   │   ├── presence_server.py  # 12 lines
-│   │   │   └── presence_stdio.py  # 52 lines
-│   │   ├── src/
-│   │   │   └── discord_presence_helper/
-│   │   │       ├── __init__.py  # 9 lines
-│   │   │       ├── agent_api.py  # 104 lines
-│   │   │       ├── client.py  # 160 lines
-│   │   │       └── encryption.py  # 24 lines
-│   │   ├── README.md  # 59 lines
-│   │   ├── requirements.txt  # 6 lines
 │   ├── fable5-comic/
-│   │   ├── fable5-ace-music/
-│   │   │   ├── Samples/
-│   │   │   ├── autosave/
-│   │   ├── images/
 │   │   ├── video/
 │   │   ├── README.md  # 46 lines
 │   ├── sprite-tab-archive/
@@ -221,11 +151,9 @@ ImageAI/
 │   ├── 2026-09-05-sprite-projects-and-startup.md  # 75 lines
 │   ├── 2026-09-05-sprite-release.md  # 27 lines
 │   ├── 2026-09-05-sprite-ui-sizing.md  # 28 lines
+│   ├── 2026-09-19-snyk-remediation.md  # 44 lines
 │   ├── BUGFIX_veo_duration_handling.md  # 195 lines
 │   ├── Bot_Animation_Ideas.md  # 66 lines
-│   ├── CharacterAnimator_BugFixes_20260112.md  # 75 lines
-│   ├── CharacterAnimator_BugFixes_Round2_20260112.md  # 214 lines
-│   ├── Claude Addons.md  # 79 lines
 │   ├── Claude-Interactions-colored.md  # 175 lines
 │   ├── Claude-Interactions.md  # 206 lines
 │   ├── CodeReview-splitter-mainwindow-theming-20260219.md  # 172 lines
@@ -235,10 +163,8 @@ ImageAI/
 │   ├── DialogUX-Audit-Findings-2026-07-06.md  # 735 lines
 │   ├── Dictation.txt  # 7 lines
 │   ├── Discord_FontGenerator_Options.md  # 63 lines
-│   ├── Discord_Logo_Prompts.md  # 27 lines
 │   ├── Discord_RPC_Dialog_Updates.md  # 52 lines
 │   ├── Discord_v0.32_Release.md  # 42 lines
-│   ├── EXTRACT_FRAMES_README.md  # 121 lines
 │   ├── Features - Agent interactions and more.md  # 141 lines
 │   ├── FontGenerator_Flow.md  # 202 lines
 │   ├── HF_Auth_UI_Guide.md  # 83 lines
@@ -259,25 +185,16 @@ ImageAI/
 │   ├── VIDEO_TAB_LOGGING.md  # 213 lines
 │   ├── Veo 3 Features.md  # 19 lines
 │   ├── Veo3_Tempo_Rhythm_Research.md  # 875 lines
-│   ├── Vibe_Lab_Animated_Emoji_Ideas.md  # 135 lines
-│   ├── WSL-Migration-to-G-Drive.md  # 113 lines
 │   ├── api_keys_comparison.md  # 114 lines
-│   ├── doc-report-2026-02-27.md  # 26 lines
 │   ├── google-genai-imageconfig-fix.md  # 69 lines
 │   ├── hermes-claude-config-sync-2026-07-29.md  # 55 lines
 │   ├── repo_error_check_2026-04-27.md  # 174 lines
 │   ├── session-2026-05-31-merge-and-skill-expansion.md  # 37 lines
-│   ├── session-2026-06-14-model-registry-migration.md  # 58 lines
-│   └── ₿ Bitcoin Wealth Builder.md  # 33 lines
+│   └── session-2026-06-14-model-registry-migration.md  # 58 lines
 ├── Plans/
 │   ├── 2026-08-24-sprite-tab-research/
 │   ├── ImageAI-Prompt-Enhancer-Pack/
 │   │   ├── ImageAI_Prompt_Enhancer_GPT5.md  # 453 lines
-│   ├── ImageAI_Layout_Starter/
-│   │   ├── Core/
-│   │   ├── Docs/
-│   │   ├── Fonts/
-│   │   └── Templates/
 │   ├── issue-11-ux-proposals/
 │   │   ├── exports/
 │   │   ├── aggregate_exports.py  # 90 lines
@@ -285,12 +202,6 @@ ImageAI/
 │   │   ├── README.txt  # 9 lines
 │   │   ├── basic_example.py  # 45 lines
 │   │   └── full_features_example.py  # 119 lines
-│   ├── providers/
-│   ├── samples/
-│   │   └── mycountry_project/
-│   │       ├── assets/
-│   │       ├── exports/
-│   │       └── logs/
 │   ├── 2026-01-27-font-segmentation-row-column.md  # 915 lines
 │   ├── 2026-01-28-generate-missing-glyphs.md  # 120 lines
 │   ├── 2026-02-18-history-tab-implementation.md  # 1206 lines
@@ -351,10 +262,10 @@ ImageAI/
 │   ├── 2026-09-04-sprite-background-modes.md  # 31 lines
 │   ├── 2026-09-05-sprite-cli.md  # 51 lines
 │   ├── 2026-09-05-sprite-ui-ux.md  # 36 lines
+│   ├── 2026-09-19-snyk-remediation.md  # 17 lines
 │   ├── AICharacterGenerator.md  # 310 lines
 │   ├── CharacterAnimatorPuppetAutomation.md  # 419 lines
 │   ├── CharacterAnimatorPuppetAutomation_LLM.md  # 180 lines
-│   ├── CharacterAnimator_LayerExport_v3.md  # 129 lines
 │   ├── Comprehensive Style Presets for AI Image & Video Generation - Research Report-Claude.md  # 871 lines
 │   ├── ComprehensiveSettings.md  # 560 lines
 │   ├── Custom emojis from Cathy Schmidt.md  # 9 lines
@@ -424,27 +335,11 @@ ImageAI/
 │   ├── sprite-tab-feature-selector.md  # 101 lines
 │   └── veo_3_inspirational_continuity.md  # 65 lines
 ├── Prompt Library/
-├── Sample/
-│   ├── Veo3_Reference_Workflow_Kit_Full_Grandpa_Was_A_Democrat/
-│   │   ├── Prompts/
-│   │   │   ├── Grandpa_Was_a_Democrat_Image_Prompts.txt  # 336 lines
-│   │   │   └── Grandpa_Was_a_Democrat_Image_Prompts_Details.md  # 330 lines
-│   │   ├── Grandpa Was A Democrat-Lyrics.txt  # 87 lines
-│   │   └── Placement_Guide.md  # 75 lines
-│   ├── Video Project image descriptions.md  # 20 lines
-│   └── midjourney_provider.py  # 99 lines
 ├── SampleData/
-│   ├── SpriteCLI/
-│   │   ├── README.md  # 35 lines
-│   │   └── rebuild.py  # 51 lines
-│   └── ice_ice_baby_heavymetal.md  # 91 lines
+│   └── SpriteCLI/
+│       ├── README.md  # 35 lines
+│       └── rebuild.py  # 51 lines
 ├── assets/
-├── cache/
-│   ├── ai_visemes/
-│   ├── exported_puppet/
-│   │   ├── Mouth/
-│   │   ├── manifest.txt  # 25 lines
-│   └── visemes/
 ├── cli/
 │   ├── commands/
 │   │   ├── __init__.py  # 0 lines
@@ -463,13 +358,13 @@ ImageAI/
 │   ├── character_animator/
 │   │   ├── __init__.py  # 62 lines
 │   │   ├── ai_face_editor.py  # 1071 lines
-│   │   ├── availability.py  # 304 lines
+│   │   ├── availability.py  # 306 lines
 │   │   ├── constants.py  # 463 lines
 │   │   ├── face_generator.py  # 539 lines
-│   │   ├── installer.py  # 384 lines
+│   │   ├── installer.py  # 385 lines
 │   │   ├── models.py  # 399 lines
 │   │   ├── psd_exporter.py  # 723 lines
-│   │   ├── segmenter.py  # 608 lines
+│   │   ├── segmenter.py  # 606 lines
 │   │   └── svg_exporter.py  # 636 lines
 │   ├── font_generator/
 │   │   ├── __init__.py  # 106 lines
@@ -547,7 +442,7 @@ ImageAI/
 │   │   ├── configs.py  # 140 lines
 │   │   ├── extract.py  # 342 lines
 │   │   ├── keying.py  # 618 lines
-│   │   ├── matting.py  # 157 lines
+│   │   ├── matting.py  # 164 lines
 │   │   ├── ml_install.py  # 46 lines
 │   │   ├── models.py  # 162 lines
 │   │   ├── pipeline.py  # 780 lines
@@ -560,7 +455,6 @@ ImageAI/
 │   │   ├── stabilize.py  # 318 lines
 │   │   ├── timing.py  # 117 lines
 │   │   └── undo.py  # 81 lines
-│   ├── style_presets/
 │   ├── styles/
 │   │   ├── __init__.py  # 10 lines
 │   │   ├── analyzer.py  # 279 lines
@@ -604,7 +498,7 @@ ImageAI/
 │   │   ├── video_prompt_generator.py  # 637 lines
 │   │   ├── whisper_analyzer.py  # 501 lines
 │   │   └── workflow_wizard.py  # 594 lines
-│   ├── __init__.py  # 69 lines
+│   ├── __init__.py  # 73 lines
 │   ├── batch_manager.py  # 492 lines
 │   ├── config.py  # 676 lines
 │   ├── config_io.py  # 498 lines
@@ -620,9 +514,11 @@ ImageAI/
 │   ├── llm_parsing.py  # 124 lines
 │   ├── logging_config.py  # 325 lines
 │   ├── lyrics_to_prompts.py  # 444 lines
+│   ├── mediapipe_tasks.py  # 143 lines
 │   ├── musetalk_installer.py  # 784 lines
-│   ├── package_installer.py  # 624 lines
+│   ├── package_installer.py  # 626 lines
 │   ├── paths.py  # 315 lines
+│   ├── platform_runtime.py  # 23 lines
 │   ├── preset_loader.py  # 402 lines
 │   ├── project_tracker.py  # 42 lines
 │   ├── prompt_data_loader.py  # 150 lines
@@ -636,14 +532,7 @@ ImageAI/
 │   ├── whisper_installer.py  # 226 lines
 │   └── wikimedia_client.py  # 244 lines
 ├── data/
-│   ├── prompts/
-│   ├── style_presets/
-│   │   ├── artist_signatures/
-│   │   ├── cinematic/
-│   │   ├── contemporary_digital/
-│   │   ├── cultural_traditions/
-│   │   └── historical_art/
-├── generated_videos/
+│   └── prompts/
 ├── gui/
 │   ├── character_animator/
 │   │   ├── __init__.py  # 20 lines
@@ -680,7 +569,6 @@ ImageAI/
 │   │   ├── template_selector.py  # 340 lines
 │   │   └── text_gen_dialog.py  # 676 lines
 │   ├── resources/
-│   │   ├── fonts/
 │   │   └── __init__.py  # 0 lines
 │   ├── sprite/
 │   │   ├── __init__.py  # 5 lines
@@ -804,6 +692,8 @@ ImageAI/
 │   │   └── sora_shot_prompt.j2  # 62 lines
 │   └── __init__.py  # 2098 lines
 ├── tests/
+│   ├── character_animator/
+│   │   └── test_segmenter_tasks.py  # 144 lines
 │   ├── gui/
 │   │   ├── test_dialog_conventions.py  # 229 lines
 │   │   ├── test_gui_paths.py  # 46 lines
@@ -951,7 +841,7 @@ ImageAI/
 │   │   ├── test_keying_cleanup.py  # 98 lines
 │   │   ├── test_keying_despill.py  # 67 lines
 │   │   ├── test_keying_ffmpeg.py  # 88 lines
-│   │   ├── test_matting.py  # 194 lines
+│   │   ├── test_matting.py  # 249 lines
 │   │   ├── test_matting_difference.py  # 39 lines
 │   │   ├── test_ml_install.py  # 52 lines
 │   │   ├── test_models.py  # 61 lines
@@ -1004,32 +894,33 @@ ImageAI/
 │   │   ├── test_veo_cancel_hook.py  # 121 lines
 │   │   ├── test_video_paths.py  # 130 lines
 │   │   └── test_video_provider_persistence.py  # 128 lines
-│   ├── conftest.py  # 67 lines
+│   ├── conftest.py  # 71 lines
 │   ├── test_cli_image_sidecars.py  # 155 lines
-│   ├── test_config_data_roots.py  # 718 lines
+│   ├── test_config_data_roots.py  # 719 lines
 │   ├── test_config_io.py  # 447 lines
+│   ├── test_generate_code_map.py  # 36 lines
 │   ├── test_google_sizing.py  # 191 lines
 │   ├── test_live_llm_params.py  # 257 lines
 │   ├── test_llm_params.py  # 280 lines
 │   ├── test_logging_redaction.py  # 186 lines
+│   ├── test_mediapipe_tasks.py  # 101 lines
 │   ├── test_no_hardcoded_paths.py  # 90 lines
 │   ├── test_paths.py  # 551 lines
+│   ├── test_platform_runtime.py  # 26 lines
 │   ├── test_provider_cache.py  # 355 lines
 │   ├── test_readme_help_anchors.py  # 73 lines
 │   └── test_utils_sidecar.py  # 57 lines
 ├── tools/
-│   ├── generate_code_map.py  # 239 lines
+│   ├── generate_code_map.py  # 237 lines
 ├── utils/
 │   ├── README.md  # 90 lines
 │   ├── diagnose_references.py  # 116 lines
 │   ├── recover_reference_metadata.py  # 286 lines
-│   ├── test_paths.py  # 56 lines
 │   ├── update_history_from_logs.py  # 321 lines
 │   └── update_reference_metadata.py  # 282 lines
 ├── weights/
-│   ├── character_animator/
 ├── AGENTS.md  # 73 lines
-├── CHANGELOG.md  # 1844 lines
+├── CHANGELOG.md  # 1852 lines
 ├── CLAUDE.md  # 6 lines
 ├── COMMIT_MESSAGE.txt  # 32 lines
 ├── CONTRIBUTING.md  # 62 lines
@@ -1045,35 +936,22 @@ ImageAI/
 ├── diagnose_qt_multimedia.py  # 237 lines
 ├── download_models.py  # 161 lines
 ├── download_social_icons.py  # 173 lines
-├── extract_all_last_frames.py  # 223 lines
 ├── imageai_codemap_agent.md  # 254 lines
 ├── install_log.txt  # 20 lines
 ├── main.py  # 269 lines # Main entry point
-├── main_original.py  # 2646 lines
 ├── migrate_config.py  # 179 lines
 ├── migrate_history.py  # 304 lines
 ├── requirements-local-sd.txt  # 15 lines
-├── requirements-sprite-ml.txt  # 8 lines
-├── requirements.txt  # 57 lines
+├── requirements-security.txt  # 14 lines
+├── requirements-sprite-ml.txt  # 9 lines
+├── requirements.txt  # 59 lines
 ├── secure_keys.py  # 106 lines
-├── test_aspect_ratio.py  # 59 lines
-├── test_auth_mode.py  # 66 lines
-├── test_enhanced_dialog_focus.py  # 61 lines
-├── test_imagen_customization.py  # 450 lines
-├── test_layout_phase1.py  # 236 lines
-├── test_layout_phase2.py  # 369 lines
-├── test_lyrics.txt  # 4 lines
 ├── test_ollama.py  # 202 lines
-├── test_phase3_templates.py  # 296 lines
-├── test_prompt_dialog_focus.py  # 59 lines
-├── test_scaling.py  # 82 lines
-├── test_tempo_descriptors.py  # 159 lines
-├── test_veo_batching.py  # 177 lines
-├── test_veo_duration_prompts.py  # 187 lines
 └── verify_ollama_ui.py  # 117 lines
 ```
 
 ## Core Exports
+- initialize_platform_runtime (from core.platform_runtime)
 - ConfigManager (from core.config)
 - get_api_key_url (from core.config)
 - APP_NAME (from core.constants)
@@ -1105,6 +983,8 @@ ImageAI/
 ## Module Symbols (Top-Level)
 - `core\layout\template_io.py`
   - functions: export_template, import_template
+- `core\platform_runtime.py`
+  - functions: _without_wmi, initialize_platform_runtime
 - `core\video\midi_utils.py`
   - functions: check_midi_available, get_midi_processor
 - `gui\layout\prompt_worker.py`

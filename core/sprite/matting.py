@@ -62,7 +62,11 @@ def _installed(name: str) -> bool:
 
 
 def available_backends() -> Dict[str, bool]:
-    return {name: _installed(name) for name in ML_BACKENDS}
+    from core.mediapipe_tasks import mediapipe_available
+    return {
+        "mediapipe": _installed("mediapipe") and mediapipe_available(),
+        "rembg": _installed("rembg"),
+    }
 
 
 def rembg_model_dir() -> Path:
@@ -90,20 +94,23 @@ def _tighten(mask: np.ndarray) -> np.ndarray:
 def _mediapipe_alpha(rgb: np.ndarray, refine_edges: bool) -> np.ndarray:
     if not _installed("mediapipe"):
         raise _fail(f"MediaPipe is not installed. {INSTALL_HINT}")
+    from core.mediapipe_tasks import create_image_segmenter, image_from_rgb
+
     try:
-        import mediapipe as mp  # lazy: heavy import
-    except ImportError as exc:
-        raise _fail(f"MediaPipe is installed but could not be imported ({exc}). {INSTALL_HINT}") from exc
-    solutions = getattr(mp, "solutions", None)
-    if solutions is None or not hasattr(solutions, "selfie_segmentation"):
-        raise _fail("This MediaPipe build has no mp.solutions.selfie_segmentation; "
-                    "install mediapipe>=0.10.0,<0.10.15 from requirements-sprite-ml.txt.")
-    with solutions.selfie_segmentation.SelfieSegmentation(model_selection=1) as seg:
-        result = seg.process(np.ascontiguousarray(rgb))
-    mask = getattr(result, "segmentation_mask", None)
-    if mask is None:
-        raise _fail("MediaPipe returned no segmentation mask for this frame.")
-    alpha = np.clip(np.asarray(mask, dtype=np.float32), 0.0, 1.0)
+        with create_image_segmenter() as segmenter:
+            result = segmenter.segment(image_from_rgb(rgb))
+            masks = result.confidence_masks
+            if not masks or len(masks) not in (1, 2):
+                raise ValueError("MediaPipe returned no person segmentation mask for this frame")
+            # The pinned model's final confidence mask is the person channel.
+            mask = masks[-1].numpy_view()
+            if mask.ndim == 3 and mask.shape[-1] == 1:
+                mask = mask[:, :, 0]
+            alpha = np.clip(np.array(mask, dtype=np.float32, copy=True), 0.0, 1.0)
+            if alpha.shape != rgb.shape[:2] or not np.isfinite(alpha).all():
+                raise ValueError("MediaPipe returned an invalid segmentation mask")
+    except Exception as exc:
+        raise _fail(f"MediaPipe background removal failed ({exc}). {INSTALL_HINT}") from exc
     return _tighten(alpha) if refine_edges else alpha
 
 

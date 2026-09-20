@@ -12,7 +12,7 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
-MEDIAPIPE_SPEC = "mediapipe>=0.10.0,<0.10.15"   # legacy mp.solutions API, matches core/character_animator
+from core.mediapipe_tasks import MEDIAPIPE_SPEC
 REMBG_SPEC = "rembg[cpu]>=2.0.60"
 REMBG_PYTHON = ((3, 11), (3, 14))                # inclusive floor, exclusive ceiling
 

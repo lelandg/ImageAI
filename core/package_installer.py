@@ -10,6 +10,8 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 from PySide6.QtCore import QThread, Signal, QObject
 
+from core.mediapipe_tasks import MEDIAPIPE_SPEC
+
 logger = logging.getLogger(__name__)
 
 
@@ -569,7 +571,7 @@ def get_puppet_ai_packages() -> Tuple[List[str], str]:
     packages.append("sam2")  # Official Meta SAM 2 package from PyPI
 
     # Pose/Face detection
-    packages.append("mediapipe>=0.10.0")
+    packages.append(MEDIAPIPE_SPEC)
 
     # Note: Depth estimation and local inpainting removed in favor of cloud AI editing
     # See Plans/AICharacterGenerator.md for details

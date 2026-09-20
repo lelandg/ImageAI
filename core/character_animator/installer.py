@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from core.paths import get_data_paths
+from core.mediapipe_tasks import MEDIAPIPE_SPEC, import_mediapipe
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ PUPPET_PACKAGES: Dict[str, List[str]] = {
         "sam2",  # Official Meta SAM 2 package from PyPI
     ],
     "pose_detection": [
-        "mediapipe>=0.10.0,<0.10.15",  # Pin to version with mp.solutions API (removed in 0.10.15+)
+        MEDIAPIPE_SPEC,  # Tasks API; no legacy protobuf pin
     ],
     "depth_estimation": [
         # Depth-Anything is used via transformers + HuggingFace model
@@ -165,7 +166,7 @@ def check_dependencies() -> Dict[str, bool]:
 
     # Check MediaPipe
     try:
-        import mediapipe
+        import_mediapipe()
         status["mediapipe"] = True
     except ImportError:
         status["mediapipe"] = False
@@ -222,7 +223,7 @@ def get_missing_packages() -> List[str]:
     package_map = {
         "torch": "torch>=2.5.1",  # Required by sam2
         "sam2": "sam2",  # Official Meta SAM 2 package from PyPI
-        "mediapipe": "mediapipe>=0.10.0,<0.10.15",
+        "mediapipe": MEDIAPIPE_SPEC,
         "depth_anything": "transformers>=4.35.0",  # For Depth-Anything via HuggingFace
         "diffusers": "diffusers>=0.25.0",
         "controlnet": "controlnet-aux>=0.0.7",

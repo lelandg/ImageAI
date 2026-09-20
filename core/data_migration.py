@@ -49,7 +49,7 @@ GROUP_CONTENTS = {
 # name that no group owns is data that every move leaves behind.
 CACHE_DIR = "cache"
 CACHE_OWNERS: Dict[Group, Tuple[str, ...]] = {
-    Group.MODELS: ("ai_visemes", "rembg"),
+    Group.MODELS: ("ai_visemes", "rembg", "mediapipe"),
     Group.VIDEO: ("video", "thumbnails", "veo_videos"),
 }
 

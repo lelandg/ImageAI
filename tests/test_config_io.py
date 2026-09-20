@@ -145,7 +145,7 @@ def test_read_document_raises_for_an_unreadable_file(config_path):
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX permission semantics")
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores the permission bits")
+@pytest.mark.skipif(os.name != "nt" and os.geteuid() == 0, reason="root ignores the permission bits")
 def test_unreadable_config_raises(config_path):
     config_path.write_text(json.dumps({"provider": "google"}), encoding="utf-8")
     config_path.chmod(0o000)
