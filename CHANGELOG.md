@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.49.2] - 2026-10-21
+
+### Fixed
+
+- Security dependency bounds for October advisories (#54): urllib3 `>=2.8.0`
+  and multidict `>=6.9.1`, and LiteLLM pinned to the patched 1.101 line
+  (`>=1.101.3,<1.102`). The pin excludes later releases still affected by
+  SNYK-PYTHON-LITELLM-20840177. The floors are repeated in `requirements.txt`
+  because Snyk's SCM resolver ignores constraint files.
+- Renewed the SDK-only LiteLLM proxy Snyk exceptions through 2026-11-20 after
+  they expired on 2026-10-19, and added three later proxy-only advisories
+  (17391455, 20257373, 20840174). Raw scans of LiteLLM 1.101.6 and 1.105.1
+  confirm none of the six has an upstream fix. ImageAI uses only the SDK and
+  never runs the proxy. Rationale and evidence: `Docs/Snyk-Exceptions.md`
+  and `Notes/2026-10-21-snyk-litellm-reassessment.md`.
+
 ## [0.49.1] - 2026-09-19
 
 ### Fixed
