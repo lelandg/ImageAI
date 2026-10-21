@@ -1,0 +1,3847 @@
+{
+  "dependencyCount": 59,
+  "displayTargetFile": "requirements.txt",
+  "filesystemPolicy": false,
+  "filtered": {
+    "ignore": [],
+    "patch": []
+  },
+  "hasUnknownVersions": false,
+  "ignoreSettings": {
+    "adminOnly": false,
+    "autoApproveIgnores": false,
+    "disregardFilesystemIgnores": false,
+    "reasonRequired": false
+  },
+  "isPrivate": true,
+  "licensesPolicy": {
+    "orgLicenseRules": null,
+    "severities": null
+  },
+  "ok": false,
+  "org": "lelandg",
+  "packageManager": "pip",
+  "path": ".",
+  "policy": "",
+  "projectName": "litellm-1101",
+  "remediation": {
+    "ignore": null,
+    "pin": {
+      "certifi@2026.7.22": {
+        "isTransitive": true,
+        "upgradeTo": "certifi@2026.10.19",
+        "vulns": [
+          "SNYK-PYTHON-CERTIFI-21280764"
+        ]
+      },
+      "filelock@4.1.1": {
+        "isTransitive": true,
+        "upgradeTo": "filelock@4.2.1",
+        "vulns": [
+          "SNYK-PYTHON-FILELOCK-21280749",
+          "SNYK-PYTHON-FILELOCK-21280752",
+          "SNYK-PYTHON-FILELOCK-21280750",
+          "SNYK-PYTHON-FILELOCK-21280753",
+          "SNYK-PYTHON-FILELOCK-21280756",
+          "SNYK-PYTHON-FILELOCK-21280758",
+          "SNYK-PYTHON-FILELOCK-21280760",
+          "SNYK-PYTHON-FILELOCK-21280761",
+          "SNYK-PYTHON-FILELOCK-21280751",
+          "SNYK-PYTHON-FILELOCK-21280755",
+          "SNYK-PYTHON-FILELOCK-21280757",
+          "SNYK-PYTHON-FILELOCK-21280759"
+        ]
+      }
+    },
+    "unresolved": [
+      {
+        "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N/E:P",
+        "alternativeIds": [],
+        "creationTime": "2026-06-21T09:40:46.552580Z",
+        "credit": [
+          "Edward-x"
+        ],
+        "cvssDetails": [
+          {
+            "assigner": "NVD",
+            "cvssV3BaseScore": 6.3,
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+            "modificationTime": "2026-06-21T13:29:38.896552Z",
+            "severity": "medium"
+          }
+        ],
+        "cvssScore": 7.1,
+        "cvssSources": [
+          {
+            "assigner": "Snyk",
+            "baseScore": 7.1,
+            "cvssVersion": "4.0",
+            "modificationTime": "2026-08-24T14:02:39.691695Z",
+            "severity": "high",
+            "type": "primary",
+            "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N/E:P"
+          },
+          {
+            "assigner": "Snyk",
+            "baseScore": 6.5,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-08-24T14:02:39.691695Z",
+            "severity": "medium",
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N/E:P"
+          },
+          {
+            "assigner": "NVD",
+            "baseScore": 6.3,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-06-21T13:29:38.896552Z",
+            "severity": "medium",
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L"
+          }
+        ],
+        "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Insufficient Session Expiration in the `authenticate_user` function. An attacker can gain unauthorized access or maintain access to sensitive information by exploiting session management flaws.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [GitHub Gist](https://gist.github.com/YLChen-007/39ed709ce322431658a05b951e91f278)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/blob/main/litellm/proxy/auth/login_utils.py#L217)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/blob/main/litellm/proxy/auth/login_utils.py#L347)\n",
+        "disclosureTime": "2026-06-21T02:39:58.000000Z",
+        "epssDetails": {
+          "modelVersion": "v2026.06.15",
+          "percentile": "0.32828",
+          "probability": "0.00400"
+        },
+        "exploit": "Proof of Concept",
+        "exploitDetails": {
+          "maturityLevels": [
+            {
+              "format": "CVSSv3",
+              "level": "Proof of Concept",
+              "type": "secondary"
+            },
+            {
+              "format": "CVSSv4",
+              "level": "Proof of Concept",
+              "type": "primary"
+            }
+          ],
+          "sources": [
+            "Snyk"
+          ]
+        },
+        "fixedIn": [],
+        "from": [
+          "litellm-1101@0.0.0",
+          "litellm@1.101.6"
+        ],
+        "functions": [],
+        "functions_new": [],
+        "id": "SNYK-PYTHON-LITELLM-17391451",
+        "identifiers": {
+          "CVE": [
+            "CVE-2026-12772"
+          ],
+          "CWE": [
+            "CWE-613"
+          ]
+        },
+        "insights": {
+          "triageAdvice": null
+        },
+        "isDisputed": false,
+        "isPatchable": false,
+        "isUpgradable": false,
+        "language": "python",
+        "malicious": false,
+        "modificationTime": "2026-08-24T14:02:39.691695Z",
+        "moduleName": "litellm",
+        "name": "litellm",
+        "packageManager": "pip",
+        "packageName": "litellm",
+        "patches": [],
+        "proprietary": false,
+        "publicationTime": "2026-06-21T10:12:25.209850Z",
+        "references": [
+          {
+            "title": "GitHub Gist",
+            "url": "https://gist.github.com/YLChen-007/39ed709ce322431658a05b951e91f278"
+          },
+          {
+            "title": "Vulnerable Code",
+            "url": "https://github.com/BerriAI/litellm/blob/main/litellm/proxy/auth/login_utils.py%23L217"
+          },
+          {
+            "title": "Vulnerable Code",
+            "url": "https://github.com/BerriAI/litellm/blob/main/litellm/proxy/auth/login_utils.py%23L347"
+          }
+        ],
+        "semver": {
+          "vulnerable": [
+            "[0,]"
+          ]
+        },
+        "severity": "high",
+        "severityBasedOn": "CVSS",
+        "severityWithCritical": "high",
+        "socialTrendAlert": false,
+        "title": "Insufficient Session Expiration",
+        "upgradePath": [],
+        "version": "1.101.6"
+      },
+      {
+        "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L/E:P",
+        "alternativeIds": [],
+        "creationTime": "2026-06-22T09:46:49.344394Z",
+        "credit": [
+          "Eric-c"
+        ],
+        "cvssDetails": [
+          {
+            "assigner": "NVD",
+            "cvssV3BaseScore": 6.3,
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+            "modificationTime": "2026-06-21T13:29:40.803194Z",
+            "severity": "medium"
+          }
+        ],
+        "cvssScore": 5.3,
+        "cvssSources": [
+          {
+            "assigner": "Snyk",
+            "baseScore": 5.3,
+            "cvssVersion": "4.0",
+            "modificationTime": "2026-08-24T14:02:39.591427Z",
+            "severity": "medium",
+            "type": "primary",
+            "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N/E:P"
+          },
+          {
+            "assigner": "Snyk",
+            "baseScore": 6.3,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-08-24T14:02:39.591427Z",
+            "severity": "medium",
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L/E:P"
+          },
+          {
+            "assigner": "NVD",
+            "baseScore": 6.3,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-06-21T13:29:40.803194Z",
+            "severity": "medium",
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L"
+          }
+        ],
+        "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Insufficient Session Expiration in the `get_redirect_response_from_openid()` function of the SSO Authentication Flow process. An attacker can cause premature session termination by manipulating authentication responses remotely, potentially leading to unauthorized session expiration and disruption of user access.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [GitHub Gist](https://gist.github.com/YLChen-007/5fa8af12e1b183674d7ca96d852fb697)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/blob/6437b812beb0267c49ab85b52f25ef1293f4b9f1/litellm/proxy/management_endpoints/ui_sso.py#L3231)\n",
+        "disclosureTime": "2026-06-21T11:11:42.153000Z",
+        "epssDetails": {
+          "modelVersion": "v2026.06.15",
+          "percentile": "0.44562",
+          "probability": "0.00570"
+        },
+        "exploit": "Proof of Concept",
+        "exploitDetails": {
+          "maturityLevels": [
+            {
+              "format": "CVSSv3",
+              "level": "Proof of Concept",
+              "type": "secondary"
+            },
+            {
+              "format": "CVSSv4",
+              "level": "Proof of Concept",
+              "type": "primary"
+            }
+          ],
+          "sources": [
+            "Snyk"
+          ]
+        },
+        "fixedIn": [],
+        "from": [
+          "litellm-1101@0.0.0",
+          "litellm@1.101.6"
+        ],
+        "functions": [],
+        "functions_new": [],
+        "id": "SNYK-PYTHON-LITELLM-17393719",
+        "identifiers": {
+          "CVE": [
+            "CVE-2026-12796"
+          ],
+          "CWE": [
+            "CWE-613"
+          ]
+        },
+        "insights": {
+          "triageAdvice": null
+        },
+        "isDisputed": false,
+        "isPatchable": false,
+        "isUpgradable": false,
+        "language": "python",
+        "malicious": false,
+        "modificationTime": "2026-08-24T14:02:39.591427Z",
+        "moduleName": "litellm",
+        "name": "litellm",
+        "packageManager": "pip",
+        "packageName": "litellm",
+        "patches": [],
+        "proprietary": false,
+        "publicationTime": "2026-06-22T09:46:49.646955Z",
+        "references": [
+          {
+            "title": "GitHub Gist",
+            "url": "https://gist.github.com/YLChen-007/5fa8af12e1b183674d7ca96d852fb697"
+          },
+          {
+            "title": "Vulnerable Code",
+            "url": "https://github.com/BerriAI/litellm/blob/6437b812beb0267c49ab85b52f25ef1293f4b9f1/litellm/proxy/management_endpoints/ui_sso.py%23L3231"
+          }
+        ],
+        "semver": {
+          "vulnerable": [
+            "[0,]"
+          ]
+        },
+        "severity": "medium",
+        "severityBasedOn": "CVSS",
+        "severityWithCritical": "medium",
+        "socialTrendAlert": false,
+        "title": "Insufficient Session Expiration",
+        "upgradePath": [],
+        "version": "1.101.6"
+      },
+      {
+        "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:L/A:L/E:P",
+        "alternativeIds": [],
+        "creationTime": "2026-06-21T09:52:44.614628Z",
+        "credit": [
+          "Edward-x"
+        ],
+        "cvssDetails": [
+          {
+            "assigner": "NVD",
+            "cvssV3BaseScore": 5,
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:L/A:L",
+            "modificationTime": "2026-06-21T13:29:38.784301Z",
+            "severity": "medium"
+          }
+        ],
+        "cvssScore": 2.3,
+        "cvssSources": [
+          {
+            "assigner": "Snyk",
+            "baseScore": 2.3,
+            "cvssVersion": "4.0",
+            "modificationTime": "2026-10-01T13:52:12.480671Z",
+            "severity": "low",
+            "type": "primary",
+            "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N/E:P"
+          },
+          {
+            "assigner": "Snyk",
+            "baseScore": 5,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-10-01T13:52:12.480671Z",
+            "severity": "medium",
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:L/A:L/E:P"
+          },
+          {
+            "assigner": "NVD",
+            "baseScore": 5,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-06-21T13:29:38.784301Z",
+            "severity": "medium",
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:L/A:L"
+          }
+        ],
+        "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Incorrect Authorization in the `user_api_key_auth.py` file of the M2M JWT Handler. An attacker can gain unauthorized access to resources by exploiting insufficient authorization checks.\r\n\r\n**Note:** This is only exploitable if the attacker possesses valid but limited credentials and can craft specific JWTs to bypass intended access controls.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [GitHub Gist](https://gist.github.com/YLChen-007/70e4e106527f74ddf17953ff0f6c248d)\n",
+        "disclosureTime": "2026-06-21T03:06:00.000000Z",
+        "epssDetails": {
+          "modelVersion": "v2026.06.15",
+          "percentile": "0.35732",
+          "probability": "0.00431"
+        },
+        "exploit": "Proof of Concept",
+        "exploitDetails": {
+          "maturityLevels": [
+            {
+              "format": "CVSSv3",
+              "level": "Proof of Concept",
+              "type": "secondary"
+            },
+            {
+              "format": "CVSSv4",
+              "level": "Proof of Concept",
+              "type": "primary"
+            }
+          ],
+          "sources": [
+            "Snyk"
+          ]
+        },
+        "fixedIn": [],
+        "from": [
+          "litellm-1101@0.0.0",
+          "litellm@1.101.6"
+        ],
+        "functions": [],
+        "functions_new": [],
+        "id": "SNYK-PYTHON-LITELLM-17391455",
+        "identifiers": {
+          "CVE": [
+            "CVE-2026-12771"
+          ],
+          "CWE": [
+            "CWE-863"
+          ]
+        },
+        "insights": {
+          "triageAdvice": null
+        },
+        "isDisputed": false,
+        "isPatchable": false,
+        "isUpgradable": false,
+        "language": "python",
+        "malicious": false,
+        "modificationTime": "2026-10-01T13:52:12.480671Z",
+        "moduleName": "litellm",
+        "name": "litellm",
+        "packageManager": "pip",
+        "packageName": "litellm",
+        "patches": [],
+        "proprietary": false,
+        "publicationTime": "2026-06-21T10:46:46.204566Z",
+        "references": [
+          {
+            "title": "GitHub Gist",
+            "url": "https://gist.github.com/YLChen-007/70e4e106527f74ddf17953ff0f6c248d"
+          }
+        ],
+        "semver": {
+          "vulnerable": [
+            "[0,]"
+          ]
+        },
+        "severity": "low",
+        "severityBasedOn": "CVSS",
+        "severityWithCritical": "low",
+        "socialTrendAlert": false,
+        "title": "Incorrect Authorization",
+        "upgradePath": [],
+        "version": "1.101.6"
+      },
+      {
+        "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+        "alternativeIds": [],
+        "creationTime": "2026-09-29T11:15:26.976436Z",
+        "credit": [
+          "Nir Zadok (Nirza)",
+          "Moshe Siman Tov Bustan"
+        ],
+        "cvssDetails": [
+          {
+            "assigner": "NVD",
+            "cvssV3BaseScore": 8.1,
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+            "modificationTime": "2026-09-29T01:30:36.617704Z",
+            "severity": "high"
+          }
+        ],
+        "cvssScore": 8.6,
+        "cvssSources": [
+          {
+            "assigner": "Snyk",
+            "baseScore": 8.6,
+            "cvssVersion": "4.0",
+            "modificationTime": "2026-09-29T14:03:07.595667Z",
+            "severity": "high",
+            "type": "primary",
+            "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N"
+          },
+          {
+            "assigner": "Snyk",
+            "baseScore": 8.1,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-09-29T14:03:07.595667Z",
+            "severity": "high",
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"
+          },
+          {
+            "assigner": "NVD",
+            "baseScore": 8.1,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-09-29T01:30:36.617704Z",
+            "severity": "high",
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"
+          }
+        ],
+        "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Weak Authentication via the JWT authentication flow's email-based fallback lookup, which does not verify the `email_verified` claim before resolving a user identity. An attacker holding a valid JWT from the configured identity provider can present a token containing an unverified email address that matches a victim's account, causing the system to authenticate the attacker as that victim and inherit their role, including `proxy_admin` privileges. This also permanently overwrites the victim's stored identity binding, granting the attacker persistent unauthorized access to administrative endpoints that expose API keys and user management functions.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [ox.security](https://www.ox.security/blog/litellm-an-ordinary-login-token-can-become-someone-elses-admin-account/)\n",
+        "disclosureTime": "2026-09-28T21:32:54.021000Z",
+        "epssDetails": {
+          "modelVersion": "v2026.06.15",
+          "percentile": "0.17739",
+          "probability": "0.00273"
+        },
+        "exploit": "Not Defined",
+        "exploitDetails": {
+          "maturityLevels": [
+            {
+              "format": "CVSSv3",
+              "level": "Not Defined",
+              "type": "secondary"
+            },
+            {
+              "format": "CVSSv4",
+              "level": "Not Defined",
+              "type": "primary"
+            }
+          ],
+          "sources": []
+        },
+        "fixedIn": [],
+        "from": [
+          "litellm-1101@0.0.0",
+          "litellm@1.101.6"
+        ],
+        "functions": [],
+        "functions_new": [],
+        "id": "SNYK-PYTHON-LITELLM-20257373",
+        "identifiers": {
+          "CVE": [
+            "CVE-2026-93355"
+          ],
+          "CWE": [
+            "CWE-1390"
+          ]
+        },
+        "insights": {
+          "triageAdvice": null
+        },
+        "isDisputed": false,
+        "isPatchable": false,
+        "isUpgradable": false,
+        "language": "python",
+        "malicious": false,
+        "modificationTime": "2026-09-29T14:03:07.595667Z",
+        "moduleName": "litellm",
+        "name": "litellm",
+        "packageManager": "pip",
+        "packageName": "litellm",
+        "patches": [],
+        "proprietary": false,
+        "publicationTime": "2026-09-29T11:15:27.255023Z",
+        "references": [
+          {
+            "title": "ox.security",
+            "url": "https://www.ox.security/blog/litellm-an-ordinary-login-token-can-become-someone-elses-admin-account/"
+          }
+        ],
+        "semver": {
+          "vulnerable": [
+            "[0,]"
+          ]
+        },
+        "severity": "high",
+        "severityBasedOn": "CVSS",
+        "severityWithCritical": "high",
+        "socialTrendAlert": false,
+        "title": "Weak Authentication",
+        "upgradePath": [],
+        "version": "1.101.6"
+      },
+      {
+        "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L/E:P",
+        "alternativeIds": [],
+        "creationTime": "2026-06-22T09:34:30.045532Z",
+        "credit": [
+          "Eric-c"
+        ],
+        "cvssDetails": [
+          {
+            "assigner": "NVD",
+            "cvssV3BaseScore": 7.3,
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L",
+            "modificationTime": "2026-06-21T13:29:40.387718Z",
+            "severity": "high"
+          }
+        ],
+        "cvssScore": 6.9,
+        "cvssSources": [
+          {
+            "assigner": "Snyk",
+            "baseScore": 6.9,
+            "cvssVersion": "4.0",
+            "modificationTime": "2026-08-24T14:02:39.693377Z",
+            "severity": "medium",
+            "type": "primary",
+            "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N/E:P"
+          },
+          {
+            "assigner": "Snyk",
+            "baseScore": 7.3,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-08-24T14:02:39.693377Z",
+            "severity": "high",
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L/E:P"
+          },
+          {
+            "assigner": "NVD",
+            "baseScore": 7.3,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-06-21T13:29:40.387718Z",
+            "severity": "high",
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L"
+          }
+        ],
+        "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Missing Authentication for Critical Function in the `/sso/debug/login` and `/sso/debug/callback` endpoints in the SSO Debug Flow. An attacker can gain unauthorized access and potentially manipulate sensitive information by sending crafted requests to the affected endpoint.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [GitHub Gist](https://gist.github.com/YLChen-007/9b13c75a3a73187a4082cc6df0b100d3)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/blob/6437b812beb0267c49ab85b52f25ef1293f4b9f1/litellm/proxy/management_endpoints/ui_sso.py#L4480)\n",
+        "disclosureTime": "2026-06-21T10:10:29.636000Z",
+        "epssDetails": {
+          "modelVersion": "v2026.06.15",
+          "percentile": "0.53634",
+          "probability": "0.00795"
+        },
+        "exploit": "Proof of Concept",
+        "exploitDetails": {
+          "maturityLevels": [
+            {
+              "format": "CVSSv3",
+              "level": "Proof of Concept",
+              "type": "secondary"
+            },
+            {
+              "format": "CVSSv4",
+              "level": "Proof of Concept",
+              "type": "primary"
+            }
+          ],
+          "sources": [
+            "Snyk"
+          ]
+        },
+        "fixedIn": [],
+        "from": [
+          "litellm-1101@0.0.0",
+          "litellm@1.101.6"
+        ],
+        "functions": [],
+        "functions_new": [],
+        "id": "SNYK-PYTHON-LITELLM-17393717",
+        "identifiers": {
+          "CVE": [
+            "CVE-2026-12795"
+          ],
+          "CWE": [
+            "CWE-306"
+          ]
+        },
+        "insights": {
+          "triageAdvice": null
+        },
+        "isDisputed": false,
+        "isPatchable": false,
+        "isUpgradable": false,
+        "language": "python",
+        "malicious": false,
+        "modificationTime": "2026-08-24T14:02:39.693377Z",
+        "moduleName": "litellm",
+        "name": "litellm",
+        "packageManager": "pip",
+        "packageName": "litellm",
+        "patches": [],
+        "proprietary": false,
+        "publicationTime": "2026-06-22T09:34:30.244826Z",
+        "references": [
+          {
+            "title": "GitHub Gist",
+            "url": "https://gist.github.com/YLChen-007/9b13c75a3a73187a4082cc6df0b100d3"
+          },
+          {
+            "title": "Vulnerable Code",
+            "url": "https://github.com/BerriAI/litellm/blob/6437b812beb0267c49ab85b52f25ef1293f4b9f1/litellm/proxy/management_endpoints/ui_sso.py%23L4480"
+          }
+        ],
+        "semver": {
+          "vulnerable": [
+            "[0,]"
+          ]
+        },
+        "severity": "medium",
+        "severityBasedOn": "CVSS",
+        "severityWithCritical": "medium",
+        "socialTrendAlert": false,
+        "title": "Missing Authentication for Critical Function",
+        "upgradePath": [],
+        "version": "1.101.6"
+      },
+      {
+        "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:C/C:H/I:H/A:H/E:P",
+        "alternativeIds": [],
+        "creationTime": "2026-10-12T10:05:58.106049Z",
+        "credit": [
+          "Gabriel Alves"
+        ],
+        "cvssDetails": [
+          {
+            "assigner": "NVD",
+            "cvssV3BaseScore": 6.3,
+            "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+            "modificationTime": "2026-10-11T13:17:03.375851Z",
+            "severity": "medium"
+          }
+        ],
+        "cvssScore": 8.5,
+        "cvssSources": [
+          {
+            "assigner": "Snyk",
+            "baseScore": 8.5,
+            "cvssVersion": "4.0",
+            "modificationTime": "2026-10-12T14:04:13.622079Z",
+            "severity": "high",
+            "type": "primary",
+            "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:H/VI:N/VA:N/SC:H/SI:H/SA:H/E:P"
+          },
+          {
+            "assigner": "Snyk",
+            "baseScore": 9.1,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-10-12T14:04:13.622079Z",
+            "severity": "critical",
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:C/C:H/I:H/A:H/E:P"
+          },
+          {
+            "assigner": "NVD",
+            "baseScore": 6.3,
+            "cvssVersion": "3.1",
+            "modificationTime": "2026-10-11T13:17:03.375851Z",
+            "severity": "medium",
+            "type": "secondary",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L"
+          }
+        ],
+        "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Authorization Bypass Through User-Controlled Key in the `add_new_model` and `can_user_make_team_model_call` functions in `model_management_endpoints.py`, which authorize the caller by role alone and never inspect the values supplied in `litellm_params`. A user with team administrator access can read any environment variable of the proxy process, including the proxy master key, by registering a model whose `api_key` is an `os.environ/<NAME>` reference and whose `api_base` points to a host they control, then invoking it so that `get_secret` resolves the variable and `_resolve_db_litellm_param` sends it to that host as the outbound `Authorization` header. This requires `STORE_MODEL_IN_DB` to be enabled and an enterprise license, which is what makes the team administrator role available.\n\n**Note:** A fix is unlikely. In https://github.com/BerriAI/litellm/commit/5862be3e79154ce5ac8a736c77c7c3614fac40fb, project maintainers removed the field whitelist and the team-scope short-circuit in `_resolve_db_litellm_param` deliberately, describing universal `os.environ/` resolution for team-scoped rows as an intended threat-model expansion that trusts team administrators to read environment variables, and placing the trust boundary on who the deployment grants team administrator rather than on what those administrators may reference.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [Red Hat Bugzilla Bug](https://bugzilla.redhat.com/show_bug.cgi?id=2549217)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/commit/5862be3e79154ce5ac8a736c77c7c3614fac40fb)\n",
+        "disclosureTime": "2026-10-11T12:00:13.000000Z",
+        "epssDetails": {
+          "modelVersion": "v2026.06.15",
+          "percentile": "0.09229",
+          "probability": "0.00201"
+        },
+        "exploit": "Proof of Concept",
+        "exploitDetails": {
+          "maturityLevels": [
+            {
+              "format": "CVSSv3",
+              "level": "Proof of Concept",
+              "type": "secondary"
+            },
+            {
+              "format": "CVSSv4",
+              "level": "Proof of Concept",
+              "type": "primary"
+            }
+          ],
+          "sources": [
+            "Snyk"
+          ]
+        },
+        "fixedIn": [],
+        "from": [
+          "litellm-1101@0.0.0",
+          "litellm@1.101.6"
+        ],
+        "functions": [],
+        "functions_new": [],
+        "id": "SNYK-PYTHON-LITELLM-20840174",
+        "identifiers": {
+          "CVE": [
+            "CVE-2026-108575"
+          ],
+          "CWE": [
+            "CWE-639"
+          ]
+        },
+        "insights": {
+          "triageAdvice": null
+        },
+        "isDisputed": false,
+        "isPatchable": false,
+        "isUpgradable": false,
+        "language": "python",
+        "malicious": false,
+        "modificationTime": "2026-10-12T14:04:13.622079Z",
+        "moduleName": "litellm",
+        "name": "litellm",
+        "packageManager": "pip",
+        "packageName": "litellm",
+        "patches": [],
+        "proprietary": false,
+        "publicationTime": "2026-10-12T10:05:58.286738Z",
+        "references": [
+          {
+            "title": "Red Hat Bugzilla Bug",
+            "url": "https://bugzilla.redhat.com/show_bug.cgi?id=2549217"
+          },
+          {
+            "title": "Vulnerable Code",
+            "url": "https://github.com/BerriAI/litellm/commit/5862be3e79154ce5ac8a736c77c7c3614fac40fb"
+          }
+        ],
+        "semver": {
+          "vulnerable": [
+            "[1.93.0.dev2,]"
+          ]
+        },
+        "severity": "high",
+        "severityBasedOn": "CVSS",
+        "severityWithCritical": "high",
+        "socialTrendAlert": false,
+        "title": "Authorization Bypass Through User-Controlled Key",
+        "upgradePath": [],
+        "version": "1.101.6"
+      }
+    ],
+    "upgrade": {}
+  },
+  "summary": "23 vulnerable dependency paths",
+  "targetFile": "",
+  "uniqueCount": 19,
+  "vulnerabilities": [
+    {
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:54:22.092299Z",
+      "credit": [
+        "Unknown"
+      ],
+      "cvssDetails": [],
+      "cvssScore": 9.1,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 9.1,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-20T20:54:22.371396Z",
+          "severity": "critical",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 7.4,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-20T20:54:22.371396Z",
+          "severity": "high",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Improper Certificate Validation via the `cacert.pem` bundle, which was missing several emSign root CA certificates (emSign Root CA - G1, emSign Root CA - C1, and emSign ECC Root CA - C3) that were incorrectly removed in a prior release. An attacker positioned between a client and a server whose certificate chains to one of these omitted roots can present a certificate that the affected bundle fails to validate, enabling MitM interception of TLS-protected traffic.\n## Remediation\nUpgrade `certifi` to version 2026.10.19 or higher.\n## References\n- [discuss.python.org](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576)\n- [emudhra.we-have-a-problem.com](https://emudhra.we-have-a-problem.com)\n- [GitHub Advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)\n- [GitHub Commit](https://github.com/certifi/python-certifi/commit/662df63d7906df66f1f07c0751a3dfe9da14d914)\n",
+      "disclosureTime": "2026-10-20T19:35:05.000000Z",
+      "exploit": "Not Defined",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Not Defined",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Not Defined",
+            "type": "primary"
+          }
+        ],
+        "sources": []
+      },
+      "fixedIn": [
+        "2026.10.19"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "openai@2.54.0",
+        "httpx@0.28.1",
+        "httpcore@1.0.9",
+        "certifi@2026.7.22"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-CERTIFI-21280764",
+      "identifiers": {
+        "CVE": [],
+        "CWE": [
+          "CWE-295"
+        ],
+        "GHSA": [
+          "GHSA-6q48-6c7w-9gw2"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-20T20:54:22.371396Z",
+      "moduleName": "certifi",
+      "name": "certifi",
+      "packageManager": "pip",
+      "packageName": "certifi",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:54:22.248948Z",
+      "references": [
+        {
+          "title": "discuss.python.org",
+          "url": "https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576"
+        },
+        {
+          "title": "emudhra.we-have-a-problem.com",
+          "url": "https://emudhra.we-have-a-problem.com"
+        },
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/certifi/python-certifi/commit/662df63d7906df66f1f07c0751a3dfe9da14d914"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2019.3.9,2026.10.19)"
+        ]
+      },
+      "severity": "critical",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "critical",
+      "socialTrendAlert": false,
+      "title": "Improper Certificate Validation",
+      "upgradePath": [],
+      "version": "2026.7.22"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:54:22.092299Z",
+      "credit": [
+        "Unknown"
+      ],
+      "cvssDetails": [],
+      "cvssScore": 9.1,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 9.1,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-20T20:54:22.371396Z",
+          "severity": "critical",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 7.4,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-20T20:54:22.371396Z",
+          "severity": "high",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Improper Certificate Validation via the `cacert.pem` bundle, which was missing several emSign root CA certificates (emSign Root CA - G1, emSign Root CA - C1, and emSign ECC Root CA - C3) that were incorrectly removed in a prior release. An attacker positioned between a client and a server whose certificate chains to one of these omitted roots can present a certificate that the affected bundle fails to validate, enabling MitM interception of TLS-protected traffic.\n## Remediation\nUpgrade `certifi` to version 2026.10.19 or higher.\n## References\n- [discuss.python.org](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576)\n- [emudhra.we-have-a-problem.com](https://emudhra.we-have-a-problem.com)\n- [GitHub Advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)\n- [GitHub Commit](https://github.com/certifi/python-certifi/commit/662df63d7906df66f1f07c0751a3dfe9da14d914)\n",
+      "disclosureTime": "2026-10-20T19:35:05.000000Z",
+      "exploit": "Not Defined",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Not Defined",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Not Defined",
+            "type": "primary"
+          }
+        ],
+        "sources": []
+      },
+      "fixedIn": [
+        "2026.10.19"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "httpx@0.28.1",
+        "httpcore@1.0.9",
+        "certifi@2026.7.22"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-CERTIFI-21280764",
+      "identifiers": {
+        "CVE": [],
+        "CWE": [
+          "CWE-295"
+        ],
+        "GHSA": [
+          "GHSA-6q48-6c7w-9gw2"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-20T20:54:22.371396Z",
+      "moduleName": "certifi",
+      "name": "certifi",
+      "packageManager": "pip",
+      "packageName": "certifi",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:54:22.248948Z",
+      "references": [
+        {
+          "title": "discuss.python.org",
+          "url": "https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576"
+        },
+        {
+          "title": "emudhra.we-have-a-problem.com",
+          "url": "https://emudhra.we-have-a-problem.com"
+        },
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/certifi/python-certifi/commit/662df63d7906df66f1f07c0751a3dfe9da14d914"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2019.3.9,2026.10.19)"
+        ]
+      },
+      "severity": "critical",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "critical",
+      "socialTrendAlert": false,
+      "title": "Improper Certificate Validation",
+      "upgradePath": [],
+      "version": "2026.7.22"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:54:22.092299Z",
+      "credit": [
+        "Unknown"
+      ],
+      "cvssDetails": [],
+      "cvssScore": 9.1,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 9.1,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-20T20:54:22.371396Z",
+          "severity": "critical",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 7.4,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-20T20:54:22.371396Z",
+          "severity": "high",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Improper Certificate Validation via the `cacert.pem` bundle, which was missing several emSign root CA certificates (emSign Root CA - G1, emSign Root CA - C1, and emSign ECC Root CA - C3) that were incorrectly removed in a prior release. An attacker positioned between a client and a server whose certificate chains to one of these omitted roots can present a certificate that the affected bundle fails to validate, enabling MitM interception of TLS-protected traffic.\n## Remediation\nUpgrade `certifi` to version 2026.10.19 or higher.\n## References\n- [discuss.python.org](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576)\n- [emudhra.we-have-a-problem.com](https://emudhra.we-have-a-problem.com)\n- [GitHub Advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)\n- [GitHub Commit](https://github.com/certifi/python-certifi/commit/662df63d7906df66f1f07c0751a3dfe9da14d914)\n",
+      "disclosureTime": "2026-10-20T19:35:05.000000Z",
+      "exploit": "Not Defined",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Not Defined",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Not Defined",
+            "type": "primary"
+          }
+        ],
+        "sources": []
+      },
+      "fixedIn": [
+        "2026.10.19"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "openai@2.54.0",
+        "httpx@0.28.1",
+        "certifi@2026.7.22"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-CERTIFI-21280764",
+      "identifiers": {
+        "CVE": [],
+        "CWE": [
+          "CWE-295"
+        ],
+        "GHSA": [
+          "GHSA-6q48-6c7w-9gw2"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-20T20:54:22.371396Z",
+      "moduleName": "certifi",
+      "name": "certifi",
+      "packageManager": "pip",
+      "packageName": "certifi",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:54:22.248948Z",
+      "references": [
+        {
+          "title": "discuss.python.org",
+          "url": "https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576"
+        },
+        {
+          "title": "emudhra.we-have-a-problem.com",
+          "url": "https://emudhra.we-have-a-problem.com"
+        },
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/certifi/python-certifi/commit/662df63d7906df66f1f07c0751a3dfe9da14d914"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2019.3.9,2026.10.19)"
+        ]
+      },
+      "severity": "critical",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "critical",
+      "socialTrendAlert": false,
+      "title": "Improper Certificate Validation",
+      "upgradePath": [],
+      "version": "2026.7.22"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:54:22.092299Z",
+      "credit": [
+        "Unknown"
+      ],
+      "cvssDetails": [],
+      "cvssScore": 9.1,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 9.1,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-20T20:54:22.371396Z",
+          "severity": "critical",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 7.4,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-20T20:54:22.371396Z",
+          "severity": "high",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Improper Certificate Validation via the `cacert.pem` bundle, which was missing several emSign root CA certificates (emSign Root CA - G1, emSign Root CA - C1, and emSign ECC Root CA - C3) that were incorrectly removed in a prior release. An attacker positioned between a client and a server whose certificate chains to one of these omitted roots can present a certificate that the affected bundle fails to validate, enabling MitM interception of TLS-protected traffic.\n## Remediation\nUpgrade `certifi` to version 2026.10.19 or higher.\n## References\n- [discuss.python.org](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576)\n- [emudhra.we-have-a-problem.com](https://emudhra.we-have-a-problem.com)\n- [GitHub Advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)\n- [GitHub Commit](https://github.com/certifi/python-certifi/commit/662df63d7906df66f1f07c0751a3dfe9da14d914)\n",
+      "disclosureTime": "2026-10-20T19:35:05.000000Z",
+      "exploit": "Not Defined",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Not Defined",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Not Defined",
+            "type": "primary"
+          }
+        ],
+        "sources": []
+      },
+      "fixedIn": [
+        "2026.10.19"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "httpx@0.28.1",
+        "certifi@2026.7.22"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-CERTIFI-21280764",
+      "identifiers": {
+        "CVE": [],
+        "CWE": [
+          "CWE-295"
+        ],
+        "GHSA": [
+          "GHSA-6q48-6c7w-9gw2"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-20T20:54:22.371396Z",
+      "moduleName": "certifi",
+      "name": "certifi",
+      "packageManager": "pip",
+      "packageName": "certifi",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:54:22.248948Z",
+      "references": [
+        {
+          "title": "discuss.python.org",
+          "url": "https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576"
+        },
+        {
+          "title": "emudhra.we-have-a-problem.com",
+          "url": "https://emudhra.we-have-a-problem.com"
+        },
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/certifi/python-certifi/commit/662df63d7906df66f1f07c0751a3dfe9da14d914"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2019.3.9,2026.10.19)"
+        ]
+      },
+      "severity": "critical",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "critical",
+      "socialTrendAlert": false,
+      "title": "Improper Certificate Validation",
+      "upgradePath": [],
+      "version": "2026.7.22"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:54:22.092299Z",
+      "credit": [
+        "Unknown"
+      ],
+      "cvssDetails": [],
+      "cvssScore": 9.1,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 9.1,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-20T20:54:22.371396Z",
+          "severity": "critical",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:N/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 7.4,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-20T20:54:22.371396Z",
+          "severity": "high",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:N"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Improper Certificate Validation via the `cacert.pem` bundle, which was missing several emSign root CA certificates (emSign Root CA - G1, emSign Root CA - C1, and emSign ECC Root CA - C3) that were incorrectly removed in a prior release. An attacker positioned between a client and a server whose certificate chains to one of these omitted roots can present a certificate that the affected bundle fails to validate, enabling MitM interception of TLS-protected traffic.\n## Remediation\nUpgrade `certifi` to version 2026.10.19 or higher.\n## References\n- [discuss.python.org](https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576)\n- [emudhra.we-have-a-problem.com](https://emudhra.we-have-a-problem.com)\n- [GitHub Advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)\n- [GitHub Commit](https://github.com/certifi/python-certifi/commit/662df63d7906df66f1f07c0751a3dfe9da14d914)\n",
+      "disclosureTime": "2026-10-20T19:35:05.000000Z",
+      "exploit": "Not Defined",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Not Defined",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Not Defined",
+            "type": "primary"
+          }
+        ],
+        "sources": []
+      },
+      "fixedIn": [
+        "2026.10.19"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tiktoken@0.14.0",
+        "requests@2.34.2",
+        "certifi@2026.7.22"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-CERTIFI-21280764",
+      "identifiers": {
+        "CVE": [],
+        "CWE": [
+          "CWE-295"
+        ],
+        "GHSA": [
+          "GHSA-6q48-6c7w-9gw2"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-20T20:54:22.371396Z",
+      "moduleName": "certifi",
+      "name": "certifi",
+      "packageManager": "pip",
+      "packageName": "certifi",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:54:22.248948Z",
+      "references": [
+        {
+          "title": "discuss.python.org",
+          "url": "https://discuss.python.org/t/information-for-python-users-regarding-emudhra-emsign-ca-certificate-security-incident/109576"
+        },
+        {
+          "title": "emudhra.we-have-a-problem.com",
+          "url": "https://emudhra.we-have-a-problem.com"
+        },
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/certifi/python-certifi/commit/662df63d7906df66f1f07c0751a3dfe9da14d914"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[2019.3.9,2026.10.19)"
+        ]
+      },
+      "severity": "critical",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "critical",
+      "socialTrendAlert": false,
+      "title": "Improper Certificate Validation",
+      "upgradePath": [],
+      "version": "2026.7.22"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:43:55.038243Z",
+      "credit": [
+        "Anthropic's OSS Scanner"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "cvssV3BaseScore": 4.7,
+          "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N",
+          "modificationTime": "2026-10-21T07:28:01.864419Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 5.7,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 5.7,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-21T14:04:21.252679Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:N/VC:N/VI:H/VA:N/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 4.7,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T14:04:21.252679Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N/E:P"
+        },
+        {
+          "assigner": "Red Hat",
+          "baseScore": 4.7,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T07:28:01.864419Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Use of Multiple Resources with Duplicate Identifier via `_try_break_expired_lock` and `_try_break_stale_lock` in `_api.py` and `_lease.py`, where an attacker with write access to the lock directory can replace a held lock file with a symlink pointing at an older file. This causes `stat()` to report the target's stale mtime, tricking a waiting process into breaking a live lock and allowing two processes to hold the lock simultaneously, resulting in a loss of mutual exclusion and potential data integrity compromise. The fix pins the inode before reading the marker to detect such replacements before acting on them.\n## Remediation\nUpgrade `filelock` to version 4.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/tox-dev/filelock/security/advisories/GHSA-2g95-wg33-c5x2)\n- [GitHub Commit](https://github.com/tox-dev/filelock/commit/740ff666b62a88496c8d7394e4e6230605e4d62b)\n- [GitHub Release](https://github.com/tox-dev/filelock/releases/tag/4.2.1)\n",
+      "disclosureTime": "2026-10-20T16:57:08.374000Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.09992",
+        "probability": "0.00205"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [
+        "4.2.1"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tokenizers@0.23.3",
+        "huggingface-hub@2.2.0",
+        "filelock@4.1.1"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-FILELOCK-21280749",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-112906"
+        ],
+        "CWE": [
+          "CWE-694"
+        ],
+        "GHSA": [
+          "GHSA-2g95-wg33-c5x2"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-21T14:04:21.252679Z",
+      "moduleName": "filelock",
+      "name": "filelock",
+      "packageManager": "pip",
+      "packageName": "filelock",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:43:55.197375Z",
+      "references": [
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/tox-dev/filelock/security/advisories/GHSA-2g95-wg33-c5x2"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/tox-dev/filelock/commit/740ff666b62a88496c8d7394e4e6230605e4d62b"
+        },
+        {
+          "title": "GitHub Release",
+          "url": "https://github.com/tox-dev/filelock/releases/tag/4.2.1"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[4.1.0,4.2.1)"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "Use of Multiple Resources with Duplicate Identifier",
+      "upgradePath": [],
+      "version": "4.1.1"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:L/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:44:41.042618Z",
+      "credit": [
+        "Anthropic's OSS Scanner"
+      ],
+      "cvssDetails": [],
+      "cvssScore": 6.9,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 6.9,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-21T14:04:21.271923Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:H/VA:L/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 6.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T14:04:21.271923Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:L/E:P"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Time-of-check Time-of-use (TOCTOU) Race Condition via `ReadWriteLock` cleanup logic in `_read_write.py`, which removes a randomized `.filelock-*` private hard-link directory during sweep operations. A local attacker with rename access in a non-sticky parent directory can observe a live link-directory name or forge a dead-owner sweep name, then rename a sibling directory onto it before the cleanup removes it, causing an arbitrary directory to be deleted. The link-directory name is derived from a digest that includes output from `host_name()`, which only adds a PID-namespace tag when `/proc/self/ns/pid` is readable, making the name predictable to any local user on macOS or systems without `/proc`.\n\n**Note:** Exploitation requires either a macOS host or a Linux attacker that can enter a private mount namespace and mount an empty tmpfs over `/proc`, obscuring the PID-namespace tag.\n## Remediation\nUpgrade `filelock` to version 4.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/tox-dev/filelock/security/advisories/GHSA-jqc4-5cvw-7w85)\n- [GitHub Commit](https://github.com/tox-dev/filelock/commit/5e3f2ec0c5fb17cb2635b60b2b68bc63ab81ca2d)\n- [GitHub PR](https://github.com/tox-dev/filelock/pull/834)\n- [GitHub Release](https://github.com/tox-dev/filelock/releases/tag/4.2.1)\n",
+      "disclosureTime": "2026-10-20T16:58:58.952440Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.00315",
+        "probability": "0.00087"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [
+        "4.2.1"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tokenizers@0.23.3",
+        "huggingface-hub@2.2.0",
+        "filelock@4.1.1"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-FILELOCK-21280752",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-112937"
+        ],
+        "CWE": [
+          "CWE-367"
+        ],
+        "GHSA": [
+          "GHSA-jqc4-5cvw-7w85"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-21T14:04:21.271923Z",
+      "moduleName": "filelock",
+      "name": "filelock",
+      "packageManager": "pip",
+      "packageName": "filelock",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:44:41.202875Z",
+      "references": [
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/tox-dev/filelock/security/advisories/GHSA-jqc4-5cvw-7w85"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/tox-dev/filelock/commit/5e3f2ec0c5fb17cb2635b60b2b68bc63ab81ca2d"
+        },
+        {
+          "title": "GitHub PR",
+          "url": "https://github.com/tox-dev/filelock/pull/834"
+        },
+        {
+          "title": "GitHub Release",
+          "url": "https://github.com/tox-dev/filelock/releases/tag/4.2.1"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[4.1.0,4.2.1)"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "Time-of-check Time-of-use (TOCTOU) Race Condition",
+      "upgradePath": [],
+      "version": "4.1.1"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:44:05.864890Z",
+      "credit": [
+        "Unknown"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "cvssV3BaseScore": 5.5,
+          "cvssV3Vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H",
+          "modificationTime": "2026-10-21T07:30:37.096874Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 6.8,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 6.8,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-21T14:04:21.271637Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:N/VA:H/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 5.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T14:04:21.271637Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H/E:P"
+        },
+        {
+          "assigner": "Red Hat",
+          "baseScore": 5.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T07:30:37.096874Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Allocation of Resources Without Limits or Throttling via the SQLite-backed read-write lock implementation in `src/filelock/_read_write.py`, where an untrusted actor who controls the database file path can supply a malformed or adversarial SQLite database, causing the lock mechanism to crash and deny availability to processes depending on the lock.\n## Remediation\nUpgrade `filelock` to version 4.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/tox-dev/filelock/security/advisories/GHSA-cwqr-hh33-gh44)\n- [GitHub Commit](https://github.com/tox-dev/filelock/commit/5e3f2ec0c5fb17cb2635b60b2b68bc63ab81ca2d)\n- [GitHub PR](https://github.com/tox-dev/filelock/pull/834)\n- [GitHub Release](https://github.com/tox-dev/filelock/releases/tag/4.2.1)\n",
+      "disclosureTime": "2026-10-20T16:57:18.973000Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.09926",
+        "probability": "0.00205"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [
+        "4.2.1"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tokenizers@0.23.3",
+        "huggingface-hub@2.2.0",
+        "filelock@4.1.1"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-FILELOCK-21280750",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-112915"
+        ],
+        "CWE": [
+          "CWE-770"
+        ],
+        "GHSA": [
+          "GHSA-cwqr-hh33-gh44"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-21T14:04:21.271637Z",
+      "moduleName": "filelock",
+      "name": "filelock",
+      "packageManager": "pip",
+      "packageName": "filelock",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:44:06.023427Z",
+      "references": [
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/tox-dev/filelock/security/advisories/GHSA-cwqr-hh33-gh44"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/tox-dev/filelock/commit/5e3f2ec0c5fb17cb2635b60b2b68bc63ab81ca2d"
+        },
+        {
+          "title": "GitHub PR",
+          "url": "https://github.com/tox-dev/filelock/pull/834"
+        },
+        {
+          "title": "GitHub Release",
+          "url": "https://github.com/tox-dev/filelock/releases/tag/4.2.1"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[3.20.4,4.2.1)"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "Allocation of Resources Without Limits or Throttling",
+      "upgradePath": [],
+      "version": "4.1.1"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:H/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:44:41.439268Z",
+      "credit": [
+        "Anthropic's OSS Scanner"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "cvssV3BaseScore": 6.3,
+          "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:H",
+          "modificationTime": "2026-10-21T07:29:00.549160Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 6.9,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 6.9,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-21T14:04:21.507603Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 7.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T14:04:21.507603Z",
+          "severity": "high",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:H/A:H/E:P"
+        },
+        {
+          "assigner": "Red Hat",
+          "baseScore": 6.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T07:29:00.549160Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:H"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Race Condition Enabling Link Following via the read-write lock implementation in `src/filelock/_read_write.py`, where the SQLite lock database is opened using a shared, predictable name in a directory where another user can manipulate names. An attacker who controls names in the lock database's directory can redirect the lock file path to an arbitrary location, allowing them to corrupt or overwrite files with the victim's privileges.\n\n**Note:** This is only exploitable when another user has write access to the directory containing the lock database.\n## Remediation\nUpgrade `filelock` to version 4.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/tox-dev/filelock/security/advisories/GHSA-v4x8-3wr5-3wq8)\n- [GitHub Commit](https://github.com/tox-dev/filelock/commit/5e3f2ec0c5fb17cb2635b60b2b68bc63ab81ca2d)\n- [GitHub PR](https://github.com/tox-dev/filelock/pull/834)\n- [GitHub Release](https://github.com/tox-dev/filelock/releases/tag/4.2.1)\n",
+      "disclosureTime": "2026-10-20T16:58:59.077546Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.00552",
+        "probability": "0.00093"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [
+        "4.2.1"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tokenizers@0.23.3",
+        "huggingface-hub@2.2.0",
+        "filelock@4.1.1"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-FILELOCK-21280753",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-112940"
+        ],
+        "CWE": [
+          "CWE-363"
+        ],
+        "GHSA": [
+          "GHSA-v4x8-3wr5-3wq8"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-21T14:04:21.507603Z",
+      "moduleName": "filelock",
+      "name": "filelock",
+      "packageManager": "pip",
+      "packageName": "filelock",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:44:41.592560Z",
+      "references": [
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/tox-dev/filelock/security/advisories/GHSA-v4x8-3wr5-3wq8"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/tox-dev/filelock/commit/5e3f2ec0c5fb17cb2635b60b2b68bc63ab81ca2d"
+        },
+        {
+          "title": "GitHub PR",
+          "url": "https://github.com/tox-dev/filelock/pull/834"
+        },
+        {
+          "title": "GitHub Release",
+          "url": "https://github.com/tox-dev/filelock/releases/tag/4.2.1"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[3.20.4,4.2.1)"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "Race Condition Enabling Link Following",
+      "upgradePath": [],
+      "version": "4.1.1"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:H/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:44:42.593244Z",
+      "credit": [
+        "Anthropic's OSS Scanner"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "cvssV3BaseScore": 6.3,
+          "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:H",
+          "modificationTime": "2026-10-21T07:26:44.262200Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 5.8,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 5.8,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-21T14:04:21.243928Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:N/VC:N/VI:H/VA:H/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 6.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T14:04:21.243928Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:H/E:P"
+        },
+        {
+          "assigner": "Red Hat",
+          "baseScore": 6.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T07:26:44.262200Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:H"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Unverified Ownership via the strict lock implementation in `_strict.py` and related claim directory handling, where `mkdir(mode=0o700)` only enforces private permissions when it creates the directory and the subsequent `lstat` check reads neither `st_uid` nor the permission bits. A local attacker who can replace the lock's claim directory or any of its ancestors can hijack the lock, leading to integrity violations or denial of service against processes relying on the lock for mutual exclusion.\n\n**Note:** This is only exploitable when another local user can replace the lock's directory or any of its ancestors.\n## Remediation\nUpgrade `filelock` to version 4.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/tox-dev/filelock/security/advisories/GHSA-9c4x-gm8v-wgc4)\n- [GitHub Commit](https://github.com/tox-dev/filelock/commit/bfa066d65a1ba9106f86ee9d027f7588b9c77e03)\n- [GitHub PR](https://github.com/tox-dev/filelock/pull/839)\n- [GitHub Release](https://github.com/tox-dev/filelock/releases/tag/4.2.1)\n",
+      "disclosureTime": "2026-10-20T16:59:20.663118Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.00569",
+        "probability": "0.00094"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [
+        "4.2.1"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tokenizers@0.23.3",
+        "huggingface-hub@2.2.0",
+        "filelock@4.1.1"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-FILELOCK-21280756",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-112911"
+        ],
+        "CWE": [
+          "CWE-283"
+        ],
+        "GHSA": [
+          "GHSA-9c4x-gm8v-wgc4"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-21T14:04:21.243928Z",
+      "moduleName": "filelock",
+      "name": "filelock",
+      "packageManager": "pip",
+      "packageName": "filelock",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:44:42.748905Z",
+      "references": [
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/tox-dev/filelock/security/advisories/GHSA-9c4x-gm8v-wgc4"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/tox-dev/filelock/commit/bfa066d65a1ba9106f86ee9d027f7588b9c77e03"
+        },
+        {
+          "title": "GitHub PR",
+          "url": "https://github.com/tox-dev/filelock/pull/839"
+        },
+        {
+          "title": "GitHub Release",
+          "url": "https://github.com/tox-dev/filelock/releases/tag/4.2.1"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[3.30.0,4.2.1)"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "Unverified Ownership",
+      "upgradePath": [],
+      "version": "4.1.1"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:H/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:44:43.334412Z",
+      "credit": [
+        "Anthropic's OSS Scanner"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "cvssV3BaseScore": 6.1,
+          "cvssV3Vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:H",
+          "modificationTime": "2026-10-21T07:26:04.251070Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 6.9,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 6.9,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-21T14:04:21.278437Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:H/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 6.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T14:04:21.278437Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:H/E:P"
+        },
+        {
+          "assigner": "Red Hat",
+          "baseScore": 6.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T07:26:04.251070Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:H"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to UNIX Hard Link via `OsFiles.overwrite()` in `SoftReadWriteLock`, which refreshes holder records by name without verifying the file identity. A local attacker who has rename access to the lock directory can replace a holder record with a named pipe to stall the lock, or, under a permissive hard-link policy, hard-link a reachable target file and cause the lock user to write through it.\n\n**Note:** The hard-link vector requires a non-default kernel hard-link policy (e.g., `fs.protected_hardlinks=0` on Linux, or macOS/BSD default behavior); the named-pipe vector requires rename access to the lock directory.\n## Remediation\nUpgrade `filelock` to version 4.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/tox-dev/filelock/security/advisories/GHSA-fj95-fr6c-h845)\n- [GitHub Commit](https://github.com/tox-dev/filelock/commit/bfa066d65a1ba9106f86ee9d027f7588b9c77e03)\n- [GitHub PR](https://github.com/tox-dev/filelock/pull/842)\n- [GitHub Release](https://github.com/tox-dev/filelock/releases/tag/4.2.1)\n",
+      "disclosureTime": "2026-10-20T16:59:26.120279Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.02041",
+        "probability": "0.00125"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [
+        "4.2.1"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tokenizers@0.23.3",
+        "huggingface-hub@2.2.0",
+        "filelock@4.1.1"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-FILELOCK-21280758",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-112934"
+        ],
+        "CWE": [
+          "CWE-62"
+        ],
+        "GHSA": [
+          "GHSA-fj95-fr6c-h845"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-21T14:04:21.278437Z",
+      "moduleName": "filelock",
+      "name": "filelock",
+      "packageManager": "pip",
+      "packageName": "filelock",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:44:43.543038Z",
+      "references": [
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/tox-dev/filelock/security/advisories/GHSA-fj95-fr6c-h845"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/tox-dev/filelock/commit/bfa066d65a1ba9106f86ee9d027f7588b9c77e03"
+        },
+        {
+          "title": "GitHub PR",
+          "url": "https://github.com/tox-dev/filelock/pull/842"
+        },
+        {
+          "title": "GitHub Release",
+          "url": "https://github.com/tox-dev/filelock/releases/tag/4.2.1"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[4.0.0,4.2.1)"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "UNIX Hard Link",
+      "upgradePath": [],
+      "version": "4.1.1"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:45:35.127681Z",
+      "credit": [
+        "Anthropic's OSS Scanner"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "cvssV3BaseScore": 4.7,
+          "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N",
+          "modificationTime": "2026-10-21T07:28:35.072286Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 5.7,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 5.7,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-21T14:04:21.388868Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:N/VC:N/VI:H/VA:N/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 4.7,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T14:04:21.388868Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N/E:P"
+        },
+        {
+          "assigner": "Red Hat",
+          "baseScore": 4.7,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T07:28:35.072286Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Insufficient Verification of Data Authenticity via `owner_is_stale` in `src/filelock/_soft.py` and `src/filelock/_identity.py`, when a process owner identity comparison is performed between a lock holder whose start token was recorded without a boot ID (high 64 bits equal to zero) and a new process whose token includes a boot ID. Because the original comparison used set membership (`process_start_token(pid) in {None, start_token}`) rather than a boot-ID-aware equality check, a live lock holder can be incorrectly classified as stale when the reader and the owner run in different Linux time namespaces or when one side cannot read `/proc/sys/kernel/random/boot_id`. This allows a competing process to prematurely reclaim the lock, corrupting the mutual-exclusion guarantee and enabling unauthorized writes to the protected resource.\n## Remediation\nUpgrade `filelock` to version 4.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/tox-dev/filelock/security/advisories/GHSA-rfpc-qcw5-3pc4)\n- [GitHub Commit](https://github.com/tox-dev/filelock/commit/eeceaa846cbe4df72718d94c8371ca1ab8f5b3cc)\n- [GitHub PR](https://github.com/tox-dev/filelock/pull/836)\n- [GitHub Release](https://github.com/tox-dev/filelock/releases/tag/4.2.1)\n",
+      "disclosureTime": "2026-10-20T16:57:56.384000Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.02665",
+        "probability": "0.00135"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [
+        "4.2.1"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tokenizers@0.23.3",
+        "huggingface-hub@2.2.0",
+        "filelock@4.1.1"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-FILELOCK-21280760",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-112939"
+        ],
+        "CWE": [
+          "CWE-345"
+        ],
+        "GHSA": [
+          "GHSA-rfpc-qcw5-3pc4"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-21T14:04:21.388868Z",
+      "moduleName": "filelock",
+      "name": "filelock",
+      "packageManager": "pip",
+      "packageName": "filelock",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:45:35.299017Z",
+      "references": [
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/tox-dev/filelock/security/advisories/GHSA-rfpc-qcw5-3pc4"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/tox-dev/filelock/commit/eeceaa846cbe4df72718d94c8371ca1ab8f5b3cc"
+        },
+        {
+          "title": "GitHub PR",
+          "url": "https://github.com/tox-dev/filelock/pull/836"
+        },
+        {
+          "title": "GitHub Release",
+          "url": "https://github.com/tox-dev/filelock/releases/tag/4.2.1"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[3.22.0,4.2.1)"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "Insufficient Verification of Data Authenticity",
+      "upgradePath": [],
+      "version": "4.1.1"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:45:49.693984Z",
+      "credit": [
+        "Unknown"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "cvssV3BaseScore": 2.5,
+          "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N",
+          "modificationTime": "2026-10-21T07:28:57.692752Z",
+          "severity": "low"
+        }
+      ],
+      "cvssScore": 2,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 2,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-21T14:04:21.254879Z",
+          "severity": "low",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:N/VC:L/VI:N/VA:N/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 2.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T14:04:21.254879Z",
+          "severity": "low",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N/E:P"
+        },
+        {
+          "assigner": "Red Hat",
+          "baseScore": 2.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T07:28:57.692752Z",
+          "severity": "low",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Symlink Attack via the lock file open logic in `_api.py` and related platform backends, where an existing lock file's permissions are not preserved on Unix systems. An attacker with local access can observe the file mode applied to a newly created lock file, potentially reading its contents or inferring sensitive path information that would otherwise be restricted by the original file's ACL.\n## Remediation\nUpgrade `filelock` to version 4.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/tox-dev/filelock/security/advisories/GHSA-9j6q-wvj5-jgjg)\n- [GitHub Commit](https://github.com/tox-dev/filelock/commit/e1e825b1992f69fb6b346dc395d5ae4893536c0a)\n- [GitHub PR](https://github.com/tox-dev/filelock/pull/835)\n- [GitHub Release](https://github.com/tox-dev/filelock/releases/tag/4.2.1)\n",
+      "disclosureTime": "2026-10-20T16:59:21.938000Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.09994",
+        "probability": "0.00205"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [
+        "4.2.1"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tokenizers@0.23.3",
+        "huggingface-hub@2.2.0",
+        "filelock@4.1.1"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-FILELOCK-21280761",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-112912"
+        ],
+        "CWE": [
+          "CWE-59"
+        ],
+        "GHSA": [
+          "GHSA-9j6q-wvj5-jgjg"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-21T14:04:21.254879Z",
+      "moduleName": "filelock",
+      "name": "filelock",
+      "packageManager": "pip",
+      "packageName": "filelock",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:45:49.847514Z",
+      "references": [
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/tox-dev/filelock/security/advisories/GHSA-9j6q-wvj5-jgjg"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/tox-dev/filelock/commit/e1e825b1992f69fb6b346dc395d5ae4893536c0a"
+        },
+        {
+          "title": "GitHub PR",
+          "url": "https://github.com/tox-dev/filelock/pull/835"
+        },
+        {
+          "title": "GitHub Release",
+          "url": "https://github.com/tox-dev/filelock/releases/tag/4.2.1"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[3.32.6,4.2.1)"
+        ]
+      },
+      "severity": "low",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "low",
+      "socialTrendAlert": false,
+      "title": "Symlink Attack",
+      "upgradePath": [],
+      "version": "4.1.1"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-06-21T09:40:46.552580Z",
+      "credit": [
+        "Edward-x"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "cvssV3BaseScore": 6.3,
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+          "modificationTime": "2026-06-21T13:29:38.896552Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 7.1,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 7.1,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-08-24T14:02:39.691695Z",
+          "severity": "high",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 6.5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-08-24T14:02:39.691695Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:N/E:P"
+        },
+        {
+          "assigner": "NVD",
+          "baseScore": 6.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-06-21T13:29:38.896552Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L"
+        }
+      ],
+      "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Insufficient Session Expiration in the `authenticate_user` function. An attacker can gain unauthorized access or maintain access to sensitive information by exploiting session management flaws.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [GitHub Gist](https://gist.github.com/YLChen-007/39ed709ce322431658a05b951e91f278)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/blob/main/litellm/proxy/auth/login_utils.py#L217)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/blob/main/litellm/proxy/auth/login_utils.py#L347)\n",
+      "disclosureTime": "2026-06-21T02:39:58.000000Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.32828",
+        "probability": "0.00400"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-LITELLM-17391451",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-12772"
+        ],
+        "CWE": [
+          "CWE-613"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-08-24T14:02:39.691695Z",
+      "moduleName": "litellm",
+      "name": "litellm",
+      "packageManager": "pip",
+      "packageName": "litellm",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-06-21T10:12:25.209850Z",
+      "references": [
+        {
+          "title": "GitHub Gist",
+          "url": "https://gist.github.com/YLChen-007/39ed709ce322431658a05b951e91f278"
+        },
+        {
+          "title": "Vulnerable Code",
+          "url": "https://github.com/BerriAI/litellm/blob/main/litellm/proxy/auth/login_utils.py%23L217"
+        },
+        {
+          "title": "Vulnerable Code",
+          "url": "https://github.com/BerriAI/litellm/blob/main/litellm/proxy/auth/login_utils.py%23L347"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[0,]"
+        ]
+      },
+      "severity": "high",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "high",
+      "socialTrendAlert": false,
+      "title": "Insufficient Session Expiration",
+      "upgradePath": [],
+      "version": "1.101.6"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-06-22T09:46:49.344394Z",
+      "credit": [
+        "Eric-c"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "cvssV3BaseScore": 6.3,
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+          "modificationTime": "2026-06-21T13:29:40.803194Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 5.3,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 5.3,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-08-24T14:02:39.591427Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 6.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-08-24T14:02:39.591427Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L/E:P"
+        },
+        {
+          "assigner": "NVD",
+          "baseScore": 6.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-06-21T13:29:40.803194Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L"
+        }
+      ],
+      "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Insufficient Session Expiration in the `get_redirect_response_from_openid()` function of the SSO Authentication Flow process. An attacker can cause premature session termination by manipulating authentication responses remotely, potentially leading to unauthorized session expiration and disruption of user access.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [GitHub Gist](https://gist.github.com/YLChen-007/5fa8af12e1b183674d7ca96d852fb697)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/blob/6437b812beb0267c49ab85b52f25ef1293f4b9f1/litellm/proxy/management_endpoints/ui_sso.py#L3231)\n",
+      "disclosureTime": "2026-06-21T11:11:42.153000Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.44562",
+        "probability": "0.00570"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-LITELLM-17393719",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-12796"
+        ],
+        "CWE": [
+          "CWE-613"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-08-24T14:02:39.591427Z",
+      "moduleName": "litellm",
+      "name": "litellm",
+      "packageManager": "pip",
+      "packageName": "litellm",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-06-22T09:46:49.646955Z",
+      "references": [
+        {
+          "title": "GitHub Gist",
+          "url": "https://gist.github.com/YLChen-007/5fa8af12e1b183674d7ca96d852fb697"
+        },
+        {
+          "title": "Vulnerable Code",
+          "url": "https://github.com/BerriAI/litellm/blob/6437b812beb0267c49ab85b52f25ef1293f4b9f1/litellm/proxy/management_endpoints/ui_sso.py%23L3231"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[0,]"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "Insufficient Session Expiration",
+      "upgradePath": [],
+      "version": "1.101.6"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:N/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:44:40.601879Z",
+      "credit": [
+        "Anthropic's OSS Scanner"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "cvssV3BaseScore": 3.3,
+          "cvssV3Vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:N",
+          "modificationTime": "2026-10-21T07:28:50.621153Z",
+          "severity": "low"
+        }
+      ],
+      "cvssScore": 4.8,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 4.8,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-21T14:04:21.506137Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:N/VI:L/VA:N/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 3.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T14:04:21.506137Z",
+          "severity": "low",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:N/E:P"
+        },
+        {
+          "assigner": "Red Hat",
+          "baseScore": 3.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T07:28:50.621153Z",
+          "severity": "low",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:L/A:N"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Time-of-check Time-of-use (TOCTOU) Race Condition via the strict lock implementation in `_strict.py` and related soft read-write storage code, where claim directories are created without being restricted to the owning account. A local attacker who can write to the same filesystem path can interfere with or substitute the claim directory, allowing unauthorized modification of lock state.\n## Remediation\nUpgrade `filelock` to version 4.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/tox-dev/filelock/security/advisories/GHSA-wfhq-q4j2-c37m)\n- [GitHub Commit](https://github.com/tox-dev/filelock/commit/bfa066d65a1ba9106f86ee9d027f7588b9c77e03)\n- [GitHub PR](https://github.com/tox-dev/filelock/pull/842)\n- [GitHub Release](https://github.com/tox-dev/filelock/releases/tag/4.2.1)\n",
+      "disclosureTime": "2026-10-20T16:58:55.175721Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.00295",
+        "probability": "0.00086"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [
+        "4.2.1"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tokenizers@0.23.3",
+        "huggingface-hub@2.2.0",
+        "filelock@4.1.1"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-FILELOCK-21280751",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-112941"
+        ],
+        "CWE": [
+          "CWE-367"
+        ],
+        "GHSA": [
+          "GHSA-wfhq-q4j2-c37m"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-21T14:04:21.506137Z",
+      "moduleName": "filelock",
+      "name": "filelock",
+      "packageManager": "pip",
+      "packageName": "filelock",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:44:40.823849Z",
+      "references": [
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/tox-dev/filelock/security/advisories/GHSA-wfhq-q4j2-c37m"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/tox-dev/filelock/commit/bfa066d65a1ba9106f86ee9d027f7588b9c77e03"
+        },
+        {
+          "title": "GitHub PR",
+          "url": "https://github.com/tox-dev/filelock/pull/842"
+        },
+        {
+          "title": "GitHub Release",
+          "url": "https://github.com/tox-dev/filelock/releases/tag/4.2.1"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[4.1.0,4.2.1)"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "Time-of-check Time-of-use (TOCTOU) Race Condition",
+      "upgradePath": [],
+      "version": "4.1.1"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:L/A:L/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-06-21T09:52:44.614628Z",
+      "credit": [
+        "Edward-x"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "cvssV3BaseScore": 5,
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:L/A:L",
+          "modificationTime": "2026-06-21T13:29:38.784301Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 2.3,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 2.3,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-01T13:52:12.480671Z",
+          "severity": "low",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:H/AT:P/PR:L/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-01T13:52:12.480671Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:L/A:L/E:P"
+        },
+        {
+          "assigner": "NVD",
+          "baseScore": 5,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-06-21T13:29:38.784301Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:L/A:L"
+        }
+      ],
+      "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Incorrect Authorization in the `user_api_key_auth.py` file of the M2M JWT Handler. An attacker can gain unauthorized access to resources by exploiting insufficient authorization checks.\r\n\r\n**Note:** This is only exploitable if the attacker possesses valid but limited credentials and can craft specific JWTs to bypass intended access controls.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [GitHub Gist](https://gist.github.com/YLChen-007/70e4e106527f74ddf17953ff0f6c248d)\n",
+      "disclosureTime": "2026-06-21T03:06:00.000000Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.35732",
+        "probability": "0.00431"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-LITELLM-17391455",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-12771"
+        ],
+        "CWE": [
+          "CWE-863"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-01T13:52:12.480671Z",
+      "moduleName": "litellm",
+      "name": "litellm",
+      "packageManager": "pip",
+      "packageName": "litellm",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-06-21T10:46:46.204566Z",
+      "references": [
+        {
+          "title": "GitHub Gist",
+          "url": "https://gist.github.com/YLChen-007/70e4e106527f74ddf17953ff0f6c248d"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[0,]"
+        ]
+      },
+      "severity": "low",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "low",
+      "socialTrendAlert": false,
+      "title": "Incorrect Authorization",
+      "upgradePath": [],
+      "version": "1.101.6"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+      "alternativeIds": [],
+      "creationTime": "2026-09-29T11:15:26.976436Z",
+      "credit": [
+        "Nir Zadok (Nirza)",
+        "Moshe Siman Tov Bustan"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "cvssV3BaseScore": 8.1,
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N",
+          "modificationTime": "2026-09-29T01:30:36.617704Z",
+          "severity": "high"
+        }
+      ],
+      "cvssScore": 8.6,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 8.6,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-09-29T14:03:07.595667Z",
+          "severity": "high",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:L/UI:N/VC:H/VI:H/VA:N/SC:N/SI:N/SA:N"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 8.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-29T14:03:07.595667Z",
+          "severity": "high",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"
+        },
+        {
+          "assigner": "NVD",
+          "baseScore": 8.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-09-29T01:30:36.617704Z",
+          "severity": "high",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:H/A:N"
+        }
+      ],
+      "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Weak Authentication via the JWT authentication flow's email-based fallback lookup, which does not verify the `email_verified` claim before resolving a user identity. An attacker holding a valid JWT from the configured identity provider can present a token containing an unverified email address that matches a victim's account, causing the system to authenticate the attacker as that victim and inherit their role, including `proxy_admin` privileges. This also permanently overwrites the victim's stored identity binding, granting the attacker persistent unauthorized access to administrative endpoints that expose API keys and user management functions.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [ox.security](https://www.ox.security/blog/litellm-an-ordinary-login-token-can-become-someone-elses-admin-account/)\n",
+      "disclosureTime": "2026-09-28T21:32:54.021000Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.17739",
+        "probability": "0.00273"
+      },
+      "exploit": "Not Defined",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Not Defined",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Not Defined",
+            "type": "primary"
+          }
+        ],
+        "sources": []
+      },
+      "fixedIn": [],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-LITELLM-20257373",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-93355"
+        ],
+        "CWE": [
+          "CWE-1390"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-09-29T14:03:07.595667Z",
+      "moduleName": "litellm",
+      "name": "litellm",
+      "packageManager": "pip",
+      "packageName": "litellm",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-09-29T11:15:27.255023Z",
+      "references": [
+        {
+          "title": "ox.security",
+          "url": "https://www.ox.security/blog/litellm-an-ordinary-login-token-can-become-someone-elses-admin-account/"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[0,]"
+        ]
+      },
+      "severity": "high",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "high",
+      "socialTrendAlert": false,
+      "title": "Weak Authentication",
+      "upgradePath": [],
+      "version": "1.101.6"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:44:42.186954Z",
+      "credit": [
+        "Anthropic's OSS Scanner"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "cvssV3BaseScore": 4.7,
+          "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N",
+          "modificationTime": "2026-10-21T07:28:05.666222Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 5.7,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 5.7,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-21T14:04:21.266716Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:N/VC:N/VI:H/VA:N/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 4.7,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T14:04:21.266716Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N/E:P"
+        },
+        {
+          "assigner": "Red Hat",
+          "baseScore": 4.7,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T07:28:05.666222Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:N/I:H/A:N"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Time-of-check Time-of-use (TOCTOU) Race Condition via the stale-lock-breaking logic in `_try_break_expired_lock` and `_try_break_stale_lock`, where a race condition allows an attacker with write access to the lock directory to replace a held lock file with a new file between the time the inode is read and the time the break is executed. Because the original code did not pin the inode before acting on the stale marker, an attacker can cause the stale-break logic to evict a live lock, allowing two processes to hold the same lock simultaneously and corrupting the integrity guarantee that filelock provides.\n\n**Note:** This is only exploitable when another local user has write access to the lock file's directory or any of its ancestor directories.\n## Remediation\nUpgrade `filelock` to version 4.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/tox-dev/filelock/security/advisories/GHSA-fq56-3cx3-fjxp)\n- [GitHub Commit](https://github.com/tox-dev/filelock/commit/740ff666b62a88496c8d7394e4e6230605e4d62b)\n- [GitHub PR](https://github.com/tox-dev/filelock/pull/843)\n- [GitHub Release](https://github.com/tox-dev/filelock/releases/tag/4.2.1)\n",
+      "disclosureTime": "2026-10-20T16:59:16.684159Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.00306",
+        "probability": "0.00086"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [
+        "4.2.1"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tokenizers@0.23.3",
+        "huggingface-hub@2.2.0",
+        "filelock@4.1.1"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-FILELOCK-21280755",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-112935"
+        ],
+        "CWE": [
+          "CWE-367"
+        ],
+        "GHSA": [
+          "GHSA-fq56-3cx3-fjxp"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-21T14:04:21.266716Z",
+      "moduleName": "filelock",
+      "name": "filelock",
+      "packageManager": "pip",
+      "packageName": "filelock",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:44:42.375637Z",
+      "references": [
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/tox-dev/filelock/security/advisories/GHSA-fq56-3cx3-fjxp"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/tox-dev/filelock/commit/740ff666b62a88496c8d7394e4e6230605e4d62b"
+        },
+        {
+          "title": "GitHub PR",
+          "url": "https://github.com/tox-dev/filelock/pull/843"
+        },
+        {
+          "title": "GitHub Release",
+          "url": "https://github.com/tox-dev/filelock/releases/tag/4.2.1"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[3.22.0,4.2.1)"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "Time-of-check Time-of-use (TOCTOU) Race Condition",
+      "upgradePath": [],
+      "version": "4.1.1"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:H/A:N/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:44:42.967270Z",
+      "credit": [
+        "Anthropic's OSS Scanner"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "cvssV3BaseScore": 5.3,
+          "cvssV3Vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:H/A:N",
+          "modificationTime": "2026-10-21T07:26:02.705002Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 5.8,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 5.8,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-21T14:04:21.212328Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:L/AC:H/AT:P/PR:L/UI:N/VC:L/VI:H/VA:N/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T14:04:21.212328Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:H/A:N/E:P"
+        },
+        {
+          "assigner": "Red Hat",
+          "baseScore": 5.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T07:26:02.705002Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:H/PR:L/UI:N/S:U/C:L/I:H/A:N"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Race Condition Enabling Link Following via `SoftFileLock._try_break_stale_lock` in `src/filelock/_soft.py`, which can restore a stale marker by name after moving it aside. A local attacker with rename access in a non-sticky lock directory can swap in a symbolic link, causing the lock user to hard-link one of its own files into the lock directory on a runtime that follows the link and a same-filesystem target. This allows the attacker to break a live lock and achieve unauthorized write access to files owned by the victim process.\n\n**Note:** This is only exploitable when another local user has rename access in a non-sticky lock directory, and no other user can replace the lock directory or any of its ancestors.\n## Remediation\nUpgrade `filelock` to version 4.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/tox-dev/filelock/security/advisories/GHSA-crv4-6mhj-j5jh)\n- [GitHub Commit](https://github.com/tox-dev/filelock/commit/740ff666b62a88496c8d7394e4e6230605e4d62b)\n- [GitHub PR](https://github.com/tox-dev/filelock/pull/843)\n- [GitHub Release](https://github.com/tox-dev/filelock/releases/tag/4.2.1)\n",
+      "disclosureTime": "2026-10-20T16:59:20.797940Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.00236",
+        "probability": "0.00083"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [
+        "4.2.1"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tokenizers@0.23.3",
+        "huggingface-hub@2.2.0",
+        "filelock@4.1.1"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-FILELOCK-21280757",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-112914"
+        ],
+        "CWE": [
+          "CWE-363"
+        ],
+        "GHSA": [
+          "GHSA-crv4-6mhj-j5jh"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-21T14:04:21.212328Z",
+      "moduleName": "filelock",
+      "name": "filelock",
+      "packageManager": "pip",
+      "packageName": "filelock",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:44:43.134108Z",
+      "references": [
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/tox-dev/filelock/security/advisories/GHSA-crv4-6mhj-j5jh"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/tox-dev/filelock/commit/740ff666b62a88496c8d7394e4e6230605e4d62b"
+        },
+        {
+          "title": "GitHub PR",
+          "url": "https://github.com/tox-dev/filelock/pull/843"
+        },
+        {
+          "title": "GitHub Release",
+          "url": "https://github.com/tox-dev/filelock/releases/tag/4.2.1"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[4.1.0,4.2.1)"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "Race Condition Enabling Link Following",
+      "upgradePath": [],
+      "version": "4.1.1"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:N/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-20T20:44:43.759214Z",
+      "credit": [
+        "Anthropic's OSS Scanner"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "Red Hat",
+          "cvssV3BaseScore": 6.1,
+          "cvssV3Vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:N",
+          "modificationTime": "2026-10-21T07:28:03.937187Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 6.9,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 6.9,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-21T14:04:21.281550Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:L/AC:L/AT:N/PR:L/UI:N/VC:L/VI:H/VA:N/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 6.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T14:04:21.281550Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:N/E:P"
+        },
+        {
+          "assigner": "Red Hat",
+          "baseScore": 6.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-21T07:28:03.937187Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:L/I:H/A:N"
+        }
+      ],
+      "description": "## Overview\n\nAffected versions of this package are vulnerable to Use of Incorrectly-Resolved Name or Reference via the lock-file open logic in `_unix.py` and related backends, where acquiring a lock on a file that does not yet exist creates it with a permissive mode (e.g. `0o666`) rather than preserving the permissions of an existing lock file or applying a restrictive default. A local attacker who can observe or race the lock-file creation can read file contents that are written to the lock file (such as a SQLite journal) by a more-privileged process, or replace the lock file to redirect locking operations, achieving information disclosure and integrity impact.\n\n**Note:** The protection against another local user holds only when no other user can rename entries in the lock's directory; passing a permissive explicit `mode` (e.g. `0o666`, `0o660`, `0o644`) to the lock constructor also widens the exposure beyond the default truncation-only risk.\n## Remediation\nUpgrade `filelock` to version 4.2.1 or higher.\n## References\n- [GitHub Advisory](https://github.com/tox-dev/filelock/security/advisories/GHSA-69hj-f68j-2879)\n- [GitHub Commit](https://github.com/tox-dev/filelock/commit/e1e825b1992f69fb6b346dc395d5ae4893536c0a)\n- [GitHub PR](https://github.com/tox-dev/filelock/pull/835)\n- [GitHub Release](https://github.com/tox-dev/filelock/releases/tag/4.2.1)\n",
+      "disclosureTime": "2026-10-20T16:59:47.388236Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.01645",
+        "probability": "0.00118"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [
+        "4.2.1"
+      ],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6",
+        "tokenizers@0.23.3",
+        "huggingface-hub@2.2.0",
+        "filelock@4.1.1"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-FILELOCK-21280759",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-112909"
+        ],
+        "CWE": [
+          "CWE-706"
+        ],
+        "GHSA": [
+          "GHSA-69hj-f68j-2879"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isPinnable": true,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-21T14:04:21.281550Z",
+      "moduleName": "filelock",
+      "name": "filelock",
+      "packageManager": "pip",
+      "packageName": "filelock",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-20T20:44:43.907366Z",
+      "references": [
+        {
+          "title": "GitHub Advisory",
+          "url": "https://github.com/tox-dev/filelock/security/advisories/GHSA-69hj-f68j-2879"
+        },
+        {
+          "title": "GitHub Commit",
+          "url": "https://github.com/tox-dev/filelock/commit/e1e825b1992f69fb6b346dc395d5ae4893536c0a"
+        },
+        {
+          "title": "GitHub PR",
+          "url": "https://github.com/tox-dev/filelock/pull/835"
+        },
+        {
+          "title": "GitHub Release",
+          "url": "https://github.com/tox-dev/filelock/releases/tag/4.2.1"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[,4.2.1)"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "Use of Incorrectly-Resolved Name or Reference",
+      "upgradePath": [],
+      "version": "4.1.1"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-06-22T09:34:30.045532Z",
+      "credit": [
+        "Eric-c"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "cvssV3BaseScore": 7.3,
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L",
+          "modificationTime": "2026-06-21T13:29:40.387718Z",
+          "severity": "high"
+        }
+      ],
+      "cvssScore": 6.9,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 6.9,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-08-24T14:02:39.693377Z",
+          "severity": "medium",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:N/VC:L/VI:L/VA:L/SC:N/SI:N/SA:N/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 7.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-08-24T14:02:39.693377Z",
+          "severity": "high",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L/E:P"
+        },
+        {
+          "assigner": "NVD",
+          "baseScore": 7.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-06-21T13:29:40.387718Z",
+          "severity": "high",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:L/I:L/A:L"
+        }
+      ],
+      "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Missing Authentication for Critical Function in the `/sso/debug/login` and `/sso/debug/callback` endpoints in the SSO Debug Flow. An attacker can gain unauthorized access and potentially manipulate sensitive information by sending crafted requests to the affected endpoint.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [GitHub Gist](https://gist.github.com/YLChen-007/9b13c75a3a73187a4082cc6df0b100d3)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/blob/6437b812beb0267c49ab85b52f25ef1293f4b9f1/litellm/proxy/management_endpoints/ui_sso.py#L4480)\n",
+      "disclosureTime": "2026-06-21T10:10:29.636000Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.53634",
+        "probability": "0.00795"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-LITELLM-17393717",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-12795"
+        ],
+        "CWE": [
+          "CWE-306"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-08-24T14:02:39.693377Z",
+      "moduleName": "litellm",
+      "name": "litellm",
+      "packageManager": "pip",
+      "packageName": "litellm",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-06-22T09:34:30.244826Z",
+      "references": [
+        {
+          "title": "GitHub Gist",
+          "url": "https://gist.github.com/YLChen-007/9b13c75a3a73187a4082cc6df0b100d3"
+        },
+        {
+          "title": "Vulnerable Code",
+          "url": "https://github.com/BerriAI/litellm/blob/6437b812beb0267c49ab85b52f25ef1293f4b9f1/litellm/proxy/management_endpoints/ui_sso.py%23L4480"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[0,]"
+        ]
+      },
+      "severity": "medium",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "medium",
+      "socialTrendAlert": false,
+      "title": "Missing Authentication for Critical Function",
+      "upgradePath": [],
+      "version": "1.101.6"
+    },
+    {
+      "CVSSv3": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:C/C:H/I:H/A:H/E:P",
+      "alternativeIds": [],
+      "creationTime": "2026-10-12T10:05:58.106049Z",
+      "credit": [
+        "Gabriel Alves"
+      ],
+      "cvssDetails": [
+        {
+          "assigner": "NVD",
+          "cvssV3BaseScore": 6.3,
+          "cvssV3Vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L",
+          "modificationTime": "2026-10-11T13:17:03.375851Z",
+          "severity": "medium"
+        }
+      ],
+      "cvssScore": 8.5,
+      "cvssSources": [
+        {
+          "assigner": "Snyk",
+          "baseScore": 8.5,
+          "cvssVersion": "4.0",
+          "modificationTime": "2026-10-12T14:04:13.622079Z",
+          "severity": "high",
+          "type": "primary",
+          "vector": "CVSS:4.0/AV:N/AC:L/AT:N/PR:H/UI:N/VC:H/VI:N/VA:N/SC:H/SI:H/SA:H/E:P"
+        },
+        {
+          "assigner": "Snyk",
+          "baseScore": 9.1,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-12T14:04:13.622079Z",
+          "severity": "critical",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:C/C:H/I:H/A:H/E:P"
+        },
+        {
+          "assigner": "NVD",
+          "baseScore": 6.3,
+          "cvssVersion": "3.1",
+          "modificationTime": "2026-10-11T13:17:03.375851Z",
+          "severity": "medium",
+          "type": "secondary",
+          "vector": "CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:L"
+        }
+      ],
+      "description": "## Overview\n[litellm](https://pypi.org/project/litellm) is a Library to easily interface with LLM API providers\n\nAffected versions of this package are vulnerable to Authorization Bypass Through User-Controlled Key in the `add_new_model` and `can_user_make_team_model_call` functions in `model_management_endpoints.py`, which authorize the caller by role alone and never inspect the values supplied in `litellm_params`. A user with team administrator access can read any environment variable of the proxy process, including the proxy master key, by registering a model whose `api_key` is an `os.environ/<NAME>` reference and whose `api_base` points to a host they control, then invoking it so that `get_secret` resolves the variable and `_resolve_db_litellm_param` sends it to that host as the outbound `Authorization` header. This requires `STORE_MODEL_IN_DB` to be enabled and an enterprise license, which is what makes the team administrator role available.\n\n**Note:** A fix is unlikely. In https://github.com/BerriAI/litellm/commit/5862be3e79154ce5ac8a736c77c7c3614fac40fb, project maintainers removed the field whitelist and the team-scope short-circuit in `_resolve_db_litellm_param` deliberately, describing universal `os.environ/` resolution for team-scoped rows as an intended threat-model expansion that trusts team administrators to read environment variables, and placing the trust boundary on who the deployment grants team administrator rather than on what those administrators may reference.\n## Remediation\nThere is no fixed version for `litellm`.\n## References\n- [Red Hat Bugzilla Bug](https://bugzilla.redhat.com/show_bug.cgi?id=2549217)\n- [Vulnerable Code](https://github.com/BerriAI/litellm/commit/5862be3e79154ce5ac8a736c77c7c3614fac40fb)\n",
+      "disclosureTime": "2026-10-11T12:00:13.000000Z",
+      "epssDetails": {
+        "modelVersion": "v2026.06.15",
+        "percentile": "0.09229",
+        "probability": "0.00201"
+      },
+      "exploit": "Proof of Concept",
+      "exploitDetails": {
+        "maturityLevels": [
+          {
+            "format": "CVSSv3",
+            "level": "Proof of Concept",
+            "type": "secondary"
+          },
+          {
+            "format": "CVSSv4",
+            "level": "Proof of Concept",
+            "type": "primary"
+          }
+        ],
+        "sources": [
+          "Snyk"
+        ]
+      },
+      "fixedIn": [],
+      "from": [
+        "litellm-1101@0.0.0",
+        "litellm@1.101.6"
+      ],
+      "functions": [],
+      "functions_new": [],
+      "id": "SNYK-PYTHON-LITELLM-20840174",
+      "identifiers": {
+        "CVE": [
+          "CVE-2026-108575"
+        ],
+        "CWE": [
+          "CWE-639"
+        ]
+      },
+      "insights": {
+        "triageAdvice": null
+      },
+      "isDisputed": false,
+      "isPatchable": false,
+      "isUpgradable": false,
+      "language": "python",
+      "malicious": false,
+      "modificationTime": "2026-10-12T14:04:13.622079Z",
+      "moduleName": "litellm",
+      "name": "litellm",
+      "packageManager": "pip",
+      "packageName": "litellm",
+      "patches": [],
+      "proprietary": false,
+      "publicationTime": "2026-10-12T10:05:58.286738Z",
+      "references": [
+        {
+          "title": "Red Hat Bugzilla Bug",
+          "url": "https://bugzilla.redhat.com/show_bug.cgi?id=2549217"
+        },
+        {
+          "title": "Vulnerable Code",
+          "url": "https://github.com/BerriAI/litellm/commit/5862be3e79154ce5ac8a736c77c7c3614fac40fb"
+        }
+      ],
+      "semver": {
+        "vulnerable": [
+          "[1.93.0.dev2,]"
+        ]
+      },
+      "severity": "high",
+      "severityBasedOn": "CVSS",
+      "severityWithCritical": "high",
+      "socialTrendAlert": false,
+      "title": "Authorization Bypass Through User-Controlled Key",
+      "upgradePath": [],
+      "version": "1.101.6"
+    }
+  ]
+}

@@ -6,26 +6,50 @@ ignore:
     - '*':
         reason: >-
           Approved SDK-only exception: ImageAI never starts LiteLLM proxy
-          authenticate_user endpoints; no upstream fixed version. See
-          Docs/Snyk-Exceptions.md.
-        expires: 2026-10-19T00:00:00.000Z
-        created: 2026-09-19T23:42:34.142Z
+          authenticate_user endpoints; no upstream fixed version. Renewed
+          2026-10-21. See Docs/Snyk-Exceptions.md.
+        expires: 2026-11-20T00:00:00.000Z
+        created: 2026-10-21T13:45:47.283Z
   SNYK-PYTHON-LITELLM-17393717:
     - '*':
         reason: >-
           Approved SDK-only exception: ImageAI exposes no LiteLLM
-          /sso/debug/login or callback endpoints; no upstream fixed version. See
-          Docs/Snyk-Exceptions.md.
-        expires: 2026-10-19T00:00:00.000Z
-        created: 2026-09-19T23:42:42.775Z
+          /sso/debug/login or callback endpoints; no upstream fixed version.
+          Renewed 2026-10-21. See Docs/Snyk-Exceptions.md.
+        expires: 2026-11-20T00:00:00.000Z
+        created: 2026-10-21T13:45:54.189Z
   SNYK-PYTHON-LITELLM-17393719:
     - '*':
         reason: >-
           Approved SDK-only exception: ImageAI does not run LiteLLM proxy OpenID
-          redirect/session handling; no upstream fixed version. See
+          redirect/session handling; no upstream fixed version. Renewed
+          2026-10-21. See Docs/Snyk-Exceptions.md.
+        expires: 2026-11-20T00:00:00.000Z
+        created: 2026-10-21T13:45:59.835Z
+  SNYK-PYTHON-LITELLM-17391455:
+    - '*':
+        reason: >-
+          Approved SDK-only exception: ImageAI never runs the LiteLLM proxy M2M
+          JWT handler (user_api_key_auth.py); no upstream fixed version. See
           Docs/Snyk-Exceptions.md.
-        expires: 2026-10-19T00:00:00.000Z
-        created: 2026-09-19T23:42:52.501Z
+        expires: 2026-11-20T00:00:00.000Z
+        created: 2026-10-21T13:46:05.407Z
+  SNYK-PYTHON-LITELLM-20257373:
+    - '*':
+        reason: >-
+          Approved SDK-only exception: ImageAI does not use LiteLLM proxy JWT
+          authentication or its email fallback lookup; no upstream fixed
+          version. See Docs/Snyk-Exceptions.md.
+        expires: 2026-11-20T00:00:00.000Z
+        created: 2026-10-21T13:46:11.113Z
+  SNYK-PYTHON-LITELLM-20840174:
+    - '*':
+        reason: >-
+          Approved SDK-only exception: ImageAI exposes no LiteLLM proxy
+          model-management endpoints (add_new_model, team model calls); no
+          upstream fixed version. See Docs/Snyk-Exceptions.md.
+        expires: 2026-11-20T00:00:00.000Z
+        created: 2026-10-21T13:46:16.926Z
 patch: {}
 
 # Match the supported interpreter used for local security validation.

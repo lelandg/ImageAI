@@ -1,22 +1,31 @@
 # Snyk applicability exceptions
 
-Reviewed: 2026-09-19 18:45. Exceptions expire 2026-10-19.
+Reviewed: 2026-10-21 08:42. Exceptions expire 2026-11-20.
 
-The maintainer explicitly approved documented exceptions for exactly these three LiteLLM proxy findings while authorizing migration away from the vulnerable Protobuf release. No Protobuf exception is approved or included.
+The maintainer explicitly approved documented exceptions for exactly these six LiteLLM proxy findings. On 2026-09-19 three were approved, alongside the migration away from the vulnerable Protobuf release; no Protobuf exception is approved or included. On 2026-10-21 those three were renewed and three later proxy advisories were added, after a raw reassessment ([Notes/2026-10-21-snyk-litellm-reassessment.md](../Notes/2026-10-21-snyk-litellm-reassessment.md)).
 
-| Advisory | Affected upstream surface | Why the reported path is absent |
-| --- | --- | --- |
-| SNYK-PYTHON-LITELLM-17391451 | Proxy authenticate_user/session handling | ImageAI does not start the LiteLLM proxy or expose its management API. |
-| SNYK-PYTHON-LITELLM-17393717 | Proxy /sso/debug/login and /sso/debug/callback | ImageAI has no LiteLLM HTTP SSO endpoints. |
-| SNYK-PYTHON-LITELLM-17393719 | Proxy OpenID redirect/session handling | ImageAI does not use LiteLLM proxy authentication or browser login sessions. |
+| Advisory | CVE | Approved | Affected upstream surface | Why the reported path is absent |
+| --- | --- | --- | --- | --- |
+| SNYK-PYTHON-LITELLM-17391451 | CVE-2026-12772 | 2026-09-19, renewed 2026-10-21 | Proxy authenticate_user/session handling | ImageAI does not start the LiteLLM proxy or expose its management API. |
+| SNYK-PYTHON-LITELLM-17393717 | CVE-2026-12795 | 2026-09-19, renewed 2026-10-21 | Proxy /sso/debug/login and /sso/debug/callback | ImageAI has no LiteLLM HTTP SSO endpoints. |
+| SNYK-PYTHON-LITELLM-17393719 | CVE-2026-12796 | 2026-09-19, renewed 2026-10-21 | Proxy OpenID redirect/session handling | ImageAI does not use LiteLLM proxy authentication or browser login sessions. |
+| SNYK-PYTHON-LITELLM-17391455 | CVE-2026-12771 | 2026-10-21 | Proxy M2M JWT handler, user_api_key_auth.py | ImageAI never authenticates inbound requests with LiteLLM JWT handling. |
+| SNYK-PYTHON-LITELLM-20257373 | CVE-2026-93355 | 2026-10-21 | Proxy JWT email-fallback identity lookup | ImageAI has no LiteLLM proxy users, roles, or identity-provider login. |
+| SNYK-PYTHON-LITELLM-20840174 | CVE-2026-108575 | 2026-10-21 | Proxy add_new_model and team model endpoints | ImageAI exposes no LiteLLM model-management API; model parameters come from its own code. |
 
-ImageAI imports the SDK in gui/llm_utils.py and builds direct completion calls in core/llm_params.py and its desktop/CLI consumers. The application does not import litellm.proxy, invoke a LiteLLM server command, or serve its authentication endpoints. The separate illustrative Discord helper under Notes is not an ImageAI application entry point.
+ImageAI imports the SDK in gui/llm_utils.py and builds direct completion calls in core/llm_params.py and its desktop/CLI consumers. The application does not import litellm.proxy, invoke a LiteLLM server command, or serve its authentication or management endpoints. The separate illustrative Discord helper under Notes is not an ImageAI application entry point.
 
-Snyk reports no patched upstream version for these three advisories. The CLI-generated .snyk policy suppresses only their exact IDs for 30 days. Reassess them before expiration and remove these exceptions before adding a LiteLLM proxy or any corresponding inbound endpoint. Do not extend them automatically.
+Snyk reports no patched upstream version for these six advisories. As of 2026-10-21 both 1.101.6, the newest eligible release in the manifest's `>=1.101.3,<1.102` range, and 1.105.1 are still affected. The CLI-generated .snyk policy suppresses only their exact IDs for 30 days. Reassess them before expiration and remove these exceptions before adding a LiteLLM proxy or any corresponding inbound endpoint. Do not extend them automatically.
 
 A policy-filtered passing scan is not a zero-advisory raw scan. Retain an unfiltered scan with --ignore-policy when reviewing applicability. Package vulnerability presence and application exploitability are distinct claims.
 
-The same three expiring exceptions are applied to the SCM-imported Snyk project `lelandg/ImageAI:requirements.txt`. The hosted exceptions are disregarded once an upstream fix is available. Review both the repository policy and the project policy when resolving or renewing an exception.
+The same six expiring exceptions must also be applied to the SCM-imported Snyk project `lelandg/ImageAI:requirements.txt`. The hosted exceptions are disregarded once an upstream fix is available. Review both the repository policy and the project policy when resolving or renewing an exception.
+
+## October 21, 2026 reassessment
+
+The three September exceptions expired on 2026-10-19. Scans of a single-package Python 3.12 environment, without the policy (`--ignore-policy`), returned exactly the six LiteLLM advisories above for both `litellm==1.101.6` and `litellm==1.105.1`, and no other LiteLLM advisory. The fixes for 20158379 and 20840177 from the October 13 bounds still hold at 1.101.6. Snyk lists no fixed version for any of the six. OSV names upstream commits for CVE-2026-12771 and CVE-2026-12772, but those commits are an unrelated cost-calculator fix and are absent from every release tag checked, so they are not treated as fixes.
+
+The maintainer approved renewing the three exceptions and adding 17391455, 20257373, and 20840174 for 30 days. A scan using the policy suppresses all six; the scan still fails on transitive certifi and filelock advisories, whose fixed releases do not yet meet the seven-day package-age rule. Those dependencies are not suppressed.
 
 ## October 13, 2026 reassessment
 
