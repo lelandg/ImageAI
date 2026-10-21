@@ -1,6 +1,7 @@
 # Security floors for transitive dependencies; this file does not install extras.
 # Included by requirements.txt so fresh installs and upgrades use patched versions.
 aiohttp>=3.14.3
+certifi>=2026.10.19  # GHSA-6q48-6c7w-9gw2 (critical): drops the compromised emSign ECC G3 root
 click>=8.3.3
 cryptography>=50.0.0
 filelock>=4.2.1  # 17 lock-handling CVEs fixed in 4.2.1, incl. GHSA-v4x8-3wr5-3wq8 (high)

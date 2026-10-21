@@ -35,7 +35,20 @@ The maintainer approved renewing the three exceptions and adding 17391455, 20257
 
 filelock reaches ImageAI through huggingface-hub, which tokenizers (LiteLLM) and the local SD stack use. 4.2.1 was published on 2026-10-17, inside the seven-day window. Upstream published every one of these advisories as a CVE-flagged GitHub security advisory patched in 4.2.1, so it qualifies under the documented exception for CVE fixes. Like the other floors, it is repeated in `requirements.txt` for Snyk SCM. Base, local SD, and Sprite ML manifests resolve with it on Linux and Windows. `tests/test_filelock_dependency_security.py` checks GHSA-69hj-f68j-2879 by behaviour: it fails on 4.1.1 and passes on 4.2.1 (POSIX only). A scan with the policy, of `litellm==1.101.6` plus `filelock>=4.2.1`, leaves one open finding: certifi.
 
-certifi stays at its current floor for now. 2026.7.22 is affected by upstream GHSA-6q48-6c7w-9gw2 (critical; PYSEC-2026-4320): emSign root CAs whose intermediate keys were compromised. 2026.10.18 removed every emSign root, and 2026.10.19 restored only the three unaffected roots; Snyk tracks that as SNYK-PYTHON-CERTIFI-21280764. The advisory has no CVE ID, so it falls outside the package-age exception, and the maintainer chose to wait. Add `certifi>=2026.10.19` to both manifests once that release is seven days old, on 2026-10-27 after 02:24 UTC.
+| Dependency | Previously resolved | Required version | Advisories |
+| --- | --- | --- | --- |
+| certifi | 2026.7.22 | >=2026.10.19 | SNYK-PYTHON-CERTIFI-21280764; upstream GHSA-6q48-6c7w-9gw2 (critical; PYSEC-2026-4320) |
+
+2026.7.22 trusts emSign ECC Root CA - G3, whose intermediates were revoked for key compromise. 2026.10.18 removed every emSign root, and 2026.10.19 restored the three unaffected ones (G1, C1, ECC C3); Snyk tracks the over-removal. requests, httpx, and the Google client libraries verify provider TLS, and therefore API-key traffic, against this bundle.
+
+2026.10.19 is younger than seven days and the advisory has no CVE ID, so the maintainer approved an explicit exception to the package-age rule. The approval depended on an artifact audit, and every check passed:
+
+- **Wheel integrity.** The PyPI wheel's SHA-256 matches PyPI's published digest.
+- **Contents.** Compared with 2026.7.22, the only code change is `__version__`; `core.py` and `__main__.py` are byte-identical. Metadata gains one classifier and a newer setuptools generator.
+- **CA bundle.** `cacert.pem` drops exactly one root, emSign ECC Root CA - G3, and adds or alters none. That matches upstream PRs #437 (remove all emSign roots) and #440 (restore G1, C1, C3).
+- **Provenance.** The wheel's `cacert.pem` is byte-identical to upstream tag `2026.10.19`, and to merge commit `662df63` of #440. PyPI's attestation names Trusted Publisher `certifi/python-certifi`, workflow `release.yml`, environment `release`, and its digest matches the wheel. The Sigstore certificate names `refs/tags/2026.10.19` at `662df63`. The Sigstore signature itself was not verified independently; PyPI checks it on upload.
+
+`tests/test_certifi_dependency_security.py` checks the bundle by fingerprint. It fails on 2026.7.22 (compromised root present) and on 2026.10.18 (unaffected roots missing), and passes on 2026.10.19. All manifests resolve with the floor on Linux and Windows. A scan with the policy, of `litellm==1.101.6` plus both floors, passes with only the six approved LiteLLM ignores.
 
 ## October 13, 2026 reassessment
 

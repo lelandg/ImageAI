@@ -45,7 +45,7 @@ The weekly report for 8–15 October showed a High "Incorrect Authorization" fin
 
 Correction, later the same day: upstream treats both as security fixes, and the earlier reading of certifi here was wrong.
 
-- **certifi.** 2026.7.22 still trusts emSign root CAs whose intermediate keys were compromised (upstream GHSA-6q48-6c7w-9gw2, critical, PYSEC-2026-4320; no CVE ID). That is a real interception risk, not a fail-closed bundle. Snyk's description refers to the three unaffected roots that 2026.10.18 removed and 2026.10.19 restored. The maintainer chose to wait for the seven-day age rule.
+- **certifi.** 2026.7.22 still trusts emSign root CAs whose intermediate keys were compromised (upstream GHSA-6q48-6c7w-9gw2, critical, PYSEC-2026-4320; no CVE ID). That is a real interception risk, not a fail-closed bundle. Snyk's description refers to the three unaffected roots that 2026.10.18 removed and 2026.10.19 restored. The maintainer first chose to wait for the seven-day age rule. Later the same day they approved an exception, conditional on an artifact audit. The audit passed, and the floor shipped. See [Docs/Snyk-Exceptions.md](../Docs/Snyk-Exceptions.md).
 - **filelock.** Its advisories are CVE-flagged GitHub security advisories patched in 4.2.1, so the floor was raised under the CVE exception.
 
 Both outcomes are recorded in [Docs/Snyk-Exceptions.md](../Docs/Snyk-Exceptions.md).
