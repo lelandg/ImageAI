@@ -27,6 +27,16 @@ The three September exceptions expired on 2026-10-19. Scans of a single-package 
 
 The maintainer approved renewing the three exceptions and adding 17391455, 20257373, and 20840174 for 30 days. A scan using the policy suppresses all six; the scan still fails on transitive certifi and filelock advisories, whose fixed releases do not yet meet the seven-day package-age rule. Those dependencies are not suppressed.
 
+### Transitive dependency floors (same day)
+
+| Dependency | Previously resolved | Required version | Advisories |
+| --- | --- | --- | --- |
+| filelock | 3.32.7 / 4.1.1 | >=4.2.1 | SNYK-PYTHON-FILELOCK-21280749 through 21280761; upstream GHSA-v4x8-3wr5-3wq8 (high) and 16 other CVE-flagged advisories |
+
+filelock reaches ImageAI through huggingface-hub, which tokenizers (LiteLLM) and the local SD stack use. 4.2.1 was published on 2026-10-17, inside the seven-day window. Upstream published every one of these advisories as a CVE-flagged GitHub security advisory patched in 4.2.1, so it qualifies under the documented exception for CVE fixes. Like the other floors, it is repeated in `requirements.txt` for Snyk SCM. Base, local SD, and Sprite ML manifests resolve with it on Linux and Windows. `tests/test_filelock_dependency_security.py` checks GHSA-69hj-f68j-2879 by behaviour: it fails on 4.1.1 and passes on 4.2.1 (POSIX only). A scan with the policy, of `litellm==1.101.6` plus `filelock>=4.2.1`, leaves one open finding: certifi.
+
+certifi stays at its current floor for now. 2026.7.22 is affected by upstream GHSA-6q48-6c7w-9gw2 (critical; PYSEC-2026-4320): emSign root CAs whose intermediate keys were compromised. 2026.10.18 removed every emSign root, and 2026.10.19 restored only the three unaffected roots; Snyk tracks that as SNYK-PYTHON-CERTIFI-21280764. The advisory has no CVE ID, so it falls outside the package-age exception, and the maintainer chose to wait. Add `certifi>=2026.10.19` to both manifests once that release is seven days old, on 2026-10-27 after 02:24 UTC.
+
 ## October 13, 2026 reassessment
 
 Fresh CLI scans of main at `410b3d4` under organization `lelandg`, using the
