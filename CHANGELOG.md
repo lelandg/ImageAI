@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.49.4] - 2026-10-21
+
+### Fixed
+
+- Raised the certifi security floor to `>=2026.10.19`. Earlier bundles trust
+  emSign ECC Root CA - G3, whose intermediates were revoked for key compromise
+  (upstream GHSA-6q48-6c7w-9gw2, critical). requests, httpx, and the Google
+  client libraries check provider TLS, and so API-key traffic, against this
+  bundle. 2026.10.19 removes that root and keeps the three unaffected emSign
+  roots that 2026.10.18 dropped by mistake.
+- The release is younger than the seven-day package-age window, so this is an
+  approved exception. An artifact audit confirmed the PyPI digest, a
+  version-only code change, and the single removed root. It also confirmed the
+  bundle is byte-identical to upstream tag `2026.10.19`, with Trusted Publisher
+  provenance. A new fingerprint regression test guards the bundle.
+
 ## [0.49.3] - 2026-10-21
 
 ### Fixed
