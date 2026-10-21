@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.49.3] - 2026-10-21
+
+### Fixed
+
+- Raised the filelock security floor to `>=4.2.1`. Upstream fixed 17
+  CVE-flagged lock-handling advisories in that release, including
+  GHSA-v4x8-3wr5-3wq8 (high). filelock reaches ImageAI through huggingface-hub
+  (tokenizers, local Stable Diffusion). The floor is repeated in
+  `requirements.txt` for Snyk SCM. A new regression test covers the
+  truncate-on-foreign-file fix (GHSA-69hj-f68j-2879).
+- The certifi floor (`>=2026.10.19`, for upstream GHSA-6q48-6c7w-9gw2) waits
+  until that release clears the seven-day package-age rule on 2026-10-27.
+
 ## [0.49.2] - 2026-10-21
 
 ### Fixed
