@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import List, Tuple
 
 from core.mediapipe_tasks import MEDIAPIPE_SPEC
-REMBG_SPEC = "rembg[cpu]>=2.0.60"
+REMBG_SPEC = "rembg[cpu]>=2.0.86"                # older rembg pins Pillow<13 (39 advisories)
 REMBG_PYTHON = ((3, 11), (3, 14))                # inclusive floor, exclusive ceiling
 
 

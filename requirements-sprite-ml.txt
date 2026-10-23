@@ -6,4 +6,4 @@
 # <Models root>/cache/rembg (core/sprite/matting.py). bria-rmbg is
 # non-commercial and is never installed or selected by default.
 mediapipe>=1.0.1,<2  # Tasks API; verified vision models download on first use
-rembg[cpu]>=2.0.60  # isnet-anime (MIT) default, u2netp (Apache-2.0)
+rembg[cpu]>=2.0.86  # 2.0.86+ allows Pillow 13; older rembg pins vulnerable Pillow<13. isnet-anime (MIT) default, u2netp (Apache-2.0)

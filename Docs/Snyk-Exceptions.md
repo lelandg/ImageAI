@@ -21,6 +21,26 @@ A policy-filtered passing scan is not a zero-advisory raw scan. Retain an unfilt
 
 The same six expiring exceptions must also be applied to the SCM-imported Snyk project `lelandg/ImageAI:requirements.txt`. The hosted exceptions are disregarded once an upstream fix is available. Review both the repository policy and the project policy when resolving or renewing an exception.
 
+## October 23, 2026 dependency floors
+
+No exception changed. Four floors were raised under the remediation rule: a reported advisory with a fixed version is fixed at once, at the lowest fixed version, whatever the release's age.
+
+| Dependency | Previously allowed | Required version | Advisories |
+| --- | --- | --- | --- |
+| pillow | >=12.3.0 | >=13.0.0 | 39 GHSAs fixed only in 13.0.0 (no 12.x patch); 38 carry CVE IDs. Examples: GHSA-8g5g-8vmr-9782 (JPEG heap overflow), GHSA-cp9v-662q-vvx9, GHSA-27h8-gf7j-v5hc |
+| rembg (Sprite ML) | >=2.0.60 | >=2.0.86 | rembg 2.0.85 and earlier require `pillow<13`, so the Sprite ML install forced vulnerable Pillow; 2.0.86 allows `<14` |
+| anyio | unbounded | >=4.14.2 | CVE-2026-64847, CVE-2026-63374 (critical in Snyk), via httpx |
+| fsspec | unbounded | >=2026.6.0 | CVE-2026-104851 (critical in Snyk), via huggingface-hub |
+
+The Pillow, anyio, and fsspec floors are in both `requirements-security.txt` and the Snyk SCM block of `requirements.txt`. The rembg floor is in `requirements-sprite-ml.txt` and in `REMBG_SPEC` (`core/sprite/ml_install.py`), the source of truth for the in-app **Install ML backends** action; a test keeps the two in sync. Fresh installs already resolved past anyio and fsspec, but an existing environment kept 4.10.0 and 2025.9.0 until these floors were added.
+
+Release checks:
+
+- **Pillow 13.0.0.** All 83 files carry Trusted Publisher attestations (`python-pillow/Pillow`, `wheels.yml`, environment `release-pypi`) whose digests match.
+- **rembg 2.0.86.** No PyPI attestations; no rembg release has them. Both files match PyPI's digests, and all 36 package `.py` files are byte-identical to GitHub tag `v2.0.86`, released by the maintainer the same minute. The release adds an `atlascloud` remote session that touches the network only when selected; ImageAI's `REMBG_MODELS` allowlist cannot select it.
+
+`tests/test_pillow_dependency_security.py` runs GHSA-cp9v-662q-vvx9 (`Image.merge` with an `I` band 0) and GHSA-27h8-gf7j-v5hc (median filter on an equal-edge crop) in child processes. Both crash the interpreter on 12.3.0 and raise cleanly on 13.0.0. Base, base plus Sprite ML, and local SD resolve on Linux and Windows. Snyk scans pass with nothing open: `requirements.txt` against the maintainer's upgraded environment (106 dependencies, the six LiteLLM ignores) and the Sprite ML extras (44 dependencies).
+
 ## October 21, 2026 reassessment
 
 The three September exceptions expired on 2026-10-19. Scans of a single-package Python 3.12 environment, without the policy (`--ignore-policy`), returned exactly the six LiteLLM advisories above for both `litellm==1.101.6` and `litellm==1.105.1`, and no other LiteLLM advisory. The fixes for 20158379 and 20840177 from the October 13 bounds still hold at 1.101.6. Snyk lists no fixed version for any of the six. OSV names upstream commits for CVE-2026-12771 and CVE-2026-12772, but those commits are an unrelated cost-calculator fix and are absent from every release tag checked, so they are not treated as fixes.

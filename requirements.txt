@@ -1,7 +1,7 @@
 -c requirements-security.txt
 
 protobuf>=5.29.6,<6  # Patched recursion limit; modern MediaPipe Tasks has no protobuf<5 pin
-pillow>=12.3.0
+pillow>=13.0.0  # 39 advisories fixed only in 13.0.0, e.g. GHSA-8g5g-8vmr-9782 (JPEG heap overflow)
 numpy>=1.26.4  # Explicit safe floor for MIDI and image processing dependencies
 packaging>=26.3  # Runtime version/specifier validation for optional ML backends
 google-genai>=2.9.0  # 2.9.0+: GeminiNextGen Interactions API w/ output_video (Gemini Omni video). NBP image_size (1K/2K/4K) still supported.
@@ -14,6 +14,8 @@ urllib3>=2.8.0
 multidict>=6.9.1
 filelock>=4.2.1
 certifi>=2026.10.19
+anyio>=4.14.2
+fsspec>=2026.6.0
 markdown>=3.5  # For better help documentation rendering
 keyring>=24.0.0  # For secure API key storage (optional)
 
