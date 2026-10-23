@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.49.5] - 2026-10-23
+
+### Fixed
+
+- Raised the Pillow floor to `>=13.0.0`. Pillow 12.3.0 has 39 security
+  advisories, including a JPEG decoder heap overflow (GHSA-8g5g-8vmr-9782), and
+  all are fixed only in 13.0.0. New regression tests confirm that malformed
+  `Image.merge` input and rank filters on zero-size crops raise errors instead
+  of crashing the process.
+- Raised the Sprite ML rembg floor to `>=2.0.86`, in both
+  `requirements-sprite-ml.txt` and the in-app **Install ML backends** action.
+  Earlier rembg releases pin `pillow<13` and so forced the vulnerable Pillow.
+- Added security floors for two transitive dependencies that the manifests
+  left unbounded: anyio `>=4.14.2` (CVE-2026-64847, CVE-2026-63374) and fsspec
+  `>=2026.6.0` (CVE-2026-104851).
+
 ## [0.49.4] - 2026-10-21
 
 ### Fixed
