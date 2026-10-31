@@ -87,18 +87,10 @@ here; read it there. What is specific to this repo:
   turn them on. Without them the config above governs version updates only.
   Check: `gh api -X GET repos/lelandg/ImageAI/vulnerability-alerts` (exit 0 = on,
   404 = off). Enable: same path with `-X PUT`.
-- PR reviewers: **Codex** (GPT-6 Astra, run locally against the committed branch
-  before opening the PR) and **CodeRabbit** (`coderabbitai[bot]`, re-reviews
-  every push — the one to wait on for the head being merged). A green CodeRabbit
-  check does not mean a review ran: read the check run's output title, where only
-  `Finished` means reviewed. Silence means clean; findings arrive as inline
-  comments. `no-ai-review` at PR creation skips the bots.
-- **GrepTile** (`greptile-apps[bot]`) reviews too, when the org has credits.
-  Two properties differ from CodeRabbit and both bite: it reviews on PR **open
-  only** and does NOT re-review a push, so after adding commits its check goes
-  missing and a fresh review must be triggered; and `Greptile Review: SUCCESS`
-  means the review ran, not that it found nothing — findings arrive as inline
-  comments while the summary stays empty. Each review costs a credit
-  (`.greptile/config.json` pins `effort: base` = 1). Running out of credits does
-  not block a merge. `no-greptile` skips GrepTile alone.
-- The global pre-commit hook runs `gitleaks` and fails closed.
+- PR reviewers configured for this repo: **Codex** (run locally against the
+  committed branch before opening the PR), **CodeRabbit**
+  (`coderabbitai[bot]`) and **GrepTile** (`greptile-apps[bot]`, tuned in
+  `.greptile/config.json`). How to read their checks -- which one re-reviews
+  a push, why a green check does not mean "no findings", and which label
+  skips which bot -- is in the global policy cited above and is deliberately
+  not repeated here.
