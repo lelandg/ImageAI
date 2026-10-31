@@ -139,6 +139,9 @@ cython_debug/
 # Project-specific
 # User configuration and generated images
 config.json
+# ...but the bare pattern above matches at any depth, which would silently
+# swallow the GrepTile reviewer config. Keep user config blocked; track this one.
+!.greptile/config.json
 generated/
 
 # Generated fonts (Font Generator output)

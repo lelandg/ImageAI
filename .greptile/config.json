@@ -1,0 +1,17 @@
+{
+  "effort": "base",
+  "autoReview": [
+    "open"
+  ],
+  "triggerOnDrafts": false,
+  "disabledLabels": [
+    "no-greptile",
+    "no-ai-review"
+  ],
+  "excludeAuthors": [
+    "dependabot[bot]",
+    "renovate[bot]",
+    "*-bot"
+  ],
+  "ignorePatterns": "package-lock.json\nuv.lock\npoetry.lock\n*.generated.*\n**/dist/**\n**/bin/**\n**/obj/**\nCHANGELOG.md\n_screenshots/**\nScreenshots/**\nImages/**"
+}

@@ -1,0 +1,109 @@
+# Free security scans on every PR, every push to the default branch, and weekly
+# on a timer (a timer catches advisories published against code that has not
+# changed). Policy: ~/.config/agents/AGENTS.md -> "Dependency, code, and secret
+# scanning".
+#
+# Actions are pinned to commit SHAs, never floating tags: a tag can be moved to
+# malicious code, a SHA cannot. Dependabot (github-actions ecosystem) proposes
+# the bumps. Scanner binaries are installed from checksum-verified release
+# assets at a pinned version (bump V by hand). Trigger is `pull_request`,
+# never `pull_request_target`.
+#
+# Each scanner is its own job so one scanner's failure never prevents another
+# from running. The dependency scanners distinguish FINDINGS (exit 1 / audit
+# results) from SCANNER ERRORS (anything else): both fail the job, with distinct
+# messages so a scanner outage is never mistaken for a clean scan.
+#
+# ImageAI is a Python repo: there is no committed package-lock.json, so the
+# `npm audit signatures` and `npm audit` jobs from the shared template are
+# deliberately absent -- `npm ci` cannot run here and the check would be
+# permanently red. Dependencies are covered by osv-scanner over the
+# requirements*.txt files.
+
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 11 * * 1" # Mondays 06:17 America/Chicago (11:17 UTC)
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks 8.30.1 (checksum-verified release binary)
+        run: |
+          set -eu
+          V=8.30.1
+          B="https://github.com/gitleaks/gitleaks/releases/download/v${V}"
+          curl -fsSLO "${B}/gitleaks_${V}_linux_x64.tar.gz"
+          curl -fsSLO "${B}/gitleaks_${V}_checksums.txt"
+          grep " gitleaks_${V}_linux_x64.tar.gz$" "gitleaks_${V}_checksums.txt" | sha256sum -c -
+          tar -xzf "gitleaks_${V}_linux_x64.tar.gz" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Scan the commits this event introduced (full history on the timer)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -eu
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) OPTS="$BASE..$HEAD" ;;
+            push)
+              case "$BEFORE" in
+                0000000000000000000000000000000000000000) OPTS="-n 50" ;;
+                *) OPTS="$BEFORE..$GITHUB_SHA" ;;
+              esac ;;
+            *) OPTS="" ;;
+          esac
+          if [ -n "$OPTS" ]; then
+            gitleaks git --redact --no-banner -v --log-opts="$OPTS"
+          else
+            gitleaks git --redact --no-banner -v
+          fi
+
+  osv-scanner:
+    name: osv-scanner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install osv-scanner 2.7.0 (checksum-verified release binary)
+        run: |
+          set -eu
+          V=2.7.0
+          B="https://github.com/google/osv-scanner/releases/download/v${V}"
+          curl -fsSLO "${B}/osv-scanner_linux_amd64"
+          curl -fsSLO "${B}/osv-scanner_SHA256SUMS"
+          grep " osv-scanner_linux_amd64$" osv-scanner_SHA256SUMS | sha256sum -c -
+          sudo install -m 0755 osv-scanner_linux_amd64 /usr/local/bin/osv-scanner
+          osv-scanner --version
+      # osv-scanner exit codes: 0 clean, 1 vulnerabilities found, anything else
+      # is a scanner error (bad flag, no packages found, network) and must never
+      # look like a findings result.
+      - name: osv-scanner over every lockfile and manifest
+        run: |
+          set -u
+          # GitHub runs this under `bash -e`: capture the exit code instead of
+          # letting a non-zero scanner result end the step before it is classified.
+          rc=0
+          osv-scanner scan source --recursive ./ || rc=$?
+          case "$rc" in
+            0) echo "osv-scanner: no known vulnerabilities" ;;
+            1)
+              echo "::error title=osv-scanner::known vulnerabilities found"
+              exit 1 ;;
+            *)
+              echo "::error title=osv-scanner::scanner error, exit $rc (not a findings result)"
+              exit "$rc" ;;
+          esac
