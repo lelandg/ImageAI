@@ -1,20 +1,58 @@
 # Security floors for transitive dependencies; this file does not install extras.
 # Included by requirements.txt so fresh installs and upgrades use patched versions.
-aiohttp>=3.14.3
+aiohttp>=3.14.4  # 3.14.3 was one patch short of clearing the 2026 advisory set
 anyio>=4.14.2  # CVE-2026-64847, CVE-2026-63374 (via httpx)
 certifi>=2026.10.19  # GHSA-6q48-6c7w-9gw2 (critical): drops the compromised emSign ECC G3 root
 click>=8.3.3
 cryptography>=50.0.0
 filelock>=4.2.1  # 17 lock-handling CVEs fixed in 4.2.1, incl. GHSA-v4x8-3wr5-3wq8 (high)
 fsspec>=2026.6.0  # CVE-2026-104851 (via huggingface-hub)
+httpcore2>=2.10.0  # PYSEC-2026-3844, GHSA-7mj9-2mp8-4m2p (httpx 2.x line)
+httpx2>=2.12.0  # 10 advisories; 2.12.0 is the lowest clearing GHSA-8xx6-hgc6-gc2m
 idna>=3.15
 jaraco.context>=6.1.0
+jinja2>=3.1.6  # 10 advisories; 3.1.6 is the lowest clearing GHSA-cpwx-vrp4-4pq7
 litellm>=1.101.3,<1.102  # Later minor lines contain separately affected releases
 multidict>=6.9.1
+nltk>=3.10.4
 pillow>=13.0.0
-pyasn1>=0.6.4
+pyasn1>=0.6.5
+pyjwt>=2.15.0
 python-dotenv>=1.2.2
+python-multipart>=0.0.31
+requests>=2.33.0
+setuptools>=84.1.0
+tqdm>=4.66.3  # Transitive via nltk; 4.66.3 clears GHSA-g7vv-2v7x-gj9p + 3 more
 urllib3>=2.8.0
+virtualenv>=21.14.13,<22  # 21.14.9 is still affected; 21.14.13 clears GHSA-cx6f-vjhg-g3cc too.
+# The <22 bound is not about the advisory: unbounded, virtualenv is the one
+# floor here whose dependency tree makes osv-scanner's transitive resolver
+# abort with "resolution aborted after too many iterations" on this file.
 pretty-midi>=0.2.11.post0
 mediapipe>=1.0.1,<2
 protobuf>=5.29.6,<6
+
+# ---------------------------------------------------------------------------
+# DELIBERATELY NOT CONSTRAINED HERE. Each needs a judgement call and a test
+# pass, so pinning them blind would trade a known advisory for an unknown
+# breakage.
+#
+#   starlette      0.49.1 -> 1.3.1 is the lowest clearing release, and that is a
+#                  MAJOR jump. Needs per-repo testing.
+#   langchain      0.0.344 -> 1.3.9 and langchain-core 0.0.9 -> 1.2.22: a major
+#   langchain-core rewrite, not a bump.
+#   torch          torch 2.9.1 -> 2.13.0 and transformers 5.9.0 -> 5.10.0: ML
+#   transformers   stacks where an upgrade risks model compatibility. Handled
+#                  with requirements-local-sd.txt / requirements-sprite-ml.txt.
+#   PyPDF2         NO FIX EXISTS. PyPDF2 stopped at 3.0.1 and is deprecated; the
+#                  patched code is in the renamed `pypdf`. A migration, not a bump.
+#   python-jose    NO FIX ABOVE CURRENT. 3.5.0 is affected and 3.4.0 (lower) is
+#                  the only release carrying a fix.
+#   ecdsa          NO FIX EXISTS for PYSEC-2026-1325 / GHSA-wj6h-64fc-37mp; every
+#                  release including 0.19.2 is affected, so a floor clears
+#                  nothing. Not in this repo's resolved tree either.
+#   opentelemetry-api
+#                  1.9.1 -> 1.45.1 (GHSA-xcq7-p3pf-p88h) is the lowest clearing
+#                  release, but it arrives transitively under the version-boxed
+#                  litellm>=1.101.3,<1.102 line, so the floor needs a resolve
+#                  test before it is safe to assert.

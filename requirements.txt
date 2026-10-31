@@ -16,6 +16,8 @@ filelock>=4.2.1
 certifi>=2026.10.19
 anyio>=4.14.2
 fsspec>=2026.6.0
+httpx2>=2.12.0  # Transitive via the AI SDKs; 2.12.0 clears 10 advisories
+httpcore2>=2.10.0  # Transitive via httpx2; PYSEC-2026-3844, GHSA-7mj9-2mp8-4m2p
 markdown>=3.5  # For better help documentation rendering
 keyring>=24.0.0  # For secure API key storage (optional)
 
@@ -29,13 +31,13 @@ keyring>=24.0.0  # For secure API key storage (optional)
 # psutil>=5.9.0
 
 # Video Project Feature Dependencies
-Jinja2>=3.1.0  # Template processing for prompt generation
+Jinja2>=3.1.6  # Template processing for prompt generation; 3.1.6 clears 10 advisories (GHSA-cpwx-vrp4-4pq7 et al.)
 imageio-ffmpeg>=0.4.9  # FFmpeg Python bindings
 litellm>=1.101.3,<1.102  # Patched, tested SDK line; see Docs/Snyk-Exceptions.md
 anthropic>=0.25.0  # Claude API support (optional for prompt generation)
 
 # MIDI Processing & Synchronization  
-setuptools>=83.0.0  # Build dependency for pretty-midi
+setuptools>=84.1.0  # Build dependency for pretty-midi; matches the requirements-security.txt floor
 pretty-midi>=0.2.11.post0  # High-level MIDI analysis for timing extraction (latest available version)
 mido>=1.3.2  # Low-level MIDI manipulation for detailed control
 
