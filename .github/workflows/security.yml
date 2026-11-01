@@ -63,7 +63,16 @@ jobs:
             push)
               case "$BEFORE" in
                 0000000000000000000000000000000000000000) OPTS="-n 50" ;;
-                *) OPTS="$BEFORE..$GITHUB_SHA" ;;
+                *)
+                  # A force-push can leave $BEFORE unreachable even at
+                  # fetch-depth 0. Passing it to gitleaks then FAILS the job
+                  # instead of scanning, so fall back and say so loudly.
+                  if git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+                    OPTS="$BEFORE..$GITHUB_SHA"
+                  else
+                    echo "::warning title=gitleaks::previous head $BEFORE is unreachable (history rewritten); scanning the last 50 commits instead"
+                    OPTS="-n 50"
+                  fi ;;
               esac ;;
             *) OPTS="" ;;
           esac

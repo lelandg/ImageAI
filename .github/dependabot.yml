@@ -58,5 +58,13 @@ updates:
     cooldown:
       default-days: 7
     groups:
-      actions:
+      security:
+        applies-to: security-updates
         patterns: ["*"]
+      actions:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
