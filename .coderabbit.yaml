@@ -31,17 +31,27 @@ reviews:
   # arrive as a GREEN check. The only way to tell a review from a non-review is
   # the check run's OUTPUT TITLE -- `Finished` means reviewed, while
   # `Review rate limited` and `Review skipped` mean it did not run:
-  #   gh api "repos/<owner>/<repo>/commits/$(git rev-parse HEAD)/check-runs" \
-  #     --jq '.check_runs[]|select(.name=="CodeRabbit")|.output.title'
+  # Ask for the PULL REQUEST's head, not `git rev-parse HEAD`: a local HEAD
+  # is routinely some other branch's commit, and the query then returns
+  # EMPTY, which reads exactly like a clean review. Empty is `missing`.
+  #   SHA=$(gh pr view <PR> --json headRefOid -q .headRefOid)
+  #   gh api "repos/OWNER/REPO/commits/$SHA/check-runs" \
+  #     --jq '.check_runs[]|select(.name=="CodeRabbit")|.output.title' \
+  #     | grep . || echo "NO CodeRabbit check -- that head is NOT reviewed"
   # This setting narrows the hole; it does not close it.
   fail_commit_status: true
 
   auto_review:
     enabled: true
 
+    # The default covers the DEFAULT BRANCH only, so a PR onto any other
+    # branch is skipped silently while the comments above promise a review
+    # on every push. `.*` is a regex over base-branch names, not a glob.
+    base_branches: [".*"]
+
     # Reviewing drafts spends a seat's rate limit on work that is not asking to
-    # merge. A draft therefore reports `Review skipped` and can never report
-    # `Finished` while it stays a draft -- which is expected, not a gate
+    # merge. A draft therefore reports `Review skipped` and will not reach
+    # `Finished` on its own while it stays a draft -- expected, not a gate
     # failure. Marking it ready does not reliably review the commits it already
     # had, but you do NOT need a new commit for that: `@coderabbitai full
     # review` is documented to override configuration skips (drafts, ignored

@@ -58,13 +58,16 @@ updates:
     cooldown:
       default-days: 7
     groups:
-      security:
-        applies-to: security-updates
-        patterns: ["*"]
+      # No `applies-to: security-updates` group here: it could never fire,
+      # because SHA-pinned actions get no Dependabot alerts.
       actions:
         applies-to: version-updates
         patterns: ["*"]
         update-types: ["minor", "patch"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
+    # NO semver-major ignore here, unlike the other ecosystems, and that is
+    # deliberate. GitHub generates Dependabot alerts only for actions on
+    # semantic versions, NOT for SHA pins (docs: "About Dependabot alerts"),
+    # so no security update can ever fire for a pinned action. A weekly
+    # VERSION update is therefore the only remediation path that exists, and
+    # ignoring majors would remove it. Advisory DETECTION comes from the
+    # `github/actions` osv-scanner plugin named in security.yml.

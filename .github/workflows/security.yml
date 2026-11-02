@@ -81,10 +81,16 @@ jobs:
           # conflict went unscanned. Every path below therefore asks for
           # first-parent merge diffs, and the full-history paths restate the
           # defaults rather than losing them.
-          MERGES="--diff-merges=first-parent"
-          FULL="--full-history --all --diff-filter=tuxdb $MERGES"
+          # --text is LOAD-BEARING, not cosmetic. Without it a PR can add
+          # `path -diff` to .gitattributes, git emits "Binary files differ"
+          # instead of the patch, and gitleaks scans nothing while reporting
+          # "no leaks found". Measured: 22 bytes scanned and a clean pass,
+          # versus 77 bytes and "leaks found: 1" with --text. Deleting
+          # .gitleaks.toml does NOT close this path. Do not remove --text.
+          DIFFOPTS="--diff-merges=first-parent --text"
+          FULL="--full-history --all --diff-filter=tuxdb $DIFFOPTS"
           case "$GITHUB_EVENT_NAME" in
-            pull_request) OPTS="$BASE..$HEAD $MERGES" ;;
+            pull_request) OPTS="$BASE..$HEAD $DIFFOPTS" ;;
             push)
               case "$BEFORE" in
                 # Branch just created: there is no previous head to diff from,
@@ -98,7 +104,7 @@ jobs:
                   # force-push of more than 50 commits leave the older ones
                   # unscanned while the job reported success.
                   if git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-                    OPTS="$BEFORE..$GITHUB_SHA $MERGES"
+                    OPTS="$BEFORE..$GITHUB_SHA $DIFFOPTS"
                   else
                     echo "::warning title=gitleaks::previous head $BEFORE is unreachable (history rewritten); scanning the full history instead"
                     OPTS="$FULL"
@@ -136,7 +142,14 @@ jobs:
           # GitHub runs this under `bash -e`: capture the exit code instead of
           # letting a non-zero scanner result end the step before it is classified.
           rc=0
-          osv-scanner scan source --recursive ./ || rc=$?
+          # The default plugin set is `lockfile, sbom, directory` -- it does
+          # NOT read workflow `uses:` references, so SHA-pinned actions were
+          # scanned by nothing: GitHub generates Dependabot alerts only for
+          # actions on semantic versions, never for SHA pins. Naming plugins
+          # REPLACES the default list, so all four are listed here.
+          osv-scanner scan source --recursive ./ \
+            --x-plugins lockfile --x-plugins sbom --x-plugins directory \
+            --x-plugins github/actions || rc=$?
           case "$rc" in
             0) echo "osv-scanner: no known vulnerabilities" ;;
             1)
