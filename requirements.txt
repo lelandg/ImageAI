@@ -20,7 +20,6 @@ filelock>=4.2.1
 certifi>=2026.10.19
 anyio>=4.14.2
 fsspec>=2026.6.0
-httpx>=0.23.0  # 2 advisories, both fixed in 0.23.0 (plain httpx, not the separate httpx2 distribution)
 markdown>=3.5  # For better help documentation rendering
 keyring>=24.0.0  # For secure API key storage (optional)
 
@@ -73,3 +72,15 @@ fonttools>=4.60.0  # Font file creation (TTF/OTF) from vectorized glyphs
 
 # --- Security floors (transitive; lowest release clearing each advisory) ---
 opentelemetry-api>=1.45.1
+# httpx2 / httpcore2 ARE in the osv-scanner-resolved tree, and these floors
+# are what clear 6 advisories (3 High) against them. Do NOT "simplify" them
+# to plain httpx: litellm >= 1.103.0 declares `httpx2<3,>=2.5.0` under its
+# `proxy` and `mcp` EXTRAS, and httpx2 pulls a matching httpcore2.
+# osv-scanner's resolver expands those extras, so it resolves httpx2 2.9.1
+# and reports the advisories even though a plain `pip install -r` of this
+# file installs neither. Removing these lines turned this repo's scan from
+# green to 6 findings -- measured, 2026-11-01. Plain httpx is a separate
+# distribution (latest 0.28.1) with only 2 advisories, both fixed in 0.23.0,
+# and is already constrained above that by litellm's own `httpx>=0.28.0`.
+httpx2>=2.12.0  # Transitive via the AI SDKs; 2.12.0 clears 10 advisories
+httpcore2>=2.10.0  # Transitive via httpx2; PYSEC-2026-3844, GHSA-7mj9-2mp8-4m2p

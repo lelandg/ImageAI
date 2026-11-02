@@ -7,7 +7,6 @@ click>=8.3.3
 cryptography>=50.0.0
 filelock>=4.2.1  # 17 lock-handling CVEs fixed in 4.2.1, incl. GHSA-v4x8-3wr5-3wq8 (high)
 fsspec>=2026.6.0  # CVE-2026-104851 (via huggingface-hub)
-httpx>=0.23.0  # 2 advisories, both fixed in 0.23.0 (plain httpx, not the separate httpx2 distribution)
 idna>=3.15
 jaraco.context>=6.1.0
 jinja2>=3.1.6  # 10 advisories; 3.1.6 is the lowest clearing GHSA-cpwx-vrp4-4pq7
@@ -55,3 +54,15 @@ protobuf>=5.29.6,<6
 #                  release, but it arrives transitively under the version-boxed
 #                  litellm>=1.101.3,<1.102 line, so the floor needs a resolve
 #                  test before it is safe to assert.
+# httpx2 / httpcore2 ARE in the osv-scanner-resolved tree, and these floors
+# are what clear 6 advisories (3 High) against them. Do NOT "simplify" them
+# to plain httpx: litellm >= 1.103.0 declares `httpx2<3,>=2.5.0` under its
+# `proxy` and `mcp` EXTRAS, and httpx2 pulls a matching httpcore2.
+# osv-scanner's resolver expands those extras, so it resolves httpx2 2.9.1
+# and reports the advisories even though a plain `pip install -r` of this
+# file installs neither. Removing these lines turned this repo's scan from
+# green to 6 findings -- measured, 2026-11-01. Plain httpx is a separate
+# distribution (latest 0.28.1) with only 2 advisories, both fixed in 0.23.0,
+# and is already constrained above that by litellm's own `httpx>=0.28.0`.
+httpcore2>=2.10.0  # PYSEC-2026-3844, GHSA-7mj9-2mp8-4m2p (httpx 2.x line)
+httpx2>=2.12.0  # 10 advisories; 2.12.0 is the lowest clearing GHSA-8xx6-hgc6-gc2m
