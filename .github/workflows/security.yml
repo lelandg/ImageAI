@@ -39,6 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          persist-credentials: false
           fetch-depth: 0
       - name: Install gitleaks 8.30.1 (checksum-verified release binary)
         run: |
@@ -51,6 +52,20 @@ jobs:
           tar -xzf "gitleaks_${V}_linux_x64.tar.gz" gitleaks
           sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
           gitleaks version
+      - name: Drop PR-supplied gitleaks suppressions
+        if: github.event_name == 'pull_request'
+        run: |
+          set -eu
+          # gitleaks reads .gitleaks.toml and .gitleaksignore from the checkout,
+          # which on a pull_request is the PR author's tree. A PR could add a
+          # global allowlist and pass the scan with a live secret. No repo in
+          # this rollout commits either file, so anything here came from the PR.
+          for f in .gitleaks.toml gitleaks.toml .gitleaksignore; do
+            if [ -e "$f" ]; then
+              echo "::warning title=gitleaks::removing PR-supplied $f before scanning (suppression config is not accepted from a pull request)"
+              rm -f "$f"
+            fi
+          done
       - name: Scan the commits this event introduced (full history on the timer)
         env:
           BASE: ${{ github.event.pull_request.base.sha }}
@@ -58,35 +73,50 @@ jobs:
           BEFORE: ${{ github.event.before }}
         run: |
           set -eu
+          # gitleaks builds `git log -p -U0 <log-opts>`, and a NON-EMPTY
+          # --log-opts replaces its own defaults
+          # (--full-history --all --diff-filter=tuxdb). Neither its default nor
+          # a custom value passes --diff-merges, so `git log -p` omits
+          # merge-commit patches: a secret added while resolving a merge
+          # conflict went unscanned. Every path below therefore asks for
+          # first-parent merge diffs, and the full-history paths restate the
+          # defaults rather than losing them.
+          MERGES="--diff-merges=first-parent"
+          FULL="--full-history --all --diff-filter=tuxdb $MERGES"
           case "$GITHUB_EVENT_NAME" in
-            pull_request) OPTS="$BASE..$HEAD" ;;
+            pull_request) OPTS="$BASE..$HEAD $MERGES" ;;
             push)
               case "$BEFORE" in
-                0000000000000000000000000000000000000000) OPTS="-n 50" ;;
+                # Branch just created: there is no previous head to diff from,
+                # so scan everything rather than an arbitrary recent slice.
+                0000000000000000000000000000000000000000) OPTS="$FULL" ;;
                 *)
                   # A force-push can leave $BEFORE unreachable even at
                   # fetch-depth 0. Passing it to gitleaks then FAILS the job
-                  # instead of scanning, so fall back and say so loudly.
+                  # instead of scanning, so fall back to a FULL scan. An
+                  # earlier revision fell back to `-n 50`, which let a
+                  # force-push of more than 50 commits leave the older ones
+                  # unscanned while the job reported success.
                   if git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-                    OPTS="$BEFORE..$GITHUB_SHA"
+                    OPTS="$BEFORE..$GITHUB_SHA $MERGES"
                   else
-                    echo "::warning title=gitleaks::previous head $BEFORE is unreachable (history rewritten); scanning the last 50 commits instead"
-                    OPTS="-n 50"
+                    echo "::warning title=gitleaks::previous head $BEFORE is unreachable (history rewritten); scanning the full history instead"
+                    OPTS="$FULL"
                   fi ;;
               esac ;;
-            *) OPTS="" ;;
+            *) OPTS="$FULL" ;;
           esac
-          if [ -n "$OPTS" ]; then
-            gitleaks git --redact --no-banner -v --log-opts="$OPTS"
-          else
-            gitleaks git --redact --no-banner -v
-          fi
+          # --ignore-gitleaks-allow: a `gitleaks:allow` comment in a PR must not
+          # be able to suppress a finding.
+          gitleaks git --redact --no-banner -v --ignore-gitleaks-allow --log-opts="$OPTS"
 
   osv-scanner:
     name: osv-scanner
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Install osv-scanner 2.7.0 (checksum-verified release binary)
         run: |
           set -eu

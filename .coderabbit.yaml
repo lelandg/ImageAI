@@ -40,9 +40,12 @@ reviews:
     enabled: true
 
     # Reviewing drafts spends a seat's rate limit on work that is not asking to
-    # merge. NOTE: a draft can never return `Finished` while it is a draft, and
-    # marking it ready does NOT reliably trigger a review of the commits it
-    # already had -- push a commit after marking ready.
+    # merge. A draft therefore reports `Review skipped` and can never report
+    # `Finished` while it stays a draft -- which is expected, not a gate
+    # failure. Marking it ready does not reliably review the commits it already
+    # had, but you do NOT need a new commit for that: `@coderabbitai full
+    # review` is documented to override configuration skips (drafts, ignored
+    # authors, disabled automatic reviews) and to review the same commit again.
     drafts: false
 
     # CodeRabbit re-reviews every push; GrepTile does not. That difference is
@@ -53,18 +56,32 @@ reviews:
     # ...and `auto_incremental_review: true` ALONE DOES NOT GIVE YOU THAT.
     # `auto_pause_after_reviewed_commits` defaults to 5: after five reviewed
     # commits since the last pause, automatic review stops and waiting cannot
-    # restart it. 0 disables the pause ("review every push"). The documented
-    # trade-off is review allowance on an active branch. Consequence of 0:
-    # `@coderabbitai review` becomes inapplicable (it only works when automatic
-    # reviews are paused), so the only way to get a failed/missed head reviewed
-    # is a new commit. If the allowance ever bites, lower this to a number --
-    # do not leave it at the default while the docs promise every push.
+    # restart it (resume with `@coderabbitai resume`). 0 means never pause --
+    # "review every push". The documented trade-off is review allowance on an
+    # active branch; if it ever bites, lower this to a number rather than
+    # leaving the default while expecting every push to be reviewed.
+    #
+    # Recovering a head that was NOT reviewed (failed, skipped, rate limited):
+    # use `@coderabbitai full review`, which is documented to review the same
+    # commit again and to override configuration skips. A plain
+    # `@coderabbitai review` is INCREMENTAL -- it reviews commits pushed since
+    # the last review, so on a head already recorded as reviewed it just
+    # replies that the last commit was already reviewed. Neither command is
+    # restricted to the paused state; `review` "works whether or not automatic
+    # reviews are enabled for the repository".
     auto_pause_after_reviewed_commits: 0
 
     # `!` is a negative match. One label skips every AI reviewer: the same
     # string is in .greptile/config.json `disabledLabels`. The label must be on
     # the PR when the review fires -- `gh pr create --label no-ai-review`, not
-    # added afterwards.
+    # added afterwards, because the filter is read at review time.
+    #
+    # The label has to EXIST in the repo first or `gh pr create --label` fails
+    # and takes the whole PR creation with it:
+    #   gh label create no-ai-review -c ededed \
+    #     -d "Skip all automated AI code review on this PR" --force
+    # To avoid racing the first review on a PR that should not be reviewed at
+    # all, open it as a draft, add the label, then mark it ready.
     labels:
       - "!no-ai-review"
 

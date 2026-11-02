@@ -1,3 +1,7 @@
+# Requires Python 3.11 or newer.
+# Raised from Python 3.10: the security floors below (notably filelock>=4.2.1)
+# have no advisory-free release supporting the older interpreters, so the
+# documented install would have failed there.
 -c requirements-security.txt
 
 protobuf>=5.29.6,<6  # Patched recursion limit; modern MediaPipe Tasks has no protobuf<5 pin
@@ -16,8 +20,7 @@ filelock>=4.2.1
 certifi>=2026.10.19
 anyio>=4.14.2
 fsspec>=2026.6.0
-httpx2>=2.12.0  # Transitive via the AI SDKs; 2.12.0 clears 10 advisories
-httpcore2>=2.10.0  # Transitive via httpx2; PYSEC-2026-3844, GHSA-7mj9-2mp8-4m2p
+httpx>=0.23.0  # 2 advisories, both fixed in 0.23.0 (plain httpx, not the separate httpx2 distribution)
 markdown>=3.5  # For better help documentation rendering
 keyring>=24.0.0  # For secure API key storage (optional)
 

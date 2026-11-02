@@ -277,7 +277,7 @@
 
 ## 1. Requirements
 
-- Python 3.10+ (3.10 to 3.13 supported)
+- Python 3.11+ (3.10 to 3.13 supported)
 - Internet connection
 - Google account (for Gemini) or OpenAI account (for DALL·E)
 - Dependencies (auto-installed via requirements.txt):

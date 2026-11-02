@@ -85,8 +85,14 @@ here; read it there. What is specific to this repo:
 - Dependabot config is committed, with grouped security PRs (`.github/dependabot.yml`).
 - Dependabot **alerts** are a per-repo GitHub setting; a config file does not
   turn them on. Without them the config above governs version updates only.
-  Check: `gh api -X GET repos/lelandg/ImageAI/vulnerability-alerts` (exit 0 = on,
-  404 = off). Enable: same path with `-X PUT`.
+  Check: `gh api -X GET repos/lelandg/ImageAI/vulnerability-alerts` -- exit 0 = on,
+  404 = off, and **403 = the token has no admin on this repo**, which is not
+  the same as off. Enable: same path with `-X PUT`.
+- Alerts and automatic security **updates** are two switches, not one. Alerts
+  only report; the half that opens PRs is `automated-security-fixes` (same API
+  shape). It is deliberately OFF here: this repo took its first scan with a
+  pre-existing advisory backlog, and enabling it would open that backlog as
+  PRs at once. Turn it on per repo once the backlog is cleared.
 - PR reviewers configured for this repo: **Codex** (run locally against the
   committed branch before opening the PR), **CodeRabbit**
   (`coderabbitai[bot]`) and **GrepTile** (`greptile-apps[bot]`, tuned in
