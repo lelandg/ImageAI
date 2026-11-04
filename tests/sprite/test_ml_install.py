@@ -20,21 +20,21 @@ def test_python_supports_rembg_window(monkeypatch):
 def test_sprite_ml_packages_on_supported_python(monkeypatch):
     monkeypatch.setattr(sys, "version_info", (3, 12, 3, "final", 0))
     packages, index_url = ml_install.sprite_ml_packages()
-    assert packages == [ml_install.MEDIAPIPE_SPEC, ml_install.REMBG_SPEC]
+    assert packages == [ml_install.MEDIAPIPE_SPEC, ml_install.REMBG_SPEC, *ml_install.SECURITY_FLOOR_SPECS]
     assert index_url == ""
 
 
 def test_sprite_ml_packages_drops_rembg_on_old_python(monkeypatch):
     monkeypatch.setattr(sys, "version_info", (3, 10, 0, "final", 0))
     packages, _ = ml_install.sprite_ml_packages()
-    assert packages == [ml_install.MEDIAPIPE_SPEC]
+    assert packages == [ml_install.MEDIAPIPE_SPEC, *ml_install.SECURITY_FLOOR_SPECS]
 
 
 def test_requirements_file_matches_the_constants():
     path = ml_install.requirements_file()
     assert path == REPO / "requirements-sprite-ml.txt"
     specs = ml_install.parse_requirements(path.read_text(encoding="utf-8"))
-    assert specs == [ml_install.MEDIAPIPE_SPEC, ml_install.REMBG_SPEC]
+    assert specs == [ml_install.MEDIAPIPE_SPEC, ml_install.REMBG_SPEC, *ml_install.SECURITY_FLOOR_SPECS]
 
 
 def test_parse_requirements_skips_comments_and_blank_lines():

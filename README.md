@@ -2,7 +2,7 @@
 
 ### [ImageAI on GitHub](https://github.com/lelandg/ImageAI) Desktop + CLI for multi‑provider AI image and video generation with enterprise auth, prompt tools, and MIDI‑synced karaoke/video workflows.
 
-**Version 0.49.5**
+**Version 0.50.0**
 
 **See [LelandGreen.com](https://www.lelandgreen.com) for links to other code and free stuff**. _Under construction. Implementing social links soon._ 
 - **Chameleon Labs Discord - Support, AI Art & Community: [Chameleon Labs Discord](https://discord.gg/chameleonlabs)**
@@ -277,7 +277,7 @@
 
 ## 1. Requirements
 
-- Python 3.10+ (3.10 to 3.13 supported)
+- Python 3.11 to 3.13 (the security floors have no supported release for 3.10)
 - Internet connection
 - Google account (for Gemini) or OpenAI account (for DALL·E)
 - Dependencies (auto-installed via requirements.txt):

@@ -1,0 +1,169 @@
+# Free security scans on every PR, every push to the default branch, and weekly
+# on a timer (a timer catches advisories published against code that has not
+# changed). Policy: ~/.config/agents/AGENTS.md -> "Dependency, code, and secret
+# scanning".
+#
+# Actions are pinned to commit SHAs, never floating tags: a tag can be moved to
+# malicious code, a SHA cannot. Dependabot (github-actions ecosystem) proposes
+# the bumps. Scanner binaries are installed from checksum-verified release
+# assets at a pinned version (bump V by hand). Trigger is `pull_request`,
+# never `pull_request_target`.
+#
+# Each scanner is its own job so one scanner's failure never prevents another
+# from running. The dependency scanners distinguish FINDINGS (exit 1 / audit
+# results) from SCANNER ERRORS (anything else): both fail the job, with distinct
+# messages so a scanner outage is never mistaken for a clean scan.
+#
+# ImageAI is a Python repo: there is no committed package-lock.json, so the
+# `npm audit signatures` and `npm audit` jobs from the shared template are
+# deliberately absent -- `npm ci` cannot run here and the check would be
+# permanently red. Dependencies are covered by osv-scanner over the
+# requirements*.txt files.
+
+name: security
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 11 * * 1" # Mondays 06:17 America/Chicago (11:17 UTC)
+
+permissions:
+  contents: read
+
+jobs:
+  secrets:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Install gitleaks 8.30.1 (checksum-verified release binary)
+        run: |
+          set -eu
+          V=8.30.1
+          B="https://github.com/gitleaks/gitleaks/releases/download/v${V}"
+          curl -fsSLO "${B}/gitleaks_${V}_linux_x64.tar.gz"
+          curl -fsSLO "${B}/gitleaks_${V}_checksums.txt"
+          grep " gitleaks_${V}_linux_x64.tar.gz$" "gitleaks_${V}_checksums.txt" | sha256sum -c -
+          tar -xzf "gitleaks_${V}_linux_x64.tar.gz" gitleaks
+          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Drop PR-supplied gitleaks suppressions
+        if: github.event_name == 'pull_request'
+        run: |
+          set -eu
+          # gitleaks reads .gitleaks.toml and .gitleaksignore from the checkout,
+          # which on a pull_request is the PR author's tree. A PR could add a
+          # global allowlist and pass the scan with a live secret. No repo in
+          # this rollout commits either file, so anything here came from the PR.
+          for f in .gitleaks.toml gitleaks.toml .gitleaksignore; do
+            if [ -e "$f" ]; then
+              echo "::warning title=gitleaks::removing PR-supplied $f before scanning (suppression config is not accepted from a pull request)"
+              rm -f "$f"
+            fi
+          done
+      - name: Scan the commits this event introduced (full history on the timer)
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -eu
+          # gitleaks builds `git log -p -U0 <log-opts>`, and a NON-EMPTY
+          # --log-opts replaces its own defaults
+          # (--full-history --all --diff-filter=tuxdb). Neither its default nor
+          # a custom value passes --diff-merges, so `git log -p` omits
+          # merge-commit patches: a secret added while resolving a merge
+          # conflict went unscanned. Every path below therefore asks for
+          # first-parent merge diffs, and the full-history paths restate the
+          # defaults rather than losing them.
+          # --text is LOAD-BEARING, not cosmetic. Without it a PR can add
+          # `path -diff` to .gitattributes, git emits "Binary files differ"
+          # instead of the patch, and gitleaks scans nothing while reporting
+          # "no leaks found". Measured: 22 bytes scanned and a clean pass,
+          # versus 77 bytes and "leaks found: 1" with --text. Deleting
+          # .gitleaks.toml does NOT close this path. Do not remove --text.
+          DIFFOPTS="--diff-merges=first-parent --text"
+          FULL="--full-history --all --diff-filter=tuxdb $DIFFOPTS"
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) OPTS="$BASE..$HEAD $DIFFOPTS" ;;
+            push)
+              case "$BEFORE" in
+                # Branch just created: there is no previous head to diff from,
+                # so scan everything rather than an arbitrary recent slice.
+                0000000000000000000000000000000000000000) OPTS="$FULL" ;;
+                *)
+                  # A force-push can leave $BEFORE unreachable even at
+                  # fetch-depth 0. Passing it to gitleaks then FAILS the job
+                  # instead of scanning, so fall back to a FULL scan. An
+                  # earlier revision fell back to `-n 50`, which let a
+                  # force-push of more than 50 commits leave the older ones
+                  # unscanned while the job reported success.
+                  if git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+                    OPTS="$BEFORE..$GITHUB_SHA $DIFFOPTS"
+                  else
+                    echo "::warning title=gitleaks::previous head $BEFORE is unreachable (history rewritten); scanning the full history instead"
+                    OPTS="$FULL"
+                  fi ;;
+              esac ;;
+            *) OPTS="$FULL" ;;
+          esac
+          # --ignore-gitleaks-allow: a `gitleaks:allow` comment in a PR must not
+          # be able to suppress a finding.
+          gitleaks git --redact --no-banner -v --ignore-gitleaks-allow --log-opts="$OPTS"
+
+  osv-scanner:
+    name: osv-scanner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install osv-scanner 2.7.0 (checksum-verified release binary)
+        run: |
+          set -eu
+          V=2.7.0
+          B="https://github.com/google/osv-scanner/releases/download/v${V}"
+          curl -fsSLO "${B}/osv-scanner_linux_amd64"
+          curl -fsSLO "${B}/osv-scanner_SHA256SUMS"
+          grep " osv-scanner_linux_amd64$" osv-scanner_SHA256SUMS | sha256sum -c -
+          sudo install -m 0755 osv-scanner_linux_amd64 /usr/local/bin/osv-scanner
+          osv-scanner --version
+      # osv-scanner exit codes: 0 clean, 1 vulnerabilities found, anything else
+      # is a scanner error (bad flag, no packages found, network) and must never
+      # look like a findings result.
+      - name: osv-scanner over every lockfile and manifest
+        run: |
+          set -u
+          # GitHub runs this under `bash -e`: capture the exit code instead of
+          # letting a non-zero scanner result end the step before it is classified.
+          rc=0
+          # The default plugin set is `lockfile, sbom, directory` -- it does
+          # NOT read workflow `uses:` references. `github/actions` adds them,
+          # but OSV matches advisories by version and these pins are SHAs, so
+          # treat it as an inventory, not detection: a pinned action's
+          # remediation path is the weekly Dependabot version update.
+          # Naming plugins REPLACES the default list, so all four are listed.
+          #
+          # --config points at an empty file OUTSIDE the checkout. Without it,
+          # osv-scanner loads any `osv-scanner.toml` beside a scanned manifest,
+          # so a pull request could add one with `ignore = true` and silence
+          # its own findings (tested: a planted override hid Pillow 9.5.0).
+          : > "$RUNNER_TEMP/osv-scanner.toml"
+          osv-scanner scan source --recursive ./ \
+            --config "$RUNNER_TEMP/osv-scanner.toml" \
+            --x-plugins lockfile --x-plugins sbom --x-plugins directory \
+            --x-plugins github/actions || rc=$?
+          case "$rc" in
+            0) echo "osv-scanner: no known vulnerabilities" ;;
+            1)
+              echo "::error title=osv-scanner::known vulnerabilities found"
+              exit 1 ;;
+            *)
+              echo "::error title=osv-scanner::scanner error, exit $rc (not a findings result)"
+              exit "$rc" ;;
+          esac

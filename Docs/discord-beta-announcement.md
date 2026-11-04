@@ -27,7 +27,7 @@ Copy/paste the following for Discord:
 📄 **Full Details**: Check the [`Docs/beta-testers-wanted.html`](https://github.com/lelandg/ImageAI/Docs/beta-testers-wanted.html) in the repo!
 
 ### Requirements
-- Python 3.10+
+- Python 3.11 to 3.13
 - At least one API key (Google, OpenAI, or Stability)
 - GPU recommended for local SD
 

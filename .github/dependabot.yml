@@ -1,0 +1,75 @@
+# Dependabot: free, GitHub-side dependency and advisory monitoring.
+# Policy: ~/.config/agents/AGENTS.md -> "Dependency, code, and secret scanning".
+#
+# Shape:
+#   - Security updates are grouped into ONE PR per ecosystem so a bad week does
+#     not open fifteen PRs.
+#   - Version updates run weekly, minor+patch only, grouped. Majors are done by
+#     hand with a changelog read. The `ignore` of semver-major below gates
+#     VERSION updates only: SECURITY updates walk past it, so a security fix
+#     that lives in a new major still arrives as a PR. "No PR" never means
+#     "no vulnerability" -- transitive-only deps and advisories with no fixed
+#     version show up only as alerts. Read the alerts.
+#   - cooldown mirrors the 7-day minimum-package-age rule for version updates.
+#     Security updates are not delayed by cooldown: remediation wins.
+#   - A Dependabot PR carries no version bump; fold it into the next release.
+#
+# ImageAI has no npm, nuget, go or cargo manifests, so those ecosystem blocks
+# from the shared template are absent. The pip block covers the root
+# `requirements.txt` plus `requirements-local-sd.txt`,
+# `requirements-security.txt` and `requirements-sprite-ml.txt`, all at the repo
+# root. It deliberately omits `update-types` from its version-update group:
+# projects that declare loose floors (`httpx>=0.27`) get REQUIREMENT changes,
+# which carry no from->to pair and therefore match NO `update-types` value --
+# adding the filter silently drops every such update out of the group and opens
+# one PR each. (That cost ChameleonLabs 22 PRs in a day.)
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/Chicago
+    open-pull-requests-limit: 2
+    cooldown:
+      default-days: 7
+    groups:
+      security:
+        applies-to: security-updates
+        patterns: ["*"]
+      # No `update-types` filter here -- see the note above.
+      minor-and-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:30"
+      timezone: America/Chicago
+    open-pull-requests-limit: 1
+    cooldown:
+      default-days: 7
+    groups:
+      # No `applies-to: security-updates` group here: it could never fire,
+      # because SHA-pinned actions get no Dependabot alerts.
+      actions:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+    # NO semver-major ignore here, unlike the other ecosystems, and that is
+    # deliberate. GitHub generates Dependabot alerts only for actions on
+    # semantic versions, NOT for SHA pins (docs: "About Dependabot alerts"),
+    # so no security update can ever fire for a pinned action. A weekly
+    # VERSION update is therefore the only remediation path that exists, and
+    # ignoring majors would remove it. Nothing DETECTS advisories against a
+    # SHA pin either: the `github/actions` osv-scanner plugin in security.yml
+    # records the SHA as the version, and OSV matches by version. Keeping pins
+    # current is the whole defence.
