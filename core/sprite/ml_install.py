@@ -15,6 +15,9 @@ from typing import List, Tuple
 from core.mediapipe_tasks import MEDIAPIPE_SPEC
 REMBG_SPEC = "rembg[cpu]>=2.0.86"                # older rembg pins Pillow<13 (39 advisories)
 REMBG_PYTHON = ((3, 11), (3, 14))                # inclusive floor, exclusive ceiling
+# Transitive security floors, repeated from requirements-security.txt because
+# osv-scanner checks requirements-sprite-ml.txt on its own and ignores -c files.
+SECURITY_FLOOR_SPECS = ("certifi>=2026.10.19", "idna>=3.15")
 
 
 def python_supports_rembg() -> bool:
@@ -28,6 +31,7 @@ def sprite_ml_packages() -> Tuple[List[str], str]:
     packages = [MEDIAPIPE_SPEC]
     if python_supports_rembg():
         packages.append(REMBG_SPEC)
+    packages.extend(SECURITY_FLOOR_SPECS)
     return packages, ""
 
 
