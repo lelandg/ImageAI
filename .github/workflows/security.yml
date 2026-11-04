@@ -143,11 +143,19 @@ jobs:
           # letting a non-zero scanner result end the step before it is classified.
           rc=0
           # The default plugin set is `lockfile, sbom, directory` -- it does
-          # NOT read workflow `uses:` references, so SHA-pinned actions were
-          # scanned by nothing: GitHub generates Dependabot alerts only for
-          # actions on semantic versions, never for SHA pins. Naming plugins
-          # REPLACES the default list, so all four are listed here.
+          # NOT read workflow `uses:` references. `github/actions` adds them,
+          # but OSV matches advisories by version and these pins are SHAs, so
+          # treat it as an inventory, not detection: a pinned action's
+          # remediation path is the weekly Dependabot version update.
+          # Naming plugins REPLACES the default list, so all four are listed.
+          #
+          # --config points at an empty file OUTSIDE the checkout. Without it,
+          # osv-scanner loads any `osv-scanner.toml` beside a scanned manifest,
+          # so a pull request could add one with `ignore = true` and silence
+          # its own findings (tested: a planted override hid Pillow 9.5.0).
+          : > "$RUNNER_TEMP/osv-scanner.toml"
           osv-scanner scan source --recursive ./ \
+            --config "$RUNNER_TEMP/osv-scanner.toml" \
             --x-plugins lockfile --x-plugins sbom --x-plugins directory \
             --x-plugins github/actions || rc=$?
           case "$rc" in

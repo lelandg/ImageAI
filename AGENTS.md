@@ -88,16 +88,20 @@ here; read it there. What is specific to this repo:
   security-update PR can ever fire for a pinned action, an
   `applies-to: security-updates` group over github-actions is dead config, and
   the weekly version update is their only automatic remediation -- which is why
-  the github-actions block carries no semver-major ignore. DETECTION comes from
-  osv-scanner's `github/actions` plugin, which is NOT in its default plugin set
-  and so is named explicitly in `security.yml`.
+  the github-actions block carries no semver-major ignore. Nothing reliably
+  DETECTS advisories against a SHA pin either: osv-scanner's `github/actions`
+  plugin (named explicitly in `security.yml`, since it is not a default)
+  records the SHA as the version, and OSV matches by version. Keeping pins
+  current is the defence.
 - Dependabot **alerts** are a per-repo GitHub setting; a config file does not
   turn them on. Without them the config above governs version updates only.
   Check it by HTTP STATUS, not by exit code -- `gh api` exits 0 on success
   and 1 on any failure, and never exits 404 or 403:
   `gh api -i -X GET repos/lelandg/ImageAI/vulnerability-alerts | head -1`
   204 = on, 404 = off, 403 = the token has no admin on this repo, which is
-  NOT the same as off. Enable: same path with `-X PUT`.
+  NOT the same as off. A token without admin can also get 404, so first
+  confirm `gh api repos/lelandg/ImageAI --jq .permissions.admin` prints
+  `true`; only then does 404 mean off. Enable: same path with `-X PUT`.
 - Alerts and automatic security **updates** are two switches, not one. Alerts
   only report; the half that opens PRs is `automated-security-fixes` (same API
   shape). It is deliberately OFF here: this repo took its first scan with a

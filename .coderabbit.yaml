@@ -38,6 +38,9 @@ reviews:
   #   gh api "repos/OWNER/REPO/commits/$SHA/check-runs" \
   #     --jq '.check_runs[]|select(.name=="CodeRabbit")|.output.title' \
   #     | grep . || echo "NO CodeRabbit check -- that head is NOT reviewed"
+  # That lists checks for the COMMIT, not the pull request: two PRs sharing a
+  # head SHA share its check. Also confirm CodeRabbit's walkthrough comment is
+  # on THIS PR and names that SHA as its last reviewed commit.
   # This setting narrows the hole; it does not close it.
   fail_commit_status: true
 

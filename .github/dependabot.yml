@@ -69,5 +69,7 @@ updates:
     # semantic versions, NOT for SHA pins (docs: "About Dependabot alerts"),
     # so no security update can ever fire for a pinned action. A weekly
     # VERSION update is therefore the only remediation path that exists, and
-    # ignoring majors would remove it. Advisory DETECTION comes from the
-    # `github/actions` osv-scanner plugin named in security.yml.
+    # ignoring majors would remove it. Nothing DETECTS advisories against a
+    # SHA pin either: the `github/actions` osv-scanner plugin in security.yml
+    # records the SHA as the version, and OSV matches by version. Keeping pins
+    # current is the whole defence.
