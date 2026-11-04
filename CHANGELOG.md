@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.50.0] - 2026-11-04
+
+### Changed
+
+- **Python 3.11 to 3.13 is now required.** Python 3.10 is no longer supported:
+  the security floors below have no advisory-free release for it.
+- Security scanning runs on every pull request: osv-scanner over every
+  manifest and workflow, plus gitleaks for secrets. Dependabot proposes
+  grouped updates, and CodeRabbit reviews each push. osv-scanner reads a
+  trusted configuration from outside the checkout, so a pull request cannot
+  silence its own findings.
+
+### Security
+
+- Raised dependency floors to the lowest release that clears each published
+  advisory: aiohttp, Jinja2, nltk, pyasn1, PyJWT, python-multipart, requests,
+  setuptools, tqdm, virtualenv, OpenTelemetry API, httpx2 and httpcore2.
+- The optional local Stable Diffusion install now requires torch 2.13.0,
+  Transformers 5.10.0, diffusers 0.38.0 and accelerate 1.15.0 or newer.
+  These clear checkpoint path-traversal, remote-code and deserialization
+  advisories.
+- The Sprite ML extras file and the in-app **Install ML backends** action now
+  carry the certifi and idna security floors.
+
 ## [0.49.5] - 2026-10-23
 
 ### Fixed
