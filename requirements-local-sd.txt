@@ -2,25 +2,25 @@
 # Install with: pip install -r requirements-local-sd.txt
 
 # Core ML dependencies
-torch>=2.13.0  # For CPU-only: torch>=2.13.0 --index-url https://download.pytorch.org/whl/cpu; 2.13.0 clears PYSEC-2026-2286 et al.
-diffusers>=0.38.0  # Clears GHSA-7wx4-6vff-v64p and 4 more; Transformers 5 support landed in 0.37.0
-transformers>=5.10.0  # 5.10.0 clears GHSA-xrqw-3rrv-vx5w / PYSEC-2026-3929
+torch>=2.15.0  # For CPU-only: torch>=2.15.0 --index-url https://download.pytorch.org/whl/cpu; 2.13.0 clears PYSEC-2026-2286 et al.
+diffusers>=0.42.1  # Clears GHSA-7wx4-6vff-v64p and 4 more; Transformers 5 support landed in 0.37.0
+transformers>=5.21.0  # 5.10.0 clears GHSA-xrqw-3rrv-vx5w / PYSEC-2026-3929
 accelerate>=1.15.0  # CVE-2026-69112 (checkpoint path traversal) affects <=1.14.0
-safetensors>=0.4.0
+safetensors>=0.8.0
 
 # System monitoring
-psutil>=5.9.0
+psutil>=5.9.8
 
 # Security floors, repeated from requirements-security.txt: osv-scanner checks
 # this file on its own and ignores -c constraints, and this file is also
 # installed on its own.
-anyio>=4.14.2
-certifi>=2026.10.19
-httpcore2>=2.10.0  # Transitive via huggingface-hub/httpx2; PYSEC-2026-3844
-httpx2>=2.12.0  # Transitive via huggingface-hub; 2.12.0 clears GHSA-8xx6-hgc6-gc2m et al.
-idna>=3.15
+anyio>=4.15.1
+certifi>=2026.10.23
+httpcore2>=2.16.0  # Transitive via huggingface-hub/httpx2; PYSEC-2026-3844
+httpx2>=2.16.0  # Transitive via huggingface-hub; 2.12.0 clears GHSA-8xx6-hgc6-gc2m et al.
+idna>=3.20
 pillow>=13.0.0
-requests>=2.33.0
+requests>=2.34.2
 
 # Note: For GPU support, install PyTorch with CUDA:
 # pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
