@@ -3,7 +3,7 @@
 
 # Core ML dependencies
 torch>=2.13.0  # For CPU-only: torch>=2.13.0 --index-url https://download.pytorch.org/whl/cpu; 2.13.0 clears PYSEC-2026-2286 et al.
-diffusers>=0.37.0  # First release fully functional with Transformers 5 (required by the floor below)
+diffusers>=0.38.0  # Clears GHSA-7wx4-6vff-v64p and 4 more; Transformers 5 support landed in 0.37.0
 transformers>=5.10.0  # 5.10.0 clears GHSA-xrqw-3rrv-vx5w / PYSEC-2026-3929
 accelerate>=1.15.0  # CVE-2026-69112 (checkpoint path traversal) affects <=1.14.0
 safetensors>=0.4.0
