@@ -34,17 +34,24 @@ _HistoryBuffer.__module__ = "mmengine.logging.history_buffer"
 _HistoryBuffer.__qualname__ = _HistoryBuffer.__name__ = "HistoryBuffer"
 
 
-def _require_patched_torch(torch) -> None:
-    """Refuse checkpoint loading on a torch whose ``weights_only`` is bypassable."""
+def _unsafe_torch_message(version: str) -> Optional[str]:
+    """Explain why ``version`` cannot load checkpoints, or None when it is patched."""
     from packaging.version import Version
 
-    installed = Version(torch.__version__.split("+")[0])
-    if installed < Version(MIN_SAFE_TORCH):
-        raise RuntimeError(
-            f"PyTorch {torch.__version__} cannot load model checkpoints safely "
-            f"(CVE-2025-32434: weights_only=True is bypassable). "
-            f"Upgrade to PyTorch {MIN_SAFE_TORCH} or later."
-        )
+    if Version(version.split("+")[0]) >= Version(MIN_SAFE_TORCH):
+        return None
+    return (
+        f"PyTorch {version} cannot load model checkpoints safely "
+        f"(CVE-2025-32434: weights_only=True is bypassable). "
+        f"Upgrade to PyTorch {MIN_SAFE_TORCH} or later."
+    )
+
+
+def _require_patched_torch(torch) -> None:
+    """Refuse checkpoint loading on a torch whose ``weights_only`` is bypassable."""
+    message = _unsafe_torch_message(torch.__version__)
+    if message:
+        raise RuntimeError(message)
 
 
 def _dwpose_safe_globals() -> list:
@@ -117,7 +124,19 @@ class MuseTalkProvider(BaseLipSyncProvider):
         is_installed, status = check_musetalk_installed()
         if not is_installed:
             logger.debug(f"MuseTalk not available: {status}")
-        return is_installed
+            return False
+        # Report the torch floor here, from package metadata (no torch import),
+        # so callers skip MuseTalk instead of failing at model load.
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            message = _unsafe_torch_message(version("torch"))
+        except PackageNotFoundError:
+            message = "PyTorch is not installed."
+        if message:
+            logger.warning(f"MuseTalk not available: {message}")
+            return False
+        return True
 
     def get_install_prompt(self) -> str:
         """Get installation instructions."""

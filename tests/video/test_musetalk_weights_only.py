@@ -104,6 +104,29 @@ def test_vulnerable_torch_is_refused_before_loading(provider, monkeypatch, loade
     assert loads == []
 
 
+@pytest.mark.parametrize("torch_version,expected", [("2.4.1", False), ("2.9.1+cu128", True)])
+def test_is_available_reports_the_torch_floor(provider, monkeypatch, torch_version, expected):
+    """A vulnerable torch makes MuseTalk unavailable up front, not at model load."""
+    import importlib.metadata
+
+    monkeypatch.setattr(musetalk_provider, "check_musetalk_installed", lambda: (True, "ok"))
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: torch_version)
+    assert provider.is_available() is expected
+
+
+def test_is_available_without_torch_is_false(provider, monkeypatch):
+    """No torch distribution at all is reported as unavailable, not raised."""
+    import importlib.metadata
+
+    def missing(name):
+        """Behave like an absent distribution."""
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(musetalk_provider, "check_musetalk_installed", lambda: (True, "ok"))
+    monkeypatch.setattr(importlib.metadata, "version", missing)
+    assert provider.is_available() is False
+
+
 def test_history_buffer_stub_is_inert():
     """The stub claims mmengine's dotted name without importing mmengine."""
     stub = musetalk_provider._HistoryBuffer

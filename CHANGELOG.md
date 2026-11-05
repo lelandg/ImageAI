@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   restriction is set explicitly, so an environment variable cannot turn it off.
 - MuseTalk refuses to load models on PyTorch older than 2.6, where the
   restricted loader can be bypassed (CVE-2025-32434). The error names the fix.
+  On such a PyTorch, MuseTalk now reports itself unavailable up front, so lip-sync
+  is skipped cleanly. MuseTalk's own installer still pins PyTorch 2.4.1, so it
+  stays unavailable until the installer is updated.
 - The 18 local Stable Diffusion advisories that have no upstream fix (torch,
   transformers, diffusers, accelerate) are documented with their impact on
   ImageAI in `Docs/Snyk-Exceptions.md`. None is suppressed.
