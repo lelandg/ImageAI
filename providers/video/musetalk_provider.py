@@ -190,7 +190,7 @@ class MuseTalkProvider(BaseLipSyncProvider):
         # Initialize model (placeholder - actual implementation depends on MuseTalk API)
         logger.info(f"Loading MuseTalk from {weights_path}")
         self._musetalk_config = config
-        self._musetalk_weights = torch.load(weights_path, map_location=self.device)
+        self._musetalk_weights = torch.load(weights_path, map_location=self.device, weights_only=True)
 
     def _load_dwpose_model(self):
         """Load DWPose body detection model."""
@@ -202,7 +202,7 @@ class MuseTalkProvider(BaseLipSyncProvider):
             raise FileNotFoundError(f"DWPose model not found: {model_path}")
 
         logger.info(f"Loading DWPose from {model_path}")
-        self._dwpose_weights = torch.load(model_path, map_location=self.device)
+        self._dwpose_weights = torch.load(model_path, map_location=self.device, weights_only=True)
 
     def _load_vae_model(self):
         """Load Stable Diffusion VAE."""
@@ -229,7 +229,7 @@ class MuseTalkProvider(BaseLipSyncProvider):
             raise FileNotFoundError(f"Whisper model not found: {model_path}")
 
         logger.info(f"Loading Whisper from {model_path}")
-        self._whisper = torch.load(model_path, map_location=self.device)
+        self._whisper = torch.load(model_path, map_location=self.device, weights_only=True)
 
     def _image_to_frames(self, image_path: Path, duration: float = None) -> List[np.ndarray]:
         """

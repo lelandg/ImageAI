@@ -21,6 +21,38 @@ A policy-filtered passing scan is not a zero-advisory raw scan. Retain an unfilt
 
 The same six expiring exceptions must also be applied to the SCM-imported Snyk project `lelandg/ImageAI:requirements.txt`. The hosted exceptions are disregarded once an upstream fix is available. Review both the repository policy and the project policy when resolving or renewing an exception.
 
+## November 5, 2026 reassessment (local SD stack)
+
+Prompted by the weekly Snyk email. CLI scans on Python 3.12 of all four manifests, against an environment upgraded to what each manifest now resolves:
+
+| Manifest | Dependencies | Result |
+| --- | --- | --- |
+| `requirements.txt` | 110 | Passes with the policy. Raw (`--ignore-policy`) returns exactly the six LiteLLM advisories above, still unfixed at 1.101.6. |
+| `requirements-security.txt` | 92 | Passes with the policy (same six LiteLLM ignores). |
+| `requirements-sprite-ml.txt` | 43 | Passes; nothing open. |
+| `requirements-local-sd.txt` | 45 | 19 advisories: one fixable, 18 with no fixed version in any release. |
+
+**Fixed.** `pygments>=2.20.0` is in `requirements-security.txt` and repeated in `requirements-local-sd.txt`. It clears SNYK-PYTHON-PYGMENTS-15746419 (CVE-2026-4539, ReDoS in `AdlLexer`; transformers > typer > rich > pygments). 2.20.0 is the lowest fixed release (2026-03-29). Fresh installs already got 2.21.0; an existing environment kept 2.19.2 until the floor. pygments is not in the base tree, so `requirements.txt` needs no Snyk SCM copy.
+
+**Hardened.** The three MuseTalk `torch.load` calls (`providers/video/musetalk_provider.py`) now pass `weights_only=True` explicitly. torch >= 2.6 already defaults to it, but `TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD` reverts the default to full pickle loading at any call site that leaves it implicit, and it cannot override an explicit argument. `tests/video/test_musetalk_weights_only.py` pins this.
+
+**No upstream fix, not ignored.** Every advisory below is affected in all releases (`[0,]`; 19500670 from transformers 4.49.0). None is suppressed: no exception is approved.
+
+| Package | Advisories (`SNYK-PYTHON-<PACKAGE>-`) | Class | ImageAI applicability |
+| --- | --- | --- | --- |
+| transformers | 14560695, 14563374, 14564275, 14564363, 14564364, 14564365, 14564366 | Code execution from a malicious checkpoint / config (`convert_config`, megatron_gpt2, weight parsing) | Reached only by loading an attacker-supplied model. `providers/local_sd.py` loads with `use_safetensors=True`, which refuses pickle weights. Upstream rejected several of these as out of scope. |
+| transformers | 18965959 | Path traversal via a crafted local shard index `weight_map` | Requires a malicious local model directory. |
+| transformers | 19500670 | `load_custom_generate()` runs model-supplied code before the trust check | No ImageAI code passes `trust_remote_code` or uses `custom_generate`. |
+| diffusers | 14567485 | Code execution from a malicious model file | As for transformers. The MuseTalk VAE `.bin` goes through diffusers' loader, which calls `torch.load(weights_only=True)`. |
+| diffusers | 18313062 | Path traversal via shard `weight_map` | Requires a malicious model index. |
+| accelerate | 14566490, 18609772 | Checkpoint deserialization; shard-path traversal in `load_checkpoint_in_model` | ImageAI never calls accelerate's checkpoint loaders; diffusers uses accelerate for device placement. |
+| torch | 15746467 | `.pt2` loader deserializes even with `weights_only=True` | ImageAI loads no `.pt2` (torch.export) files. |
+| torch | 10332643, 10337825, 10337826, 10337834 | Local memory corruption / crash in `torch.jit`, NCCL reduce, the CUDA caching allocator | Local-access only; ImageAI calls none of these APIs directly. |
+
+The residual risk is the one every local ML stack carries: a user loading a model ID or checkpoint from an untrusted source. Local SD is an optional extra. Its model list and custom model IDs come from the user, and `use_safetensors=True` is the defence. Snyk shows no fix, so floors cannot clear these. Ignoring them in `.snyk`, with a reason and an expiry like the LiteLLM entries, needs the maintainer's approval. Until then they stay open in the scan.
+
+Separately: the six LiteLLM exceptions expire **2026-11-20**. Reassess them before then; do not extend them automatically.
+
 ## October 23, 2026 dependency floors
 
 No exception changed. Four floors were raised under the remediation rule: a reported advisory with a fixed version is fixed at once, at the lowest fixed version, whatever the release's age.
