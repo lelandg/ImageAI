@@ -1,5 +1,5 @@
 # Requires Python 3.11 or newer.
-# Raised from Python 3.10: the security floors below (notably filelock>=4.2.1)
+# Raised from Python 3.10: the security floors below (notably filelock>=4.2.4)
 # have no advisory-free release supporting the older interpreters, so the
 # documented install would have failed there.
 -c requirements-security.txt
@@ -8,20 +8,20 @@ protobuf>=5.29.6,<6  # Patched recursion limit; modern MediaPipe Tasks has no pr
 pillow>=13.0.0  # 39 advisories fixed only in 13.0.0, e.g. GHSA-8g5g-8vmr-9782 (JPEG heap overflow)
 numpy>=1.26.4  # Explicit safe floor for MIDI and image processing dependencies
 packaging>=26.3  # Runtime version/specifier validation for optional ML backends
-google-genai>=2.9.0  # 2.9.0+: GeminiNextGen Interactions API w/ output_video (Gemini Omni video). NBP image_size (1K/2K/4K) still supported.
+google-genai>=2.34.0  # 2.9.0+: GeminiNextGen Interactions API w/ output_video (Gemini Omni video). NBP image_size (1K/2K/4K) still supported.
 google-cloud-aiplatform
 PySide6
 openai
-requests>=2.33.0  # For Stability AI REST API
+requests>=2.34.2  # For Stability AI REST API
 # Repeat these security floors here because Snyk SCM ignores constraint files.
 urllib3>=2.8.0
 multidict>=6.9.1
 filelock>=4.2.1
-certifi>=2026.10.19
-anyio>=4.14.2
-fsspec>=2026.6.0
-markdown>=3.5  # For better help documentation rendering
-keyring>=24.0.0  # For secure API key storage (optional)
+certifi>=2026.10.23
+anyio>=4.15.1
+fsspec>=2026.9.0
+markdown>=3.11.2  # For better help documentation rendering
+keyring>=24.3.1  # For secure API key storage (optional)
 
 # Optional dependencies for Local Stable Diffusion
 # Uncomment these lines to enable local SD support:
@@ -34,31 +34,31 @@ keyring>=24.0.0  # For secure API key storage (optional)
 
 # Video Project Feature Dependencies
 Jinja2>=3.1.6  # Template processing for prompt generation; 3.1.6 clears 10 advisories (GHSA-cpwx-vrp4-4pq7 et al.)
-imageio-ffmpeg>=0.4.9  # FFmpeg Python bindings
+imageio-ffmpeg>=0.7.0  # FFmpeg Python bindings
 litellm>=1.101.3,<1.102  # Patched, tested SDK line; see Docs/Snyk-Exceptions.md
-anthropic>=0.25.0  # Claude API support (optional for prompt generation)
+anthropic>=0.125.0  # Claude API support (optional for prompt generation)
 
 # MIDI Processing & Synchronization  
-setuptools>=84.1.0  # Build dependency for pretty-midi; matches the requirements-security.txt floor
+setuptools>=84.2.1  # Build dependency for pretty-midi; matches the requirements-security.txt floor
 pretty-midi>=0.2.11.post0  # High-level MIDI analysis for timing extraction (latest available version)
-mido>=1.3.2  # Low-level MIDI manipulation for detailed control
+mido>=1.3.3  # Low-level MIDI manipulation for detailed control
 
 # Optional dependencies for Local LLM support
 # Uncomment if you want to use local LLMs for prompt generation:
 # ollama>=0.3.0  # Local LLM support via Ollama
 
 # Video creation dependencies (required for video projects)
-opencv-python>=4.8.1.78  # Required for video frame processing and assembly
+opencv-python>=4.14.0.94  # Required for video frame processing and assembly
 
 # Sprite tab de-jitter (core/sprite/stabilize.py); OpenCV phaseCorrelate is the fallback
-scikit-image>=0.24  # skimage.registration.phase_cross_correlation (sub-pixel frame alignment)
-scipy>=1.13  # required by scikit-image
+scikit-image>=0.26.0  # skimage.registration.phase_cross_correlation (sub-pixel frame alignment)
+scipy>=1.18.1  # required by scikit-image
 
 # Discord Rich Presence (optional - for showing activity in Discord status)
-pypresence>=4.6.0  # Discord RPC wrapper library
+pypresence>=4.6.2  # Discord RPC wrapper library
 
 # Font Generator Dependencies
-fonttools>=4.60.0  # Font file creation (TTF/OTF) from vectorized glyphs
+fonttools>=4.68.0  # Font file creation (TTF/OTF) from vectorized glyphs
 
 # AI Upscaling (installed at runtime via GUI if needed)
 # Installed on 2025-09-14 17:39:20
@@ -94,5 +94,5 @@ opentelemetry-api>=1.45.1
 # Plain httpx is a SEPARATE distribution (latest 0.28.1) with only 2
 # advisories, both fixed in 0.23.0, already satisfied via litellm's own
 # `httpx>=0.28.0`.
-httpx2>=2.12.0  # Transitive via the AI SDKs; 2.12.0 clears 10 advisories
-httpcore2>=2.10.0  # Transitive via httpx2; PYSEC-2026-3844, GHSA-7mj9-2mp8-4m2p
+httpx2>=2.16.0  # Transitive via the AI SDKs; 2.12.0 clears 10 advisories
+httpcore2>=2.16.0  # Transitive via httpx2; PYSEC-2026-3844, GHSA-7mj9-2mp8-4m2p
