@@ -15,6 +15,76 @@ from core.musetalk_installer import (
 
 logger = logging.getLogger(__name__)
 
+# torch.load(weights_only=True) is bypassable below 2.6 (CVE-2025-32434), and
+# torch, transformers, diffusers and accelerate carry checkpoint-
+# deserialization advisories with no upstream fix (Docs/Snyk-Exceptions.md,
+# 2026-11-05). Restricted loading on a patched torch is the defence.
+MIN_SAFE_TORCH = "2.6"
+
+
+class _HistoryBuffer:
+    """Inert stand-in for mmengine's training-log buffer in the DWPose checkpoint.
+
+    The restricted unpickler fills its ``__dict__`` with the logged values;
+    mmengine is never imported and none of its code runs.
+    """
+
+
+_HistoryBuffer.__module__ = "mmengine.logging.history_buffer"
+_HistoryBuffer.__qualname__ = _HistoryBuffer.__name__ = "HistoryBuffer"
+
+
+def _require_patched_torch(torch) -> None:
+    """Refuse checkpoint loading on a torch whose ``weights_only`` is bypassable."""
+    from packaging.version import Version
+
+    installed = Version(torch.__version__.split("+")[0])
+    if installed < Version(MIN_SAFE_TORCH):
+        raise RuntimeError(
+            f"PyTorch {torch.__version__} cannot load model checkpoints safely "
+            f"(CVE-2025-32434: weights_only=True is bypassable). "
+            f"Upgrade to PyTorch {MIN_SAFE_TORCH} or later."
+        )
+
+
+def _dwpose_safe_globals() -> list:
+    """The exact non-tensor globals the DWPose (mmengine) checkpoint pickles.
+
+    Found with ``torch.serialization.get_unsafe_globals_in_checkpoint`` plus
+    the numpy dtype classes the unpickler asks for. Object arrays stay refused.
+    """
+    import numpy.dtypes as ndt
+
+    try:
+        from numpy._core import multiarray  # numpy >= 2
+    except ImportError:  # numpy 1.x
+        from numpy.core import multiarray
+
+    return [
+        (multiarray.scalar, "numpy.core.multiarray.scalar"),
+        (multiarray._reconstruct, "numpy.core.multiarray._reconstruct"),
+        np.ndarray,
+        np.dtype,
+        ndt.UInt8DType,
+        ndt.Float32DType,
+        ndt.Float64DType,
+        ndt.Int64DType,
+        (_HistoryBuffer, "mmengine.logging.history_buffer.HistoryBuffer"),
+    ]
+
+
+def _restricted_load(path: Path, map_location, allow=()):
+    """``torch.load`` with an explicit ``weights_only=True`` and a minimal allowlist.
+
+    The argument is explicit because ``TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD``
+    reverts an implicit default to full pickle loading but cannot override it.
+    """
+    import torch
+
+    _require_patched_torch(torch)
+    with torch.serialization.safe_globals(list(allow)):
+        return torch.load(path, map_location=map_location, weights_only=True)
+
 
 class MuseTalkProvider(BaseLipSyncProvider):
     """
@@ -148,6 +218,8 @@ class MuseTalkProvider(BaseLipSyncProvider):
         try:
             import torch
 
+            _require_patched_torch(torch)
+
             # Determine device
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
             logger.info(f"Using device: {self.device}")
@@ -173,7 +245,6 @@ class MuseTalkProvider(BaseLipSyncProvider):
 
     def _load_musetalk_model(self):
         """Load the core MuseTalk model."""
-        import torch
         import json
 
         model_dir = self.model_path / "musetalk"
@@ -190,19 +261,17 @@ class MuseTalkProvider(BaseLipSyncProvider):
         # Initialize model (placeholder - actual implementation depends on MuseTalk API)
         logger.info(f"Loading MuseTalk from {weights_path}")
         self._musetalk_config = config
-        self._musetalk_weights = torch.load(weights_path, map_location=self.device, weights_only=True)
+        self._musetalk_weights = _restricted_load(weights_path, self.device)
 
     def _load_dwpose_model(self):
         """Load DWPose body detection model."""
-        import torch
-
         model_path = self.model_path / "dwpose" / "dw-ll_ucoco_384.pth"
 
         if not model_path.exists():
             raise FileNotFoundError(f"DWPose model not found: {model_path}")
 
         logger.info(f"Loading DWPose from {model_path}")
-        self._dwpose_weights = torch.load(model_path, map_location=self.device, weights_only=True)
+        self._dwpose_weights = _restricted_load(model_path, self.device, _dwpose_safe_globals())
 
     def _load_vae_model(self):
         """Load Stable Diffusion VAE."""
@@ -221,15 +290,13 @@ class MuseTalkProvider(BaseLipSyncProvider):
 
     def _load_whisper_model(self):
         """Load Whisper audio model."""
-        import torch
-
         model_path = self.model_path / "whisper" / "tiny.pt"
 
         if not model_path.exists():
             raise FileNotFoundError(f"Whisper model not found: {model_path}")
 
         logger.info(f"Loading Whisper from {model_path}")
-        self._whisper = torch.load(model_path, map_location=self.device, weights_only=True)
+        self._whisper = _restricted_load(model_path, self.device)
 
     def _image_to_frames(self, image_path: Path, duration: float = None) -> List[np.ndarray]:
         """
