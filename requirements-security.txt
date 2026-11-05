@@ -15,6 +15,7 @@ multidict>=6.9.1
 nltk>=3.10.4
 pillow>=13.0.0
 pyasn1>=0.6.5
+pygments>=2.20.0  # Transitive via transformers > typer > rich; CVE-2026-4539 (AdlLexer ReDoS)
 pyjwt>=2.15.0
 python-dotenv>=1.2.2
 python-multipart>=0.0.31

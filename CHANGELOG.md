@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.50.1] - 2026-11-05
+
+### Security
+
+- Raised the pygments floor to 2.20.0 for the local Stable Diffusion extras,
+  clearing a ReDoS advisory (CVE-2026-4539) that reached pygments through
+  transformers. Existing environments kept the vulnerable 2.19.2 until now.
+- MuseTalk lip-sync now loads its model checkpoints only through PyTorch's
+  restricted loader, which refuses to run code embedded in a checkpoint. The
+  restriction is set explicitly, so an environment variable cannot turn it off.
+- MuseTalk refuses to load models on PyTorch older than 2.6, where the
+  restricted loader can be bypassed (CVE-2025-32434). The error names the fix.
+  On such a PyTorch, MuseTalk now reports itself unavailable up front, so lip-sync
+  is skipped cleanly. MuseTalk's own installer still pins PyTorch 2.4.1, so it
+  stays unavailable until the installer is updated.
+- The 18 local Stable Diffusion advisories that have no upstream fix (torch,
+  transformers, diffusers, accelerate) are documented with their impact on
+  ImageAI in `Docs/Snyk-Exceptions.md`. None is suppressed.
+
+### Fixed
+
+- The DWPose body-detection model loads again on PyTorch 2.6 and later. It had
+  failed under the restricted loader that newer PyTorch uses by default.
+
 ## [0.50.0] - 2026-11-04
 
 ### Changed
