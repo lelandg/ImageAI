@@ -52,7 +52,7 @@ opencv-python>=4.14.0.94  # Required for video frame processing and assembly
 
 # Sprite tab de-jitter (core/sprite/stabilize.py); OpenCV phaseCorrelate is the fallback
 scikit-image>=0.26.0  # skimage.registration.phase_cross_correlation (sub-pixel frame alignment)
-scipy>=1.18.1  # required by scikit-image
+scipy>=1.13  # required by scikit-image
 
 # Discord Rich Presence (optional - for showing activity in Discord status)
 pypresence>=4.6.2  # Discord RPC wrapper library

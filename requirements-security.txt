@@ -28,7 +28,7 @@ virtualenv>=21.15.1,<22  # 21.14.9 is still affected; 21.14.13 clears GHSA-cx6f-
 # floor here whose dependency tree makes osv-scanner's transitive resolver
 # abort with "resolution aborted after too many iterations" on this file.
 pretty-midi>=0.2.11.post0
-mediapipe>=1.2.0,<2
+mediapipe>=1.0.1,<2
 protobuf>=5.29.6,<6
 
 # ---------------------------------------------------------------------------
