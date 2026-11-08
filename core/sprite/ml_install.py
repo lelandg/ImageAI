@@ -17,7 +17,7 @@ REMBG_SPEC = "rembg[cpu]>=2.0.86"                # older rembg pins Pillow<13 (3
 REMBG_PYTHON = ((3, 11), (3, 14))                # inclusive floor, exclusive ceiling
 # Transitive security floors, repeated from requirements-security.txt because
 # osv-scanner checks requirements-sprite-ml.txt on its own and ignores -c files.
-SECURITY_FLOOR_SPECS = ("certifi>=2026.10.19", "idna>=3.15")
+SECURITY_FLOOR_SPECS = ("certifi>=2026.10.23", "idna>=3.20")
 
 
 def python_supports_rembg() -> bool:
