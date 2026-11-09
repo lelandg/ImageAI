@@ -16,9 +16,9 @@ requests>=2.34.2  # For Stability AI REST API
 # Repeat these security floors here because Snyk SCM ignores constraint files.
 urllib3>=2.8.0
 multidict>=6.9.1
-filelock>=4.2.1
+filelock>=4.2.6
 certifi>=2026.10.23
-anyio>=4.15.1
+anyio>=4.16.0
 fsspec>=2026.9.0
 markdown>=3.11.2  # For better help documentation rendering
 keyring>=24.3.1  # For secure API key storage (optional)
@@ -34,7 +34,7 @@ keyring>=24.3.1  # For secure API key storage (optional)
 
 # Video Project Feature Dependencies
 Jinja2>=3.1.6  # Template processing for prompt generation; 3.1.6 clears 10 advisories (GHSA-cpwx-vrp4-4pq7 et al.)
-imageio-ffmpeg>=0.7.0  # FFmpeg Python bindings
+imageio-ffmpeg>=0.8.0  # FFmpeg Python bindings
 litellm>=1.101.3,<1.102  # Patched, tested SDK line; see Docs/Snyk-Exceptions.md
 anthropic>=0.125.0  # Claude API support (optional for prompt generation)
 
@@ -52,7 +52,7 @@ opencv-python>=4.14.0.94  # Required for video frame processing and assembly
 
 # Sprite tab de-jitter (core/sprite/stabilize.py); OpenCV phaseCorrelate is the fallback
 scikit-image>=0.26.0  # skimage.registration.phase_cross_correlation (sub-pixel frame alignment)
-scipy>=1.13  # required by scikit-image
+scipy>=1.18.1  # required by scikit-image
 
 # Discord Rich Presence (optional - for showing activity in Discord status)
 pypresence>=4.6.2  # Discord RPC wrapper library
@@ -71,7 +71,7 @@ fonttools>=4.68.0  # Font file creation (TTF/OTF) from vectorized glyphs
 # realesrgan>=0.3.0
 
 # --- Security floors (transitive; lowest release clearing each advisory) ---
-opentelemetry-api>=1.45.1
+opentelemetry-api>=1.45.2
 # httpx2 / httpcore2 are DIRECT requirements here, deliberately, and
 # `pip install -r` of this file DOES install them. That is the accepted cost of
 # the only placement that works -- it is not an oversight, so do not "move them
