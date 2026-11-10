@@ -7373,9 +7373,9 @@ For more detailed information, please refer to the full documentation.
         current_tab_index = self.tabs.currentIndex()
 
         # Check if we're on the video tab
-        if current_tab_index == 3:  # Video tab
-            if hasattr(self, 'video_tab') and hasattr(self.video_tab, 'workspace_widget'):
-                self.video_tab.workspace_widget.save_project()
+        if current_tab_index == self.tabs.indexOf(self.tab_video):
+            if hasattr(self.tab_video, 'workspace_widget'):
+                self.tab_video.workspace_widget.save_project()
             return
 
         # Otherwise, handle image tab project save
@@ -7462,9 +7462,9 @@ For more detailed information, please refer to the full documentation.
         current_tab_index = self.tabs.currentIndex()
 
         # Check if we're on the video tab
-        if current_tab_index == 3:  # Video tab
-            if hasattr(self, 'video_tab') and hasattr(self.video_tab, 'workspace_widget'):
-                self.video_tab.workspace_widget.save_project_as()
+        if current_tab_index == self.tabs.indexOf(self.tab_video):
+            if hasattr(self.tab_video, 'workspace_widget'):
+                self.tab_video.workspace_widget.save_project_as()
             return
 
         # Otherwise, just call regular save for image tab
@@ -7475,9 +7475,9 @@ For more detailed information, please refer to the full documentation.
         current_tab_index = self.tabs.currentIndex()
 
         # Check if we're on the video tab
-        if current_tab_index == 3:  # Video tab
-            if hasattr(self, 'video_tab') and hasattr(self.video_tab, 'workspace_widget'):
-                self.video_tab.workspace_widget.open_project()
+        if current_tab_index == self.tabs.indexOf(self.tab_video):
+            if hasattr(self.tab_video, 'workspace_widget'):
+                self.tab_video.workspace_widget.open_project()
             return
 
         # Otherwise, handle image tab project load
