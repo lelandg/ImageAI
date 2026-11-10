@@ -2943,7 +2943,7 @@ Built with:
 
 ## License
 
-See LICENSE file for details.
+ImageAI is released under the MIT License. See [LICENSE](LICENSE) for details.
 
 ## Support
 
