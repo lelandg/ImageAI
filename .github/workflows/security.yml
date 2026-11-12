@@ -496,15 +496,21 @@ jobs:
                           peeled[name_[:-3]] = oid
                       else:
                           direct[name_] = oid
-                  # Only RELEASE tags count (v1, v1.2, 1.2.3, v2.0.0-rc.1):
-                  # zizmor matches advisories by the tag name, so a commit whose
-                  # only tag is, say, `scratch` would match no version range.
-                  release = re.compile(r"refs/tags/v?\d+(\.\d+){0,3}([-+][0-9A-Za-z.-]+)?")
-                  tags[key] = {peeled.get(n_, oid) for n_, oid in direct.items() if release.fullmatch(n_)}
+                  # zizmor queries advisories by the LONGEST tag on the pinned
+                  # commit, so that tag must be a release tag (v1, v1.2, 1.2.3,
+                  # v2.0.0-rc.1+build.5, or an action-prefixed save/v1.0.0).
+                  # A commit whose longest tag is, say, `scratch-build` would
+                  # match no version range even if it also carries v1.2.3.
+                  release = re.compile(r"(?:[^/]+/)*v?\d+(?:\.\d+){0,3}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
+                  by_commit = {}
+                  for n_, oid in direct.items():
+                      by_commit.setdefault(peeled.get(n_, oid), []).append(n_[len("refs/tags/"):])
+                  tags[key] = {c for c, names in by_commit.items()
+                               if release.fullmatch(max(names, key=len))}
               if sha not in tags[key]:
                   for p in where:
                       bad += 1
-                      print(f"::error file={esc(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} is not a commit any release tag (vX.Y.Z) of {esc(owner)}/{esc(repo)} points at, so no advisory can be matched to it. Pin the SHA of a released version.")
+                      print(f"::error file={esc(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} is not a release-tagged commit of {esc(owner)}/{esc(repo)} (no tag, or its longest tag is not a version such as v1.2.3), so no advisory can be matched to it. Pin the SHA of a released version.")
           print(f"action pins: {len(pins)} distinct SHA pins checked, {bad} not a tagged release")
           sys.exit(1 if bad else 0)
           PY
@@ -783,7 +789,9 @@ jobs:
                   ok = u.protocol === "https:" && (u.origin + u.pathname).startsWith(prefix) && u.pathname.endsWith(".tgz");
                 } catch (e) { ok = false; }
                 if (!ok || !p.integrity) {
-                  n++;
+                  // Counted as not covered only when installed here; an absent
+                  // one still gets the warning but is counted as not checked.
+                  if (inv.has(path)) n++; else absent.push(path);
                   console.log(`::warning title=${T}::${esc(path)} does not come from the registry ${esc(prefix)} with an integrity hash (${esc(r || "no resolved URL")}); its signature is not verified`);
                 } else if (!inv.has(path)) {
                   // npm audit signatures checks the INSTALLED tree only, so a
@@ -800,7 +808,7 @@ jobs:
               }
               if (absent.length) {
                 const shown = absent.slice(0, 10).map(esc).join(", ");
-                console.log(`::notice title=${T}::${absent.length} registry dependencies in the lockfile were not installed on this runner (usually optional packages for another platform), so their signatures were not verified here: ${shown}${absent.length > 10 ? ", ..." : ""}`);
+                console.log(`::notice title=${T}::${absent.length} dependencies in the lockfile were not installed on this runner (usually optional packages for another platform), so their signatures were not verified here: ${shown}${absent.length > 10 ? ", ..." : ""}`);
               }
               console.log(`${covered} installed registry dependencies covered by the signature check above; ${n} not from the registry ${prefix} or missing an integrity hash (not covered); ${notVerified} not reached through a registry spec (not covered); ${absent.length} not installed here (not checked)`);
             })().catch((e) => {
