@@ -95,8 +95,8 @@ here; read it there. What is specific to this repo:
   osv-scanner 2.7.0 it did not flag `tj-actions/changed-files`
   (GHSA-mrrh-fwg8-r2c3) at a vulnerable SHA or tag. zizmor looks up a SHA
   pin by one tag: for a root action (owner/repo@sha) the longest tag
-  without a `/`, for a sub-action the longest tag under its path (else
-  the longest of all). The job fails unless that tag, and any tag tied
+  without a `/`, for a sub-action the longest tag under its path or its
+  last directory (else the longest of all). The job fails unless that tag, and any tag tied
   with it, is a plain release version (v1, v1.2.3): an untagged commit,
   a non-version tag or a path-prefixed tag matches no advisory. Pin
   released versions.
