@@ -522,7 +522,7 @@ jobs:
                       where = pins.setdefault((parts[0], parts[1], ref, "/".join(parts[2:])), [])
                       if p not in where:
                           where.append(p)
-          import base64
+          import base64, urllib.error, urllib.parse, urllib.request
           git_env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
           token = os.environ.get("GH_TOKEN", "")
           if token:
@@ -531,13 +531,41 @@ jobs:
               git_env.update({"GIT_CONFIG_COUNT": "1",
                               "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
                               "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"})
-          tags = {}
-          upper_pins, untagged = set(), set()
+          tags, canon = {}, {}
+          upper_pins, untagged, wrong_name = set(), set(), set()
           for p, value in uppercase:
               upper_pins.add(value)
               print(f"::error file={prop(p)},title=action pins::{esc(value)} is pinned with uppercase hex. zizmor matches a pin to its release tag case-sensitively, so no advisory can be matched to it. Pin the lowercase SHA.")
           for (owner, repo, sha, subpath), where in sorted(pins.items()):
               key = (owner, repo)
+              if key not in canon:
+                  # zizmor 1.32.0 sends `owner/repo@version` to the advisory
+                  # API as written, and the API matches the name case-
+                  # sensitively: `ACTIONS/download-artifact@v4.1.2` returns
+                  # nothing, `actions/download-artifact@v4.1.2` returns
+                  # GHSA-cxww-7g56-2vh6. GitHub runs the action whatever the
+                  # case, so the name must be written exactly as the
+                  # repository's full_name, which is how the advisory database
+                  # records it (`Azure/setup-kubectl`, not `azure/...`). A
+                  # renamed repository redirects, so its old name fails too.
+                  req = urllib.request.Request(
+                      "https://api.github.com/repos/" + urllib.parse.quote(owner, safe="")
+                      + "/" + urllib.parse.quote(repo, safe=""),
+                      headers={"Accept": "application/vnd.github+json", "User-Agent": "action-pin-check",
+                               **({"Authorization": f"Bearer {token}"} if token else {})})
+                  try:
+                      with urllib.request.urlopen(req, timeout=60) as resp:
+                          full = json.load(resp).get("full_name")
+                      if not isinstance(full, str):
+                          raise ValueError("no full_name in the response")
+                  except (urllib.error.URLError, OSError, ValueError) as exc:
+                      print(f"::error title=action pins::scanner error: cannot look up the repository {esc(owner)}/{esc(repo)} ({esc(exc)}); not a findings result")
+                      sys.exit(2)
+                  canon[key] = full
+              if canon[key] != f"{owner}/{repo}":
+                  wrong_name.add(key)
+                  for p in where:
+                      print(f"::error file={prop(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} does not spell the repository as GitHub does ({esc(canon[key])}). The advisory lookup matches the name exactly, so no advisory can be matched to it. Write {esc(canon[key])}.")
               if key not in tags:
                   try:
                       out = subprocess.run(
@@ -594,8 +622,9 @@ jobs:
                   untagged.add((owner, repo, sha, subpath))
                   for p in where:
                       print(f"::error file={prop(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} is not a release-tagged commit of {esc(owner)}/{esc(repo)} (no tag, or the tag zizmor would query is not a plain version such as v1.2.3), so no advisory can be matched to it. Pin the SHA of a released version.")
-          print(f"action pins: {len(pins)} distinct SHA pins checked; rejected: {len(upper_pins)} written in uppercase hex, {len(untagged)} not a tagged release")
-          sys.exit(1 if upper_pins or untagged else 0)
+          print(f"action pins: {len(pins)} distinct SHA pins checked; rejected: {len(upper_pins)} written in uppercase hex, "
+                f"{len(wrong_name)} repositories not spelled as GitHub does, {len(untagged)} not a tagged release")
+          sys.exit(1 if upper_pins or untagged or wrong_name else 0)
           PY
 
   npm-audit:
