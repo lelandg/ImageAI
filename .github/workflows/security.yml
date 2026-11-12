@@ -677,7 +677,9 @@ jobs:
       # silently. The next step lists those, so they are at least visible.
       - name: Registry packages have verified signatures
         if: steps.lock.outputs.present == 'true'
-        run: npm audit signatures
+        # --include: verify every installed dependency type, whatever `omit`
+        # the trusted .npmrc sets (the listing below assumes all are checked).
+        run: npm audit signatures --include=dev --include=optional --include=peer
       # A locked dependency counts as covered only when it resolves to a .tgz
       # under the configured registry (registry.npmjs.org unless the trusted
       # .npmrc says otherwise) and has an integrity hash. Any other https host
@@ -694,7 +696,8 @@ jobs:
         run: |
           set -eu
           REGISTRY="$(npm config get registry)"
-          export REGISTRY
+          NPM_DIR="$(npm root -g)/npm"
+          export REGISTRY NPM_DIR
           # shellcheck disable=SC2016  # the single-quoted body is JavaScript, not shell
           node -e '
             const fs = require("fs");
@@ -727,84 +730,81 @@ jobs:
             // Workflow-command escaping: paths and URLs come from the lockfile, which a PR controls.
             // (No apostrophes in this script: it is one single-quoted shell argument.)
             const esc = (s) => String(s).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
-            // npm verifies a package only when the dependency that pulls it in
-            // is declared as a registry spec (a version, range, tag or npm:
-            // alias). One declared as a URL, git or file spec is skipped even
-            // when its tarball sits on the registry. So collect every declared
-            // spec per install path, resolving each name the way node does
-            // (nearest node_modules, walking up), and count a package as
-            // covered when at least one dependent declares it with a registry
-            // spec: npm verifies it through that edge.
-            const isRegistrySpec = (s) => {
-              s = String(s).trim();
-              if (s.startsWith("npm:")) return true;
-              if (/^(file|link|git|git\+[a-z]+|github|gitlab|bitbucket|gist|https?):/i.test(s)) return false;
-              if (s.includes("://")) return false;
-              if (/^[^@\s\/][^\s\/]*\/[^\s\/]+(#.*)?$/.test(s)) return false; // user/repo shorthand
-              if (/^(\.{1,2}(\/|$)|~\/|\/)/.test(s)) return false; // local path (a leading ~ alone is a semver range)
-              return true;
-            };
-            // edges[path]: one entry per dependent that declares this package,
-            // holding every spec that dependent gives the name (dependencies,
-            // optional, peer, and dev for the root and workspace packages).
-            // An edge counts as a registry edge only when ALL of its specs are
-            // registry specs, and only dependents actually present here count,
-            // so an absent optional package cannot vouch for anything.
-            const edges = {};
-            for (const [from, q] of Object.entries(pkgs)) {
-              if (!q) continue;
-              const local = !from.includes("node_modules/");
-              if (!local && !fs.existsSync(from)) continue;
-              const groups = [q.dependencies, q.optionalDependencies, q.peerDependencies];
-              if (local) groups.push(q.devDependencies);
-              const byName = {};
-              for (const g of groups) {
-                for (const [name, spec] of Object.entries(g || {})) (byName[name] = byName[name] || []).push(spec);
+            // Which installed packages did npm audit signatures verify? Rather
+            // than re-derive it from the lockfile (overrides, field precedence,
+            // workspaces and optional platform packages all change the answer),
+            // ask the same code npm uses: load the installed tree with the
+            // Arborist and npm-package-arg bundled in this npm, and apply the
+            // edge filter from npm lib/utils/verify-signatures.js (a valid spec,
+            // an installed version, not a workspace, and spec.registry).
+            (async () => {
+              let Arborist, npa;
+              try {
+                Arborist = require(process.env.NPM_DIR + "/node_modules/@npmcli/arborist");
+                npa = require(process.env.NPM_DIR + "/node_modules/npm-package-arg");
+              } catch (e) {
+                console.log(`::error title=${T}::cannot load the Arborist bundled with npm from ${esc(process.env.NPM_DIR)} (${esc(e.message)}); not a coverage result`);
+                process.exit(2);
               }
-              for (const [name, list] of Object.entries(byName)) {
-                let base = from;
-                for (;;) {
-                  const cand = (base ? base + "/" : "") + "node_modules/" + name;
-                  if (pkgs[cand]) { (edges[cand] = edges[cand] || []).push(list); break; }
-                  if (!base) break;
-                  const i = base.lastIndexOf("/node_modules/");
-                  base = i < 0 ? "" : base.slice(0, i);
+              let tree;
+              try {
+                tree = await new Arborist({ path: process.cwd() }).loadActual();
+              } catch (e) {
+                console.log(`::error title=${T}::cannot load the installed tree (${esc(e.message)}); not a coverage result`);
+                process.exit(2);
+              }
+              const specOf = (edge) => {
+                let name = edge.name;
+                try { name = npa(edge.spec).subSpec.name; } catch (e) { /* keep edge.name */ }
+                try { return npa(`${name}@${edge.spec}`); } catch (e) { return null; }
+              };
+              // Locations as lockfile keys (forward slashes on every OS).
+              const loc = (node) => node.location.split(String.fromCharCode(92)).join("/");
+              const inv = new Map([...tree.inventory.values()].map((node) => [loc(node), node]));
+              const verified = new Set();
+              for (const node of tree.inventory.values()) {
+                for (const edge of node.edgesOut.values()) {
+                  const to = edge.to;
+                  const spec = specOf(edge);
+                  if (!to || !spec || !spec.registry || to.isWorkspace || !(to.package || {}).version) continue;
+                  verified.add(loc(to));
                 }
               }
-            }
-            let n = 0, covered = 0, notRegistrySpec = 0;
-            const absent = [];
-            for (const [path, p] of Object.entries(pkgs)) {
-              // Skip the root, links, and workspace packages (entries outside
-              // node_modules): those are source code of this repository.
-              if (!path || !p || p.link || !path.includes("node_modules/")) continue;
-              const r = p.resolved || "";
-              let ok = false;
-              try {
-                const u = new URL(r);
-                ok = u.protocol === "https:" && (u.origin + u.pathname).startsWith(prefix) && u.pathname.endsWith(".tgz");
-              } catch (e) { ok = false; }
-              if (!ok || !p.integrity) {
-                n++;
-                console.log(`::warning title=${T}::${esc(path)} does not come from the registry ${esc(prefix)} with an integrity hash (${esc(r || "no resolved URL")}); its signature is not verified`);
-              } else if (!fs.existsSync(path)) {
-                // npm audit signatures checks the INSTALLED tree only. A lockfile
-                // key is its install path, so a registry entry that npm ci did
-                // not install here (an optional package for another platform)
-                // was not verified on this runner.
-                absent.push(path);
-              } else if (!(edges[path] || []).some((list) => list.every(isRegistrySpec))) {
-                notRegistrySpec++;
-                const declared = [].concat(...(edges[path] || [])).filter((s) => !isRegistrySpec(s));
-                const why = declared.length ? `is declared as ${esc(declared.join(", "))}, not a registry version or range` : "is not declared by any dependent in the lockfile";
-                console.log(`::warning title=${T}::${esc(path)} ${why}, so npm audit signatures does not verify it`);
-              } else {
-                covered++;
+              let n = 0, covered = 0, notVerified = 0;
+              const absent = [];
+              for (const [path, p] of Object.entries(pkgs)) {
+                // Skip the root, links, and workspace packages (entries outside
+                // node_modules): those are source code of this repository.
+                if (!path || !p || p.link || !path.includes("node_modules/")) continue;
+                const r = p.resolved || "";
+                let ok = false;
+                try {
+                  const u = new URL(r);
+                  ok = u.protocol === "https:" && (u.origin + u.pathname).startsWith(prefix) && u.pathname.endsWith(".tgz");
+                } catch (e) { ok = false; }
+                if (!ok || !p.integrity) {
+                  n++;
+                  console.log(`::warning title=${T}::${esc(path)} does not come from the registry ${esc(prefix)} with an integrity hash (${esc(r || "no resolved URL")}); its signature is not verified`);
+                } else if (!inv.has(path)) {
+                  // npm audit signatures checks the INSTALLED tree only, so a
+                  // registry entry that npm ci did not install here (an optional
+                  // package for another platform) was not verified on this runner.
+                  absent.push(path);
+                } else if (!verified.has(path)) {
+                  notVerified++;
+                  const specs = [...inv.get(path).edgesIn].map((e) => e.spec);
+                  console.log(`::warning title=${T}::${esc(path)} is not reached through a registry spec (its dependents declare: ${esc(specs.join(", ") || "nothing")}), so npm audit signatures does not verify it`);
+                } else {
+                  covered++;
+                }
               }
-            }
-            if (absent.length) {
-              const shown = absent.slice(0, 10).map(esc).join(", ");
-              console.log(`::notice title=${T}::${absent.length} registry dependencies in the lockfile were not installed on this runner (usually optional packages for another platform), so their signatures were not verified here: ${shown}${absent.length > 10 ? ", ..." : ""}`);
-            }
-            console.log(`${covered} installed registry dependencies covered by the signature check above; ${n} not from the registry ${prefix} or missing an integrity hash (not covered); ${notRegistrySpec} not declared as a registry version or range (not covered); ${absent.length} not installed here (not checked)`);
+              if (absent.length) {
+                const shown = absent.slice(0, 10).map(esc).join(", ");
+                console.log(`::notice title=${T}::${absent.length} registry dependencies in the lockfile were not installed on this runner (usually optional packages for another platform), so their signatures were not verified here: ${shown}${absent.length > 10 ? ", ..." : ""}`);
+              }
+              console.log(`${covered} installed registry dependencies covered by the signature check above; ${n} not from the registry ${prefix} or missing an integrity hash (not covered); ${notVerified} not reached through a registry spec (not covered); ${absent.length} not installed here (not checked)`);
+            })().catch((e) => {
+              console.log(`::error title=${T}::coverage listing failed (${esc(e && e.message)}); not a coverage result`);
+              process.exit(2);
+            });
           '
