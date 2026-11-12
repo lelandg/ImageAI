@@ -279,8 +279,8 @@ jobs:
   #   impostor-commit           a SHA pin that is not in the action's own repo
   #                             (a commit from a fork, served under its name)
   #   unpinned-uses             an action not pinned to a full commit SHA
-  # Known limit: a SHA that no release tag points at cannot be mapped to a
-  # version, so no advisory matches it. Pin to a released version's SHA.
+  # A SHA that no release tag points at cannot be mapped to a version, so no
+  # advisory could match it; the job's last step fails on such a pin.
   zizmor:
     name: zizmor
     runs-on: ubuntu-latest
@@ -369,6 +369,122 @@ jobs:
               print(f"::error file={path}{line},title=zizmor {esc(ident)}::{esc(f.get('desc', ''))}: {esc(note)} ({esc(feature)})")
           print(f"zizmor: {len(findings)} findings in total, {hits} in the gated audits")
           sys.exit(1 if hits else 0)
+          PY
+      # known-vulnerable-actions matches advisories by release tag. A SHA pin
+      # that no tag of the action's repository points at cannot be matched to
+      # any advisory, so it would pass that audit unchecked (unpinned-uses and
+      # impostor-commit both accept it). So every SHA pin of an external action
+      # must be a commit that one of its repository's tags points at. Runs even
+      # when the zizmor step failed, so both results show.
+      - name: Every action SHA pin is a tagged release
+        if: ${{ !cancelled() }}
+        run: |
+          # -I: see the zizmor step; the working directory is the PR's checkout.
+          # Each file is PARSED (yq, preinstalled on GitHub's Ubuntu runners,
+          # with anchors expanded) and every `uses` value anywhere in it is
+          # checked, so quoted keys, flow mappings and folded scalars cannot
+          # hide a pin the way they could from a line-based match.
+          python3 -I - <<'PY'
+          import json, os, re, subprocess, sys
+
+          def esc(s):
+              return str(s).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+          def uses_values(doc):
+              # Only the keys that select an action or reusable workflow:
+              # jobs.<id>.uses, jobs.<id>.steps[*].uses, and runs.steps[*].uses
+              # in an action.yml. A `uses` inside a step's `with:` is an input.
+              def step_uses(steps):
+                  for s in steps if isinstance(steps, list) else []:
+                      if isinstance(s, dict) and isinstance(s.get("uses"), str):
+                          yield s["uses"].strip()
+              if not isinstance(doc, dict):
+                  return
+              jobs = doc.get("jobs")
+              for job in (jobs.values() if isinstance(jobs, dict) else []):
+                  if isinstance(job, dict):
+                      if isinstance(job.get("uses"), str):
+                          yield job["uses"].strip()
+                      yield from step_uses(job.get("steps"))
+              runs = doc.get("runs")
+              if isinstance(runs, dict):
+                  yield from step_uses(runs.get("steps"))
+
+          files = []
+          for root, dirs, names in os.walk(".", followlinks=False):
+              dirs[:] = [d for d in dirs if d != ".git"]
+              for n in names:
+                  p = os.path.join(root, n)[2:]
+                  if os.path.islink(p):
+                      continue
+                  in_wf = p.replace(os.sep, "/").startswith(".github/workflows/") and n.endswith((".yml", ".yaml"))
+                  if in_wf or n in ("action.yml", "action.yaml"):
+                      files.append(p)
+          pins = {}  # (owner, repo, sha) -> [file]
+          for p in sorted(files):
+              try:
+                  res = subprocess.run(["yq", "-o=json", "-I=0", "explode(.)", p],
+                                       capture_output=True, text=True, timeout=60)
+              except (subprocess.SubprocessError, OSError) as exc:
+                  print(f"::error title=action pins::scanner error: cannot run yq on {esc(p)} ({esc(exc)}); not a findings result")
+                  sys.exit(2)
+              if res.returncode != 0:
+                  print(f"::error file={esc(p)},title=action pins::scanner error: yq cannot parse {esc(p)} ({esc(res.stderr.strip()[:300])}); not a findings result")
+                  sys.exit(2)
+              for doc in res.stdout.splitlines():
+                  if not doc.strip():
+                      continue
+                  try:
+                      parsed = json.loads(doc)
+                  except ValueError as exc:
+                      print(f"::error file={esc(p)},title=action pins::scanner error: unreadable yq output ({esc(exc)}); not a findings result")
+                      sys.exit(2)
+                  for value in uses_values(parsed):
+                      if "@" not in value:
+                          continue
+                      name, ref = value.rsplit("@", 1)
+                      if name.startswith(("./", "docker://")) or not re.fullmatch(r"[0-9a-fA-F]{40}", ref):
+                          continue  # local, container, or not a SHA (zizmor gates unpinned refs)
+                      ref = ref.lower()  # git ls-remote prints lowercase object IDs
+                      parts = name.split("/")
+                      if len(parts) < 2:
+                          continue
+                      where = pins.setdefault((parts[0], parts[1], ref), [])
+                      if p not in where:
+                          where.append(p)
+          tags = {}
+          bad = 0
+          for (owner, repo, sha), where in sorted(pins.items()):
+              key = (owner, repo)
+              if key not in tags:
+                  try:
+                      out = subprocess.run(
+                          ["git", "ls-remote", "--tags", f"https://github.com/{owner}/{repo}.git"],
+                          capture_output=True, text=True, timeout=60, check=True,
+                          env={**os.environ, "GIT_TERMINAL_PROMPT": "0"}).stdout
+                  except (subprocess.SubprocessError, OSError) as exc:
+                      print(f"::error title=action pins::scanner error: cannot list the tags of {esc(owner)}/{esc(repo)} ({esc(exc)}); not a findings result")
+                      sys.exit(2)
+                  # An annotated tag prints two lines: the tag object, then the
+                  # commit it points at (`<tag>^{}`). Only commits can be pinned,
+                  # so accept the peeled commit; a lightweight tag has one line.
+                  direct, peeled = {}, {}
+                  for l in out.splitlines():
+                      fields = l.split()
+                      if len(fields) < 2:
+                          continue
+                      oid, name_ = fields[0], fields[1]
+                      if name_.endswith("^{}"):
+                          peeled[name_[:-3]] = oid
+                      else:
+                          direct[name_] = oid
+                  tags[key] = {peeled.get(n_, oid) for n_, oid in direct.items()}
+              if sha not in tags[key]:
+                  for p in where:
+                      bad += 1
+                      print(f"::error file={esc(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} is not a commit any tag of {esc(owner)}/{esc(repo)} points at, so no advisory can be matched to it. Pin the SHA of a released version.")
+          print(f"action pins: {len(pins)} distinct SHA pins checked, {bad} not a tagged release")
+          sys.exit(1 if bad else 0)
           PY
 
   npm-audit:
@@ -546,6 +662,9 @@ jobs:
       # is a tarball URL, not the registry, and is listed. The list needs the
       # lockfile's `packages` map (lockfileVersion 2 or 3): a v1 lockfile has
       # none, and the step fails rather than report nothing as "covered".
+      # `npm audit signatures` checks the installed tree only, so a registry
+      # entry npm ci did not install on this runner (an optional package for
+      # another platform) is reported as not checked, not as covered.
       - name: List dependencies that signatures do not cover
         if: steps.lock.outputs.present == 'true'
         run: |
@@ -584,7 +703,8 @@ jobs:
             // Workflow-command escaping: paths and URLs come from the lockfile, which a PR controls.
             // (No apostrophes in this script: it is one single-quoted shell argument.)
             const esc = (s) => String(s).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
-            let n = 0;
+            let n = 0, covered = 0;
+            const absent = [];
             for (const [path, p] of Object.entries(pkgs)) {
               if (!path || !p || p.link) continue;
               const r = p.resolved || "";
@@ -596,7 +716,19 @@ jobs:
               if (!ok || !p.integrity) {
                 n++;
                 console.log(`::warning title=${T}::${esc(path)} does not come from the registry ${esc(prefix)} with an integrity hash (${esc(r || "no resolved URL")}); its signature is not verified`);
+              } else if (!fs.existsSync(path)) {
+                // npm audit signatures checks the INSTALLED tree only. A lockfile
+                // key is its install path, so a registry entry that npm ci did
+                // not install here (an optional package for another platform)
+                // was not verified on this runner.
+                absent.push(path);
+              } else {
+                covered++;
               }
             }
-            console.log(n ? `${n} locked dependencies are not covered by signature verification` : `every locked dependency comes from ${prefix}`);
+            if (absent.length) {
+              const shown = absent.slice(0, 10).map(esc).join(", ");
+              console.log(`::notice title=${T}::${absent.length} registry dependencies in the lockfile were not installed on this runner (usually optional packages for another platform), so their signatures were not verified here: ${shown}${absent.length > 10 ? ", ..." : ""}`);
+            }
+            console.log(`${covered} installed registry dependencies covered by the signature check above; ${n} not from the registry ${prefix} or missing an integrity hash (not covered); ${absent.length} not installed here (not checked)`);
           '
