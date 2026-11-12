@@ -374,7 +374,7 @@ jobs:
       # that no tag of the action's repository points at cannot be matched to
       # any advisory, so it would pass that audit unchecked (unpinned-uses and
       # impostor-commit both accept it). So every SHA pin of an external action
-      # must be a commit that one of its repository's tags points at. Runs even
+      # must be a commit that one of its repository's RELEASE tags points at. Runs even
       # when the zizmor step failed, so both results show.
       - name: Every action SHA pin is a tagged release
         if: ${{ !cancelled() }}
@@ -478,11 +478,15 @@ jobs:
                           peeled[name_[:-3]] = oid
                       else:
                           direct[name_] = oid
-                  tags[key] = {peeled.get(n_, oid) for n_, oid in direct.items()}
+                  # Only RELEASE tags count (v1, v1.2, 1.2.3, v2.0.0-rc.1):
+                  # zizmor matches advisories by the tag name, so a commit whose
+                  # only tag is, say, `scratch` would match no version range.
+                  release = re.compile(r"refs/tags/v?\d+(\.\d+){0,3}([-+][0-9A-Za-z.-]+)?")
+                  tags[key] = {peeled.get(n_, oid) for n_, oid in direct.items() if release.fullmatch(n_)}
               if sha not in tags[key]:
                   for p in where:
                       bad += 1
-                      print(f"::error file={esc(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} is not a commit any tag of {esc(owner)}/{esc(repo)} points at, so no advisory can be matched to it. Pin the SHA of a released version.")
+                      print(f"::error file={esc(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} is not a commit any release tag (vX.Y.Z) of {esc(owner)}/{esc(repo)} points at, so no advisory can be matched to it. Pin the SHA of a released version.")
           print(f"action pins: {len(pins)} distinct SHA pins checked, {bad} not a tagged release")
           sys.exit(1 if bad else 0)
           PY
@@ -664,7 +668,9 @@ jobs:
       # none, and the step fails rather than report nothing as "covered".
       # `npm audit signatures` checks the installed tree only, so a registry
       # entry npm ci did not install on this runner (an optional package for
-      # another platform) is reported as not checked, not as covered.
+      # another platform) is reported as not checked, not as covered. npm also
+      # skips a package whose dependents declare it as a URL, git or file spec
+      # (even a URL on the registry), so those are listed as not covered.
       - name: List dependencies that signatures do not cover
         if: steps.lock.outputs.present == 'true'
         run: |
@@ -703,7 +709,41 @@ jobs:
             // Workflow-command escaping: paths and URLs come from the lockfile, which a PR controls.
             // (No apostrophes in this script: it is one single-quoted shell argument.)
             const esc = (s) => String(s).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
-            let n = 0, covered = 0;
+            // npm verifies a package only when the dependency that pulls it in
+            // is declared as a registry spec (a version, range, tag or npm:
+            // alias). One declared as a URL, git or file spec is skipped even
+            // when its tarball sits on the registry. So collect every declared
+            // spec per install path, resolving each name the way node does
+            // (nearest node_modules, walking up), and count a package as
+            // covered only when all of its declared specs are registry specs.
+            const isRegistrySpec = (s) => {
+              s = String(s).trim();
+              if (s.startsWith("npm:")) return true;
+              if (/^(file|link|git|git\+[a-z]+|github|gitlab|bitbucket|gist|https?):/i.test(s)) return false;
+              if (s.includes("://")) return false;
+              if (/^[^@\s\/][^\s\/]*\/[^\s\/]+(#.*)?$/.test(s)) return false; // user/repo shorthand
+              if (/^(\.{1,2}(\/|$)|~\/|\/)/.test(s)) return false; // local path (a leading ~ alone is a semver range)
+              return true;
+            };
+            const specs = {};
+            for (const [from, q] of Object.entries(pkgs)) {
+              if (!q) continue;
+              const groups = [q.dependencies, q.optionalDependencies, q.peerDependencies];
+              if (from === "") groups.push(q.devDependencies);
+              for (const g of groups) {
+                for (const [name, spec] of Object.entries(g || {})) {
+                  let base = from;
+                  for (;;) {
+                    const cand = (base ? base + "/" : "") + "node_modules/" + name;
+                    if (pkgs[cand]) { (specs[cand] = specs[cand] || []).push(spec); break; }
+                    if (!base) break;
+                    const i = base.lastIndexOf("/node_modules/");
+                    base = i < 0 ? "" : base.slice(0, i);
+                  }
+                }
+              }
+            }
+            let n = 0, covered = 0, notRegistrySpec = 0;
             const absent = [];
             for (const [path, p] of Object.entries(pkgs)) {
               if (!path || !p || p.link) continue;
@@ -722,6 +762,11 @@ jobs:
                 // not install here (an optional package for another platform)
                 // was not verified on this runner.
                 absent.push(path);
+              } else if (!(specs[path] || []).length || !(specs[path] || []).every(isRegistrySpec)) {
+                notRegistrySpec++;
+                const declared = (specs[path] || []).filter((s) => !isRegistrySpec(s));
+                const why = declared.length ? `is declared as ${esc(declared.join(", "))}, not a registry version or range` : "is not declared by any dependent in the lockfile";
+                console.log(`::warning title=${T}::${esc(path)} ${why}, so npm audit signatures does not verify it`);
               } else {
                 covered++;
               }
@@ -730,5 +775,5 @@ jobs:
               const shown = absent.slice(0, 10).map(esc).join(", ");
               console.log(`::notice title=${T}::${absent.length} registry dependencies in the lockfile were not installed on this runner (usually optional packages for another platform), so their signatures were not verified here: ${shown}${absent.length > 10 ? ", ..." : ""}`);
             }
-            console.log(`${covered} installed registry dependencies covered by the signature check above; ${n} not from the registry ${prefix} or missing an integrity hash (not covered); ${absent.length} not installed here (not checked)`);
+            console.log(`${covered} installed registry dependencies covered by the signature check above; ${n} not from the registry ${prefix} or missing an integrity hash (not covered); ${notRegistrySpec} not declared as a registry version or range (not covered); ${absent.length} not installed here (not checked)`);
           '
