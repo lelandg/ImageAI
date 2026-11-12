@@ -16,7 +16,8 @@
 #
 # The npm jobs run only when package-lock.json exists at the repo root, and
 # say so in a notice when it does not. Move or remove that check if your
-# lockfile lives elsewhere.
+# lockfile lives elsewhere. They read the Node version from .nvmrc, and fail
+# with a message saying so when it is missing.
 name: security
 
 on:
@@ -202,7 +203,10 @@ jobs:
             echo "no pyproject.toml at the repo root; nothing to list"
             exit 0
           fi
-          python3 - "$RUNNER_TEMP/pyproject-requirements.txt" <<'PY'
+          # -I (isolated mode): the working directory is the PR's checkout, and
+          # without it a PR-added tomllib.py would be imported in place of the
+          # standard library and could hide dependencies from the scan.
+          python3 -I - "$RUNNER_TEMP/pyproject-requirements.txt" <<'PY'
           import sys, tomllib
           with open("pyproject.toml", "rb") as fh:
               data = tomllib.load(fh)
@@ -222,16 +226,28 @@ jobs:
       # osv-scanner exit codes: 0 clean, 1 vulnerabilities found, anything else
       # is a scanner error (bad flag, no packages found, network) and must never
       # look like a findings result.
-      - name: osv-scanner over every lockfile, manifest and workflow
+      #
+      # Known limit of the transitive resolver (requirements.txt and the
+      # pyproject.toml list above are resolved through deps.dev): it can fail
+      # on a fully pinned closure that includes Windows-only packages
+      # (seen: `pywin32 311.0.0 not found`, a scanner error), and it can pick
+      # stale versions for unpinned specs. If your repo hits that, add
+      # --no-resolve to scan only the versions you declare, and say why in a
+      # comment. EdgeMesh does this, to be revisited by 2026-12-11.
+      - name: osv-scanner over every lockfile and manifest
         run: |
           set -u
           # GitHub runs this under `bash -e`: capture the exit code instead of
           # letting a non-zero scanner result end the step before it is classified.
           rc=0
-          # The default plugin set is `lockfile, sbom, directory` -- it does
-          # NOT read workflow `uses:` references, and GitHub raises Dependabot
-          # alerts only for actions on semantic versions, never for SHA pins.
-          # Naming plugins REPLACES the default list, so all four are listed.
+          # The default plugin set is `lockfile, sbom, directory`. Naming
+          # plugins REPLACES the default list, so all four are listed.
+          # `github/actions` only INVENTORIES workflow `uses:` references: it
+          # does NOT detect advisories against them. Tested with osv-scanner
+          # 2.7.0: tj-actions/changed-files (GHSA-mrrh-fwg8-r2c3) at v44.5.7,
+          # by tag and by SHA, and actions/download-artifact v4.1.2
+          # (GHSA-cxww-7g56-2vh6) all scanned as "No issues found". The
+          # zizmor job below is the actions advisory check.
           # --no-ignore: a pull request can add .gitignore rules that hide
           # tracked manifests or workflows from a recursive scan.
           # -L adds the pyproject.toml dependencies listed by the step above.
@@ -253,6 +269,107 @@ jobs:
               echo "::error title=osv-scanner::scanner error, exit $rc (not a findings result)"
               exit "$rc" ;;
           esac
+
+  # Advisories against the actions your workflows use. Neither osv-scanner (see
+  # above) nor Dependabot covers a SHA-pinned action, so zizmor does: it maps a
+  # SHA pin to its release tag and checks that version against the GitHub
+  # Advisory Database. The job fails on three audits only, so zizmor's other
+  # (style and hardening) findings never turn a PR red:
+  #   known-vulnerable-actions  an action version with a published advisory
+  #   impostor-commit           a SHA pin that is not in the action's own repo
+  #                             (a commit from a fork, served under its name)
+  #   unpinned-uses             an action not pinned to a full commit SHA
+  # Known limit: a SHA that no release tag points at cannot be mapped to a
+  # version, so no advisory matches it. Pin to a released version's SHA.
+  zizmor:
+    name: zizmor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install zizmor 1.32.0 (digest-verified release binary)
+        # Download OUTSIDE the checkout: a PR controls the checkout and could
+        # commit a symlink named like a download target for curl to write through.
+        working-directory: ${{ runner.temp }}
+        run: |
+          set -eu
+          V=1.32.0
+          F="zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSLO "https://github.com/zizmorcore/zizmor/releases/download/v${V}/${F}"
+          # This release publishes no checksums file, so the asset's digest
+          # (as GitHub lists it for the release) is recorded here.
+          echo "bb110cc765eca9cd7efb2e284a956be5974c60027b0970f16397d86208a9957b  ${F}" | sha256sum -c -
+          tar -xzf "${F}" zizmor
+          sudo install -m 0755 zizmor /usr/local/bin/zizmor
+          zizmor --version
+      # zizmor's online audits need a token; without one it silently runs
+      # offline and skips the advisory lookup, so a missing token is an error.
+      # The job token is read-only (`contents: read`) and is enough: the
+      # advisory database and the actions' tags are public.
+      # --no-config and --no-ignores: a pull request controls the checkout, so
+      # it could add a zizmor.yml that disables an audit, or a
+      # `# zizmor: ignore[...]` comment. Neither is honoured.
+      # --collect=all: also audit workflows a PR hides with .gitignore.
+      # --strict-collection: a collected file zizmor cannot parse fails the
+      # scan instead of being skipped with a warning.
+      # --no-exit-codes: exit 0 means the scan ran, anything else is a scanner
+      # error; the JSON decides whether there are findings.
+      - name: zizmor (known-vulnerable, impostor and unpinned actions)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -u
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error title=zizmor::scanner error: no GitHub token, so the advisory lookup cannot run (not a findings result)"
+            exit 2
+          fi
+          out="$RUNNER_TEMP/zizmor.json"
+          rc=0
+          zizmor --format json --no-progress --no-exit-codes --strict-collection \
+            --no-config --no-ignores --collect=all . > "$out" || rc=$?
+          if [ "$rc" -ne 0 ]; then
+            echo "::error title=zizmor::scanner error, exit $rc (not a findings result)"
+            exit 2
+          fi
+          # -I (isolated mode): the working directory is the PR's checkout, and
+          # without it a PR-added json.py would be imported in place of the
+          # standard library and could report no findings.
+          python3 -I - "$out" <<'PY'
+          import json, sys
+          GATED = {"known-vulnerable-actions", "impostor-commit", "unpinned-uses"}
+          try:
+              with open(sys.argv[1], encoding="utf-8") as fh:
+                  findings = json.load(fh)
+              if not isinstance(findings, list):
+                  raise ValueError(f"expected a list, got {type(findings).__name__}")
+          except (OSError, ValueError) as exc:
+              print(f"::error title=zizmor::scanner error: unreadable output ({exc}); not a findings result")
+              sys.exit(2)
+          def esc(s):
+              # Workflow-command escaping: the text comes from the PR's files.
+              return str(s).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+          hits = 0
+          for f in findings:
+              ident = f.get("ident", "")
+              if ident not in GATED:
+                  continue
+              hits += 1
+              loc = (f.get("locations") or [{}])[0]
+              key = loc.get("symbolic", {}).get("key", {})
+              local = key.get("Local", {}) if isinstance(key, dict) else {}
+              path = local.get("given_path") or local.get("verbatim_path") or "?"
+              path = path[2:] if path.startswith("./") else path
+              row = loc.get("concrete", {}).get("location", {}).get("start_point", {}).get("row")
+              line = f",line={row + 1}" if isinstance(row, int) else ""
+              note = loc.get("symbolic", {}).get("annotation", "")
+              feature = loc.get("concrete", {}).get("feature", "").strip()
+              path = esc(path).replace(",", "%2C").replace(":", "%3A")
+              print(f"::error file={path}{line},title=zizmor {esc(ident)}::{esc(f.get('desc', ''))}: {esc(note)} ({esc(feature)})")
+          print(f"zizmor: {len(findings)} findings in total, {hits} in the gated audits")
+          sys.exit(1 if hits else 0)
+          PY
 
   npm-audit:
     name: npm audit
@@ -305,25 +422,47 @@ jobs:
           case "$mode" in
             100644|100755) git cat-file blob "HEAD^1:.npmrc" > .npmrc ;;
           esac
+      # setup-node reads the Node version from .nvmrc and, without one, fails
+      # with an error that does not say what is missing.
+      - name: Check for .nvmrc
+        if: steps.lock.outputs.present == 'true'
+        run: |
+          if [ ! -f .nvmrc ]; then
+            echo "::error file=.nvmrc,title=npm audit::.nvmrc is missing at the repo root. The npm jobs read the Node version from it; commit one with an LTS major, e.g. 'echo 24 > .nvmrc'"
+            exit 1
+          fi
       - if: steps.lock.outputs.present == 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
       # npm audit reads the lockfile; no install, so no lifecycle scripts run.
       # The --include flags audit every dependency type whatever the config
-      # says. The exit code is ignored on purpose: the JSON decides. A result
-      # without metadata is a registry or network failure, not a clean scan,
-      # and fails.
+      # says. npm's exit code is ignored on purpose: the JSON decides.
+      # Exit 1 means findings and nothing else. Every scanner error exits 2
+      # with a message that says so: output that is empty or not JSON, or a
+      # result without metadata (a registry or network failure). Neither is
+      # a clean scan.
       - name: npm audit (high+), findings vs scanner error
         if: steps.lock.outputs.present == 'true'
         run: |
           set -u
-          npm audit --audit-level=high --include=dev --include=optional --include=peer --json > "$RUNNER_TEMP/audit.json" || true
+          npm_rc=0
+          npm audit --audit-level=high --include=dev --include=optional --include=peer --json > "$RUNNER_TEMP/audit.json" || npm_rc=$?
           # shellcheck disable=SC2016  # the single-quoted body is JavaScript, not shell
-          AUDIT_JSON="$RUNNER_TEMP/audit.json" node -e '
-            const d = require(process.env.AUDIT_JSON);
-            if (!d.metadata || !d.metadata.vulnerabilities) {
-              console.error("::error title=npm audit::no audit result (registry or network failure):", JSON.stringify(d).slice(0, 400));
+          AUDIT_JSON="$RUNNER_TEMP/audit.json" NPM_RC="$npm_rc" node -e '
+            const fs = require("fs");
+            const raw = fs.readFileSync(process.env.AUDIT_JSON, "utf8");
+            let d;
+            try {
+              d = JSON.parse(raw);
+            } catch (e) {
+              console.log(`::error title=npm audit::scanner error: npm audit (exit ${process.env.NPM_RC}) wrote ${raw.trim() ? "output that is not JSON" : "no output"}; not a findings result`);
+              if (raw.trim()) console.log(raw.slice(0, 400));
+              process.exit(2);
+            }
+            if (!d || typeof d !== "object" || !d.metadata || !d.metadata.vulnerabilities) {
+              console.log(`::error title=npm audit::scanner error: no audit result (registry or network failure, npm exit ${process.env.NPM_RC}); not a findings result`);
+              console.log(JSON.stringify(d).slice(0, 400));
               process.exit(2);
             }
             const v = d.metadata.vulnerabilities;
@@ -377,6 +516,13 @@ jobs:
           case "$mode" in
             100644|100755) git cat-file blob "HEAD^1:.npmrc" > .npmrc ;;
           esac
+      - name: Check for .nvmrc
+        if: steps.lock.outputs.present == 'true'
+        run: |
+          if [ ! -f .nvmrc ]; then
+            echo "::error file=.nvmrc,title=npm audit signatures::.nvmrc is missing at the repo root. The npm jobs read the Node version from it; commit one with an LTS major, e.g. 'echo 24 > .nvmrc'"
+            exit 1
+          fi
       - if: steps.lock.outputs.present == 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -394,23 +540,63 @@ jobs:
       - name: Registry packages have verified signatures
         if: steps.lock.outputs.present == 'true'
         run: npm audit signatures
+      # A locked dependency counts as covered only when it resolves to a .tgz
+      # under the configured registry (registry.npmjs.org unless the trusted
+      # .npmrc says otherwise) and has an integrity hash. Any other https host
+      # is a tarball URL, not the registry, and is listed. The list needs the
+      # lockfile's `packages` map (lockfileVersion 2 or 3): a v1 lockfile has
+      # none, and the step fails rather than report nothing as "covered".
       - name: List dependencies that signatures do not cover
         if: steps.lock.outputs.present == 'true'
         run: |
           set -eu
+          REGISTRY="$(npm config get registry)"
+          export REGISTRY
           # shellcheck disable=SC2016  # the single-quoted body is JavaScript, not shell
           node -e '
             const fs = require("fs");
+            const T = "npm audit signatures";
             const f = fs.existsSync("npm-shrinkwrap.json") ? "npm-shrinkwrap.json" : "package-lock.json";
-            const pkgs = JSON.parse(fs.readFileSync(f, "utf8")).packages || {};
+            let reg;
+            try {
+              reg = new URL(process.env.REGISTRY || "");
+            } catch (e) {
+              console.log(`::error title=${T}::cannot read the configured npm registry (${JSON.stringify(process.env.REGISTRY)}); not a coverage result`);
+              process.exit(2);
+            }
+            if (reg.protocol !== "https:") {
+              console.log(`::error title=${T}::the configured npm registry ${reg.href} is not https`);
+              process.exit(1);
+            }
+            const prefix = reg.origin + (reg.pathname.endsWith("/") ? reg.pathname : reg.pathname + "/");
+            let lock;
+            try {
+              lock = JSON.parse(fs.readFileSync(f, "utf8"));
+            } catch (e) {
+              console.log(`::error file=${f},title=${T}::${f} is not valid JSON (${e.message}); not a coverage result`);
+              process.exit(2);
+            }
+            const pkgs = lock && lock.packages;
+            if (!pkgs || typeof pkgs !== "object" || Array.isArray(pkgs)) {
+              console.log(`::error file=${f},title=${T}::${f} has no "packages" map (lockfileVersion ${lock && lock.lockfileVersion}), so the dependencies outside signature coverage cannot be listed. Regenerate it with npm 7 or later: npm install --package-lock-only`);
+              process.exit(1);
+            }
+            // Workflow-command escaping: paths and URLs come from the lockfile, which a PR controls.
+            // (No apostrophes in this script: it is one single-quoted shell argument.)
+            const esc = (s) => String(s).replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
             let n = 0;
             for (const [path, p] of Object.entries(pkgs)) {
-              if (!path || p.link) continue;
+              if (!path || !p || p.link) continue;
               const r = p.resolved || "";
-              if (!/^https:\/\/[^/]+\/.+\.tgz$/.test(r) || !p.integrity) {
+              let ok = false;
+              try {
+                const u = new URL(r);
+                ok = u.protocol === "https:" && (u.origin + u.pathname).startsWith(prefix) && u.pathname.endsWith(".tgz");
+              } catch (e) { ok = false; }
+              if (!ok || !p.integrity) {
                 n++;
-                console.log(`::warning title=npm audit signatures::${path} does not come from a registry (${r || "no resolved URL"}); its signature is not verified`);
+                console.log(`::warning title=${T}::${esc(path)} does not come from the registry ${esc(prefix)} with an integrity hash (${esc(r || "no resolved URL")}); its signature is not verified`);
               }
             }
-            console.log(n ? `${n} locked dependencies are not covered by signature verification` : "every locked dependency comes from a registry");
+            console.log(n ? `${n} locked dependencies are not covered by signature verification` : `every locked dependency comes from ${prefix}`);
           '
