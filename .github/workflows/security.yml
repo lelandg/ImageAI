@@ -504,7 +504,7 @@ jobs:
                   # by some monorepo actions) are rejected on purpose: zizmor
                   # sends the prefixed name to the advisory database, which
                   # matches nothing, so such a pin would never be checked.
-                  release = re.compile(r"v?\d+(?:\.\d+){0,3}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
+                  release = re.compile(r"v?\d+(?:\.\d+){0,3}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?", re.ASCII)
                   by_commit = {}
                   for n_, oid in direct.items():
                       by_commit.setdefault(peeled.get(n_, oid), []).append(n_[len("refs/tags/"):])
@@ -523,8 +523,10 @@ jobs:
                   chosen = [n_ for n_ in names if n_.startswith((subpath + "/", leaf + "/"))] or names
               # Ties: zizmor may pick any of the equally long tags, so every
               # one of them must be a release tag.
-              top = max((len(n_) for n_ in chosen), default=0)
-              if not (chosen and all(release.fullmatch(n_) for n_ in chosen if len(n_) == top)):
+              # Length in UTF-8 bytes, as zizmor (Rust str::len) measures it.
+              blen = lambda s: len(s.encode("utf-8"))
+              top = max((blen(n_) for n_ in chosen), default=0)
+              if not (chosen and all(release.fullmatch(n_) for n_ in chosen if blen(n_) == top)):
                   for p in where:
                       bad += 1
                       print(f"::error file={esc(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} is not a release-tagged commit of {esc(owner)}/{esc(repo)} (no tag, or the tag zizmor would query is not a plain version such as v1.2.3), so no advisory can be matched to it. Pin the SHA of a released version.")
