@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.50.2] - 2026-11-12
+
+- File > Save, Save As and Open now work on the Video tab, and no longer do nothing on the Layout tab.
+
+skip-auto-fix
+
 ## [0.50.1] - 2026-11-05
 
 ### Security
