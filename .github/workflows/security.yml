@@ -429,7 +429,7 @@ jobs:
                       print(f"::error file={esc(p)},title=action pins::{esc(p)} is a symlink; workflow and action manifests must be regular files to be checked")
                       sys.exit(1)
                   files.append(p)
-          pins = {}  # (owner, repo, sha) -> [file]
+          pins = {}  # (owner, repo, sha, is_root_action) -> [file]
           for p in sorted(files):
               try:
                   res = subprocess.run(["yq", "-o=json", "-I=0", "explode(.)", p],
@@ -458,7 +458,7 @@ jobs:
                       parts = name.split("/")
                       if len(parts) < 2:
                           continue
-                      where = pins.setdefault((parts[0], parts[1], ref), [])
+                      where = pins.setdefault((parts[0], parts[1], ref, len(parts) == 2), [])
                       if p not in where:
                           where.append(p)
           import base64
@@ -472,7 +472,7 @@ jobs:
                               "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"})
           tags = {}
           bad = 0
-          for (owner, repo, sha), where in sorted(pins.items()):
+          for (owner, repo, sha, is_root), where in sorted(pins.items()):
               key = (owner, repo)
               if key not in tags:
                   try:
@@ -496,21 +496,36 @@ jobs:
                           peeled[name_[:-3]] = oid
                       else:
                           direct[name_] = oid
-                  # zizmor queries advisories by the LONGEST tag on the pinned
-                  # commit, so that tag must be a release tag (v1, v1.2, 1.2.3,
-                  # v2.0.0-rc.1+build.5, or an action-prefixed save/v1.0.0).
-                  # A commit whose longest tag is, say, `scratch-build` would
-                  # match no version range even if it also carries v1.2.3.
-                  release = re.compile(r"(?:[^/]+/)*v?\d+(?:\.\d+){0,3}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
+                  # zizmor queries advisories by ONE tag on the pinned commit
+                  # (chosen below), so that tag must be a release tag (v1, v1.2, 1.2.3,
+                  # v2.0.0-rc.1+build.5). A commit whose longest tag is, say,
+                  # `scratch-build` would match no version range even if it
+                  # also carries v1.2.3. Path-prefixed tags (save/v4.1.2, used
+                  # by some monorepo actions) are rejected on purpose: zizmor
+                  # sends the prefixed name to the advisory database, which
+                  # matches nothing, so such a pin would never be checked.
+                  release = re.compile(r"v?\d+(?:\.\d+){0,3}(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?")
                   by_commit = {}
                   for n_, oid in direct.items():
                       by_commit.setdefault(peeled.get(n_, oid), []).append(n_[len("refs/tags/"):])
-                  tags[key] = {c for c, names in by_commit.items()
-                               if release.fullmatch(max(names, key=len))}
-              if sha not in tags[key]:
+                  tags[key] = by_commit
+              names = tags[key].get(sha, [])
+              # Which tag zizmor queries: for a root action (owner/repo@sha) it
+              # prefers unprefixed tags, then the longest; for a sub-action
+              # (owner/repo/path@sha) it prefers path-prefixed tags, which the
+              # advisory database never matches, so any prefixed tag on the
+              # commit fails a sub-action pin.
+              if is_root:
+                  chosen = [n_ for n_ in names if "/" not in n_] or names
+              else:
+                  chosen = [] if any("/" in n_ for n_ in names) else names
+              # Ties: zizmor may pick any of the equally long tags, so every
+              # one of them must be a release tag.
+              top = max((len(n_) for n_ in chosen), default=0)
+              if not (chosen and all(release.fullmatch(n_) for n_ in chosen if len(n_) == top)):
                   for p in where:
                       bad += 1
-                      print(f"::error file={esc(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} is not a release-tagged commit of {esc(owner)}/{esc(repo)} (no tag, or its longest tag is not a version such as v1.2.3), so no advisory can be matched to it. Pin the SHA of a released version.")
+                      print(f"::error file={esc(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} is not a release-tagged commit of {esc(owner)}/{esc(repo)} (no tag, or the tag zizmor would query is not a plain version such as v1.2.3), so no advisory can be matched to it. Pin the SHA of a released version.")
           print(f"action pins: {len(pins)} distinct SHA pins checked, {bad} not a tagged release")
           sys.exit(1 if bad else 0)
           PY
