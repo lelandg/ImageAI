@@ -429,7 +429,7 @@ jobs:
                       print(f"::error file={esc(p)},title=action pins::{esc(p)} is a symlink; workflow and action manifests must be regular files to be checked")
                       sys.exit(1)
                   files.append(p)
-          pins = {}  # (owner, repo, sha, is_root_action) -> [file]
+          pins = {}  # (owner, repo, sha, subpath) -> [file]; subpath is "" for a root action
           for p in sorted(files):
               try:
                   res = subprocess.run(["yq", "-o=json", "-I=0", "explode(.)", p],
@@ -458,7 +458,7 @@ jobs:
                       parts = name.split("/")
                       if len(parts) < 2:
                           continue
-                      where = pins.setdefault((parts[0], parts[1], ref, len(parts) == 2), [])
+                      where = pins.setdefault((parts[0], parts[1], ref, "/".join(parts[2:])), [])
                       if p not in where:
                           where.append(p)
           import base64
@@ -472,7 +472,7 @@ jobs:
                               "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"})
           tags = {}
           bad = 0
-          for (owner, repo, sha, is_root), where in sorted(pins.items()):
+          for (owner, repo, sha, subpath), where in sorted(pins.items()):
               key = (owner, repo)
               if key not in tags:
                   try:
@@ -510,15 +510,17 @@ jobs:
                       by_commit.setdefault(peeled.get(n_, oid), []).append(n_[len("refs/tags/"):])
                   tags[key] = by_commit
               names = tags[key].get(sha, [])
-              # Which tag zizmor queries: for a root action (owner/repo@sha) it
-              # prefers unprefixed tags, then the longest; for a sub-action
-              # (owner/repo/path@sha) it prefers path-prefixed tags, which the
-              # advisory database never matches, so any prefixed tag on the
-              # commit fails a sub-action pin.
-              if is_root:
+              # Which tag zizmor queries (zizmor 1.32.0, best_tag_for_commit):
+              # for a root action (owner/repo@sha) it prefers unprefixed tags;
+              # for a sub-action (owner/repo/path@sha) it prefers tags that
+              # start with the subpath or its last directory. Then the longest.
+              # A preferred sub-action tag is path-prefixed, which the advisory
+              # database never matches, so the release check below rejects it.
+              if not subpath:
                   chosen = [n_ for n_ in names if "/" not in n_] or names
               else:
-                  chosen = [] if any("/" in n_ for n_ in names) else names
+                  leaf = subpath.rsplit("/", 1)[-1]
+                  chosen = [n_ for n_ in names if n_.startswith((subpath + "/", leaf + "/"))] or names
               # Ties: zizmor may pick any of the equally long tags, so every
               # one of them must be a release tag.
               top = max((len(n_) for n_ in chosen), default=0)
