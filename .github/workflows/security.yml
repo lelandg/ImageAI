@@ -312,11 +312,19 @@ jobs:
       # it could add a zizmor.yml that disables an audit, or a
       # `# zizmor: ignore[...]` comment. Neither is honoured.
       # --collect=all: also audit workflows a PR hides with .gitignore.
+      # --ignore-lockfile: zizmor skips `unpinned-uses` for any workflow listed
+      # in .github/workflows/actions.lock, while `known-vulnerable-actions`
+      # still reads the `uses:` ref, not the locked commit the runner checks
+      # out. (Hidden, experimental flag in 1.32.0: if a later version drops it,
+      # zizmor exits non-zero and the step fails as a scanner error.)
       # --strict-collection: a collected file zizmor cannot parse fails the
       # scan instead of being skipped with a warning.
       # --no-exit-codes: exit 0 means the scan ran, anything else is a scanner
       # error; the JSON decides whether there are findings.
       - name: zizmor (known-vulnerable, impostor and unpinned actions)
+        # Explicit, so a workflow-level `defaults.run.working-directory` cannot
+        # point the scan at a clean subdirectory.
+        working-directory: ${{ github.workspace }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -325,10 +333,18 @@ jobs:
             echo "::error title=zizmor::scanner error: no GitHub token, so the advisory lookup cannot run (not a findings result)"
             exit 2
           fi
+          # zizmor also reads switches from the environment, and a workflow-
+          # or job-level `env:` reaches this step: ZIZMOR_OFFLINE or
+          # ZIZMOR_NO_ONLINE_AUDITS would skip the advisory and impostor
+          # audits while the job stays green, and GH_HOST would send the token
+          # to another host. Unset them, keep only the job token, and name the
+          # host on the command line (it outranks the environment).
+          unset ZIZMOR_OFFLINE ZIZMOR_NO_ONLINE_AUDITS GITHUB_TOKEN ZIZMOR_GITHUB_TOKEN
           out="$RUNNER_TEMP/zizmor.json"
           rc=0
           zizmor --format json --no-progress --no-exit-codes --strict-collection \
-            --no-config --no-ignores --collect=all . > "$out" || rc=$?
+            --no-config --no-ignores --collect=all --ignore-lockfile \
+            --gh-hostname github.com . > "$out" || rc=$?
           if [ "$rc" -ne 0 ]; then
             echo "::error title=zizmor::scanner error, exit $rc (not a findings result)"
             exit 2
@@ -378,6 +394,7 @@ jobs:
       # when the zizmor step failed, so both results show.
       - name: Every action SHA pin is a tagged release
         if: ${{ !cancelled() }}
+        working-directory: ${{ github.workspace }}  # see the zizmor step
         env:
           # Read-only job token, so the tag lookup also works for this
           # repository's own reusable workflows when it is private. Passed to
@@ -395,14 +412,22 @@ jobs:
           def esc(s):
               return str(s).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
 
+          def prop(s):
+              # An annotation property (file=) also ends at a comma or colon.
+              return esc(s).replace(",", "%2C").replace(":", "%3A")
+
           def uses_values(doc):
               # Only the keys that select an action or reusable workflow:
               # jobs.<id>.uses, jobs.<id>.steps[*].uses, and runs.steps[*].uses
-              # in an action.yml. A `uses` inside a step's `with:` is an input.
+              # in an action.yml, plus the steps of a `parallel:` group at any
+              # depth. A `uses` inside a step's `with:` is an input.
               def step_uses(steps):
                   for s in steps if isinstance(steps, list) else []:
-                      if isinstance(s, dict) and isinstance(s.get("uses"), str):
+                      if not isinstance(s, dict):
+                          continue
+                      if isinstance(s.get("uses"), str):
                           yield s["uses"].strip()
+                      yield from step_uses(s.get("parallel"))
               if not isinstance(doc, dict):
                   return
               jobs = doc.get("jobs")
@@ -415,6 +440,14 @@ jobs:
               if isinstance(runs, dict):
                   yield from step_uses(runs.get("steps"))
 
+          # With .github/workflows/actions.lock the runner checks out the
+          # LOCKED commit of each action, which neither this step nor zizmor's
+          # advisory audit reads (both check the `uses:` ref). Fail closed until
+          # this check audits locked commits.
+          lockfile = ".github/workflows/actions.lock"
+          if os.path.lexists(lockfile):
+              print(f"::error file={prop(lockfile)},title=action pins::{lockfile} is a workflow lockfile. The runner executes its locked commits, which this check and zizmor's advisory audit do not read, so the lockfile is not supported here.")
+              sys.exit(1)
           files = []
           for root, dirs, names in os.walk(".", followlinks=False):
               dirs[:] = [d for d in dirs if d != ".git"]
@@ -425,29 +458,43 @@ jobs:
                   dp = os.path.join(root, d)[2:]
                   if os.path.islink(dp) and (dp.replace(os.sep, "/").split("/")[0] == ".github"
                                              or any(os.path.exists(os.path.join(dp, m)) for m in ("action.yml", "action.yaml"))):
-                      print(f"::error file={esc(dp)},title=action pins::{esc(dp)} is a symlinked directory; workflows and actions must be regular files to be checked")
+                      print(f"::error file={prop(dp)},title=action pins::{esc(dp)} is a symlinked directory; workflows and actions must be regular files to be checked")
                       sys.exit(1)
               for n in names:
                   p = os.path.join(root, n)[2:]
-                  in_wf = p.replace(os.sep, "/").startswith(".github/workflows/") and n.endswith((".yml", ".yaml"))
+                  low = n.lower()
+                  in_wf_dir = p.replace(os.sep, "/").startswith(".github/workflows/")
+                  if (low in ("action.yml", "action.yaml") and n not in ("action.yml", "action.yaml")) \
+                          or (in_wf_dir and low.endswith((".yml", ".yaml")) and not n.endswith((".yml", ".yaml"))):
+                      # A Windows or macOS runner finds `Action.yml` for
+                      # `uses: ./dir`, but neither this step nor zizmor
+                      # collects a name that is not all lowercase: fail closed.
+                      print(f"::error file={prop(p)},title=action pins::{esc(p)} is a workflow or action manifest whose name is not lowercase; rename it so it can be checked")
+                      sys.exit(1)
+                  in_wf = in_wf_dir and n.endswith((".yml", ".yaml"))
                   if not (in_wf or n in ("action.yml", "action.yaml")):
                       continue
                   if os.path.islink(p):
                       # Not followed (it could point outside the checkout), so
                       # its pins cannot be checked: fail closed.
-                      print(f"::error file={esc(p)},title=action pins::{esc(p)} is a symlink; workflow and action manifests must be regular files to be checked")
+                      print(f"::error file={prop(p)},title=action pins::{esc(p)} is a symlink; workflow and action manifests must be regular files to be checked")
                       sys.exit(1)
                   files.append(p)
           pins = {}  # (owner, repo, sha, subpath) -> [file]; subpath is "" for a root action
+          uppercase = []  # (file, uses value) pinned with uppercase hex
           for p in sorted(files):
               try:
-                  res = subprocess.run(["yq", "-o=json", "-I=0", "explode(.)", p],
+                  # "./" + p: a PR-controlled directory named like an option
+                  # (`--foo=x/action.yml`) must reach yq as a file, not a flag.
+                  # stdin is closed so yq can never parse it instead.
+                  res = subprocess.run(["yq", "-o=json", "-I=0", "explode(.)", "./" + p],
+                                       stdin=subprocess.DEVNULL,
                                        capture_output=True, text=True, timeout=60)
               except (subprocess.SubprocessError, OSError) as exc:
                   print(f"::error title=action pins::scanner error: cannot run yq on {esc(p)} ({esc(exc)}); not a findings result")
                   sys.exit(2)
               if res.returncode != 0:
-                  print(f"::error file={esc(p)},title=action pins::scanner error: yq cannot parse {esc(p)} ({esc(res.stderr.strip()[:300])}); not a findings result")
+                  print(f"::error file={prop(p)},title=action pins::scanner error: yq cannot parse {esc(p)} ({esc(res.stderr.strip()[:300])}); not a findings result")
                   sys.exit(2)
               for doc in res.stdout.splitlines():
                   if not doc.strip():
@@ -455,7 +502,7 @@ jobs:
                   try:
                       parsed = json.loads(doc)
                   except ValueError as exc:
-                      print(f"::error file={esc(p)},title=action pins::scanner error: unreadable yq output ({esc(exc)}); not a findings result")
+                      print(f"::error file={prop(p)},title=action pins::scanner error: unreadable yq output ({esc(exc)}); not a findings result")
                       sys.exit(2)
                   for value in uses_values(parsed):
                       if "@" not in value:
@@ -463,6 +510,11 @@ jobs:
                       name, ref = value.rsplit("@", 1)
                       if name.startswith(("./", "docker://")) or not re.fullmatch(r"[0-9a-fA-F]{40}", ref):
                           continue  # local, container, or not a SHA (zizmor gates unpinned refs)
+                      if ref != ref.lower():
+                          # zizmor 1.32.0 compares a SHA pin with tag commits
+                          # case-sensitively, so an uppercase pin matches no
+                          # tag and no advisory is ever looked up for it.
+                          uppercase.append((p, value))
                       ref = ref.lower()  # git ls-remote prints lowercase object IDs
                       parts = name.split("/")
                       if len(parts) < 2:
@@ -480,7 +532,10 @@ jobs:
                               "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
                               "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"})
           tags = {}
-          bad = 0
+          upper_pins, untagged = set(), set()
+          for p, value in uppercase:
+              upper_pins.add(value)
+              print(f"::error file={prop(p)},title=action pins::{esc(value)} is pinned with uppercase hex. zizmor matches a pin to its release tag case-sensitively, so no advisory can be matched to it. Pin the lowercase SHA.")
           for (owner, repo, sha, subpath), where in sorted(pins.items()):
               key = (owner, repo)
               if key not in tags:
@@ -536,11 +591,11 @@ jobs:
               blen = lambda s: len(s.encode("utf-8"))
               top = max((blen(n_) for n_ in chosen), default=0)
               if not (chosen and all(release.fullmatch(n_) for n_ in chosen if blen(n_) == top)):
+                  untagged.add((owner, repo, sha, subpath))
                   for p in where:
-                      bad += 1
-                      print(f"::error file={esc(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} is not a release-tagged commit of {esc(owner)}/{esc(repo)} (no tag, or the tag zizmor would query is not a plain version such as v1.2.3), so no advisory can be matched to it. Pin the SHA of a released version.")
-          print(f"action pins: {len(pins)} distinct SHA pins checked, {bad} not a tagged release")
-          sys.exit(1 if bad else 0)
+                      print(f"::error file={prop(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} is not a release-tagged commit of {esc(owner)}/{esc(repo)} (no tag, or the tag zizmor would query is not a plain version such as v1.2.3), so no advisory can be matched to it. Pin the SHA of a released version.")
+          print(f"action pins: {len(pins)} distinct SHA pins checked; rejected: {len(upper_pins)} written in uppercase hex, {len(untagged)} not a tagged release")
+          sys.exit(1 if upper_pins or untagged else 0)
           PY
 
   npm-audit:
