@@ -418,6 +418,15 @@ jobs:
           files = []
           for root, dirs, names in os.walk(".", followlinks=False):
               dirs[:] = [d for d in dirs if d != ".git"]
+              for d in dirs:
+                  # os.walk does not enter a symlinked directory, so a symlinked
+                  # .github (or anything under it), or a symlinked directory
+                  # holding an action.yml, would hide manifests: fail closed.
+                  dp = os.path.join(root, d)[2:]
+                  if os.path.islink(dp) and (dp.replace(os.sep, "/").split("/")[0] == ".github"
+                                             or any(os.path.exists(os.path.join(dp, m)) for m in ("action.yml", "action.yaml"))):
+                      print(f"::error file={esc(dp)},title=action pins::{esc(dp)} is a symlinked directory; workflows and actions must be regular files to be checked")
+                      sys.exit(1)
               for n in names:
                   p = os.path.join(root, n)[2:]
                   in_wf = p.replace(os.sep, "/").startswith(".github/workflows/") and n.endswith((".yml", ".yaml"))
