@@ -16,7 +16,7 @@ requests>=2.34.2  # For Stability AI REST API
 # Repeat these security floors here because Snyk SCM ignores constraint files.
 urllib3>=2.8.0
 multidict>=6.9.1
-filelock>=4.2.6
+filelock>=4.2.9
 certifi>=2026.10.23
 anyio>=4.16.0
 fsspec>=2026.9.0
@@ -34,7 +34,7 @@ keyring>=24.3.1  # For secure API key storage (optional)
 
 # Video Project Feature Dependencies
 Jinja2>=3.1.6  # Template processing for prompt generation; 3.1.6 clears 10 advisories (GHSA-cpwx-vrp4-4pq7 et al.)
-imageio-ffmpeg>=0.8.0  # FFmpeg Python bindings
+imageio-ffmpeg>=0.8.1  # FFmpeg Python bindings
 litellm>=1.101.3,<1.102  # Patched, tested SDK line; see Docs/Snyk-Exceptions.md
 anthropic>=0.125.0  # Claude API support (optional for prompt generation)
 
