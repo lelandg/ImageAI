@@ -280,7 +280,9 @@ jobs:
   #                             (a commit from a fork, served under its name)
   #   unpinned-uses             an action not pinned to a full commit SHA
   # A SHA that no release tag points at cannot be mapped to a version, so no
-  # advisory could match it; the job's last step fails on such a pin.
+  # advisory could match it; the job's pin step fails on such a pin. The last
+  # step covers the advisories zizmor cannot see (reusable workflows,
+  # sub-action paths, renamed repositories).
   zizmor:
     name: zizmor
     runs-on: ubuntu-latest
@@ -482,6 +484,7 @@ jobs:
                   files.append(p)
           pins = {}  # (owner, repo, sha, subpath) -> [file]; subpath is "" for a root action
           uppercase = []  # (file, uses value) pinned with uppercase hex
+          noncanon = []  # (file, uses value) with a path part that is not plain (see below)
           for p in sorted(files):
               try:
                   # "./" + p: a PR-controlled directory named like an option
@@ -519,6 +522,14 @@ jobs:
                       parts = name.split("/")
                       if len(parts) < 2:
                           continue
+                      if not all(re.fullmatch(r"[A-Za-z0-9_.-]*[A-Za-z0-9_-]", s_) for s_ in parts):
+                          # The runner drops empty and `.` path parts, and a
+                          # Windows runner drops a trailing dot, so
+                          # `owner/repo/a/./b` and `owner/repo/a./b` run
+                          # `owner/repo/a/b`, but no advisory name matches the
+                          # spelling as written. Only plain path parts pass.
+                          noncanon.append((p, value))
+                          continue
                       where = pins.setdefault((parts[0], parts[1], ref, "/".join(parts[2:])), [])
                       if p not in where:
                           where.append(p)
@@ -531,11 +542,14 @@ jobs:
               git_env.update({"GIT_CONFIG_COUNT": "1",
                               "GIT_CONFIG_KEY_0": "http.https://github.com/.extraheader",
                               "GIT_CONFIG_VALUE_0": f"AUTHORIZATION: basic {basic}"})
-          tags, canon = {}, {}
+          tags, canon, repo_ids = {}, {}, {}
+          records = []  # handed to the advisory step below
           upper_pins, untagged, wrong_name = set(), set(), set()
           for p, value in uppercase:
               upper_pins.add(value)
               print(f"::error file={prop(p)},title=action pins::{esc(value)} is pinned with uppercase hex. zizmor matches a pin to its release tag case-sensitively, so no advisory can be matched to it. Pin the lowercase SHA.")
+          for p, value in noncanon:
+              print(f"::error file={prop(p)},title=action pins::{esc(value)} has a path part that is empty, `.` or `..`, ends in a dot, or uses a character other than letters, digits, `_`, `-` and `.`. The runner may resolve it to another path, which no advisory name would match as written. Write the plain owner/repo/path.")
           for (owner, repo, sha, subpath), where in sorted(pins.items()):
               key = (owner, repo)
               if key not in canon:
@@ -555,13 +569,16 @@ jobs:
                                **({"Authorization": f"Bearer {token}"} if token else {})})
                   try:
                       with urllib.request.urlopen(req, timeout=60) as resp:
-                          full = json.load(resp).get("full_name")
-                      if not isinstance(full, str):
-                          raise ValueError("no full_name in the response")
+                          info = json.load(resp)
+                      full = info.get("full_name") if isinstance(info, dict) else None
+                      rid = info.get("id") if isinstance(info, dict) else None
+                      if not isinstance(full, str) or type(rid) is not int:
+                          raise ValueError("no full_name or id in the response")
                   except (urllib.error.URLError, OSError, ValueError) as exc:
                       print(f"::error title=action pins::scanner error: cannot look up the repository {esc(owner)}/{esc(repo)} ({esc(exc)}); not a findings result")
                       sys.exit(2)
                   canon[key] = full
+                  repo_ids[key] = rid
               if canon[key] != f"{owner}/{repo}":
                   wrong_name.add(key)
                   for p in where:
@@ -622,9 +639,247 @@ jobs:
                   untagged.add((owner, repo, sha, subpath))
                   for p in where:
                       print(f"::error file={prop(p)},title=action pins::{esc(owner)}/{esc(repo)}@{sha} is not a release-tagged commit of {esc(owner)}/{esc(repo)} (no tag, or the tag zizmor would query is not a plain version such as v1.2.3), so no advisory can be matched to it. Pin the SHA of a released version.")
+              # The pin's versions for the advisory step: its release tags
+              # with the most version parts (v4.3.0, not the floating v4 on
+              # the same commit, which the advisory API reads as 4.0.0).
+              rel = [n_ for n_ in names if release.fullmatch(n_)]
+              depth = lambda t: len(re.split(r"[-+]", t, maxsplit=1)[0].split("."))
+              most = max((depth(t) for t in rel), default=0)
+              records.append({"owner": owner, "repo": repo, "full_name": canon[key], "id": repo_ids[key],
+                              "subpath": subpath, "sha": sha, "files": where,
+                              "versions": sorted(t for t in rel if depth(t) == most)})
+          try:
+              with open(os.path.join(os.environ["RUNNER_TEMP"], "action-pins.json"), "x", encoding="utf-8") as fh:
+                  json.dump(records, fh)
+          except (KeyError, OSError) as exc:
+              print(f"::error title=action pins::scanner error: cannot hand the pins to the advisory step ({esc(exc)}); not a findings result")
+              sys.exit(2)
           print(f"action pins: {len(pins)} distinct SHA pins checked; rejected: {len(upper_pins)} written in uppercase hex, "
+                f"{len(noncanon)} with a path that is not plain, "
                 f"{len(wrong_name)} repositories not spelled as GitHub does, {len(untagged)} not a tagged release")
-          sys.exit(1 if upper_pins or untagged or wrong_name else 0)
+          sys.exit(1 if upper_pins or noncanon or untagged or wrong_name else 0)
+          PY
+      # zizmor 1.32.0 looks up advisories for step actions only, under the
+      # name as written. It misses advisories against reusable workflows
+      # (jobs.<id>.uses), advisories filed under a sub-action's own path
+      # (owner/repo/sub/path, sometimes as a https://github.com/... URL), and
+      # advisories filed under a repository's name before a rename or
+      # transfer. This step reads every reviewed advisory in the `actions`
+      # ecosystem, resolves the repository each one names to its ID (GitHub
+      # redirects an old name to the repository's current ID), and asks the
+      # advisory API whether each pin's release version is in the vulnerable
+      # range, under every name that resolves to the pin's repository.
+      - name: Advisories against reusable workflows, sub-action paths and renamed repositories
+        if: ${{ !cancelled() }}
+        working-directory: ${{ github.workspace }}  # see the zizmor step
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # -I: see the zizmor step; the working directory is the PR's checkout.
+          python3 -I - <<'PY'
+          import http.client, json, os, re, sys, time, urllib.error, urllib.parse, urllib.request
+
+          API = "https://api.github.com"
+
+          def esc(s):
+              return str(s).replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+          def prop(s):
+              return esc(s).replace(",", "%2C").replace(":", "%3A")
+
+          def fail(msg):
+              print(f"::error title=action advisories::scanner error: {esc(msg)}; not a findings result")
+              sys.exit(2)
+
+          def crashed(kind, exc, tb):
+              # An uncaught exception would exit 1, the findings code.
+              print(f"::error title=action advisories::scanner error: {esc(kind.__name__)} ({esc(exc)}); not a findings result", flush=True)
+              os._exit(2)
+          sys.excepthook = crashed
+
+          token = os.environ.get("GH_TOKEN", "")
+          if not token:
+              fail("no GitHub token, so the advisory lookup cannot run")
+          HEADERS = {"Accept": "application/vnd.github+json", "User-Agent": "action-advisory-check",
+                     "X-GitHub-Api-Version": "2022-11-28", "Authorization": f"Bearer {token}"}
+
+          class SameHost(urllib.request.HTTPRedirectHandler):
+              # GitHub redirects a renamed repository within the API host;
+              # anything else would carry the token elsewhere.
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  if not newurl.startswith(API + "/"):
+                      fail(f"redirect away from {API} ({newurl[:200]})")
+                  return super().redirect_request(req, fp, code, msg, headers, newurl)
+          OPENER = urllib.request.build_opener(SameHost)
+
+          def next_link(link):
+              # The rel="next" URL of a Link header, wherever its parameters sit.
+              nxt = None
+              for m in re.finditer(r'<([^>]*)>([^<]*)', link):
+                  rels = re.findall(r';\s*rel\s*=\s*"?([^";,]*)', m.group(2), flags=re.I)
+                  if any("next" in r.lower().split() for r in rels):
+                      if nxt is not None or not m.group(1).startswith(API + "/"):
+                          fail(f"unexpected pagination link ({link[:300]})")
+                      nxt = m.group(1)
+              if nxt is None and re.search(r"\bnext\b", re.sub(r"<[^>]*>", "", link), flags=re.I):
+                  fail(f"unreadable pagination link ({link[:300]})")
+              return nxt
+
+          MISSING = object()  # not JSON null: a 200 with `null` is not a 404
+
+          def get(url, missing_ok=False):
+              # Returns the decoded JSON and the next page's URL, or (MISSING,
+              # None) for a repository that does not exist when missing_ok.
+              # A dropped connection, a truncated body or a 5xx is retried
+              # twice; anything else, or a third failure, is a scanner error.
+              for attempt in (1, 2, 3):
+                  req = urllib.request.Request(url, headers=HEADERS)
+                  try:
+                      with OPENER.open(req, timeout=60) as resp:
+                          data = json.load(resp)
+                          link = resp.headers.get("Link", "")
+                      return data, next_link(link)
+                  except urllib.error.HTTPError as exc:
+                      if missing_ok and exc.code in (404, 451):
+                          return MISSING, None
+                      if exc.code not in (500, 502, 503, 504) or attempt == 3:
+                          fail(f"GET {url} returned HTTP {exc.code}")
+                  except (urllib.error.URLError, OSError, http.client.IncompleteRead) as exc:
+                      if attempt == 3:
+                          fail(f"GET {url} failed ({exc})")
+                  except ValueError as exc:
+                      fail(f"GET {url} returned unreadable JSON ({exc})")
+                  time.sleep(5 * attempt)
+
+          def vulns_of(adv):
+              # Every advisory must carry the fields this step reads, or a
+              # malformed one could drop a name (a clean pass) or be reported
+              # as a finding.
+              ok = (isinstance(adv, dict) and isinstance(adv.get("ghsa_id"), str)
+                    and re.fullmatch(r"GHSA(-[0-9a-z]{4}){3}", adv["ghsa_id"])
+                    and (adv.get("withdrawn_at") is None
+                         or isinstance(adv["withdrawn_at"], str)
+                         and re.match(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d", adv["withdrawn_at"]))
+                    and isinstance(adv.get("vulnerabilities"), list)
+                    and all(isinstance(v, dict) and isinstance(v.get("package"), dict)
+                            and isinstance(v["package"].get("name"), str)
+                            and isinstance(v["package"].get("ecosystem"), str)
+                            for v in adv["vulnerabilities"]))
+              if not ok:
+                  fail(f"an advisory without the expected fields ({str(adv)[:200]})")
+              for v in adv["vulnerabilities"]:
+                  name = v["package"]["name"]
+                  if v["package"]["ecosystem"] == "actions" and (not split_name(name) or "," in name or "@" in name):
+                      fail(f"{adv['ghsa_id']} names the action {name!r}, which this step cannot query")
+              return adv["vulnerabilities"]
+
+          def get_all(url):
+              out, pages = [], 0
+              while url:
+                  data, url = get(url)
+                  if not isinstance(data, list):
+                      fail("the advisory API did not return a list of advisories")
+                  for adv in data:
+                      vulns_of(adv)
+                  out += data
+                  pages += 1
+                  if pages > 200:
+                      fail("more than 200 pages of advisories")
+              return out
+
+          try:
+              with open(os.path.join(os.environ["RUNNER_TEMP"], "action-pins.json"), encoding="utf-8") as fh:
+                  pins = json.load(fh)
+              if not isinstance(pins, list):
+                  raise ValueError("not a list")
+          except (KeyError, OSError, ValueError) as exc:
+              fail(f"no pin list from the pin step, which stopped before writing it ({exc})")
+          for x in pins:
+              if not (isinstance(x, dict) and type(x.get("id")) is int
+                      and all(isinstance(x.get(k), str) and x[k] for k in ("owner", "repo", "full_name", "sha"))
+                      and isinstance(x.get("subpath"), str)
+                      and isinstance(x.get("files"), list) and x["files"] and all(isinstance(f, str) for f in x["files"])
+                      and isinstance(x.get("versions"), list) and all(isinstance(v, str) and v for v in x["versions"])):
+                  fail(f"a malformed pin record ({str(x)[:200]})")
+
+          def split_name(n):
+              # owner/repo[/path] or https://github.com/owner/repo[/path]
+              s = re.sub(r"^(?:https?://)?(?:www\.)?github\.com/", "", n.strip(), flags=re.I).strip("/")
+              parts = s.split("/")
+              if len(parts) >= 2:
+                  parts[1] = re.sub(r"\.git$", "", parts[1])
+              # Plain parts only, as the pin step requires of a `uses:` path,
+              # so an advisory name can never be a spelling the pin cannot be.
+              if len(parts) < 2 or not all(re.fullmatch(r"[A-Za-z0-9_.-]*[A-Za-z0-9_-]", x) for x in parts):
+                  return None
+              return parts[0], parts[1], "/".join(parts[2:])
+
+          # Every advisory package name in the actions ecosystem, and the ID of
+          # the repository it names. GET /repos/{old name} redirects to the
+          # repository's current ID after a rename or transfer.
+          advisories = get_all(f"{API}/advisories?ecosystem=actions&per_page=100")
+          by_id, by_name, resolved = {}, {}, {}
+          for adv in advisories:
+              for v in vulns_of(adv):
+                  name = v["package"]["name"]
+                  if v["package"]["ecosystem"] != "actions":
+                      continue
+                  owner, repo, sub = split_name(name)
+                  key = (owner.lower(), repo.lower())
+                  if key not in resolved:
+                      info, _ = get(f"{API}/repos/{urllib.parse.quote(owner, safe='')}/{urllib.parse.quote(repo, safe='')}",
+                                    missing_ok=True)
+                      if info is not MISSING and (not isinstance(info, dict) or type(info.get("id")) is not int):
+                          fail(f"no repository ID for {owner}/{repo}")
+                      resolved[key] = None if info is MISSING else info["id"]
+                  if resolved[key] is not None:
+                      by_id.setdefault(resolved[key], set()).add((name, sub.lower()))
+                  # A name that no longer resolves still matches as written.
+                  by_name.setdefault(key, set()).add((name, sub.lower()))
+
+          hits, unchecked = set(), set()
+          for pin in pins:
+              owner, repo, full, rid = pin["owner"], pin["repo"], pin["full_name"], pin["id"]
+              sub = pin["subpath"].strip("/")
+              shown = f"{owner}/{repo}{'/' + sub if sub else ''}@{pin['sha']}"
+              if not pin["versions"]:
+                  # The pin step already rejects it as not a tagged release.
+                  unchecked.add(shown)
+                  for p in pin["files"]:
+                      print(f"::error file={prop(p)},title=action advisories::{esc(shown)} has no release version, so no advisory can be checked for it (see the pin step).")
+                  continue
+              def applies(asub):
+                  # An advisory against the repository covers all of it; one
+                  # against a path covers that path and anything below it.
+                  return not asub or sub.lower() == asub.strip("/") or sub.lower().startswith(asub.strip("/") + "/")
+              names = {f"{owner}/{repo}", full}
+              if sub:
+                  names |= {f"{owner}/{repo}/{sub}", f"{full}/{sub}", f"https://github.com/{full}/{sub}"}
+              for key in {(owner.lower(), repo.lower()), tuple(full.lower().split("/", 1))}:
+                  names |= {n for n, s in by_name.get(key, ()) if applies(s)}
+              names |= {n for n, s in by_id.get(rid, ()) if applies(s)}
+              for version in pin["versions"]:
+                  affects = ",".join(sorted(f"{n}@{version}" for n in names))
+                  found = get_all(f"{API}/advisories?" + urllib.parse.urlencode(
+                      {"ecosystem": "actions", "affects": affects, "per_page": "100"}))
+                  for adv in found:
+                      ghsa = adv["ghsa_id"]
+                      if adv["withdrawn_at"] or (ghsa, shown) in hits:
+                          continue
+                      matched = [v for v in adv["vulnerabilities"]
+                                 if v["package"]["ecosystem"] == "actions" and v["package"]["name"] in names]
+                      if not matched:
+                          fail(f"{ghsa} was returned for {affects} but names none of those actions")
+                      ranges = "; ".join(f"{v['package']['name']} {v.get('vulnerable_version_range')}" for v in matched)
+                      hits.add((ghsa, shown))
+                      for p in pin["files"]:
+                          print(f"::error file={prop(p)},title=action advisories::{esc(shown)} is release {esc(version)}, "
+                                f"which {esc(ghsa)} marks vulnerable ({esc(ranges)}): {esc(adv.get('summary', ''))}. "
+                                f"Pin a fixed release.")
+          print(f"action advisories: {len(advisories)} reviewed advisories in the actions ecosystem, "
+                f"{len(resolved)} repositories named, {sum(1 for v in resolved.values() if v is None)} no longer exist; "
+                f"{len(pins)} pins, {len(unchecked)} without a release version, {len(hits)} findings")
+          sys.exit(1 if hits or unchecked else 0)
           PY
 
   npm-audit:
