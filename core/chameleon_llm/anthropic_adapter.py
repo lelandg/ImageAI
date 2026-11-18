@@ -78,7 +78,7 @@ def _convert_content(content):
 def _build_request(route: Route, messages: list[dict], params: dict) -> dict:
     system: list[str] = []
     turns: list[dict] = []
-    for m in messages:
+    for index, m in enumerate(messages):
         role = m.get("role")
         if role in ("system", "developer"):
             text = _text_of(m.get("content"))
@@ -87,7 +87,9 @@ def _build_request(route: Route, messages: list[dict], params: dict) -> dict:
             continue
         content = _convert_content(m.get("content"))
         if role == "assistant" and not content:
-            continue  # empty assistant turns are rejected by the API
+            logger.debug("chameleon_llm: dropping empty assistant message at "
+                         "index %d: the Anthropic API rejects empty content", index)
+            continue
         turns.append({"role": role, "content": content})
     if not any(t["role"] == "user" for t in turns):
         raise BadRequestError(
@@ -98,9 +100,12 @@ def _build_request(route: Route, messages: list[dict], params: dict) -> dict:
     if fmt:
         if fmt.get("type") == "json_object":
             system.append(JSON_INSTRUCTION)
+            logger.debug("chameleon_llm: approximating response_format json_object "
+                         "with a system instruction")
         else:
-            logger.warning("chameleon_llm: dropping parameter 'response_format': "
-                           "the Anthropic adapter supports only json_object")
+            logger.warning("chameleon_llm: dropping parameter 'response_format' "
+                           "(type=%r): the Anthropic adapter supports only "
+                           "json_object", fmt.get("type"))
     stop = params.pop("stop", None)
 
     request: dict = {"model": route.model, "messages": turns,

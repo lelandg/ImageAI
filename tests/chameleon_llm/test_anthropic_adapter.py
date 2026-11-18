@@ -98,6 +98,30 @@ def test_other_response_format_dropped_with_warning(fake_anthropic, caplog):
         call(params={"response_format": {"type": "text"}})
     assert "system" not in fake_anthropic.calls[0]
     assert "response_format" in caplog.text
+    assert "'text'" in caplog.text
+
+
+def _records(caplog, needle, level):
+    return [r for r in caplog.records
+            if needle in r.getMessage() and r.levelno == level]
+
+
+def test_json_mode_approximation_logged_once_at_debug(fake_anthropic, caplog):
+    with caplog.at_level(logging.DEBUG, logger="chameleon_llm"):
+        call(params={"response_format": {"type": "json_object"}})
+    assert len(_records(caplog, "approximating response_format", logging.DEBUG)) == 1
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+def test_dropped_assistant_message_logged_once_at_debug(fake_anthropic, caplog):
+    with caplog.at_level(logging.DEBUG, logger="chameleon_llm"):
+        call([{"role": "user", "content": "SECRET-A"},
+              {"role": "assistant", "content": None},
+              {"role": "user", "content": "b"}])
+    recs = _records(caplog, "dropping empty assistant message", logging.DEBUG)
+    assert len(recs) == 1 and "index 1" in recs[0].getMessage()
+    assert "SECRET-A" not in recs[0].getMessage()
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 def test_stop_string_becomes_list(fake_anthropic):
