@@ -72,15 +72,6 @@ class QuestionWorker(QObject):
             console.info(f"LLM Request - Question: {self.question}")
             self.log_message.emit(f"Question: {self.question}", "INFO")
 
-            # Try to use litellm for better compatibility
-            try:
-                import litellm
-                litellm.drop_params = True
-                use_litellm = True
-            except ImportError:
-                logger.warning("LiteLLM not installed, falling back to direct SDK")
-                use_litellm = False
-
             # Create appropriate system prompt based on context
             if self.prompt:
                 system_prompt = """You are an expert prompt engineer for AI image generation.
@@ -125,31 +116,17 @@ class QuestionWorker(QObject):
 
                 # Validate/corral params centrally (drops temperature for
                 # models that reject it, e.g. gpt-5 reasoning models).
-                from core.llm_params import validate_params
+                from core import chameleon_llm
+                from core.llm_params import build_completion_kwargs
                 # Don't specify max_tokens - let model decide
-                validated_params, _ = validate_params(
-                    "openai", model_name, {"temperature": self.temperature},
+                request_kwargs = build_completion_kwargs(
+                    "openai", model_name, messages,
+                    {"temperature": self.temperature},
+                    api_key=self.api_key or None,
                     on_warning=lambda msg: self.log_message.emit(msg, "WARNING")
                 )
-
-                if use_litellm:
-                    import litellm
-                    response = litellm.completion(
-                        model=model_name,
-                        messages=messages,
-                        api_key=self.api_key,
-                        **validated_params
-                    )
-                    answer = response.choices[0].message.content
-                else:
-                    import openai
-                    client = openai.OpenAI(api_key=self.api_key)
-                    response = client.chat.completions.create(
-                        model=model_name,
-                        messages=messages,
-                        **validated_params
-                    )
-                    answer = response.choices[0].message.content
+                response = chameleon_llm.completion(**request_kwargs)
+                answer = response.choices[0].message.content
 
             elif self.llm_provider.lower() in ["google", "gemini"]:
                 import google.generativeai as genai

@@ -36,12 +36,7 @@ except ImportError:
     print("Error: tqdm not installed. Install with: pip install tqdm")
     sys.exit(1)
 
-try:
-    import litellm
-except ImportError:
-    print("Error: litellm not installed. Install with: pip install litellm")
-    sys.exit(1)
-
+from core import chameleon_llm
 from core.prompt_data_loader import PromptDataLoader
 from core.config import ConfigManager
 
@@ -59,9 +54,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-# Disable litellm's verbose logging
-litellm.set_verbose = False
 
 # Global flag for clean shutdown
 shutdown_requested = False
@@ -242,10 +234,14 @@ class TagGenerator:
                 completion_params = {
                     "model": self.model,
                     "messages": [{"role": "user", "content": prompt}],
-                    "api_key": self.api_key,
                     "temperature": temperature,
                     "max_tokens": 500
                 }
+
+                # The Vertex AI route authenticates with the Google Cloud
+                # login (ADC) and ignores api_key, so only other routes get one.
+                if not self.model.startswith("vertex_ai/"):
+                    completion_params["api_key"] = self.api_key
 
                 # Add vertex_project for Vertex AI models
                 if self.model.startswith("vertex_ai/"):
@@ -257,7 +253,7 @@ class TagGenerator:
                         logger.warning("No Google Cloud project ID found. Set with: gcloud config set project PROJECT_ID")
 
                 # Call LLM
-                response = litellm.completion(**completion_params)
+                response = chameleon_llm.completion(**completion_params)
 
                 # Extract response
                 content = response.choices[0].message.content.strip()

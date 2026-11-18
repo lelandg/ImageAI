@@ -20,9 +20,9 @@ from .common.dialog_conventions import (
 )
 from .dialog_utils import OperationGuardMixin, guard_operation
 from .history_widget import DialogHistoryWidget
+from .llm_utils import LLMHandler
 from core.discord_rpc import discord_rpc, ActivityState
-from core.llm_params import validate_params
-from core.logging_config import SecretRedactionFilter
+from core.llm_params import build_completion_kwargs
 from core.paths import get_data_paths
 
 logger = logging.getLogger(__name__)
@@ -83,41 +83,11 @@ class LLMWorker(QObject):
             logger.info(f"LLM Request - Input text: {self.input_text}")
             console.info(f"LLM Request - Input text: {self.input_text}")
 
-            # Try to import and use litellm for better compatibility
-            try:
-                import litellm
-                import logging as py_logging
-
-                # Set up custom handler to capture litellm logs
-                class LiteLLMConsoleHandler(py_logging.Handler):
-                    def emit(self, record):
-                        if record.name == "LiteLLM":
-                            # Only show the message, not the file info
-                            msg = record.getMessage()
-                            console.info(f"LiteLLM: {msg}")
-
-                # Add console handler for litellm
-                litellm_logger = py_logging.getLogger("LiteLLM")
-                console_handler = LiteLLMConsoleHandler()
-                console_handler.setFormatter(py_logging.Formatter('%(message)s'))
-                # This handler runs before propagation to the root logger, so
-                # it needs its own redaction filter.
-                console_handler.addFilter(SecretRedactionFilter())
-                litellm_logger.addHandler(console_handler)
-
-                litellm.drop_params = True  # Drop unsupported params
-                # Set verbose logging via environment variable instead of deprecated method
-                import os
-                os.environ['LITELLM_LOG'] = 'INFO'  # or 'DEBUG' for more verbose
-                use_litellm = True
-
-                logger.info("LiteLLM imported successfully")
-                console.info("LiteLLM imported successfully")
-                self.log_message.emit("LiteLLM imported successfully", "INFO")
-            except ImportError:
-                logger.warning("LiteLLM not installed, falling back to direct SDK")
-                console.warning("LiteLLM not installed, falling back to direct SDK")
-                use_litellm = False
+            # Set up the LLM client (mirrors package logs to the status console)
+            _, llm = LLMHandler.setup_llm(enable_console_logging=True)
+            logger.info("LLM client ready")
+            console.info("LLM client ready")
+            self.log_message.emit("LLM client ready", "INFO")
 
             def _param_warn(msg: str) -> None:
                 # Surface param corrections in the status console alongside the
@@ -139,102 +109,50 @@ class LLMWorker(QObject):
             if self.llm_provider.lower() == "openai":
                 model_name = self.llm_model or "gpt-4"
 
-                if use_litellm:
-                    # Use litellm for better compatibility.
-                    # core.llm_params owns per-model corralling (GPT-5
-                    # temperature lock, max_tokens -> max_completion_tokens).
-                    llm_kwargs, _ = validate_params(
-                        "openai", model_name,
-                        {"temperature": self.temperature, "max_tokens": self.max_tokens},
-                        on_warning=_param_warn)
+                # core.llm_params owns the route prefix and per-model
+                # corralling (GPT-5 temperature lock,
+                # max_tokens -> max_completion_tokens).
+                request_data = build_completion_kwargs(
+                    "openai", model_name,
+                    [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    {"temperature": self.temperature, "max_tokens": self.max_tokens},
+                    api_key=self.api_key or None,
+                    on_warning=_param_warn)
 
-                    request_data = {
-                        "model": model_name,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        **llm_kwargs
-                    }
+                token_value = request_data.get('max_tokens', request_data.get('max_completion_tokens'))
 
-                    token_value = llm_kwargs.get('max_tokens', llm_kwargs.get('max_completion_tokens'))
+                logger.info(f"LLM Request - Sending to OpenAI:")
+                console.info(f"LLM Request - Sending to OpenAI:")
 
-                    logger.info(f"LLM Request - Sending via LiteLLM to OpenAI:")
-                    console.info(f"LLM Request - Sending via LiteLLM to OpenAI:")
+                logger.info(f"  Model: {model_name}")
+                console.info(f"  Model: {model_name}")
 
-                    logger.info(f"  Model: {model_name}")
-                    console.info(f"  Model: {model_name}")
+                logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
+                console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
 
-                    logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
-                    console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
+                logger.info(f"  Max tokens: {token_value}")
+                console.info(f"  Max tokens: {token_value}")
 
-                    logger.info(f"  Max tokens: {token_value}")
-                    console.info(f"  Max tokens: {token_value}")
+                # Clean up multi-line strings for logging
+                clean_system = system_prompt.replace('\n', ' ').strip()
+                clean_user = user_prompt.replace('\n', ' ').strip()
 
-                    # Clean up multi-line strings for logging
-                    clean_system = system_prompt.replace('\n', ' ').strip()
-                    clean_user = user_prompt.replace('\n', ' ').strip()
+                logger.info(f"  System prompt: {clean_system}")
+                console.info(f"  System prompt: {clean_system}")
 
-                    logger.info(f"  System prompt: {clean_system}")
-                    console.info(f"  System prompt: {clean_system}")
+                logger.info(f"  User prompt: {clean_user}")
+                console.info(f"  User prompt: {clean_user}")
 
-                    logger.info(f"  User prompt: {clean_user}")
-                    console.info(f"  User prompt: {clean_user}")
-
-                    response = litellm.completion(**request_data)
-                else:
-                    # Fallback to direct OpenAI SDK
-                    from openai import OpenAI
-                    client = OpenAI(api_key=self.api_key)
-
-                    # core.llm_params picks the right token param name
-                    # (max_completion_tokens for reasoning models) and drops
-                    # temperature where the model rejects it (GPT-5 line).
-                    llm_kwargs, _ = validate_params(
-                        "openai", model_name,
-                        {"temperature": self.temperature, "max_tokens": self.max_tokens},
-                        on_warning=_param_warn)
-                    token_param = ("max_completion_tokens"
-                                   if "max_completion_tokens" in llm_kwargs else "max_tokens")
-
-                    request_data = {
-                        "model": model_name,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        **llm_kwargs
-                    }
-
-                    logger.info(f"LLM Request - Sending to OpenAI API:")
-                    console.info(f"LLM Request - Sending to OpenAI API:")
-
-                    logger.info(f"  Model: {request_data['model']}")
-                    console.info(f"  Model: {request_data['model']}")
-
-                    logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
-                    console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
-
-                    logger.info(f"  Token limit ({token_param}): {request_data.get(token_param)}")
-                    console.info(f"  Token limit ({token_param}): {request_data.get(token_param)}")
-
-                    # Clean up multi-line strings for logging
-                    clean_system = system_prompt.replace('\n', ' ').strip()
-                    clean_user = user_prompt.replace('\n', ' ').strip()
-
-                    logger.info(f"  System prompt: {clean_system}")
-                    console.info(f"  System prompt: {clean_system}")
-
-                    logger.info(f"  User prompt: {clean_user}")
-                    console.info(f"  User prompt: {clean_user}")
-
-                    response = client.chat.completions.create(**request_data)
+                response = llm.completion(**request_data)
 
                 # Log raw response to both log file and console
                 logger.info(f"LLM Response - Status: Success")
                 console.info(f"LLM Response - Status: Success")
 
-                # Handle both litellm and direct SDK response formats
+                # Log response details
                 if hasattr(response, 'model'):
                     logger.info(f"LLM Response - Model used: {response.model}")
                     console.info(f"LLM Response - Model used: {response.model}")
@@ -249,11 +167,9 @@ class LLMWorker(QObject):
                     logger.info(f"LLM Response - Total tokens: {response.usage.total_tokens if hasattr(response.usage, 'total_tokens') else 'N/A'}")
                     console.info(f"LLM Response - Total tokens: {response.usage.total_tokens if hasattr(response.usage, 'total_tokens') else 'N/A'}")
 
-                # Parse the response (same structure for both litellm and direct SDK)
-                if hasattr(response.choices[0], 'message'):
-                    content = response.choices[0].message.content
-                else:
-                    content = response.choices[0].text
+                # chameleon_llm replies are always chat-style: message.content
+                # is a str (the legacy text-completion shape never occurs).
+                content = response.choices[0].message.content
 
                 # Check for empty response
                 if not content or not content.strip():
@@ -347,110 +263,56 @@ class LLMWorker(QObject):
             elif self.llm_provider.lower() == "gemini" or self.llm_provider.lower() == "google":
                 model_name = self.llm_model or "gemini-pro"
 
-                if use_litellm:
-                    # Use litellm for better compatibility
-                    # Determine model prefix based on auth mode
-                    # - API key mode: use "gemini/" (Google AI Studio API)
-                    # - gcloud/ADC mode: use "vertex_ai/" (Google Cloud Vertex AI)
-                    if self.api_key:
-                        # API key authentication - use Google AI Studio
-                        if not model_name.startswith("gemini/"):
-                            litellm_model = f"gemini/{model_name}"
-                        else:
-                            litellm_model = model_name
-                    else:
-                        # Google Cloud authentication (ADC) - use Vertex AI
-                        if not model_name.startswith("vertex_ai/"):
-                            litellm_model = f"vertex_ai/{model_name}"
-                        else:
-                            litellm_model = model_name
+                # API key present -> "gemini/" (Google AI Studio);
+                # otherwise "vertex_ai/" (Google Cloud login / ADC).
+                request_data = build_completion_kwargs(
+                    "gemini", model_name,
+                    [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    {"temperature": self.temperature, "max_tokens": self.max_tokens},
+                    api_key=self.api_key or None,
+                    auth_mode="api-key" if self.api_key else "gcloud",
+                    on_warning=_param_warn)
 
-                    llm_kwargs, _ = validate_params(
-                        "gemini", model_name,
-                        {"temperature": self.temperature, "max_tokens": self.max_tokens},
-                        on_warning=_param_warn)
-
-                    request_data = {
-                        "model": litellm_model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        **llm_kwargs
-                    }
-
-                    # Only add API key if provided (for API key auth mode)
-                    # For gcloud auth, LiteLLM will use Application Default Credentials
-                    if self.api_key:
-                        request_data['api_key'] = self.api_key
-                        logger.info(f"  Using API key authentication (Google AI Studio)")
-                        console.info(f"  Using API key authentication (Google AI Studio)")
-                    else:
-                        logger.info(f"  Using Google Cloud authentication (Vertex AI with ADC)")
-                        console.info(f"  Using Google Cloud authentication (Vertex AI with ADC)")
-
-                    logger.info(f"LLM Request - Sending via LiteLLM to Gemini:")
-                    console.info(f"LLM Request - Sending via LiteLLM to Gemini:")
-
-                    logger.info(f"  Model: {request_data['model']}")
-                    console.info(f"  Model: {request_data['model']}")
-
-                    logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
-                    console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
-
-                    logger.info(f"  Max tokens: {request_data.get('max_tokens')}")
-                    console.info(f"  Max tokens: {request_data.get('max_tokens')}")
-
-                    # Clean up multi-line strings for logging
-                    clean_system = system_prompt.replace('\n', ' ').strip()
-                    clean_user = user_prompt.replace('\n', ' ').strip()
-
-                    logger.info(f"  System prompt: {clean_system}")
-                    console.info(f"  System prompt: {clean_system}")
-
-                    logger.info(f"  User prompt: {clean_user}")
-                    console.info(f"  User prompt: {clean_user}")
-
-                    response = litellm.completion(**request_data)
-
-                    # Parse litellm response
-                    if hasattr(response.choices[0], 'message'):
-                        # Handle None content from Gemini models
-                        if response.choices[0].message.content is None:
-                            logger.warning("Received None content from LLM response")
-                            content = "[]"  # Return empty array as fallback
-                        else:
-                            content = response.choices[0].message.content.strip()
-                    else:
-                        if response.choices[0].text is None:
-                            logger.warning("Received None text from LLM response")
-                            content = "[]"  # Return empty array as fallback
-                        else:
-                            content = response.choices[0].text.strip()
+                if self.api_key:
+                    logger.info(f"  Using API key authentication (Google AI Studio)")
+                    console.info(f"  Using API key authentication (Google AI Studio)")
                 else:
-                    # Fallback to direct Gemini SDK
-                    import google.generativeai as genai
-                    genai.configure(api_key=self.api_key)
-                    model = genai.GenerativeModel(model_name)
+                    logger.info(f"  Using Google Cloud authentication (Vertex AI with ADC)")
+                    console.info(f"  Using Google Cloud authentication (Vertex AI with ADC)")
 
-                    prompt = f"""Generate exactly {self.num_variations} creative image generation prompts based on: "{self.input_text}"
-                    Return ONLY a JSON array of strings, no other text: ["prompt1", "prompt2", "prompt3"]"""
+                logger.info(f"LLM Request - Sending to Gemini:")
+                console.info(f"LLM Request - Sending to Gemini:")
 
-                    # Log request details to both log file and console
-                    logger.info(f"LLM Request - Sending to Gemini API:")
-                    console.info(f"LLM Request - Sending to Gemini API:")
+                logger.info(f"  Model: {request_data['model']}")
+                console.info(f"  Model: {request_data['model']}")
 
-                    logger.info(f"  Model: {model_name}")
-                    console.info(f"  Model: {model_name}")
+                logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
+                console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
 
-                    # Clean up multi-line strings for logging
-                    clean_prompt = prompt.replace('\n', ' ').strip()
+                logger.info(f"  Max tokens: {request_data.get('max_tokens')}")
+                console.info(f"  Max tokens: {request_data.get('max_tokens')}")
 
-                    logger.info(f"  Prompt: {clean_prompt}")
-                    console.info(f"  Prompt: {clean_prompt}")
+                # Clean up multi-line strings for logging
+                clean_system = system_prompt.replace('\n', ' ').strip()
+                clean_user = user_prompt.replace('\n', ' ').strip()
 
-                    response = model.generate_content(prompt)
-                    content = response.text.strip()
+                logger.info(f"  System prompt: {clean_system}")
+                console.info(f"  System prompt: {clean_system}")
+
+                logger.info(f"  User prompt: {clean_user}")
+                console.info(f"  User prompt: {clean_user}")
+
+                response = llm.completion(**request_data)
+
+                # message.content is always a str; an empty reply becomes an
+                # empty array, which falls through to the fallback prompts.
+                content = (response.choices[0].message.content or "").strip()
+                if not content:
+                    logger.warning("Received empty content from LLM response")
+                    content = "[]"  # Return empty array as fallback
 
                 logger.info(f"LLM Response - Status: Success")
                 console.info(f"LLM Response - Status: Success")
@@ -529,102 +391,48 @@ class LLMWorker(QObject):
                 from core.llm_models import resolve_model
                 model_name = self.llm_model or resolve_model('anthropic', 'sonnet', static_default='claude-sonnet-4-6')
 
-                if use_litellm:
-                    # Use litellm with Anthropic provider - must prefix with "anthropic/"
-                    litellm_model = f"anthropic/{model_name}"
-                    # core.llm_params drops sampling params the Claude 5-line
-                    # rejects and clamps temperature to 0..1 for older models.
-                    llm_kwargs, _ = validate_params(
-                        "anthropic", model_name,
-                        {"temperature": self.temperature, "max_tokens": self.max_tokens},
-                        on_warning=_param_warn)
-                    request_data = {
-                        "model": litellm_model,
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        **llm_kwargs,
-                        "api_key": self.api_key  # Pass API key directly to LiteLLM
-                    }
+                # core.llm_params adds the "anthropic/" route, drops sampling
+                # params the Claude 5-line rejects and clamps temperature to
+                # 0..1 for older models.
+                request_data = build_completion_kwargs(
+                    "anthropic", model_name,
+                    [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    {"temperature": self.temperature, "max_tokens": self.max_tokens},
+                    api_key=self.api_key or None,
+                    on_warning=_param_warn)
 
-                    logger.info(f"LLM Request - Sending via LiteLLM to Claude:")
-                    console.info(f"LLM Request - Sending via LiteLLM to Claude:")
+                logger.info(f"LLM Request - Sending to Claude:")
+                console.info(f"LLM Request - Sending to Claude:")
 
-                    logger.info(f"  Model: {litellm_model} (original: {model_name})")
-                    console.info(f"  Model: {litellm_model} (original: {model_name})")
+                logger.info(f"  Model: {request_data['model']} (original: {model_name})")
+                console.info(f"  Model: {request_data['model']} (original: {model_name})")
 
-                    logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
-                    console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
+                logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
+                console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
 
-                    logger.info(f"  Max tokens: {request_data.get('max_tokens')}")
-                    console.info(f"  Max tokens: {request_data.get('max_tokens')}")
+                logger.info(f"  Max tokens: {request_data.get('max_tokens')}")
+                console.info(f"  Max tokens: {request_data.get('max_tokens')}")
 
-                    # Clean up multi-line strings for logging
-                    clean_system = system_prompt.replace('\n', ' ').strip()
-                    clean_user = user_prompt.replace('\n', ' ').strip()
+                # Clean up multi-line strings for logging
+                clean_system = system_prompt.replace('\n', ' ').strip()
+                clean_user = user_prompt.replace('\n', ' ').strip()
 
-                    logger.info(f"  System prompt: {clean_system}")
-                    console.info(f"  System prompt: {clean_system}")
+                logger.info(f"  System prompt: {clean_system}")
+                console.info(f"  System prompt: {clean_system}")
 
-                    logger.info(f"  User prompt: {clean_user}")
-                    console.info(f"  User prompt: {clean_user}")
+                logger.info(f"  User prompt: {clean_user}")
+                console.info(f"  User prompt: {clean_user}")
 
-                    response = litellm.completion(**request_data)
-                else:
-                    # Fallback to direct Anthropic SDK
-                    from anthropic import Anthropic
-                    client = Anthropic(api_key=self.api_key)
-
-                    # Validate through core.llm_params; the anthropic SDK takes
-                    # the same key names (temperature/max_tokens/top_p/top_k).
-                    llm_kwargs, _ = validate_params(
-                        "anthropic", model_name,
-                        {"temperature": self.temperature, "max_tokens": self.max_tokens},
-                        on_warning=_param_warn)
-                    sdk_params = {k: v for k, v in llm_kwargs.items()
-                                  if k in ("temperature", "max_tokens", "top_p", "top_k")}
-                    # The anthropic SDK requires max_tokens
-                    sdk_params.setdefault("max_tokens", self.max_tokens)
-
-                    request_data = {
-                        "model": model_name,
-                        "messages": [
-                            {"role": "user", "content": user_prompt}
-                        ],
-                        "system": system_prompt,
-                        **sdk_params
-                    }
-
-                    logger.info(f"LLM Request - Sending to Claude API:")
-                    console.info(f"LLM Request - Sending to Claude API:")
-
-                    logger.info(f"  Model: {request_data['model']}")
-                    console.info(f"  Model: {request_data['model']}")
-
-                    logger.info(f"  Temperature: {request_data.get('temperature', 'default')}")
-                    console.info(f"  Temperature: {request_data.get('temperature', 'default')}")
-
-                    logger.info(f"  Max tokens: {request_data.get('max_tokens')}")
-                    console.info(f"  Max tokens: {request_data.get('max_tokens')}")
-
-                    # Clean up multi-line strings for logging
-                    clean_system = system_prompt.replace('\n', ' ').strip()
-                    clean_user = user_prompt.replace('\n', ' ').strip()
-
-                    logger.info(f"  System prompt: {clean_system}")
-                    console.info(f"  System prompt: {clean_system}")
-
-                    logger.info(f"  User prompt: {clean_user}")
-                    console.info(f"  User prompt: {clean_user}")
-
-                    response = client.messages.create(**request_data)
+                response = llm.completion(**request_data)
 
                 # Log raw response to both log file and console
                 logger.info(f"LLM Response - Status: Success")
                 console.info(f"LLM Response - Status: Success")
 
-                # Handle both litellm and direct SDK response formats
+                # Log response details
                 if hasattr(response, 'model'):
                     logger.info(f"LLM Response - Model used: {response.model}")
                     console.info(f"LLM Response - Model used: {response.model}")
@@ -633,14 +441,8 @@ class LLMWorker(QObject):
                     logger.info(f"LLM Response - Tokens used: {response.usage}")
                     console.info(f"LLM Response - Tokens used: {response.usage}")
 
-                # Extract content - handle both formats
-                if use_litellm and hasattr(response, 'choices'):
-                    content = response.choices[0].message.content
-                elif hasattr(response, 'content'):
-                    # Direct Anthropic SDK returns content as list of blocks
-                    content = response.content[0].text if isinstance(response.content, list) else response.content
-                else:
-                    content = str(response)
+                # Extract content
+                content = response.choices[0].message.content
 
                 logger.info(f"LLM Response - Raw content: {content}")
                 # Don't show raw response in console, only log it

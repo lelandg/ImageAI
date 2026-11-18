@@ -4,8 +4,6 @@ import ast
 import re
 from pathlib import Path
 
-import pytest
-
 REPO = Path(__file__).resolve().parent.parent
 ALL_ROOTS = ["core", "gui", "cli", "providers", "scripts", "main.py"]
 CORE_ROOTS = ["core"]
@@ -59,12 +57,10 @@ def _attribute_offenders(roots):
     return offenders
 
 
-@pytest.mark.xfail(strict=True, reason="gui/ and scripts/ migrate in Task 8")
 def test_no_litellm_import_in_application_code():
     assert _import_offenders(ALL_ROOTS) == []
 
 
-@pytest.mark.xfail(strict=True, reason="gui/ and scripts/ migrate in Task 8")
 def test_no_litellm_attribute_use():
     assert _attribute_offenders(ALL_ROOTS) == []
 
@@ -72,3 +68,17 @@ def test_no_litellm_attribute_use():
 def test_no_litellm_in_core():
     assert _import_offenders(CORE_ROOTS) == []
     assert _attribute_offenders(CORE_ROOTS) == []
+
+
+def test_no_litellm_text_anywhere_in_application_code():
+    """Comments, docstrings and strings must not name the old library either."""
+    offenders = []
+    for f in _python_files(ALL_ROOTS):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for i, line in enumerate(text.splitlines(), 1):
+            if "litellm" in line.lower():
+                offenders.append(f"{f.relative_to(REPO)}:{i}")
+    assert offenders == []

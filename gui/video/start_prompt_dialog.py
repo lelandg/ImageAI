@@ -164,28 +164,33 @@ Current prompt: {current_info}
 
 Generate a detailed visual description suitable for AI image generation."""
 
-        # Use LiteLLM to make the call
-        import litellm
-        litellm.drop_params = True
-
-        from core.llm_params import build_completion_kwargs
+        # Make the call through the vendored chameleon_llm package
+        import os
+        from core import chameleon_llm
+        from core.llm_params import build_completion_kwargs, normalize_provider
 
         self.logger.info(f"Calling LLM with provider={self.provider}, model={self.model}")
         self.logger.info(f"User prompt: {user_prompt}")
 
         # Centralized param validation + route prefixing (normalizes provider
-        # display names like 'google'/'claude' to their LiteLLM routes).
+        # display names like 'google'/'claude' to their chameleon_llm routes).
+        # Gemini uses the API-key route when a key is configured (argument or
+        # environment), otherwise the Google Cloud login route.
+        provider_id = normalize_provider(self.provider)
+        has_gemini_key = bool(self.api_key or os.environ.get('GEMINI_API_KEY')
+                              or os.environ.get('GOOGLE_API_KEY'))
         completion_kwargs = build_completion_kwargs(
-            self.provider,
+            provider_id,
             self.model,
             [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt}
             ],
             {"temperature": 0.7},
-            api_key=self.api_key,
+            api_key=self.api_key or None,
+            auth_mode=('api-key' if provider_id == 'gemini' and has_gemini_key else None),
         )
-        response = litellm.completion(**completion_kwargs)
+        response = chameleon_llm.completion(**completion_kwargs)
 
         prompt = response.choices[0].message.content.strip()
         self.logger.info(f"Generated prompt: {prompt}")

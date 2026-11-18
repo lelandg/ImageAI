@@ -30,9 +30,3 @@ def test_setup_llm_does_not_stack_handlers():
 def test_setup_llm_sets_no_attributes_on_package():
     ok, mod = LLMHandler.setup_llm(enable_console_logging=False)
     assert not hasattr(mod, "drop_params")
-
-
-def test_temporary_litellm_aliases_still_resolve():
-    from gui.llm_utils import LiteLLMHandler
-    assert LiteLLMHandler is LLMHandler
-    assert LLMHandler.setup_litellm is LLMHandler.setup_llm

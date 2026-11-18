@@ -149,7 +149,7 @@ def handle_lyrics_to_prompts(args) -> int:
         generator = LyricsToPromptsGenerator(config=config_dict)
     except Exception as e:
         print(f"Error initializing generator: {e}")
-        print("Make sure LiteLLM is installed: pip install litellm")
+        print("Check your API key and provider settings.")
         return 2
 
     # Generate prompts

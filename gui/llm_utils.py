@@ -132,15 +132,12 @@ class LLMHandler:
 
         return True, chameleon_llm
 
-    # TEMPORARY alias, removed in the gui migration task
-    setup_litellm = setup_llm
-
     @staticmethod
     def prepare_request(provider: str, model: str, messages: List[Dict[str, str]],
                         temperature: float = 0.7, max_tokens: int = 1000,
                         api_key: Optional[str] = None) -> Dict[str, Any]:
         """
-        Prepare request data for the former LiteLLM-style completion call.
+        Prepare request data for a ``chameleon_llm.completion`` call.
 
         Args:
             provider: LLM provider name
@@ -174,6 +171,3 @@ class LLMHandler:
             "max_tokens": max_tokens
         }
 
-
-# TEMPORARY alias, removed in the gui migration task
-LiteLLMHandler = LLMHandler

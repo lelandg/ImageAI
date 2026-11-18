@@ -5041,7 +5041,7 @@ class WorkspaceWidget(QWidget):
         llm_model = self.llm_model_combo.currentText()
 
         # Create end prompt generator
-        end_prompt_gen = EndPromptGenerator(llm_provider=None)  # Will use litellm directly
+        end_prompt_gen = EndPromptGenerator(llm_provider=None)  # Will use chameleon_llm directly
 
         # Show dialog
         dialog = EndPromptDialog(
@@ -5920,7 +5920,7 @@ class WorkspaceWidget(QWidget):
 
         # Create generator (can reuse EndPromptGenerator)
         from gui.video.start_prompt_dialog import StartPromptDialog
-        generator = EndPromptGenerator(llm_provider=None)  # Will use litellm directly
+        generator = EndPromptGenerator(llm_provider=None)  # Will use chameleon_llm directly
 
         # Show dialog with continuity support
         dialog = StartPromptDialog(

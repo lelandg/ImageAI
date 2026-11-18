@@ -14,10 +14,10 @@ from PySide6.QtCore import Qt, QThread, Signal, QSettings
 
 from core.config import ConfigManager
 from core.layout.models import TextBlock, DocumentSpec
-from core.llm_models import get_provider_models, get_provider_prefix
-from core.llm_params import validate_params
+from core.llm_models import get_provider_models
+from core.llm_params import build_completion_kwargs
 from core.discord_rpc import discord_rpc, ActivityState
-from gui.llm_utils import DialogStatusConsole, LiteLLMHandler, LLMResponseParser
+from gui.llm_utils import DialogStatusConsole, LLMHandler, LLMResponseParser
 from ..common.dialog_conventions import (
     DialogCleanupMixin, bind_primary_action, persist_splitter,
     restore_splitter, set_default_button, standard_splitter,
@@ -44,18 +44,18 @@ class TextGenerationWorker(QThread):
         self.temperature = temperature
         self.provider = provider
         self.model = model
-        self.litellm = None
+        self.llm = None
 
     def run(self):
         """Generate text using LLM."""
         try:
-            # Set up LiteLLM
-            self.progress.emit("Setting up LiteLLM...")
-            success, litellm = LiteLLMHandler.setup_litellm(enable_console_logging=True)
+            # Set up the LLM client
+            self.progress.emit("Setting up LLM client...")
+            success, llm = LLMHandler.setup_llm(enable_console_logging=True)
             if not success:
-                self.error.emit("Failed to initialize LiteLLM")
+                self.error.emit("Failed to initialize LLM client")
                 return
-            self.litellm = litellm
+            self.llm = llm
 
             # Get LLM provider and API key
             # Use passed provider or fallback to config
@@ -118,33 +118,23 @@ class TextGenerationWorker(QThread):
                 # Use first model (typically the most capable/newest)
                 model_name = models[0]
 
-            # Apply LiteLLM prefix
-            prefix = get_provider_prefix(provider_id)
-            model = f"{prefix}{model_name}" if prefix else model_name
-
-            # Call LLM
-            self.progress.emit(f"Calling {model}...")
             messages = [{"role": "user", "content": prompt}]
 
-            # Validate/corral params centrally (clamps ranges, drops
-            # temperature for models that reject it)
-            validated_params, _ = validate_params(
-                provider_id, model_name, {"temperature": self.temperature},
+            # Route prefix (anthropic/, gemini/ or vertex_ai/ by auth mode,
+            # ...), parameter validation and the API key are built centrally.
+            # With gcloud auth no API key is passed; the Google Cloud login
+            # (Application Default Credentials) is used.
+            completion_kwargs = build_completion_kwargs(
+                provider_id, model_name, messages,
+                {"temperature": self.temperature},
+                api_key=api_key, auth_mode=auth_mode,
                 on_warning=self.progress.emit
             )
 
-            completion_kwargs = {
-                "model": model,
-                "messages": messages,
-                **validated_params
-            }
+            # Call LLM
+            self.progress.emit(f"Calling {completion_kwargs['model']}...")
 
-            # Only add API key if provided (for API key auth mode)
-            # For gcloud auth, LiteLLM will use Application Default Credentials
-            if api_key:
-                completion_kwargs["api_key"] = api_key
-
-            response = litellm.completion(**completion_kwargs)
+            response = llm.completion(**completion_kwargs)
 
             # Extract content
             if not response or not response.choices:
