@@ -2,6 +2,7 @@
 
 **Date:** 2026-11-18 10:58
 **Status:** Design, awaiting Leland's approval. Nothing is built.
+**Updated:** 2026-11-18 11:03
 **Pilot:** ImageAI. ChatMaster follows as a separate project.
 
 ## Intent
@@ -177,6 +178,20 @@ handles that and keeps doing so.
 validated by `core/llm_params.py`). `top_k` goes in `extra_body` for local
 servers and is dropped for `api.openai.com`.
 
+*Responses path.* Some OpenAI models are served only by the Responses API
+(`gpt-pro` family, `o3-pro`, `o1-pro`); LiteLLM bridged these silently. The
+adapter keeps a small pattern list of such models. For a match it calls
+`client.responses.create` instead of chat completions: `system` messages
+become `instructions`, the remaining messages become `input` (text parts as
+`input_text`, images as `input_image`), `max_tokens` /
+`max_completion_tokens` become `max_output_tokens`, `reasoning_effort`
+becomes `reasoning={"effort": ...}`, `verbosity` and JSON mode go under
+`text`. The reply is normalised to the same `Completion` shape: `output_text`
+as content, `status` "incomplete" as `length`, usage `input_tokens` /
+`output_tokens` as prompt and completion tokens. The builder confirms the
+model list and field names against the current `openai` SDK and proves each
+with a live test before relying on them.
+
 **Anthropic adapter.**
 - `system` role messages are joined and sent as the `system` parameter.
 - `max_tokens` is required by the API. When the caller sends none, use 4096.
@@ -279,8 +294,10 @@ call sites and `gui/llm_utils.py`.
 - A fresh virtual environment built from `requirements.txt` has no `litellm`.
 - `grep -ri litellm` over code and current docs returns nothing outside
   `Plans/`, `Notes/` and `CHANGELOG.md`.
-- The full test suite passes; the live tests pass for OpenAI, Anthropic,
-  Gemini API key and Vertex; Ollama and LM Studio are checked by hand.
+- The full test suite passes; the live tests pass for OpenAI (one chat
+  model and one Responses-only model), Anthropic, Gemini API key and Vertex,
+  run by Claude. Ollama, LM Studio and the dialog check below are a runbook
+  step for Leland, the last gate before merge.
 - `pip-audit`, `osv-scanner` and `snyk test` report no LiteLLM finding, and
   the before and after advisory counts are in the PR body.
 - Each LLM dialog in the GUI is opened once and produces a result.
@@ -301,19 +318,18 @@ One PR in `lelandg/ImageAI` on branch `feat/replace-litellm`.
 - Anthropic JSON mode is done with a system-text instruction.
 - Default `max_tokens` 4096 for Anthropic, default timeout 600 seconds,
   no retries inside the shim unless a caller asks, one client per call.
+- Claude runs the paid live tests; the local-server and GUI checks go on
+  Leland's runbook. Proposed to Leland 2026-11-18, not yet confirmed.
 - Bare model ids are fixed at the call sites, not guessed inside the shim.
 - Environment-variable fallbacks for keys and endpoints, as listed above.
 - Azure and Bedrock are unsupported in this version.
 
-## Open, waiting on Leland
+## Decided by Leland
 
-1. **OpenAI models served only by the Responses API** (`gpt-pro` family,
-   `o3-pro`, `o1-pro` in `core/llm_models.py`). LiteLLM bridges these to the
-   Responses API without saying so. Either the OpenAI adapter gets a second
-   request path for them, or they leave the model list.
-2. **Who runs the checks that need accounts and a screen:** the live tests
-   (they cost a little money), the Ollama and LM Studio checks, and opening
-   each LLM dialog.
+- Approach A, SDK adapters (2026-11-18).
+- ImageAI is the pilot; Heimdallr and PromptAlchemy are unused and out of scope.
+- `gpt-pro`, `o3-pro` and `o1-pro` keep working (2026-11-18). See "Responses
+  path" under the OpenAI adapter.
 
 ## Left to the builder
 
