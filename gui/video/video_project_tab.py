@@ -74,6 +74,31 @@ class VideoGenerationThread(QThread):
             self.kwargs.get('auth_mode'), self.kwargs.get('google_api_key'),
             self.kwargs.get('gcloud_project_id'))
 
+    def _style_analysis_credentials(self, provider, config):
+        """``(api_key, google_llm, google_cloud_login)`` for the continuity
+        style analysis.
+
+        The Google key comes from the same snapshot as the auth mode (the
+        generation parameters). ``config`` is a separately loaded
+        ``ConfigManager``: when the saved mode is Google Cloud login its
+        ``get_api_key('google')`` answers with an OAuth access token, which
+        must not be sent as an API key because the live mode says API key.
+        It is asked for a Google key only when the parameters carry no auth
+        mode at all. With Google Cloud login there is no key; the analyzer
+        signs in on Vertex AI."""
+        google_llm = self._google_llm_config()
+        google_cloud_login = (provider == 'google'
+                              and google_llm.get('auth_mode') == 'gcloud')
+        api_key = None
+        if provider == 'google':
+            if not google_cloud_login:
+                api_key = google_llm.get('google_api_key')
+                if not api_key and 'auth_mode' not in google_llm:
+                    api_key = config.get_api_key('google')
+        elif provider == 'openai':
+            api_key = config.get_api_key('openai')
+        return api_key, google_llm, google_cloud_login
+
     def _generate_storyboard(self):
         """Generate storyboard from text"""
         # Implementation moved from original file
@@ -408,18 +433,8 @@ class VideoGenerationThread(QThread):
                         self.progress_update.emit(progress, f"Analyzing previous frame for continuity...")
 
                         # Get API key for style analysis
-                        llm_api_key = None
-                        google_llm = self._google_llm_config()
-                        google_cloud_login = (provider == 'google'
-                                              and google_llm.get('auth_mode') == 'gcloud')
-                        if provider == 'google':
-                            # With Google Cloud login there is no key to
-                            # fetch (the lookup would answer with an access
-                            # token); the analyzer signs in on Vertex AI.
-                            if not google_cloud_login:
-                                llm_api_key = config.get_api_key('google')
-                        elif provider == 'openai':
-                            llm_api_key = config.get_api_key('openai')
+                        llm_api_key, google_llm, google_cloud_login = (
+                            self._style_analysis_credentials(provider, config))
 
                         if llm_api_key or google_cloud_login:
                             analyzer = StyleAnalyzer(
