@@ -2,7 +2,7 @@
 
 **Date:** 2026-11-18 10:58
 **Status:** Design, awaiting Leland's approval. Nothing is built.
-**Updated:** 2026-11-18 11:03
+**Updated:** 2026-11-18 11:13
 **Pilot:** ImageAI. ChatMaster follows as a separate project.
 
 ## Intent
@@ -289,18 +289,73 @@ call sites and `gui/llm_utils.py`.
 - Live tests in `tests/test_live_llm_params.py` re-pointed at the shim: one
   text call, one JSON-mode call and one image call per cloud route.
 
+#### Automated local-server and dialog tests (Leland, 2026-11-18)
+
+Leland wants as much of the checking as possible automated, so that other
+people can run it. Nothing in "Done means" is a hand check any more.
+
+Three tiers, each one command:
+
+| Tier | Marker | Runs when | Command |
+|---|---|---|---|
+| Unit and dialog | none | always, and in CI | `python -m pytest` |
+| Local servers | `local` | the server answers; otherwise each test skips with the reason | `python -m pytest -m local -v` |
+| Cloud | `live` | `IMAGEAI_LIVE_TESTS=1` and the provider key is configured | `python -m pytest -m live -v` |
+
+**LM Studio (`tests/test_local_lmstudio.py`).** A fixture talks to LM
+Studio's own REST API, not the OpenAI-compatible one, because only the REST
+API reports which models are downloaded and which are loaded:
+
+1. Base URL from `IMAGEAI_LMSTUDIO_URL`, else the `lmstudio` endpoint in
+   `LLM_PROVIDERS` (`http://localhost:1234`).
+2. List models over REST with a 2 second timeout. No answer: skip, with
+   "LM Studio is not running at <url>".
+3. Pick the model: `IMAGEAI_LMSTUDIO_MODEL` if set, else a model already
+   loaded, else the smallest downloaded chat model, which the fixture loads
+   over REST. No chat model downloaded: skip, saying so.
+4. Run the shim through the `lm_studio/` route: a text call, a JSON-mode
+   call, and an image call when the REST listing marks the model as
+   vision-capable (otherwise that one test skips).
+5. A model the fixture loaded is unloaded at the end; a model that was
+   already loaded is left alone.
+
+The builder confirms the REST paths and field names against the LM Studio
+version current at build time (the API has had a `/api/v0` and a `/api/v1`
+form) and supports whichever the running server answers.
+
+**Ollama (`tests/test_local_ollama.py`).** The same pattern over Ollama's
+REST API: `IMAGEAI_OLLAMA_URL` or the default endpoint, `GET /api/tags` to
+list, `IMAGEAI_OLLAMA_MODEL` or the smallest installed model, the same three
+calls through the `ollama/` route. The existing `fetch_ollama_models` in
+`core/llm_models.py` is reused for the listing.
+
+**Dialogs (`tests/gui/test_llm_dialogs_shim.py`).** The suite already builds
+dialogs offscreen (`tests/conftest.py` sets `QT_QPA_PLATFORM=offscreen`).
+For each dialog and worker that calls the LLM, a test constructs it, replaces
+`core.llm_shim.completion` with a fake that returns a canned `Completion`,
+triggers the primary action, and asserts that the result reaches the widget
+and that the request and response appear in the status console. This
+replaces "open each dialog by hand", and it runs in CI with no keys.
+
+**For other people.** A short `Docs/Testing-LLM.md` lists the three commands,
+the environment variables above, what each tier costs (the cloud tier a few
+cents, the others nothing), and what a skip message means. `pytest.ini`
+gains the `local` marker.
+
 ### Done means
 
 - A fresh virtual environment built from `requirements.txt` has no `litellm`.
 - `grep -ri litellm` over code and current docs returns nothing outside
   `Plans/`, `Notes/` and `CHANGELOG.md`.
-- The full test suite passes; the live tests pass for OpenAI (one chat
-  model and one Responses-only model), Anthropic, Gemini API key and Vertex,
-  run by Claude. Ollama, LM Studio and the dialog check below are a runbook
-  step for Leland, the last gate before merge.
+- The full test suite passes, including the offscreen dialog tests.
+- The `live` tier passes for OpenAI (one chat model and one Responses-only
+  model), Anthropic, Gemini API key and Vertex.
+- The `local` tier passes against LM Studio and Ollama on Leland's machine,
+  with the output in the PR body. If a server is not running when Claude runs
+  it, that tier is the one runbook step: start the server, run the one
+  command.
 - `pip-audit`, `osv-scanner` and `snyk test` report no LiteLLM finding, and
   the before and after advisory counts are in the PR body.
-- Each LLM dialog in the GUI is opened once and produces a result.
 
 ### Delivery
 
@@ -318,8 +373,11 @@ One PR in `lelandg/ImageAI` on branch `feat/replace-litellm`.
 - Anthropic JSON mode is done with a system-text instruction.
 - Default `max_tokens` 4096 for Anthropic, default timeout 600 seconds,
   no retries inside the shim unless a caller asks, one client per call.
-- Claude runs the paid live tests; the local-server and GUI checks go on
-  Leland's runbook. Proposed to Leland 2026-11-18, not yet confirmed.
+- Claude runs all three test tiers, the paid one included. Proposed to
+  Leland 2026-11-18, not yet confirmed.
+- Ollama gets the same automated treatment Leland asked for on LM Studio.
+- The fixture may load a model into LM Studio and unloads only what it
+  loaded.
 - Bare model ids are fixed at the call sites, not guessed inside the shim.
 - Environment-variable fallbacks for keys and endpoints, as listed above.
 - Azure and Bedrock are unsupported in this version.
@@ -330,6 +388,8 @@ One PR in `lelandg/ImageAI` on branch `feat/replace-litellm`.
 - ImageAI is the pilot; Heimdallr and PromptAlchemy are unused and out of scope.
 - `gpt-pro`, `o3-pro` and `o1-pro` keep working (2026-11-18). See "Responses
   path" under the OpenAI adapter.
+- LM Studio is tested through its REST API, and testing is automated as far
+  as possible so other people can run it (2026-11-18).
 
 ## Left to the builder
 
