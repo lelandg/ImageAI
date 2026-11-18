@@ -95,9 +95,9 @@ Describe a natural ending frame for this scene."""
 
         try:
             # Call LLM provider
-            import litellm
+            from core import chameleon_llm
 
-            # Prepare model string (anthropic/gemini need LiteLLM prefixes)
+            # Prepare model string (anthropic/gemini need route prefixes)
             provider_id = normalize_provider(provider)
             prefix = get_provider_prefix(provider_id)
             model_id = f"{prefix}{model}" if prefix else model
@@ -109,7 +109,7 @@ Describe a natural ending frame for this scene."""
                 provider_id, model,
                 {"temperature": temperature, "max_tokens": 150}
             )
-            response = litellm.completion(
+            response = chameleon_llm.completion(
                 model=model_id,
                 messages=[
                     {"role": "system", "content": self.SYSTEM_PROMPT},

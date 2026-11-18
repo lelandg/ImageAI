@@ -299,17 +299,17 @@ IMPORTANT:
 - PRESERVE all style descriptors from the start frame description (e.g., "hi-res cartoon", "photorealistic", "cinematic", etc.)"""
 
         try:
-            # Call LLM provider using LiteLLM
-            import litellm
+            # Call LLM provider using chameleon_llm
+            from core import chameleon_llm
 
-            # Map provider names to LiteLLM format
-            # LiteLLM uses "gemini" not "google" for Google Gemini models
-            litellm_provider = "gemini" if provider == "google" else provider
+            # Map provider names to chameleon_llm route prefixes
+            # chameleon_llm uses "gemini" not "google" for Google Gemini models
+            route_provider = "gemini" if provider == "google" else provider
 
-            # Prepare model string for LiteLLM
-            model_id = f"{litellm_provider}/{model}" if litellm_provider else model
+            # Prepare model string (route prefix) for chameleon_llm
+            model_id = f"{route_provider}/{model}" if route_provider else model
 
-            self.logger.info(f"Generating video prompt with {provider}/{model} (LiteLLM: {model_id})")
+            self.logger.info(f"Generating video prompt with {provider}/{model} (route: {model_id})")
             self.logger.debug(f"Context: start='{context.start_prompt[:50]}...', camera={context.enable_camera_movements}, flow={context.enable_prompt_flow}")
 
             # Log the full user prompt for debugging
@@ -355,6 +355,10 @@ IMPORTANT:
             else:
                 self.logger.info(f"Using gcloud authentication (Application Default Credentials)")
 
+            # Google Cloud login (ADC) uses the Vertex route, not the API-key route
+            if provider == "google" and auth_mode == "gcloud":
+                model_id = f"vertex_ai/{model}"
+
             # Prepare request parameters
             request_params = {
                 "model": model_id,
@@ -367,14 +371,13 @@ IMPORTANT:
             }
 
             # Only add API key if provided (for API key auth mode)
-            # For gcloud auth, LiteLLM will use Application Default Credentials
+            # For gcloud auth, chameleon_llm's vertex_ai route uses Application Default Credentials
             if api_key:
                 request_params['api_key'] = api_key
 
-            response = litellm.completion(**request_params)
+            response = chameleon_llm.completion(**request_params)
 
-            # CRITICAL: Check if content is None (known LiteLLM+Gemini bug)
-            # See: https://github.com/BerriAI/litellm/issues/10721
+            # CRITICAL: Check if content is None (defensive; the client normally returns a str)
             message_content = response.choices[0].message.content
             finish_reason = response.choices[0].finish_reason if response.choices else "unknown"
 
@@ -382,7 +385,7 @@ IMPORTANT:
             self.logger.info(f"LLM Response (finish_reason={finish_reason}):\n{'-'*80}\n{message_content}\n{'-'*80}")
 
             if message_content is None:
-                self.logger.error(f"❌ LLM returned None content (finish_reason: {finish_reason}). This is a known LiteLLM+Gemini bug.")
+                self.logger.error(f"❌ LLM returned None content (finish_reason: {finish_reason}).")
                 self.logger.error("Falling back to basic prompt. Consider using Anthropic/OpenAI instead.")
                 return self._fallback_prompt(context)
 
@@ -550,20 +553,20 @@ CRITICAL REQUIREMENTS:
 - PRESERVE all style descriptors from start frame descriptions (e.g., "hi-res cartoon", "photorealistic", "cinematic", etc.)"""
 
         try:
-            import litellm
+            from core import chameleon_llm
 
-            # Map provider names to LiteLLM format
-            # LiteLLM uses "gemini" not "google" for Google Gemini models
-            litellm_provider = "gemini" if provider == "google" else provider
+            # Map provider names to chameleon_llm route prefixes
+            # chameleon_llm uses "gemini" not "google" for Google Gemini models
+            route_provider = "gemini" if provider == "google" else provider
 
-            model_id = f"{litellm_provider}/{model}" if litellm_provider else model
+            model_id = f"{route_provider}/{model}" if route_provider else model
 
-            self.logger.info(f"Batch generating {len(contexts)} video prompts with {provider}/{model} (LiteLLM: {model_id})")
+            self.logger.info(f"Batch generating {len(contexts)} video prompts with {provider}/{model} (route: {model_id})")
 
             # Log the full batch prompt for debugging
             self.logger.info(f"Batch prompt sent to LLM ({len(batch_prompt)} chars):\n{'-'*80}\n{batch_prompt[:1000]}...\n{'-'*80}")
 
-            response = litellm.completion(
+            response = chameleon_llm.completion(
                 model=model_id,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -573,8 +576,7 @@ CRITICAL REQUIREMENTS:
                 max_tokens=500 * len(contexts)  # Increased from 200 to 500 tokens per video prompt
             )
 
-            # CRITICAL: Check if content is None (known LiteLLM+Gemini bug)
-            # See: https://github.com/BerriAI/litellm/issues/10721
+            # CRITICAL: Check if content is None (defensive; the client normally returns a str)
             message_content = response.choices[0].message.content
             finish_reason = response.choices[0].finish_reason if response.choices else "unknown"
 
@@ -582,7 +584,7 @@ CRITICAL REQUIREMENTS:
             self.logger.info(f"Batch LLM Response (finish_reason={finish_reason}, {len(message_content) if message_content else 0} chars):\n{'-'*80}\n{message_content}\n{'-'*80}")
 
             if message_content is None:
-                self.logger.error(f"❌ LLM returned None content (finish_reason: {finish_reason}). This is a known LiteLLM+Gemini bug.")
+                self.logger.error(f"❌ LLM returned None content (finish_reason: {finish_reason}).")
                 self.logger.error("Falling back to individual generation. Consider using Anthropic/OpenAI instead.")
                 # Fallback to individual generation
                 results = []

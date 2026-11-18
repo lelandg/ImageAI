@@ -269,7 +269,7 @@ def generate_action_cards(brief: str, genre: str, *, provider: str, model: Optio
                           token: Optional[CancelToken] = None) -> List[ActionCardDraft]:
     """Run the contract against a chat model and return validated drafts.
 
-    ``completion_fn`` defaults to ``litellm.completion``. Kwargs come from
+    ``completion_fn`` defaults to ``chameleon_llm.completion``. Kwargs come from
     ``build_completion_kwargs`` (temperature 0.2, max_tokens 4000, JSON mode
     where the model supports it). The model defaults to
     ``default_chat_model(provider)``.
@@ -295,9 +295,8 @@ def generate_action_cards(brief: str, genre: str, *, provider: str, model: Optio
     emit(logger, log, "=== END LLM REQUEST ===")
 
     if completion_fn is None:
-        import litellm
-        litellm.drop_params = True
-        completion_fn = litellm.completion
+        from core import chameleon_llm
+        completion_fn = chameleon_llm.completion
 
     if token is not None:
         token.raise_if_cancelled()

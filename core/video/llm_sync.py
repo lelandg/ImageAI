@@ -542,7 +542,7 @@ Lyrics:
             import time
             api_start = time.time()
             
-            # Use litellm through the UnifiedLLMProvider
+            # Use chameleon_llm through the UnifiedLLMProvider
             from core.llm_models import get_provider_prefix
             from core.llm_params import normalize_provider, validate_params
 
@@ -559,7 +559,7 @@ Lyrics:
             param_kwargs, _ = validate_params(provider_id, self.model, params)
 
             self.logger.info(f"Making LLM API call with model: {model_id}")
-            response = self.llm_provider.litellm.completion(
+            response = self.llm_provider.llm.completion(
                 model=model_id,
                 messages=[
                     {"role": "system", "content": system_prompt},

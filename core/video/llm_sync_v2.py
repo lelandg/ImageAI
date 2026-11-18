@@ -188,7 +188,7 @@ class LLMSyncAssistant:
                  'response_format': {"type": "json_object"}})
 
             self.logger.info(f"Making LLM API call with model: {model_id}")
-            response = self.llm_provider.litellm.completion(
+            response = self.llm_provider.llm.completion(
                 model=model_id,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -404,7 +404,7 @@ class LLMSyncAssistant:
             import time
             api_start = time.time()
 
-            # Route via the canonical provider prefix (LiteLLM: 'anthropic/<model>')
+            # Route via the canonical provider prefix (chameleon_llm: 'anthropic/<model>')
             from core.llm_models import get_provider_prefix
             from core.llm_params import validate_params
 
@@ -417,7 +417,7 @@ class LLMSyncAssistant:
                  'max_tokens': 4000})
 
             self.logger.info(f"Making LLM API call with model: {model_id}")
-            response = self.llm_provider.litellm.completion(
+            response = self.llm_provider.llm.completion(
                 model=model_id,
                 messages=[
                     {"role": "system", "content": system_prompt},
@@ -658,7 +658,7 @@ class LLMSyncAssistant:
                 {'temperature': 0.1})  # Low temperature for consistent timing
 
             self.logger.info(f"Making LLM API call with model: {model_id}")
-            response = self.llm_provider.litellm.completion(
+            response = self.llm_provider.llm.completion(
                 model=model_id,
                 messages=[
                     {"role": "system", "content": system_prompt},

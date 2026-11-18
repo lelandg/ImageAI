@@ -12,6 +12,9 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 from enum import Enum
 
+from core import chameleon_llm
+from core.llm_params import build_completion_kwargs, infer_provider_from_model
+
 logger = logging.getLogger(__name__)
 
 
@@ -222,58 +225,27 @@ Focus on CONTINUITY - the viewer should feel this is one continuous video."""
             # Encode to base64
             image_base64 = base64.b64encode(image_data).decode('utf-8')
 
-            # Try litellm first for better compatibility
-            try:
-                import litellm
-                litellm.drop_params = True
-
-                response = litellm.completion(
-                    model=self.llm_model,
-                    messages=[
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
                         {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:{mime_type};base64,{image_base64}"
-                                    }
-                                }
-                            ]
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{image_base64}"
+                            }
                         }
-                    ],
-                    temperature=0.7,
-                    api_key=self.api_key
-                )
+                    ]
+                }
+            ]
+            kwargs = build_completion_kwargs(
+                infer_provider_from_model(self.llm_model), self.llm_model,
+                messages, {"temperature": 0.7}, api_key=self.api_key
+            )
+            response = chameleon_llm.completion(**kwargs)
 
-                return response.choices[0].message.content.strip()
-
-            except ImportError:
-                # Fall back to direct OpenAI SDK
-                import openai
-                client = openai.OpenAI(api_key=self.api_key)
-
-                response = client.chat.completions.create(
-                    model=self.llm_model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:{mime_type};base64,{image_base64}"
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    temperature=0.7
-                )
-
-                return response.choices[0].message.content.strip()
+            return response.choices[0].message.content.strip()
 
         except Exception as e:
             logger.error(f"OpenAI analysis failed: {e}")
@@ -290,62 +262,29 @@ Focus on CONTINUITY - the viewer should feel this is one continuous video."""
             if media_type == "jpg":
                 media_type = "jpeg"  # Claude uses "jpeg" not "jpg"
 
-            # Try litellm first
-            try:
-                import litellm
-                litellm.drop_params = True
-
-                response = litellm.completion(
-                    model=self.llm_model,
-                    messages=[
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
                         {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": mime_type,
-                                        "data": image_base64
-                                    }
-                                },
-                                {"type": "text", "text": prompt}
-                            ]
-                        }
-                    ],
-                    temperature=0.7,
-                    api_key=self.api_key
-                )
-
-                return response.choices[0].message.content.strip()
-
-            except ImportError:
-                # Fall back to direct Anthropic SDK
-                import anthropic
-                client = anthropic.Anthropic(api_key=self.api_key)
-
-                response = client.messages.create(
-                    model=self.llm_model,
-                    max_tokens=1000,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": mime_type,
-                                        "data": image_base64
-                                    }
-                                },
-                                {"type": "text", "text": prompt}
-                            ]
-                        }
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": mime_type,
+                                "data": image_base64
+                            }
+                        },
+                        {"type": "text", "text": prompt}
                     ]
-                )
+                }
+            ]
+            kwargs = build_completion_kwargs(
+                infer_provider_from_model(self.llm_model), self.llm_model,
+                messages, {"temperature": 0.7}, api_key=self.api_key
+            )
+            response = chameleon_llm.completion(**kwargs)
 
-                return response.content[0].text.strip()
+            return response.choices[0].message.content.strip()
 
         except Exception as e:
             logger.error(f"Anthropic analysis failed: {e}")

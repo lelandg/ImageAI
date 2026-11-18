@@ -155,8 +155,8 @@ def generate_pose_instructions(
     messages = build_pose_messages(action, frames, character_notes)
     model = model or default_chat_model(provider)
     if completion_fn is None:
-        import litellm
-        completion_fn = litellm.completion
+        from core import chameleon_llm
+        completion_fn = chameleon_llm.completion
     kwargs = build_completion_kwargs(
         provider, model, messages, LLMParams(temperature=0.4, max_tokens=2000),
         api_key=api_key, auth_mode=auth_mode,

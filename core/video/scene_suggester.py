@@ -111,7 +111,7 @@ OUTPUT: Return the COMPLETE lyrics with tags inserted on new lines. Include ALL 
             SuggestionResult with tagged text and metadata
         """
         if not self.llm.is_available():
-            logger.warning("LiteLLM not available for scene suggestion")
+            logger.warning("LLM client not available for scene suggestion")
             return SuggestionResult(
                 tagged_text=lyrics,
                 tags_added=0,
@@ -213,9 +213,6 @@ OUTPUT: Return the COMPLETE lyrics with tags inserted on new lines. Include ALL 
         console_callback: Optional[Callable[[str, str], None]] = None
     ) -> Optional[str]:
         """Call LLM and return response text"""
-        if not self.llm.litellm:
-            return None
-
         # Build model identifier
         provider_id = normalize_provider(provider)
         prefix = get_provider_prefix(provider_id)
@@ -250,7 +247,7 @@ OUTPUT: Return the COMPLETE lyrics with tags inserted on new lines. Include ALL 
             if console_callback:
                 console_callback(f"Sending request to {model_id}...", "INFO")
 
-            response = self.llm.litellm.completion(**kwargs)
+            response = self.llm.llm.completion(**kwargs)
 
             if (response and response.choices and len(response.choices) > 0
                 and response.choices[0].message

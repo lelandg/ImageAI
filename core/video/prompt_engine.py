@@ -15,6 +15,7 @@ from enum import Enum
 from jinja2 import Template, Environment, FileSystemLoader
 
 from .project import Scene
+from core import chameleon_llm
 from core.llm_models import get_provider_models, get_provider_prefix
 
 
@@ -61,7 +62,7 @@ class PromptTemplate:
 
 class UnifiedLLMProvider:
     """
-    Unified interface for all LLM providers using LiteLLM.
+    Unified interface for all LLM providers using chameleon_llm.
     Supports OpenAI, Anthropic, Google Gemini, Ollama, and LM Studio.
 
     Note: Provider/model lists now centralized in core.llm_models
@@ -77,26 +78,14 @@ class UnifiedLLMProvider:
         self.config = config or {}
         self.logger = logging.getLogger(__name__)
         
-        # Try to import litellm
-        try:
-            import litellm
-            import os
-            self.litellm = litellm
-            self.litellm.drop_params = True  # Drop unsupported params
-            # Use environment variable instead of deprecated set_verbose
-            os.environ['LITELLM_LOG'] = 'ERROR'  # Only show errors, not verbose info
-        except ImportError:
-            self.logger.warning("LiteLLM not installed. Install with: pip install litellm")
-            self.litellm = None
+        # The vendored client module (always available)
+        self.llm = chameleon_llm
         
         # Set up API keys and endpoints
         self._setup_providers()
     
     def _setup_providers(self):
         """Set up API keys and endpoints for each provider"""
-        if not self.litellm:
-            return
-
         import os
 
         # Log what API keys are available
@@ -136,8 +125,8 @@ class UnifiedLLMProvider:
             self.lmstudio_base = 'http://localhost:1234/v1'
     
     def is_available(self) -> bool:
-        """Check if LiteLLM is available"""
-        return self.litellm is not None
+        """Check if the LLM client is available (always true for chameleon_llm)"""
+        return self.llm is not None
     
     def list_models(self, provider: str) -> List[str]:
         """
@@ -161,6 +150,12 @@ class UnifiedLLMProvider:
         Returns:
             True if the error is transient and retryable
         """
+        if isinstance(error, (chameleon_llm.TimeoutError_,
+                              chameleon_llm.ConnectionError_,
+                              chameleon_llm.ServerError,
+                              chameleon_llm.RateLimitError)):
+            return True
+
         error_str = str(error).lower()
 
         # Anthropic-specific transient errors
@@ -349,7 +344,7 @@ class UnifiedLLMProvider:
             Enhanced prompt text
         """
         if not self.is_available():
-            self.logger.warning("LiteLLM not available, returning original text")
+            self.logger.warning("LLM client not available, returning original text")
             return text
 
         # Check if LLM logging is enabled
@@ -380,7 +375,7 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
         else:
             user_prompt = f"Transform this into an image generation prompt: {text}"
         
-        # Prepare model identifier for LiteLLM
+        # Prepare model identifier (route prefix) for chameleon_llm
         if provider == 'lmstudio':
             # LM Studio uses OpenAI-compatible API
             model_id = model
@@ -392,7 +387,7 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
             api_base = None
         
         try:
-            # Build kwargs for litellm with validated/corralled params
+            # Build kwargs for chameleon_llm with validated/corralled params
             from core.llm_params import validate_params
             param_kwargs, _ = validate_params(
                 provider, model_id,
@@ -425,9 +420,9 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
                 console_callback(f"System: {system_prompt[:200]}..." if len(system_prompt) > 200 else f"System: {system_prompt}", "INFO")
                 console_callback(f"User: {user_prompt}", "INFO")
 
-            # Call LiteLLM with retry for transient errors
+            # Call the LLM with retry for transient errors
             def make_enhance_call():
-                return self.litellm.completion(**kwargs)
+                return self.llm.completion(**kwargs)
 
             response = self._retry_with_backoff(
                 func=make_enhance_call,
@@ -666,7 +661,7 @@ Return one enhanced visual description per line, numbered:
                 kwargs["api_base"] = api_base
 
             self.logger.debug(f"Batch enhancing {len(texts)} texts with max_tokens={max_tokens}")
-            response = self.litellm.completion(**kwargs)
+            response = self.llm.completion(**kwargs)
 
             # Parse the response
             enhanced_text = response.choices[0].message.content.strip()
@@ -916,7 +911,7 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
             self.logger.info(batch_prompt)
             self.logger.info("=== END VIDEO PROMPT REQUEST ===")
 
-            response = self.litellm.completion(**kwargs)
+            response = self.llm.completion(**kwargs)
 
             # Parse the response
             enhanced_text = response.choices[0].message.content.strip()
@@ -979,36 +974,38 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
             from core.llm_models import resolve_model
             model = resolve_model('openai', 'gpt', static_default='gpt-4o')  # vision-capable
 
-        # Prepare kwargs for litellm with validated/corralled params
-        from core.llm_params import infer_provider_from_model, validate_params
+        # Get appropriate API configuration
+        api_key = None
+        if 'gpt' in model.lower() or 'openai' in model.lower():
+            if 'openai_api_key' in self.config:
+                api_key = self.config['openai_api_key']
+        elif 'claude' in model.lower():
+            if 'anthropic_api_key' in self.config:
+                api_key = self.config['anthropic_api_key']
+        elif 'gemini' in model.lower():
+            if 'google_api_key' in self.config:
+                api_key = self.config['google_api_key']
+
+        # Prepare kwargs for chameleon_llm with validated/corralled params. A bare
+        # Claude/Gemini id gets its route prefix here (the package never guesses).
+        import os
+        from core.llm_params import build_completion_kwargs, infer_provider_from_model
         provider = infer_provider_from_model(model)
-        param_kwargs, _ = validate_params(
-            provider, model,
+        has_gemini_key = bool(api_key or os.environ.get('GEMINI_API_KEY')
+                              or os.environ.get('GOOGLE_API_KEY'))
+        kwargs = build_completion_kwargs(
+            provider, model, messages,
             {"temperature": temperature, "max_tokens": max_tokens,
              "reasoning_effort": reasoning_effort,
              "response_format": response_format},
+            api_key=api_key or None,
+            auth_mode=('api-key' if provider == 'gemini' and has_gemini_key else None),
             on_warning=(lambda msg: console_callback(msg, "WARNING"))
             if console_callback else None)
-        kwargs = {
-            'model': model,
-            'messages': messages,
-            **param_kwargs
-        }
-
-        # Get appropriate API configuration
-        if 'gpt' in model.lower() or 'openai' in model.lower():
-            if 'openai_api_key' in self.config:
-                kwargs['api_key'] = self.config['openai_api_key']
-        elif 'claude' in model.lower():
-            if 'anthropic_api_key' in self.config:
-                kwargs['api_key'] = self.config['anthropic_api_key']
-        elif 'gemini' in model.lower():
-            if 'google_api_key' in self.config:
-                kwargs['api_key'] = self.config['google_api_key']
 
         def make_llm_call():
             """Inner function for the actual LLM call (used by retry wrapper)."""
-            response = self.litellm.completion(**kwargs)
+            response = self.llm.completion(**kwargs)
 
             # Extract and return the response
             if response and response.choices:
@@ -1454,8 +1451,8 @@ Return only the enhanced video prompt."""
                 console_callback(f"=== Video Prompt Enhancement ({provider}/{model}) ===", "INFO")
                 console_callback(f"Original: {text[:100]}...", "INFO")
 
-            # Call LiteLLM
-            response = self.llm_provider.litellm.completion(**kwargs)
+            # Call the LLM
+            response = self.llm_provider.llm.completion(**kwargs)
 
             if response and response.choices and len(response.choices) > 0:
                 enhanced = response.choices[0].message.content.strip()

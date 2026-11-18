@@ -359,9 +359,9 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                 self.logger.error("LLM provider not available for Veo batch generation")
                 return None
 
-            import litellm
+            from core import chameleon_llm
 
-            # Prepare the model string (anthropic/gemini need LiteLLM prefixes)
+            # Prepare the model string (anthropic/gemini need route prefixes)
             provider_id = normalize_provider(provider)
             prefix = get_provider_prefix(provider_id)
             model_id = f"{prefix}{model}" if prefix else model
@@ -373,7 +373,7 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                 provider_id, model,
                 {"temperature": 0.7, "max_tokens": 3000}
             )
-            response = litellm.completion(
+            response = chameleon_llm.completion(
                 model=model_id,
                 messages=[
                     {"role": "system", "content": "You are a music video director. Respond only with valid JSON."},
@@ -537,9 +537,9 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                 return None, []
             
             # Call the LLM directly for structured output
-            import litellm
+            from core import chameleon_llm
 
-            # Prepare the model string (anthropic/gemini need LiteLLM prefixes)
+            # Prepare the model string (anthropic/gemini need route prefixes)
             provider_id = normalize_provider(provider)
             prefix = get_provider_prefix(provider_id)
             model_id = f"{prefix}{model}" if prefix else model
@@ -548,7 +548,7 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                 provider_id, model,
                 {"temperature": 0.7, "max_tokens": 4000}
             )
-            response = litellm.completion(
+            response = chameleon_llm.completion(
                 model=model_id,
                 messages=[
                     {"role": "system", "content": "You are a senior film editor. Respond only with valid JSON."},
@@ -617,9 +617,9 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                 self.logger.error("LLM provider not available")
                 return None, []
             
-            import litellm
+            from core import chameleon_llm
 
-            # Prepare the model string (anthropic/gemini need LiteLLM prefixes)
+            # Prepare the model string (anthropic/gemini need route prefixes)
             provider_id = normalize_provider(provider)
             prefix = get_provider_prefix(provider_id)
             model_id = f"{prefix}{model}" if prefix else model
@@ -628,7 +628,7 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                 provider_id, model,
                 {"temperature": 0.7, "max_tokens": 4000}
             )
-            response = litellm.completion(
+            response = chameleon_llm.completion(
                 model=model_id,
                 messages=[
                     {"role": "system", "content": "You are a music video director. Respond only with valid JSON."},

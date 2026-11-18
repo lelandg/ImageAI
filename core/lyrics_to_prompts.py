@@ -7,11 +7,13 @@ Based on the Lyrics-to-Image-Prompt-Guide.md specification.
 
 import json
 import logging
+import os
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
 from core.llm_models import resolve_model
-from core.llm_params import infer_provider_from_model, validate_params
+from core import chameleon_llm
+from core.llm_params import build_completion_kwargs, infer_provider_from_model
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -55,7 +57,7 @@ class LyricsToPromptsGenerator:
     """
     Generates image prompts from lyrics using LLMs.
 
-    Supports multiple LLM providers through LiteLLM:
+    Supports multiple LLM providers through chameleon_llm:
     - OpenAI (GPT-5, GPT-4)
     - Google (Gemini)
     - Anthropic (Claude)
@@ -90,27 +92,13 @@ Rules:
             config: Configuration dictionary with API keys
         """
         self.config = config or {}
-        self.litellm = None
-        self._setup_litellm()
+        self.llm = chameleon_llm
+        logger.info("chameleon_llm initialized for lyrics-to-prompts")
+        console.info("✅ LLM client initialized")
         self._setup_providers()
 
-    def _setup_litellm(self):
-        """Set up LiteLLM if available"""
-        try:
-            import litellm
-            self.litellm = litellm
-            self.litellm.drop_params = True
-            logger.info("LiteLLM initialized for lyrics-to-prompts")
-            console.info("✅ LiteLLM initialized")
-        except ImportError:
-            logger.warning("LiteLLM not installed. Install with: pip install litellm")
-            console.error("❌ LiteLLM not installed. Install with: pip install litellm")
-
     def _setup_providers(self):
-        """Set up API keys as environment variables for LiteLLM"""
-        if not self.litellm:
-            return
-
+        """Set up API keys as environment variables for chameleon_llm"""
         import os
 
         logger.debug(f"Setting up LLM providers with config keys: {list(self.config.keys())}")
@@ -177,11 +165,6 @@ Rules:
         Returns:
             LyricsToPromptsResult with generated prompts (one per input lyric line)
         """
-        if not self.litellm:
-            error = "LiteLLM not available"
-            logger.error(error)
-            return LyricsToPromptsResult(prompts=[], raw_response="", success=False, error=error)
-
         if not lyrics:
             error = "No lyrics provided"
             logger.error(error)
@@ -208,21 +191,28 @@ Rules:
         try:
             # Validate params against what this provider/model actually accepts.
             provider_id = infer_provider_from_model(model)
-            param_kwargs, _ = validate_params(
+            # build_completion_kwargs adds the route prefix a bare Claude or
+            # Gemini id needs (chameleon_llm never guesses a provider).
+            provider_key = self.config.get(
+                {"openai": "openai_api_key", "anthropic": "anthropic_api_key",
+                 "gemini": "google_api_key"}.get(provider_id, "")
+            )
+            kwargs = build_completion_kwargs(
                 provider_id, model,
+                [
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt}
+                ],
                 {"temperature": temperature, "max_tokens": 4096},
+                api_key=provider_key or None,
+                auth_mode=('api-key' if provider_id == 'gemini' and (
+                    provider_key or os.environ.get('GEMINI_API_KEY')
+                    or os.environ.get('GOOGLE_API_KEY')) else None),
                 on_warning=console.warning,
             )
 
             # Call LLM
-            response = self.litellm.completion(
-                model=model,
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt}
-                ],
-                **param_kwargs
-            )
+            response = self.llm.completion(**kwargs)
 
             raw_content = response.choices[0].message.content
             logger.debug(f"Raw LLM response: {raw_content[:200]}...")

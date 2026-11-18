@@ -99,11 +99,11 @@ class PromptEnhancerLLM:
             self.logger.debug(f"Original prompt: {prompt}")
             self.logger.debug(f"Enhancement level: {enhancement_level}, style: {style_preset}")
 
-            # Check if we're using litellm or need direct API calls
-            if hasattr(self.llm_provider, 'litellm') and self.llm_provider.litellm:
-                self.logger.info("Using litellm for enhancement")
-                # Use litellm for the call
-                response = self._call_with_litellm(
+            # Check if the provider exposes the LLM client or we need the fallback
+            if hasattr(self.llm_provider, 'llm') and self.llm_provider.llm:
+                self.logger.info("Using chameleon_llm for enhancement")
+                # Use chameleon_llm for the call
+                response = self._call_with_llm(
                     actual_llm_provider, model, user_prompt, temperature, max_tokens
                 )
             elif hasattr(self.llm_provider, 'enhance_prompt'):
@@ -140,10 +140,10 @@ class PromptEnhancerLLM:
             self.logger.error(f"Failed to enhance prompt with LLM: {e}")
             return self._create_fallback_response(prompt, provider, enhancement_level)
 
-    def _call_with_litellm(self, provider: str, model: Optional[str],
+    def _call_with_llm(self, provider: str, model: Optional[str],
                           user_prompt: str, temperature: float, max_tokens: int = 4000) -> Dict[str, Any]:
         """
-        Call LLM using litellm library.
+        Call LLM using the chameleon_llm client.
 
         Args:
             provider: LLM provider name
@@ -165,7 +165,7 @@ class PromptEnhancerLLM:
         else:
             model_id = model or resolve_model('openai', 'gpt-mini', static_default='gpt-4o-mini')
 
-        # Add LiteLLM provider prefix if needed
+        # Add the chameleon_llm route prefix if needed
         provider_prefixes = {
             'google': 'gemini/',
             'anthropic': 'anthropic/',
@@ -221,12 +221,12 @@ class PromptEnhancerLLM:
         self.logger.info(f"  User prompt: {clean_user}")
         console.info(f"  User prompt: {clean_user}")
 
-        # Call litellm
+        # Call the LLM
         try:
-            response = self.llm_provider.litellm.completion(**kwargs)
+            response = self.llm_provider.llm.completion(**kwargs)
         except Exception as e:
-            self.logger.error(f"LiteLLM call failed: {e}")
-            console.error(f"LiteLLM call failed: {e}")
+            self.logger.error(f"LLM call failed: {e}")
+            console.error(f"LLM call failed: {e}")
             raise
 
         # Always log response for debugging

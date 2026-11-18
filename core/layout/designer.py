@@ -309,12 +309,12 @@ def run_design(messages: List[Dict], page_px: Tuple[int, int],
 def run_completion(config, provider: str, model: str, messages: List[Dict],
                    temperature: float = 0.4) -> str:
     """Real LLM call (mirrors TextGenerationWorker). Not unit-tested (network)."""
-    from gui.llm_utils import LiteLLMHandler
+    from gui.llm_utils import LLMHandler
     from core.llm_models import get_provider_models, get_provider_prefix
     from core.llm_params import validate_params
-    ok, litellm = LiteLLMHandler.setup_litellm(enable_console_logging=True)
-    if not ok or litellm is None:
-        raise RuntimeError("Failed to initialize LiteLLM")
+    ok, llm = LLMHandler.setup_llm(enable_console_logging=True)
+    if not ok or llm is None:
+        raise RuntimeError("Failed to initialize the LLM client")
     provider = provider or (config.get_layout_llm_provider() if config else "google")
     pid_api, pid = resolve_provider_ids(provider)
     api_key = None
@@ -336,7 +336,7 @@ def run_completion(config, provider: str, model: str, messages: List[Dict],
     kwargs = {"model": full_model, "messages": messages, **param_kwargs}
     if api_key:
         kwargs["api_key"] = api_key
-    resp = litellm.completion(**kwargs)
+    resp = llm.completion(**kwargs)
     if not resp or not resp.choices:
         raise RuntimeError("Empty LLM response")
     content = resp.choices[0].message.content or ""
