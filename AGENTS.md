@@ -59,7 +59,8 @@ is in `core/`, GUI in `gui/`, CLI in `cli/`, provider backends in `providers/`.
 
 - Dialogs that call LLMs get a status console at the bottom (splitter),
   real-time progress, Ctrl+Enter = primary action, Escape = close.
-- Use the vendored `core/chameleon_llm` for chat calls; build kwargs via `core.llm_params.build_completion_kwargs`.
+- Use the vendored `core/chameleon_llm` for chat calls; build kwargs via
+  `core.llm_params.build_completion_kwargs`.
 - Conventional Commits (`feat:`, `fix:`, `docs:`, …), subject <72 chars.
 - Plan files in `Plans/` / `Notes/` track progress; update them as tasks start
   and finish. If interrupted, read the plan file first to resume.

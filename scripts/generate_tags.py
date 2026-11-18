@@ -14,7 +14,8 @@ Options:
     --test          Test mode: only process first 10 items from each category
     --limit N       Process only N items from each category (default: all)
     --provider      LLM provider to use (default: google, options: google, openai)
-    --model         Model to use (default: gemini-2.0-flash-exp for google)
+    --model         Model to use (default: gemini/gemini-2.0-flash-exp for google;
+                    a bare id gets the provider's route automatically)
 """
 
 import json
@@ -39,6 +40,7 @@ except ImportError:
 from core import chameleon_llm
 from core.prompt_data_loader import PromptDataLoader
 from core.config import ConfigManager
+from core.llm_params import normalize_provider, strip_route_prefix
 
 # Setup logging to both file and console
 log_filename = f"generate_tags_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -73,6 +75,27 @@ if hasattr(signal, 'SIGTERM'):
     signal.signal(signal.SIGTERM, signal_handler)
 
 
+def route_model(provider: str, model: str, auth_mode: Optional[str] = None) -> str:
+    """Give a bare model id the route chameleon_llm needs for ``provider``.
+
+    The package never guesses a provider from a model name, so a bare
+    ``--model`` override would otherwise go to OpenAI. An id that already
+    carries a route prefix, and any OpenAI id, is returned unchanged.
+    """
+    if strip_route_prefix(model) != model:
+        return model
+    provider_id = normalize_provider(provider)
+    if provider_id == "gemini":
+        if (auth_mode or "").strip().lower() == "gcloud":
+            return f"vertex_ai/{model}"
+        return f"gemini/{model}"
+    if provider_id == "anthropic":
+        return f"anthropic/{model}"
+    if provider_id == "ollama":
+        return f"ollama/{model}"
+    return model
+
+
 class TagGenerator:
     """Generates semantic tags and metadata for prompt builder items."""
 
@@ -88,7 +111,7 @@ class TagGenerator:
 
         # Set default models by provider
         if model:
-            self.model = model
+            self.model = route_model(provider, model, self.config.get_auth_mode("google"))
         elif provider == "google":
             # Check auth mode to determine which endpoint to use
             auth_mode = self.config.get_auth_mode("google")
