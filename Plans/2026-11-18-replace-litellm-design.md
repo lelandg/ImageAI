@@ -537,10 +537,18 @@ Changes after the independent review of those fixes:
   mode and project on the object and pass them with every request
   (`api_key`, `auth_mode`, `vertex_project`). Exporting the key let one
   object change another's route: a second object in `gcloud` mode removed
-  the variable a first object in API-key mode relied on. An object with no
-  Google key of its own still uses `gemini/` when the user set
-  `GEMINI_API_KEY` or `GOOGLE_API_KEY`, else `vertex_ai/`. The OpenAI and
+  the variable a first object in API-key mode relied on. The OpenAI and
   Anthropic keys are still exported as before.
+- **A missing Google key never moves a request to Vertex.** These objects
+  always pass their auth mode: `api-key` is the `gemini/` route, and without
+  a key the request fails with the package's `AuthError`; only `gcloud` uses
+  `vertex_ai/`. In API-key mode a key the config dict lacks is read once per
+  object through `ConfigManager.get_api_key("google")` (`google_credentials`
+  in `core/llm_params.py`), because a key kept in the keyring is in no config
+  dict. That lookup is never made in `gcloud` mode, where it would return an
+  access token. The video workspace's single-scene Enhance built its provider
+  config from top-level config entries and found no key for keyring storage;
+  it now uses `get_api_key` like the other builders.
 - **An explicit Google auth mode decides the route, also over a prefix.**
   With `auth_mode` given, `build_completion_kwargs` sends `gemini/x` on
   `vertex_ai/` in `gcloud` mode (no key, with the project) and `vertex_ai/x`
