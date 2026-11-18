@@ -19,7 +19,8 @@ from core import chameleon_llm
 from core.llm_models import get_provider_models
 # _route_kwargs: chameleon_llm.completion kwargs from a provider alias
 # ("google", "claude", "LM Studio"); one shared copy lives in core.llm_params.
-from core.llm_params import normalize_provider, saved_vertex_project
+from core.llm_params import (apply_google_credential, google_auth_settings,
+                             normalize_provider)
 from core.llm_params import route_completion_kwargs as _route_kwargs
 
 
@@ -118,10 +119,19 @@ class UnifiedLLMProvider:
         else:
             self.logger.debug("No Anthropic API key available")
 
-        # Google Gemini
-        if 'google_api_key' in self.config and self.config['google_api_key']:
-            os.environ['GEMINI_API_KEY'] = self.config['google_api_key']
+        # Google Gemini. With Google Cloud login ("gcloud" auth mode) the
+        # configured Google value is an OAuth access token, not an API key:
+        # it is never exported or sent, and Gemini models take vertex_ai/.
+        self.google_auth_mode, self.vertex_project = google_auth_settings(self.config)
+        # Passed to the kwargs builder: 'gcloud' forces vertex_ai/; None keeps
+        # the API-key-mode rule (gemini/ when a key is configured).
+        self.gemini_auth_mode = ('gcloud' if self.google_auth_mode == 'gcloud'
+                                 else None)
+        if apply_google_credential(self.config.get('google_api_key'),
+                                   self.google_auth_mode):
             self.logger.info("Google Gemini API key configured")
+        elif self.gemini_auth_mode:
+            self.logger.info("Google Cloud login configured (Vertex AI)")
         else:
             self.logger.debug("No Google API key available")
         
@@ -137,10 +147,6 @@ class UnifiedLLMProvider:
         else:
             self.lmstudio_base = 'http://localhost:1234/v1'
 
-        # Google Cloud project saved in Settings, when the config carries it
-        # (gcloud_project_id); sent on the vertex_ai route only.
-        self.vertex_project = saved_vertex_project(self.config)
-
     def route_kwargs(self, provider: str, model: str,
                      messages: List[Dict[str, Any]],
                      params: Optional[Dict[str, Any]] = None,
@@ -152,12 +158,14 @@ class UnifiedLLMProvider:
         The LM Studio endpoint goes to an LM Studio request only (a cloud or
         Ollama request never receives it); a Gemini model takes ``gemini/``
         when a key is configured and ``vertex_ai/`` (Google Cloud login, with
-        the saved project) otherwise.
+        the saved project) otherwise, and always ``vertex_ai/`` when Settings
+        select Google Cloud login.
         """
         api_base = (self.lmstudio_base
                     if normalize_provider(provider) == 'lmstudio' else None)
         return _route_kwargs(provider, model, messages, params,
                              api_base=api_base,
+                             auth_mode=self.gemini_auth_mode,
                              vertex_project=self.vertex_project,
                              on_warning=on_warning)
 
@@ -432,6 +440,7 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
                 ],
                 {"temperature": temperature, "max_tokens": max_tokens},
                 api_base=api_base,
+                auth_mode=self.gemini_auth_mode,
                 vertex_project=self.vertex_project,
                 on_warning=(lambda msg: console_callback(msg, "WARNING"))
                 if console_callback else None)
@@ -680,7 +689,8 @@ Return one enhanced visual description per line, numbered:
                 ],
                 {"temperature": temperature, "max_tokens": max_tokens,
                  "timeout": 120},  # 2 minute timeout to prevent hanging
-                api_base=api_base, vertex_project=self.vertex_project)
+                api_base=api_base, auth_mode=self.gemini_auth_mode,
+                vertex_project=self.vertex_project)
 
             self.logger.debug(f"Batch enhancing {len(texts)} texts with max_tokens={max_tokens}")
             response = self.llm.completion(**kwargs)
@@ -909,7 +919,8 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
                 ],
                 {"temperature": temperature, "max_tokens": max_tokens,
                  "timeout": 120},
-                api_base=api_base, vertex_project=self.vertex_project)
+                api_base=api_base, auth_mode=self.gemini_auth_mode,
+                vertex_project=self.vertex_project)
 
             if console_callback:
                 console_callback(f"🎬 Batch enhancing {len(texts)} prompts for video in ONE API call...", "INFO")
@@ -994,6 +1005,8 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
         provider_id = infer_provider_from_model(model)
         key_name = _CLOUD_KEY_NAMES.get(provider_id)
         api_key = (self.config.get(key_name) or None) if key_name else None
+        if provider_id == "gemini" and self.gemini_auth_mode:
+            api_key = None  # Google Cloud login: the value is an access token
 
         # Prepare kwargs for chameleon_llm with validated/corralled params. A bare
         # Claude/Gemini id gets its route prefix here (the package never guesses).
@@ -1003,6 +1016,7 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
              "reasoning_effort": reasoning_effort,
              "response_format": response_format},
             api_key=api_key,
+            auth_mode=self.gemini_auth_mode,
             vertex_project=self.vertex_project,
             on_warning=(lambda msg: console_callback(msg, "WARNING"))
             if console_callback else None)
@@ -1440,6 +1454,7 @@ Return only the enhanced video prompt."""
                 ],
                 {"temperature": 0.7, "max_tokens": 300},
                 api_base=api_base,
+                auth_mode=self.llm_provider.gemini_auth_mode,
                 vertex_project=self.llm_provider.vertex_project)
 
             # Log to console if callback provided

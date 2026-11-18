@@ -172,16 +172,23 @@ class PromptEnhancerLLM:
         # endpoint) and per-model params (max_tokens vs max_completion_tokens,
         # clamping, drops) are built centrally. API keys reach the adapters
         # through the environment UnifiedLLMProvider configured.
-        kwargs = route_completion_kwargs(
-            provider_id, model_id,
-            [
-                {"role": "system", "content": self.enhancer.SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt}
-            ],
-            {"temperature": temperature, "max_tokens": max_tokens},
-            api_base=(getattr(self.llm_provider, 'lmstudio_base', None)
-                      if provider_id == 'lmstudio' else None),
-        )
+        messages = [
+            {"role": "system", "content": self.enhancer.SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}
+        ]
+        params = {"temperature": temperature, "max_tokens": max_tokens}
+        builder = getattr(self.llm_provider, 'route_kwargs', None)
+        if callable(builder):
+            # UnifiedLLMProvider applies its own settings: the LM Studio
+            # endpoint, and Google Cloud login (vertex_ai/ with the saved
+            # project, never an access token as an API key).
+            kwargs = builder(provider_id, model_id, messages, params)
+        else:
+            kwargs = route_completion_kwargs(
+                provider_id, model_id, messages, params,
+                api_base=(getattr(self.llm_provider, 'lmstudio_base', None)
+                          if provider_id == 'lmstudio' else None),
+            )
         model_id = kwargs["model"]
 
         # Check if LLM logging is enabled

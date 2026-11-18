@@ -13,7 +13,8 @@ from dataclasses import dataclass, asdict
 
 from core.llm_models import resolve_model
 from core import chameleon_llm
-from core.llm_params import build_completion_kwargs, infer_provider_from_model
+from core.llm_params import (apply_google_credential, build_completion_kwargs,
+                             google_auth_settings, infer_provider_from_model)
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -119,11 +120,17 @@ Rules:
         else:
             logger.debug("No Anthropic API key available")
 
-        # Google Gemini
-        if 'google_api_key' in self.config and self.config['google_api_key']:
-            os.environ['GEMINI_API_KEY'] = self.config['google_api_key']
+        # Google Gemini. With Google Cloud login ("gcloud" auth mode) the
+        # configured Google value is an OAuth access token, not an API key:
+        # it is never exported or sent, and Gemini models take vertex_ai/.
+        self.google_auth_mode, self.vertex_project = google_auth_settings(self.config)
+        if apply_google_credential(self.config.get('google_api_key'),
+                                   self.google_auth_mode):
             logger.info("Google Gemini API key configured")
             console.info("✅ Google Gemini API key configured")
+        elif self.google_auth_mode == 'gcloud':
+            logger.info("Google Cloud login configured (Vertex AI)")
+            console.info("✅ Google Cloud login configured (Vertex AI)")
         else:
             logger.debug("No Google API key available")
 
@@ -198,6 +205,9 @@ Rules:
                 {"openai": "openai_api_key", "anthropic": "anthropic_api_key",
                  "gemini": "google_api_key"}.get(provider_id, "")
             )
+            gcloud = provider_id == 'gemini' and self.google_auth_mode == 'gcloud'
+            if gcloud:
+                provider_key = None  # an access token, not a Gemini API key
             kwargs = build_completion_kwargs(
                 provider_id, model,
                 [
@@ -207,9 +217,11 @@ Rules:
                 {"temperature": temperature, "max_tokens": 4096},
                 api_key=provider_key or None,
                 api_base=self.lmstudio_base if provider_id == 'lmstudio' else None,
-                auth_mode=('api-key' if provider_id == 'gemini' and (
-                    provider_key or os.environ.get('GEMINI_API_KEY')
-                    or os.environ.get('GOOGLE_API_KEY')) else None),
+                auth_mode=('gcloud' if gcloud else
+                           'api-key' if provider_id == 'gemini' and (
+                               provider_key or os.environ.get('GEMINI_API_KEY')
+                               or os.environ.get('GOOGLE_API_KEY')) else None),
+                vertex_project=self.vertex_project,
                 on_warning=console.warning,
             )
 

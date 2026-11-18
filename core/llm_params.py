@@ -619,6 +619,90 @@ def saved_vertex_project(config: Any) -> Optional[str]:
     return None
 
 
+_GCLOUD_AUTH_MODES = frozenset({"gcloud", "adc", "google cloud account"})
+
+
+def _normalize_google_auth_mode(value: Any) -> Optional[str]:
+    """'gcloud', 'api-key', or None when ``value`` is not a usable setting."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return "gcloud" if value.strip().lower() in _GCLOUD_AUTH_MODES else "api-key"
+
+
+def _saved_settings() -> Any:
+    """The app's saved Settings (a ``ConfigManager``), or None when they
+    cannot be read. A separate function so tests can replace it."""
+    try:
+        from core.config import ConfigManager
+        return ConfigManager()
+    except Exception as exc:  # never let a settings problem break a request
+        logger.debug(f"saved Settings unavailable for Google auth lookup: {exc}")
+        return None
+
+
+def google_auth_settings(config: Any = None) -> Tuple[str, Optional[str]]:
+    """``(auth_mode, project)`` for Google: 'gcloud' (Google Cloud login) or
+    'api-key', and the Google Cloud project saved in Settings.
+
+    ``config`` is whatever the caller holds: a ``ConfigManager`` or a
+    provider-config dict. Values it carries (``auth_mode``,
+    ``gcloud_project_id``) win. The provider-config dicts the GUI builds carry
+    neither, so anything missing is read from the saved Settings.
+    """
+    mode = None
+    getter = getattr(config, "get", None)
+    if callable(getter):
+        try:
+            mode = _normalize_google_auth_mode(getter("auth_mode"))
+        except Exception:
+            mode = None
+    project = saved_vertex_project(config)
+    if mode is None or project is None:
+        saved = _saved_settings()
+        if saved is not None:
+            if mode is None:
+                try:
+                    mode = _normalize_google_auth_mode(saved.get("auth_mode"))
+                except Exception:
+                    mode = None
+            if project is None:
+                project = saved_vertex_project(saved)
+    return mode or "api-key", project
+
+
+# GEMINI_API_KEY values this process exported from a provider config. Kept so
+# that switching to Google Cloud login can take back exactly what was exported
+# and leave a variable the user set alone.
+_EXPORTED_GEMINI_KEYS: set = set()
+
+
+def _forget_exported_gemini_keys() -> None:
+    """Forget which values were exported (for tests)."""
+    _EXPORTED_GEMINI_KEYS.clear()
+
+
+def apply_google_credential(value: Optional[str], auth_mode: str) -> bool:
+    """Apply the Google value of a provider config to ``GEMINI_API_KEY``.
+
+    'api-key' mode: export it, as before; returns True when a key was set.
+    'gcloud' mode: the value is an OAuth access token (that is what
+    ``ConfigManager.get_api_key("google")`` answers in that mode), not a
+    Gemini API key. It is never exported, and a ``GEMINI_API_KEY`` this
+    process exported earlier (or one equal to the token) is removed so that
+    no stale key steers a later request onto the ``gemini/`` route.
+    """
+    if auth_mode == "gcloud":
+        current = os.environ.get("GEMINI_API_KEY")
+        if current and (current in _EXPORTED_GEMINI_KEYS or current == value):
+            del os.environ["GEMINI_API_KEY"]
+        return False
+    if value:
+        os.environ["GEMINI_API_KEY"] = value
+        _EXPORTED_GEMINI_KEYS.add(value)
+        return True
+    return False
+
+
 def route_completion_kwargs(
     provider: str,
     model: str,
