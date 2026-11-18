@@ -136,42 +136,67 @@ def _to_completion(route: Route, resp) -> Completion:
         raw=resp)
 
 
+# Sampling parameters and the installed SDK.
+#
+# With anthropic SDK 0.x, Messages.create() names temperature/top_p/top_k and
+# they are passed through. With anthropic SDK 2.x, create() no longer names
+# them, and the Messages API version that SDK speaks accepts no sampling
+# parameter for any model (sending one in extra_body is answered with
+# "400 ... Extra inputs are not permitted"). So a sampling parameter the
+# installed create() does not name is dropped, never sent.
+_SAMPLING_PARAMS = ("temperature", "top_p", "top_k")
+
 # messages-resource class -> names its create() accepts (None = any name).
 _CREATE_PARAMS: "weakref.WeakKeyDictionary[type, frozenset | None]" = (
     weakref.WeakKeyDictionary())
 
+# Sampling parameter names already reported at WARNING in this process.
+_WARNED_DROPS: set[str] = set()
 
-def _create_params(messages_resource) -> frozenset | None:
-    """Parameter names of ``messages.create`` in the installed SDK (cached per
-    class). ``None`` means it takes ``**kwargs`` or cannot be inspected."""
-    cls = type(messages_resource)
-    if cls not in _CREATE_PARAMS:
+
+def _reset_drop_warnings() -> None:
+    """Forget which drops were reported (for tests)."""
+    _WARNED_DROPS.clear()
+
+
+def _create_params(resource_cls: type) -> frozenset | None:
+    """Parameter names of ``resource_cls.create`` (cached per class). ``None``
+    means it takes ``**kwargs`` or cannot be inspected."""
+    if resource_cls not in _CREATE_PARAMS:
         try:
-            params = inspect.signature(messages_resource.create).parameters
-        except (TypeError, ValueError):
+            params = inspect.signature(resource_cls.create).parameters
+        except (AttributeError, TypeError, ValueError):
             names = None
         else:
             names = (None if any(p.kind is p.VAR_KEYWORD for p in params.values())
                      else frozenset(params))
-        _CREATE_PARAMS[cls] = names
-    return _CREATE_PARAMS[cls]
+        _CREATE_PARAMS[resource_cls] = names
+    return _CREATE_PARAMS[resource_cls]
+
+
+def sdk_accepts(name: str) -> bool:
+    """Whether the installed anthropic SDK's ``messages.create`` takes ``name``."""
+    from anthropic.resources.messages import Messages
+    params = _create_params(Messages)
+    return params is None or name in params
 
 
 def _fit_to_sdk(request: dict, messages_resource) -> dict:
-    """Move request fields the installed SDK's create() does not name into
-    ``extra_body`` so they still reach the API (anthropic 2.x dropped
-    temperature/top_p/top_k from the signature; the API decides per model)."""
-    accepted = _create_params(messages_resource)
+    """Drop the sampling parameters the installed SDK's create() does not name
+    (see the note above). One WARNING per name per process, then DEBUG."""
+    accepted = _create_params(type(messages_resource))
     if accepted is None:
         return request
-    unnamed = {k: v for k, v in request.items() if k not in accepted}
-    if not unnamed:
+    dropped = [k for k in _SAMPLING_PARAMS if k in request and k not in accepted]
+    if not dropped:
         return request
-    fitted = {k: v for k, v in request.items() if k in accepted}
-    fitted["extra_body"] = {**(request.get("extra_body") or {}), **unnamed}
-    logger.debug("chameleon_llm anthropic: sending %s in extra_body (not named by "
-                 "this SDK's messages.create)", ", ".join(sorted(unnamed)))
-    return fitted
+    for name in dropped:
+        level = logging.DEBUG if name in _WARNED_DROPS else logging.WARNING
+        _WARNED_DROPS.add(name)
+        logger.log(level, "chameleon_llm: dropping parameter '%s': the installed "
+                   "anthropic SDK no longer accepts this sampling parameter, so "
+                   "it is not sent", name)
+    return {k: v for k, v in request.items() if k not in dropped}
 
 
 def complete(route: Route, messages: list[dict], *, api_key: str | None,

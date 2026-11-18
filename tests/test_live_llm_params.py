@@ -88,11 +88,28 @@ def _curated(provider, wanted):
 
 
 def _older_claude():
-    """A Claude that takes temperature in [0, 1] (clamps 1.5 to 1.0)."""
+    """A Claude that takes temperature in [0, 1] (clamps 1.5 to 1.0).
+
+    Prefers the current resolved ``haiku`` (curated dated ids get retired),
+    then falls back to the first curated model that fits.
+    """
     def wanted(model_id):
         params, _ = validate_params("anthropic", model_id, {"temperature": 1.5})
         return params.get("temperature") == 1.0
+    current = resolve_model("anthropic", "haiku")
+    if current and wanted(current):
+        return current
     return _curated("anthropic", wanted)
+
+
+def _sdk_sends(*names):
+    """Skip unless the installed anthropic SDK sends every named sampling
+    parameter. With anthropic SDK 2.x the adapter drops them before the
+    request, so there is nothing for the API to reject."""
+    from core.chameleon_llm.anthropic_adapter import sdk_accepts
+    if not all(sdk_accepts(n) for n in names):
+        pytest.skip("installed anthropic SDK drops sampling parameters before "
+                    "the request")
 
 
 def _classic_openai():
@@ -107,20 +124,23 @@ def _classic_openai():
 
 class TestAnthropicClaude5:
     # The "raw" tests pass sampling params straight to completion(). With
-    # anthropic SDK 2.x the adapter sends them in extra_body, so they reach
-    # the API and the API's 400 is what these tests assert.
+    # anthropic SDK 0.x they reach the API, whose 400 these tests assert. With
+    # SDK 2.x the Messages API accepts no sampling parameter for any model and
+    # the adapter drops them before the request, so those tests skip.
     @staticmethod
     def model():
         return resolve_model("anthropic", "sonnet")
 
     def test_raw_temperature_rejected(self, keys):
         """Documents the bug from imageai_current.log: temperature -> 400."""
+        _sdk_sends("temperature")
         api_key = _need(keys, "anthropic")
         with pytest.raises(chameleon_llm.BadRequestError, match="temperature"):
             _raw_call(model=f"anthropic/{self.model()}", messages=_MSGS,
                       temperature=0.7, max_tokens=32, api_key=api_key)
 
     def test_raw_top_p_rejected(self, keys):
+        _sdk_sends("top_p")
         api_key = _need(keys, "anthropic")
         with pytest.raises(chameleon_llm.BadRequestError, match="top_p"):
             _raw_call(model=f"anthropic/{self.model()}", messages=_MSGS,
@@ -137,6 +157,9 @@ class TestAnthropicClaude5:
 # --- Anthropic: older Claude, temperature range 0..1 -------------------------
 
 class TestAnthropicOlder:
+    # The success tests run under both SDK generations: with SDK 2.x the
+    # sampling parameters are dropped and the call must still succeed. Only
+    # the "rejected_raw" tests need an SDK that sends them.
     def test_temperature_upper_bound_ok(self, keys):
         api_key = _need(keys, "anthropic")
         response = _raw_call(model=f"anthropic/{_older_claude()}", messages=_MSGS,
@@ -144,6 +167,7 @@ class TestAnthropicOlder:
         assert _content(response)
 
     def test_temperature_above_one_rejected_raw(self, keys):
+        _sdk_sends("temperature")
         api_key = _need(keys, "anthropic")
         with pytest.raises(chameleon_llm.BadRequestError, match="temperature"):
             _raw_call(model=f"anthropic/{_older_claude()}", messages=_MSGS,
@@ -160,6 +184,7 @@ class TestAnthropicOlder:
         assert _content(response)
 
     def test_temp_and_top_p_together_rejected_raw(self, keys):
+        _sdk_sends("temperature", "top_p")
         api_key = _need(keys, "anthropic")
         with pytest.raises(chameleon_llm.BadRequestError):
             _raw_call(model=f"anthropic/{_older_claude()}", messages=_MSGS,

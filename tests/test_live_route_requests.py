@@ -62,3 +62,30 @@ def test_json_mode_passes_response_format():
     kwargs = _build("anthropic", {"max_tokens": 64,
                                   "response_format": {"type": "json_object"}})
     assert kwargs["response_format"] == {"type": "json_object"}
+
+
+# --- Last patch: Anthropic helpers of the live file ---------------------------
+
+def test_older_claude_prefers_the_resolved_haiku(monkeypatch):
+    monkeypatch.setattr(live, "resolve_model",
+                        lambda provider, family, **_: "claude-haiku-test-current")
+    assert live._older_claude() == "claude-haiku-test-current"
+
+
+def test_older_claude_falls_back_when_haiku_takes_no_temperature(monkeypatch):
+    # a Claude 5-line id: its rules drop temperature, so it is not "older"
+    monkeypatch.setattr(live, "resolve_model",
+                        lambda provider, family, **_: "claude-sonnet-5-test")
+    picked = live._older_claude()
+    assert picked != "claude-sonnet-5-test"
+    params, _ = live.validate_params("anthropic", picked, {"temperature": 1.5})
+    assert params.get("temperature") == 1.0
+
+
+def test_sdk_sends_skips_exactly_when_the_sdk_drops_the_param():
+    from core.chameleon_llm.anthropic_adapter import sdk_accepts
+    if sdk_accepts("temperature"):
+        live._sdk_sends("temperature")  # must not skip
+    else:
+        with pytest.raises(pytest.skip.Exception, match="drops sampling parameters"):
+            live._sdk_sends("temperature")

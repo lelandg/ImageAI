@@ -233,8 +233,16 @@ def test_response_model_falls_back_to_requested(fake_anthropic):
 
 
 # --- L1: sampling params the installed SDK's create() does not name ----------
-# anthropic 2.x dropped temperature/top_p/top_k from Messages.create(); the
-# adapter then sends them in extra_body so they still reach the API.
+# anthropic 2.x dropped temperature/top_p/top_k from Messages.create(), and the
+# Messages API it speaks rejects them for every model ("Extra inputs are not
+# permitted"), so the adapter drops them; with 0.x they are passed through.
+
+@pytest.fixture(autouse=True)
+def _fresh_drop_warnings():
+    anthropic_adapter._reset_drop_warnings()
+    yield
+    anthropic_adapter._reset_drop_warnings()
+
 
 def _patch_client(monkeypatch, messages_cls):
     import anthropic
@@ -276,24 +284,59 @@ class _OldSDKMessages:  # shaped like anthropic 0.x: sampling params named
         return _reply()
 
 
-def test_sampling_params_go_to_extra_body_when_create_lacks_them(monkeypatch):
+def _drop_warnings(caplog):
+    return [r.getMessage() for r in caplog.records
+            if r.name == "chameleon_llm" and r.levelno == logging.WARNING]
+
+
+def test_sampling_params_dropped_when_create_lacks_them(monkeypatch, caplog):
     calls = _patch_client(monkeypatch, _NewSDKMessages)
-    resp = call(params={"temperature": 0.3, "top_k": 5, "max_tokens": 9,
-                        "stop": "END"})
-    assert calls[0]["extra_body"] == {"temperature": 0.3, "top_k": 5}
-    assert calls[0]["stop_sequences"] == ["END"]
-    assert calls[0]["max_tokens"] == 9
+    with caplog.at_level(logging.DEBUG, logger="chameleon_llm"):
+        resp = call(params={"temperature": 0.3, "top_k": 5, "max_tokens": 9,
+                            "stop": "END"})
+    sent = calls[0]
+    assert "temperature" not in sent and "top_k" not in sent
+    assert sent["extra_body"] is None  # never smuggled into the body
+    assert sent["stop_sequences"] == ["END"]
+    assert sent["max_tokens"] == 9
     assert resp.choices[0].message.content == "hello"
+    warnings = _drop_warnings(caplog)
+    assert len(warnings) == 2
+    assert any("'temperature'" in w for w in warnings)
+    assert any("'top_k'" in w for w in warnings)
+    assert all("no longer accepts" in w for w in warnings)
 
 
-def test_sampling_params_passed_as_arguments_when_create_names_them(monkeypatch):
+def test_drop_warns_once_per_name_then_debug(monkeypatch, caplog):
+    _patch_client(monkeypatch, _NewSDKMessages)
+    with caplog.at_level(logging.DEBUG, logger="chameleon_llm"):
+        call(params={"temperature": 0.3})
+        call(params={"temperature": 0.4})
+    assert len(_drop_warnings(caplog)) == 1
+    debug = [r.getMessage() for r in caplog.records
+             if r.name == "chameleon_llm" and r.levelno == logging.DEBUG
+             and "'temperature'" in r.getMessage()]
+    assert len(debug) == 1
+
+
+def test_sampling_params_passed_as_arguments_when_create_names_them(monkeypatch, caplog):
     calls = _patch_client(monkeypatch, _OldSDKMessages)
-    call(params={"temperature": 0.3, "top_p": 0.9})
+    with caplog.at_level(logging.DEBUG, logger="chameleon_llm"):
+        call(params={"temperature": 0.3, "top_p": 0.9})
     assert calls[0]["temperature"] == 0.3 and calls[0]["top_p"] == 0.9
     assert calls[0]["extra_body"] is None
+    assert _drop_warnings(caplog) == []
 
 
 def test_no_extra_body_without_sampling_params(monkeypatch):
     calls = _patch_client(monkeypatch, _NewSDKMessages)
     call(params={"max_tokens": 9})
     assert calls[0]["extra_body"] is None
+
+
+def test_sdk_accepts_matches_the_installed_sdk():
+    import inspect
+    from anthropic.resources.messages import Messages
+    named = inspect.signature(Messages.create).parameters
+    for name in ("temperature", "top_p", "top_k"):
+        assert anthropic_adapter.sdk_accepts(name) is (name in named)

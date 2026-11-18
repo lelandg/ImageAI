@@ -48,10 +48,11 @@ def test_anthropic_request_binds_to_real_messages_create():
          "response_format": {"type": "json_object"}, "stop": ["END"]})
     fitted = anthropic_adapter._fit_to_sdk(request, client.messages)
     _bind(client.messages.create, fitted)
-    sent = {**fitted, **(fitted.get("extra_body") or {})}
-    for name in ("temperature", "top_p", "top_k", "max_tokens", "stop_sequences",
-                 "system", "messages", "model"):
-        assert name in sent, name
+    assert "extra_body" not in fitted
+    for name in ("max_tokens", "stop_sequences", "system", "messages", "model"):
+        assert name in fitted, name
+    for name in ("temperature", "top_p", "top_k"):  # sent only if the SDK names it
+        assert (name in fitted) is anthropic_adapter.sdk_accepts(name), name
 
 
 def test_openai_chat_request_binds_to_real_create():
