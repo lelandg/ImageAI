@@ -68,3 +68,53 @@ def test_rate_limit_is_reported_not_raised(widgets, fake_config, fake_completion
     assert error_logged()
     assert dialog.preview_edit.toPlainText() == ""
     assert dialog.generate_btn.isEnabled() and not dialog.apply_btn.isEnabled()
+
+
+# --- the Google Cloud project saved in Settings reaches Vertex calls ----------
+
+def _dialog_with_project(widgets, config, provider, model, auth_mode, project):
+    values = {"auth_mode": auth_mode, "gcloud_project_id": project}
+    config.get.side_effect = lambda key, default=None: values.get(key, default)
+    block = TextBlock(id="b1", rect=(0, 0, 100, 50), text="hello")
+    return widgets(TextGenerationDialog(config, block, provider=provider, model=model))
+
+
+def test_gcloud_mode_sends_the_saved_project(
+        widgets, fake_config, fake_completion, inline_threads):
+    fake_completion.reply = CANNED
+    dialog = _dialog_with_project(widgets, fake_config, "google",
+                                  "gemini-test-model", "gcloud", "saved-project")
+
+    dialog.generate()
+
+    kwargs = fake_completion.kwargs
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert kwargs["vertex_project"] == "saved-project"
+    assert "api_key" not in kwargs
+
+
+@pytest.mark.parametrize("provider, auth_mode, model", [
+    ("google", "api-key", "gemini-test-model"),
+    ("openai", "gcloud", "gpt-test-model"),
+])
+def test_saved_project_is_not_sent_off_the_vertex_route(
+        widgets, fake_config, fake_completion, inline_threads,
+        provider, auth_mode, model):
+    fake_completion.reply = CANNED
+    dialog = _dialog_with_project(widgets, fake_config, provider, model,
+                                  auth_mode, "saved-project")
+
+    dialog.generate()
+
+    assert "vertex_project" not in fake_completion.kwargs
+
+
+def test_gcloud_mode_without_a_saved_project_sends_none(
+        widgets, fake_config, fake_completion, inline_threads):
+    fake_completion.reply = CANNED
+    dialog = _dialog_with_project(widgets, fake_config, "google",
+                                  "gemini-test-model", "gcloud", "")
+
+    dialog.generate()
+
+    assert "vertex_project" not in fake_completion.kwargs

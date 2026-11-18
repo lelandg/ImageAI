@@ -346,7 +346,8 @@ IMPORTANT:
         try:
             # Call LLM provider using chameleon_llm
             from core import chameleon_llm
-            from core.llm_params import build_completion_kwargs, normalize_provider
+            from core.llm_params import (build_completion_kwargs,
+                                         normalize_provider, saved_vertex_project)
 
             # The provider may be a display name ("Google", "LM Studio")
             provider_id = normalize_provider(provider)
@@ -376,7 +377,8 @@ IMPORTANT:
                  "max_tokens": 500},  # Increased from 200 to avoid truncation
                 api_key=api_key,
                 api_base=self._endpoint_for(provider_id),
-                auth_mode=auth_mode if provider_id == "gemini" else None)
+                auth_mode=auth_mode if provider_id == "gemini" else None,
+                vertex_project=saved_vertex_project(self.config))
             model_id = request_params["model"]
 
             self.logger.info(f"Generating video prompt with {provider}/{model} (route: {model_id})")
@@ -564,7 +566,9 @@ CRITICAL REQUIREMENTS:
 
         try:
             from core import chameleon_llm
-            from core.llm_params import normalize_provider, route_completion_kwargs
+            from core.llm_params import (normalize_provider,
+                                         route_completion_kwargs,
+                                         saved_vertex_project)
 
             # Display names ("Google", "LM Studio") route centrally, and the
             # params are corralled per model (GPT-5 temperature lock,
@@ -583,7 +587,8 @@ CRITICAL REQUIREMENTS:
                 api_key=api_key,
                 api_base=self._endpoint_for(provider_id),
                 auth_mode=(auth_mode if provider_id == "gemini" and self.config
-                           else None))
+                           else None),
+                vertex_project=saved_vertex_project(self.config))
             model_id = request_params["model"]
 
             self.logger.info(f"Batch generating {len(contexts)} video prompts with {provider}/{model} (route: {model_id})")

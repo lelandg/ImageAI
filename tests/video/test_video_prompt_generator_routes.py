@@ -123,3 +123,26 @@ def test_configured_local_endpoint_is_the_api_base(completion, site, provider, k
 def test_ollama_without_configured_endpoint_has_no_api_base(completion, site):
     site("Ollama", "local-test-model", {})
     assert "api_base" not in completion.call_args.kwargs
+
+
+# --- the Google Cloud project saved in Settings reaches Vertex calls ----------
+
+@pytest.mark.parametrize("site", SITES, ids=lambda f: f.__name__)
+def test_gcloud_mode_sends_the_saved_project(completion, site):
+    site("Google", "gemini-test-model",
+         config={"auth_mode": "gcloud", "gcloud_project_id": "saved-project"})
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert kwargs["vertex_project"] == "saved-project"
+    assert "api_key" not in kwargs
+
+
+@pytest.mark.parametrize("site", SITES, ids=lambda f: f.__name__)
+@pytest.mark.parametrize("provider,model", [
+    ("Google", "gemini-test-model"),      # api-key mode
+    ("OpenAI", "gpt-4-test"),
+    ("Ollama", "local-test-model"),
+])
+def test_saved_project_stays_off_other_routes(completion, site, provider, model):
+    site(provider, model, config={**CONFIG, "gcloud_project_id": "saved-project"})
+    assert "vertex_project" not in completion.call_args.kwargs

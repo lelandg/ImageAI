@@ -434,3 +434,77 @@ def test_cloud_openai_names_stay_on_openai_whatever_the_default(model):
 def test_explicit_local_route_prefix_wins_for_gpt_oss():
     assert infer_provider_from_model("ollama/gpt-oss:20b") == "ollama"
     assert infer_provider_from_model("lm_studio/gpt-oss-20b") == "lmstudio"
+
+
+# --- vertex_project: the saved Google Cloud project reaches Vertex calls ------
+
+_MSGS = [{"role": "user", "content": "hi"}]
+
+
+def test_vertex_project_sent_on_the_vertex_route():
+    kwargs = build_completion_kwargs(
+        "gemini", "gemini-test-model", _MSGS, auth_mode="gcloud",
+        vertex_project="saved-project")
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert kwargs["vertex_project"] == "saved-project"
+
+
+def test_vertex_project_sent_when_the_caller_prefixed_the_route():
+    kwargs = build_completion_kwargs(
+        "gemini", "vertex_ai/gemini-test-model", _MSGS,
+        vertex_project="saved-project")
+    assert kwargs["vertex_project"] == "saved-project"
+
+
+@pytest.mark.parametrize("provider,model,extra", [
+    ("gemini", "gemini-test-model", {"auth_mode": "api-key", "api_key": "k"}),
+    ("openai", "gpt-test-model", {"api_key": "k"}),
+    ("anthropic", "claude-test-model", {"api_key": "k"}),
+    ("ollama", "llama-test", {}),
+    ("lmstudio", "local-test", {"api_base": "http://localhost:1234/v1"}),
+])
+def test_vertex_project_never_sent_off_the_vertex_route(provider, model, extra):
+    """Only the vertex_ai route uses it; elsewhere the adapter would drop it
+    with a warning (gemini/) or the dispatcher would (other adapters)."""
+    kwargs = build_completion_kwargs(
+        provider, model, _MSGS, vertex_project="saved-project", **extra)
+    assert "vertex_project" not in kwargs
+
+
+@pytest.mark.parametrize("empty", [None, "", "   "])
+def test_empty_vertex_project_is_not_sent(empty):
+    kwargs = build_completion_kwargs(
+        "gemini", "gemini-test-model", _MSGS, auth_mode="gcloud",
+        vertex_project=empty)
+    assert "vertex_project" not in kwargs
+
+
+def test_route_completion_kwargs_passes_vertex_project(monkeypatch):
+    from core.llm_params import route_completion_kwargs
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    kwargs = route_completion_kwargs(
+        "Google", "gemini-test-model", _MSGS, vertex_project="saved-project")
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert kwargs["vertex_project"] == "saved-project"
+
+
+def test_saved_vertex_project_reads_config_objects_and_dicts():
+    from unittest.mock import MagicMock
+    from core.llm_params import saved_vertex_project
+
+    class _Config:
+        def __init__(self, value):
+            self._value = value
+
+        def get(self, key, default=None):
+            return self._value if key == "gcloud_project_id" else default
+
+    assert saved_vertex_project(_Config("my-project")) == "my-project"
+    assert saved_vertex_project({"gcloud_project_id": " my-project "}) == "my-project"
+    assert saved_vertex_project(_Config("")) is None
+    assert saved_vertex_project(_Config(None)) is None
+    assert saved_vertex_project({}) is None
+    assert saved_vertex_project(None) is None
+    # A mock config answers every lookup with another mock: not a project id.
+    assert saved_vertex_project(MagicMock()) is None

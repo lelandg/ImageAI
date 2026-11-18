@@ -510,6 +510,7 @@ def build_completion_kwargs(
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
     auth_mode: Optional[str] = None,
+    vertex_project: Optional[str] = None,
     strict: bool = False,
     on_warning: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
@@ -523,6 +524,12 @@ def build_completion_kwargs(
     ``vertex_ai/``) wins when given; otherwise the presence of ``api_key``
     decides (present -> Google AI Studio, absent -> Vertex AI/ADC). Callers
     relying on the ``GEMINI_API_KEY`` env var must pass ``auth_mode='api-key'``.
+
+    ``vertex_project`` is the Google Cloud project saved in Settings (see
+    :func:`saved_vertex_project`). It is sent on the ``vertex_ai/`` route only;
+    without it the adapter falls back to ``GOOGLE_CLOUD_PROJECT`` and then to
+    the project of the Application Default Credentials, which may be another
+    project than the one the user configured.
     """
     if not model or not str(model).strip():
         raise LLMParamError(f"no model specified for provider {provider!r}")
@@ -562,7 +569,29 @@ def build_completion_kwargs(
         kwargs["api_key"] = api_key
     if api_base:
         kwargs["api_base"] = api_base
+    if routed_model.startswith("vertex_ai/"):
+        project = vertex_project.strip() if isinstance(vertex_project, str) else ""
+        if project:
+            kwargs["vertex_project"] = project
     return kwargs
+
+
+def saved_vertex_project(config: Any) -> Optional[str]:
+    """The Google Cloud project saved in Settings (``gcloud_project_id``).
+
+    ``config`` is a ``ConfigManager`` or a plain dict; anything else, a
+    missing entry or a non-string value gives ``None``.
+    """
+    getter = getattr(config, "get", None)
+    if getter is None:
+        return None
+    try:
+        value = getter("gcloud_project_id")
+    except Exception:
+        return None
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
 
 
 def route_completion_kwargs(
@@ -574,6 +603,7 @@ def route_completion_kwargs(
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
     auth_mode: Optional[str] = None,
+    vertex_project: Optional[str] = None,
     on_warning: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
     """:func:`build_completion_kwargs` for callers that hold a provider alias
@@ -592,4 +622,4 @@ def route_completion_kwargs(
     return build_completion_kwargs(
         provider_id, model, messages, params,
         api_key=api_key or None, api_base=api_base, auth_mode=auth_mode,
-        on_warning=on_warning)
+        vertex_project=vertex_project, on_warning=on_warning)

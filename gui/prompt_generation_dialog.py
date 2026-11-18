@@ -22,7 +22,7 @@ from .dialog_utils import OperationGuardMixin, guard_operation
 from .history_widget import DialogHistoryWidget
 from .llm_utils import LLMHandler
 from core.discord_rpc import discord_rpc, ActivityState
-from core.llm_params import build_completion_kwargs
+from core.llm_params import build_completion_kwargs, saved_vertex_project
 from core.paths import get_data_paths
 
 logger = logging.getLogger(__name__)
@@ -39,8 +39,11 @@ class LLMWorker(QObject):
     def __init__(self, operation: str, input_text: str, num_variations: int,
                  llm_provider: str, llm_model: str, api_key: str,
                  temperature: float = 0.8, max_tokens: int = 1000,
-                 reasoning_effort: str = "medium", verbosity: str = "medium"):
+                 reasoning_effort: str = "medium", verbosity: str = "medium",
+                 vertex_project: Optional[str] = None):
         super().__init__()
+        # Google Cloud project saved in Settings; used on the vertex_ai route.
+        self.vertex_project = vertex_project
         self.operation = operation
         self.input_text = input_text
         self.num_variations = num_variations
@@ -274,6 +277,7 @@ class LLMWorker(QObject):
                     {"temperature": self.temperature, "max_tokens": self.max_tokens},
                     api_key=self.api_key or None,
                     auth_mode="api-key" if self.api_key else "gcloud",
+                    vertex_project=self.vertex_project,
                     on_warning=_param_warn)
 
                 if self.api_key:
@@ -1022,7 +1026,8 @@ class PromptGenerationDialog(DialogCleanupMixin, QDialog, OperationGuardMixin):
         self.worker = LLMWorker(
             "generate", input_text, num_variations,
             llm_provider, llm_model, api_key,
-            temperature, max_tokens, reasoning, verbosity
+            temperature, max_tokens, reasoning, verbosity,
+            vertex_project=saved_vertex_project(self.config)
         )
         self.worker.moveToThread(self.thread)
 

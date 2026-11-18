@@ -15,7 +15,7 @@ from PySide6.QtCore import Qt, QThread, Signal, QSettings
 from core.config import ConfigManager
 from core.layout.models import TextBlock, DocumentSpec
 from core.llm_models import get_provider_models
-from core.llm_params import build_completion_kwargs
+from core.llm_params import build_completion_kwargs, saved_vertex_project
 from core.discord_rpc import discord_rpc, ActivityState
 from gui.llm_utils import DialogStatusConsole, LLMHandler, LLMResponseParser
 from ..common.dialog_conventions import (
@@ -128,6 +128,7 @@ class TextGenerationWorker(QThread):
                 provider_id, model_name, messages,
                 {"temperature": self.temperature},
                 api_key=api_key, auth_mode=auth_mode,
+                vertex_project=saved_vertex_project(self.config),
                 on_warning=self.progress.emit
             )
 
