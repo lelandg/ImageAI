@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import inspect
 import logging
 import os
 import re
+import weakref
 
 import anthropic  # top-level on purpose: dispatch turns an ImportError here into MissingSDKError
 
@@ -134,6 +136,44 @@ def _to_completion(route: Route, resp) -> Completion:
         raw=resp)
 
 
+# messages-resource class -> names its create() accepts (None = any name).
+_CREATE_PARAMS: "weakref.WeakKeyDictionary[type, frozenset | None]" = (
+    weakref.WeakKeyDictionary())
+
+
+def _create_params(messages_resource) -> frozenset | None:
+    """Parameter names of ``messages.create`` in the installed SDK (cached per
+    class). ``None`` means it takes ``**kwargs`` or cannot be inspected."""
+    cls = type(messages_resource)
+    if cls not in _CREATE_PARAMS:
+        try:
+            params = inspect.signature(messages_resource.create).parameters
+        except (TypeError, ValueError):
+            names = None
+        else:
+            names = (None if any(p.kind is p.VAR_KEYWORD for p in params.values())
+                     else frozenset(params))
+        _CREATE_PARAMS[cls] = names
+    return _CREATE_PARAMS[cls]
+
+
+def _fit_to_sdk(request: dict, messages_resource) -> dict:
+    """Move request fields the installed SDK's create() does not name into
+    ``extra_body`` so they still reach the API (anthropic 2.x dropped
+    temperature/top_p/top_k from the signature; the API decides per model)."""
+    accepted = _create_params(messages_resource)
+    if accepted is None:
+        return request
+    unnamed = {k: v for k, v in request.items() if k not in accepted}
+    if not unnamed:
+        return request
+    fitted = {k: v for k, v in request.items() if k in accepted}
+    fitted["extra_body"] = {**(request.get("extra_body") or {}), **unnamed}
+    logger.debug("chameleon_llm anthropic: sending %s in extra_body (not named by "
+                 "this SDK's messages.create)", ", ".join(sorted(unnamed)))
+    return fitted
+
+
 def complete(route: Route, messages: list[dict], *, api_key: str | None,
              api_base: str | None, params: dict, timeout: float,
              max_retries: int) -> Completion:
@@ -147,6 +187,7 @@ def complete(route: Route, messages: list[dict], *, api_key: str | None,
     logger.debug("chameleon_llm anthropic: model=%s base_url=%s timeout=%s "
                  "max_retries=%s max_tokens=%s", route.model, api_base, timeout,
                  max_retries, request["max_tokens"])
+    request = _fit_to_sdk(request, client.messages)
     try:
         resp = client.messages.create(**request)
     except Exception as exc:

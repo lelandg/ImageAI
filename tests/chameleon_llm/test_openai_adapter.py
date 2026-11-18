@@ -315,3 +315,81 @@ def test_responses_retry_not_attempted_on_local_base(fake_openai):
     with pytest.raises(BadRequestError):
         call(OLLAMA, api_key=None)
     assert fake_openai.responses_calls == []
+
+
+# --- L2 defense: max_tokens refused in favour of max_completion_tokens --------
+
+_TOKENS_MSG = ("Unsupported parameter: 'max_tokens' is not supported with this "
+               "model. Use 'max_completion_tokens' instead.")
+
+
+class _OneShotChat:
+    """Patches chat.completions.create: raise ``first`` once, then ``then``."""
+
+    def __init__(self, monkeypatch, state, first, then=None):
+        orig = openai_adapter.openai.OpenAI
+        outer = self
+        self.calls = state.chat_calls
+        self.first, self.then = first, then
+
+        def build(**kwargs):
+            client = orig(**kwargs)
+
+            def create(**kw):
+                outer.calls.append(kw)
+                if len(outer.calls) == 1:
+                    raise outer.first
+                if outer.then is not None:
+                    raise outer.then
+                return state.chat_reply
+            client.chat.completions.create = create
+            return client
+        monkeypatch.setattr(openai_adapter.openai, "OpenAI", build)
+
+
+def test_max_tokens_refusal_retries_once_renamed(fake_openai, monkeypatch, caplog):
+    _OneShotChat(monkeypatch, fake_openai, _NotChatError(_TOKENS_MSG, 400))
+    with caplog.at_level(logging.WARNING, logger="chameleon_llm"):
+        resp = call(Route("openai", "openai", "new-model"),
+                    params={"max_tokens": 64, "temperature": 1})
+    assert len(fake_openai.chat_calls) == 2
+    first, second = fake_openai.chat_calls
+    assert first["max_tokens"] == 64 and "max_completion_tokens" not in first
+    assert second["max_completion_tokens"] == 64 and "max_tokens" not in second
+    assert resp.choices[0].message.content == "hello"
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1 and "new-model" in warnings[0]
+
+
+def test_max_tokens_retry_failure_carries_both_errors(fake_openai, monkeypatch):
+    class Boom(Exception):
+        status_code = 500
+    _OneShotChat(monkeypatch, fake_openai, _NotChatError(_TOKENS_MSG, 400),
+                 then=Boom("down"))
+    with pytest.raises(LLMError) as info:
+        call(Route("openai", "openai", "new-model"), params={"max_tokens": 64})
+    assert len(fake_openai.chat_calls) == 2  # one retry, no loop
+    assert info.value.status_code == 500
+    assert "down" in str(info.value) and "max_completion_tokens" in str(info.value)
+    assert isinstance(info.value.__cause__, Boom)
+
+
+def test_max_tokens_refusal_without_max_tokens_is_not_retried(fake_openai):
+    fake_openai.chat_raises = _NotChatError(_TOKENS_MSG, 400)
+    with pytest.raises(BadRequestError):
+        call(params={"temperature": 1})
+    assert len(fake_openai.chat_calls) == 1
+
+
+# --- R3: a failed Responses retry also reports the chat error ----------------
+
+def test_responses_retry_failure_includes_the_chat_error(fake_openai):
+    class Boom(Exception):
+        status_code = 500
+    fake_openai.chat_raises = _NotChatError("use the Responses API please", 404)
+    fake_openai.responses_raises = Boom("down")
+    with pytest.raises(LLMError) as info:
+        call(Route("openai", "openai", "new-pro-model"))
+    assert "down" in str(info.value)
+    assert "use the Responses API please" in str(info.value)
+    assert isinstance(info.value.__cause__, Boom)

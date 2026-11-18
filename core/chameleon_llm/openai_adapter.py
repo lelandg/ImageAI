@@ -211,15 +211,29 @@ def complete(route: Route, messages: list[dict], *, api_key: str | None,
         resp = client.chat.completions.create(**request)
     except Exception as exc:
         error = wrap_sdk_error(exc, "openai")
-        if base_url or not _points_at_responses(error):
-            raise error from exc
-        logger.warning(
-            "chameleon_llm: model '%s' rejected chat completions and asked for "
-            "the Responses API; retrying once on the Responses path. Add it to "
-            "openai_adapter.RESPONSES_ONLY_PATTERNS so the pattern list learns it",
-            route.model)
-        return _send_responses(
-            client, route, _build_responses_request(route, messages, params))
+        if not base_url and _points_at_responses(error):
+            logger.warning(
+                "chameleon_llm: model '%s' rejected chat completions and asked for "
+                "the Responses API; retrying once on the Responses path. Add it to "
+                "openai_adapter.RESPONSES_ONLY_PATTERNS so the pattern list learns it",
+                route.model)
+            return _send_responses(
+                client, route, _build_responses_request(route, messages, params),
+                first_error=error)
+        if "max_tokens" in request and _wants_completion_tokens(error):
+            logger.warning(
+                "chameleon_llm: model '%s' rejected max_tokens and asked for "
+                "max_completion_tokens; retrying once with it renamed. Its "
+                "parameter rule in core/llm_params.py should learn the model",
+                route.model)
+            renamed = dict(request)
+            renamed["max_completion_tokens"] = renamed.pop("max_tokens")
+            try:
+                resp = client.chat.completions.create(**renamed)
+            except Exception as retry_exc:
+                raise _retry_error(retry_exc, error) from retry_exc
+            return _to_completion(route, resp)
+        raise error from exc
     return _to_completion(route, resp)
 
 
@@ -230,9 +244,28 @@ def _points_at_responses(error) -> bool:
             and ("v1/responses" in text or "responses api" in text))
 
 
-def _send_responses(client, route: Route, request: dict) -> Completion:
+def _wants_completion_tokens(error) -> bool:
+    """True for a 400 saying max_tokens is unsupported, use max_completion_tokens."""
+    text = str(error).lower()
+    return (error.status_code == 400 and "max_tokens" in text
+            and "max_completion_tokens" in text
+            and ("unsupported" in text or "not supported" in text))
+
+
+def _retry_error(retry_exc: Exception, first_error):
+    """The retry's error, with the first attempt's error text appended."""
+    error = wrap_sdk_error(retry_exc, "openai")
+    return type(error)(
+        f"{error} (single retry; the first attempt failed with: {first_error})",
+        provider=error.provider, status_code=error.status_code)
+
+
+def _send_responses(client, route: Route, request: dict,
+                    first_error=None) -> Completion:
     try:
         resp = client.responses.create(**request)
     except Exception as exc:
+        if first_error is not None:
+            raise _retry_error(exc, first_error) from exc
         raise wrap_sdk_error(exc, "openai") from exc
     return _responses_to_completion(route, resp)

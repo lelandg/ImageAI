@@ -230,3 +230,70 @@ def test_response_model_is_provider_reported(fake_anthropic):
 def test_response_model_falls_back_to_requested(fake_anthropic):
     fake_anthropic.reply.model = None
     assert call().model == "test-model"
+
+
+# --- L1: sampling params the installed SDK's create() does not name ----------
+# anthropic 2.x dropped temperature/top_p/top_k from Messages.create(); the
+# adapter then sends them in extra_body so they still reach the API.
+
+def _patch_client(monkeypatch, messages_cls):
+    import anthropic
+    calls = []
+
+    class FakeAnthropic:
+        def __init__(self, **kwargs):
+            self.messages = messages_cls(calls)
+
+    monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
+    return calls
+
+
+def _reply():
+    return make_anthropic_reply()
+
+
+class _NewSDKMessages:  # shaped like anthropic 2.8.0: no sampling params
+    def __init__(self, calls):
+        self.calls = calls
+
+    def create(self, *, max_tokens, messages, model, stop_sequences=None,
+               system=None, extra_body=None, timeout=None):
+        self.calls.append(dict(max_tokens=max_tokens, messages=messages, model=model,
+                               stop_sequences=stop_sequences, system=system,
+                               extra_body=extra_body))
+        return _reply()
+
+
+class _OldSDKMessages:  # shaped like anthropic 0.x: sampling params named
+    def __init__(self, calls):
+        self.calls = calls
+
+    def create(self, *, max_tokens, messages, model, temperature=None, top_p=None,
+               top_k=None, stop_sequences=None, system=None, extra_body=None):
+        self.calls.append(dict(max_tokens=max_tokens, model=model,
+                               temperature=temperature, top_p=top_p, top_k=top_k,
+                               extra_body=extra_body))
+        return _reply()
+
+
+def test_sampling_params_go_to_extra_body_when_create_lacks_them(monkeypatch):
+    calls = _patch_client(monkeypatch, _NewSDKMessages)
+    resp = call(params={"temperature": 0.3, "top_k": 5, "max_tokens": 9,
+                        "stop": "END"})
+    assert calls[0]["extra_body"] == {"temperature": 0.3, "top_k": 5}
+    assert calls[0]["stop_sequences"] == ["END"]
+    assert calls[0]["max_tokens"] == 9
+    assert resp.choices[0].message.content == "hello"
+
+
+def test_sampling_params_passed_as_arguments_when_create_names_them(monkeypatch):
+    calls = _patch_client(monkeypatch, _OldSDKMessages)
+    call(params={"temperature": 0.3, "top_p": 0.9})
+    assert calls[0]["temperature"] == 0.3 and calls[0]["top_p"] == 0.9
+    assert calls[0]["extra_body"] is None
+
+
+def test_no_extra_body_without_sampling_params(monkeypatch):
+    calls = _patch_client(monkeypatch, _NewSDKMessages)
+    call(params={"max_tokens": 9})
+    assert calls[0]["extra_body"] is None

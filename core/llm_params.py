@@ -183,11 +183,14 @@ _FAMILY_RULES: List[_FamilyRule] = [
             description="Claude 4.x/3.x (temperature 0-1)",
         ),
     ),
-    # OpenAI — reasoning models (gpt-5.x, o-series, chat-latest): temperature
-    # locked to the default, top_p rejected, max_completion_tokens required.
+    # OpenAI — reasoning models (gpt-5 and every later generation, every
+    # o-series number, chat-latest): max_completion_tokens required (the live
+    # API rejects max_tokens for GPT-6), top_p rejected, temperature locked to
+    # the default. The temperature lock is proven for gpt-5; for GPT-6 and
+    # later it is assumed by analogy until the live tier proves it.
     _FamilyRule(
         provider="openai",
-        pattern=r"^(gpt-5|o1|o3|o4|chat-latest)",
+        pattern=r"^(gpt-(?:[5-9]|\d{2,})|o\d|chat-latest)",
         rules=ModelParamRules(
             temperature_range=(1.0, 1.0),
             temperature_fixed=1.0,
@@ -301,7 +304,7 @@ def infer_provider_from_model(model: str, default: str = "openai") -> str:
         return "anthropic"
     if bare.startswith("gemini"):
         return "gemini"
-    if re.match(r"^(gpt|o[134]|chat-latest|davinci)", bare):
+    if re.match(r"^(gpt|o\d|chat-latest|davinci)", bare):
         return "openai"
     return normalize_provider(default)
 

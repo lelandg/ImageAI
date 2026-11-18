@@ -367,3 +367,23 @@ def test_route_kwargs_google_argument_key(_no_gemini_env):
                                      api_key="k")
     assert kwargs["model"] == "gemini/gemini-test-model"
     assert kwargs["api_key"] == "k"
+
+
+# --- L2: every GPT generation from 5 on, and every o-series number ------------
+
+@pytest.mark.parametrize("model", [
+    "gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-7-test", "gpt-10-test",
+    "o5-test", "gpt-5-test", "o3-test",
+])
+def test_later_generations_use_reasoning_rules(model):
+    kwargs, warnings = validate_params(
+        "openai", model, {"temperature": 0.5, "max_tokens": 256})
+    assert kwargs == {"max_completion_tokens": 256}
+    assert warnings  # the non-default temperature was dropped, with a warning
+
+
+@pytest.mark.parametrize("model", ["gpt-4.1", "gpt-4o", "gpt-4-turbo",
+                                   "gpt-3.5-turbo", "local-test-model"])
+def test_classic_models_keep_max_tokens(model):
+    kwargs, _ = validate_params("openai", model, {"temperature": 0.5, "max_tokens": 256})
+    assert kwargs == {"temperature": 0.5, "max_tokens": 256}
