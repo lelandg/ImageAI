@@ -1,8 +1,8 @@
 # Replace LiteLLM with an in-house adapter package (`chameleon_llm`) — design
 
 **Date:** 2026-11-18 10:58
-**Status:** Design approved by Leland 2026-11-18 11:13. Nothing is built.
-**Updated:** 2026-11-18 11:14
+**Status:** Implemented 2026-11-18 on `feat/replace-litellm`. See "What changed during the build" at the end.
+**Updated:** 2026-11-18 14:40
 **Pilot:** ImageAI. ChatMaster follows as a separate project.
 
 ## Intent
@@ -404,3 +404,56 @@ One PR in `lelandg/ImageAI` on branch `feat/replace-litellm`.
 Async `acompletion`, streaming, tool calling, embeddings, extended thinking,
 fallback lists, a Mistral route, and a typed timeout exception that matches
 its `litellm.exceptions.Timeout` handling.
+
+## What changed during the build (2026-11-18)
+
+The build followed this design except where the real SDKs and APIs disagreed
+with it. Each change below was found by a review or by the paid live tests.
+
+- **The package refuses instead of guessing.** A bare `claude...` or
+  `gemini...` id, or a wrong first segment such as `claude/` or `google/`,
+  raises `BadRequestError` naming the right prefix when no base URL is in
+  effect. The design sent anything unrecognised to OpenAI, which made every
+  routing mistake fail silently. Five call sites had that mistake.
+- **Every chat call builds its arguments through
+  `core.llm_params.build_completion_kwargs`** (or `route_completion_kwargs`).
+  The design assumed parameters were already validated everywhere; they were
+  not.
+- **Vertex defaults to the `global` location,** not `us-central1`. Current
+  Gemini models return 404 in `us-central1`.
+- **Anthropic sampling parameters.** With `anthropic` 2.x, `messages.create`
+  has no `temperature`, `top_p` or `top_k`, and the API rejects them for every
+  model. The adapter inspects the installed SDK: parameters it accepts are
+  passed, others are dropped with one WARNING per parameter per process.
+- **OpenAI.** The Responses path takes `seed`, `stop` and `top_k` nowhere
+  (dropped with a WARNING), needs `detail` on images, and sends assistant
+  history as plain text. A chat call that fails because the model needs the
+  Responses API, or because it wants `max_completion_tokens`, is retried
+  once. Whether `gpt-pro`, `o3-pro` and `o1-pro` are Responses-only is still
+  not confirmed by documentation; the Responses path is proven to work for
+  `gpt-pro` by the live tests.
+- **Parameter rules in `core/llm_params.py`** now treat GPT-5 and every later
+  GPT generation as reasoning models, and Claude Opus, Sonnet and Haiku 5 and
+  later as models without sampling parameters. The model registry had moved
+  on to ids the old patterns did not match.
+- **Local endpoints never receive `OPENAI_API_KEY` from the environment.**
+  Ollama, LM Studio and any call with a base URL use an explicit key or a
+  placeholder.
+- **Transport errors are classified by class name,** so both `httpx` and
+  `httpx2` exceptions map to `TimeoutError_` and `ConnectionError_`.
+- **`response.model` is the model the provider reports,** when it reports one.
+- **Logging levels.** A dropped parameter is a WARNING. An approximation
+  (Anthropic JSON mode by instruction, a dropped empty assistant turn) is
+  DEBUG. A lossless rename is not logged.
+- **Dependencies.** `httpx2` and `httpcore2` stay pinned: the OpenAI and
+  Anthropic SDKs require `httpx2` themselves. `jsonschema` and `tqdm` are now
+  declared directly; they had only ever arrived through LiteLLM. `openai` has
+  a floor of 2.0.0.
+- **Tests.** The default command is `python -m pytest -m "not local and not
+  live"`. In the local tier a skip means there is nothing to test; any
+  unexpected answer from a running server fails. Offline tests bind the
+  adapters' arguments to the real SDK call signatures, so an SDK that drops a
+  parameter fails a unit test.
+- **Removed:** `gui/prompt_question_dialog_old.py` (nothing imported it).
+- **Not verified:** the local tier's real-server paths have never run. No LM
+  Studio or Ollama server was running on the build machine.

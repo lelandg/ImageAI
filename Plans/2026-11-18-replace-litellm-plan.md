@@ -1,6 +1,6 @@
 # Replace LiteLLM with `chameleon_llm` — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** ImageAI stops installing and importing `litellm`; every LLM feature keeps working through a small vendored package, `core/chameleon_llm/`.
 
@@ -9,6 +9,8 @@
 **Tech Stack:** Python, `openai`, `anthropic`, `google-genai`, `pytest`, PySide6 offscreen for dialog tests.
 
 **Spec:** `Plans/2026-11-18-replace-litellm-design.md` (read it first; this plan argues from it).
+
+**Status (2026-11-18 14:40):** Tasks 1 to 11 complete and reviewed. Task 12 in progress. Deviations from this plan are listed in the spec under "What changed during the build".
 
 **Written:** 2026-11-18 11:20. **Branch:** `feat/replace-litellm`, worktree `.worktrees/replace-litellm`, cut from `origin/main` b47a111.
 
@@ -106,7 +108,7 @@ Routing table (copy from the spec): none or `openai/` → openai; `ollama/`, `ol
 
 Dispatcher behavior: params whose value is `None` are removed silently; params not in the adapter's `ACCEPTED_PARAMS` are removed with one WARNING naming them; `timeout` defaults to 600; one DEBUG line with route, model and sorted parameter names; adapters are imported lazily by name, and an `ImportError` for an SDK becomes `MissingSDKError` naming the pip package.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```python
 # test_routing.py
@@ -152,10 +154,10 @@ def test_wrap_connection_by_class_name(): # class APIConnectionError -> Connecti
 def test_wrapped_message_keeps_original_text_and_type_name(): ...
 ```
 
-- [ ] **Step 2:** Run `python -m pytest tests/chameleon_llm -v`. Expected: collection errors (module not found).
-- [ ] **Step 3:** Implement the five files to the interfaces above.
-- [ ] **Step 4:** Run the same command. Expected: all pass.
-- [ ] **Step 5:** Commit: `feat(llm): add chameleon_llm types, routing and dispatcher`.
+- [x] **Step 2:** Run `python -m pytest tests/chameleon_llm -v`. Expected: collection errors (module not found).
+- [x] **Step 3:** Implement the five files to the interfaces above.
+- [x] **Step 4:** Run the same command. Expected: all pass.
+- [x] **Step 5:** Commit: `feat(llm): add chameleon_llm types, routing and dispatcher`.
 
 ---
 
@@ -174,7 +176,7 @@ Decisions:
 - Client: `openai.OpenAI(api_key=..., base_url=..., timeout=timeout, max_retries=max_retries)`, one per call.
 - Response: `content = choice.message.content or ""`; `finish_reason` passed through, with `None` → `"stop"`; usage fields default to 0 when the server omits `usage`.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```python
 def test_plain_call_builds_client_and_request(fake_openai):
@@ -195,10 +197,10 @@ def test_list_content_and_image_parts_pass_through_unchanged(fake_openai): ...
 def test_sdk_error_wrapped(fake_openai): ...                   # status 429 -> RateLimitError, __cause__ set
 ```
 
-- [ ] **Step 2:** Run `python -m pytest tests/chameleon_llm/test_openai_adapter.py -v`. Expected: fail, module missing.
-- [ ] **Step 3:** Implement `complete` (chat path only).
-- [ ] **Step 4:** Run again. Expected: pass.
-- [ ] **Step 5:** Commit: `feat(llm): add OpenAI-compatible adapter`.
+- [x] **Step 2:** Run `python -m pytest tests/chameleon_llm/test_openai_adapter.py -v`. Expected: fail, module missing.
+- [x] **Step 3:** Implement `complete` (chat path only).
+- [x] **Step 4:** Run again. Expected: pass.
+- [x] **Step 5:** Commit: `feat(llm): add OpenAI-compatible adapter`.
 
 ---
 
@@ -210,8 +212,8 @@ def test_sdk_error_wrapped(fake_openai): ...                   # status 429 -> R
 
 **Interfaces — Produces:** `openai_adapter.RESPONSES_ONLY_PATTERNS: tuple[str, ...]` and `def uses_responses_api(model: str) -> bool`.
 
-- [ ] **Step 1: Confirm the facts.** Read the installed `openai` SDK's `resources/responses` signature and the current OpenAI model docs (Context7 `openai-python`). Record in the test file's docstring: which of `o1-pro`, `o3-pro` and the id `resolve_model("openai", "gpt-pro")` returns are Responses-only, and the exact field names for instructions, input parts, output-token cap, reasoning effort, verbosity, JSON mode, status and usage. If a field differs from the spec's "Responses path" paragraph, the SDK wins; note the difference in the commit body.
-- [ ] **Step 2: Write failing tests**
+- [x] **Step 1: Confirm the facts.** Read the installed `openai` SDK's `resources/responses` signature and the current OpenAI model docs (Context7 `openai-python`). Record in the test file's docstring: which of `o1-pro`, `o3-pro` and the id `resolve_model("openai", "gpt-pro")` returns are Responses-only, and the exact field names for instructions, input parts, output-token cap, reasoning effort, verbosity, JSON mode, status and usage. If a field differs from the spec's "Responses path" paragraph, the SDK wins; note the difference in the commit body.
+- [x] **Step 2: Write failing tests**
 
 ```python
 @pytest.mark.parametrize("model,expected", [("o1-pro", True), ("o3-pro", True),
@@ -229,10 +231,10 @@ def test_responses_empty_output_is_empty_string(fake_openai): ...
 def test_local_server_never_uses_responses(fake_openai):  # api_base set + model "o3-pro" -> chat path
 ```
 
-- [ ] **Step 3:** Run `python -m pytest tests/chameleon_llm/test_openai_responses.py -v`. Expected: fail.
-- [ ] **Step 4:** Implement the branch inside `complete`.
-- [ ] **Step 5:** Run again; also rerun Task 2's file. Expected: both pass.
-- [ ] **Step 6:** Commit: `feat(llm): route Responses-only OpenAI models`.
+- [x] **Step 3:** Run `python -m pytest tests/chameleon_llm/test_openai_responses.py -v`. Expected: fail.
+- [x] **Step 4:** Implement the branch inside `complete`.
+- [x] **Step 5:** Run again; also rerun Task 2's file. Expected: both pass.
+- [x] **Step 6:** Commit: `feat(llm): route Responses-only OpenAI models`.
 
 ---
 
@@ -251,7 +253,7 @@ JSON_INSTRUCTION = "Respond with a single valid JSON object and no other text."
 
 Decisions: key is the argument, else `ANTHROPIC_API_KEY`, else `AuthError`. `system` messages are joined with a blank line into the `system` parameter. `max_tokens` defaults to 4096. `image_url` with a `data:` URL → `{"type":"image","source":{"type":"base64","media_type":...,"data":...}}`; with an `http(s)` URL → `{"type":"image","source":{"type":"url","url":...}}`; a part already of type `image` passes through. `response_format={"type":"json_object"}` appends `JSON_INSTRUCTION` to the system text (creating it if absent). `stop` (str or list) → `stop_sequences` list. Reply: text blocks joined with `""`. `stop_reason` map: `end_turn`, `stop_sequence` → `stop`; `max_tokens` → `length`; `refusal` → `content_filter`; anything else → `stop`. Usage: `input_tokens`, `output_tokens`, sum.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```python
 def test_system_lifted_and_joined(fake_anthropic): ...
@@ -273,10 +275,10 @@ def test_key_never_logged(fake_anthropic, caplog): ...
 def test_sdk_error_wrapped(fake_anthropic): ...
 ```
 
-- [ ] **Step 2:** Run `python -m pytest tests/chameleon_llm/test_anthropic_adapter.py -v`. Expected: fail.
-- [ ] **Step 3:** Implement.
-- [ ] **Step 4:** Run again. Expected: pass.
-- [ ] **Step 5:** Commit: `feat(llm): add Anthropic adapter`.
+- [x] **Step 2:** Run `python -m pytest tests/chameleon_llm/test_anthropic_adapter.py -v`. Expected: fail.
+- [x] **Step 3:** Implement.
+- [x] **Step 4:** Run again. Expected: pass.
+- [x] **Step 5:** Commit: `feat(llm): add Anthropic adapter`.
 
 ---
 
@@ -291,7 +293,7 @@ def test_sdk_error_wrapped(fake_anthropic): ...
 
 Decisions: `route="gemini"` → `genai.Client(api_key=arg or env GEMINI_API_KEY or env GOOGLE_API_KEY)`, none → `AuthError` naming `GEMINI_API_KEY`. `route="vertex_ai"` → `genai.Client(vertexai=True, project=vertex_project or env GOOGLE_CLOUD_PROJECT or None, location=vertex_location or env GOOGLE_CLOUD_LOCATION or "us-central1")`; no key needed. Timeout and retries go through `http_options`; confirm the option names against the installed `google-genai` before writing the test, and record them in the test docstring. Translation and finish-reason map exactly as the spec's "Gemini adapter" list. Reply text: join the text parts of the first candidate; no candidates or no parts → `""` with `content_filter`. Usage from `usage_metadata` (`prompt_token_count`, `candidates_token_count`, `total_token_count`), missing → 0.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```python
 def test_api_key_route_builds_key_client(fake_genai): ...
@@ -314,10 +316,10 @@ def test_key_never_logged(fake_genai, caplog): ...
 def test_sdk_error_wrapped(fake_genai): ...
 ```
 
-- [ ] **Step 2:** Run `python -m pytest tests/chameleon_llm/test_gemini_adapter.py -v`. Expected: fail.
-- [ ] **Step 3:** Implement.
-- [ ] **Step 4:** Run `python -m pytest tests/chameleon_llm -v`. Expected: every package test passes.
-- [ ] **Step 5:** Commit: `feat(llm): add Gemini and Vertex adapter`.
+- [x] **Step 2:** Run `python -m pytest tests/chameleon_llm/test_gemini_adapter.py -v`. Expected: fail.
+- [x] **Step 3:** Implement.
+- [x] **Step 4:** Run `python -m pytest tests/chameleon_llm -v`. Expected: every package test passes.
+- [x] **Step 5:** Commit: `feat(llm): add Gemini and Vertex adapter`.
 
 ---
 
@@ -343,7 +345,7 @@ No `LiteLLMHandler` alias is kept; Tasks 7-8 update every caller.
 
 Output ceilings: for each model id in `LLM_PROVIDERS` with no `max_output_tokens` in `core/model-registry.fallback.json` (today `claude-opus-4-20250514` and `claude-3-7-sonnet-20250219`; list them with a short script and include the list in the commit body), add a `_FamilyRule` placed before the generic rule for that provider with `max_output_tokens` taken from the provider's published limit. Local models (Ollama, LM Studio) get no ceiling.
 
-- [ ] **Step 1: Write failing tests**
+- [x] **Step 1: Write failing tests**
 
 ```python
 # tests/test_llm_params.py (add)
@@ -362,10 +364,10 @@ def test_setup_llm_returns_package_with_completion():
 def test_setup_llm_attaches_console_handler_to_chameleon_llm_logger(): ...
 ```
 
-- [ ] **Step 2:** Run `python -m pytest tests/test_llm_params.py tests/gui/test_llm_handler.py -v`. Expected: the new tests fail.
-- [ ] **Step 3:** Make the changes. Existing tests in `tests/test_llm_params.py` that patch `litellm` are rewritten against the registry.
-- [ ] **Step 4:** Run again. Expected: pass.
-- [ ] **Step 5:** Commit: `refactor(llm): drop LiteLLM from params and handler`.
+- [x] **Step 2:** Run `python -m pytest tests/test_llm_params.py tests/gui/test_llm_handler.py -v`. Expected: the new tests fail.
+- [x] **Step 3:** Make the changes. Existing tests in `tests/test_llm_params.py` that patch `litellm` are rewritten against the registry.
+- [x] **Step 4:** Run again. Expected: pass.
+- [x] **Step 5:** Commit: `refactor(llm): drop LiteLLM from params and handler`.
 
 ---
 
@@ -384,7 +386,7 @@ Rules for every site:
 5. `core/video/prompt_engine.py` `_is_retryable_error` (164-191): keep its text matching; add `isinstance(e, (chameleon_llm.TimeoutError_, chameleon_llm.ConnectionError_, chameleon_llm.ServerError, chameleon_llm.RateLimitError))` as the first check.
 6. Request and response logging at each site is left exactly as it is.
 
-- [ ] **Step 1: Write the failing guard test**
+- [x] **Step 1: Write the failing guard test**
 
 ```python
 # tests/test_no_litellm.py
@@ -399,11 +401,11 @@ def test_no_litellm_attribute_use():
 
 Mark both `@pytest.mark.xfail(strict=True, reason="gui/ and scripts/ migrate in Task 8")` for this task; add a third, unmarked test with `ROOTS = ["core"]`.
 
-- [ ] **Step 2:** Run `python -m pytest tests/test_no_litellm.py -v`. Expected: the `core` test fails; the two xfail tests xfail.
-- [ ] **Step 3:** Apply rules 1-6 file by file.
-- [ ] **Step 4: Bare-id regression test** in `tests/video/test_prompt_engine_routes.py`: patch `core.chameleon_llm.completion`, call `analyze_image` with a model id starting `claude-` and one starting `gemini-`, assert the `model` argument received starts with `anthropic/` and with `gemini/` or `vertex_ai/`.
-- [ ] **Step 5:** Run `python -m pytest tests/test_no_litellm.py tests/video tests/sprite tests/layout tests/styles -v`. Expected: pass (two xfail).
-- [ ] **Step 6:** Commit: `refactor(llm): move core call sites to chameleon_llm`.
+- [x] **Step 2:** Run `python -m pytest tests/test_no_litellm.py -v`. Expected: the `core` test fails; the two xfail tests xfail.
+- [x] **Step 3:** Apply rules 1-6 file by file.
+- [x] **Step 4: Bare-id regression test** in `tests/video/test_prompt_engine_routes.py`: patch `core.chameleon_llm.completion`, call `analyze_image` with a model id starting `claude-` and one starting `gemini-`, assert the `model` argument received starts with `anthropic/` and with `gemini/` or `vertex_ai/`.
+- [x] **Step 5:** Run `python -m pytest tests/test_no_litellm.py tests/video tests/sprite tests/layout tests/styles -v`. Expected: pass (two xfail).
+- [x] **Step 6:** Commit: `refactor(llm): move core call sites to chameleon_llm`.
 
 ---
 
@@ -418,10 +420,10 @@ Same rules as Task 7, plus:
 - `scripts/generate_tags.py:250-255` keeps passing `vertex_project` / `vertex_location`.
 - `gui/prompt_question_dialog_old.py`: if nothing imports it (`grep -rn prompt_question_dialog_old`), delete the file instead of migrating it and say so in the commit body.
 
-- [ ] **Step 1:** Remove the two `xfail` marks in `tests/test_no_litellm.py`. Run it. Expected: both fail.
-- [ ] **Step 2:** Apply the rules.
-- [ ] **Step 3:** Run `python -m pytest tests/test_no_litellm.py tests/gui -v`. Expected: pass.
-- [ ] **Step 4:** Commit: `refactor(llm): move gui and script call sites to chameleon_llm`.
+- [x] **Step 1:** Remove the two `xfail` marks in `tests/test_no_litellm.py`. Run it. Expected: both fail.
+- [x] **Step 2:** Apply the rules.
+- [x] **Step 3:** Run `python -m pytest tests/test_no_litellm.py tests/gui -v`. Expected: pass.
+- [x] **Step 4:** Commit: `refactor(llm): move gui and script call sites to chameleon_llm`.
 
 ---
 
@@ -444,9 +446,9 @@ One test per LLM entry point: `gui/prompt_generation_dialog.py`, `gui/prompt_que
 
 Plus one failure test per entry point: `fake_completion` raises `chameleon_llm.RateLimitError`; assert the dialog does not raise, the console shows the error text, and the error was logged at ERROR.
 
-- [ ] **Step 1:** Write the tests.
-- [ ] **Step 2:** Run `python -m pytest tests/gui/test_llm_dialogs.py -v`. Expected: pass. A test that fails here has found a migration bug in Task 8; fix it in the dialog, not in the test.
-- [ ] **Step 3:** Commit: `test(gui): cover LLM dialogs offscreen with a fake completion`.
+- [x] **Step 1:** Write the tests.
+- [x] **Step 2:** Run `python -m pytest tests/gui/test_llm_dialogs.py -v`. Expected: pass. A test that fails here has found a migration bug in Task 8; fix it in the dialog, not in the test.
+- [x] **Step 3:** Commit: `test(gui): cover LLM dialogs offscreen with a fake completion`.
 
 ---
 
@@ -468,11 +470,11 @@ LocalServer(base_url: str, model: str, vision: bool)   # base_url is the OpenAI-
 
 `pytest.ini` marker line: `local: needs a local LM Studio or Ollama server; each test skips when the server does not answer`.
 
-- [ ] **Step 1: Confirm the LM Studio REST API.** Read the current LM Studio REST documentation and record in `tests/local/conftest.py`'s docstring the paths and fields for: listing models with downloaded/loaded state and a vision flag, loading a model, unloading a model. Support the newest documented form; if the server answers 404 on it, fall back to the older form if one is documented. If the documented API cannot load a model, the fixture skips with "load a model in LM Studio first" when none is loaded, and the plan's load/unload steps are dropped; say so in the commit body.
-- [ ] **Step 2: Write the fixtures.**
+- [x] **Step 1: Confirm the LM Studio REST API.** Read the current LM Studio REST documentation and record in `tests/local/conftest.py`'s docstring the paths and fields for: listing models with downloaded/loaded state and a vision flag, loading a model, unloading a model. Support the newest documented form; if the server answers 404 on it, fall back to the older form if one is documented. If the documented API cannot load a model, the fixture skips with "load a model in LM Studio first" when none is loaded, and the plan's load/unload steps are dropped; say so in the commit body.
+- [x] **Step 2: Write the fixtures.**
   - LM Studio: base from `IMAGEAI_LMSTUDIO_URL`, else `http://localhost:1234`. List with a 2 second timeout; any connection error → `pytest.skip("LM Studio is not running at <url>")`. Model: `IMAGEAI_LMSTUDIO_MODEL`, else the first loaded chat model, else the smallest downloaded chat model, loaded over REST with a 120 second timeout. No chat model → skip with "no chat model downloaded in LM Studio". On teardown unload only a model this fixture loaded. `LocalServer.base_url` is `<base>/v1`.
   - Ollama: base from `IMAGEAI_OLLAMA_URL`, else `http://localhost:11434`. List through `core.llm_models.fetch_ollama_models`; empty → skip. Model: `IMAGEAI_OLLAMA_MODEL`, else the smallest by the `size` field of `GET /api/tags`. `vision` is true when `POST /api/show` reports a vision capability.
-- [ ] **Step 3: Write the tests** (same three in each file, all `@pytest.mark.local`):
+- [x] **Step 3: Write the tests** (same three in each file, all `@pytest.mark.local`):
 
 ```python
 def test_text_reply(server):
@@ -490,11 +492,11 @@ def test_image_input(server):
 
 `PREFIX` is `"lm_studio/"` and `"ollama/"`. For Ollama, `api_base` is the bare base URL (the adapter adds `/v1`).
 
-- [ ] **Step 4:** Run `python -m pytest -m local -v`. Expected: tests pass for each running server and skip, with the reason shown, for each absent one. Zero failures either way.
-- [ ] **Step 5: Re-point the cloud tier.** In `tests/test_live_llm_params.py` replace `pytest.importorskip("litellm")` and the `litellm_mod` fixture with `from core import chameleon_llm`; the "raw request rejected" tests assert `chameleon_llm.BadRequestError`. Add, per cloud route (OpenAI chat model, OpenAI Responses-only model via `resolve_model("openai", "gpt-pro")`, Anthropic, Gemini API key, Vertex): one text call, one JSON-mode call, one image call. Vertex tests skip when no Google Cloud login is available.
-- [ ] **Step 6:** Run `python -m pytest tests/test_live_llm_params.py -v` without the environment variable. Expected: all skipped, none errored.
-- [ ] **Step 7: Write `Docs/Testing-LLM.md`:** the three commands from the spec's tier table, the four `IMAGEAI_*` variables and `IMAGEAI_LIVE_TESTS`, the cost of each tier, where keys are read from (`config.get_api_key()`, never the environment of the test command), and what each skip message means.
-- [ ] **Step 8:** Commit: `test(llm): add local-server tier and re-point live tier`.
+- [x] **Step 4:** Run `python -m pytest -m local -v`. Expected: tests pass for each running server and skip, with the reason shown, for each absent one. Zero failures either way.
+- [x] **Step 5: Re-point the cloud tier.** In `tests/test_live_llm_params.py` replace `pytest.importorskip("litellm")` and the `litellm_mod` fixture with `from core import chameleon_llm`; the "raw request rejected" tests assert `chameleon_llm.BadRequestError`. Add, per cloud route (OpenAI chat model, OpenAI Responses-only model via `resolve_model("openai", "gpt-pro")`, Anthropic, Gemini API key, Vertex): one text call, one JSON-mode call, one image call. Vertex tests skip when no Google Cloud login is available.
+- [x] **Step 6:** Run `python -m pytest tests/test_live_llm_params.py -v` without the environment variable. Expected: all skipped, none errored.
+- [x] **Step 7: Write `Docs/Testing-LLM.md`:** the three commands from the spec's tier table, the four `IMAGEAI_*` variables and `IMAGEAI_LIVE_TESTS`, the cost of each tier, where keys are read from (`config.get_api_key()`, never the environment of the test command), and what each skip message means.
+- [x] **Step 8:** Commit: `test(llm): add local-server tier and re-point live tier`.
 
 ---
 
@@ -504,7 +506,7 @@ def test_image_input(server):
 **Delete:** `tests/test_litellm_sdk_compatibility.py`
 **Test:** `tests/test_no_litellm.py`, `tests/test_http_dependency_security.py`
 
-- [ ] **Step 1: Add the failing requirements test** to `tests/test_no_litellm.py`:
+- [x] **Step 1: Add the failing requirements test** to `tests/test_no_litellm.py`:
 
 ```python
 @pytest.mark.parametrize("name", ["requirements.txt", "requirements-security.txt"])
@@ -515,13 +517,13 @@ def test_litellm_not_required(name):
 
 Run it. Expected: fail.
 
-- [ ] **Step 2:** Remove the `litellm` line from both requirements files and delete `tests/test_litellm_sdk_compatibility.py`.
-- [ ] **Step 3: Re-resolve.** In a fresh virtual environment outside the repo run `python -m pip install -r requirements.txt`, then `python -m pip show litellm` (expected: "not found") and `python -m pip show httpx2 httpcore2`. If nothing requires `httpx2` / `httpcore2` any more ("Required-by:" empty apart from each other), remove both pins and their comment block from both requirements files and update `tests/test_http_dependency_security.py` to match; otherwise keep the pins and rewrite the comment so it no longer names LiteLLM as the reason.
-- [ ] **Step 4:** Remove every LiteLLM entry from `.snyk` and `Docs/Snyk-Exceptions.md`. Remove nothing else from either file.
-- [ ] **Step 5: Docs.** `AGENTS.md`: the Hard-rules helper list says `LLMHandler`; the Conventions line becomes "Use `core/chameleon_llm` for chat calls; parameter rules live in `core/llm_params.py`." Update the one-line mentions in `README.md`, `Docs/ImageAI-CLI-Guide.md`, `Docs/Claude Desktop Instructions.md` and both `imageai-cli` `SKILL.md` copies (the two copies stay identical). Add `Docs/Testing-LLM.md` to the Pointers list in `AGENTS.md`. Regenerate `Docs/CodeMap.md` with `python tools/generate_code_map.py`. Leave `Plans/`, `Notes/`, `CHANGELOG.md` and `COMMIT_MESSAGE.txt` alone.
-- [ ] **Step 6:** Run `python -m pytest tests/test_no_litellm.py tests/test_http_dependency_security.py tests/test_readme_help_anchors.py tests/test_generate_code_map.py -v`. Expected: pass.
-- [ ] **Step 7:** Run `grep -rli litellm . --include=*.py --include=*.md --include=*.txt --include=.snyk --exclude-dir=.git --exclude-dir=Plans --exclude-dir=Notes --exclude-dir=.venv --exclude-dir=.venv_linux --exclude-dir=.worktrees`. Expected output: `CHANGELOG.md`, `COMMIT_MESSAGE.txt`, `tests/test_no_litellm.py`, and nothing else.
-- [ ] **Step 8:** Commit: `build(deps): remove litellm`.
+- [x] **Step 2:** Remove the `litellm` line from both requirements files and delete `tests/test_litellm_sdk_compatibility.py`.
+- [x] **Step 3: Re-resolve.** In a fresh virtual environment outside the repo run `python -m pip install -r requirements.txt`, then `python -m pip show litellm` (expected: "not found") and `python -m pip show httpx2 httpcore2`. If nothing requires `httpx2` / `httpcore2` any more ("Required-by:" empty apart from each other), remove both pins and their comment block from both requirements files and update `tests/test_http_dependency_security.py` to match; otherwise keep the pins and rewrite the comment so it no longer names LiteLLM as the reason.
+- [x] **Step 4:** Remove every LiteLLM entry from `.snyk` and `Docs/Snyk-Exceptions.md`. Remove nothing else from either file.
+- [x] **Step 5: Docs.** `AGENTS.md`: the Hard-rules helper list says `LLMHandler`; the Conventions line becomes "Use `core/chameleon_llm` for chat calls; parameter rules live in `core/llm_params.py`." Update the one-line mentions in `README.md`, `Docs/ImageAI-CLI-Guide.md`, `Docs/Claude Desktop Instructions.md` and both `imageai-cli` `SKILL.md` copies (the two copies stay identical). Add `Docs/Testing-LLM.md` to the Pointers list in `AGENTS.md`. Regenerate `Docs/CodeMap.md` with `python tools/generate_code_map.py`. Leave `Plans/`, `Notes/`, `CHANGELOG.md` and `COMMIT_MESSAGE.txt` alone.
+- [x] **Step 6:** Run `python -m pytest tests/test_no_litellm.py tests/test_http_dependency_security.py tests/test_readme_help_anchors.py tests/test_generate_code_map.py -v`. Expected: pass.
+- [x] **Step 7:** Run `grep -rli litellm . --include=*.py --include=*.md --include=*.txt --include=.snyk --exclude-dir=.git --exclude-dir=Plans --exclude-dir=Notes --exclude-dir=.venv --exclude-dir=.venv_linux --exclude-dir=.worktrees`. Expected output: `CHANGELOG.md`, `COMMIT_MESSAGE.txt`, `tests/test_no_litellm.py`, and nothing else.
+- [x] **Step 8:** Commit: `build(deps): remove litellm`.
 
 ---
 
