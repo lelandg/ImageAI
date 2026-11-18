@@ -14,7 +14,8 @@ Environment variables (all optional):
 * ``IMAGEAI_OLLAMA_URL``      Ollama base URL, default ``http://localhost:11434``
 * ``IMAGEAI_OLLAMA_MODEL``    Ollama model name to use
 * ``LM_API_TOKEN``            LM Studio's own token variable; sent as a Bearer
-                              header when LM Studio has authentication on.
+                              header when LM Studio has authentication on, for
+                              the REST calls and as ``api_key`` for completions.
 
 LM Studio REST API (confirmed 2026-11-18)
 -----------------------------------------
@@ -60,8 +61,8 @@ import pytest
 import requests
 
 
-from local_logic import (fail_or_skip_request_error, parse_listing, parse_ollama_tags,
-                         pick_lmstudio_model, pick_ollama_model)
+from local_logic import (fail_or_skip_request_error, lmstudio_token, parse_listing,
+                         parse_ollama_tags, pick_lmstudio_model, pick_ollama_model)
 
 LIST_TIMEOUT = (2, 10)      # (connect, read) seconds for listing calls
 LOAD_TIMEOUT = 120          # seconds for loading a model
@@ -75,10 +76,11 @@ class LocalServer:
     base_url: str               # OpenAI-compatible URL to pass as api_base
     model: str
     vision: Optional[bool]      # None = the server did not say
+    api_key: Optional[str] = None  # pass to completion(); None = no auth
 
 
 def _headers() -> dict:
-    token = os.environ.get("LM_API_TOKEN")
+    token = lmstudio_token()
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
@@ -151,7 +153,8 @@ def lmstudio():
                 if not any(m.key == pick.key and m.loaded for m in again):
                     pytest.fail(f"LM Studio answered 200 to the load of {pick.key} "
                                 "but the model does not show as loaded afterwards")
-        yield LocalServer(base_url=base + "/v1", model=model_id, vision=pick.vision)
+        yield LocalServer(base_url=base + "/v1", model=model_id, vision=pick.vision,
+                          api_key=lmstudio_token())
     finally:
         if loaded_here:  # only a model this fixture loaded
             try:

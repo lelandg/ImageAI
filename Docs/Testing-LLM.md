@@ -56,7 +56,7 @@ All of these are optional.
 | `IMAGEAI_LMSTUDIO_MODEL` | local tier | LM Studio model key to test. Default: a loaded model, else the smallest downloaded chat model. |
 | `IMAGEAI_OLLAMA_URL` | local tier | Ollama address. Default `http://localhost:11434`. |
 | `IMAGEAI_OLLAMA_MODEL` | local tier | Ollama model name to test. Default: the smallest installed model that can complete text. |
-| `LM_API_TOKEN` | local tier | LM Studio's own token variable. Set it only if you turned on authentication in LM Studio. |
+| `LM_API_TOKEN` | local tier | LM Studio's own token variable. Set it only if you turned on authentication in LM Studio. The tests send it with the REST calls and with every completion. |
 
 ## Where API keys come from
 

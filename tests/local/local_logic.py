@@ -103,6 +103,13 @@ def pick_lmstudio_model(models: list, wanted: Optional[str] = None) -> LMModel:
     return min(chat, key=lambda m: (m.size is None, m.size or 0))
 
 
+def lmstudio_token() -> Optional[str]:
+    """LM Studio's own ``LM_API_TOKEN``, or None when unset or blank."""
+    import os
+    token = (os.environ.get("LM_API_TOKEN") or "").strip()
+    return token or None
+
+
 def fail_or_skip_request_error(server: str, base: str, path: str, exc) -> None:
     """Skip when nothing accepted the connection; fail on anything else.
 

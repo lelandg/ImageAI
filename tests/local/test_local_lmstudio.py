@@ -20,9 +20,11 @@ def server(lmstudio):
 
 
 def _ask(server, messages, **params):
+    # With authentication on in LM Studio, completions need the token too;
+    # without one the adapter sends a placeholder key.
     return chameleon_llm.completion(
         model=f"{PREFIX}{server.model}", api_base=server.base_url,
-        messages=messages, timeout=TIMEOUT, **params)
+        api_key=server.api_key, messages=messages, timeout=TIMEOUT, **params)
 
 
 def test_text_reply(server):

@@ -193,3 +193,27 @@ def test_named_model_found_is_returned_after_the_upfront_check():
     models = parse_listing(_v1({"key": "a", "type": "llm", "size_bytes": 9},
                                {"key": "b", "type": "llm", "size_bytes": 1}))
     assert pick_lmstudio_model(models, "a").key == "a"
+
+
+# --- Codex P2-3: the LM Studio token also authenticates completions ----------
+
+@pytest.mark.parametrize("value,expected", [
+    (None, None), ("", None), ("  ", None), ("tok-test", "tok-test")])
+def test_lmstudio_token(monkeypatch, value, expected):
+    from local_logic import lmstudio_token
+    if value is None:
+        monkeypatch.delenv("LM_API_TOKEN", raising=False)
+    else:
+        monkeypatch.setenv("LM_API_TOKEN", value)
+    assert lmstudio_token() == expected
+
+
+def test_lmstudio_completions_pass_the_server_token(monkeypatch):
+    import test_local_lmstudio as lm
+    from types import SimpleNamespace
+    seen = {}
+    monkeypatch.setattr(lm.chameleon_llm, "completion",
+                        lambda **kw: seen.update(kw) or "ok")
+    server = SimpleNamespace(model="m", base_url="http://h/v1", api_key="tok-test")
+    lm._ask(server, [{"role": "user", "content": "x"}])
+    assert seen["api_key"] == "tok-test"
