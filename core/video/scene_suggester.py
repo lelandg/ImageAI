@@ -12,8 +12,6 @@ from dataclasses import dataclass
 
 from .tag_parser import TagParser, TagType, Tag
 from .prompt_engine import UnifiedLLMProvider
-from core.llm_models import get_provider_prefix
-from core.llm_params import normalize_provider, validate_params
 
 logger = logging.getLogger(__name__)
 
@@ -213,11 +211,6 @@ OUTPUT: Return the COMPLETE lyrics with tags inserted on new lines. Include ALL 
         console_callback: Optional[Callable[[str, str], None]] = None
     ) -> Optional[str]:
         """Call LLM and return response text"""
-        # Build model identifier
-        provider_id = normalize_provider(provider)
-        prefix = get_provider_prefix(provider_id)
-        model_id = f"{prefix}{model}" if prefix else model
-
         # System message
         system_msg = (
             "You are a professional music video storyboard artist. "
@@ -226,22 +219,21 @@ OUTPUT: Return the COMPLETE lyrics with tags inserted on new lines. Include ALL 
         )
 
         try:
-            # Validate/corral params for this provider/model (clamps, drops,
-            # renames as needed — e.g. temperature dropped for Claude 5-line).
-            llm_kwargs, _ = validate_params(
-                provider_id, model, {
-                    "temperature": temperature,
-                    "max_tokens": 4000  # Allow for longer responses with tags
-                }
-            )
-            kwargs = {
-                "model": model_id,
-                "messages": [
+            # Route and params are built centrally: LM Studio gets its
+            # endpoint, Gemini takes gemini/ or vertex_ai/ by sign-in, and
+            # params are corralled per model (clamps, drops, renames — e.g.
+            # temperature dropped for Claude 5-line).
+            kwargs = self.llm.route_kwargs(
+                provider, model,
+                [
                     {"role": "system", "content": system_msg},
                     {"role": "user", "content": prompt}
                 ],
-                **llm_kwargs
-            }
+                {
+                    "temperature": temperature,
+                    "max_tokens": 4000  # Allow for longer responses with tags
+                })
+            model_id = kwargs["model"]
 
             logger.info(f"Calling LLM: {model_id}")
             if console_callback:

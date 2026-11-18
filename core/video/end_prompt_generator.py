@@ -9,8 +9,7 @@ import logging
 from typing import Optional
 from dataclasses import dataclass
 
-from core.llm_models import get_provider_prefix, resolve_model
-from core.llm_params import normalize_provider, validate_params
+from core.llm_models import resolve_model
 
 
 @dataclass
@@ -97,26 +96,19 @@ Describe a natural ending frame for this scene."""
             # Call LLM provider
             from core import chameleon_llm
 
-            # Prepare model string (anthropic/gemini need route prefixes)
-            provider_id = normalize_provider(provider)
-            prefix = get_provider_prefix(provider_id)
-            model_id = f"{prefix}{model}" if prefix else model
-
             self.logger.info(f"Generating end prompt with {provider}/{model}")
             self.logger.debug(f"Context: start='{context.start_prompt[:50]}...', next='{context.next_start_prompt[:50] if context.next_start_prompt else 'None'}...'")
 
-            llm_kwargs, _ = validate_params(
-                provider_id, model,
-                {"temperature": temperature, "max_tokens": 150}
-            )
-            response = chameleon_llm.completion(
-                model=model_id,
-                messages=[
+            # Route and params are built centrally: LM Studio gets its
+            # endpoint, Gemini takes gemini/ or vertex_ai/ by sign-in.
+            llm_kwargs = self.llm_provider.route_kwargs(
+                provider, model,
+                [
                     {"role": "system", "content": self.SYSTEM_PROMPT},
                     {"role": "user", "content": user_prompt}
                 ],
-                **llm_kwargs
-            )
+                {"temperature": temperature, "max_tokens": 150})
+            response = chameleon_llm.completion(**llm_kwargs)
 
             # Extract response text
             response_text = response.choices[0].message.content.strip()

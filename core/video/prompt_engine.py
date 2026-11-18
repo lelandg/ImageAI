@@ -19,7 +19,7 @@ from core import chameleon_llm
 from core.llm_models import get_provider_models
 # _route_kwargs: chameleon_llm.completion kwargs from a provider alias
 # ("google", "claude", "LM Studio"); one shared copy lives in core.llm_params.
-from core.llm_params import normalize_provider
+from core.llm_params import normalize_provider, saved_vertex_project
 from core.llm_params import route_completion_kwargs as _route_kwargs
 
 
@@ -136,7 +136,31 @@ class UnifiedLLMProvider:
             self.lmstudio_base = self.config['lmstudio_endpoint']
         else:
             self.lmstudio_base = 'http://localhost:1234/v1'
-    
+
+        # Google Cloud project saved in Settings, when the config carries it
+        # (gcloud_project_id); sent on the vertex_ai route only.
+        self.vertex_project = saved_vertex_project(self.config)
+
+    def route_kwargs(self, provider: str, model: str,
+                     messages: List[Dict[str, Any]],
+                     params: Optional[Dict[str, Any]] = None,
+                     on_warning: Optional[Callable[[str], None]] = None
+                     ) -> Dict[str, Any]:
+        """``chameleon_llm.completion`` kwargs for a provider alias, with this
+        object's settings applied.
+
+        The LM Studio endpoint goes to an LM Studio request only (a cloud or
+        Ollama request never receives it); a Gemini model takes ``gemini/``
+        when a key is configured and ``vertex_ai/`` (Google Cloud login, with
+        the saved project) otherwise.
+        """
+        api_base = (self.lmstudio_base
+                    if normalize_provider(provider) == 'lmstudio' else None)
+        return _route_kwargs(provider, model, messages, params,
+                             api_base=api_base,
+                             vertex_project=self.vertex_project,
+                             on_warning=on_warning)
+
     def is_available(self) -> bool:
         """Check if the LLM client is available (always true for chameleon_llm)"""
         return self.llm is not None
@@ -408,6 +432,7 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
                 ],
                 {"temperature": temperature, "max_tokens": max_tokens},
                 api_base=api_base,
+                vertex_project=self.vertex_project,
                 on_warning=(lambda msg: console_callback(msg, "WARNING"))
                 if console_callback else None)
             model_id = kwargs["model"]
@@ -655,7 +680,7 @@ Return one enhanced visual description per line, numbered:
                 ],
                 {"temperature": temperature, "max_tokens": max_tokens,
                  "timeout": 120},  # 2 minute timeout to prevent hanging
-                api_base=api_base)
+                api_base=api_base, vertex_project=self.vertex_project)
 
             self.logger.debug(f"Batch enhancing {len(texts)} texts with max_tokens={max_tokens}")
             response = self.llm.completion(**kwargs)
@@ -884,7 +909,7 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
                 ],
                 {"temperature": temperature, "max_tokens": max_tokens,
                  "timeout": 120},
-                api_base=api_base)
+                api_base=api_base, vertex_project=self.vertex_project)
 
             if console_callback:
                 console_callback(f"🎬 Batch enhancing {len(texts)} prompts for video in ONE API call...", "INFO")
@@ -978,6 +1003,7 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
              "reasoning_effort": reasoning_effort,
              "response_format": response_format},
             api_key=api_key,
+            vertex_project=self.vertex_project,
             on_warning=(lambda msg: console_callback(msg, "WARNING"))
             if console_callback else None)
 
@@ -1413,7 +1439,8 @@ Return only the enhanced video prompt."""
                     {"role": "user", "content": user_prompt}
                 ],
                 {"temperature": 0.7, "max_tokens": 300},
-                api_base=api_base)
+                api_base=api_base,
+                vertex_project=self.llm_provider.vertex_project)
 
             # Log to console if callback provided
             if console_callback:

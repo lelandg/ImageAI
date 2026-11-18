@@ -230,6 +230,42 @@ def test_analyze_image_without_a_configured_key_sends_none(
     assert "api_key" not in completion.call_args.kwargs
 
 
+# --- the saved Google Cloud project reaches every Vertex call ------------------
+
+_PROJECT = {"gcloud_project_id": "saved-project"}
+_VERTEX_SITES = [
+    lambda cfg: UnifiedLLMProvider(cfg).enhance_prompt(
+        "a cat", "google", "gemini-test-model"),
+    lambda cfg: UnifiedLLMProvider(cfg).batch_enhance(
+        ["a cat", "a dog"], "google", "gemini-test-model"),
+    lambda cfg: UnifiedLLMProvider(cfg).batch_enhance_for_video(
+        ["a cat", "a dog"], "google", "gemini-test-model"),
+    lambda cfg: PromptEngine(UnifiedLLMProvider(cfg)).enhance_for_video(
+        "a cat", "google", "gemini-test-model"),
+    lambda cfg: UnifiedLLMProvider(cfg).analyze_image(
+        [{"role": "user", "content": "describe"}], model="gemini-test-model",
+        max_retries=0),
+]
+_VERTEX_IDS = ["enhance", "batch", "batch_video", "enhance_for_video",
+               "analyze_image"]
+
+
+@pytest.mark.parametrize("site", _VERTEX_SITES, ids=_VERTEX_IDS)
+def test_vertex_route_carries_the_saved_project(completion, no_gemini_key, site):
+    site(dict(_PROJECT))
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert kwargs["vertex_project"] == "saved-project"
+
+
+@pytest.mark.parametrize("site", _VERTEX_SITES, ids=_VERTEX_IDS)
+def test_api_key_route_does_not_carry_the_project(completion, site):
+    site({**_PROJECT, "google_api_key": "k"})
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == "gemini/gemini-test-model"
+    assert "vertex_project" not in kwargs
+
+
 # --- Addendum (httpx2): wrapped transport errors stay retryable ---------------
 
 def test_wrapped_transport_errors_are_retryable():
