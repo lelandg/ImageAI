@@ -10,9 +10,9 @@ REPO = Path(__file__).resolve().parent.parent
 ALL_ROOTS = ["core", "gui", "cli", "providers", "scripts", "main.py"]
 CORE_ROOTS = ["core"]
 
-# A real attribute use of the library module: ``litellm.`` not preceded by a
-# word character, so ``chameleon_llm.completion`` and ``self.litellm_x`` never match.
-_ATTR_USE = re.compile(r"(?<![\w.])litellm\.")
+# Any ``litellm.`` use, including ``obj.litellm.completion``. The word
+# boundary keeps ``chameleon_llm.completion`` and ``self.litellm_x`` clear.
+_ATTR_USE = re.compile(r"\blitellm\.")
 
 
 def _python_files(roots):

@@ -17,6 +17,7 @@ from jinja2 import Template, Environment, FileSystemLoader
 from .project import Scene
 from core import chameleon_llm
 from core.llm_models import get_provider_models, get_provider_prefix
+from core.llm_params import normalize_provider
 
 
 class PromptStyle(Enum):
@@ -58,6 +59,27 @@ class PromptTemplate:
         context.update(kwargs)
         
         return template.render(**context)
+
+
+def _route_kwargs(provider, model, messages, params, *, api_key=None,
+                  api_base=None, on_warning=None):
+    """Build ``chameleon_llm.completion`` kwargs with the right route prefix.
+
+    ``provider`` may be an alias ("google", "claude", "LM Studio"). A Gemini
+    model uses the API-key route when a key is configured (argument or
+    GEMINI_API_KEY / GOOGLE_API_KEY), otherwise the Vertex (Google Cloud
+    login) route.
+    """
+    import os
+    from core.llm_params import build_completion_kwargs, normalize_provider
+    provider_id = normalize_provider(provider)
+    has_key = bool(api_key or os.environ.get('GEMINI_API_KEY')
+                   or os.environ.get('GOOGLE_API_KEY'))
+    return build_completion_kwargs(
+        provider_id, model, messages, params,
+        api_key=api_key or None, api_base=api_base,
+        auth_mode=('api-key' if provider_id == 'gemini' and has_key else None),
+        on_warning=on_warning)
 
 
 class UnifiedLLMProvider:
@@ -376,36 +398,28 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
             user_prompt = f"Transform this into an image generation prompt: {text}"
         
         # Prepare model identifier (route prefix) for chameleon_llm
-        if provider == 'lmstudio':
+        if normalize_provider(provider) == 'lmstudio':
             # LM Studio uses OpenAI-compatible API
             model_id = model
             api_base = self.lmstudio_base
         else:
-            # Use provider prefix if needed
-            prefix = get_provider_prefix(provider)
-            model_id = f"{prefix}{model}" if prefix else model
+            # The route prefix is added by _route_kwargs below
+            model_id = model
             api_base = None
         
         try:
             # Build kwargs for chameleon_llm with validated/corralled params
-            from core.llm_params import validate_params
-            param_kwargs, _ = validate_params(
+            kwargs = _route_kwargs(
                 provider, model_id,
-                {"temperature": temperature, "max_tokens": max_tokens},
-                on_warning=(lambda msg: console_callback(msg, "WARNING"))
-                if console_callback else None)
-            kwargs = {
-                "model": model_id,
-                "messages": [
+                [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                **param_kwargs
-            }
-
-            # Add api_base for LM Studio
-            if api_base:
-                kwargs["api_base"] = api_base
+                {"temperature": temperature, "max_tokens": max_tokens},
+                api_base=api_base,
+                on_warning=(lambda msg: console_callback(msg, "WARNING"))
+                if console_callback else None)
+            model_id = kwargs["model"]
 
             # Log LLM request if enabled
             if log_llm:
@@ -628,12 +642,11 @@ Return one enhanced visual description per line, numbered:
         
         try:
             # Prepare model identifier
-            if provider == 'lmstudio':
+            if normalize_provider(provider) == 'lmstudio':
                 model_id = model
                 api_base = self.lmstudio_base
             else:
-                prefix = get_provider_prefix(provider)
-                model_id = f"{prefix}{model}" if prefix else model
+                model_id = model
                 api_base = None
             
             # Adjust max_tokens based on provider and batch size
@@ -643,22 +656,15 @@ Return one enhanced visual description per line, numbered:
             else:
                 max_tokens = 150 * len(texts)
 
-            from core.llm_params import validate_params
-            param_kwargs, _ = validate_params(
+            kwargs = _route_kwargs(
                 provider, model_id,
-                {"temperature": temperature, "max_tokens": max_tokens,
-                 "timeout": 120})  # 2 minute timeout to prevent hanging
-            kwargs = {
-                "model": model_id,
-                "messages": [
+                [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": batch_prompt}
                 ],
-                **param_kwargs
-            }
-
-            if api_base:
-                kwargs["api_base"] = api_base
+                {"temperature": temperature, "max_tokens": max_tokens,
+                 "timeout": 120},  # 2 minute timeout to prevent hanging
+                api_base=api_base)
 
             self.logger.debug(f"Batch enhancing {len(texts)} texts with max_tokens={max_tokens}")
             response = self.llm.completion(**kwargs)
@@ -869,34 +875,25 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
 
         try:
             # Prepare model identifier
-            if provider == 'lmstudio':
+            if normalize_provider(provider) == 'lmstudio':
                 model_id = model
                 api_base = self.lmstudio_base
             else:
-                from core.llm_models import get_provider_prefix
-                prefix = get_provider_prefix(provider)
-                model_id = f"{prefix}{model}" if prefix else model
+                model_id = model
                 api_base = None
 
             # Adjust max_tokens for video prompts (slightly longer than image prompts)
             max_tokens = 200 * len(texts)  # ~200 tokens per video prompt
 
-            from core.llm_params import validate_params
-            param_kwargs, _ = validate_params(
+            kwargs = _route_kwargs(
                 provider, model_id,
-                {"temperature": temperature, "max_tokens": max_tokens,
-                 "timeout": 120})
-            kwargs = {
-                "model": model_id,
-                "messages": [
+                [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": batch_prompt}
                 ],
-                **param_kwargs
-            }
-
-            if api_base:
-                kwargs["api_base"] = api_base
+                {"temperature": temperature, "max_tokens": max_tokens,
+                 "timeout": 120},
+                api_base=api_base)
 
             if console_callback:
                 console_callback(f"🎬 Batch enhancing {len(texts)} prompts for video in ONE API call...", "INFO")
@@ -988,18 +985,13 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
 
         # Prepare kwargs for chameleon_llm with validated/corralled params. A bare
         # Claude/Gemini id gets its route prefix here (the package never guesses).
-        import os
-        from core.llm_params import build_completion_kwargs, infer_provider_from_model
-        provider = infer_provider_from_model(model)
-        has_gemini_key = bool(api_key or os.environ.get('GEMINI_API_KEY')
-                              or os.environ.get('GOOGLE_API_KEY'))
-        kwargs = build_completion_kwargs(
-            provider, model, messages,
+        from core.llm_params import infer_provider_from_model
+        kwargs = _route_kwargs(
+            infer_provider_from_model(model), model, messages,
             {"temperature": temperature, "max_tokens": max_tokens,
              "reasoning_effort": reasoning_effort,
              "response_format": response_format},
-            api_key=api_key or None,
-            auth_mode=('api-key' if provider == 'gemini' and has_gemini_key else None),
+            api_key=api_key,
             on_warning=(lambda msg: console_callback(msg, "WARNING"))
             if console_callback else None)
 
@@ -1421,30 +1413,21 @@ Return only the enhanced video prompt."""
 
         try:
             # Prepare model identifier
-            if provider == 'lmstudio':
+            if normalize_provider(provider) == 'lmstudio':
                 model_id = model
                 api_base = self.llm_provider.lmstudio_base
             else:
-                from core.llm_models import get_provider_prefix
-                prefix = get_provider_prefix(provider)
-                model_id = f"{prefix}{model}" if prefix else model
+                model_id = model
                 api_base = None
 
-            from core.llm_params import validate_params
-            param_kwargs, _ = validate_params(
+            kwargs = _route_kwargs(
                 provider, model_id,
-                {"temperature": 0.7, "max_tokens": 300})
-            kwargs = {
-                "model": model_id,
-                "messages": [
+                [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
-                **param_kwargs
-            }
-
-            if api_base:
-                kwargs["api_base"] = api_base
+                {"temperature": 0.7, "max_tokens": 300},
+                api_base=api_base)
 
             # Log to console if callback provided
             if console_callback:
