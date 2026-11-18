@@ -268,3 +268,35 @@ def test_sdk_error_wrapped(fake_genai):
         call()
     assert info.value.__cause__ is fake_genai.raises
     assert "slow down" in str(info.value)
+
+
+# --- M1: a known finish reason wins over "no parts" -------------------------
+
+def _no_parts_reply(reason):
+    return SimpleNamespace(
+        candidates=[SimpleNamespace(content=SimpleNamespace(parts=[]),
+                                    finish_reason=reason)],
+        usage_metadata=None)
+
+
+@pytest.mark.parametrize("reason,expected", [
+    ("MAX_TOKENS", "length"), (types.FinishReason.MAX_TOKENS, "length"),
+    ("STOP", "stop"), ("SAFETY", "content_filter"),
+    (None, "content_filter"), ("SOMETHING_NEW", "content_filter"),
+])
+def test_no_parts_uses_finish_reason_first(fake_genai, reason, expected):
+    fake_genai.reply = _no_parts_reply(reason)
+    resp = call()
+    assert resp.choices[0].message.content == ""
+    assert resp.choices[0].finish_reason == expected
+
+
+# --- M2: response.model reports the model the provider says it used ---------
+
+def test_response_model_is_provider_reported(fake_genai):
+    fake_genai.reply.model_version = "served-model-001"
+    assert call().model == "served-model-001"
+
+
+def test_response_model_falls_back_to_requested(fake_genai):
+    assert call().model == "test-model"

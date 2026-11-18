@@ -50,11 +50,13 @@ def _resolve_base_url(route: Route, api_base: str | None) -> str | None:
 
 
 def _resolve_key(route: Route, api_key: str | None, base_url: str | None) -> str:
+    if route.route in _LOCAL_ROUTES or base_url:
+        # A local or compatible endpoint never receives the cloud key from the
+        # environment: only a key the caller passed for it, else a placeholder.
+        return api_key or _PLACEHOLDER_KEY
     key = api_key or os.environ.get("OPENAI_API_KEY")
     if key:
         return key
-    if route.route in _LOCAL_ROUTES or base_url:
-        return _PLACEHOLDER_KEY
     raise AuthError(
         "No OpenAI API key: pass api_key or set OPENAI_API_KEY", provider="openai")
 
@@ -75,6 +77,12 @@ def _build_request(route: Route, messages: list[dict], params: dict,
     return request
 
 
+def _served_model(route: Route, resp) -> str:
+    """The model the provider reports it used, else the requested id."""
+    served = getattr(resp, "model", None)
+    return served if isinstance(served, str) and served else route.model
+
+
 def _to_completion(route: Route, resp) -> Completion:
     choices = []
     for i, ch in enumerate(getattr(resp, "choices", None) or []):
@@ -88,7 +96,7 @@ def _to_completion(route: Route, resp) -> Completion:
         choices = [Choice(0, Message("assistant", ""), "stop")]
     usage = getattr(resp, "usage", None)
     return Completion(
-        model=route.model,
+        model=_served_model(route, resp),
         choices=choices,
         usage=Usage(
             getattr(usage, "prompt_tokens", 0) or 0,
@@ -172,7 +180,7 @@ def _responses_to_completion(route: Route, resp) -> Completion:
     prompt = getattr(usage, "input_tokens", 0) or 0
     completion = getattr(usage, "output_tokens", 0) or 0
     return Completion(
-        model=route.model,
+        model=_served_model(route, resp),
         choices=[Choice(0, Message("assistant", text if isinstance(text, str) else ""),
                         finish)],
         usage=Usage(prompt, completion,
@@ -197,12 +205,34 @@ def complete(route: Route, messages: list[dict], *, api_key: str | None,
                  "timeout=%s max_retries=%s",
                  "responses" if use_responses else "chat", route.route,
                  route.model, base_url, timeout, max_retries)
+    if use_responses:
+        return _send_responses(client, route, request)
     try:
-        if use_responses:
-            resp = client.responses.create(**request)
-        else:
-            resp = client.chat.completions.create(**request)
+        resp = client.chat.completions.create(**request)
+    except Exception as exc:
+        error = wrap_sdk_error(exc, "openai")
+        if base_url or not _points_at_responses(error):
+            raise error from exc
+        logger.warning(
+            "chameleon_llm: model '%s' rejected chat completions and asked for "
+            "the Responses API; retrying once on the Responses path. Add it to "
+            "openai_adapter.RESPONSES_ONLY_PATTERNS so the pattern list learns it",
+            route.model)
+        return _send_responses(
+            client, route, _build_responses_request(route, messages, params))
+    return _to_completion(route, resp)
+
+
+def _points_at_responses(error) -> bool:
+    """True for a 400/404 whose message says to use the Responses API."""
+    text = str(error).lower()
+    return (error.status_code in (400, 404)
+            and ("v1/responses" in text or "responses api" in text))
+
+
+def _send_responses(client, route: Route, request: dict) -> Completion:
+    try:
+        resp = client.responses.create(**request)
     except Exception as exc:
         raise wrap_sdk_error(exc, "openai") from exc
-    return (_responses_to_completion(route, resp) if use_responses
-            else _to_completion(route, resp))
+    return _responses_to_completion(route, resp)

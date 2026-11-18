@@ -30,7 +30,7 @@ def test_plain_call_and_reply(fake_anthropic):
     assert fake_anthropic.calls == [{
         "model": "test-model", "messages": MSGS, "max_tokens": 4096,
         "temperature": 0.2}]
-    assert resp.model == "test-model"
+    assert resp.model == "echoed-model"  # the model the provider reports
     assert resp.choices[0].message.role == "assistant"
     assert resp.choices[0].message.content == "hello"
     assert resp.choices[0].finish_reason == "stop"
@@ -219,3 +219,14 @@ def test_sdk_error_wrapped(fake_anthropic):
         call()
     assert info.value.provider == "anthropic"
     assert info.value.__cause__ is err
+
+
+# --- M2: response.model reports the model the provider says it used ---------
+
+def test_response_model_is_provider_reported(fake_anthropic):
+    assert call().model == "echoed-model"
+
+
+def test_response_model_falls_back_to_requested(fake_anthropic):
+    fake_anthropic.reply.model = None
+    assert call().model == "test-model"

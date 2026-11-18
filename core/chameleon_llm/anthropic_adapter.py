@@ -126,8 +126,9 @@ def _to_completion(route: Route, resp) -> Completion:
     usage = getattr(resp, "usage", None)
     prompt = getattr(usage, "input_tokens", 0) or 0
     completion = getattr(usage, "output_tokens", 0) or 0
+    served = getattr(resp, "model", None)  # the model the API says it used
     return Completion(
-        model=route.model,
+        model=served if isinstance(served, str) and served else route.model,
         choices=[Choice(0, Message("assistant", text), finish)],
         usage=Usage(prompt, completion, prompt + completion),
         raw=resp)

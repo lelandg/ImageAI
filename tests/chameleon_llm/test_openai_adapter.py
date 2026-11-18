@@ -1,4 +1,5 @@
 import logging
+from types import SimpleNamespace
 
 import pytest
 
@@ -34,7 +35,7 @@ def test_plain_call_builds_client_and_request(fake_openai):
         {"api_key": "k", "base_url": None, "timeout": 600, "max_retries": 0}]
     assert fake_openai.chat_calls == [
         {"model": "test-model", "messages": MSGS, "temperature": 0.2}]
-    assert resp.model == "test-model"
+    assert resp.model == "echoed-model"  # the model the provider reports
     assert resp.choices[0].message.role == "assistant"
     assert resp.choices[0].message.content == "hello"
     assert resp.choices[0].finish_reason == "stop"
@@ -206,3 +207,111 @@ def test_sdk_error_wrapped(fake_openai):
     assert info.value.__cause__ is err
     assert info.value.provider == "openai"
     assert info.value.status_code == 429
+
+
+# --- I2: a base URL in effect never receives the environment OpenAI key -----
+
+def test_env_openai_key_not_sent_to_ollama(fake_openai, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-real-cloud-key")
+    call(OLLAMA, api_key=None)
+    assert fake_openai.client_kwargs[0]["api_key"] == "not-needed"
+
+
+def test_env_openai_key_not_sent_to_lm_studio(fake_openai, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-real-cloud-key")
+    call(LMSTUDIO, api_key=None, api_base="http://lm:1234/v1")
+    assert fake_openai.client_kwargs[0]["api_key"] == "not-needed"
+
+
+def test_env_openai_key_not_sent_to_custom_base(fake_openai, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-real-cloud-key")
+    call(api_key=None, api_base="http://compat/v1")
+    assert fake_openai.client_kwargs[-1]["api_key"] == "not-needed"
+    monkeypatch.setenv("OPENAI_API_BASE", "http://env-compat/v1")
+    call(api_key=None)
+    assert fake_openai.client_kwargs[-1]["api_key"] == "not-needed"
+
+
+def test_explicit_key_sent_to_local_route(fake_openai, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-real-cloud-key")
+    call(OLLAMA, api_key="local-key")
+    assert fake_openai.client_kwargs[0]["api_key"] == "local-key"
+
+
+def test_plain_openai_route_still_reads_env_key(fake_openai, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-real-cloud-key")
+    call(api_key=None)
+    assert fake_openai.client_kwargs[0]["api_key"] == "sk-real-cloud-key"
+    assert fake_openai.client_kwargs[0]["base_url"] is None
+
+
+# --- M2: response.model reports the model the provider says it used ---------
+
+def test_response_model_is_provider_reported(fake_openai):
+    assert call().model == "echoed-model"
+
+
+def test_response_model_falls_back_to_requested(fake_openai):
+    fake_openai.chat_reply.model = None
+    assert call().model == "test-model"
+
+
+# --- I5a: a Responses-only model unknown to the pattern list ----------------
+
+class _NotChatError(Exception):
+    def __init__(self, msg, status_code):
+        super().__init__(msg)
+        self.status_code = status_code
+
+
+@pytest.mark.parametrize("status,msg", [
+    (404, "This model is only supported in v1/responses and not in v1/chat/completions."),
+    (400, "This model is only available through the Responses API."),
+])
+def test_chat_error_pointing_at_responses_retries_once_there(
+        fake_openai, caplog, status, msg):
+    fake_openai.chat_raises = _NotChatError(msg, status)
+    fake_openai.responses_reply = SimpleNamespace(
+        output_text="from responses", status="completed", usage=None,
+        incomplete_details=None, model="served-model")
+    with caplog.at_level(logging.WARNING, logger="chameleon_llm"):
+        resp = call(Route("openai", "openai", "new-pro-model"),
+                    params={"max_tokens": 9})
+    assert len(fake_openai.chat_calls) == 1
+    assert len(fake_openai.responses_calls) == 1
+    assert fake_openai.responses_calls[0]["max_output_tokens"] == 9
+    assert resp.choices[0].message.content == "from responses"
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "new-pro-model" in warnings[0] and "RESPONSES_ONLY_PATTERNS" in warnings[0]
+
+
+def test_responses_retry_failure_is_wrapped(fake_openai):
+    class Boom(Exception):
+        status_code = 500
+    fake_openai.chat_raises = _NotChatError("use the Responses API", 404)
+    fake_openai.responses_raises = Boom("down")
+    with pytest.raises(LLMError) as info:
+        call(Route("openai", "openai", "new-pro-model"))
+    assert info.value.status_code == 500
+    assert len(fake_openai.chat_calls) == 1
+    assert len(fake_openai.responses_calls) == 1
+
+
+@pytest.mark.parametrize("status,msg", [
+    (400, "Invalid value for temperature."),     # 400 without the hint
+    (500, "v1/responses is down"),              # hint but wrong status
+])
+def test_other_chat_errors_are_not_retried(fake_openai, status, msg):
+    fake_openai.raises = _NotChatError(msg, status)
+    with pytest.raises(LLMError):
+        call()
+    assert len(fake_openai.chat_calls) == 1
+    assert fake_openai.responses_calls == []
+
+
+def test_responses_retry_not_attempted_on_local_base(fake_openai):
+    fake_openai.raises = _NotChatError("use the Responses API", 404)
+    with pytest.raises(BadRequestError):
+        call(OLLAMA, api_key=None)
+    assert fake_openai.responses_calls == []

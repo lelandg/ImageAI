@@ -50,3 +50,27 @@ def test_wrapped_message_keeps_original_text_and_type_name():
 
 def test_all_errors_are_exceptions():
     assert issubclass(LLMError, Exception)
+
+
+# --- I4: httpx transport errors (google-genai lets them propagate) ----------
+
+httpx = pytest.importorskip("httpx")
+
+
+@pytest.mark.parametrize("exc,cls", [
+    (httpx.ConnectError("refused"), ConnectionError_),
+    (httpx.ReadError("reset"), ConnectionError_),
+    (httpx.RemoteProtocolError("closed"), ConnectionError_),
+    (httpx.ReadTimeout("slow"), TimeoutError_),
+    (httpx.ConnectTimeout("slow"), TimeoutError_),
+])
+def test_wrap_httpx_transport_errors(exc, cls):
+    err = wrap_sdk_error(exc, "gemini")
+    assert type(err) is cls
+    assert err.status_code is None
+
+
+@pytest.mark.parametrize("name", ["NetworkError", "ProtocolError", "ConnectFailed"])
+def test_wrap_connection_family_by_class_name(name):
+    exc = type(name, (Exception,), {})("x")
+    assert type(wrap_sdk_error(exc, "gemini")) is ConnectionError_

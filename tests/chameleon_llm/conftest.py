@@ -15,6 +15,8 @@ class FakeOpenAIState:
         self.chat_reply = make_chat_reply()
         self.responses_reply = None
         self.raises = None         # exception instance raised by any create()
+        self.chat_raises = None    # raised by chat.completions.create only
+        self.responses_raises = None  # raised by responses.create only
 
     @property
     def clients_built(self):
@@ -46,6 +48,8 @@ def fake_openai(monkeypatch):
             state.chat_calls.append(kwargs)
             if state.raises is not None:
                 raise state.raises
+            if state.chat_raises is not None:
+                raise state.chat_raises
             return state.chat_reply
 
     class _Responses:
@@ -53,6 +57,8 @@ def fake_openai(monkeypatch):
             state.responses_calls.append(kwargs)
             if state.raises is not None:
                 raise state.raises
+            if state.responses_raises is not None:
+                raise state.responses_raises
             return state.responses_reply
 
     class FakeOpenAI:

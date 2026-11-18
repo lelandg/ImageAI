@@ -174,20 +174,21 @@ def _to_completion(route: Route, resp) -> Completion:
         parts = getattr(getattr(cand, "content", None), "parts", None) or []
         text = "".join(getattr(p, "text", None) or "" for p in parts)
         name = _finish_name(getattr(cand, "finish_reason", None))
-        if not parts:
-            finish = "content_filter"
-        elif name == "MAX_TOKENS":
+        if name == "MAX_TOKENS":
             finish = "length"
         elif name in _CONTENT_FILTER:
             finish = "content_filter"
-        else:
+        elif name == "STOP" or parts:
             finish = "stop"
+        else:  # no parts and no known reason: treat the reply as withheld
+            finish = "content_filter"
     usage = getattr(resp, "usage_metadata", None)
     prompt = getattr(usage, "prompt_token_count", 0) or 0
     completion = getattr(usage, "candidates_token_count", 0) or 0
     total = getattr(usage, "total_token_count", 0) or (prompt + completion)
+    served = getattr(resp, "model_version", None)  # the model the API says it used
     return Completion(
-        model=route.model,
+        model=served if isinstance(served, str) and served else route.model,
         choices=[Choice(0, Message("assistant", text), finish)],
         usage=Usage(prompt, completion, total),
         raw=resp)
