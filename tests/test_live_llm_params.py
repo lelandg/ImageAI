@@ -106,6 +106,9 @@ def _classic_openai():
 # --- Anthropic: Claude 5-line rejects sampling params ------------------------
 
 class TestAnthropicClaude5:
+    # The "raw" tests pass sampling params straight to completion(). With
+    # anthropic SDK 2.x the adapter sends them in extra_body, so they reach
+    # the API and the API's 400 is what these tests assert.
     @staticmethod
     def model():
         return resolve_model("anthropic", "sonnet")
@@ -188,6 +191,9 @@ class TestAnthropicOlder:
 # --- OpenAI: reasoning models (gpt-5.x) --------------------------------------
 
 class TestOpenAIReasoning:
+    # The cheapest current flagship (GPT-6 at the time of writing). That GPT-6
+    # rejects a non-default temperature like gpt-5 is assumed by the rules in
+    # core/llm_params.py; test_raw_nondefault_temperature_rejected proves it.
     @staticmethod
     def model():
         return resolve_model("openai", "gpt-nano")  # cheapest of the family
@@ -290,67 +296,80 @@ def _red_png_data_url():
 # answer, and an empty reply would fail a test for the wrong reason.
 _ROUTE_MAX_TOKENS = 1024
 
-# (id, key provider or None, model resolver, route prefix, extra kwargs)
+# (id, builder provider, key provider or None, model resolver, auth mode).
+# Every route builds its request with build_completion_kwargs exactly as the
+# application does (route prefix, max_tokens vs max_completion_tokens, dropped
+# sampling params), so these tests exercise the real path.
 _ROUTES = [
-    pytest.param("openai_chat", "openai",
-                 lambda: resolve_model("openai", "gpt-mini"), "", {},
+    pytest.param("openai_chat", "openai", "openai",
+                 lambda: resolve_model("openai", "gpt-mini"), None,
                  id="openai-chat"),
     # Whether this model is Responses-only is unconfirmed by documentation;
     # this live test is the proof (the adapter routes by model-id pattern).
-    pytest.param("openai_responses", "openai",
-                 lambda: resolve_model("openai", "gpt-pro"), "", {},
+    pytest.param("openai_responses", "openai", "openai",
+                 lambda: resolve_model("openai", "gpt-pro"), None,
                  id="openai-responses"),
-    pytest.param("anthropic", "anthropic",
-                 lambda: resolve_model("anthropic", "haiku"), "anthropic/", {},
+    pytest.param("anthropic", "anthropic", "anthropic",
+                 lambda: resolve_model("anthropic", "haiku"), None,
                  id="anthropic"),
-    pytest.param("gemini", "google",
-                 lambda: resolve_model("gemini", "flash-lite"), "gemini/", {},
+    pytest.param("gemini", "gemini", "google",
+                 lambda: resolve_model("gemini", "flash-lite"), "api-key",
                  id="gemini-api-key"),
-    pytest.param("vertex", None,
-                 lambda: resolve_model("gemini", "flash-lite"), "vertex_ai/", {},
+    # Vertex: Google Cloud login, no key; the adapter's default location
+    # ("global") serves the current models, so none is passed.
+    pytest.param("vertex", "gemini", None,
+                 lambda: resolve_model("gemini", "flash-lite"), "gcloud",
                  id="vertex"),
 ]
 
 
-def _route_kwargs(keys, provider, resolver, prefix, extra):
-    kwargs = dict(extra)
-    if provider is None:  # Vertex: Google Cloud login, no key
+def _route_request(keys, provider, key_provider, resolver, auth_mode, messages,
+                   params):
+    api_key = None
+    extra = {}
+    if key_provider is None:
         available, project = _adc_project()
         if not available:
             pytest.skip("no Google Cloud application-default credentials "
                         "(run: gcloud auth application-default login)")
         if project:
-            kwargs["vertex_project"] = project
+            extra["vertex_project"] = project
     else:
-        kwargs["api_key"] = _need(keys, provider)
-    kwargs["model"] = f"{prefix}{resolver()}"
+        api_key = _need(keys, key_provider)
+    kwargs = build_completion_kwargs(provider, resolver(), messages, params,
+                                     api_key=api_key, auth_mode=auth_mode)
+    kwargs.update(extra)
+    kwargs.setdefault("timeout", _TIMEOUT)
     return kwargs
 
 
-@pytest.mark.parametrize("name,provider,resolver,prefix,extra", _ROUTES)
+@pytest.mark.parametrize("name,provider,key_provider,resolver,auth_mode", _ROUTES)
 class TestRoutes:
-    def test_text(self, keys, name, provider, resolver, prefix, extra):
-        kwargs = _route_kwargs(keys, provider, resolver, prefix, extra)
-        response = _raw_call(messages=_MSGS, max_tokens=_ROUTE_MAX_TOKENS, **kwargs)
+    def test_text(self, keys, name, provider, key_provider, resolver, auth_mode):
+        kwargs = _route_request(keys, provider, key_provider, resolver, auth_mode,
+                                _MSGS, {"max_tokens": _ROUTE_MAX_TOKENS})
+        response = chameleon_llm.completion(**kwargs)
         assert _content(response).strip()
 
-    def test_json_mode(self, keys, name, provider, resolver, prefix, extra):
-        kwargs = _route_kwargs(keys, provider, resolver, prefix, extra)
-        response = _raw_call(
-            messages=[{"role": "user",
-                       "content": 'Reply with only this JSON object: {"ok": true}'}],
-            max_tokens=_ROUTE_MAX_TOKENS,
-            response_format={"type": "json_object"}, **kwargs)
+    def test_json_mode(self, keys, name, provider, key_provider, resolver, auth_mode):
+        kwargs = _route_request(
+            keys, provider, key_provider, resolver, auth_mode,
+            [{"role": "user",
+              "content": 'Reply with only this JSON object: {"ok": true}'}],
+            {"max_tokens": _ROUTE_MAX_TOKENS,
+             "response_format": {"type": "json_object"}})
+        response = chameleon_llm.completion(**kwargs)
         parsed = LLMResponseParser.parse_json_response(_content(response), dict)
         assert isinstance(parsed, dict), _content(response)
 
-    def test_image(self, keys, name, provider, resolver, prefix, extra):
-        kwargs = _route_kwargs(keys, provider, resolver, prefix, extra)
-        response = _raw_call(
-            messages=[{"role": "user", "content": [
+    def test_image(self, keys, name, provider, key_provider, resolver, auth_mode):
+        kwargs = _route_request(
+            keys, provider, key_provider, resolver, auth_mode,
+            [{"role": "user", "content": [
                 {"type": "text", "text": "What colour is this image? One word."},
                 {"type": "image_url", "image_url": {"url": _red_png_data_url()}}]}],
-            max_tokens=_ROUTE_MAX_TOKENS, **kwargs)
+            {"max_tokens": _ROUTE_MAX_TOKENS})
+        response = chameleon_llm.completion(**kwargs)
         assert _content(response).strip()
 
 
