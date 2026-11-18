@@ -1,7 +1,11 @@
 """Fixtures for the ``local`` test tier: a real LM Studio or Ollama server.
 
-Each fixture skips (with the reason shown by ``pytest -v -rs``) when its
-server does not answer, so the tier is safe to run on any machine.
+A fixture skips (reason shown by ``pytest -v -rs``) only when there is nothing
+to test: the server does not answer, or it has no chat model. Anything
+unexpected from a server that DOES answer is a failure, never a skip, so a
+contributor with a running server never gets a green run that tested nothing.
+The parsing and the decisions live in ``local_logic.py``, which is tested
+without a server in ``test_local_fixture_logic.py``.
 
 Environment variables (all optional):
 
@@ -23,8 +27,8 @@ Documented and used (newest form, tried first):
 * ``GET  /api/v1/models`` lists models. The docs name the endpoint but print no
   response example. The fields used here (``models`` array; ``key``, ``type``,
   ``size_bytes``, ``loaded_instances`` with an ``id``, ``capabilities.vision``)
-  are NOT confirmed by the docs. ``_parse_listing`` therefore accepts several
-  spellings and treats a missing field as "unknown".
+  are NOT confirmed by the docs. ``local_logic.parse_listing`` accepts several
+  spellings; a body it cannot read FAILS the test and names the keys it saw.
 * ``POST /api/v1/models/load`` with ``{"model": <key>}`` loads a model; the
   response carries ``instance_id`` and ``status: "loaded"`` (documented).
 * ``POST /api/v1/models/unload`` with ``{"instance_id": <id>}`` unloads it;
@@ -40,12 +44,15 @@ Documented older form, used when ``/api/v1/models`` answers 404:
   already loaded, or skips with "load a model in LM Studio first".
 
 If the live server disagrees with this docstring, the live server wins; adjust
-``_parse_listing``.
+``local_logic.parse_listing``.
 """
 
 from __future__ import annotations
 
+import base64
+import io
 import os
+import warnings
 from dataclasses import dataclass
 from typing import Optional
 
@@ -53,6 +60,8 @@ import pytest
 import requests
 
 from core.llm_models import fetch_ollama_models
+
+from local_logic import parse_listing, pick_lmstudio_model, pick_ollama_model
 
 LIST_TIMEOUT = (2, 10)      # (connect, read) seconds for listing calls
 LOAD_TIMEOUT = 120          # seconds for loading a model
@@ -63,28 +72,9 @@ _DEFAULT_OLLAMA = "http://localhost:11434"
 
 @dataclass
 class LocalServer:
-    base_url: str   # OpenAI-compatible URL to pass as api_base
+    base_url: str               # OpenAI-compatible URL to pass as api_base
     model: str
-    vision: bool
-
-
-# --- LM Studio ----------------------------------------------------------------
-
-@dataclass
-class _LMModel:
-    key: str
-    kind: str                     # "llm", "vlm", "embedding", ...
-    size: Optional[float]
-    loaded_ids: list
-    vision: bool
-
-    @property
-    def is_chat(self) -> bool:
-        return self.kind in ("llm", "vlm")
-
-    @property
-    def loaded(self) -> bool:
-        return bool(self.loaded_ids)
+    vision: Optional[bool]      # None = the server did not say
 
 
 def _headers() -> dict:
@@ -92,36 +82,10 @@ def _headers() -> dict:
     return {"Authorization": f"Bearer {token}"} if token else {}
 
 
-def _parse_listing(payload: dict) -> list:
-    """Normalize a /api/v1/models or /api/v0/models payload."""
-    items = payload.get("models")
-    if items is None:
-        items = payload.get("data") or []
-    out = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        key = item.get("key") or item.get("id")
-        if not key:
-            continue
-        kind = str(item.get("type") or "").lower()
-        instances = item.get("loaded_instances")
-        if instances is None:
-            instances = [key] if item.get("state") == "loaded" else []
-        ids = [i.get("id", key) if isinstance(i, dict) else i for i in instances]
-        caps = item.get("capabilities")
-        vision = (bool(caps.get("vision")) if isinstance(caps, dict) else False) \
-            or kind == "vlm"
-        size = item.get("size_bytes", item.get("size"))
-        out.append(_LMModel(key=key, kind=kind,
-                            size=float(size) if isinstance(size, (int, float)) else None,
-                            loaded_ids=ids, vision=vision))
-    return out
-
-
 def _list_lmstudio(base: str):
-    """Return (models, api_version) or skip. Newest path first, 404 falls back."""
-    for version, path in (("v1", "/api/v1/models"), ("v0", "/api/v0/models")):
+    """Return (models, api_version). Newest path first; 404 falls back."""
+    paths = (("v1", "/api/v1/models"), ("v0", "/api/v0/models"))
+    for version, path in paths:
         try:
             resp = requests.get(base + path, headers=_headers(), timeout=LIST_TIMEOUT)
         except requests.RequestException:
@@ -129,77 +93,79 @@ def _list_lmstudio(base: str):
         if resp.status_code == 404:
             continue
         if resp.status_code in (401, 403):
-            pytest.skip(f"LM Studio at {base} requires a token: set LM_API_TOKEN")
+            pytest.fail(f"LM Studio at {base} answered HTTP {resp.status_code} on "
+                        f"{path}: it needs a token. Set LM_API_TOKEN.")
         if resp.status_code != 200:
-            pytest.skip(f"LM Studio at {base} answered HTTP {resp.status_code} "
-                        f"on {path}")
+            pytest.fail(f"LM Studio at {base} answered HTTP {resp.status_code} on "
+                        f"{path}: {resp.text[:200]}")
         try:
-            return _parse_listing(resp.json()), version
+            payload = resp.json()
         except ValueError:
-            pytest.skip(f"LM Studio at {base} returned non-JSON on {path}")
-    pytest.skip(f"LM Studio at {base} has no REST model listing "
-                "(/api/v1/models and /api/v0/models both answered 404)")
+            pytest.fail(f"LM Studio at {base} returned a non-JSON body on {path}: "
+                        f"{resp.text[:200]}")
+        return parse_listing(payload), version
+    pytest.fail(f"Something answers at {base} but it is not a recognised LM Studio "
+                f"REST API: {paths[0][1]} and {paths[1][1]} both returned 404.")
 
 
 @pytest.fixture(scope="session")
 def lmstudio():
     base = os.environ.get("IMAGEAI_LMSTUDIO_URL", _DEFAULT_LMSTUDIO).rstrip("/")
     models, version = _list_lmstudio(base)
-    chat = [m for m in models if m.is_chat]
-
-    wanted = os.environ.get("IMAGEAI_LMSTUDIO_MODEL")
-    if wanted:
-        pick = next((m for m in chat if m.key == wanted or wanted in m.loaded_ids),
-                    None)
-        if pick is None:
-            pytest.skip(f"IMAGEAI_LMSTUDIO_MODEL={wanted!r} is not a chat model "
-                        "in LM Studio")
-    else:
-        pick = next((m for m in chat if m.loaded), None)
-        if pick is None:
-            if not chat:
-                pytest.skip("no chat model downloaded in LM Studio")
-            pick = min(chat, key=lambda m: (m.size is None, m.size or 0))
+    pick = pick_lmstudio_model(models, os.environ.get("IMAGEAI_LMSTUDIO_MODEL"))
 
     loaded_here = None
-    if not pick.loaded:
+    if pick.loaded:
+        model_id = pick.loaded_ids[0]
+    else:
         if version != "v1":
-            pytest.skip("load a model in LM Studio first "
-                        "(this LM Studio only offers the /api/v0 listing, "
-                        "which cannot load models)")
+            pytest.skip("load a model in LM Studio first (this LM Studio only offers "
+                        "the /api/v0 listing, which cannot load models)")
         try:
             resp = requests.post(base + "/api/v1/models/load",
                                  json={"model": pick.key}, headers=_headers(),
                                  timeout=LOAD_TIMEOUT)
         except requests.RequestException as exc:
-            pytest.skip(f"could not load {pick.key} in LM Studio: {exc}")
+            pytest.fail(f"loading {pick.key} in LM Studio failed: {exc}")
         if resp.status_code != 200:
-            pytest.skip(f"could not load {pick.key} in LM Studio: "
-                        f"HTTP {resp.status_code} {resp.text[:200]}")
+            pytest.fail(f"loading {pick.key} in LM Studio failed: "
+                        f"HTTP {resp.status_code} {resp.text[:300]}")
         try:
-            loaded_here = resp.json().get("instance_id") or pick.key
+            body = resp.json()
         except ValueError:
-            loaded_here = pick.key
-        model_id = loaded_here
-    else:
-        model_id = pick.loaded_ids[0]
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        status = body.get("status")
+        model_id = body.get("instance_id") or pick.key
+        loaded_here = model_id  # from here on, teardown unloads it
+        if status is not None and status != "loaded":
+            pytest.fail(f"LM Studio accepted the load of {pick.key} but reported "
+                        f"status {status!r}, not 'loaded'")
+        if status is None:  # no status field: confirm by listing again
+            again, _ = _list_lmstudio(base)
+            if not any(m.key == pick.key and m.loaded for m in again):
+                pytest.fail(f"LM Studio answered 200 to the load of {pick.key} but "
+                            "the model does not show as loaded afterwards")
 
     try:
         yield LocalServer(base_url=base + "/v1", model=model_id, vision=pick.vision)
     finally:
         if loaded_here:  # only a model this fixture loaded
             try:
-                requests.post(base + "/api/v1/models/unload",
-                              json={"instance_id": loaded_here},
-                              headers=_headers(), timeout=LIST_TIMEOUT)
-            except requests.RequestException:
-                pass
+                resp = requests.post(base + "/api/v1/models/unload",
+                                     json={"instance_id": loaded_here},
+                                     headers=_headers(), timeout=LIST_TIMEOUT)
+                if resp.status_code != 200:
+                    warnings.warn(f"could not unload {loaded_here} from LM Studio: "
+                                  f"HTTP {resp.status_code}; unload it by hand")
+            except requests.RequestException as exc:
+                warnings.warn(f"could not unload {loaded_here} from LM Studio: "
+                              f"{exc}; unload it by hand")
 
-
-# --- Ollama -------------------------------------------------------------------
 
 def _ollama_capabilities(base: str, name: str) -> Optional[list]:
-    """Capabilities reported by POST /api/show, or None when not reported."""
+    """Capabilities from POST /api/show, or None when not reported."""
     try:
         resp = requests.post(base + "/api/show", json={"model": name},
                              timeout=LIST_TIMEOUT)
@@ -216,50 +182,20 @@ def ollama():
     names = fetch_ollama_models(base)
     if not names:
         pytest.skip(f"Ollama is not running at {base}, or has no models installed")
-
-    wanted = os.environ.get("IMAGEAI_OLLAMA_MODEL")
-    if wanted:
-        if wanted not in names:
-            pytest.skip(f"IMAGEAI_OLLAMA_MODEL={wanted!r} is not installed in Ollama")
-        candidates = [wanted]
-    else:
-        try:
-            tags = requests.get(base + "/api/tags", timeout=LIST_TIMEOUT).json()
-            sizes = {m.get("name"): m.get("size") or 0 for m in tags.get("models", [])}
-        except (requests.RequestException, ValueError):
-            sizes = {}
-        candidates = sorted(names, key=lambda n: sizes.get(n, 0))
-
-    for name in candidates:
-        caps = _ollama_capabilities(base, name)
-        # Older Ollama reports no capabilities; then trust the name.
-        if caps is None or "completion" in caps:
-            return LocalServer(base_url=base, model=name,
-                               vision=bool(caps) and "vision" in caps)
-    pytest.skip("no Ollama model that can complete text is installed")
-
-
-# --- Shared test data -----------------------------------------------------------
-
-@pytest.fixture(scope="session")
-def red_png_data_url() -> str:
-    """An 8x8 red PNG as a base64 data URL, built in memory (no binary file)."""
-    import base64
-    import io
-
-    from PIL import Image
-
-    buf = io.BytesIO()
-    Image.new("RGB", (8, 8), (255, 0, 0)).save(buf, format="PNG")
-    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    try:
+        tags = requests.get(base + "/api/tags", timeout=LIST_TIMEOUT).json()
+        sizes = {m.get("name"): m.get("size") or 0 for m in tags.get("models", [])}
+    except (requests.RequestException, ValueError):
+        sizes = {}
+    name, vision = pick_ollama_model(
+        names, sizes, os.environ.get("IMAGEAI_OLLAMA_MODEL"),
+        lambda n: _ollama_capabilities(base, n))
+    return LocalServer(base_url=base, model=name, vision=vision)
 
 
 @pytest.fixture(scope="session")
 def red_png_data_url() -> str:
     """An 8x8 solid red PNG as a base64 data URL (built here, not committed)."""
-    import base64
-    import io
-
     from PIL import Image
 
     buf = io.BytesIO()

@@ -44,8 +44,10 @@ def test_json_mode(server):
 
 
 def test_image_input(server, red_png_data_url):
+    if server.vision is None:
+        pytest.skip(f"the server did not report whether {server.model} supports vision")
     if not server.vision:
-        pytest.skip(f"model {server.model} does not report vision support")
+        pytest.skip(f"the server reports that {server.model} has no vision")
     r = _ask(server,
              [{"role": "user", "content": [
                  {"type": "text", "text": "What colour is this image? One word."},

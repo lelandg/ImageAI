@@ -32,7 +32,8 @@ import pytest
 
 from core import chameleon_llm
 from core.llm_models import LLM_PROVIDERS, resolve_model
-from core.llm_params import LLMParams, build_completion_kwargs, validate_params
+from core.llm_params import (LLMParams, build_completion_kwargs, get_param_rules,
+                             validate_params)
 from core.llm_parsing import LLMResponseParser
 
 pytestmark = [
@@ -169,12 +170,15 @@ class TestAnthropicOlder:
         assert _content(response)
 
     def test_max_tokens_over_limit_corralled(self, keys):
-        """The registry caps output tokens; a 100k request must be reduced."""
+        """The ceiling comes from the rules; a 100k request must be capped to it."""
         api_key = _need(keys, "anthropic")
         model = _older_claude()
         params, warnings = validate_params(
             "anthropic", model, {"max_tokens": 100_000})
-        assert params["max_tokens"] < 100_000 and warnings
+        ceiling = get_param_rules("anthropic", model).max_output_tokens
+        if ceiling is None:
+            pytest.skip(f"no output-token ceiling known for {model}")
+        assert params["max_tokens"] == ceiling and warnings
         response = _corralled_call(
             "anthropic", model,
             LLMParams(temperature=0.0, max_tokens=100_000), api_key)
@@ -274,6 +278,7 @@ def _adc_project():
         return False, None
 
 
+# Same image as the red_png_data_url fixture in tests/local/conftest.py (no shared helper module).
 def _red_png_data_url():
     from PIL import Image
     buf = io.BytesIO()

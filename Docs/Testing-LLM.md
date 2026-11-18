@@ -82,17 +82,35 @@ yourself. The tests never download or delete a model.
 | `no Google Cloud application-default credentials ...` | The Vertex tests found no Google Cloud login. | Run `gcloud auth application-default login`. |
 | `no curated <provider> model fits this test` | The built-in model list has no model of the kind the test needs. | Report it. The test needs updating. |
 | `LM Studio is not running at <url>` | Nothing answered within 2 seconds. | Start LM Studio and its local server, or set `IMAGEAI_LMSTUDIO_URL`. |
-| `LM Studio at <url> requires a token: set LM_API_TOKEN` | Authentication is on in LM Studio. | Set `LM_API_TOKEN`. |
-| `LM Studio at <url> has no REST model listing ...` | The server answered 404 on both model-listing paths. | Check the URL. Update LM Studio. |
-| `no chat model downloaded in LM Studio` | LM Studio has only embedding models, or none. | Download a chat model in LM Studio. |
+| `no chat model downloaded in LM Studio (...)` | LM Studio lists no models, or only embedding models. | Download a chat model in LM Studio. |
 | `load a model in LM Studio first ...` | This LM Studio cannot load models over REST, and none is loaded. | Load a model by hand. |
-| `could not load <model> in LM Studio ...` | The load request failed, for example not enough memory. | Free memory, or choose a smaller model with `IMAGEAI_LMSTUDIO_MODEL`. |
-| `IMAGEAI_LMSTUDIO_MODEL=... is not a chat model in LM Studio` | The model you named is not downloaded, or is not a chat model. | Fix the name. |
 | `Ollama is not running at <url>, or has no models installed` | Nothing answered, or the server has no models. | Start Ollama and run `ollama pull <model>`, or set `IMAGEAI_OLLAMA_URL`. |
-| `IMAGEAI_OLLAMA_MODEL=... is not installed in Ollama` | The model you named is not installed. | Fix the name. |
-| `no Ollama model that can complete text is installed` | Every installed model is, for example, an embedding model. | Pull a chat model. |
-| `model <name> does not report vision support` | The model cannot read images. | Nothing. This is expected for text-only models. |
+| `no Ollama model that can complete text is installed ...` | Ollama reported capabilities for every model and none can complete text. | Pull a chat model. |
+| `the server did not report whether <model> supports vision` | The server does not say if the model reads images. | Nothing, or use a model whose server reports it. |
+| `the server reports that <model> has no vision` | The model is text-only. | Nothing. This is expected. |
 
-A test that fails is not the same as a skip. A failure against a running
+## Failures you may see
+
+A skip means there is nothing to test. A failure means a server answered but
+did something unexpected, so the test could not do its job. These are the
+failures the fixtures raise on purpose.
+
+| Message starts with | Meaning | What to do |
+|---|---|---|
+| `LM Studio at <url> answered HTTP 401` (or 403) | Authentication is on in LM Studio. | Set `LM_API_TOKEN`. |
+| `LM Studio at <url> answered HTTP <code>` | The model listing returned an error. | Read the text after the code. |
+| `LM Studio at <url> returned a non-JSON body` | Something else may be using the port. | Check the URL. |
+| `Something answers at <url> but it is not a recognised LM Studio REST API` | Both listing paths returned 404. | Check the URL. Update LM Studio. |
+| `LM Studio answered 200 but the body has no recognisable model list` | The reply has no `models` or `data` array. The message lists the keys it saw. | Report the keys. The test code needs updating. |
+| `LM Studio lists models but none is recognised as a chat model` | The `type` values are not the ones the tests know. The message lists them. | Report the values. The test code needs updating. |
+| `IMAGEAI_LMSTUDIO_MODEL=... is not a chat model` | The model you named is not a downloaded chat model. | Fix the name. |
+| `loading <model> in LM Studio failed` | The load request failed, for example not enough memory. | Free memory, or pick a smaller model with `IMAGEAI_LMSTUDIO_MODEL`. |
+| `LM Studio accepted the load ... but reported status` or `... does not show as loaded afterwards` | The load did not take effect. | Check LM Studio's own log. |
+| `IMAGEAI_OLLAMA_MODEL=... is not installed in Ollama` | The model you named is not installed. | Fix the name. |
+
+If LM Studio cannot unload a model the tests loaded, you get a warning, not a
+failure. Unload that model by hand.
+
+A test that fails for any other reason is not the same as a skip. A failure against a running
 server, or with a configured key, means a real problem. Report it with the
 full pytest output.
