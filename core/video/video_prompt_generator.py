@@ -170,6 +170,20 @@ Add camera movement (pan, zoom, dolly, tilt, etc.) and subtle motion over time.
         """Check if LLM provider and model are configured"""
         return bool(self.llm_provider and self.llm_model)
 
+    def _endpoint_for(self, provider_id: str) -> Optional[str]:
+        """The configured endpoint for a local provider, else None.
+
+        Keys as in the video workspace's ``get_provider_config()``:
+        ``lmstudio_endpoint`` and ``ollama_endpoint``.
+        """
+        key = {"lmstudio": "lmstudio_endpoint",
+               "ollama": "ollama_endpoint"}.get(provider_id)
+        getter = getattr(self.config, "get", None) if self.config else None
+        if not key or not callable(getter):
+            return None
+        value = getter(key, None)
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
     def _auth_for(self, provider_id: str):
         """Return ``(auth_mode, api_key)`` for a canonical provider id.
 
@@ -361,6 +375,7 @@ IMPORTANT:
                 {"temperature": temperature,
                  "max_tokens": 500},  # Increased from 200 to avoid truncation
                 api_key=api_key,
+                api_base=self._endpoint_for(provider_id),
                 auth_mode=auth_mode if provider_id == "gemini" else None)
             model_id = request_params["model"]
 
@@ -566,6 +581,7 @@ CRITICAL REQUIREMENTS:
                  # Increased from 200 to 500 tokens per video prompt
                  "max_tokens": 500 * len(contexts)},
                 api_key=api_key,
+                api_base=self._endpoint_for(provider_id),
                 auth_mode=(auth_mode if provider_id == "gemini" and self.config
                            else None))
             model_id = request_params["model"]

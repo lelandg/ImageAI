@@ -1,10 +1,15 @@
 """scripts/generate_tags.py gives a bare --model override the provider's route."""
 
-import importlib.util
-import signal
-from pathlib import Path
-
 import pytest
+
+# The script exits at import time without tqdm, a tool dependency that
+# requirements.txt does not install: skip the whole module first.
+pytest.importorskip("tqdm", reason="scripts/generate_tags.py needs tqdm "
+                    "(not in requirements.txt)")
+
+import importlib.util  # noqa: E402
+import signal  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "generate_tags.py"
 
@@ -25,6 +30,8 @@ def tags_module(tmp_path_factory):
         spec = importlib.util.spec_from_file_location("generate_tags_under_test", SCRIPT)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
+    except SystemExit as exc:  # the script calls sys.exit on a missing import
+        pytest.fail(f"importing {SCRIPT.name} exited with {exc.code!r}")
     finally:
         os.chdir(cwd)
         signal.signal(signal.SIGINT, old_int)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from .errors import BadRequestError, UnsupportedRouteError
@@ -68,7 +69,8 @@ def _refuse_silent_misroute(model: str, head: str, sep: str) -> None:
 def resolve_route(model: str, api_base: str | None = None) -> Route:
     """Resolve ``model`` to a Route. Only the first segment can be a prefix.
 
-    Without ``api_base``, an id that would silently reach OpenAI (a bare
+    Without ``api_base`` (argument or a non-empty ``OPENAI_API_BASE``
+    environment variable), an id that would silently reach OpenAI (a bare
     ``claude*``/``gemini*`` id, or a misnamed or miscased prefix such as
     ``google/`` or ``Anthropic/``) raises ``BadRequestError``. With an
     ``api_base`` any name is accepted: a local server may host any model.
@@ -86,6 +88,8 @@ def resolve_route(model: str, api_base: str | None = None) -> Route:
                 raise BadRequestError(f"model id missing after '{head}/'")
             adapter, route = _PREFIXES[head]
             return Route(adapter, route, rest)
-    if not api_base:
+    # The OpenAI adapter also honors OPENAI_API_BASE, so a base URL from the
+    # environment counts here too: the call then goes to that server.
+    if not (api_base or os.environ.get("OPENAI_API_BASE")):
         _refuse_silent_misroute(model, head, sep)
     return Route("openai", "openai", model)

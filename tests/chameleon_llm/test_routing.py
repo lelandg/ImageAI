@@ -4,6 +4,12 @@ from core.chameleon_llm.errors import BadRequestError, UnsupportedRouteError
 from core.chameleon_llm.routing import Route, resolve_route
 
 
+@pytest.fixture(autouse=True)
+def _no_env_base(monkeypatch):
+    # OPENAI_API_BASE lifts the refusal (R1); keep the developer's env out.
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+
+
 @pytest.mark.parametrize("model,api_base,expected", [
     ("test-model", None, Route("openai", "openai", "test-model")),
     ("openai/test-model", None, Route("openai", "openai", "test-model")),
@@ -101,3 +107,21 @@ def test_dispatch_passes_api_base_to_routing(fake_openai):
                api_base="http://localhost:1234/v1")
     assert fake_openai.chat_calls[0]["model"] == "claude-test-model"
     assert fake_openai.client_kwargs[0]["base_url"] == "http://localhost:1234/v1"
+
+
+# --- R1: OPENAI_API_BASE counts as an api_base for the refusal ---------------
+
+@pytest.mark.parametrize("model", ["claude-test-model", "google/gemma-test"])
+def test_openai_api_base_env_allows_any_name(monkeypatch, model):
+    monkeypatch.setenv("OPENAI_API_BASE", "http://localhost:1234/v1")
+    assert resolve_route(model) == Route("openai", "openai", model)
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_missing_or_empty_openai_api_base_env_still_refuses(monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    else:
+        monkeypatch.setenv("OPENAI_API_BASE", value)
+    with pytest.raises(BadRequestError):
+        resolve_route("claude-test-model")

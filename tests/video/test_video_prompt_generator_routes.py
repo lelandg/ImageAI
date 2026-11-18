@@ -102,3 +102,24 @@ def test_single_google_gcloud_auth_uses_vertex_without_key(completion):
 def test_single_passes_configured_key(completion):
     _single("Anthropic", "claude-test-model", {"anthropic_api_key": "the-key"})
     assert completion.call_args.kwargs["api_key"] == "the-key"
+
+
+# --- R2: configured local endpoints are used ----------------------------------
+
+@pytest.mark.parametrize("site", SITES, ids=lambda f: f.__name__)
+@pytest.mark.parametrize("provider,key,endpoint,expected_model", [
+    ("LM Studio", "lmstudio_endpoint", "http://lm-host:4321/v1", "local-test-model"),
+    ("Ollama", "ollama_endpoint", "http://ollama-host:5678", "ollama/local-test-model"),
+])
+def test_configured_local_endpoint_is_the_api_base(completion, site, provider, key,
+                                                    endpoint, expected_model):
+    site(provider, "local-test-model", {key: endpoint})
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == expected_model
+    assert kwargs["api_base"] == endpoint
+
+
+@pytest.mark.parametrize("site", SITES, ids=lambda f: f.__name__)
+def test_ollama_without_configured_endpoint_has_no_api_base(completion, site):
+    site("Ollama", "local-test-model", {})
+    assert "api_base" not in completion.call_args.kwargs
