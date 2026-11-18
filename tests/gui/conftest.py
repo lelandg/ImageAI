@@ -42,16 +42,46 @@ _PINNED_ENV = (
 )
 
 
+_TRANSPORT_KWARGS = frozenset(
+    {"model", "messages", "api_key", "api_base", "timeout", "max_retries"})
+
+
+def check_completion_kwargs(kwargs):
+    """Fail as the real ``completion`` would on a wrong route, and also on a
+    parameter the route's adapter does not accept (the real call would drop
+    it with a WARNING, so a dialog test would not notice the lost setting)."""
+    from core.chameleon_llm.dispatch import _load_adapter
+    route = chameleon_llm.resolve_route(kwargs.get("model", ""), kwargs.get("api_base"))
+    accepted = _load_adapter(route.adapter).ACCEPTED_PARAMS | _TRANSPORT_KWARGS
+    rejected = sorted(k for k, v in kwargs.items() if k not in accepted and v is not None)
+    if rejected:
+        raise AssertionError(
+            f"completion kwargs not accepted by the {route.route} route "
+            f"({kwargs.get('model')!r}): {rejected}")
+    return route
+
+
 class FakeCompletion:
-    """Stands in for ``chameleon_llm.completion``: records kwargs, returns ``reply``."""
+    """Stands in for ``chameleon_llm.completion``: records kwargs, returns ``reply``.
+
+    Each call is checked against the real router and the routed adapter's
+    accepted parameters (see ``check_completion_kwargs``), so a dialog that
+    builds a wrong route or an unaccepted parameter fails its test.
+    """
 
     def __init__(self):
         self.reply = ""
         self.error = None
         self.calls = []
+        self.violations = []  # also asserted empty at fixture teardown
 
     def __call__(self, **kwargs):
         self.calls.append(kwargs)
+        try:
+            check_completion_kwargs(kwargs)
+        except Exception as exc:  # dialogs catch errors; teardown still sees it
+            self.violations.append(f"{type(exc).__name__}: {exc}")
+            raise
         if self.error is not None:
             raise self.error
         return Completion(
@@ -97,7 +127,8 @@ def stub_api_key(monkeypatch):
 def fake_completion(monkeypatch, llm_sandbox, stub_api_key):
     fake = FakeCompletion()
     monkeypatch.setattr(chameleon_llm, "completion", fake)
-    return fake
+    yield fake
+    assert not fake.violations, fake.violations
 
 
 @pytest.fixture
