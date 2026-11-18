@@ -13,8 +13,8 @@ from dataclasses import dataclass, asdict
 
 from core.llm_models import resolve_model
 from core import chameleon_llm
-from core.llm_params import (apply_google_credential, build_completion_kwargs,
-                             google_auth_settings, infer_provider_from_model)
+from core.llm_params import (build_completion_kwargs, google_auth_settings,
+                             infer_provider_from_model)
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -120,12 +120,14 @@ Rules:
         else:
             logger.debug("No Anthropic API key available")
 
-        # Google Gemini. With Google Cloud login ("gcloud" auth mode) the
-        # configured Google value is an OAuth access token, not an API key:
-        # it is never exported or sent, and Gemini models take vertex_ai/.
+        # Google Gemini. The key, auth mode and project stay on this object
+        # and travel with every request; nothing is written to GEMINI_API_KEY,
+        # so two objects with different Google settings cannot change each
+        # other's routing. With Google Cloud login ("gcloud") the configured
+        # Google value is an OAuth access token, not an API key: it is never
+        # sent, and Gemini models take vertex_ai/.
         self.google_auth_mode, self.vertex_project = google_auth_settings(self.config)
-        if apply_google_credential(self.config.get('google_api_key'),
-                                   self.google_auth_mode):
+        if self.google_auth_mode != 'gcloud' and self.config.get('google_api_key'):
             logger.info("Google Gemini API key configured")
             console.info("✅ Google Gemini API key configured")
         elif self.google_auth_mode == 'gcloud':

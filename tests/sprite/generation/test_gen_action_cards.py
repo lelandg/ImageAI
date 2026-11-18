@@ -260,3 +260,25 @@ def test_generate_action_cards_keeps_the_project_off_other_routes(monkeypatch):
                               plate_color="#00FF00", completion_fn=fake_completion)
     assert all("vertex_project" not in kwargs for kwargs in calls)
     assert calls[0]["model"] == "gemini/gemini-test-model"
+
+
+def test_generate_action_cards_prefixed_model_in_gcloud_mode(monkeypatch):
+    """A ``gemini/`` id must not keep the API-key route (and the token) when
+    the auth mode is Google Cloud login."""
+    from core import llm_params
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: _SavedSettings(
+        auth_mode="gcloud", gcloud_project_id="settings-project"))
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        return _response(json.dumps(VALID))
+
+    generate_action_cards("a knight", "sidescroller", provider="google",
+                          model="gemini/gemini-test-model",
+                          api_key="oauth-access-token", auth_mode="gcloud",
+                          plate_color="#00FF00", completion_fn=fake_completion)
+    kwargs = calls[0]
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in kwargs
+    assert kwargs["vertex_project"] == "settings-project"

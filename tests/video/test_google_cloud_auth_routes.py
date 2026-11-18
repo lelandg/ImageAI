@@ -20,6 +20,7 @@ from core.lyrics_to_prompts import LyricsToPromptsGenerator
 from core.prompt_enhancer_llm import PromptEnhancerLLM
 from core.video.end_prompt_generator import EndPromptContext, EndPromptGenerator
 from core.video.llm_sync import LLMSyncAssistant
+from core.video.llm_sync_v2 import LLMSyncAssistant as LLMSyncAssistantV2
 from core.video.prompt_engine import PromptEngine, UnifiedLLMProvider
 from core.video.scene_suggester import SceneSuggester
 from core.video.storyboard_v2 import EnhancedStoryboardGenerator
@@ -39,9 +40,6 @@ def _clean_env(monkeypatch):
     for name in _ENV:
         monkeypatch.setenv(name, "x")
         monkeypatch.delenv(name)
-    llm_params._forget_exported_gemini_keys()
-    yield
-    llm_params._forget_exported_gemini_keys()
 
 
 @pytest.fixture
@@ -147,34 +145,86 @@ def test_gcloud_mode_ignores_a_gemini_key_in_the_environment(
     assert os.environ["GEMINI_API_KEY"] == "user-env-key"
 
 
-def test_gcloud_mode_removes_a_key_an_earlier_provider_exported(
-        completion, saved_api_key_mode, monkeypatch):
-    UnifiedLLMProvider({"google_api_key": "stored-key"})
-    assert os.environ["GEMINI_API_KEY"] == "stored-key"
-    # the user switches Settings to Google Cloud login; a new provider is built
-    monkeypatch.setattr(llm_params, "_saved_settings",
-                        lambda: _Saved(auth_mode="gcloud"))
-    UnifiedLLMProvider({"google_api_key": TOKEN})
-    assert "GEMINI_API_KEY" not in os.environ
-
-
-def test_lyrics_gcloud_mode_removes_a_key_exported_earlier(
-        completion, saved_api_key_mode, monkeypatch):
-    LyricsToPromptsGenerator({"google_api_key": "stored-key"})
-    assert os.environ["GEMINI_API_KEY"] == "stored-key"
-    monkeypatch.setattr(llm_params, "_saved_settings",
-                        lambda: _Saved(auth_mode="gcloud"))
-    LyricsToPromptsGenerator({"google_api_key": TOKEN})
-    assert "GEMINI_API_KEY" not in os.environ
-
-
 @sites
-def test_api_key_mode_behaves_as_before(completion, saved_api_key_mode, site):
+def test_api_key_mode_sends_its_own_key_explicitly(
+        completion, saved_api_key_mode, site):
+    """The key travels in the request, not through GEMINI_API_KEY: nothing is
+    exported, so no other object's routing can depend on it."""
     site({"google_api_key": "stored-key", "gcloud_project_id": "saved-project"})
     kwargs = completion.call_args.kwargs
     assert kwargs["model"] == f"gemini/{MODEL}"
+    assert kwargs["api_key"] == "stored-key"
     assert "vertex_project" not in kwargs
-    assert os.environ["GEMINI_API_KEY"] == "stored-key"
+    assert "GEMINI_API_KEY" not in os.environ
+
+
+# --- two objects with different Google settings do not affect each other ------
+
+API_KEY_DICT = {"google_api_key": "stored-key", "auth_mode": "api-key"}
+
+MAKERS = {
+    "provider": lambda c: (lambda p: lambda: p.enhance_prompt("a cat", "google", MODEL))(
+        UnifiedLLMProvider(dict(c))),
+    "provider_batch": lambda c: (lambda p: lambda: p.batch_enhance(
+        ["a cat", "a dog"], "google", MODEL))(UnifiedLLMProvider(dict(c))),
+    "analyze_image": lambda c: (lambda p: lambda: p.analyze_image(
+        [{"role": "user", "content": "describe"}], model=MODEL, max_retries=0))(
+        UnifiedLLMProvider(dict(c))),
+    "prompt_engine": lambda c: (lambda e: lambda: e.enhance_for_video(
+        "a cat", "google", MODEL))(PromptEngine(UnifiedLLMProvider(dict(c)))),
+    "scene_suggester": lambda c: (lambda s: lambda: s._call_llm(
+        "tag these lyrics", "google", MODEL, 0.7))(SceneSuggester(dict(c))),
+    "llm_sync": lambda c: (lambda a: lambda: a.sync_with_llm("la la", None, 30.0))(
+        LLMSyncAssistant("google", MODEL, dict(c))),
+    "llm_sync_v2": lambda c: (lambda a: lambda: a._sync_single_section_with_gemini(
+        "la la", None, 30.0, None))(LLMSyncAssistantV2("gemini", MODEL, dict(c))),
+    "lyrics": lambda c: (lambda g: lambda: g.generate(["line one"], model=MODEL))(
+        LyricsToPromptsGenerator(dict(c))),
+}
+makers = pytest.mark.parametrize("make", list(MAKERS.values()), ids=list(MAKERS))
+
+
+def _call(completion, call):
+    completion.reset_mock()
+    call()
+    return completion.call_args.kwargs
+
+
+def _assert_api_key_route(kwargs):
+    assert kwargs["model"] == f"gemini/{MODEL}"
+    assert kwargs["api_key"] == "stored-key"
+
+
+@makers
+def test_api_key_object_first_then_gcloud_object(completion, make):
+    first = make(API_KEY_DICT)          # object A: API-key mode
+    _assert_api_key_route(_call(completion, first))
+    second = make(GCLOUD_DICT)          # object B: Google Cloud login
+    _assert_vertex(_call(completion, second), "saved-project")
+    # creating and using B changed nothing for A
+    _assert_api_key_route(_call(completion, first))
+    assert "GEMINI_API_KEY" not in os.environ
+
+
+@makers
+def test_gcloud_object_first_then_api_key_object(completion, make):
+    first = make(GCLOUD_DICT)
+    _assert_vertex(_call(completion, first), "saved-project")
+    second = make(API_KEY_DICT)
+    _assert_api_key_route(_call(completion, second))
+    # creating and using the API-key object changed nothing for the first
+    _assert_vertex(_call(completion, first), "saved-project")
+    assert "GEMINI_API_KEY" not in os.environ
+
+
+@makers
+def test_keyless_object_is_not_given_another_objects_key(
+        completion, saved_api_key_mode, make):
+    keyless = make({})
+    make(API_KEY_DICT)
+    kwargs = _call(completion, keyless)
+    assert kwargs["model"] == f"vertex_ai/{MODEL}"
+    assert "api_key" not in kwargs
 
 
 @sites

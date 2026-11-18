@@ -192,3 +192,22 @@ def test_generate_keeps_the_project_off_the_api_key_route(monkeypatch):
                                completion_fn=fake_completion)
     assert seen["model"] == "gemini/gemini-test-model"
     assert "vertex_project" not in seen
+
+
+def test_generate_prefixed_model_in_gcloud_mode(monkeypatch):
+    from core import llm_params
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: _SavedSettings(
+        auth_mode="gcloud", gcloud_project_id="settings-project"))
+    seen = {}
+
+    def fake_completion(**kwargs):
+        seen.update(kwargs)
+        return _fake_response(_reply())
+
+    generate_pose_instructions(_action(), 4, provider="google",
+                               model="gemini/gemini-test-model",
+                               api_key="oauth-access-token", auth_mode="gcloud",
+                               completion_fn=fake_completion)
+    assert seen["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in seen
+    assert seen["vertex_project"] == "settings-project"

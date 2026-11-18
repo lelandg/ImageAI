@@ -576,3 +576,72 @@ def test_foreign_route_with_a_key_raises_in_strict_mode():
     with pytest.raises(LLMParamError, match="ollama"):
         build_completion_kwargs("gemini", "ollama/gemma-test", _MSGS,
                                 api_key="k", strict=True)
+
+
+# --- an explicit Google auth mode decides the route, whatever the prefix ------
+
+@pytest.mark.parametrize("auth_mode", ["gcloud", "adc", "Google Cloud Account"])
+@pytest.mark.parametrize("model", ["gemini/gemini-test-model",
+                                   "vertex_ai/gemini-test-model",
+                                   "gemini-test-model"])
+def test_gcloud_mode_always_takes_vertex_and_never_sends_a_key(auth_mode, model):
+    seen = []
+    kwargs = build_completion_kwargs(
+        "gemini", model, _MSGS, api_key="oauth-access-token",
+        auth_mode=auth_mode, vertex_project="saved-project",
+        on_warning=seen.append)
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in kwargs
+    assert kwargs["vertex_project"] == "saved-project"
+    # only a re-routed prefix is worth a message
+    assert len(seen) == (1 if model.startswith("gemini/") else 0)
+    assert all("oauth-access-token" not in message for message in seen)
+
+
+@pytest.mark.parametrize("auth_mode", ["api-key", "api_key", "API Key"])
+@pytest.mark.parametrize("model", ["gemini/gemini-test-model",
+                                   "vertex_ai/gemini-test-model",
+                                   "gemini-test-model"])
+def test_api_key_mode_always_takes_the_gemini_route(auth_mode, model):
+    seen = []
+    kwargs = build_completion_kwargs(
+        "gemini", model, _MSGS, api_key="stored-key", auth_mode=auth_mode,
+        vertex_project="saved-project", on_warning=seen.append)
+    assert kwargs["model"] == "gemini/gemini-test-model"
+    assert kwargs["api_key"] == "stored-key"
+    assert "vertex_project" not in kwargs
+    assert len(seen) == (1 if model.startswith("vertex_ai/") else 0)
+
+
+def test_google_prefix_is_honoured_when_no_auth_mode_is_given():
+    kwargs = build_completion_kwargs("gemini", "gemini/gemini-test-model", _MSGS,
+                                     api_key="k")
+    assert kwargs["model"] == "gemini/gemini-test-model" and kwargs["api_key"] == "k"
+    kwargs = build_completion_kwargs("gemini", "vertex_ai/gemini-test-model", _MSGS,
+                                     api_key="k")
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in kwargs
+
+
+def test_auth_mode_reroute_raises_in_strict_mode():
+    with pytest.raises(LLMParamError, match="vertex_ai"):
+        build_completion_kwargs("gemini", "gemini/gemini-test-model", _MSGS,
+                                auth_mode="gcloud", strict=True)
+
+
+@pytest.mark.parametrize("provider,model", [
+    ("openai", "gpt-test-model"), ("anthropic", "anthropic/claude-test-model"),
+    ("ollama", "ollama/llama-test"),
+])
+def test_google_auth_mode_does_not_touch_other_providers(provider, model):
+    kwargs = build_completion_kwargs(provider, model, _MSGS, api_key="own-key",
+                                     auth_mode="gcloud")
+    assert kwargs["api_key"] == "own-key"
+    assert not kwargs["model"].startswith("vertex_ai/")
+
+
+def test_gcloud_mode_does_not_reroute_a_foreign_local_prefix():
+    kwargs = build_completion_kwargs("gemini", "ollama/gemma-test", _MSGS,
+                                     api_key="oauth-access-token", auth_mode="gcloud")
+    assert kwargs["model"] == "ollama/gemma-test"
+    assert "api_key" not in kwargs

@@ -19,8 +19,7 @@ from core import chameleon_llm
 from core.llm_models import get_provider_models
 # _route_kwargs: chameleon_llm.completion kwargs from a provider alias
 # ("google", "claude", "LM Studio"); one shared copy lives in core.llm_params.
-from core.llm_params import (apply_google_credential, google_auth_settings,
-                             normalize_provider)
+from core.llm_params import google_auth_settings, normalize_provider
 from core.llm_params import route_completion_kwargs as _route_kwargs
 
 
@@ -119,21 +118,28 @@ class UnifiedLLMProvider:
         else:
             self.logger.debug("No Anthropic API key available")
 
-        # Google Gemini. With Google Cloud login ("gcloud" auth mode) the
-        # configured Google value is an OAuth access token, not an API key:
-        # it is never exported or sent, and Gemini models take vertex_ai/.
+        # Google Gemini. The key, auth mode and project stay on this object
+        # and travel with every request. Nothing is written to
+        # GEMINI_API_KEY: two objects with different Google settings must not
+        # change each other's routing through the process environment.
         self.google_auth_mode, self.vertex_project = google_auth_settings(self.config)
-        # Passed to the kwargs builder: 'gcloud' forces vertex_ai/; None keeps
-        # the API-key-mode rule (gemini/ when a key is configured).
-        self.gemini_auth_mode = ('gcloud' if self.google_auth_mode == 'gcloud'
-                                 else None)
-        if apply_google_credential(self.config.get('google_api_key'),
-                                   self.google_auth_mode):
-            self.logger.info("Google Gemini API key configured")
-        elif self.gemini_auth_mode:
+        if self.google_auth_mode == 'gcloud':
+            # Google Cloud login: the configured Google value is an OAuth
+            # access token, not an API key. It is never sent; Gemini models
+            # take vertex_ai/.
+            self.google_api_key = None
+            self.gemini_auth_mode = 'gcloud'
             self.logger.info("Google Cloud login configured (Vertex AI)")
         else:
-            self.logger.debug("No Google API key available")
+            self.google_api_key = self.config.get('google_api_key') or None
+            # With no key of its own the object passes no mode: the builder
+            # then uses gemini/ only when the user set a key in the
+            # environment, else vertex_ai/.
+            self.gemini_auth_mode = 'api-key' if self.google_api_key else None
+            if self.google_api_key:
+                self.logger.info("Google Gemini API key configured")
+            else:
+                self.logger.debug("No Google API key available")
         
         # Ollama endpoint
         if 'ollama_endpoint' in self.config and self.config['ollama_endpoint']:
@@ -146,6 +152,11 @@ class UnifiedLLMProvider:
             self.lmstudio_base = self.config['lmstudio_endpoint']
         else:
             self.lmstudio_base = 'http://localhost:1234/v1'
+
+    def google_key_for(self, provider: str) -> Optional[str]:
+        """This object's Gemini API key when ``provider`` is Google, else None."""
+        return (self.google_api_key
+                if normalize_provider(provider) == 'gemini' else None)
 
     def route_kwargs(self, provider: str, model: str,
                      messages: List[Dict[str, Any]],
@@ -164,6 +175,7 @@ class UnifiedLLMProvider:
         api_base = (self.lmstudio_base
                     if normalize_provider(provider) == 'lmstudio' else None)
         return _route_kwargs(provider, model, messages, params,
+                             api_key=self.google_key_for(provider),
                              api_base=api_base,
                              auth_mode=self.gemini_auth_mode,
                              vertex_project=self.vertex_project,
@@ -439,6 +451,7 @@ Be highly descriptive and detailed. Aim for 75-150 words."""
                     {"role": "user", "content": user_prompt}
                 ],
                 {"temperature": temperature, "max_tokens": max_tokens},
+                api_key=self.google_key_for(provider),
                 api_base=api_base,
                 auth_mode=self.gemini_auth_mode,
                 vertex_project=self.vertex_project,
@@ -689,6 +702,7 @@ Return one enhanced visual description per line, numbered:
                 ],
                 {"temperature": temperature, "max_tokens": max_tokens,
                  "timeout": 120},  # 2 minute timeout to prevent hanging
+                api_key=self.google_key_for(provider),
                 api_base=api_base, auth_mode=self.gemini_auth_mode,
                 vertex_project=self.vertex_project)
 
@@ -919,6 +933,7 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
                 ],
                 {"temperature": temperature, "max_tokens": max_tokens,
                  "timeout": 120},
+                api_key=self.google_key_for(provider),
                 api_base=api_base, auth_mode=self.gemini_auth_mode,
                 vertex_project=self.vertex_project)
 
@@ -1005,8 +1020,8 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
         provider_id = infer_provider_from_model(model)
         key_name = _CLOUD_KEY_NAMES.get(provider_id)
         api_key = (self.config.get(key_name) or None) if key_name else None
-        if provider_id == "gemini" and self.gemini_auth_mode:
-            api_key = None  # Google Cloud login: the value is an access token
+        if provider_id == "gemini":
+            api_key = self.google_api_key  # None with Google Cloud login
 
         # Prepare kwargs for chameleon_llm with validated/corralled params. A bare
         # Claude/Gemini id gets its route prefix here (the package never guesses).
@@ -1453,6 +1468,7 @@ Return only the enhanced video prompt."""
                     {"role": "user", "content": user_prompt}
                 ],
                 {"temperature": 0.7, "max_tokens": 300},
+                api_key=self.llm_provider.google_key_for(provider),
                 api_base=api_base,
                 auth_mode=self.llm_provider.gemini_auth_mode,
                 vertex_project=self.llm_provider.vertex_project)

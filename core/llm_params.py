@@ -501,6 +501,12 @@ def validate_params(
     return out, warnings
 
 
+def _is_api_key_mode(auth_mode: str) -> bool:
+    """True for the API-key spellings of the Google auth mode; every other
+    value (gcloud, adc, "Google Cloud Account") means Google Cloud login."""
+    return auth_mode.strip().lower().replace("_", "-").replace(" ", "-") == "api-key"
+
+
 def build_completion_kwargs(
     provider: str,
     model: str,
@@ -521,9 +527,12 @@ def build_completion_kwargs(
     merges the corralled parameters from :func:`validate_params`.
 
     Gemini routing: ``auth_mode`` ('api-key' -> ``gemini/``, 'gcloud'/'adc' ->
-    ``vertex_ai/``) wins when given; otherwise the presence of ``api_key``
-    decides (present -> Google AI Studio, absent -> Vertex AI/ADC). Callers
-    relying on the ``GEMINI_API_KEY`` env var must pass ``auth_mode='api-key'``.
+    ``vertex_ai/``) wins when given, also over a ``gemini/`` or ``vertex_ai/``
+    prefix already on the model id (the id is re-routed, with a warning), so
+    Google Cloud login never sends a key. Without ``auth_mode`` a Google
+    prefix is honoured, and for a bare id the presence of ``api_key`` decides
+    (present -> Google AI Studio, absent -> Vertex AI/ADC). Callers relying on
+    the ``GEMINI_API_KEY`` env var must pass ``auth_mode='api-key'``.
 
     ``api_key`` is the key of ``provider``. When ``model`` carries the route
     prefix of another provider (``ollama/...`` under Google, ``anthropic/...``
@@ -544,6 +553,8 @@ def build_completion_kwargs(
     model_id = str(model).strip()
     # Set when the model id carries the route prefix of another provider.
     foreign_route = None
+    # Set when an explicit Google auth mode overrides a Google route prefix.
+    reroute_message = None
 
     if provider_id == "lmstudio":
         # OpenAI-compatible local server via api_base. Checked before the
@@ -559,9 +570,20 @@ def build_completion_kwargs(
         owner = _PREFIX_TO_PROVIDER.get(prefix)
         if owner and owner != provider_id:
             foreign_route = prefix
+        elif provider_id == "gemini" and auth_mode:
+            # An explicit auth mode decides between the two Google routes,
+            # also for an id that already names one: "gemini/x" with Google
+            # Cloud login is a Vertex request (and must not carry a key), and
+            # "vertex_ai/x" in API-key mode is a Gemini API request.
+            target = "gemini/" if _is_api_key_mode(auth_mode) else "vertex_ai/"
+            if prefix != target:
+                routed_model = target + model_id[len(prefix):]
+                reroute_message = (
+                    f"model '{model_id}' sent on the '{target}' route: the "
+                    f"Google auth mode is '{auth_mode}'")
     elif provider_id == "gemini":
         if auth_mode:
-            use_api_key_route = auth_mode.strip().lower() in ("api-key", "api_key")
+            use_api_key_route = _is_api_key_mode(auth_mode)
         else:
             use_api_key_route = bool(api_key)
         routed_model = (f"gemini/{model_id}" if use_api_key_route
@@ -575,6 +597,12 @@ def build_completion_kwargs(
 
     kwargs["model"] = routed_model
     kwargs["messages"] = messages
+    if reroute_message:
+        if strict:
+            raise LLMParamError(reroute_message)
+        logger.warning(f"LLM request re-routed: {reroute_message}")
+        if on_warning:
+            on_warning(reroute_message)
     if api_key and foreign_route:
         # The key belongs to ``provider_id``; the prefix sends the request to
         # another provider (a local server, or a different cloud). Sending it
@@ -668,39 +696,6 @@ def google_auth_settings(config: Any = None) -> Tuple[str, Optional[str]]:
             if project is None:
                 project = saved_vertex_project(saved)
     return mode or "api-key", project
-
-
-# GEMINI_API_KEY values this process exported from a provider config. Kept so
-# that switching to Google Cloud login can take back exactly what was exported
-# and leave a variable the user set alone.
-_EXPORTED_GEMINI_KEYS: set = set()
-
-
-def _forget_exported_gemini_keys() -> None:
-    """Forget which values were exported (for tests)."""
-    _EXPORTED_GEMINI_KEYS.clear()
-
-
-def apply_google_credential(value: Optional[str], auth_mode: str) -> bool:
-    """Apply the Google value of a provider config to ``GEMINI_API_KEY``.
-
-    'api-key' mode: export it, as before; returns True when a key was set.
-    'gcloud' mode: the value is an OAuth access token (that is what
-    ``ConfigManager.get_api_key("google")`` answers in that mode), not a
-    Gemini API key. It is never exported, and a ``GEMINI_API_KEY`` this
-    process exported earlier (or one equal to the token) is removed so that
-    no stale key steers a later request onto the ``gemini/`` route.
-    """
-    if auth_mode == "gcloud":
-        current = os.environ.get("GEMINI_API_KEY")
-        if current and (current in _EXPORTED_GEMINI_KEYS or current == value):
-            del os.environ["GEMINI_API_KEY"]
-        return False
-    if value:
-        os.environ["GEMINI_API_KEY"] = value
-        _EXPORTED_GEMINI_KEYS.add(value)
-        return True
-    return False
 
 
 def route_completion_kwargs(

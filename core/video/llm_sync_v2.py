@@ -635,10 +635,10 @@ class LLMSyncAssistant:
             import time
             api_start = time.time()
             
-            # 'gemini/' when a key is configured (UnifiedLLMProvider puts it
-            # in GEMINI_API_KEY), otherwise 'vertex_ai/' (Google Cloud login)
-            from core.llm_params import route_completion_kwargs
-            completion_kwargs = route_completion_kwargs(
+            # The provider object passes its own Google key, auth mode and
+            # project: 'gemini/' with a key, 'vertex_ai/' with Google Cloud
+            # login. The request does not depend on GEMINI_API_KEY.
+            completion_kwargs = self.llm_provider.route_kwargs(
                 'gemini', self.model,
                 [
                     {"role": "system", "content": system_prompt},
