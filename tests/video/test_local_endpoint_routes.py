@@ -134,16 +134,26 @@ def test_gemini_with_a_key_uses_the_api_key_route(completion, site, provider):
 
 @sites
 @pytest.mark.parametrize("provider", ["gemini", "google"])
-def test_gemini_without_a_key_uses_vertex_with_the_saved_project(
+def test_google_cloud_login_uses_vertex_with_the_saved_project(
         completion, site, provider):
-    """No Gemini key anywhere means Google Cloud login: vertex_ai/, and the
-    project saved in Settings when the provider config carries it."""
-    site({"gcloud_project_id": "saved-project", "lmstudio_endpoint": LM_BASE},
-         provider, "gemini-test-model")
+    """Google Cloud login: vertex_ai/, and the project saved in Settings."""
+    site({"auth_mode": "gcloud", "gcloud_project_id": "saved-project",
+          "lmstudio_endpoint": LM_BASE}, provider, "gemini-test-model")
     kwargs = completion.call_args.kwargs
     assert kwargs["model"] == "vertex_ai/gemini-test-model"
     assert kwargs["vertex_project"] == "saved-project"
     assert "api_base" not in kwargs and "api_key" not in kwargs
+
+
+@sites
+@pytest.mark.parametrize("provider", ["gemini", "google"])
+def test_gemini_without_a_key_stays_on_the_gemini_route(completion, site, provider):
+    """API-key mode with no key: gemini/ (an authentication error when it
+    really runs), never Vertex."""
+    site({"gcloud_project_id": "saved-project"}, provider, "gemini-test-model")
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == "gemini/gemini-test-model"
+    assert "api_key" not in kwargs and "vertex_project" not in kwargs
 
 
 @sites

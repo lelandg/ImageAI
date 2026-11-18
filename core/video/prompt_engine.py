@@ -19,7 +19,7 @@ from core import chameleon_llm
 from core.llm_models import get_provider_models
 # _route_kwargs: chameleon_llm.completion kwargs from a provider alias
 # ("google", "claude", "LM Studio"); one shared copy lives in core.llm_params.
-from core.llm_params import google_auth_settings, normalize_provider
+from core.llm_params import google_credentials, normalize_provider
 from core.llm_params import route_completion_kwargs as _route_kwargs
 
 
@@ -122,24 +122,22 @@ class UnifiedLLMProvider:
         # and travel with every request. Nothing is written to
         # GEMINI_API_KEY: two objects with different Google settings must not
         # change each other's routing through the process environment.
-        self.google_auth_mode, self.vertex_project = google_auth_settings(self.config)
+        # The auth mode is always passed to the builder: 'gcloud' is Vertex
+        # AI; 'api-key' is the gemini/ route, also when no key is found (the
+        # request then fails with an authentication error; a missing key
+        # never moves a request to Vertex). In api-key mode a key the config
+        # dict lacks is read once from Settings (get_api_key); in gcloud mode
+        # the configured Google value is an OAuth access token and is never
+        # sent or looked up.
+        (self.google_auth_mode, self.google_api_key,
+         self.vertex_project) = google_credentials(self.config)
+        self.gemini_auth_mode = self.google_auth_mode
         if self.google_auth_mode == 'gcloud':
-            # Google Cloud login: the configured Google value is an OAuth
-            # access token, not an API key. It is never sent; Gemini models
-            # take vertex_ai/.
-            self.google_api_key = None
-            self.gemini_auth_mode = 'gcloud'
             self.logger.info("Google Cloud login configured (Vertex AI)")
+        elif self.google_api_key:
+            self.logger.info("Google Gemini API key configured")
         else:
-            self.google_api_key = self.config.get('google_api_key') or None
-            # With no key of its own the object passes no mode: the builder
-            # then uses gemini/ only when the user set a key in the
-            # environment, else vertex_ai/.
-            self.gemini_auth_mode = 'api-key' if self.google_api_key else None
-            if self.google_api_key:
-                self.logger.info("Google Gemini API key configured")
-            else:
-                self.logger.debug("No Google API key available")
+            self.logger.debug("No Google API key available")
         
         # Ollama endpoint
         if 'ollama_endpoint' in self.config and self.config['ollama_endpoint']:
@@ -168,9 +166,9 @@ class UnifiedLLMProvider:
 
         The LM Studio endpoint goes to an LM Studio request only (a cloud or
         Ollama request never receives it); a Gemini model takes ``gemini/``
-        when a key is configured and ``vertex_ai/`` (Google Cloud login, with
-        the saved project) otherwise, and always ``vertex_ai/`` when Settings
-        select Google Cloud login.
+        in API-key mode (with this object's key; a missing key is an
+        authentication error, never a move to Vertex) and ``vertex_ai/`` with
+        the saved project when Settings select Google Cloud login.
         """
         api_base = (self.lmstudio_base
                     if normalize_provider(provider) == 'lmstudio' else None)

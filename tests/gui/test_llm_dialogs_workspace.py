@@ -160,3 +160,87 @@ def test_start_prompt_in_api_key_mode_still_requires_a_key(
 
     assert start_prompt_calls == []
     assert warnings and warnings[0][0] == "API Key Missing"
+
+
+# --- Enhance (single scene): the Settings key reaches the request -------------
+
+@pytest.fixture
+def one_scene(workspace, monkeypatch):
+    from types import SimpleNamespace
+    scene = SimpleNamespace(source="rainy street", prompt="")
+    workspace.current_project = SimpleNamespace(scenes=[scene], metadata={})
+    workspace.enable_continuity_checkbox.setChecked(False)
+    monkeypatch.setattr(workspace, "save_project", lambda *a, **k: None)
+    monkeypatch.setattr(workspace, "populate_scene_table", lambda *a, **k: None)
+    return scene
+
+
+def _keyring_only(fake_config, auth_mode="api-key", project=None):
+    """Keys are in the keyring: ``get_api_key`` finds them, the legacy
+    top-level ``config.get('<provider>_api_key')`` entries do not exist."""
+    values = {"auth_mode": auth_mode, "gcloud_project_id": project}
+    fake_config.get.side_effect = lambda key, default=None: (
+        default if values.get(key) is None else values[key])
+    fake_config.get_api_key.side_effect = lambda provider: f"{provider}-settings-key"
+
+
+def test_enhance_single_prompt_uses_the_settings_key_on_gemini(
+        workspace, one_scene, fake_completion, fake_config, monkeypatch):
+    from core import llm_params
+    _keyring_only(fake_config)
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: fake_config)
+    fake_completion.reply = "A neon-lit rainy street at night"
+    _select_google(workspace)
+
+    workspace.enhance_single_prompt(0)
+
+    kwargs = fake_completion.kwargs
+    assert kwargs["model"] == "gemini/gemini-test-model"
+    assert kwargs["api_key"] == "google-settings-key"
+    assert one_scene.prompt == "A neon-lit rainy street at night"
+
+
+@pytest.mark.parametrize("provider,model,expected", [
+    ("OpenAI", "gpt-4-test", "gpt-4-test"),
+    ("Anthropic", "claude-test-model", "anthropic/claude-test-model"),
+])
+def test_enhance_single_prompt_reads_other_keys_through_get_api_key(
+        workspace, one_scene, fake_completion, fake_config, monkeypatch,
+        provider, model, expected):
+    import os
+    from core import llm_params
+    _keyring_only(fake_config)
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: fake_config)
+    fake_completion.reply = "A neon-lit rainy street at night"
+    workspace.llm_provider_combo.setCurrentText(provider)
+    workspace.llm_model_combo.clear()
+    workspace.llm_model_combo.addItem(model)
+    workspace.llm_model_combo.setCurrentText(model)
+
+    workspace.enhance_single_prompt(0)
+
+    assert fake_completion.kwargs["model"] == expected
+    env_name = {"OpenAI": "OPENAI_API_KEY", "Anthropic": "ANTHROPIC_API_KEY"}[provider]
+    assert os.environ[env_name] == f"{provider.lower()}-settings-key"
+
+
+def test_enhance_single_prompt_in_gcloud_mode_fetches_no_google_key(
+        workspace, one_scene, fake_completion, fake_config, monkeypatch):
+    from core import llm_params
+    _keyring_only(fake_config, auth_mode="gcloud", project="saved-project")
+
+    def _no_google(provider):
+        assert provider != "google", "gcloud mode must not fetch a Google key or token"
+        return f"{provider}-settings-key"
+
+    fake_config.get_api_key.side_effect = _no_google
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: fake_config)
+    fake_completion.reply = "A neon-lit rainy street at night"
+    _select_google(workspace)
+
+    workspace.enhance_single_prompt(0)
+
+    kwargs = fake_completion.kwargs
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in kwargs
+    assert kwargs["vertex_project"] == "saved-project"

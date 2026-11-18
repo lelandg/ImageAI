@@ -60,11 +60,22 @@ def completion():
 class _Saved:
     """Stands in for the ConfigManager that holds the saved Settings."""
 
-    def __init__(self, **values):
+    def __init__(self, google_key=None, **values):
         self._values = values
+        self._google_key = google_key
+        self.key_lookups = []
 
     def get(self, key, default=None):
         return self._values.get(key, default)
+
+    def get_api_key(self, provider):
+        # as ConfigManager: in gcloud mode the Google lookup is an access token
+        self.key_lookups.append(provider)
+        if provider != "google":
+            return None
+        if self._values.get("auth_mode") == "gcloud":
+            return TOKEN
+        return self._google_key
 
 
 @pytest.fixture
@@ -223,15 +234,74 @@ def test_keyless_object_is_not_given_another_objects_key(
     keyless = make({})
     make(API_KEY_DICT)
     kwargs = _call(completion, keyless)
-    assert kwargs["model"] == f"vertex_ai/{MODEL}"
+    assert kwargs["model"] == f"gemini/{MODEL}"   # API-key mode: never Vertex
     assert "api_key" not in kwargs
 
 
 @sites
-def test_api_key_mode_without_a_key_still_falls_back_to_vertex(
+def test_api_key_mode_without_any_key_stays_on_the_gemini_route(
         completion, saved_api_key_mode, site):
+    """A missing key is an authentication error on gemini/ (the package's
+    AuthError when it really runs), never a silent move to Vertex."""
     site({})
-    assert completion.call_args.kwargs["model"] == f"vertex_ai/{MODEL}"
+    for call in completion.call_args_list:
+        assert call.kwargs["model"] == f"gemini/{MODEL}"
+        assert "api_key" not in call.kwargs
+        assert "vertex_project" not in call.kwargs
+
+
+@sites
+def test_api_key_mode_reads_the_settings_key_when_the_dict_has_none(
+        completion, monkeypatch, site):
+    """A key stored in the keyring is not in the config dict some callers
+    build with ``config.get('google_api_key')``; the object looks it up
+    through ``get_api_key`` and sends it."""
+    saved = _Saved(google_key="settings-key", auth_mode="api-key")
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: saved)
+    site({"google_api_key": None})
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == f"gemini/{MODEL}"
+    assert kwargs["api_key"] == "settings-key"
+    assert "GEMINI_API_KEY" not in os.environ
+
+
+def test_the_dict_key_wins_and_no_lookup_is_made(completion, monkeypatch):
+    saved = _Saved(google_key="settings-key", auth_mode="api-key")
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: saved)
+    _provider({"google_api_key": "dict-key"}).enhance_prompt("a cat", "google", MODEL)
+    assert completion.call_args.kwargs["api_key"] == "dict-key"
+    assert saved.key_lookups == []
+
+
+def test_the_settings_key_is_looked_up_once_per_object(completion, monkeypatch):
+    saved = _Saved(google_key="settings-key", auth_mode="api-key")
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: saved)
+    provider = _provider({})
+    provider.enhance_prompt("a cat", "google", MODEL)
+    provider.batch_enhance(["a cat", "a dog"], "google", MODEL)
+    assert saved.key_lookups == ["google"]
+
+
+@sites
+def test_gcloud_mode_never_looks_up_a_google_key(completion, monkeypatch, site):
+    """In gcloud mode ``get_api_key('google')`` would answer with a token."""
+    saved = _Saved(auth_mode="gcloud", gcloud_project_id="settings-project")
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: saved)
+    site({})
+    assert saved.key_lookups == []
+    _assert_vertex(completion.call_args.kwargs, "settings-project")
+
+
+def test_dict_says_api_key_but_settings_say_gcloud_makes_no_lookup(
+        completion, monkeypatch):
+    """The saved lookup would be a token; an explicit api-key dict gets none."""
+    saved = _Saved(auth_mode="gcloud")
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: saved)
+    _provider({"auth_mode": "api-key"}).enhance_prompt("a cat", "google", MODEL)
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == f"gemini/{MODEL}"
+    assert "api_key" not in kwargs
+    assert saved.key_lookups == []
 
 
 @pytest.mark.parametrize("raw", ["gcloud", "Google Cloud Account", "GCLOUD", "adc"])

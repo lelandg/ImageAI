@@ -668,6 +668,55 @@ def _saved_settings() -> Any:
         return None
 
 
+def _google_settings(config: Any, want_key: bool
+                     ) -> Tuple[str, Optional[str], Optional[str]]:
+    """``(auth_mode, api_key, project)``; the saved Settings are opened at
+    most once. See :func:`google_auth_settings` and :func:`google_credentials`."""
+    mode = None
+    key = None
+    getter = getattr(config, "get", None)
+    if callable(getter):
+        try:
+            mode = _normalize_google_auth_mode(getter("auth_mode"))
+        except Exception:
+            mode = None
+        if want_key:
+            try:
+                value = getter("google_api_key")
+            except Exception:
+                value = None
+            key = value.strip() if isinstance(value, str) and value.strip() else None
+    project = saved_vertex_project(config)
+
+    needs_key = want_key and key is None and mode != "gcloud"
+    if mode is None or project is None or needs_key:
+        saved = _saved_settings()
+        if saved is not None:
+            try:
+                saved_mode = _normalize_google_auth_mode(saved.get("auth_mode"))
+            except Exception:
+                saved_mode = None
+            if mode is None:
+                mode = saved_mode
+            if project is None:
+                project = saved_vertex_project(saved)
+            # get_api_key is the only way keys are read. Never in Google
+            # Cloud mode (ours or the saved one): there it answers with an
+            # OAuth access token, which is not a Gemini API key.
+            if (want_key and key is None and (mode or "api-key") == "api-key"
+                    and saved_mode != "gcloud"):
+                try:
+                    value = saved.get_api_key("google")
+                except Exception as exc:
+                    logger.debug(f"Google API key lookup failed: {exc}")
+                    value = None
+                key = value.strip() if isinstance(value, str) and value.strip() else None
+    mode = mode or "api-key"
+    if mode == "gcloud":
+        key = None
+    return mode, key, project
+
+
 def google_auth_settings(config: Any = None) -> Tuple[str, Optional[str]]:
     """``(auth_mode, project)`` for Google: 'gcloud' (Google Cloud login) or
     'api-key', and the Google Cloud project saved in Settings.
@@ -677,25 +726,25 @@ def google_auth_settings(config: Any = None) -> Tuple[str, Optional[str]]:
     ``gcloud_project_id``) win. The provider-config dicts the GUI builds carry
     neither, so anything missing is read from the saved Settings.
     """
-    mode = None
-    getter = getattr(config, "get", None)
-    if callable(getter):
-        try:
-            mode = _normalize_google_auth_mode(getter("auth_mode"))
-        except Exception:
-            mode = None
-    project = saved_vertex_project(config)
-    if mode is None or project is None:
-        saved = _saved_settings()
-        if saved is not None:
-            if mode is None:
-                try:
-                    mode = _normalize_google_auth_mode(saved.get("auth_mode"))
-                except Exception:
-                    mode = None
-            if project is None:
-                project = saved_vertex_project(saved)
-    return mode or "api-key", project
+    mode, _key, project = _google_settings(config, want_key=False)
+    return mode, project
+
+
+def google_credentials(config: Any = None) -> Tuple[str, Optional[str], Optional[str]]:
+    """``(auth_mode, api_key, project)`` for an object that sends Google
+    requests and keeps its own settings.
+
+    As :func:`google_auth_settings`, plus the Gemini API key. In 'api-key'
+    mode the key is ``config``'s ``google_api_key`` when it has one, else the
+    key saved in Settings, read once through ``ConfigManager.get_api_key``
+    (a key kept in the OS keyring is in no config dict). In 'gcloud' mode the
+    key is always None and no lookup is made.
+
+    Callers pass the returned mode to the kwargs builder on every request, so
+    'api-key' mode with no key stays on ``gemini/`` and fails with an
+    authentication error; only 'gcloud' goes to ``vertex_ai/``.
+    """
+    return _google_settings(config, want_key=True)
 
 
 def route_completion_kwargs(

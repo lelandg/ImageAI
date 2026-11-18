@@ -51,7 +51,11 @@ def _enhance(provider, model, api_config=None):
      "anthropic/claude-test-model"),
     ("Google", "gemini-test-model", {"google_api_key": "k"},
      "gemini/gemini-test-model"),
-    ("Google", "gemini-test-model", {}, "vertex_ai/gemini-test-model"),
+    ("Google", "gemini-test-model", {"auth_mode": "gcloud"},
+     "vertex_ai/gemini-test-model"),
+    # API-key mode with no key stays on gemini/ (never a move to Vertex)
+    ("Google", "gemini-test-model", {"auth_mode": "api-key"},
+     "gemini/gemini-test-model"),
     ("Ollama", "local-test-model", {}, "ollama/local-test-model"),
     ("LM Studio", "local-test-model", {}, "local-test-model"),
 ])

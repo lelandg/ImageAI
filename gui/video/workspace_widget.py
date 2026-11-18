@@ -3945,10 +3945,20 @@ class WorkspaceWidget(QWidget):
 
             # Create LLM provider
             from core.video.prompt_engine import UnifiedLLMProvider
+            # Keys come from get_api_key (keyring, then the provider
+            # settings): a top-level '<provider>_api_key' config entry does
+            # not exist for a key stored in the keyring. With Google Cloud
+            # login there is no Google key to fetch (the lookup would answer
+            # with an access token); the provider object uses Vertex AI.
+            from core.llm_params import google_auth_settings
+            google_mode, google_project = google_auth_settings(self.config)
             api_config = {
-                'openai_api_key': self.config.get('openai_api_key'),
-                'anthropic_api_key': self.config.get('anthropic_api_key'),
-                'google_api_key': self.config.get('google_api_key')
+                'openai_api_key': self.config.get_api_key('openai'),
+                'anthropic_api_key': self.config.get_api_key('anthropic'),
+                'google_api_key': (None if google_mode == 'gcloud'
+                                   else self.config.get_api_key('google')),
+                'auth_mode': google_mode,
+                'gcloud_project_id': google_project,
             }
             llm = UnifiedLLMProvider(api_config)
 

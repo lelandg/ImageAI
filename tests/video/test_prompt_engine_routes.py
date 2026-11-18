@@ -110,9 +110,40 @@ def test_google_alias_uses_api_key_route_when_key_set(completion, gemini_key, si
 
 
 @pytest.mark.parametrize("site", ALIAS_SITES, ids=lambda f: f.__name__)
-def test_google_alias_uses_vertex_route_without_key(completion, no_gemini_key, site):
+def test_google_alias_without_a_key_stays_on_the_gemini_route(
+        completion, no_gemini_key, site):
+    """API-key mode with no key is an authentication error on gemini/ when it
+    really runs; a missing key never moves the request to Vertex."""
     site("google", "gemini-test-model")
-    assert completion.call_args.kwargs["model"] == "vertex_ai/gemini-test-model"
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == "gemini/gemini-test-model"
+    assert "api_key" not in kwargs
+
+
+class _GcloudSettings:
+    """Saved Settings that select Google Cloud login."""
+
+    def get(self, key, default=None):
+        return {"auth_mode": "gcloud"}.get(key, default)
+
+    def get_api_key(self, provider):
+        raise AssertionError("Google Cloud login must not look up an API key")
+
+
+@pytest.fixture
+def google_cloud_login(monkeypatch):
+    from core import llm_params
+    monkeypatch.setattr(llm_params, "_saved_settings", _GcloudSettings)
+
+
+@pytest.mark.parametrize("site", ALIAS_SITES, ids=lambda f: f.__name__)
+def test_google_alias_uses_vertex_route_with_google_cloud_login(
+        completion, gemini_key, google_cloud_login, site):
+    # even with a Gemini key in the environment
+    site("google", "gemini-test-model")
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in kwargs
 
 
 # --- I5b: an LM Studio endpoint stays on the object, never in OPENAI_API_BASE -
@@ -232,7 +263,7 @@ def test_analyze_image_without_a_configured_key_sends_none(
 
 # --- the saved Google Cloud project reaches every Vertex call ------------------
 
-_PROJECT = {"gcloud_project_id": "saved-project"}
+_PROJECT = {"gcloud_project_id": "saved-project", "auth_mode": "gcloud"}
 _VERTEX_SITES = [
     lambda cfg: UnifiedLLMProvider(cfg).enhance_prompt(
         "a cat", "google", "gemini-test-model"),
@@ -260,7 +291,8 @@ def test_vertex_route_carries_the_saved_project(completion, no_gemini_key, site)
 
 @pytest.mark.parametrize("site", _VERTEX_SITES, ids=_VERTEX_IDS)
 def test_api_key_route_does_not_carry_the_project(completion, site):
-    site({**_PROJECT, "google_api_key": "k"})
+    site({"gcloud_project_id": "saved-project", "auth_mode": "api-key",
+          "google_api_key": "k"})
     kwargs = completion.call_args.kwargs
     assert kwargs["model"] == "gemini/gemini-test-model"
     assert "vertex_project" not in kwargs

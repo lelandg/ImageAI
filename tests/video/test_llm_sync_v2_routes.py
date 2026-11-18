@@ -50,7 +50,16 @@ def test_gemini_with_key_uses_api_key_route(completion):
     assert completion.call_args.kwargs["model"] == "gemini/gemini-test-model"
 
 
-def test_gemini_without_key_uses_vertex_route(completion):
+def test_gemini_without_key_stays_on_the_gemini_route(completion):
     LLMSyncAssistant("gemini", "gemini-test-model", {})._sync_single_section_with_gemini(
+        "la la", None, 30.0, None)
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == "gemini/gemini-test-model"
+    assert "api_key" not in kwargs
+
+
+def test_gemini_with_google_cloud_login_uses_vertex_route(completion):
+    LLMSyncAssistant("gemini", "gemini-test-model",
+                     {"auth_mode": "gcloud"})._sync_single_section_with_gemini(
         "la la", None, 30.0, None)
     assert completion.call_args.kwargs["model"] == "vertex_ai/gemini-test-model"
