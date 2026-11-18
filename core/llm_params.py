@@ -2,7 +2,7 @@
 Unified LLM parameter population, validation, and corralling.
 
 Single source of truth for which chat-completion parameters each provider/model
-accepts. Every LiteLLM call site builds its kwargs through this module instead
+accepts. Every completion call site builds its kwargs through this module instead
 of hand-rolling ``temperature``/``max_tokens`` dicts and per-model hacks.
 
 Contract (see Plans/LLM-Params-Standardization.md):
@@ -13,11 +13,11 @@ Contract (see Plans/LLM-Params-Standardization.md):
     nonsense values, unknown reasoning effort), or for *any* correction when
     ``strict=True``.
 
-Why curated rules instead of LiteLLM's tables: LiteLLM 1.89.0 claims
-``temperature`` is supported on ``anthropic/claude-opus-5``, but the live API
-rejects it with a 400 ("`temperature` is deprecated for this model"), so
-``litellm.drop_params`` does not protect us. The rules below are verified by
-the live boundary tests in ``tests/test_live_llm_params.py``.
+Why curated rules: third-party capability tables lag the live APIs (one
+table claimed ``temperature`` was supported on ``anthropic/claude-opus-5``,
+but the live API rejects it with a 400, "`temperature` is deprecated for this
+model"). The rules below are verified by the live boundary tests in
+``tests/test_live_llm_params.py``.
 """
 
 import json
@@ -31,7 +31,7 @@ from core.model_registry import FALLBACK_PATH
 
 logger = logging.getLogger(__name__)
 
-# Known LiteLLM route prefixes that may arrive glued onto a model id.
+# Known route prefixes that may arrive glued onto a model id.
 _ROUTE_PREFIXES = (
     "anthropic/", "gemini/", "vertex_ai/", "openai/", "ollama/", "ollama_chat/",
     "lm_studio/", "azure/", "bedrock/",
@@ -137,6 +137,36 @@ _FAMILY_RULES: List[_FamilyRule] = [
             description="Claude 5-line (no sampling params)",
         ),
     ),
+    # Anthropic — dated releases the model registry snapshot has no output
+    # ceiling for. Limits are Anthropic's published per-model maximum output.
+    _FamilyRule(
+        provider="anthropic",
+        pattern=r"^claude-opus-4-2025",
+        rules=ModelParamRules(
+            temperature_range=(0.0, 1.0),
+            top_p_supported=True,
+            top_k_supported=True,
+            temp_top_p_exclusive=True,
+            tokens_param="max_tokens",
+            max_output_tokens=32000,  # unconfirmed (not found in Context7 docs)
+            supports_seed=False,
+            description="Claude Opus 4 (temperature 0-1)",
+        ),
+    ),
+    _FamilyRule(
+        provider="anthropic",
+        pattern=r"^claude-3-7-sonnet",
+        rules=ModelParamRules(
+            temperature_range=(0.0, 1.0),
+            top_p_supported=True,
+            top_k_supported=True,
+            temp_top_p_exclusive=True,
+            tokens_param="max_tokens",
+            max_output_tokens=64000,  # unconfirmed (not found in Context7 docs)
+            supports_seed=False,
+            description="Claude 3.7 Sonnet (temperature 0-1)",
+        ),
+    ),
     # Anthropic — everything older: temperature 0..1, top_p exclusive with
     # temperature, top_k accepted.
     _FamilyRule(
@@ -237,7 +267,7 @@ def normalize_provider(provider: str) -> str:
 
 
 def strip_route_prefix(model: str) -> str:
-    """Remove a LiteLLM route prefix ('anthropic/', 'gemini/', ...) if present."""
+    """Remove a route prefix ('anthropic/', 'gemini/', ...) if present."""
     for prefix in _ROUTE_PREFIXES:
         if model.startswith(prefix):
             return model[len(prefix):]
@@ -282,23 +312,11 @@ def _registry_max_output_tokens(model_id: str) -> Optional[int]:
     return None
 
 
-def _litellm_max_output_tokens(provider_id: str, model_id: str) -> Optional[int]:
-    try:
-        import litellm
-        prefix = get_provider_prefix(provider_id)
-        info = litellm.get_model_info(f"{prefix}{model_id}" if prefix else model_id)
-        # Only trust the explicit output cap: in older LiteLLM table entries
-        # 'max_tokens' means the total context window, not the output ceiling.
-        return info.get("max_output_tokens")
-    except Exception:
-        return None
-
-
 def get_param_rules(provider: str, model: str) -> ModelParamRules:
     """Resolve the parameter rules for a provider/model.
 
-    Curated family rules are authoritative; the model registry (then LiteLLM's
-    tables) fill in ``max_output_tokens``. Unknown providers get permissive
+    Curated family rules are authoritative; the model registry fills in
+    ``max_output_tokens`` when a rule does not set one. Unknown providers get permissive
     defaults so local/custom endpoints keep working.
     """
     provider_id = normalize_provider(provider)
@@ -315,10 +333,7 @@ def get_param_rules(provider: str, model: str) -> ModelParamRules:
         rules = ModelParamRules(description=f"unknown provider '{provider_id}' (permissive)")
 
     if rules.max_output_tokens is None:
-        rules.max_output_tokens = (
-            _registry_max_output_tokens(model_id)
-            or _litellm_max_output_tokens(provider_id, model_id)
-        )
+        rules.max_output_tokens = _registry_max_output_tokens(model_id)
     return rules
 
 
@@ -340,7 +355,7 @@ def validate_params(
 ) -> Tuple[Dict[str, Any], List[str]]:
     """Validate and corral chat params for one provider/model.
 
-    Returns ``(litellm_kwargs, warnings)`` where ``litellm_kwargs`` contains
+    Returns ``(kwargs, warnings)`` where ``kwargs`` contains
     only parameters the model accepts (already renamed, clamped, capped).
 
     Corralling (logged + reported via ``on_warning``):
@@ -482,7 +497,7 @@ def build_completion_kwargs(
     strict: bool = False,
     on_warning: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
-    """Build a complete, validated kwargs dict for ``litellm.completion()``.
+    """Build a complete, validated kwargs dict for ``chameleon_llm.completion()``.
 
     Handles route prefixing per provider (``anthropic/``, ``gemini/`` vs
     ``vertex_ai/`` by auth mode, bare model + ``api_base`` for LM Studio) and

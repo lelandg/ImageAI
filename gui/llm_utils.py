@@ -87,70 +87,60 @@ class DialogStatusConsole(QGroupBox):
         self.log("=" * 60)
 
 
-class LiteLLMHandler:
-    """Handler for LiteLLM setup and configuration."""
+class LLMHandler:
+    """Handler for LLM client setup and configuration."""
 
     @staticmethod
-    def setup_litellm(enable_console_logging: bool = True) -> Tuple[bool, Optional[Any]]:
+    def setup_llm(enable_console_logging: bool = True) -> Tuple[bool, Any]:
         """
-        Set up LiteLLM with proper configuration.
+        Set up the vendored chameleon_llm package.
 
         Args:
-            enable_console_logging: Whether to enable console logging
+            enable_console_logging: Whether to mirror package logs to the console
 
         Returns:
-            Tuple of (success, litellm module or None)
+            Tuple of (True, the ``core.chameleon_llm`` module); call
+            ``.completion(...)`` on the module.
         """
-        try:
-            import litellm
-            import logging as py_logging
-            import os
+        from core import chameleon_llm
 
-            # Set environment variable for debugging if needed
-            if enable_console_logging:
-                os.environ['LITELLM_LOG'] = 'INFO'
+        if enable_console_logging:
+            pkg_logger = logging.getLogger("chameleon_llm")
 
-                # Set up custom handler to capture litellm logs
-                class LiteLLMConsoleHandler(py_logging.Handler):
-                    def emit(self, record):
-                        if record.name == "LiteLLM":
-                            # Only show the message, not the file info
-                            msg = record.getMessage()
-                            console.info(f"LiteLLM: {msg}")
+            # Remove our own earlier handler so repeated setup never stacks.
+            for existing in list(pkg_logger.handlers):
+                if getattr(existing, "_imageai_console", False):
+                    pkg_logger.removeHandler(existing)
 
-                # Add console handler for litellm
-                litellm_logger = py_logging.getLogger("LiteLLM")
+            class ChameleonLLMConsoleHandler(logging.Handler):
+                _imageai_console = True
 
-                # Remove existing handlers to avoid duplicates
-                litellm_logger.handlers = []
+                def emit(self, record):
+                    # Only show the message, not the file info
+                    console.info(f"LLM: {record.getMessage()}")
 
-                console_handler = LiteLLMConsoleHandler()
-                console_handler.setFormatter(py_logging.Formatter('%(message)s'))
-                # This handler runs before propagation to the root logger, so
-                # it needs its own redaction filter.
-                console_handler.addFilter(SecretRedactionFilter())
-                litellm_logger.addHandler(console_handler)
+            console_handler = ChameleonLLMConsoleHandler()
+            console_handler.setFormatter(logging.Formatter('%(message)s'))
+            # This handler runs before propagation to the root logger, so
+            # it needs its own redaction filter.
+            console_handler.addFilter(SecretRedactionFilter())
+            pkg_logger.addHandler(console_handler)
 
-            litellm.drop_params = True  # Drop unsupported params
+        logger.info("LLM client (chameleon_llm) set up successfully")
+        if enable_console_logging:
+            console.info("LLM client ready for use")
 
-            logger.info("LiteLLM set up successfully")
-            if enable_console_logging:
-                console.info("LiteLLM ready for use")
+        return True, chameleon_llm
 
-            return True, litellm
-
-        except ImportError:
-            logger.warning("LiteLLM not installed")
-            if enable_console_logging:
-                console.warning("LiteLLM not installed, using direct SDK")
-            return False, None
+    # TEMPORARY alias, removed in the gui migration task
+    setup_litellm = setup_llm
 
     @staticmethod
     def prepare_request(provider: str, model: str, messages: List[Dict[str, str]],
                         temperature: float = 0.7, max_tokens: int = 1000,
                         api_key: Optional[str] = None) -> Dict[str, Any]:
         """
-        Prepare request data for LiteLLM.
+        Prepare request data for the former LiteLLM-style completion call.
 
         Args:
             provider: LLM provider name
@@ -183,3 +173,7 @@ class LiteLLMHandler:
             "temperature": temperature,
             "max_tokens": max_tokens
         }
+
+
+# TEMPORARY alias, removed in the gui migration task
+LiteLLMHandler = LLMHandler

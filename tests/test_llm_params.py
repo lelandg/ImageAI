@@ -227,7 +227,7 @@ def test_build_kwargs_requires_model():
 
 
 def test_build_kwargs_lmstudio_slash_model_id():
-    # LM Studio ids often contain slashes that are NOT litellm route prefixes;
+    # LM Studio ids often contain slashes that are NOT route prefixes;
     # api_base must still be wired (PR #40 review, suggestion 1).
     kwargs = build_completion_kwargs(
         "lmstudio", "lmstudio-community/Meta-Llama-3-8B-GGUF", _MSGS)
@@ -278,3 +278,36 @@ def test_unknown_dict_keys_warn_but_do_not_crash(caplog):
             "openai", "gpt-4o", {"temperature": 0.3, "max_completion_tokens": 99})
     assert kwargs == {"temperature": 0.3}
     assert any("unknown LLM params" in r.message for r in caplog.records)
+
+
+# --- LiteLLM removal: curated rules + registry are the only ceiling sources ---
+
+def test_no_litellm_reference_in_llm_params():
+    from pathlib import Path
+    assert "litellm" not in Path("core/llm_params.py").read_text(encoding="utf-8").lower()
+
+
+def test_every_cloud_model_has_an_output_ceiling():
+    from core.llm_models import LLM_PROVIDERS
+    from core.llm_params import get_param_rules
+    missing = []
+    for provider in ("openai", "anthropic", "gemini"):
+        for model in LLM_PROVIDERS[provider].models:
+            model_id = model if isinstance(model, str) else getattr(model, "id", model)
+            if not get_param_rules(provider, model_id).max_output_tokens:
+                missing.append(f"{provider}/{model_id}")
+    assert missing == []
+
+
+def test_unknown_local_model_has_no_ceiling():
+    from core.llm_params import get_param_rules
+    assert get_param_rules("ollama", "some-local-model").max_output_tokens is None
+    assert get_param_rules("lmstudio", "some-local-model").max_output_tokens is None
+
+
+def test_curated_ceiling_caps_max_tokens():
+    from core.llm_params import validate_params
+    out, warnings = validate_params(
+        "anthropic", "claude-opus-4-20250514", {"max_tokens": 10_000_000})
+    assert out["max_tokens"] == 32000
+    assert warnings
