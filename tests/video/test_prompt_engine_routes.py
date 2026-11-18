@@ -148,6 +148,22 @@ def test_lyrics_cloud_model_ignores_lmstudio_endpoint(completion, no_openai_base
     assert "api_base" not in kwargs
 
 
+@pytest.mark.parametrize("model", ["gpt-oss-20b", "gpt-oss:20b"])
+def test_lyrics_gpt_oss_goes_to_configured_lmstudio(completion, no_openai_base,
+                                                    model):
+    """An open-weight gpt-oss id is a local model, not cloud OpenAI: it keeps
+    the configured LM Studio endpoint and never gets the OpenAI key."""
+    completion.return_value = _fake_response('{"prompts": []}')
+    gen = LyricsToPromptsGenerator({
+        "lmstudio_endpoint": "http://lm-host:1234/v1",
+        "openai_api_key": "cloud-openai-key"})
+    gen.generate(["line one"], model=model)
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == model
+    assert kwargs["api_base"] == "http://lm-host:1234/v1"
+    assert "api_key" not in kwargs
+
+
 # --- Addendum (httpx2): wrapped transport errors stay retryable ---------------
 
 def test_wrapped_transport_errors_are_retryable():

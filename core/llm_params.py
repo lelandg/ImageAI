@@ -292,16 +292,26 @@ _PREFIX_TO_PROVIDER = {
 }
 
 
+# Open-weight OpenAI models (gpt-oss-20b, gpt-oss:120b). Local servers host
+# them; the OpenAI API does not, so the name is not evidence of cloud OpenAI.
+_OPEN_WEIGHT_GPT = re.compile(r"^gpt-oss(?:[-:._]|$)")
+
+
 def infer_provider_from_model(model: str, default: str = "openai") -> str:
     """Best-effort provider id from a (possibly prefixed) model string.
 
     For call sites that only receive a model name (e.g. analyze_image).
+    An open-weight ``gpt-oss`` id returns ``default``: it is a local model.
     """
     m = (model or "").strip().lower()
+    bare = strip_route_prefix(m)
+    if _OPEN_WEIGHT_GPT.match(bare) and (bare == m or m.startswith("openai/")):
+        # Local servers list it as "gpt-oss-20b", "gpt-oss:20b" or
+        # "openai/gpt-oss-20b" (publisher name, not a route).
+        return normalize_provider(default)
     for prefix, provider in _PREFIX_TO_PROVIDER.items():
         if m.startswith(prefix):
             return provider
-    bare = strip_route_prefix(m)
     if bare.startswith("claude"):
         return "anthropic"
     if bare.startswith("gemini"):

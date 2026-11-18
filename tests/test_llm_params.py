@@ -409,3 +409,28 @@ def test_claude_5_and_later_drop_sampling_params(model):
 def test_claude_4_and_older_keep_temperature(model):
     kwargs, _ = validate_params("anthropic", model, {"temperature": 1.5})
     assert kwargs == {"temperature": 1.0}
+
+
+@pytest.mark.parametrize("model", [
+    "gpt-oss-20b", "gpt-oss:20b", "gpt-oss-120b", "GPT-OSS-20B", "gpt-oss",
+    "openai/gpt-oss-20b",  # LM Studio lists it under the publisher name
+])
+def test_open_weight_gpt_oss_is_not_inferred_as_cloud_openai(model):
+    """gpt-oss is an open-weight model served by local servers, never by the
+    OpenAI API: the name must fall through to the caller's default."""
+    assert infer_provider_from_model(model, default="lmstudio") == "lmstudio"
+    assert infer_provider_from_model(model, default="ollama") == "ollama"
+
+
+@pytest.mark.parametrize("model", [
+    "gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5.5", "gpt-6", "gpt-6-pro",
+    "gpt-4.1", "o3", "o4-mini", "chat-latest", "openai/gpt-5.5",
+    "gpt-ossified",  # not the gpt-oss family: no separator after "oss"
+])
+def test_cloud_openai_names_stay_on_openai_whatever_the_default(model):
+    assert infer_provider_from_model(model, default="lmstudio") == "openai"
+
+
+def test_explicit_local_route_prefix_wins_for_gpt_oss():
+    assert infer_provider_from_model("ollama/gpt-oss:20b") == "ollama"
+    assert infer_provider_from_model("lm_studio/gpt-oss-20b") == "lmstudio"
