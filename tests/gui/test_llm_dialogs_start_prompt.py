@@ -145,8 +145,12 @@ def test_gcloud_mode_keeps_the_token_away_from_the_style_analyzer(
 
     widgets(StartPromptDialog(
         MagicMock(), "rainy street", "", "google", "gemini-test-model", OAUTH_TOKEN,
-        ContinuityMode.STYLE_ONLY, frame, auth_mode="gcloud"))
+        ContinuityMode.STYLE_ONLY, frame, auth_mode="gcloud",
+        vertex_project="saved-project"))
 
     assert len(built) == 1
     assert built[0]["api_key"] is None
+    # the analyzer is told how to sign in instead: Vertex, with the project
+    assert built[0]["auth_mode"] == "gcloud"
+    assert built[0]["vertex_project"] == "saved-project"
     assert "api_key" not in fake_completion.kwargs

@@ -92,7 +92,11 @@ class StartPromptGenerationThread(QThread):
                     analyzer = StyleAnalyzer(
                         api_key=self._credential(),
                         llm_provider=self.provider,
-                        llm_model=self.model
+                        llm_model=self.model,
+                        # Google: how to sign in (API key, or Google Cloud
+                        # login on Vertex with the saved project)
+                        auth_mode=self.auth_mode,
+                        vertex_project=self.vertex_project
                     )
 
                     if self.continuity_mode == ContinuityMode.STYLE_ONLY:
