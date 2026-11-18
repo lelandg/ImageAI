@@ -48,11 +48,12 @@ def parse_listing(payload) -> list:
         pytest.fail("LM Studio answered 200 but the body has no recognisable model "
                     f"list (expected a 'models' or 'data' array). Top-level keys: {keys}")
     out = []
+    unreadable = []
     for item in items:
-        if not isinstance(item, dict):
-            continue
-        key = item.get("key") or item.get("id")
+        key = item.get("key") or item.get("id") if isinstance(item, dict) else None
         if not key:
+            unreadable.append(sorted(item) if isinstance(item, dict)
+                              else type(item).__name__)
             continue
         kind = str(item.get("type") or "").lower()
         instances = item.get("loaded_instances")
@@ -72,14 +73,20 @@ def parse_listing(payload) -> list:
         out.append(LMModel(key=key, kind=kind,
                            size=float(size) if isinstance(size, (int, float)) else None,
                            loaded_ids=ids, vision=vision, fields=sorted(item)))
+    if items and not out:
+        pytest.fail(f"LM Studio lists {len(items)} entries but none has a 'key' or "
+                    f"'id' field. Entry keys seen: {unreadable[:3]}")
     return out
 
 
 def pick_lmstudio_model(models: list, wanted: Optional[str] = None) -> LMModel:
     """Choose the model to test: named, else loaded chat, else smallest chat."""
+    chat = [m for m in models if m.is_chat]
+    if wanted and not any(m.key == wanted or wanted in m.loaded_ids for m in chat):
+        pytest.fail(f"IMAGEAI_LMSTUDIO_MODEL={wanted!r} is not a chat model in "
+                    f"LM Studio. Chat models: {[m.key for m in chat]}")
     if not models:
         pytest.skip("no chat model downloaded in LM Studio (the model list is empty)")
-    chat = [m for m in models if m.is_chat]
     if not chat:
         if all(m.kind in EMBEDDING_KINDS for m in models):
             pytest.skip("no chat model downloaded in LM Studio (only embedding models)")
@@ -98,6 +105,29 @@ def pick_lmstudio_model(models: list, wanted: Optional[str] = None) -> LMModel:
         if m.loaded:
             return m
     return min(chat, key=lambda m: (m.size is None, m.size or 0))
+
+
+def parse_ollama_tags(payload, wanted: Optional[str] = None) -> tuple:
+    """Parse a GET /api/tags body into (names, sizes). Skips when empty."""
+    items = payload.get("models") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        keys = sorted(payload) if isinstance(payload, dict) else type(payload).__name__
+        pytest.fail("Ollama answered 200 but the body has no 'models' list. "
+                    f"Top-level keys: {keys}")
+    names, sizes = [], {}
+    for item in items:
+        name = (item.get("name") or item.get("model")) if isinstance(item, dict) else None
+        if not name:
+            pytest.fail("Ollama lists a model entry with no 'name'. Entry: "
+                        f"{sorted(item) if isinstance(item, dict) else type(item).__name__}")
+        names.append(name)
+        sizes[name] = item.get("size") or 0
+    if wanted and wanted not in names:
+        pytest.fail(f"IMAGEAI_OLLAMA_MODEL={wanted!r} is not installed in "
+                    f"Ollama. Installed: {names}")
+    if not names:
+        pytest.skip("Ollama has no models installed")
+    return names, sizes
 
 
 def pick_ollama_model(names: list, sizes: dict, wanted: Optional[str],

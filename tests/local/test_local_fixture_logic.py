@@ -2,7 +2,8 @@
 
 import pytest
 
-from local_logic import parse_listing, pick_lmstudio_model, pick_ollama_model
+from local_logic import (parse_listing, parse_ollama_tags, pick_lmstudio_model,
+                         pick_ollama_model)
 
 SKIP = pytest.skip.Exception
 FAIL = pytest.fail.Exception
@@ -116,3 +117,44 @@ def test_ollama_named_model_missing_fails():
 def test_ollama_no_completion_model_skips():
     with pytest.raises(SKIP):
         pick_ollama_model(["e"], {}, None, lambda n: ["embedding"])
+
+
+def test_named_lmstudio_model_with_empty_list_fails():
+    with pytest.raises(FAIL, match="IMAGEAI_LMSTUDIO_MODEL"):
+        pick_lmstudio_model(parse_listing(_v1()), "foo")
+
+
+def test_named_lmstudio_model_with_embedding_only_list_fails():
+    models = parse_listing(_v1({"key": "e", "type": "embedding"}))
+    with pytest.raises(FAIL, match="IMAGEAI_LMSTUDIO_MODEL"):
+        pick_lmstudio_model(models, "foo")
+
+
+def test_entries_without_key_or_id_fail_and_name_entry_keys():
+    with pytest.raises(FAIL) as err:
+        parse_listing(_v1({"name": "a", "type": "llm"}))
+    assert "name" in str(err.value) and "type" in str(err.value)
+
+
+def test_ollama_body_without_models_fails():
+    with pytest.raises(FAIL, match="no 'models' list"):
+        parse_ollama_tags({"error": "x"})
+
+
+def test_ollama_empty_models_skips():
+    with pytest.raises(SKIP, match="no models installed"):
+        parse_ollama_tags({"models": []})
+
+
+def test_ollama_named_model_with_empty_models_fails():
+    with pytest.raises(FAIL, match="IMAGEAI_OLLAMA_MODEL"):
+        parse_ollama_tags({"models": []}, "foo")
+
+
+def test_ollama_named_model_missing_fails_in_parse():
+    with pytest.raises(FAIL, match="IMAGEAI_OLLAMA_MODEL"):
+        parse_ollama_tags({"models": [{"name": "a", "size": 1}]}, "foo")
+
+
+def test_ollama_tags_parse_names_and_sizes():
+    assert parse_ollama_tags({"models": [{"name": "a", "size": 7}]}) == (["a"], {"a": 7})

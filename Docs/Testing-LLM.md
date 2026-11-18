@@ -84,7 +84,8 @@ yourself. The tests never download or delete a model.
 | `LM Studio is not running at <url>` | Nothing answered within 2 seconds. | Start LM Studio and its local server, or set `IMAGEAI_LMSTUDIO_URL`. |
 | `no chat model downloaded in LM Studio (...)` | LM Studio lists no models, or only embedding models. | Download a chat model in LM Studio. |
 | `load a model in LM Studio first ...` | This LM Studio cannot load models over REST, and none is loaded. | Load a model by hand. |
-| `Ollama is not running at <url>, or has no models installed` | Nothing answered, or the server has no models. | Start Ollama and run `ollama pull <model>`, or set `IMAGEAI_OLLAMA_URL`. |
+| `Ollama is not running at <url>` | Nothing answered within 2 seconds. | Start Ollama, or set `IMAGEAI_OLLAMA_URL`. |
+| `Ollama has no models installed` | Ollama answers but lists no models. | Run `ollama pull <model>`. |
 | `no Ollama model that can complete text is installed ...` | Ollama reported capabilities for every model and none can complete text. | Pull a chat model. |
 | `the server did not report whether <model> supports vision` | The server does not say if the model reads images. | Nothing, or use a model whose server reports it. |
 | `the server reports that <model> has no vision` | The model is text-only. | Nothing. This is expected. |
@@ -103,10 +104,13 @@ failures the fixtures raise on purpose.
 | `Something answers at <url> but it is not a recognised LM Studio REST API` | Both listing paths returned 404. | Check the URL. Update LM Studio. |
 | `LM Studio answered 200 but the body has no recognisable model list` | The reply has no `models` or `data` array. The message lists the keys it saw. | Report the keys. The test code needs updating. |
 | `LM Studio lists models but none is recognised as a chat model` | The `type` values are not the ones the tests know. The message lists them. | Report the values. The test code needs updating. |
-| `IMAGEAI_LMSTUDIO_MODEL=... is not a chat model` | The model you named is not a downloaded chat model. | Fix the name. |
+| `IMAGEAI_LMSTUDIO_MODEL=... is not a chat model` | The model you named is not a downloaded chat model. This fails even when LM Studio lists no models. | Fix the name. |
 | `loading <model> in LM Studio failed` | The load request failed, for example not enough memory. | Free memory, or pick a smaller model with `IMAGEAI_LMSTUDIO_MODEL`. |
 | `LM Studio accepted the load ... but reported status` or `... does not show as loaded afterwards` | The load did not take effect. | Check LM Studio's own log. |
 | `IMAGEAI_OLLAMA_MODEL=... is not installed in Ollama` | The model you named is not installed. | Fix the name. |
+| `Ollama at <url> answered HTTP <code>` or `returned a non-JSON body` | The model listing returned an error. | Read the text after the code. Check the URL. |
+| `Ollama answered 200 but the body has no 'models' list` | The reply is not an Ollama model listing. The message lists the keys it saw. | Check the URL. |
+| `LM Studio lists N entries but none has a 'key' or 'id' field` | The listing uses field names the tests do not know. The message lists them. | Report the keys. The test code needs updating. |
 
 If LM Studio cannot unload a model the tests loaded, you get a warning, not a
 failure. Unload that model by hand.

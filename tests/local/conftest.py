@@ -59,9 +59,9 @@ from typing import Optional
 import pytest
 import requests
 
-from core.llm_models import fetch_ollama_models
 
-from local_logic import parse_listing, pick_lmstudio_model, pick_ollama_model
+from local_logic import (parse_listing, parse_ollama_tags, pick_lmstudio_model,
+                         pick_ollama_model)
 
 LIST_TIMEOUT = (2, 10)      # (connect, read) seconds for listing calls
 LOAD_TIMEOUT = 120          # seconds for loading a model
@@ -139,16 +139,18 @@ def lmstudio():
         status = body.get("status")
         model_id = body.get("instance_id") or pick.key
         loaded_here = model_id  # from here on, teardown unloads it
-        if status is not None and status != "loaded":
-            pytest.fail(f"LM Studio accepted the load of {pick.key} but reported "
-                        f"status {status!r}, not 'loaded'")
-        if status is None:  # no status field: confirm by listing again
-            again, _ = _list_lmstudio(base)
-            if not any(m.key == pick.key and m.loaded for m in again):
-                pytest.fail(f"LM Studio answered 200 to the load of {pick.key} but "
-                            "the model does not show as loaded afterwards")
 
     try:
+        # Verification runs inside the try so a failure still unloads the model.
+        if loaded_here:
+            if status is not None and status != "loaded":
+                pytest.fail(f"LM Studio accepted the load of {pick.key} but "
+                            f"reported status {status!r}, not 'loaded'")
+            if status is None:  # no status field: confirm by listing again
+                again, _ = _list_lmstudio(base)
+                if not any(m.key == pick.key and m.loaded for m in again):
+                    pytest.fail(f"LM Studio answered 200 to the load of {pick.key} "
+                                "but the model does not show as loaded afterwards")
         yield LocalServer(base_url=base + "/v1", model=model_id, vision=pick.vision)
     finally:
         if loaded_here:  # only a model this fixture loaded
@@ -179,16 +181,22 @@ def _ollama_capabilities(base: str, name: str) -> Optional[list]:
 @pytest.fixture(scope="session")
 def ollama():
     base = os.environ.get("IMAGEAI_OLLAMA_URL", _DEFAULT_OLLAMA).rstrip("/")
-    names = fetch_ollama_models(base)
-    if not names:
-        pytest.skip(f"Ollama is not running at {base}, or has no models installed")
+    wanted = os.environ.get("IMAGEAI_OLLAMA_MODEL")
     try:
-        tags = requests.get(base + "/api/tags", timeout=LIST_TIMEOUT).json()
-        sizes = {m.get("name"): m.get("size") or 0 for m in tags.get("models", [])}
-    except (requests.RequestException, ValueError):
-        sizes = {}
+        resp = requests.get(base + "/api/tags", timeout=LIST_TIMEOUT)
+    except requests.RequestException:
+        pytest.skip(f"Ollama is not running at {base}")
+    if resp.status_code != 200:
+        pytest.fail(f"Ollama at {base} answered HTTP {resp.status_code} on "
+                    f"/api/tags: {resp.text[:200]}")
+    try:
+        payload = resp.json()
+    except ValueError:
+        pytest.fail(f"Ollama at {base} returned a non-JSON body on /api/tags: "
+                    f"{resp.text[:200]}")
+    names, sizes = parse_ollama_tags(payload, wanted)
     name, vision = pick_ollama_model(
-        names, sizes, os.environ.get("IMAGEAI_OLLAMA_MODEL"),
+        names, sizes, wanted,
         lambda n: _ollama_capabilities(base, n))
     return LocalServer(base_url=base, model=name, vision=vision)
 
