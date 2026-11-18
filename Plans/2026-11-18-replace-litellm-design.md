@@ -1,8 +1,8 @@
-# Replace LiteLLM with an in-house adapter package (`llm_shim`) — design
+# Replace LiteLLM with an in-house adapter package (`chameleon_llm`) — design
 
 **Date:** 2026-11-18 10:58
-**Status:** Design, awaiting Leland's approval. Nothing is built.
-**Updated:** 2026-11-18 11:13
+**Status:** Design approved by Leland 2026-11-18 11:13. Nothing is built.
+**Updated:** 2026-11-18 11:14
 **Pilot:** ImageAI. ChatMaster follows as a separate project.
 
 ## Intent
@@ -103,8 +103,8 @@ package we own removes the dependency and its advisory stream.
 
 ### Shape
 
-A self-contained Python package named `llm_shim`, vendored at
-`core/llm_shim/` (the same pattern as `core/model_registry/`). It imports
+A self-contained Python package named `chameleon_llm`, vendored at
+`core/chameleon_llm/` (the same pattern as `core/model_registry/`). It imports
 nothing from ImageAI. Files:
 
 | File | Purpose |
@@ -120,7 +120,7 @@ nothing from ImageAI. Files:
 ### Public call
 
 ```python
-from core.llm_shim import completion
+from core.chameleon_llm import completion
 
 resp = completion(
     model="anthropic/<id>",      # same prefixed strings as today
@@ -140,7 +140,7 @@ resp.model
 ```
 
 A keyword the chosen adapter does not accept is dropped and logged at
-WARNING on the `llm_shim` logger. That is what `drop_params = True` did, minus
+WARNING on the `chameleon_llm` logger. That is what `drop_params = True` did, minus
 the silence. `drop_params` itself does not exist in the shim.
 
 ### Keys and endpoints
@@ -237,14 +237,14 @@ with a live test before relying on them.
 
 ### Logging
 
-The shim logs on the logger `llm_shim`: one DEBUG line per request (route,
+The shim logs on the logger `chameleon_llm`: one DEBUG line per request (route,
 model, parameter names, never the key) and the WARNING lines above. The full
 request and response logging required by `AGENTS.md` stays where it is, in the
 call sites and `gui/llm_utils.py`.
 
 ### Changes in ImageAI
 
-1. Add `core/llm_shim/` and its tests.
+1. Add `core/chameleon_llm/` and its tests.
 2. `core/llm_params.py`: delete `_litellm_max_output_tokens`. The model
    registry supplies the output ceiling. For each model in `LLM_PROVIDERS`
    that the bundled registry snapshot does not cover (today
@@ -253,7 +253,7 @@ call sites and `gui/llm_utils.py`.
    stop naming LiteLLM.
 3. `gui/llm_utils.py`: `LiteLLMHandler` becomes `LLMHandler`;
    `setup_litellm()` becomes `setup_llm()`, attaches the console handler
-   to the `llm_shim` logger, and returns `(True, core.llm_shim)` so callers
+   to the `chameleon_llm` logger, and returns `(True, core.chameleon_llm)` so callers
    keep calling `.completion` on the returned module. Every reference is
    updated in the same PR.
 4. All call sites: `import litellm` / `self.litellm = litellm` /
@@ -267,7 +267,7 @@ call sites and `gui/llm_utils.py`.
    block if nothing else pulls them.
 6. `.snyk`, `Docs/Snyk-Exceptions.md`: remove LiteLLM entries.
 7. Docs that name LiteLLM: `AGENTS.md` ("Prefer LiteLLM" becomes "Use
-   `core/llm_shim`"), `README.md`, `Docs/ImageAI-CLI-Guide.md`,
+   `core/chameleon_llm`"), `README.md`, `Docs/ImageAI-CLI-Guide.md`,
    `Docs/Claude Desktop Instructions.md`, both `imageai-cli` `SKILL.md`
    copies, and a regenerated `Docs/CodeMap.md`. `CHANGELOG.md` is not edited
    by hand.
@@ -329,10 +329,10 @@ list, `IMAGEAI_OLLAMA_MODEL` or the smallest installed model, the same three
 calls through the `ollama/` route. The existing `fetch_ollama_models` in
 `core/llm_models.py` is reused for the listing.
 
-**Dialogs (`tests/gui/test_llm_dialogs_shim.py`).** The suite already builds
+**Dialogs (`tests/gui/test_llm_dialogs.py`).** The suite already builds
 dialogs offscreen (`tests/conftest.py` sets `QT_QPA_PLATFORM=offscreen`).
 For each dialog and worker that calls the LLM, a test constructs it, replaces
-`core.llm_shim.completion` with a fake that returns a canned `Completion`,
+`core.chameleon_llm.completion` with a fake that returns a canned `Completion`,
 triggers the primary action, and asserts that the result reaches the widget
 and that the request and response appear in the status console. This
 replaces "open each dialog by hand", and it runs in CI with no keys.
@@ -364,7 +364,6 @@ One PR in `lelandg/ImageAI` on branch `feat/replace-litellm`.
 
 ## Calls made by Claude (not decided by Leland)
 
-- The name `llm_shim`.
 - The package is born vendored inside ImageAI. Its own repository is created
   when ChatMaster becomes the second user, and ImageAI's copy is then synced
   from it, as `core/model_registry/client.py` is today. This replaces my
@@ -388,6 +387,7 @@ One PR in `lelandg/ImageAI` on branch `feat/replace-litellm`.
 - ImageAI is the pilot; Heimdallr and PromptAlchemy are unused and out of scope.
 - `gpt-pro`, `o3-pro` and `o1-pro` keep working (2026-11-18). See "Responses
   path" under the OpenAI adapter.
+- The package is named `chameleon_llm` (2026-11-18).
 - LM Studio is tested through its REST API, and testing is automated as far
   as possible so other people can run it (2026-11-18).
 
