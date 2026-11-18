@@ -15,6 +15,7 @@ from .llm_utils import DialogStatusConsole
 from .history_widget import DialogHistoryWidget
 from .dialog_utils import OperationGuardMixin, guard_operation
 from core.discord_rpc import discord_rpc, ActivityState
+from core.llm_params import saved_vertex_project
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -29,8 +30,14 @@ class QuestionWorker(QObject):
 
     def __init__(self, prompt: str, question: str, llm_provider: str, llm_model: str, api_key: str,
                  temperature: float = 0.7, reasoning_effort: str = "medium", verbosity: str = "medium",
-                 conversation_history=None):
+                 conversation_history=None, auth_mode: str = None,
+                 vertex_project: str = None):
         super().__init__()
+        # Google only: "api-key" or "gcloud" as configured in Settings. None
+        # means "follow the key": a key selects the API-key route.
+        self.auth_mode = auth_mode
+        # Google Cloud project saved in Settings; used on the vertex_ai route.
+        self.vertex_project = vertex_project
         self.prompt = prompt
         self.question = question
         self.llm_provider = llm_provider
@@ -45,6 +52,20 @@ class QuestionWorker(QObject):
     def stop(self):
         """Stop the worker."""
         self._stopped = True
+
+    def _log_request(self, request_kwargs: dict) -> None:
+        """Log the complete request (route, params, every message) to the
+        file log and the status console. The API key is never logged."""
+        params = {k: v for k, v in request_kwargs.items()
+                  if k not in ("messages", "api_key", "model")}
+        lines = [f"LLM Request - Route: {request_kwargs.get('model')}",
+                 f"LLM Request - Params: {params}"]
+        for message in request_kwargs.get("messages", []):
+            lines.append(f"LLM Request - {message.get('role')} message (FULL):")
+            lines.append(str(message.get("content")))
+        for line in lines:
+            logger.info(line)
+            console.info(line)
 
     def run(self):
         """Run the LLM question operation."""
@@ -125,36 +146,40 @@ class QuestionWorker(QObject):
                     api_key=self.api_key or None,
                     on_warning=lambda msg: self.log_message.emit(msg, "WARNING")
                 )
+                self._log_request(request_kwargs)
                 response = chameleon_llm.completion(**request_kwargs)
                 answer = response.choices[0].message.content
 
             elif self.llm_provider.lower() in ["google", "gemini"]:
-                import google.generativeai as genai
+                from core import chameleon_llm
+                from core.llm_models import resolve_model
+                from core.llm_params import build_completion_kwargs
 
-                # Configure authentication based on available credentials
-                if self.api_key:
-                    genai.configure(api_key=self.api_key)
+                model_name = self.llm_model or resolve_model('gemini', 'flash', static_default='gemini-2.0-flash-exp')
+
+                # The configured auth mode decides the route: "api-key" ->
+                # gemini/ with the stored key, "gcloud" -> vertex_ai/ with the
+                # Google Cloud login (ADC). In gcloud mode no key is sent, so
+                # an OAuth access token can never be used as a Gemini API key.
+                auth_mode = self.auth_mode or ("api-key" if self.api_key else "gcloud")
+                if auth_mode == "api-key":
                     logger.info("Using API key authentication for Gemini")
                     console.info("Using API key authentication for Gemini")
                 else:
-                    # Use Application Default Credentials (gcloud auth)
-                    # genai SDK will automatically use ADC if no API key is provided
-                    logger.info("Using Google Cloud authentication (ADC) for Gemini")
-                    console.info("Using Google Cloud authentication (ADC) for Gemini")
+                    logger.info("Using Google Cloud authentication (Vertex AI with ADC) for Gemini")
+                    console.info("Using Google Cloud authentication (Vertex AI with ADC) for Gemini")
 
-                from core.llm_models import resolve_model
-                model_name = self.llm_model or resolve_model('gemini', 'flash', static_default='gemini-2.0-flash-exp')
-                model = genai.GenerativeModel(model_name)
-
-                # Format conversation for Gemini
-                if self.prompt:
-                    prompt_text = f"Prompt to analyze: {self.prompt}\n\nQuestion: {self.question}"
-                else:
-                    prompt_text = self.question
-
-                response = model.generate_content(prompt_text)
-                if response and hasattr(response, 'text'):
-                    answer = response.text or ""
+                request_kwargs = build_completion_kwargs(
+                    "gemini", model_name, messages,
+                    {"temperature": self.temperature},
+                    api_key=(self.api_key or None) if auth_mode == "api-key" else None,
+                    auth_mode=auth_mode,
+                    vertex_project=self.vertex_project,
+                    on_warning=lambda msg: self.log_message.emit(msg, "WARNING")
+                )
+                self._log_request(request_kwargs)
+                response = chameleon_llm.completion(**request_kwargs)
+                answer = response.choices[0].message.content or ""
 
             # Fallback for empty response
             if not answer:
@@ -640,7 +665,10 @@ class PromptQuestionDialog(QDialog, OperationGuardMixin):
             temperature,
             reasoning,
             verbosity,
-            conv_history
+            conv_history,
+            auth_mode=(auth_mode if llm_provider.lower() in ["google", "gemini"]
+                       else None),
+            vertex_project=saved_vertex_project(self.config)
         )
 
         self.worker.moveToThread(self.thread)
