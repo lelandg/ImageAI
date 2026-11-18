@@ -164,6 +164,72 @@ def test_lyrics_gpt_oss_goes_to_configured_lmstudio(completion, no_openai_base,
     assert "api_key" not in kwargs
 
 
+# --- analyze_image: the credential follows the resolved provider --------------
+
+ALL_KEYS = {"openai_api_key": "cloud-openai-key",
+            "anthropic_api_key": "cloud-anthropic-key",
+            "google_api_key": "cloud-google-key"}
+CLOUD_KEYS = set(ALL_KEYS.values())
+
+
+@pytest.fixture(autouse=True)
+def _restore_key_env(monkeypatch):
+    # UnifiedLLMProvider copies configured keys into os.environ; set-then-
+    # delete makes monkeypatch put the environment back after each test.
+    for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.setenv(name, "x")
+        monkeypatch.delenv(name)
+
+
+def _analyze(model, config=ALL_KEYS):
+    provider = UnifiedLLMProvider(dict(config))
+    provider.analyze_image(
+        [{"role": "user", "content": "describe"}], model=model, max_retries=0)
+
+
+@pytest.mark.parametrize("model", [
+    "ollama/gpt-oss:20b",          # "gpt" in a local model's name
+    "ollama/openai-community-x",   # "openai" in a local model's name
+    "ollama/claude-style-llama",
+    "ollama_chat/gemini-like:7b",
+    "lm_studio/gpt-oss-20b",
+    "ollama/llava:13b",
+])
+def test_analyze_image_never_hands_a_cloud_key_to_a_local_route(
+        completion, no_openai_base, model):
+    _analyze(model)
+    kwargs = completion.call_args.kwargs
+    assert kwargs.get("api_key") not in CLOUD_KEYS, kwargs.get("model")
+    assert "api_key" not in kwargs
+
+
+@pytest.mark.parametrize("model,expected_key,route", [
+    ("gpt-test-model", "cloud-openai-key", "gpt-test-model"),
+    ("openai/gpt-test-model", "cloud-openai-key", "openai/gpt-test-model"),
+    ("claude-test-model", "cloud-anthropic-key", "anthropic/claude-test-model"),
+    ("anthropic/claude-test-model", "cloud-anthropic-key",
+     "anthropic/claude-test-model"),
+    ("gemini-test-model", "cloud-google-key", "gemini/gemini-test-model"),
+    # A name that mentions another vendor still gets its own provider's key.
+    ("anthropic/claude-gpt-hybrid", "cloud-anthropic-key",
+     "anthropic/claude-gpt-hybrid"),
+    ("gemini/gemini-openai-compat", "cloud-google-key",
+     "gemini/gemini-openai-compat"),
+])
+def test_analyze_image_key_matches_the_resolved_provider(
+        completion, no_openai_base, model, expected_key, route):
+    _analyze(model)
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == route
+    assert kwargs["api_key"] == expected_key
+
+
+def test_analyze_image_without_a_configured_key_sends_none(
+        completion, no_openai_base):
+    _analyze("gpt-test-model", config={})
+    assert "api_key" not in completion.call_args.kwargs
+
+
 # --- Addendum (httpx2): wrapped transport errors stay retryable ---------------
 
 def test_wrapped_transport_errors_are_retryable():

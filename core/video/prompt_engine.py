@@ -23,6 +23,15 @@ from core.llm_params import normalize_provider
 from core.llm_params import route_completion_kwargs as _route_kwargs
 
 
+# Config key holding the API key of each cloud provider (canonical ids from
+# core.llm_params). Local providers (ollama, lmstudio) have no entry.
+_CLOUD_KEY_NAMES = {
+    "openai": "openai_api_key",
+    "anthropic": "anthropic_api_key",
+    "gemini": "google_api_key",
+}
+
+
 class PromptStyle(Enum):
     """Available prompt enhancement styles"""
     CINEMATIC = "cinematic"
@@ -953,23 +962,18 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
             from core.llm_models import resolve_model
             model = resolve_model('openai', 'gpt', static_default='gpt-4o')  # vision-capable
 
-        # Get appropriate API configuration
-        api_key = None
-        if 'gpt' in model.lower() or 'openai' in model.lower():
-            if 'openai_api_key' in self.config:
-                api_key = self.config['openai_api_key']
-        elif 'claude' in model.lower():
-            if 'anthropic_api_key' in self.config:
-                api_key = self.config['anthropic_api_key']
-        elif 'gemini' in model.lower():
-            if 'google_api_key' in self.config:
-                api_key = self.config['google_api_key']
+        # The credential follows the resolved provider, never a substring of
+        # the model id: "ollama/gpt-oss:20b" contains "gpt" but is a local
+        # route, and a local server must not be handed a cloud API key.
+        from core.llm_params import infer_provider_from_model
+        provider_id = infer_provider_from_model(model)
+        key_name = _CLOUD_KEY_NAMES.get(provider_id)
+        api_key = (self.config.get(key_name) or None) if key_name else None
 
         # Prepare kwargs for chameleon_llm with validated/corralled params. A bare
         # Claude/Gemini id gets its route prefix here (the package never guesses).
-        from core.llm_params import infer_provider_from_model
         kwargs = _route_kwargs(
-            infer_provider_from_model(model), model, messages,
+            provider_id, model, messages,
             {"temperature": temperature, "max_tokens": max_tokens,
              "reasoning_effort": reasoning_effort,
              "response_format": response_format},
