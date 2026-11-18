@@ -110,15 +110,65 @@ def lmstudio_token() -> Optional[str]:
     return token or None
 
 
+def instance_to_use(pick: LMModel, wanted: Optional[str] = None) -> str:
+    """The loaded instance id the tests talk to.
+
+    ``IMAGEAI_LMSTUDIO_MODEL`` may name one loaded instance of a model (LM
+    Studio can hold several, e.g. ``name`` and ``name:2``). That instance is
+    used when it is loaded; a request by model key, or no request, keeps the
+    first instance.
+    """
+    if wanted and wanted in pick.loaded_ids:
+        return wanted
+    return pick.loaded_ids[0]
+
+
+# errno values for "connection refused": POSIX ECONNREFUSED and its Windows
+# socket code (WSAECONNREFUSED), which Python reports in errno or winerror.
+_REFUSED_CODES = frozenset({111, 61, 10061})
+
+
+def _refused_connection(exc) -> bool:
+    """True when ``exc`` (or an error it wraps) is a refused TCP connection.
+
+    requests wraps the OSError several levels deep: ConnectionError ->
+    urllib3 MaxRetryError (``.reason``) -> NewConnectionError -> OSError
+    (``__cause__`` or ``__context__``). Walk all of those links.
+    """
+    import errno
+    codes = _REFUSED_CODES | {getattr(errno, "ECONNREFUSED", 111)}
+    seen, stack = set(), [exc]
+    while stack:
+        err = stack.pop()
+        if err is None or id(err) in seen:
+            continue
+        seen.add(id(err))
+        if isinstance(err, ConnectionRefusedError):
+            return True
+        if isinstance(err, OSError) and (
+                err.errno in codes or getattr(err, "winerror", None) in codes):
+            return True
+        stack.extend([err.__cause__, err.__context__, getattr(err, "reason", None)])
+        stack.extend(a for a in getattr(err, "args", ()) if isinstance(a, BaseException))
+    return False
+
+
 def fail_or_skip_request_error(server: str, base: str, path: str, exc) -> None:
     """Skip when nothing accepted the connection; fail on anything else.
 
     Only a refused connection or a connect timeout means the server is not
-    running. A read timeout or any other request error comes from a server
-    that answered, so the test fails instead of reporting a green skip.
+    running. Every other request error fails the test instead of reporting a
+    green skip: a read timeout, a TLS or proxy error, and also a
+    ``ConnectionError`` from a server that accepted the connection and then
+    reset or closed it (requests raises ``ConnectionError`` for those too).
     """
     import requests
-    if isinstance(exc, (requests.ConnectionError, requests.ConnectTimeout)):
+    not_running = isinstance(exc, requests.ConnectTimeout) or (
+        isinstance(exc, requests.ConnectionError)
+        and not isinstance(exc, (requests.exceptions.SSLError,
+                                 requests.exceptions.ProxyError))
+        and _refused_connection(exc))
+    if not_running:
         pytest.skip(f"{server} is not running at {base}")
     pytest.fail(f"{server} at {base} accepted the connection but the request to "
                 f"{path} failed: {type(exc).__name__}: {exc}")

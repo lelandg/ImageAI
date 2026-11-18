@@ -165,14 +165,123 @@ def test_ollama_tags_parse_names_and_sizes():
 requests = pytest.importorskip("requests")
 
 
-@pytest.mark.parametrize("exc", [
-    requests.ConnectionError("refused"),
-    requests.ConnectTimeout("no answer within the connect timeout"),
-])
-def test_unreachable_server_skips(exc):
+def _decide(server, base, path, exc):
+    """("skip" | "fail", message). Explicit, because a skip raised inside
+    ``pytest.raises(FAIL)`` would report the test as skipped, not failed."""
     from local_logic import fail_or_skip_request_error
-    with pytest.raises(SKIP, match="LM Studio is not running at http://h:1"):
-        fail_or_skip_request_error("LM Studio", "http://h:1", "/api/v1/models", exc)
+    try:
+        fail_or_skip_request_error(server, base, path, exc)
+    except SKIP as outcome:
+        return "skip", str(outcome)
+    except FAIL as outcome:
+        return "fail", str(outcome)
+    raise AssertionError("fail_or_skip_request_error returned without deciding")
+
+
+def _refused(os_error):
+    """requests' error for a refused connection, built as urllib3 builds it:
+    ConnectionError(MaxRetryError(reason=NewConnectionError)) from the OSError."""
+    from urllib3.exceptions import MaxRetryError, NewConnectionError
+    new = NewConnectionError(None, f"Failed to establish a new connection: {os_error}")
+    new.__cause__ = os_error
+    return requests.ConnectionError(MaxRetryError(None, "/api/tags", new))
+
+
+def _closed_after_accept(inner):
+    """requests' error when the server accepts, then drops the connection."""
+    from urllib3.exceptions import ProtocolError
+    return requests.ConnectionError(ProtocolError("Connection aborted.", inner))
+
+
+def _remote_disconnected():
+    import http.client
+    return http.client.RemoteDisconnected(
+        "Remote end closed connection without response")
+
+
+@pytest.mark.parametrize("exc", [
+    _refused(ConnectionRefusedError(111, "Connection refused")),
+    _refused(ConnectionRefusedError(
+        10061, "No connection could be made because the target machine "
+               "actively refused it")),
+    _refused(OSError(111, "Connection refused")),      # errno only, base class
+    requests.ConnectTimeout("no answer within the connect timeout"),
+], ids=["refused-posix", "refused-windows", "refused-errno", "connect-timeout"])
+def test_unreachable_server_skips(exc):
+    outcome, msg = _decide("LM Studio", "http://h:1", "/api/v1/models", exc)
+    assert outcome == "skip", msg
+    assert "LM Studio is not running at http://h:1" in msg
+
+
+@pytest.mark.parametrize("exc", [
+    _closed_after_accept(_remote_disconnected()),
+    _closed_after_accept(ConnectionResetError(104, "Connection reset by peer")),
+    _closed_after_accept(ConnectionAbortedError(
+        10053, "An established connection was aborted")),
+    requests.exceptions.SSLError("certificate verify failed"),
+    requests.exceptions.ProxyError("proxy said no"),
+    requests.ConnectionError("no cause attached"),
+], ids=["closed-before-reply", "reset", "aborted", "ssl", "proxy", "unexplained"])
+def test_connection_error_from_an_answering_server_fails(exc):
+    """A ConnectionError is not proof that nothing is listening: a server that
+    accepts and then resets, or a TLS failure, must not become a green skip."""
+    outcome, msg = _decide("Ollama", "http://h:2", "/api/tags", exc)
+    assert outcome == "fail", msg
+    assert "Ollama at http://h:2" in msg and "/api/tags" in msg
+    assert type(exc).__name__ in msg
+
+
+def _loopback_get(port):
+    """One GET to 127.0.0.1 with proxies ignored; returns the exception raised."""
+    session = requests.Session()
+    session.trust_env = False
+    try:
+        session.get(f"http://127.0.0.1:{port}/api/tags", timeout=5)
+    except requests.RequestException as exc:
+        return exc
+    finally:
+        session.close()
+    raise AssertionError("the request unexpectedly succeeded")
+
+
+def test_real_refused_connection_skips():
+    """The exception requests really raises for a closed loopback port."""
+    import socket
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    exc = _loopback_get(port)  # nothing listens on the port any more
+    outcome, msg = _decide("Ollama", f"http://127.0.0.1:{port}", "/api/tags", exc)
+    assert outcome == "skip", f"{msg} ({exc!r})"
+    assert "Ollama is not running" in msg
+
+
+def test_real_connection_closed_after_accept_fails():
+    """A loopback server that accepts and closes before replying is a failure."""
+    import socket
+    import threading
+
+    server = socket.socket()
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+    port = server.getsockname()[1]
+
+    def _accept_and_close():
+        conn, _ = server.accept()
+        conn.recv(65536)
+        conn.close()
+
+    thread = threading.Thread(target=_accept_and_close, daemon=True)
+    thread.start()
+    try:
+        exc = _loopback_get(port)
+    finally:
+        thread.join(timeout=5)
+        server.close()
+    assert isinstance(exc, requests.ConnectionError)
+    outcome, msg = _decide("Ollama", f"http://127.0.0.1:{port}", "/api/tags", exc)
+    assert outcome == "fail", f"{msg} ({exc!r})"
+    assert "/api/tags" in msg
 
 
 @pytest.mark.parametrize("exc", [
@@ -217,3 +326,32 @@ def test_lmstudio_completions_pass_the_server_token(monkeypatch):
     server = SimpleNamespace(model="m", base_url="http://h/v1", api_key="tok-test")
     lm._ask(server, [{"role": "user", "content": "x"}])
     assert seen["api_key"] == "tok-test"
+
+
+# --- the requested loaded instance is the one the tests use -------------------
+
+def _two_instances():
+    return parse_listing(_v1({
+        "key": "a", "type": "llm", "size_bytes": 9,
+        "loaded_instances": [{"id": "a"}, {"id": "a:2"}]}))
+
+
+def test_requested_second_instance_is_used():
+    from local_logic import instance_to_use
+    pick = pick_lmstudio_model(_two_instances(), "a:2")
+    assert pick.key == "a"
+    assert instance_to_use(pick, "a:2") == "a:2"
+
+
+@pytest.mark.parametrize("wanted", [None, "", "a"])
+def test_first_instance_is_the_default(wanted):
+    """No selection, or a selection by model key, keeps the first instance."""
+    from local_logic import instance_to_use
+    pick = pick_lmstudio_model(_two_instances(), wanted or None)
+    assert instance_to_use(pick, wanted) == "a"
+
+
+def test_request_for_an_instance_that_is_not_loaded_falls_back_to_the_first():
+    from local_logic import instance_to_use
+    pick = pick_lmstudio_model(_two_instances(), "a")
+    assert instance_to_use(pick, "a:9") == "a"

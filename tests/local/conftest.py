@@ -61,7 +61,8 @@ import pytest
 import requests
 
 
-from local_logic import (fail_or_skip_request_error, lmstudio_token, parse_listing,
+from local_logic import (fail_or_skip_request_error, instance_to_use,
+                         lmstudio_token, parse_listing,
                          parse_ollama_tags, pick_lmstudio_model, pick_ollama_model)
 
 LIST_TIMEOUT = (2, 10)      # (connect, read) seconds for listing calls
@@ -114,11 +115,12 @@ def _list_lmstudio(base: str):
 def lmstudio():
     base = os.environ.get("IMAGEAI_LMSTUDIO_URL", _DEFAULT_LMSTUDIO).rstrip("/")
     models, version = _list_lmstudio(base)
-    pick = pick_lmstudio_model(models, os.environ.get("IMAGEAI_LMSTUDIO_MODEL"))
+    wanted = os.environ.get("IMAGEAI_LMSTUDIO_MODEL")
+    pick = pick_lmstudio_model(models, wanted)
 
     loaded_here = None
     if pick.loaded:
-        model_id = pick.loaded_ids[0]
+        model_id = instance_to_use(pick, wanted)
     else:
         if version != "v1":
             pytest.skip("load a model in LM Studio first (this LM Studio only offers "
