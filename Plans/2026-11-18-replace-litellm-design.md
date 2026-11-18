@@ -298,9 +298,28 @@ Three tiers, each one command:
 
 | Tier | Marker | Runs when | Command |
 |---|---|---|---|
-| Unit and dialog | none | always, and in CI | `python -m pytest` |
-| Local servers | `local` | the server answers; otherwise each test skips with the reason | `python -m pytest -m local -v` |
-| Cloud | `live` | `IMAGEAI_LIVE_TESTS=1` and the provider key is configured | `python -m pytest -m live -v` |
+| Unit and dialog | none | always, and in CI | `python -m pytest -m "not local and not live"` |
+| Local servers | `local` | the server answers; otherwise each test skips with the reason | `python -m pytest -m local -v -rs` |
+| Cloud | `live` | `IMAGEAI_LIVE_TESTS=1` and the provider key is in the keyring | see below |
+
+A bare `python -m pytest` also runs the local tier, which can load a model
+into LM Studio; the unit command excludes it. The cloud tier stays off unless
+`IMAGEAI_LIVE_TESTS` is `1`. These are the same commands as in
+`Docs/Testing-LLM.md`.
+
+PowerShell:
+
+```powershell
+$env:IMAGEAI_LIVE_TESTS = "1"
+python -m pytest -m live -v -rs
+Remove-Item Env:IMAGEAI_LIVE_TESTS
+```
+
+bash:
+
+```bash
+IMAGEAI_LIVE_TESTS=1 python -m pytest -m live -v -rs
+```
 
 **LM Studio (`tests/test_local_lmstudio.py`).** A fixture talks to LM
 Studio's own REST API, not the OpenAI-compatible one, because only the REST
@@ -455,5 +474,45 @@ with it. Each change below was found by a review or by the paid live tests.
   adapters' arguments to the real SDK call signatures, so an SDK that drops a
   parameter fails a unit test.
 - **Removed:** `gui/prompt_question_dialog_old.py` (nothing imported it).
+
+Changes after the first automated review of the pull request:
+
+- **A failed Responses reply is an error.** A Responses API reply with status
+  `failed` or `cancelled` arrives as HTTP 200. The adapter now raises an
+  `LLMError` subclass chosen from the provider's error code
+  (`rate_limit_exceeded`, `server_error`, a `*timeout` code, anything else
+  is a bad request) and carries the code and message. It used to return an
+  empty completion, which also hid the failure from the retry in
+  `PromptEngine`.
+- **`top_k` on local routes.** LM Studio and a custom base URL still receive
+  `top_k` in `extra_body`. The `ollama/` routes drop it with a WARNING:
+  Ollama's OpenAI-compatible endpoint has no such field.
+- **Cleartext warning.** When a real API key would be sent to a base URL that
+  is not https and whose host is not loopback, the OpenAI and Anthropic
+  adapters log one WARNING per base URL per process
+  (`core/chameleon_llm/endpoint.py`). The request is still sent, and the key
+  is never logged.
+- **`vertex_project`.** `build_completion_kwargs` and
+  `route_completion_kwargs` take the Google Cloud project saved in Settings
+  and send it on the `vertex_ai/` route only. `saved_vertex_project(config)`
+  reads it. Without it the adapter fell back to `GOOGLE_CLOUD_PROJECT` or the
+  project of the login, which may not be the configured one.
+- **More call sites moved to the shared builder:** the layout designer, the
+  scene suggester, the three storyboard calls, `LLMSyncAssistant.sync_with_llm`,
+  the end-prompt generator, and the Google branch of Ask AI (which still
+  imported `google.generativeai`). They had prefixed the model by hand, which
+  sent LM Studio requests to cloud OpenAI and ignored Google Cloud login.
+- **Credentials follow the resolved provider.** `analyze_image` picked a key
+  by substring of the model id and could hand a cloud key to a local route.
+  Start Prompt passed a Google Cloud access token as a Gemini API key. Both
+  now decide from the provider and the configured auth mode.
+- **`gpt-oss` names are local.** `infer_provider_from_model` no longer treats
+  the open-weight `gpt-oss` family as cloud OpenAI.
+- **Local tier:** only a refused connection or a connect timeout skips; any
+  other connection error fails. `IMAGEAI_LMSTUDIO_MODEL` may name one loaded
+  instance.
+- **Cloud tier keys:** the tests see only keys stored in the keyring, because
+  the test sandbox hides `config.json`. `Docs/Testing-LLM.md` has the
+  procedure.
 - **Not verified:** the local tier's real-server paths have never run. No LM
   Studio or Ollama server was running on the build machine.
