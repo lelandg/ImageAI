@@ -92,3 +92,16 @@ def test_gemini_request_binds_to_real_generate_content():
     client = genai.Client(**client_kwargs)  # API-key route: no credential lookup
     request = gemini_adapter._build_request(route, MSGS, params)
     _bind(client.models.generate_content, request)
+
+
+@pytest.mark.parametrize("env_var", ["GOOGLE_GENAI_USE_VERTEXAI",
+                                     "GOOGLE_GENAI_USE_ENTERPRISE"])
+def test_gemini_route_client_stays_in_ai_studio_mode(monkeypatch, env_var):
+    pytest.importorskip("google.genai")
+    from google import genai
+    from core.chameleon_llm import gemini_adapter
+    monkeypatch.setenv(env_var, "true")
+    client = genai.Client(**gemini_adapter._build_client_kwargs(
+        Route("gemini", "gemini", "test-model"), "test", None, {},
+        timeout=5, max_retries=0))
+    assert client.vertexai is False

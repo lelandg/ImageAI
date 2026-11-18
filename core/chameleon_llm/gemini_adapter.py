@@ -158,6 +158,9 @@ def _build_client_kwargs(route: Route, api_key: str | None, api_base: str | None
             logger.warning("chameleon_llm: dropping parameter(s) %s: only the "
                            "vertex_ai route uses them", ", ".join(ignored))
         kwargs["api_key"] = _resolve_key(api_key)
+        # Explicit: with vertexai=None the SDK reads GOOGLE_GENAI_USE_VERTEXAI
+        # (and GOOGLE_GENAI_USE_ENTERPRISE) and could send gemini/ to Vertex.
+        kwargs["vertexai"] = False
     return kwargs
 
 

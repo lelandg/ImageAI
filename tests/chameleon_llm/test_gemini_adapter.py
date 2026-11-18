@@ -48,7 +48,8 @@ def test_api_key_route_builds_key_client(fake_genai):
     resp = call(api_key="secret")
     kwargs = fake_genai.client_kwargs[0]
     assert kwargs["api_key"] == "secret"
-    assert "vertexai" not in kwargs
+    # explicit, so GOOGLE_GENAI_USE_VERTEXAI cannot send gemini/ to Vertex
+    assert kwargs["vertexai"] is False
     assert fake_genai.calls[0]["model"] == "test-model"
     assert resp.model == "test-model"
     assert resp.choices[0].message.role == "assistant"
