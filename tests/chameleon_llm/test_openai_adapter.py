@@ -178,6 +178,15 @@ def test_list_content_and_image_parts_pass_through_unchanged(fake_openai):
     assert fake_openai.chat_calls[0]["messages"] == msgs
 
 
+def test_assistant_none_and_empty_content_pass_through(fake_openai):
+    msgs = [{"role": "user", "content": "hi"},
+            {"role": "assistant", "content": None},
+            {"role": "assistant", "content": ""},
+            {"role": "user", "content": "again"}]
+    call(messages=msgs)
+    assert fake_openai.chat_calls[0]["messages"] == msgs
+
+
 def test_params_forwarded_verbatim(fake_openai):
     params = {"max_completion_tokens": 50, "reasoning_effort": "low", "seed": 1,
               "stop": ["x"], "response_format": {"type": "json_object"}}

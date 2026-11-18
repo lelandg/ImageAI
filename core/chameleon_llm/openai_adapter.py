@@ -1,9 +1,10 @@
-"""OpenAI-compatible adapter (OpenAI, Ollama, LM Studio): chat-completions path."""
+"""OpenAI-compatible adapter (OpenAI, Ollama, LM Studio): chat-completions and Responses paths."""
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 
 import openai  # top-level on purpose: dispatch turns an ImportError here into MissingSDKError
 
@@ -18,9 +19,19 @@ ACCEPTED_PARAMS = frozenset({
     "reasoning_effort", "verbosity", "response_format", "seed", "stop",
 })
 
+# Models served only by the Responses API (patterns, matched on the bare id).
+RESPONSES_ONLY_PATTERNS: tuple[str, ...] = (
+    r"^o\d+-pro(-|$)",
+    r"^gpt-\d+(\.\d+)*-pro(-|$)",
+)
+
 _LOCAL_ROUTES = frozenset({"ollama", "lm_studio"})
 _PLACEHOLDER_KEY = "not-needed"
 _DEFAULT_OLLAMA_BASE = "http://localhost:11434"
+
+
+def uses_responses_api(model: str) -> bool:
+    return any(re.search(p, model) for p in RESPONSES_ONLY_PATTERNS)
 
 
 def _resolve_base_url(route: Route, api_base: str | None) -> str | None:
@@ -86,20 +97,110 @@ def _to_completion(route: Route, resp) -> Completion:
         raw=resp)
 
 
+def _text_of(content) -> str:
+    if isinstance(content, str):
+        return content
+    return "\n\n".join(p.get("text", "") for p in content or []
+                       if isinstance(p, dict) and p.get("type") == "text")
+
+
+def _response_part(part, role: str) -> dict:
+    if part.get("type") == "image_url":
+        img = part.get("image_url")
+        url = img.get("url") if isinstance(img, dict) else img
+        detail = (img.get("detail") if isinstance(img, dict) else None) or "auto"
+        return {"type": "input_image", "image_url": url, "detail": detail}
+    kind = "output_text" if role == "assistant" else "input_text"
+    return {"type": kind, "text": part.get("text", "")}
+
+
+def _build_responses_request(route: Route, messages: list[dict],
+                             params: dict) -> dict:
+    instructions, items = [], []
+    for m in messages:
+        role, content = m.get("role"), m.get("content")
+        if role in ("system", "developer"):
+            instructions.append(_text_of(content))
+            continue
+        parts = ([{"type": "text", "text": content}] if isinstance(content, str)
+                 else list(content or []))
+        parts = [_response_part(p, role) for p in parts if p
+                 and not (p.get("type") == "text" and not p.get("text"))]
+        if parts:
+            items.append({"role": role, "content": parts})
+    request: dict = {"model": route.model, "input": items}
+    if instructions:
+        request["instructions"] = "\n\n".join(t for t in instructions if t)
+    params = dict(params)
+    for name in ("seed", "stop", "top_k"):
+        if params.pop(name, None) is not None:
+            logger.warning("chameleon_llm: dropping parameter '%s': the OpenAI "
+                           "Responses API does not accept it", name)
+    cap = params.pop("max_tokens", None)
+    cap = params.pop("max_completion_tokens", None) or cap
+    if cap is not None:
+        request["max_output_tokens"] = cap
+    effort = params.pop("reasoning_effort", None)
+    if effort is not None:
+        request["reasoning"] = {"effort": effort}
+    text: dict = {}
+    verbosity = params.pop("verbosity", None)
+    if verbosity is not None:
+        text["verbosity"] = verbosity
+    fmt = params.pop("response_format", None)
+    if fmt:
+        if fmt.get("type") == "json_schema" and "json_schema" in fmt:
+            fmt = {"type": "json_schema", **fmt["json_schema"]}
+        text["format"] = fmt
+    if text:
+        request["text"] = text
+    request.update(params)  # temperature, top_p
+    return request
+
+
+def _responses_to_completion(route: Route, resp) -> Completion:
+    text = getattr(resp, "output_text", None)
+    status = getattr(resp, "status", None)
+    if status == "incomplete":
+        reason = getattr(getattr(resp, "incomplete_details", None), "reason", None)
+        finish = "content_filter" if reason == "content_filter" else "length"
+    else:
+        finish = "stop"
+    usage = getattr(resp, "usage", None)
+    prompt = getattr(usage, "input_tokens", 0) or 0
+    completion = getattr(usage, "output_tokens", 0) or 0
+    return Completion(
+        model=route.model,
+        choices=[Choice(0, Message("assistant", text if isinstance(text, str) else ""),
+                        finish)],
+        usage=Usage(prompt, completion,
+                    getattr(usage, "total_tokens", 0) or prompt + completion),
+        raw=resp)
+
+
 def complete(route: Route, messages: list[dict], *, api_key: str | None,
              api_base: str | None, params: dict, timeout: float,
              max_retries: int) -> Completion:
     base_url = _resolve_base_url(route, api_base)
     key = _resolve_key(route, api_key, base_url)
-    request = _build_request(route, messages, params, base_url)
+    use_responses = not base_url and uses_responses_api(route.model)
+    if use_responses:
+        request = _build_responses_request(route, messages, params)
+    else:
+        request = _build_request(route, messages, params, base_url)
 
     client = openai.OpenAI(api_key=key, base_url=base_url, timeout=timeout,
                            max_retries=max_retries)
-    logger.debug("chameleon_llm openai chat: route=%s model=%s base_url=%s "
-                 "timeout=%s max_retries=%s", route.route, route.model,
-                 base_url, timeout, max_retries)
+    logger.debug("chameleon_llm openai %s: route=%s model=%s base_url=%s "
+                 "timeout=%s max_retries=%s",
+                 "responses" if use_responses else "chat", route.route,
+                 route.model, base_url, timeout, max_retries)
     try:
-        resp = client.chat.completions.create(**request)
+        if use_responses:
+            resp = client.responses.create(**request)
+        else:
+            resp = client.chat.completions.create(**request)
     except Exception as exc:
         raise wrap_sdk_error(exc, "openai") from exc
-    return _to_completion(route, resp)
+    return (_responses_to_completion(route, resp) if use_responses
+            else _to_completion(route, resp))
