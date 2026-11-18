@@ -109,3 +109,14 @@ def test_temperature_is_corralled_per_model(completion):
 
 def test_reply_text_is_returned(completion):
     assert _run("OpenAI", "gpt-test-model") == "{}"
+
+
+@pytest.mark.parametrize("model", ["ollama/gemma-test", "lm_studio/gemma-test",
+                                   "openai/gpt-test-model"])
+def test_google_key_never_follows_a_foreign_route_prefix(completion, model):
+    """Provider "Google" with a model id that names another route: the Google
+    key was fetched, and must not be forwarded to that other provider."""
+    _run("Google", model, auth_mode="api-key")
+    kwargs = completion[0]
+    assert kwargs["model"] == model
+    assert "api_key" not in kwargs

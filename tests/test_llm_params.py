@@ -508,3 +508,71 @@ def test_saved_vertex_project_reads_config_objects_and_dicts():
     assert saved_vertex_project(None) is None
     # A mock config answers every lookup with another mock: not a project id.
     assert saved_vertex_project(MagicMock()) is None
+
+
+# --- a key never follows a route prefix to another provider -------------------
+
+@pytest.mark.parametrize("provider,model", [
+    ("gemini", "ollama/gemma-test"),          # Google selected, local model id
+    ("gemini", "ollama_chat/gemma-test"),
+    ("gemini", "lm_studio/gemma-test"),
+    ("openai", "ollama/gpt-oss:20b"),
+    ("anthropic", "lm_studio/claude-style-local"),
+    ("openai", "anthropic/claude-test-model"),  # cloud X key -> cloud Y
+    ("anthropic", "openai/gpt-test-model"),
+    ("openai", "gemini/gemini-test-model"),
+    ("anthropic", "gemini/gemini-test-model"),
+    ("gemini", "openai/gpt-test-model"),
+    ("ollama", "openai/gpt-test-model"),
+])
+def test_key_is_dropped_when_the_route_prefix_names_another_provider(
+        provider, model, caplog):
+    import logging
+    seen = []
+    with caplog.at_level(logging.WARNING, logger="core.llm_params"):
+        kwargs = build_completion_kwargs(
+            provider, model, _MSGS, api_key="provider-secret-key",
+            auth_mode="api-key" if provider == "gemini" else None,
+            on_warning=seen.append)
+    assert kwargs["model"] == model          # the prefix is still honoured
+    assert "api_key" not in kwargs
+    assert len(seen) == 1 and model.split("/")[0] in seen[0]
+    assert "provider-secret-key" not in caplog.text
+    assert "provider-secret-key" not in seen[0]
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+@pytest.mark.parametrize("provider,model", [
+    ("openai", "openai/gpt-test-model"),
+    ("openai", "gpt-test-model"),
+    ("anthropic", "anthropic/claude-test-model"),
+    ("gemini", "gemini/gemini-test-model"),
+    ("ollama", "ollama/llama-test"),          # a local provider's own token
+    ("ollama", "ollama_chat/llama-test"),
+    ("lmstudio", "local-test-model"),
+    ("lmstudio", "lm_studio/local-test-model"),
+    ("lmstudio", "lmstudio-community/Some-Model-GGUF"),
+    ("lmstudio", "openai/gpt-oss-20b"),       # publisher name, LM Studio endpoint
+])
+def test_key_passes_when_the_route_belongs_to_the_provider(provider, model):
+    seen = []
+    kwargs = build_completion_kwargs(
+        provider, model, _MSGS, api_key="own-key",
+        auth_mode="api-key" if provider == "gemini" else None,
+        on_warning=seen.append)
+    assert kwargs["api_key"] == "own-key"
+    assert seen == []
+
+
+def test_foreign_route_without_a_key_logs_nothing(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="core.llm_params"):
+        kwargs = build_completion_kwargs("gemini", "ollama/gemma-test", _MSGS)
+    assert "api_key" not in kwargs
+    assert not caplog.records
+
+
+def test_foreign_route_with_a_key_raises_in_strict_mode():
+    with pytest.raises(LLMParamError, match="ollama"):
+        build_completion_kwargs("gemini", "ollama/gemma-test", _MSGS,
+                                api_key="k", strict=True)

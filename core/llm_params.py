@@ -525,6 +525,12 @@ def build_completion_kwargs(
     decides (present -> Google AI Studio, absent -> Vertex AI/ADC). Callers
     relying on the ``GEMINI_API_KEY`` env var must pass ``auth_mode='api-key'``.
 
+    ``api_key`` is the key of ``provider``. When ``model`` carries the route
+    prefix of another provider (``ollama/...`` under Google, ``anthropic/...``
+    under OpenAI), the prefix is honoured but the key is not sent (WARNING and
+    ``on_warning``; ``LLMParamError`` when ``strict``). A local provider's own
+    token still passes on its own route.
+
     ``vertex_project`` is the Google Cloud project saved in Settings (see
     :func:`saved_vertex_project`). It is sent on the ``vertex_ai/`` route only;
     without it the adapter falls back to ``GOOGLE_CLOUD_PROJECT`` and then to
@@ -536,6 +542,8 @@ def build_completion_kwargs(
 
     provider_id = normalize_provider(provider)
     model_id = str(model).strip()
+    # Set when the model id carries the route prefix of another provider.
+    foreign_route = None
 
     if provider_id == "lmstudio":
         # OpenAI-compatible local server via api_base. Checked before the
@@ -547,6 +555,10 @@ def build_completion_kwargs(
             api_base = config.endpoint if config else None
     elif any(model_id.startswith(p) for p in _ROUTE_PREFIXES):
         routed_model = model_id  # caller already prefixed — honor it
+        prefix = next(p for p in _ROUTE_PREFIXES if model_id.startswith(p))
+        owner = _PREFIX_TO_PROVIDER.get(prefix)
+        if owner and owner != provider_id:
+            foreign_route = prefix
     elif provider_id == "gemini":
         if auth_mode:
             use_api_key_route = auth_mode.strip().lower() in ("api-key", "api_key")
@@ -563,6 +575,19 @@ def build_completion_kwargs(
 
     kwargs["model"] = routed_model
     kwargs["messages"] = messages
+    if api_key and foreign_route:
+        # The key belongs to ``provider_id``; the prefix sends the request to
+        # another provider (a local server, or a different cloud). Sending it
+        # would hand one provider's credential to another.
+        message = (f"API key for provider '{provider_id}' not sent: the model "
+                   f"id selects the '{foreign_route}' route, which belongs to "
+                   f"another provider")
+        if strict:
+            raise LLMParamError(message)
+        logger.warning(f"LLM request for {routed_model}: {message}")
+        if on_warning:
+            on_warning(message)
+        api_key = None
     # The vertex_ai route signs in with the Google Cloud login; a stored API
     # key would only be dropped (with a warning) by the adapter.
     if api_key and not routed_model.startswith("vertex_ai/"):
