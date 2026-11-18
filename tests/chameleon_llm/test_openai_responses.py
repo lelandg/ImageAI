@@ -182,3 +182,76 @@ def test_assistant_none_content_sent_as_empty_string(fake_openai):
     inp = fake_openai.responses_calls[0]["input"]
     assert inp[1] == {"role": "assistant", "content": ""}
     assert inp[2] == {"role": "assistant", "content": "x\n\ny"}
+
+
+# --- a failed or cancelled response is an error, not a completion ------------
+
+def _failed_reply(status="failed", code="server_error", message="boom",
+                  with_error=True):
+    reply = make_responses_reply(text="", status=status, usage=None)
+    reply.error = (SimpleNamespace(code=code, message=message)
+                   if with_error else None)
+    return reply
+
+
+@pytest.mark.parametrize("code,expected", [
+    ("server_error", "ServerError"),
+    ("rate_limit_exceeded", "RateLimitError"),
+    ("vector_store_timeout", "TimeoutError_"),
+    ("invalid_prompt", "BadRequestError"),
+    ("image_too_large", "BadRequestError"),
+])
+def test_failed_response_raises_with_provider_error(fake_openai, code, expected):
+    from core.chameleon_llm import errors
+    fake_openai.responses_reply = _failed_reply(code=code, message="the detail")
+    with pytest.raises(errors.LLMError) as info:
+        call()
+    assert type(info.value).__name__ == expected
+    assert info.value.provider == "openai"
+    text = str(info.value)
+    assert code in text and "the detail" in text and "failed" in text
+
+
+def test_failed_response_without_error_payload_raises_base_error(fake_openai):
+    from core.chameleon_llm import errors
+    fake_openai.responses_reply = _failed_reply(with_error=False)
+    with pytest.raises(errors.LLMError) as info:
+        call()
+    assert type(info.value) is errors.LLMError
+    assert "failed" in str(info.value)
+
+
+def test_cancelled_response_raises(fake_openai):
+    from core.chameleon_llm import errors
+    fake_openai.responses_reply = _failed_reply(status="cancelled",
+                                                with_error=False)
+    with pytest.raises(errors.LLMError) as info:
+        call()
+    assert type(info.value) is errors.LLMError
+    assert "cancelled" in str(info.value)
+
+
+def test_failed_response_after_chat_retry_raises_too(fake_openai):
+    """The chat -> Responses retry path must not turn a failed response into
+    a completion either."""
+    from core.chameleon_llm import errors
+
+    class _Status(Exception):
+        status_code = 404
+
+    fake_openai.chat_raises = _Status(
+        "This model is only supported in v1/responses")
+    fake_openai.responses_reply = _failed_reply(code="server_error")
+    with pytest.raises(errors.ServerError):
+        openai_adapter.complete(
+            Route("openai", "openai", "test-model"), MSGS, api_key="k",
+            api_base=None, params={}, timeout=600, max_retries=0)
+
+
+def test_failed_response_is_retryable_by_the_prompt_engine(fake_openai):
+    """PromptEngine retries on the error class; a server_error must reach it."""
+    from core.video.prompt_engine import UnifiedLLMProvider
+    fake_openai.responses_reply = _failed_reply(code="server_error")
+    with pytest.raises(Exception) as info:
+        call()
+    assert UnifiedLLMProvider({})._is_retryable_error(info.value)

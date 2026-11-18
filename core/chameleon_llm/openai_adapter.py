@@ -9,7 +9,10 @@ import re
 import openai  # top-level on purpose: dispatch turns an ImportError here into MissingSDKError
 
 from .endpoint import warn_if_cleartext_key
-from .errors import AuthError, BadRequestError, wrap_sdk_error
+from .errors import (
+    AuthError, BadRequestError, LLMError, RateLimitError, ServerError,
+    TimeoutError_, wrap_sdk_error,
+)
 from .routing import Route
 from .types import Choice, Completion, Message, Usage
 
@@ -175,9 +178,38 @@ def _build_responses_request(route: Route, messages: list[dict],
     return request
 
 
+def _failed_response_error(status: str, resp) -> LLMError:
+    """The error for a Responses reply whose status is failed or cancelled.
+
+    HTTP 200 carries these, so no SDK exception is raised; the class comes
+    from ``resp.error.code`` (ResponseError in the SDK)."""
+    err = getattr(resp, "error", None)
+    code = getattr(err, "code", None)
+    message = getattr(err, "message", None)
+    code = code if isinstance(code, str) and code else None
+    cls: type[LLMError]
+    if code is None:
+        cls = LLMError
+    elif code == "rate_limit_exceeded":
+        cls = RateLimitError
+    elif code == "server_error":
+        cls = ServerError
+    elif "timeout" in code:
+        cls = TimeoutError_
+    else:  # invalid_prompt, invalid_image, image_too_large, ...
+        cls = BadRequestError
+    detail = f"status={status}" + (f", code={code}" if code else "")
+    text = f"OpenAI Responses request did not complete ({detail})"
+    if isinstance(message, str) and message:
+        text += f": {message}"
+    return cls(text, provider="openai")
+
+
 def _responses_to_completion(route: Route, resp) -> Completion:
     text = getattr(resp, "output_text", None)
     status = getattr(resp, "status", None)
+    if status in ("failed", "cancelled"):
+        raise _failed_response_error(status, resp)
     if status == "incomplete":
         reason = getattr(getattr(resp, "incomplete_details", None), "reason", None)
         finish = "content_filter" if reason == "content_filter" else "length"
