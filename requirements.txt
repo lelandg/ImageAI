@@ -11,7 +11,7 @@ packaging>=26.3  # Runtime version/specifier validation for optional ML backends
 google-genai>=2.34.0  # 2.9.0+: GeminiNextGen Interactions API w/ output_video (Gemini Omni video). NBP image_size (1K/2K/4K) still supported.
 google-cloud-aiplatform
 PySide6
-openai
+openai>=2.0.0  # chameleon_llm needs client.responses and the verbosity kwarg (minimum not verified)
 requests>=2.34.2  # For Stability AI REST API
 # Repeat these security floors here because Snyk SCM ignores constraint files.
 urllib3>=2.8.0
@@ -35,7 +35,7 @@ keyring>=24.3.1  # For secure API key storage (optional)
 # Video Project Feature Dependencies
 Jinja2>=3.1.6  # Template processing for prompt generation; 3.1.6 clears 10 advisories (GHSA-cpwx-vrp4-4pq7 et al.)
 imageio-ffmpeg>=0.8.1  # FFmpeg Python bindings
-anthropic>=0.125.0  # Claude API support (optional for prompt generation)
+anthropic>=0.125.0  # Claude API: the only path for Claude chat (core/chameleon_llm)
 
 # MIDI Processing & Synchronization  
 setuptools>=84.2.1  # Build dependency for pretty-midi; matches the requirements-security.txt floor
@@ -77,7 +77,7 @@ opentelemetry-api>=1.45.2
 # to a constraints file" and do not collapse them into plain httpx.
 #
 # WHY THEY ARE NEEDED: the openai and anthropic SDKs require `httpx2<3`
-# (openai >= 2.12.0), httpx2 pulls a matching httpcore2, and google-genai
+# (openai requires httpx2>=2.12.0), httpx2 pulls a matching httpcore2, and google-genai
 # offers an `httpx2` extra that osv-scanner's resolver expands. Without these
 # floors the resolver can pick an older httpx2 / httpcore2 and report their
 # advisories. Re-checked 2026-11-18 after the old LLM wrapper was removed: a
