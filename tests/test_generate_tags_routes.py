@@ -1,15 +1,14 @@
 """scripts/generate_tags.py gives a bare --model override the provider's route."""
 
+import importlib.util
+import signal
+from pathlib import Path
+
 import pytest
-
-# The script exits at import time without tqdm, a tool dependency that
-# requirements.txt does not install: skip the whole module first.
-pytest.importorskip("tqdm", reason="scripts/generate_tags.py needs tqdm "
-                    "(not in requirements.txt)")
-
-import importlib.util  # noqa: E402
-import signal  # noqa: E402
-from pathlib import Path  # noqa: E402
+# requirements.txt declares tqdm, and the script exits at import time without
+# it. A plain import makes a missing install a collection error, not a skip
+# that silently removes every routing test in this module.
+import tqdm  # noqa: F401
 
 SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "generate_tags.py"
 
