@@ -108,8 +108,9 @@ def test_api_base_argument_beats_env_and_allows_missing_key(fake_openai, monkeyp
     assert fake_openai.client_kwargs[0]["api_key"] == "not-needed"
 
 
-def test_top_k_in_extra_body_for_local_and_dropped_for_cloud(fake_openai, caplog):
-    call(OLLAMA, api_key=None, params={"top_k": 40, "temperature": 0.1})
+def test_top_k_in_extra_body_for_lm_studio_and_dropped_for_cloud(fake_openai, caplog):
+    call(LMSTUDIO, api_key=None, api_base="http://localhost:1234/v1",
+         params={"top_k": 40, "temperature": 0.1})
     assert fake_openai.chat_calls[-1]["extra_body"] == {"top_k": 40}
     assert "top_k" not in fake_openai.chat_calls[-1]
     call(api_base="http://proxy/v1", params={"top_k": 5})
@@ -120,6 +121,29 @@ def test_top_k_in_extra_body_for_local_and_dropped_for_cloud(fake_openai, caplog
     assert "extra_body" not in fake_openai.chat_calls[-1]
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1 and "top_k" in warnings[0].getMessage()
+
+
+@pytest.mark.parametrize("api_base", [None, "http://localhost:11434",
+                                      "http://ollama.example.test:11434/v1"])
+def test_top_k_dropped_with_warning_for_ollama(fake_openai, caplog, api_base):
+    """Ollama's OpenAI-compatible endpoint has no top_k field: sending it in
+    extra_body would be ignored without a trace, so it is dropped and named."""
+    with caplog.at_level(logging.WARNING, logger="chameleon_llm"):
+        call(OLLAMA, api_key=None, api_base=api_base,
+             params={"top_k": 40, "temperature": 0.1})
+    sent = fake_openai.chat_calls[-1]
+    assert "top_k" not in sent and "extra_body" not in sent
+    assert sent["temperature"] == 0.1
+    warnings = [r.getMessage() for r in caplog.records
+                if r.levelno == logging.WARNING]
+    assert len(warnings) == 1
+    assert "'top_k'" in warnings[0] and "Ollama" in warnings[0]
+
+
+def test_ollama_without_top_k_logs_nothing(fake_openai, caplog):
+    with caplog.at_level(logging.WARNING, logger="chameleon_llm"):
+        call(OLLAMA, api_key=None, params={"temperature": 0.1})
+    assert not [r for r in caplog.records if r.levelno == logging.WARNING]
 
 
 def test_missing_key_raises_auth_error_before_network(fake_openai):

@@ -69,7 +69,13 @@ def _build_request(route: Route, messages: list[dict], params: dict,
     top_k = params.pop("top_k", None)
     request.update(params)
     if top_k is not None:
-        if base_url:
+        if route.route == "ollama":
+            # Ollama's OpenAI-compatible endpoint has no top_k field; in
+            # extra_body it would be ignored without a trace.
+            logger.warning(
+                "chameleon_llm: dropping parameter 'top_k': Ollama's "
+                "OpenAI-compatible endpoint does not accept it")
+        elif base_url:
             request["extra_body"] = {"top_k": top_k}
         else:
             logger.warning(
