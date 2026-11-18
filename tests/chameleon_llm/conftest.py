@@ -111,3 +111,55 @@ def fake_anthropic(monkeypatch):
     monkeypatch.setattr(anthropic, "Anthropic", FakeAnthropic)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     return state
+
+
+class FakeGenaiState:
+    """Records what the adapter did to the fake ``google.genai.Client``."""
+
+    def __init__(self):
+        self.client_kwargs = []   # one dict per Client(...) construction
+        self.calls = []           # kwargs of each models.generate_content
+        self.reply = make_genai_reply()
+        self.raises = None        # exception instance raised by generate_content()
+
+    @property
+    def clients_built(self):
+        return len(self.client_kwargs)
+
+
+def make_genai_reply(text="hello", finish_reason="STOP", usage=(3, 4, 7)):
+    """Build an object shaped like a google-genai GenerateContentResponse."""
+    use = None
+    if usage is not None:
+        use = SimpleNamespace(prompt_token_count=usage[0],
+                              candidates_token_count=usage[1],
+                              total_token_count=usage[2])
+    parts = [SimpleNamespace(text=text)] if text is not None else []
+    candidate = SimpleNamespace(
+        content=SimpleNamespace(role="model", parts=parts),
+        finish_reason=finish_reason)
+    return SimpleNamespace(candidates=[candidate], usage_metadata=use)
+
+
+@pytest.fixture
+def fake_genai(monkeypatch):
+    genai = pytest.importorskip("google.genai")
+    state = FakeGenaiState()
+
+    class _Models:
+        def generate_content(self, **kwargs):
+            state.calls.append(kwargs)
+            if state.raises is not None:
+                raise state.raises
+            return state.reply
+
+    class FakeClient:
+        def __init__(self, **kwargs):
+            state.client_kwargs.append(kwargs)
+            self.models = _Models()
+
+    monkeypatch.setattr(genai, "Client", FakeClient)
+    for var in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_CLOUD_PROJECT",
+                "GOOGLE_CLOUD_LOCATION"):
+        monkeypatch.delenv(var, raising=False)
+    return state

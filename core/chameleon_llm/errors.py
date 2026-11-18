@@ -49,6 +49,8 @@ def _status_of(exc: Exception) -> int | None:
     status = getattr(exc, "status_code", None)
     if status is None:
         status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status is None:
+        status = getattr(exc, "code", None)  # google.genai.errors.APIError
     return status if isinstance(status, int) else None
 
 
