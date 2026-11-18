@@ -387,3 +387,25 @@ def test_later_generations_use_reasoning_rules(model):
 def test_classic_models_keep_max_tokens(model):
     kwargs, _ = validate_params("openai", model, {"temperature": 0.5, "max_tokens": 256})
     assert kwargs == {"temperature": 0.5, "max_tokens": 256}
+
+
+# --- Claude Haiku 5 and every later generation take no sampling params --------
+
+@pytest.mark.parametrize("model", [
+    "claude-haiku-5-5", "claude-haiku-5", "claude-sonnet-5-5", "claude-opus-5-5",
+    "claude-opus-6-test", "claude-haiku-10-test",
+])
+def test_claude_5_and_later_drop_sampling_params(model):
+    kwargs, warnings = validate_params(
+        "anthropic", model, {"temperature": 0.5, "top_p": 0.9, "top_k": 5,
+                             "max_tokens": 64})
+    assert kwargs == {"max_tokens": 64}
+    assert len(warnings) == 3
+
+
+@pytest.mark.parametrize("model", [
+    "claude-haiku-4-5-20251001", "claude-opus-4-20250514", "claude-3-7-sonnet-20250219",
+])
+def test_claude_4_and_older_keep_temperature(model):
+    kwargs, _ = validate_params("anthropic", model, {"temperature": 1.5})
+    assert kwargs == {"temperature": 1.0}

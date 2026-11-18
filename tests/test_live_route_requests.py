@@ -66,20 +66,54 @@ def test_json_mode_passes_response_format():
 
 # --- Last patch: Anthropic helpers of the live file ---------------------------
 
-def test_older_claude_prefers_the_resolved_haiku(monkeypatch):
+def test_older_claude_candidates_exclude_no_sampling_models(monkeypatch):
+    # the resolved haiku is a 5-line model: it takes no temperature
     monkeypatch.setattr(live, "resolve_model",
-                        lambda provider, family, **_: "claude-haiku-test-current")
-    assert live._older_claude() == "claude-haiku-test-current"
+                        lambda provider, family, **_: "claude-haiku-5-5")
+    candidates = live._older_claude_candidates()
+    assert "claude-haiku-5-5" not in candidates
+    for model in candidates:
+        params, _ = live.validate_params("anthropic", model, {"temperature": 1.5})
+        assert params.get("temperature") == 1.0, model
 
 
-def test_older_claude_falls_back_when_haiku_takes_no_temperature(monkeypatch):
-    # a Claude 5-line id: its rules drop temperature, so it is not "older"
+def test_older_claude_candidates_put_an_older_resolved_haiku_first(monkeypatch):
     monkeypatch.setattr(live, "resolve_model",
-                        lambda provider, family, **_: "claude-sonnet-5-test")
-    picked = live._older_claude()
-    assert picked != "claude-sonnet-5-test"
-    params, _ = live.validate_params("anthropic", picked, {"temperature": 1.5})
-    assert params.get("temperature") == 1.0
+                        lambda provider, family, **_: "claude-haiku-4-5-test")
+    assert live._older_claude_candidates()[0] == "claude-haiku-4-5-test"
+
+
+def _not_found(model):
+    return live.chameleon_llm.BadRequestError(
+        f"NotFoundError: Error code: 404 - {{'type': 'error', 'error': "
+        f"{{'type': 'not_found_error', 'message': 'model: {model}'}}}}",
+        provider="anthropic", status_code=404)
+
+
+def test_pick_available_skips_retired_models():
+    def probe(model):
+        if model == "retired":
+            raise _not_found(model)
+    assert live._pick_available(["retired", "current"], probe) == "current"
+
+
+def test_pick_available_skips_the_class_when_all_are_retired():
+    def probe(model):
+        raise _not_found(model)
+    with pytest.raises(pytest.skip.Exception,
+                       match="no current Claude model accepts sampling parameters"):
+        live._pick_available(["a", "b"], probe)
+    with pytest.raises(pytest.skip.Exception,
+                       match="no current Claude model accepts sampling parameters"):
+        live._pick_available([], probe)
+
+
+def test_pick_available_raises_other_bad_requests():
+    def probe(model):
+        raise live.chameleon_llm.BadRequestError("invalid_request_error: bad",
+                                                 provider="anthropic", status_code=400)
+    with pytest.raises(live.chameleon_llm.BadRequestError):
+        live._pick_available(["a"], probe)
 
 
 def test_sdk_sends_skips_exactly_when_the_sdk_drops_the_param():

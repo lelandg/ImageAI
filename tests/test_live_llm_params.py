@@ -87,19 +87,58 @@ def _curated(provider, wanted):
     pytest.skip(f"no curated {provider} model fits this test")
 
 
-def _older_claude():
-    """A Claude that takes temperature in [0, 1] (clamps 1.5 to 1.0).
+_NO_OLDER_CLAUDE = "no current Claude model accepts sampling parameters"
 
-    Prefers the current resolved ``haiku`` (curated dated ids get retired),
-    then falls back to the first curated model that fits.
+
+def _older_claude_candidates():
+    """Claude ids whose rules take a temperature in [0, 1] (1.5 clamps to 1.0).
+
+    Derived from the rules, never written out: the resolved ``haiku`` first
+    when it qualifies, then the curated list. Claude 5 and later take no
+    sampling parameters, so they never qualify.
     """
     def wanted(model_id):
-        params, _ = validate_params("anthropic", model_id, {"temperature": 1.5})
-        return params.get("temperature") == 1.0
+        rules = get_param_rules("anthropic", model_id)
+        return (rules.temperature_range is not None
+                and rules.temperature_fixed is None
+                and rules.temperature_range[1] == 1.0)
+    candidates = []
     current = resolve_model("anthropic", "haiku")
     if current and wanted(current):
-        return current
-    return _curated("anthropic", wanted)
+        candidates.append(current)
+    candidates += [m for m in LLM_PROVIDERS["anthropic"].models
+                   if wanted(m) and m not in candidates]
+    return candidates
+
+
+def _is_model_not_found(exc):
+    text = str(exc)
+    return "not_found" in text or "model:" in text
+
+
+def _pick_available(candidates, probe):
+    """First candidate ``probe`` accepts. A retired model ("model not found")
+    is passed over; when none is left the caller's class is skipped."""
+    for model in candidates:
+        try:
+            probe(model)
+        except chameleon_llm.BadRequestError as exc:
+            if _is_model_not_found(exc):
+                continue
+            raise
+        return model
+    pytest.skip(_NO_OLDER_CLAUDE)
+
+
+@pytest.fixture(scope="class")
+def older_claude(keys):
+    """A current Claude that takes sampling parameters, probed once per class
+    with a sampling-free call (the curated list holds retired dated ids)."""
+    api_key = _need(keys, "anthropic")
+    return _pick_available(
+        _older_claude_candidates(),
+        lambda model: _raw_call(model=f"anthropic/{model}", messages=_MSGS,
+                                max_tokens=8, api_key=api_key))
 
 
 def _sdk_sends(*names):
@@ -160,22 +199,22 @@ class TestAnthropicOlder:
     # The success tests run under both SDK generations: with SDK 2.x the
     # sampling parameters are dropped and the call must still succeed. Only
     # the "rejected_raw" tests need an SDK that sends them.
-    def test_temperature_upper_bound_ok(self, keys):
+    def test_temperature_upper_bound_ok(self, keys, older_claude):
         api_key = _need(keys, "anthropic")
-        response = _raw_call(model=f"anthropic/{_older_claude()}", messages=_MSGS,
+        response = _raw_call(model=f"anthropic/{older_claude}", messages=_MSGS,
                              temperature=1.0, max_tokens=32, api_key=api_key)
         assert _content(response)
 
-    def test_temperature_above_one_rejected_raw(self, keys):
+    def test_temperature_above_one_rejected_raw(self, keys, older_claude):
         _sdk_sends("temperature")
         api_key = _need(keys, "anthropic")
         with pytest.raises(chameleon_llm.BadRequestError, match="temperature"):
-            _raw_call(model=f"anthropic/{_older_claude()}", messages=_MSGS,
+            _raw_call(model=f"anthropic/{older_claude}", messages=_MSGS,
                       temperature=1.5, max_tokens=32, api_key=api_key)
 
-    def test_temperature_above_one_corralled(self, keys):
+    def test_temperature_above_one_corralled(self, keys, older_claude):
         api_key = _need(keys, "anthropic")
-        model = _older_claude()
+        model = older_claude
         params, warnings = validate_params(
             "anthropic", model, {"temperature": 1.5, "max_tokens": 32})
         assert params["temperature"] == 1.0 and warnings
@@ -183,24 +222,24 @@ class TestAnthropicOlder:
             "anthropic", model, LLMParams(temperature=1.5, max_tokens=32), api_key)
         assert _content(response)
 
-    def test_temp_and_top_p_together_rejected_raw(self, keys):
+    def test_temp_and_top_p_together_rejected_raw(self, keys, older_claude):
         _sdk_sends("temperature", "top_p")
         api_key = _need(keys, "anthropic")
         with pytest.raises(chameleon_llm.BadRequestError):
-            _raw_call(model=f"anthropic/{_older_claude()}", messages=_MSGS,
+            _raw_call(model=f"anthropic/{older_claude}", messages=_MSGS,
                       temperature=0.5, top_p=0.9, max_tokens=32, api_key=api_key)
 
-    def test_temp_and_top_p_corralled(self, keys):
+    def test_temp_and_top_p_corralled(self, keys, older_claude):
         api_key = _need(keys, "anthropic")
         response = _corralled_call(
-            "anthropic", _older_claude(),
+            "anthropic", older_claude,
             LLMParams(temperature=0.5, top_p=0.9, max_tokens=32), api_key)
         assert _content(response)
 
-    def test_max_tokens_over_limit_corralled(self, keys):
+    def test_max_tokens_over_limit_corralled(self, keys, older_claude):
         """The ceiling comes from the rules; a 100k request must be capped to it."""
         api_key = _need(keys, "anthropic")
-        model = _older_claude()
+        model = older_claude
         params, warnings = validate_params(
             "anthropic", model, {"max_tokens": 100_000})
         ceiling = get_param_rules("anthropic", model).max_output_tokens

@@ -123,11 +123,13 @@ class _FamilyRule:
 
 
 _FAMILY_RULES: List[_FamilyRule] = [
-    # Anthropic — Claude Opus 4.7/4.8, Opus/Sonnet 5, Fable/Mythos: sampling
-    # params removed entirely (400 if sent).
+    # Anthropic — Claude Opus 4.7/4.8, every Opus/Sonnet/Haiku of generation
+    # 5 and later, Fable/Mythos: sampling params removed entirely (400 if
+    # sent; live: "temperature is deprecated for this model" on Haiku 5).
+    # claude-haiku-4-5-*, claude-opus-4-2025* and claude-3-* do not match.
     _FamilyRule(
         provider="anthropic",
-        pattern=r"^claude-(opus-4-[78]|opus-5|sonnet-5|fable|mythos)",
+        pattern=r"^claude-(opus-4-[78]|(?:opus|sonnet|haiku)-(?:[5-9]|\d{2,})|fable|mythos)",
         rules=ModelParamRules(
             temperature_range=None,
             top_p_supported=False,
