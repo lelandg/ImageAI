@@ -210,3 +210,53 @@ def test_generate_action_cards_raises_after_the_completion_when_cancelled():
                               api_key="k", plate_color="#00FF00",
                               completion_fn=fake_completion, token=token)
     assert len(calls) == 1
+
+
+# --- Google Cloud login: Vertex route with the project saved in Settings ------
+
+class _SavedSettings:
+    def __init__(self, **values):
+        self._values = values
+
+    def get(self, key, default=None):
+        return self._values.get(key, default)
+
+
+def test_generate_action_cards_sends_the_saved_project_on_vertex(monkeypatch):
+    from core import llm_params
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: _SavedSettings(
+        auth_mode="gcloud", gcloud_project_id="settings-project"))
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        return _response(json.dumps(VALID))
+
+    # in gcloud mode the panel's get_api_key("google") is an OAuth access token
+    generate_action_cards("a knight", "sidescroller", provider="google",
+                          model="gemini-test-model", api_key="oauth-access-token",
+                          auth_mode="gcloud", plate_color="#00FF00",
+                          completion_fn=fake_completion)
+    kwargs = calls[0]
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in kwargs
+    assert kwargs["vertex_project"] == "settings-project"
+
+
+def test_generate_action_cards_keeps_the_project_off_other_routes(monkeypatch):
+    from core import llm_params
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: _SavedSettings(
+        auth_mode="api-key", gcloud_project_id="settings-project"))
+    calls = []
+
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        return _response(json.dumps(VALID))
+
+    for provider, model, mode in (("google", "gemini-test-model", "api-key"),
+                                  ("openai", "gpt-4o", None)):
+        generate_action_cards("a knight", "sidescroller", provider=provider,
+                              model=model, api_key="k", auth_mode=mode,
+                              plate_color="#00FF00", completion_fn=fake_completion)
+    assert all("vertex_project" not in kwargs for kwargs in calls)
+    assert calls[0]["model"] == "gemini/gemini-test-model"

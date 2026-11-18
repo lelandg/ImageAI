@@ -147,3 +147,48 @@ def test_generate_default_model_resolves_to_a_real_model_not_the_family_name():
     resolved = seen["model"].rsplit("/", 1)[-1]
     assert resolved != "chat"
     assert resolved == default_chat_model("gemini")
+
+
+# --- Google Cloud login: Vertex route with the project saved in Settings ------
+
+class _SavedSettings:
+    def __init__(self, **values):
+        self._values = values
+
+    def get(self, key, default=None):
+        return self._values.get(key, default)
+
+
+def test_generate_sends_the_saved_project_on_vertex(monkeypatch):
+    from core import llm_params
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: _SavedSettings(
+        auth_mode="gcloud", gcloud_project_id="settings-project"))
+    seen = {}
+
+    def fake_completion(**kwargs):
+        seen.update(kwargs)
+        return _fake_response(_reply())
+
+    generate_pose_instructions(_action(), 4, provider="google", model="gemini-test-model",
+                               api_key="oauth-access-token", auth_mode="gcloud",
+                               completion_fn=fake_completion)
+    assert seen["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in seen
+    assert seen["vertex_project"] == "settings-project"
+
+
+def test_generate_keeps_the_project_off_the_api_key_route(monkeypatch):
+    from core import llm_params
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: _SavedSettings(
+        auth_mode="api-key", gcloud_project_id="settings-project"))
+    seen = {}
+
+    def fake_completion(**kwargs):
+        seen.update(kwargs)
+        return _fake_response(_reply())
+
+    generate_pose_instructions(_action(), 4, provider="google", model="gemini-test-model",
+                               api_key="k", auth_mode="api-key",
+                               completion_fn=fake_completion)
+    assert seen["model"] == "gemini/gemini-test-model"
+    assert "vertex_project" not in seen

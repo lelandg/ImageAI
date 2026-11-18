@@ -11,7 +11,8 @@ import logging
 import re
 from typing import Any, Callable, Dict, List, Optional
 
-from core.llm_params import LLMParams, build_completion_kwargs
+from core.llm_params import (LLMParams, build_completion_kwargs,
+                             google_auth_settings, normalize_provider)
 from core.llm_parsing import LLMResponseParser
 from core.sprite.generation._common import emit
 from core.sprite.generation.action_cards import default_chat_model
@@ -157,9 +158,13 @@ def generate_pose_instructions(
     if completion_fn is None:
         from core import chameleon_llm
         completion_fn = chameleon_llm.completion
+    # Google Cloud login takes the vertex_ai/ route; it needs the project
+    # saved in Settings (the builder sends it on that route only).
+    vertex_project = (google_auth_settings({"auth_mode": auth_mode})[1]
+                      if normalize_provider(provider) == "gemini" else None)
     kwargs = build_completion_kwargs(
         provider, model, messages, LLMParams(temperature=0.4, max_tokens=2000),
-        api_key=api_key, auth_mode=auth_mode,
+        api_key=api_key, auth_mode=auth_mode, vertex_project=vertex_project,
     )
     redacted = {k: v for k, v in kwargs.items() if k not in ("api_key", "messages")}
     request_log = (
