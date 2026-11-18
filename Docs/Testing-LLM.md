@@ -53,7 +53,7 @@ All of these are optional.
 |---|---|---|
 | `IMAGEAI_LIVE_TESTS` | cloud tier | Set to `1` to allow paid API calls. Any other value skips them. |
 | `IMAGEAI_LMSTUDIO_URL` | local tier | LM Studio address. Default `http://localhost:1234`. |
-| `IMAGEAI_LMSTUDIO_MODEL` | local tier | LM Studio model key to test. Default: a loaded model, else the smallest downloaded chat model. |
+| `IMAGEAI_LMSTUDIO_MODEL` | local tier | LM Studio model key to test, or the id of one loaded instance of a model (for example `name:2`). A model key uses that model's first loaded instance; an instance id uses that instance. Default: a loaded model, else the smallest downloaded chat model. |
 | `IMAGEAI_OLLAMA_URL` | local tier | Ollama address. Default `http://localhost:11434`. |
 | `IMAGEAI_OLLAMA_MODEL` | local tier | Ollama model name to test. Default: the smallest installed model that can complete text. |
 | `LM_API_TOKEN` | local tier | LM Studio's own token variable. Set it only if you turned on authentication in LM Studio. The tests send it with the REST calls and with every completion. |
@@ -62,8 +62,42 @@ All of these are optional.
 
 The cloud tier reads keys through the app's configuration
 (`config.get_api_key()`). It never reads keys from the command line or from
-the environment of the test command. To give a test a key, add the key in the
-app's Settings first. Keys live in your user folder, never in the repository.
+the environment of the test command. Keys live in your user folder, never in
+the repository.
+
+**The cloud tier finds a key only when it is stored in your operating
+system's keyring.** Every test run redirects `config.json` to an empty
+temporary folder (`tests/conftest.py::_sandboxed_user_data_dir`), so that a
+test can never overwrite your real settings. A key that exists only in
+`config.json` is therefore invisible to the tests, and that provider's tests
+skip with `no <provider> API key configured`. Settings stores a key in the
+keyring whenever the `keyring` package is installed and the system has a
+keyring service. It falls back to `config.json` only when the keyring is not
+available.
+
+To give the cloud tier a key:
+
+1. Check whether the key is already in the keyring. This prints `in keyring`
+   or `NOT in keyring`, never the key. Replace `openai` with `anthropic` or
+   `google` for the other providers. The command is the same in PowerShell
+   and bash:
+
+   ```
+   python -c "import keyring; print('in keyring' if keyring.get_password('ImageAI', 'openai_api_key') else 'NOT in keyring')"
+   ```
+
+2. If it prints `in keyring`, you are done.
+3. If it prints `NOT in keyring`, or fails with `No module named 'keyring'`,
+   install the requirements into the virtual environment
+   (`python -m pip install -r requirements.txt`), start the app, open
+   Settings, type the key in again and save. Then run the command from step 1
+   again. It must print `in keyring`.
+4. If step 1 still prints `NOT in keyring`, your system has no keyring service
+   (this can happen on a Linux machine without a desktop session). The cloud
+   tier cannot read your keys on that machine.
+
+The Google key from step 1 is used for the `gemini/` tests only. It is always
+the stored API key, never a Google Cloud access token.
 
 Vertex AI tests use your Google Cloud login, not a key. Run
 `gcloud auth application-default login` once to set it up.
@@ -81,19 +115,22 @@ yourself. The tests never download or delete a model.
 - **Ollama.** The tests use the smallest installed model. They do not load or
   unload anything.
 - The image test runs only when the server says the model can read images.
+- **`top_k`.** LM Studio receives `top_k`. Ollama does not: its
+  OpenAI-compatible endpoint has no such field, so the package drops it on the
+  `ollama/` routes and logs a WARNING that names it.
 
 ## What each skip message means
 
 | Message | Meaning | What to do |
 |---|---|---|
 | `live API tests disabled (set IMAGEAI_LIVE_TESTS=1)` | The cloud tier is off. | Nothing, unless you want to spend money. See the commands above. |
-| `no anthropic API key configured` (also `openai`, `google`) | That provider has no key in the app's configuration. | Add the key in Settings. |
+| `no anthropic API key configured` (also `openai`, `google`) | That provider has no key in the keyring. A key saved only in `config.json` does not count. | Follow "Where API keys come from" above. |
 | `no Google Cloud application-default credentials ...` | The Vertex tests found no Google Cloud login. | Run `gcloud auth application-default login`. |
 | `no curated <provider> model fits this test` | The built-in model list has no model of the kind the test needs. | Report it. The test needs updating. |
-| `LM Studio is not running at <url>` | The connection was refused, or nothing accepted it within 2 seconds. | Start LM Studio and its local server, or set `IMAGEAI_LMSTUDIO_URL`. |
+| `LM Studio is not running at <url>` | The connection was refused, or nothing accepted it within 2 seconds. No other connection error skips. | Start LM Studio and its local server, or set `IMAGEAI_LMSTUDIO_URL`. |
 | `no chat model downloaded in LM Studio (...)` | LM Studio lists no models, or only embedding models. | Download a chat model in LM Studio. |
 | `load a model in LM Studio first ...` | This LM Studio cannot load models over REST, and none is loaded. | Load a model by hand. |
-| `Ollama is not running at <url>` | The connection was refused, or nothing accepted it within 2 seconds. | Start Ollama, or set `IMAGEAI_OLLAMA_URL`. |
+| `Ollama is not running at <url>` | The connection was refused, or nothing accepted it within 2 seconds. No other connection error skips. | Start Ollama, or set `IMAGEAI_OLLAMA_URL`. |
 | `Ollama has no models installed` | Ollama answers but lists no models. | Run `ollama pull <model>`. |
 | `no Ollama model that can complete text is installed ...` | Ollama reported capabilities for every model and none can complete text. | Pull a chat model. |
 | `the server did not report whether <model> supports vision` | The server does not say if the model reads images. | Nothing, or use a model whose server reports it. |
@@ -107,7 +144,7 @@ failures the fixtures raise on purpose.
 
 | Message starts with | Meaning | What to do |
 |---|---|---|
-| `LM Studio at <url> accepted the connection but the request to <path> failed` (also `Ollama at <url> ...`) | The server accepted the connection, then timed out reading or broke off the reply. The message names the error. | Check that the server is not busy or stuck. Check the URL. |
+| `LM Studio at <url> accepted the connection but the request to <path> failed` (also `Ollama at <url> ...`) | The request failed for a reason other than a refused connection or a connect timeout. Usually the server accepted the connection, then timed out reading, reset it or closed it before replying. A TLS error, a proxy error and a host name that does not resolve also end here. The message names the error. | Check that the server is not busy or stuck. Check the URL. |
 | `LM Studio at <url> answered HTTP 401` (or 403) | Authentication is on in LM Studio. | Set `LM_API_TOKEN`. |
 | `LM Studio at <url> answered HTTP <code>` | The model listing returned an error. | Read the text after the code. |
 | `LM Studio at <url> returned a non-JSON body` | Something else may be using the port. | Check the URL. |
