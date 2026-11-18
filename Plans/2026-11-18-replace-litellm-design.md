@@ -542,13 +542,23 @@ Changes after the independent review of those fixes:
 - **A missing Google key never moves a request to Vertex.** These objects
   always pass their auth mode: `api-key` is the `gemini/` route, and without
   a key the request fails with the package's `AuthError`; only `gcloud` uses
-  `vertex_ai/`. In API-key mode a key the config dict lacks is read once per
-  object through `ConfigManager.get_api_key("google")` (`google_credentials`
-  in `core/llm_params.py`), because a key kept in the keyring is in no config
-  dict. That lookup is never made in `gcloud` mode, where it would return an
-  access token. The video workspace's single-scene Enhance built its provider
+  `vertex_ai/`. The video workspace's single-scene Enhance built its provider
   config from top-level config entries and found no key for keyring storage;
   it now uses `get_api_key` like the other builders.
+- **Mode, project and key come from one config.** The GUI builders of
+  chat/LLM provider configs fetched the Google credential from the live
+  config and let the provider object re-read the auth mode from disk. After
+  an auth-mode change in Settings that was not saved yet, the two disagreed
+  and an access token went out as a Gemini API key. Every such builder now
+  uses `google_provider_config(live_config)` (or `google_provider_part` when
+  it holds only values): mode and project from that instance, the key through
+  `get_api_key("google")` in API-key mode only, so with Google Cloud login no
+  token is fetched at all. On the consuming side the rule is dict first: a
+  config that carries an auth mode is taken at its word and the saved
+  Settings are never consulted for the mode or for a key; a key handed in
+  with `gcloud` mode is dropped. Only a config with no mode at all (a caller
+  outside the GUI) falls back to the saved Settings, including the one-time
+  `get_api_key("google")` lookup in API-key mode.
 - **An explicit Google auth mode decides the route, also over a prefix.**
   With `auth_mode` given, `build_completion_kwargs` sends `gemini/x` on
   `vertex_ai/` in `gcloud` mode (no key, with the project) and `vertex_ai/x`
