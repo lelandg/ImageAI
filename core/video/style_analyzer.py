@@ -52,8 +52,14 @@ class StyleAnalyzer:
         if self.llm_provider in ("google", "gemini"):
             # With Google Cloud login the caller's api_key is absent or is an
             # OAuth access token; neither is a Gemini API key.
-            self.auth_mode, self.vertex_project = google_auth_settings(
-                {"auth_mode": auth_mode, "gcloud_project_id": vertex_project})
+            # Only what the caller gave is passed on: a value it did not give
+            # is read from the saved Settings.
+            given = {}
+            if auth_mode:
+                given["auth_mode"] = auth_mode
+            if vertex_project:
+                given["gcloud_project_id"] = vertex_project
+            self.auth_mode, self.vertex_project = google_auth_settings(given)
 
     def _get_default_model(self) -> str:
         """Get default vision model for the provider (resolved from the registry)."""

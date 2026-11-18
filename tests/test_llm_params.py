@@ -645,3 +645,105 @@ def test_gcloud_mode_does_not_reroute_a_foreign_local_prefix():
                                      api_key="oauth-access-token", auth_mode="gcloud")
     assert kwargs["model"] == "ollama/gemma-test"
     assert "api_key" not in kwargs
+
+
+# --- google_provider_config: one live config supplies mode, project and key ---
+
+class _LiveConfig:
+    """A ConfigManager as the GUI holds it: in gcloud mode the Google key
+    lookup answers with an OAuth access token."""
+
+    def __init__(self, auth_mode, project=None, stored_key="stored-key"):
+        self._values = {"auth_mode": auth_mode, "gcloud_project_id": project}
+        self._stored_key = stored_key
+        self.key_lookups = []
+
+    def get(self, key, default=None):
+        value = self._values.get(key)
+        return default if value is None else value
+
+    def get_api_key(self, provider):
+        self.key_lookups.append(provider)
+        if provider == "google" and self._values["auth_mode"] in (
+                "gcloud", "Google Cloud Account"):
+            return "oauth-access-token"
+        return self._stored_key
+
+
+@pytest.fixture
+def no_saved_settings(monkeypatch):
+    from core import llm_params
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: pytest.fail(
+        "the saved Settings must not be opened"))
+
+
+@pytest.mark.parametrize("raw", ["gcloud", "Google Cloud Account"])
+def test_google_provider_config_in_gcloud_mode_fetches_no_key(raw, no_saved_settings):
+    from core.llm_params import google_provider_config
+    config = _LiveConfig(raw, project="live-project")
+    assert google_provider_config(config) == {
+        "google_api_key": None, "auth_mode": "gcloud",
+        "gcloud_project_id": "live-project"}
+    assert config.key_lookups == []   # no token, no gcloud subprocess
+
+
+@pytest.mark.parametrize("raw", ["api-key", "api_key", "API Key", None])
+def test_google_provider_config_in_api_key_mode_fetches_the_key(raw, no_saved_settings):
+    from core.llm_params import google_provider_config
+    config = _LiveConfig(raw, project="live-project")
+    assert google_provider_config(config) == {
+        "google_api_key": "stored-key", "auth_mode": "api-key",
+        "gcloud_project_id": "live-project"}
+    assert config.key_lookups == ["google"]
+
+
+def test_google_provider_part_drops_a_key_in_gcloud_mode():
+    from core.llm_params import google_provider_part
+    assert google_provider_part("gcloud", "oauth-access-token", "p") == {
+        "google_api_key": None, "auth_mode": "gcloud", "gcloud_project_id": "p"}
+    assert google_provider_part("api-key", "k", None) == {
+        "google_api_key": "k", "auth_mode": "api-key", "gcloud_project_id": None}
+    # no mode known: only the key, so the consumer falls back to saved Settings
+    assert google_provider_part(None, "k", None) == {"google_api_key": "k"}
+
+
+class _Persisted:
+    """Saved Settings whose values must lose against a dict that has a mode."""
+
+    def __init__(self, auth_mode, project="persisted-project"):
+        self._values = {"auth_mode": auth_mode, "gcloud_project_id": project}
+        self.key_lookups = []
+
+    def get(self, key, default=None):
+        return self._values.get(key, default)
+
+    def get_api_key(self, provider):
+        self.key_lookups.append(provider)
+        return "persisted-key"
+
+
+@pytest.mark.parametrize("dict_mode,persisted_mode", [("gcloud", "api-key"),
+                                                      ("api-key", "gcloud")])
+def test_a_dict_with_a_mode_never_takes_mode_or_key_from_saved_settings(
+        monkeypatch, dict_mode, persisted_mode):
+    from core import llm_params
+    persisted = _Persisted(persisted_mode)
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: persisted)
+    mode, key, project = llm_params.google_credentials({"auth_mode": dict_mode})
+    assert mode == dict_mode
+    assert key is None
+    assert persisted.key_lookups == []
+    # the project alone may still come from Settings when the dict has no entry
+    assert project == "persisted-project"
+
+
+def test_a_complete_dict_never_opens_saved_settings(no_saved_settings):
+    from core import llm_params
+    assert llm_params.google_credentials(
+        {"auth_mode": "api-key", "google_api_key": "k", "gcloud_project_id": None}
+    ) == ("api-key", "k", None)
+    assert llm_params.google_credentials(
+        {"auth_mode": "gcloud", "google_api_key": "oauth-access-token",
+         "gcloud_project_id": None}) == ("gcloud", None, None)
+    assert llm_params.google_auth_settings(
+        {"auth_mode": "gcloud", "gcloud_project_id": None}) == ("gcloud", None)

@@ -2464,10 +2464,13 @@ class WorkspaceWidget(QWidget):
                     self.finished.emit(e)
 
         # Build LLM config
+        # Google: mode, project and key from the same live config (no key or
+        # token is fetched with Google Cloud login).
+        from core.llm_params import google_provider_config
         llm_config = {
             'openai_api_key': self.config.get_api_key('openai'),
             'anthropic_api_key': self.config.get_api_key('anthropic'),
-            'google_api_key': self.config.get_api_key('google'),
+            **google_provider_config(self.config),
         }
 
         from core.video.scene_suggester import SceneSuggester
@@ -3031,10 +3034,12 @@ class WorkspaceWidget(QWidget):
         if anthropic_key:
             config['anthropic_api_key'] = anthropic_key
 
-        # Get Google/Gemini key (with both keyring and config file fallback)
-        google_key = config_manager.get_api_key('google')
-        if google_key:
-            config['google_api_key'] = google_key
+        # Google: auth mode, project and key all from this widget's live
+        # config, so an auth mode changed in Settings but not yet saved is
+        # honoured and the key always belongs to the mode. With Google Cloud
+        # login no key or token is fetched; the chat calls use Vertex AI.
+        from core.llm_params import google_provider_config
+        config.update(google_provider_config(self.config))
 
         # Add LM Studio and Ollama endpoints if configured
         if hasattr(self.video_config, 'config'):
@@ -3364,7 +3369,9 @@ class WorkspaceWidget(QWidget):
             provider_lower = provider.lower()
             required_key = provider_key_map.get(provider_lower)
 
-            if required_key and not config.get(required_key):
+            google_cloud_login = (required_key == 'google_api_key'
+                                  and config.get('auth_mode') == 'gcloud')
+            if required_key and not config.get(required_key) and not google_cloud_login:
                 error_msg = f"⚠️ {provider} API key not found. Please set it in Settings tab."
                 self.logger.warning(error_msg)
                 self._log_to_console(error_msg, "WARNING")
@@ -3950,15 +3957,11 @@ class WorkspaceWidget(QWidget):
             # not exist for a key stored in the keyring. With Google Cloud
             # login there is no Google key to fetch (the lookup would answer
             # with an access token); the provider object uses Vertex AI.
-            from core.llm_params import google_auth_settings
-            google_mode, google_project = google_auth_settings(self.config)
+            from core.llm_params import google_provider_config
             api_config = {
                 'openai_api_key': self.config.get_api_key('openai'),
                 'anthropic_api_key': self.config.get_api_key('anthropic'),
-                'google_api_key': (None if google_mode == 'gcloud'
-                                   else self.config.get_api_key('google')),
-                'auth_mode': google_mode,
-                'gcloud_project_id': google_project,
+                **google_provider_config(self.config),
             }
             llm = UnifiedLLMProvider(api_config)
 
@@ -6205,6 +6208,7 @@ class WorkspaceWidget(QWidget):
         stability_key = self.config.get_api_key('stability')
 
         # Get auth mode from config (for Google Cloud authentication support)
+        from core.llm_params import saved_vertex_project
         auth_mode = self.config.get('auth_mode', 'api-key')
         google_project_id = self.config.get('google_project_id', None)
 
@@ -6237,6 +6241,8 @@ class WorkspaceWidget(QWidget):
             'auth_mode': auth_mode,  # Include auth mode for Google Cloud support
             'google_auth_mode': auth_mode,  # Alias for video generation
             'google_project_id': google_project_id,  # Google Cloud project ID
+            # Project saved in Settings, for chat/LLM calls on Vertex AI
+            'gcloud_project_id': saved_vertex_project(self.config),
             'google_api_key': google_key,
             'openai_api_key': openai_key,
             'anthropic_api_key': anthropic_key,

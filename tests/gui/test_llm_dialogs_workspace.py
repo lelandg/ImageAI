@@ -244,3 +244,133 @@ def test_enhance_single_prompt_in_gcloud_mode_fetches_no_google_key(
     assert kwargs["model"] == "vertex_ai/gemini-test-model"
     assert "api_key" not in kwargs
     assert kwargs["vertex_project"] == "saved-project"
+
+
+# --- Settings changed in memory but not saved: the live config decides --------
+
+TOKEN = "oauth-access-token-not-an-api-key"
+
+
+class _Persisted:
+    """What is on disk: read by code that re-opens the saved Settings."""
+
+    def __init__(self, auth_mode):
+        self._values = {"auth_mode": auth_mode,
+                        "gcloud_project_id": "persisted-project"}
+        self.key_lookups = []
+
+    def get(self, key, default=None):
+        return self._values.get(key, default)
+
+    def get_api_key(self, provider):
+        self.key_lookups.append(provider)
+        return TOKEN if self._values["auth_mode"] == "gcloud" else "persisted-key"
+
+
+def _live(fake_config, auth_mode, project="live-project"):
+    """The widget's in-memory config. Records every Google key lookup; in
+    gcloud mode that lookup would answer with an access token."""
+    values = {"auth_mode": auth_mode, "gcloud_project_id": project}
+    fake_config.get.side_effect = lambda key, default=None: (
+        default if values.get(key) is None else values[key])
+    lookups = []
+
+    def _get_api_key(provider):
+        lookups.append(provider)
+        if provider == "google":
+            return TOKEN if auth_mode != "api-key" else "live-key"
+        return f"{provider}-key"
+
+    fake_config.get_api_key.side_effect = _get_api_key
+    return lookups
+
+
+@pytest.fixture
+def persisted(monkeypatch):
+    from core import llm_params
+
+    def _set(auth_mode):
+        saved = _Persisted(auth_mode)
+        monkeypatch.setattr(llm_params, "_saved_settings", lambda: saved)
+        return saved
+    return _set
+
+
+@pytest.mark.parametrize("live_mode", ["gcloud", "Google Cloud Account"])
+def test_suggest_scenes_unsaved_switch_to_google_cloud_uses_vertex(
+        workspace, fake_completion, fake_config, persisted, live_mode):
+    """Disk still says api-key; the user switched to Google Cloud login."""
+    saved = persisted("api-key")
+    lookups = _live(fake_config, live_mode)
+    fake_completion.reply = CANNED
+    _select_google(workspace)
+
+    workspace._suggest_scenes()
+
+    kwargs = fake_completion.kwargs
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in kwargs
+    assert kwargs["vertex_project"] == "live-project"
+    assert "google" not in lookups           # no token fetched from the live config
+    assert saved.key_lookups == []           # and no key read from disk
+
+
+def test_suggest_scenes_unsaved_switch_to_api_key_uses_gemini(
+        workspace, fake_completion, fake_config, persisted):
+    """Disk still says gcloud; the user switched to an API key."""
+    saved = persisted("gcloud")
+    _live(fake_config, "api-key")
+    fake_completion.reply = CANNED
+    _select_google(workspace)
+
+    workspace._suggest_scenes()
+
+    kwargs = fake_completion.kwargs
+    assert kwargs["model"] == "gemini/gemini-test-model"
+    assert kwargs["api_key"] == "live-key"
+    assert "vertex_project" not in kwargs
+    assert saved.key_lookups == []
+
+
+@pytest.mark.parametrize("live_mode,persisted_mode,expected", [
+    ("gcloud", "api-key",
+     {"google_api_key": None, "auth_mode": "gcloud",
+      "gcloud_project_id": "live-project"}),
+    ("api-key", "gcloud",
+     {"google_api_key": "live-key", "auth_mode": "api-key",
+      "gcloud_project_id": "live-project"}),
+])
+def test_get_provider_config_takes_google_from_the_live_config(
+        workspace, fake_config, persisted, monkeypatch, live_mode, persisted_mode,
+        expected):
+    saved = persisted(persisted_mode)
+    lookups = _live(fake_config, live_mode)
+    # the OpenAI/Anthropic part still opens a ConfigManager; keep it off disk
+    monkeypatch.setattr("core.ConfigManager", lambda: fake_config)
+
+    config = workspace.get_provider_config()
+
+    assert {k: config.get(k) for k in expected} == expected
+    assert ("google" in lookups) is (live_mode == "api-key")
+    assert saved.key_lookups == []
+
+
+@pytest.mark.parametrize("live_mode,persisted_mode,model,sends_key", [
+    ("gcloud", "api-key", "vertex_ai/gemini-test-model", False),
+    ("api-key", "gcloud", "gemini/gemini-test-model", True),
+])
+def test_enhance_single_prompt_follows_the_live_config(
+        workspace, one_scene, fake_completion, fake_config, persisted,
+        live_mode, persisted_mode, model, sends_key):
+    saved = persisted(persisted_mode)
+    lookups = _live(fake_config, live_mode)
+    fake_completion.reply = "A neon-lit rainy street at night"
+    _select_google(workspace)
+
+    workspace.enhance_single_prompt(0)
+
+    kwargs = fake_completion.kwargs
+    assert kwargs["model"] == model
+    assert kwargs.get("api_key") == ("live-key" if sends_key else None)
+    assert ("google" in lookups) is sends_key
+    assert saved.key_lookups == []

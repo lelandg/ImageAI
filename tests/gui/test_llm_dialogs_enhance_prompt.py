@@ -80,3 +80,56 @@ def test_reasoning_model_params_are_corralled(qapp, fake_completion):
     kwargs = fake_completion.kwargs
     assert kwargs["max_completion_tokens"] == 1000
     assert "max_tokens" not in kwargs and "temperature" not in kwargs
+
+
+# --- the dialog's live auth mode beats what is saved on disk ------------------
+
+class _Persisted:
+    def __init__(self, auth_mode):
+        self._auth_mode = auth_mode
+        self.key_lookups = []
+
+    def get(self, key, default=None):
+        return {"auth_mode": self._auth_mode}.get(key, default)
+
+    def get_api_key(self, provider):
+        self.key_lookups.append(provider)
+        return "persisted-key"
+
+
+def _run_with_mode(api_key, auth_mode, project=None):
+    worker = EnhanceWorker("a cat", "Google", "gemini-test-model", api_key,
+                           EnhancementLevel.MEDIUM, auth_mode=auth_mode,
+                           vertex_project=project)
+    worker.run()
+
+
+def test_worker_in_live_gcloud_mode_ignores_api_key_mode_on_disk(
+        qapp, fake_completion, monkeypatch):
+    from core import llm_params
+    saved = _Persisted("api-key")
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: saved)
+    fake_completion.reply = CANNED
+
+    _run_with_mode(None, "gcloud", project="live-project")
+
+    kwargs = fake_completion.kwargs
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in kwargs
+    assert kwargs["vertex_project"] == "live-project"
+    assert saved.key_lookups == []
+
+
+def test_worker_in_live_api_key_mode_ignores_gcloud_mode_on_disk(
+        qapp, fake_completion, monkeypatch):
+    from core import llm_params
+    saved = _Persisted("gcloud")
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: saved)
+    fake_completion.reply = CANNED
+
+    _run_with_mode("live-key", "api-key")
+
+    kwargs = fake_completion.kwargs
+    assert kwargs["model"] == "gemini/gemini-test-model"
+    assert kwargs["api_key"] == "live-key"
+    assert saved.key_lookups == []

@@ -668,10 +668,70 @@ def _saved_settings() -> Any:
         return None
 
 
+def google_provider_part(auth_mode: Any, api_key: Optional[str],
+                         project: Optional[str]) -> Dict[str, Any]:
+    """The Google entries of a provider config, from values the caller holds.
+
+    With a known ``auth_mode`` the result is complete (``google_api_key``,
+    ``auth_mode``, ``gcloud_project_id``), and in Google Cloud login mode the
+    key is dropped: there it is an OAuth access token, not a Gemini API key.
+    With no usable ``auth_mode`` only the key is returned, so the consumer
+    falls back to the saved Settings for the rest.
+    """
+    mode = _normalize_google_auth_mode(auth_mode)
+    key = api_key.strip() if isinstance(api_key, str) and api_key.strip() else None
+    if mode is None:
+        return {"google_api_key": key}
+    project = project.strip() if isinstance(project, str) and project.strip() else None
+    return {"google_api_key": None if mode == "gcloud" else key,
+            "auth_mode": mode, "gcloud_project_id": project}
+
+
+def google_provider_config(config: Any) -> Dict[str, Any]:
+    """The Google entries of a provider config, all from ONE live config.
+
+    ``config`` is the caller's ``ConfigManager``. Auth mode and project are
+    read from that instance (never re-read from disk: the user may have
+    changed Settings without saving), and the key is fetched through
+    ``get_api_key('google')`` in API-key mode only. In Google Cloud login mode
+    no lookup is made: it would answer with an OAuth access token and start a
+    ``gcloud`` subprocess for a value no chat call may use.
+
+    Every GUI builder of a chat/LLM provider config uses this, so the
+    credential and the mode it belongs to cannot come from different places.
+    """
+    try:
+        raw_mode = config.get("auth_mode")
+    except Exception:
+        raw_mode = None
+    mode = _normalize_google_auth_mode(raw_mode) or "api-key"
+    key = None
+    if mode == "api-key":
+        try:
+            key = config.get_api_key("google")
+        except Exception as exc:
+            logger.debug(f"Google API key lookup failed: {exc}")
+    return google_provider_part(mode, key, saved_vertex_project(config))
+
+
+def _has_entry(config: Any, name: str) -> bool:
+    """Whether a dict-like ``config`` has an entry ``name`` (even None)."""
+    try:
+        return name in config
+    except TypeError:
+        return False
+
+
 def _google_settings(config: Any, want_key: bool
                      ) -> Tuple[str, Optional[str], Optional[str]]:
     """``(auth_mode, api_key, project)``; the saved Settings are opened at
-    most once. See :func:`google_auth_settings` and :func:`google_credentials`."""
+    most once. See :func:`google_auth_settings` and :func:`google_credentials`.
+
+    Dict first: when ``config`` carries an auth mode, the saved Settings are
+    never consulted for the mode or for a key (the caller supplied the
+    credential that belongs to that mode). Only a project the config has no
+    entry for may still come from Settings.
+    """
     mode = None
     key = None
     getter = getattr(config, "get", None)
@@ -688,23 +748,24 @@ def _google_settings(config: Any, want_key: bool
             key = value.strip() if isinstance(value, str) and value.strip() else None
     project = saved_vertex_project(config)
 
-    needs_key = want_key and key is None and mode != "gcloud"
-    if mode is None or project is None or needs_key:
+    mode_given = mode is not None
+    needs_project = project is None and not _has_entry(config, "gcloud_project_id")
+    needs_key = want_key and key is None and not mode_given
+    if not mode_given or needs_project:
         saved = _saved_settings()
         if saved is not None:
             try:
                 saved_mode = _normalize_google_auth_mode(saved.get("auth_mode"))
             except Exception:
                 saved_mode = None
-            if mode is None:
+            if not mode_given:
                 mode = saved_mode
-            if project is None:
+            if needs_project:
                 project = saved_vertex_project(saved)
-            # get_api_key is the only way keys are read. Never in Google
-            # Cloud mode (ours or the saved one): there it answers with an
-            # OAuth access token, which is not a Gemini API key.
-            if (want_key and key is None and (mode or "api-key") == "api-key"
-                    and saved_mode != "gcloud"):
+            # get_api_key is the only way keys are read. Only for a config
+            # that carried no mode, and never when the saved mode is Google
+            # Cloud login: there it answers with an OAuth access token.
+            if needs_key and saved_mode != "gcloud":
                 try:
                     value = saved.get_api_key("google")
                 except Exception as exc:
@@ -713,7 +774,7 @@ def _google_settings(config: Any, want_key: bool
                 key = value.strip() if isinstance(value, str) and value.strip() else None
     mode = mode or "api-key"
     if mode == "gcloud":
-        key = None
+        key = None  # whatever was handed in: a token is not a Gemini API key
     return mode, key, project
 
 
@@ -734,11 +795,12 @@ def google_credentials(config: Any = None) -> Tuple[str, Optional[str], Optional
     """``(auth_mode, api_key, project)`` for an object that sends Google
     requests and keeps its own settings.
 
-    As :func:`google_auth_settings`, plus the Gemini API key. In 'api-key'
-    mode the key is ``config``'s ``google_api_key`` when it has one, else the
-    key saved in Settings, read once through ``ConfigManager.get_api_key``
-    (a key kept in the OS keyring is in no config dict). In 'gcloud' mode the
-    key is always None and no lookup is made.
+    As :func:`google_auth_settings`, plus the Gemini API key: ``config``'s
+    ``google_api_key``. A config that carries no auth mode at all gets mode,
+    project and (in 'api-key' mode) key from the saved Settings, the key read
+    once through ``ConfigManager.get_api_key``. A config that carries a mode
+    is taken at its word: no key is looked up for it. In 'gcloud' mode the
+    key is always None, whatever was handed in.
 
     Callers pass the returned mode to the kwargs builder on every request, so
     'api-key' mode with no key stays on ``gemini/`` and fails with an
