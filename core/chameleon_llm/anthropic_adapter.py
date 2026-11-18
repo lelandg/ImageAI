@@ -10,6 +10,7 @@ import weakref
 
 import anthropic  # top-level on purpose: dispatch turns an ImportError here into MissingSDKError
 
+from .endpoint import warn_if_cleartext_key
 from .errors import AuthError, BadRequestError, wrap_sdk_error
 from .routing import Route
 from .types import Choice, Completion, Message, Usage
@@ -208,6 +209,7 @@ def complete(route: Route, messages: list[dict], *, api_key: str | None,
     kwargs = {"api_key": key, "timeout": timeout, "max_retries": max_retries}
     if api_base:
         kwargs["base_url"] = api_base
+        warn_if_cleartext_key(key, api_base, "anthropic")
     client = anthropic.Anthropic(**kwargs)
     logger.debug("chameleon_llm anthropic: model=%s base_url=%s timeout=%s "
                  "max_retries=%s max_tokens=%s", route.model, api_base, timeout,

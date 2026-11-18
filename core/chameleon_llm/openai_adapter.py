@@ -8,6 +8,7 @@ import re
 
 import openai  # top-level on purpose: dispatch turns an ImportError here into MissingSDKError
 
+from .endpoint import warn_if_cleartext_key
 from .errors import AuthError, BadRequestError, wrap_sdk_error
 from .routing import Route
 from .types import Choice, Completion, Message, Usage
@@ -193,6 +194,8 @@ def complete(route: Route, messages: list[dict], *, api_key: str | None,
              max_retries: int) -> Completion:
     base_url = _resolve_base_url(route, api_base)
     key = _resolve_key(route, api_key, base_url)
+    warn_if_cleartext_key(None if key == _PLACEHOLDER_KEY else key, base_url,
+                          "openai")
     use_responses = not base_url and uses_responses_api(route.model)
     if use_responses:
         request = _build_responses_request(route, messages, params)
