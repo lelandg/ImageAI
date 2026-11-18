@@ -110,7 +110,8 @@ If you change routing or key handling, these are the tests to read first.
 | Rule | Test file |
 |---|---|
 | A provider's key is not sent when the model id carries another provider's route prefix (`ollama/...` under Google, `anthropic/...` under OpenAI). | `tests/test_llm_params.py` |
-| With Google Cloud login, no call sends the access token as a Gemini API key or exports it as `GEMINI_API_KEY`; Gemini models use `vertex_ai/` with the saved project. | `tests/video/test_google_cloud_auth_routes.py`, `tests/video/test_style_analyzer_routes.py` |
+| With Google Cloud login, no call sends the access token as a Gemini API key; Gemini models use `vertex_ai/` with the saved project, also when the model id already says `gemini/`. | `tests/video/test_google_cloud_auth_routes.py`, `tests/video/test_style_analyzer_routes.py`, `tests/test_styles_analyzer_google_auth.py`, `tests/test_llm_params.py` |
+| The Google key is passed with each request and never written to `GEMINI_API_KEY`; two objects with different Google settings do not change each other's route, in either creation order. | `tests/video/test_google_cloud_auth_routes.py` |
 | A base URL is logged without user info, query or fragment, at every log level. | `tests/chameleon_llm/test_cleartext_warning.py` |
 
 Tests that need the saved Settings replace `core.llm_params._saved_settings`.

@@ -529,11 +529,25 @@ Changes after the independent review of those fixes:
   it carries them, else from the saved Settings. `UnifiedLLMProvider`, the
   lyrics generator, `StyleAnalyzer` and the sprite chat calls use it. In
   `gcloud` mode the configured Google value is an OAuth access token: it is
-  never exported as `GEMINI_API_KEY` and never sent as a key, a
-  `GEMINI_API_KEY` the process exported earlier is removed (one the user set
-  is left alone), and Gemini models take `vertex_ai/` with the saved project.
-  API-key mode is unchanged. The GUI code that builds provider configs was not
-  changed; it still fetches the token, which is now ignored.
+  never sent as a key, and Gemini models take `vertex_ai/` with the saved
+  project. The GUI code that builds provider configs was not changed; it
+  still fetches the token, which is now ignored.
+- **The Google key is no longer written to `GEMINI_API_KEY`.**
+  `UnifiedLLMProvider` and the lyrics generator keep their Google key, auth
+  mode and project on the object and pass them with every request
+  (`api_key`, `auth_mode`, `vertex_project`). Exporting the key let one
+  object change another's route: a second object in `gcloud` mode removed
+  the variable a first object in API-key mode relied on. An object with no
+  Google key of its own still uses `gemini/` when the user set
+  `GEMINI_API_KEY` or `GOOGLE_API_KEY`, else `vertex_ai/`. The OpenAI and
+  Anthropic keys are still exported as before.
+- **An explicit Google auth mode decides the route, also over a prefix.**
+  With `auth_mode` given, `build_completion_kwargs` sends `gemini/x` on
+  `vertex_ai/` in `gcloud` mode (no key, with the project) and `vertex_ai/x`
+  on `gemini/` in API-key mode, each with a warning. Without `auth_mode` a
+  Google prefix is honoured as written. `core/styles/analyzer.py`, which
+  prefixes its model with `gemini/`, now follows the auth mode and no longer
+  demands an API key under Google Cloud login.
 - **`StyleAnalyzer` uses the package for Google too.** Its Google branch built
   its own `genai.Client`; it now sends the image as a base64 data URL through
   `build_completion_kwargs` and `chameleon_llm.completion`, on `gemini/` or
