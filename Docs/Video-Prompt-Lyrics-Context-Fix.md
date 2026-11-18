@@ -67,7 +67,7 @@ self.logger.info(f"User prompt (FULL, {len(batch_prompt)} chars):")
 self.logger.info(batch_prompt)
 self.logger.info("=== END VIDEO PROMPT REQUEST ===")
 
-response = self.litellm.completion(**kwargs)
+response = chameleon_llm.completion(**kwargs)
 
 # Parse the response
 enhanced_text = response.choices[0].message.content.strip()

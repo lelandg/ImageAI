@@ -72,6 +72,7 @@ is in `core/`, GUI in `gui/`, CLI in `cli/`, provider backends in `providers/`.
 - `Docs/CodeMap.md` — `file.py:line` for all symbols (regenerate with
   `tools/generate_code_map.py` when stale).
 - `Docs/Storage-Locations-Known-Issues.md` — storage-root history and traps.
+- `Docs/Testing-LLM.md` — how the LLM tests are run (offline, local and live).
 
 ## Scanning & review
 

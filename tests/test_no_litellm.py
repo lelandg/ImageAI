@@ -4,6 +4,8 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
 REPO = Path(__file__).resolve().parent.parent
 ALL_ROOTS = ["core", "gui", "cli", "providers", "scripts", "main.py"]
 CORE_ROOTS = ["core"]
@@ -82,3 +84,12 @@ def test_no_litellm_text_anywhere_in_application_code():
             if "litellm" in line.lower():
                 offenders.append(f"{f.relative_to(REPO)}:{i}")
     assert offenders == []
+
+
+@pytest.mark.parametrize("name", ["requirements.txt", "requirements-security.txt"])
+def test_litellm_not_required(name):
+    lines = [
+        l.split("#")[0].strip().lower()
+        for l in (REPO / name).read_text(encoding="utf-8").splitlines()
+    ]
+    assert not any(l.startswith("litellm") for l in lines)

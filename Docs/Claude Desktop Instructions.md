@@ -7,7 +7,7 @@
 
 **Version**: 0.10.5  
 **Primary Language**: Python 3.9-3.13  
-**Tech Stack**: PySide6 (Qt), Google Gemini API, OpenAI API, Stability AI, Hugging Face Diffusers, FFmpeg, LiteLLM  
+**Tech Stack**: PySide6 (Qt), Google Gemini API, OpenAI API, Stability AI, Hugging Face Diffusers, FFmpeg, and the built-in `core/chameleon_llm` adapter (OpenAI, Anthropic and Google SDKs)  
 **Architecture Pattern**: Modular provider system with worker threads, event sourcing for video projects
 
 ---
@@ -186,7 +186,7 @@ PySide6/Qt patterns used throughout:
 - **openai**: DALL-E API client  
 - **PySide6**: Qt6 bindings for GUI
 - **pillow**: Image processing
-- **litellm**: Unified LLM interface for video prompts
+- **core/chameleon_llm**: Built-in LLM adapter over the official OpenAI, Anthropic and Google SDKs, used for video prompts
 
 ### Optional Dependencies (Local SD)
 - **torch, diffusers, transformers**: Hugging Face ML stack

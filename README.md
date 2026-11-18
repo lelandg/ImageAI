@@ -290,7 +290,7 @@
   - `pretty-midi` - MIDI file analysis and timing extraction
   - `mido` - Low-level MIDI manipulation for lyrics and events
   - `moviepy` - Video processing and assembly
-  - `litellm` - Unified LLM provider interface (for video prompts)
+  - `core/chameleon_llm` (built in, no extra package) - adapter over the official OpenAI, Anthropic and Google SDKs (for video prompts)
 
 ## 2. Authentication Setup
 

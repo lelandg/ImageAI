@@ -385,7 +385,7 @@ python main.py --lyrics-to-prompts song.txt \
     --lyrics-output prompts.json
 ```
 
-`--lyrics-model` accepts any LiteLLM id (`gpt-4o`,
+`--lyrics-model` accepts any model id the built-in `chameleon_llm` adapter understands (`gpt-4o`,
 `gemini/gemini-2.0-flash-exp`, `claude-sonnet-4-6`, …).
 
 ---
