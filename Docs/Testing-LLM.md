@@ -102,6 +102,21 @@ the stored API key, never a Google Cloud access token.
 Vertex AI tests use your Google Cloud login, not a key. Run
 `gcloud auth application-default login` once to set it up.
 
+## What the unit tier proves about credentials
+
+These rules are tested offline, with a recorder in place of the real client.
+If you change routing or key handling, these are the tests to read first.
+
+| Rule | Test file |
+|---|---|
+| A provider's key is not sent when the model id carries another provider's route prefix (`ollama/...` under Google, `anthropic/...` under OpenAI). | `tests/test_llm_params.py` |
+| With Google Cloud login, no call sends the access token as a Gemini API key or exports it as `GEMINI_API_KEY`; Gemini models use `vertex_ai/` with the saved project. | `tests/video/test_google_cloud_auth_routes.py`, `tests/video/test_style_analyzer_routes.py` |
+| A base URL is logged without user info, query or fragment, at every log level. | `tests/chameleon_llm/test_cleartext_warning.py` |
+
+Tests that need the saved Settings replace `core.llm_params._saved_settings`.
+Unpatched, it reads the sandboxed, empty `config.json`, which means API-key
+mode and no project.
+
 ## Local tier details
 
 You need LM Studio, Ollama, or both. Start the server and download a model

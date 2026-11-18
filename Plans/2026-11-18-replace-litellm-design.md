@@ -514,5 +514,33 @@ Changes after the first automated review of the pull request:
 - **Cloud tier keys:** the tests see only keys stored in the keyring, because
   the test sandbox hides `config.json`. `Docs/Testing-LLM.md` has the
   procedure.
+
+Changes after the independent review of those fixes:
+
+- **A key never follows a route prefix to another provider.**
+  `build_completion_kwargs` still honours a prefix on the model id, but when
+  the prefix belongs to another provider than the caller's (`ollama/...` under
+  Google, `anthropic/...` under OpenAI) it does not send the caller's key. It
+  logs a WARNING without the key, calls `on_warning`, and raises
+  `LLMParamError` when `strict`. A provider's key on its own route is
+  unchanged, including an Ollama or LM Studio token.
+- **Google Cloud login is decided in one place.** `google_auth_settings(config)`
+  returns the auth mode and the saved project, from the caller's config when
+  it carries them, else from the saved Settings. `UnifiedLLMProvider`, the
+  lyrics generator, `StyleAnalyzer` and the sprite chat calls use it. In
+  `gcloud` mode the configured Google value is an OAuth access token: it is
+  never exported as `GEMINI_API_KEY` and never sent as a key, a
+  `GEMINI_API_KEY` the process exported earlier is removed (one the user set
+  is left alone), and Gemini models take `vertex_ai/` with the saved project.
+  API-key mode is unchanged. The GUI code that builds provider configs was not
+  changed; it still fetches the token, which is now ignored.
+- **`StyleAnalyzer` uses the package for Google too.** Its Google branch built
+  its own `genai.Client`; it now sends the image as a base64 data URL through
+  `build_completion_kwargs` and `chameleon_llm.completion`, on `gemini/` or
+  `vertex_ai/` by auth mode. Its single key is not sent when the model id
+  routes to another provider.
+- **Base URLs are logged only in sanitised form.** `endpoint.display_url`
+  keeps scheme, host, port and path and removes user info, query and
+  fragment. Both adapters' DEBUG lines and the cleartext WARNING use it.
 - **Not verified:** the local tier's real-server paths have never run. No LM
   Studio or Ollama server was running on the build machine.
