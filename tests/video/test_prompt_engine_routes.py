@@ -146,3 +146,22 @@ def test_lyrics_cloud_model_ignores_lmstudio_endpoint(completion, no_openai_base
     kwargs = completion.call_args.kwargs
     assert kwargs["model"] == "gpt-test-model"
     assert "api_base" not in kwargs
+
+
+# --- Addendum (httpx2): wrapped transport errors stay retryable ---------------
+
+def test_wrapped_transport_errors_are_retryable():
+    from core.chameleon_llm.errors import wrap_sdk_error
+
+    class TransportError(Exception):
+        pass
+
+    class ReadError(TransportError):  # httpx/httpx2 shape, no library needed
+        pass
+
+    class ReadTimeout(TransportError):
+        pass
+
+    provider = UnifiedLLMProvider({})
+    for exc in (ReadError("reset"), ReadTimeout("slow")):
+        assert provider._is_retryable_error(wrap_sdk_error(exc, "gemini"))

@@ -75,25 +75,41 @@ def wrap_sdk_error(exc: Exception, provider: str) -> LLMError:
     return cls(message, provider=provider, status_code=status)
 
 
+# Class names (anywhere in the MRO) that mark a transport failure. They match
+# httpx and httpx2 alike, and SDK subclasses of either, without importing them.
+_TIMEOUT_NAMES = frozenset({"TimeoutException"})
+_CONNECTION_NAMES = frozenset({
+    "TransportError", "NetworkError", "ProtocolError",
+    "ReadError", "WriteError", "CloseError",
+})
+_CONNECTION_WORDS = ("connect", "network", "protocol")
+
+
 def _transport_class(exc: Exception) -> type[LLMError]:
     """Classify an error that carries no HTTP status (timeouts, dropped links).
 
-    google-genai lets httpx errors (ConnectError, ReadError,
-    RemoteProtocolError, ReadTimeout) propagate unwrapped, so httpx's own
-    hierarchy is checked first; httpx is imported lazily and is optional.
+    The SDKs let their HTTP library's errors (httpx at older versions, httpx2
+    at the versions requirements.txt installs) propagate unwrapped, e.g.
+    ConnectError, ReadError, RemoteProtocolError, ReadTimeout. The decision
+    is made by class NAME along ``type(exc).__mro__``, so it does not depend
+    on which library raised; the guarded isinstance checks are a backstop.
     """
-    try:
-        import httpx
-    except ImportError:  # pragma: no cover - httpx ships with every SDK we use
-        httpx = None
-    if httpx is not None:
-        if isinstance(exc, httpx.TimeoutException):
-            return TimeoutError_
-        if isinstance(exc, httpx.TransportError):
-            return ConnectionError_
-    name = type(exc).__name__.lower()
-    if "timeout" in name:
+    names = [klass.__name__ for klass in type(exc).__mro__]
+    if any(n in _TIMEOUT_NAMES or "timeout" in n.lower() for n in names):
         return TimeoutError_
-    if any(word in name for word in ("connect", "network", "protocol")):
+    if any(n in _CONNECTION_NAMES
+           or any(word in n.lower() for word in _CONNECTION_WORDS)
+           for n in names):
         return ConnectionError_
+    for module_name in ("httpx", "httpx2"):
+        try:
+            module = __import__(module_name)
+        except ImportError:
+            continue
+        timeout_cls = getattr(module, "TimeoutException", None)
+        transport_cls = getattr(module, "TransportError", None)
+        if isinstance(timeout_cls, type) and isinstance(exc, timeout_cls):
+            return TimeoutError_
+        if isinstance(transport_cls, type) and isinstance(exc, transport_cls):
+            return ConnectionError_
     return LLMError

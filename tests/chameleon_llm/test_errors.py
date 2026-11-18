@@ -74,3 +74,72 @@ def test_wrap_httpx_transport_errors(exc, cls):
 def test_wrap_connection_family_by_class_name(name):
     exc = type(name, (Exception,), {})("x")
     assert type(wrap_sdk_error(exc, "gemini")) is ConnectionError_
+
+
+# --- Addendum: classify by class name along the MRO (httpx, httpx2, SDKs) ----
+# Local stand-ins shaped like httpx/httpx2's hierarchy; no library needed.
+
+class TransportError(Exception):
+    pass
+
+
+class NetworkError(TransportError):
+    pass
+
+
+class ReadError(NetworkError):
+    pass
+
+
+class TimeoutException(TransportError):
+    pass
+
+
+class ReadTimeout(TimeoutException):
+    pass
+
+
+class ProtocolError(TransportError):
+    pass
+
+
+class RemoteProtocolError(ProtocolError):
+    pass
+
+
+class WriteError(Exception):
+    pass
+
+
+class CloseError(Exception):
+    pass
+
+
+class SDKTransportFailure(TransportError):  # name alone says nothing
+    pass
+
+
+@pytest.mark.parametrize("exc,cls", [
+    (ReadError("reset"), ConnectionError_),
+    (ReadTimeout("slow"), TimeoutError_),
+    (RemoteProtocolError("closed"), ConnectionError_),
+    (SDKTransportFailure("x"), ConnectionError_),
+    (WriteError("x"), ConnectionError_),
+    (CloseError("x"), ConnectionError_),
+])
+def test_wrap_by_class_name_along_mro(exc, cls):
+    err = wrap_sdk_error(exc, "gemini")
+    assert type(err) is cls
+    assert err.status_code is None
+
+
+def test_wrap_unrelated_value_error_stays_plain():
+    assert type(wrap_sdk_error(ValueError("odd"), "gemini")) is LLMError
+
+
+def test_status_code_wins_over_a_connect_name():
+    class APIConnectionStatusError(Exception):
+        status_code = 429
+    err = wrap_sdk_error(APIConnectionStatusError("busy"), "openai")
+    assert type(err) is RateLimitError
+    assert err.status_code == 429
