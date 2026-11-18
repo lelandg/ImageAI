@@ -22,6 +22,8 @@ anyio>=4.16.0
 fsspec>=2026.9.0
 markdown>=3.11.3  # For better help documentation rendering
 keyring>=24.3.1  # For secure API key storage (optional)
+jsonschema>=4.0.0  # Layout template validation (core/layout/template_manager.py); used to arrive through LiteLLM
+tqdm>=4.70.1  # Progress bars in scripts/generate_tags.py; used to arrive through LiteLLM. Floor matches requirements-security.txt
 
 # Optional dependencies for Local Stable Diffusion
 # Uncomment these lines to enable local SD support:
