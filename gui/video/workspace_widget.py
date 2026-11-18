@@ -5879,16 +5879,28 @@ class WorkspaceWidget(QWidget):
         llm_provider = self.llm_provider_combo.currentText().lower()
         llm_model = self.llm_model_combo.currentText()
 
+        # Google follows the auth mode configured in Settings. With Google
+        # Cloud login there is no API key to check: the request signs in with
+        # Application Default Credentials on the vertex_ai route. Do not call
+        # get_api_key('google') in that mode: it answers with an OAuth access
+        # token, which is not a Gemini API key.
+        google_auth_mode = None
+        if llm_provider in ["google", "gemini"]:
+            configured = self.config.get("auth_mode", "api-key")
+            google_auth_mode = ("gcloud" if configured in ("gcloud", "Google Cloud Account")
+                                else "api-key")
+
         # Get API key from config
         api_key = None
         if llm_provider == "openai":
             api_key = self.config.get_api_key('openai')
         elif llm_provider in ["google", "gemini"]:
-            api_key = self.config.get_api_key('google')
+            if google_auth_mode != "gcloud":
+                api_key = self.config.get_api_key('google')
         elif llm_provider in ["anthropic", "claude"]:
             api_key = self.config.get_api_key('anthropic')
 
-        if not api_key:
+        if not api_key and google_auth_mode != "gcloud":
             from gui.common.dialog_manager import get_dialog_manager
             dialog_manager = get_dialog_manager(self)
             dialog_manager.show_warning(
@@ -5923,6 +5935,7 @@ class WorkspaceWidget(QWidget):
         generator = EndPromptGenerator(llm_provider=None)  # Will use chameleon_llm directly
 
         # Show dialog with continuity support
+        from core.llm_params import saved_vertex_project
         dialog = StartPromptDialog(
             generator,
             scene.source,
@@ -5932,7 +5945,9 @@ class WorkspaceWidget(QWidget):
             api_key,
             continuity_mode,
             previous_frame_path,
-            self
+            self,
+            auth_mode=google_auth_mode,
+            vertex_project=saved_vertex_project(self.config)
         )
 
         if dialog.exec_():

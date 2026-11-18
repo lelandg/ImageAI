@@ -45,7 +45,10 @@ class StartPromptGenerationThread(QThread):
         api_key: str,
         continuity_mode: ContinuityMode = ContinuityMode.NONE,
         previous_frame_path: Optional[Path] = None,
-        parent=None
+        parent=None,
+        *,
+        auth_mode: Optional[str] = None,
+        vertex_project: Optional[str] = None
     ):
         super().__init__(parent)
         self.generator = generator
@@ -54,9 +57,27 @@ class StartPromptGenerationThread(QThread):
         self.provider = provider
         self.model = model
         self.api_key = api_key
+        # Google only: the auth mode configured in Settings ("api-key" or
+        # "gcloud"). None keeps the old rule: a key selects the API-key route.
+        self.auth_mode = auth_mode
+        # Google Cloud project saved in Settings; used on the vertex_ai route.
+        self.vertex_project = vertex_project
         self.continuity_mode = continuity_mode
         self.previous_frame_path = previous_frame_path
         self.logger = logging.getLogger(__name__)
+
+    def _uses_google_cloud_login(self) -> bool:
+        """True for a Google model when Settings selects Google Cloud login."""
+        from core.llm_params import normalize_provider
+        mode = (self.auth_mode or "").strip().lower()
+        return (normalize_provider(self.provider) == "gemini"
+                and mode in ("gcloud", "adc", "google cloud account"))
+
+    def _credential(self) -> Optional[str]:
+        """The API key to send, or None with Google Cloud login. In that mode
+        ``ConfigManager.get_api_key("google")`` answers with an OAuth access
+        token, which must never travel as a Gemini API key."""
+        return None if self._uses_google_cloud_login() else (self.api_key or None)
 
     def run(self):
         """Run generation in background"""
@@ -69,7 +90,7 @@ class StartPromptGenerationThread(QThread):
 
                 try:
                     analyzer = StyleAnalyzer(
-                        api_key=self.api_key,
+                        api_key=self._credential(),
                         llm_provider=self.provider,
                         llm_model=self.model
                     )
@@ -174,11 +195,19 @@ Generate a detailed visual description suitable for AI image generation."""
 
         # Centralized param validation + route prefixing (normalizes provider
         # display names like 'google'/'claude' to their chameleon_llm routes).
-        # Gemini uses the API-key route when a key is configured (argument or
-        # environment), otherwise the Google Cloud login route.
+        # Gemini follows the auth mode configured in Settings: "gcloud" ->
+        # vertex_ai/ (Google Cloud login, no key), "api-key" -> gemini/. With
+        # no mode given, the API-key route is used when a key is configured
+        # (argument or environment), otherwise the Google Cloud login route.
         provider_id = normalize_provider(self.provider)
-        has_gemini_key = bool(self.api_key or os.environ.get('GEMINI_API_KEY')
-                              or os.environ.get('GOOGLE_API_KEY'))
+        api_key = self._credential()
+        auth_mode = None
+        if provider_id == 'gemini':
+            if self._uses_google_cloud_login():
+                auth_mode = 'gcloud'
+            elif (self.auth_mode or api_key or os.environ.get('GEMINI_API_KEY')
+                    or os.environ.get('GOOGLE_API_KEY')):
+                auth_mode = 'api-key'
         completion_kwargs = build_completion_kwargs(
             provider_id,
             self.model,
@@ -187,8 +216,9 @@ Generate a detailed visual description suitable for AI image generation."""
                 {"role": "user", "content": user_prompt}
             ],
             {"temperature": 0.7},
-            api_key=self.api_key or None,
-            auth_mode=('api-key' if provider_id == 'gemini' and has_gemini_key else None),
+            api_key=api_key,
+            auth_mode=auth_mode,
+            vertex_project=self.vertex_project,
         )
         response = chameleon_llm.completion(**completion_kwargs)
 
@@ -217,7 +247,10 @@ class StartPromptDialog(DialogCleanupMixin, QDialog):
         api_key: str,
         continuity_mode: ContinuityMode = ContinuityMode.NONE,
         previous_frame_path: Optional[Path] = None,
-        parent=None
+        parent=None,
+        *,
+        auth_mode: Optional[str] = None,
+        vertex_project: Optional[str] = None
     ):
         super().__init__(parent)
         self.logger = logging.getLogger(__name__)
@@ -227,6 +260,11 @@ class StartPromptDialog(DialogCleanupMixin, QDialog):
         self.provider = provider
         self.model = model
         self.api_key = api_key
+        # Google only: the auth mode configured in Settings ("api-key" or
+        # "gcloud"). None keeps the old rule: a key selects the API-key route.
+        self.auth_mode = auth_mode
+        # Google Cloud project saved in Settings; used on the vertex_ai route.
+        self.vertex_project = vertex_project
         self.continuity_mode = continuity_mode
         self.previous_frame_path = previous_frame_path
         self.generation_thread: Optional[StartPromptGenerationThread] = None
@@ -383,7 +421,9 @@ class StartPromptDialog(DialogCleanupMixin, QDialog):
             self.api_key,
             self.continuity_mode,
             self.previous_frame_path,
-            self
+            self,
+            auth_mode=self.auth_mode,
+            vertex_project=self.vertex_project
         )
         self.generation_thread.generation_complete.connect(self._on_generation_complete)
         self.generation_thread.generation_failed.connect(self._on_generation_failed)

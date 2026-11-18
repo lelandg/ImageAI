@@ -59,3 +59,94 @@ def test_rate_limit_is_reported_not_raised(widgets, fake_completion, inline_thre
     assert "RateLimitError: slow down" in widget_text
     assert "RateLimitError: slow down" in dialog.generated_prompt_edit.toPlainText()
     assert error_logged()
+
+
+# --- the configured Google auth mode reaches the worker -----------------------
+
+OAUTH_TOKEN = "oauth-access-token-not-an-api-key"
+
+
+def test_gcloud_mode_uses_vertex_and_never_sends_the_oauth_token(
+        widgets, fake_completion, inline_threads):
+    """In gcloud mode ``get_api_key("google")`` can answer with an OAuth access
+    token. Even if one is handed in, it must not travel as a Gemini API key."""
+    fake_completion.reply = CANNED
+
+    dialog = widgets(StartPromptDialog(
+        MagicMock(), "rainy street", "", "google", "gemini-test-model", OAUTH_TOKEN,
+        auth_mode="gcloud", vertex_project="saved-project"))
+
+    kwargs = fake_completion.kwargs
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in kwargs
+    assert kwargs["vertex_project"] == "saved-project"
+    assert dialog.get_prompt() == CANNED
+
+
+def test_gcloud_mode_without_any_key_still_generates(
+        widgets, fake_completion, inline_threads):
+    fake_completion.reply = CANNED
+
+    dialog = widgets(StartPromptDialog(
+        MagicMock(), "rainy street", "", "gemini", "gemini-test-model", None,
+        auth_mode="gcloud"))
+
+    kwargs = fake_completion.kwargs
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in kwargs and "vertex_project" not in kwargs
+    assert dialog.get_prompt() == CANNED
+
+
+def test_api_key_mode_keeps_the_gemini_route(widgets, fake_completion, inline_threads):
+    fake_completion.reply = CANNED
+
+    widgets(StartPromptDialog(
+        MagicMock(), "rainy street", "", "google", "gemini-test-model", "test-key",
+        auth_mode="api-key", vertex_project="saved-project"))
+
+    kwargs = fake_completion.kwargs
+    assert kwargs["model"] == "gemini/gemini-test-model"
+    assert kwargs["api_key"] == "test-key"
+    assert "vertex_project" not in kwargs
+
+
+def test_auth_mode_does_not_change_other_providers(
+        widgets, fake_completion, inline_threads):
+    fake_completion.reply = CANNED
+
+    widgets(StartPromptDialog(
+        MagicMock(), "rainy street", "", "openai", "gpt-test-model", "test-key",
+        auth_mode="gcloud", vertex_project="saved-project"))
+
+    kwargs = fake_completion.kwargs
+    assert kwargs["model"] == "gpt-test-model"
+    assert kwargs["api_key"] == "test-key"
+    assert "vertex_project" not in kwargs
+
+
+def test_gcloud_mode_keeps_the_token_away_from_the_style_analyzer(
+        widgets, fake_completion, inline_threads, monkeypatch, tmp_path):
+    import gui.video.start_prompt_dialog as module
+    from core.video.style_analyzer import ContinuityMode
+
+    built = []
+
+    class _Analyzer:
+        def __init__(self, **kwargs):
+            built.append(kwargs)
+
+        def analyze_for_style(self, _path):
+            return "warm film grain"
+
+    monkeypatch.setattr(module, "StyleAnalyzer", _Analyzer)
+    fake_completion.reply = CANNED
+    frame = tmp_path / "prev.png"
+    frame.write_bytes(b"not a real image")
+
+    widgets(StartPromptDialog(
+        MagicMock(), "rainy street", "", "google", "gemini-test-model", OAUTH_TOKEN,
+        ContinuityMode.STYLE_ONLY, frame, auth_mode="gcloud"))
+
+    assert len(built) == 1
+    assert built[0]["api_key"] is None
+    assert "api_key" not in fake_completion.kwargs

@@ -124,7 +124,7 @@ def test_worker_keeps_the_project_off_other_routes(
 
 
 def test_dialog_hands_the_saved_project_to_its_worker(
-        qapp, widgets, fake_completion, monkeypatch):
+        qapp, widgets, fake_completion, monkeypatch, message_boxes):
     """Drive the real Generate action; the thread and worker are recorders, so
     nothing runs and nothing can reach a provider."""
     import gui.prompt_generation_dialog as module
