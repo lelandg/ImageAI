@@ -27,7 +27,7 @@ def _ask(server, messages, **params):
 
 def test_text_reply(server):
     r = _ask(server, [{"role": "user", "content": "Reply with the single word: pong"}],
-             max_tokens=20, temperature=0)
+             max_tokens=256, temperature=0)
     assert r.choices[0].message.content.strip() != ""
     assert r.choices[0].finish_reason in ("stop", "length")
 

@@ -95,16 +95,26 @@ def pick_lmstudio_model(models: list, wanted: Optional[str] = None) -> LMModel:
             f"'type' values seen: {sorted({m.kind for m in models})}; "
             f"keys on the first entry: {models[0].fields}. If these are real chat "
             "models, the field names in tests/local/local_logic.py are wrong.")
-    if wanted:
-        for m in chat:
-            if m.key == wanted or wanted in m.loaded_ids:
-                return m
-        pytest.fail(f"IMAGEAI_LMSTUDIO_MODEL={wanted!r} is not a chat model in "
-                    f"LM Studio. Chat models: {[m.key for m in chat]}")
+    if wanted:  # present in ``chat``: the check at the top fails otherwise
+        return next(m for m in chat if m.key == wanted or wanted in m.loaded_ids)
     for m in chat:
         if m.loaded:
             return m
     return min(chat, key=lambda m: (m.size is None, m.size or 0))
+
+
+def fail_or_skip_request_error(server: str, base: str, path: str, exc) -> None:
+    """Skip when nothing accepted the connection; fail on anything else.
+
+    Only a refused connection or a connect timeout means the server is not
+    running. A read timeout or any other request error comes from a server
+    that answered, so the test fails instead of reporting a green skip.
+    """
+    import requests
+    if isinstance(exc, (requests.ConnectionError, requests.ConnectTimeout)):
+        pytest.skip(f"{server} is not running at {base}")
+    pytest.fail(f"{server} at {base} accepted the connection but the request to "
+                f"{path} failed: {type(exc).__name__}: {exc}")
 
 
 def parse_ollama_tags(payload, wanted: Optional[str] = None) -> tuple:

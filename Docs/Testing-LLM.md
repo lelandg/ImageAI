@@ -9,11 +9,20 @@ project's virtual environment active.
 
 | Tier | What it tests | Cost | Command |
 |---|---|---|---|
-| Unit and dialog | The package and the dialogs, with fake replies | Free | `python -m pytest` |
+| Unit and dialog | The package and the dialogs, with fake replies | Free | `python -m pytest -m "not local and not live"` |
 | Local servers | A real LM Studio or Ollama on your machine | Free | `python -m pytest -m local -v -rs` |
 | Cloud (`live`) | The real OpenAI, Anthropic and Google APIs | A few cents | see below |
 
 Add `-rs` to any run to print the reason for every skipped test.
+
+A bare `python -m pytest` also runs the local tier. When LM Studio is running,
+that can load a model into memory. Use the unit-and-dialog command above when
+you want only the free, offline tests.
+
+On some Windows machines, running all the GUI test directories in one
+process can crash the Python interpreter. Run one directory per process to
+avoid it, for example `python -m pytest tests/gui -m "not local and not live"`,
+then `python -m pytest tests/video -m "not local and not live"`, and so on.
 
 ### Running the cloud tier
 
@@ -81,10 +90,10 @@ yourself. The tests never download or delete a model.
 | `no anthropic API key configured` (also `openai`, `google`) | That provider has no key in the app's configuration. | Add the key in Settings. |
 | `no Google Cloud application-default credentials ...` | The Vertex tests found no Google Cloud login. | Run `gcloud auth application-default login`. |
 | `no curated <provider> model fits this test` | The built-in model list has no model of the kind the test needs. | Report it. The test needs updating. |
-| `LM Studio is not running at <url>` | Nothing answered within 2 seconds. | Start LM Studio and its local server, or set `IMAGEAI_LMSTUDIO_URL`. |
+| `LM Studio is not running at <url>` | The connection was refused, or nothing accepted it within 2 seconds. | Start LM Studio and its local server, or set `IMAGEAI_LMSTUDIO_URL`. |
 | `no chat model downloaded in LM Studio (...)` | LM Studio lists no models, or only embedding models. | Download a chat model in LM Studio. |
 | `load a model in LM Studio first ...` | This LM Studio cannot load models over REST, and none is loaded. | Load a model by hand. |
-| `Ollama is not running at <url>` | Nothing answered within 2 seconds. | Start Ollama, or set `IMAGEAI_OLLAMA_URL`. |
+| `Ollama is not running at <url>` | The connection was refused, or nothing accepted it within 2 seconds. | Start Ollama, or set `IMAGEAI_OLLAMA_URL`. |
 | `Ollama has no models installed` | Ollama answers but lists no models. | Run `ollama pull <model>`. |
 | `no Ollama model that can complete text is installed ...` | Ollama reported capabilities for every model and none can complete text. | Pull a chat model. |
 | `the server did not report whether <model> supports vision` | The server does not say if the model reads images. | Nothing, or use a model whose server reports it. |
@@ -98,6 +107,7 @@ failures the fixtures raise on purpose.
 
 | Message starts with | Meaning | What to do |
 |---|---|---|
+| `LM Studio at <url> accepted the connection but the request to <path> failed` (also `Ollama at <url> ...`) | The server accepted the connection, then timed out reading or broke off the reply. The message names the error. | Check that the server is not busy or stuck. Check the URL. |
 | `LM Studio at <url> answered HTTP 401` (or 403) | Authentication is on in LM Studio. | Set `LM_API_TOKEN`. |
 | `LM Studio at <url> answered HTTP <code>` | The model listing returned an error. | Read the text after the code. |
 | `LM Studio at <url> returned a non-JSON body` | Something else may be using the port. | Check the URL. |

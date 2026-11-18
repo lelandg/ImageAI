@@ -60,8 +60,8 @@ import pytest
 import requests
 
 
-from local_logic import (parse_listing, parse_ollama_tags, pick_lmstudio_model,
-                         pick_ollama_model)
+from local_logic import (fail_or_skip_request_error, parse_listing, parse_ollama_tags,
+                         pick_lmstudio_model, pick_ollama_model)
 
 LIST_TIMEOUT = (2, 10)      # (connect, read) seconds for listing calls
 LOAD_TIMEOUT = 120          # seconds for loading a model
@@ -88,8 +88,8 @@ def _list_lmstudio(base: str):
     for version, path in paths:
         try:
             resp = requests.get(base + path, headers=_headers(), timeout=LIST_TIMEOUT)
-        except requests.RequestException:
-            pytest.skip(f"LM Studio is not running at {base}")
+        except requests.RequestException as exc:
+            fail_or_skip_request_error("LM Studio", base, path, exc)
         if resp.status_code == 404:
             continue
         if resp.status_code in (401, 403):
@@ -184,8 +184,8 @@ def ollama():
     wanted = os.environ.get("IMAGEAI_OLLAMA_MODEL")
     try:
         resp = requests.get(base + "/api/tags", timeout=LIST_TIMEOUT)
-    except requests.RequestException:
-        pytest.skip(f"Ollama is not running at {base}")
+    except requests.RequestException as exc:
+        fail_or_skip_request_error("Ollama", base, "/api/tags", exc)
     if resp.status_code != 200:
         pytest.fail(f"Ollama at {base} answered HTTP {resp.status_code} on "
                     f"/api/tags: {resp.text[:200]}")

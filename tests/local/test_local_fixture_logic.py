@@ -158,3 +158,38 @@ def test_ollama_named_model_missing_fails_in_parse():
 
 def test_ollama_tags_parse_names_and_sizes():
     assert parse_ollama_tags({"models": [{"name": "a", "size": 7}]}) == (["a"], {"a": 7})
+
+
+# --- M5: only "nothing accepted the connection" counts as not running --------
+
+requests = pytest.importorskip("requests")
+
+
+@pytest.mark.parametrize("exc", [
+    requests.ConnectionError("refused"),
+    requests.ConnectTimeout("no answer within the connect timeout"),
+])
+def test_unreachable_server_skips(exc):
+    from local_logic import fail_or_skip_request_error
+    with pytest.raises(SKIP, match="LM Studio is not running at http://h:1"):
+        fail_or_skip_request_error("LM Studio", "http://h:1", "/api/v1/models", exc)
+
+
+@pytest.mark.parametrize("exc", [
+    requests.ReadTimeout("answered, then went quiet"),
+    requests.exceptions.ChunkedEncodingError("broken body"),
+    requests.exceptions.TooManyRedirects("loop"),
+])
+def test_answering_server_error_fails(exc):
+    from local_logic import fail_or_skip_request_error
+    with pytest.raises(FAIL) as err:
+        fail_or_skip_request_error("Ollama", "http://h:2", "/api/tags", exc)
+    msg = str(err.value)
+    assert "Ollama at http://h:2" in msg and "/api/tags" in msg
+    assert type(exc).__name__ in msg
+
+
+def test_named_model_found_is_returned_after_the_upfront_check():
+    models = parse_listing(_v1({"key": "a", "type": "llm", "size_bytes": 9},
+                               {"key": "b", "type": "llm", "size_bytes": 1}))
+    assert pick_lmstudio_model(models, "a").key == "a"
