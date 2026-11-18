@@ -104,14 +104,13 @@ def _text_of(content) -> str:
                        if isinstance(p, dict) and p.get("type") == "text")
 
 
-def _response_part(part, role: str) -> dict:
+def _response_part(part) -> dict:
     if part.get("type") == "image_url":
         img = part.get("image_url")
         url = img.get("url") if isinstance(img, dict) else img
         detail = (img.get("detail") if isinstance(img, dict) else None) or "auto"
         return {"type": "input_image", "image_url": url, "detail": detail}
-    kind = "output_text" if role == "assistant" else "input_text"
-    return {"type": kind, "text": part.get("text", "")}
+    return {"type": "input_text", "text": part.get("text", "")}
 
 
 def _build_responses_request(route: Route, messages: list[dict],
@@ -122,9 +121,12 @@ def _build_responses_request(route: Route, messages: list[dict],
         if role in ("system", "developer"):
             instructions.append(_text_of(content))
             continue
+        if role == "assistant":  # EasyInputMessage allows only plain text here
+            items.append({"role": role, "content": _text_of(content)})
+            continue
         parts = ([{"type": "text", "text": content}] if isinstance(content, str)
                  else list(content or []))
-        parts = [_response_part(p, role) for p in parts if p
+        parts = [_response_part(p) for p in parts if p
                  and not (p.get("type") == "text" and not p.get("text"))]
         if parts:
             items.append({"role": role, "content": parts})

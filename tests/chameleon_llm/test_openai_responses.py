@@ -98,7 +98,7 @@ def test_responses_request_translation(fake_openai):
                 {"type": "input_text", "text": "what is this"},
                 {"type": "input_image", "image_url": "data:image/png;base64,AAAA",
                  "detail": "auto"}]},
-            {"role": "assistant", "content": [{"type": "output_text", "text": "ok"}]},
+            {"role": "assistant", "content": "ok"},
             {"role": "user", "content": [{"type": "input_text", "text": "more"}]},
         ],
         "max_output_tokens": 10,
@@ -170,3 +170,15 @@ def test_local_server_never_uses_responses(fake_openai):
     assert len(fake_openai.chat_calls) == 1
     call(Route("openai", "ollama", "o3-pro"))
     assert fake_openai.responses_calls == []
+
+
+def test_assistant_none_content_sent_as_empty_string(fake_openai):
+    fake_openai.responses_reply = make_responses_reply()
+    call(messages=[{"role": "user", "content": "a"},
+                   {"role": "assistant", "content": None},
+                   {"role": "assistant", "content": [
+                       {"type": "text", "text": "x"}, {"type": "text", "text": "y"}]},
+                   {"role": "user", "content": "b"}])
+    inp = fake_openai.responses_calls[0]["input"]
+    assert inp[1] == {"role": "assistant", "content": ""}
+    assert inp[2] == {"role": "assistant", "content": "x\n\ny"}
