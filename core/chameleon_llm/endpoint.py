@@ -45,8 +45,12 @@ def is_cleartext_remote(base_url: str) -> bool:
     return parts.scheme.lower() != "https" and not _is_loopback(host)
 
 
-def _display(base_url: str) -> str:
-    """The URL without user info, query or fragment (they can hold secrets)."""
+def display_url(base_url: str | None) -> str:
+    """``base_url`` in the only form that may be logged: scheme, host, port
+    and path, without user info, query or fragment (they can hold secrets).
+    Every log line in this package that names a base URL goes through here."""
+    if not base_url:
+        return "<default>"
     parts, host = _split(base_url)
     if parts is None or not host:
         return "<unparseable base URL>"
@@ -75,4 +79,4 @@ def warn_if_cleartext_key(api_key: str | None, base_url: str | None,
         "chameleon_llm: the %s API key is being sent unencrypted to %s: the "
         "base URL is not https and its host is not loopback. Use an https "
         "endpoint unless this network path is trusted", provider,
-        _display(base_url))
+        display_url(base_url))

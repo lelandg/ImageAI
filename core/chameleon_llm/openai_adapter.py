@@ -8,7 +8,7 @@ import re
 
 import openai  # top-level on purpose: dispatch turns an ImportError here into MissingSDKError
 
-from .endpoint import warn_if_cleartext_key
+from .endpoint import display_url, warn_if_cleartext_key
 from .errors import (
     AuthError, BadRequestError, LLMError, RateLimitError, ServerError,
     TimeoutError_, wrap_sdk_error,
@@ -245,7 +245,7 @@ def complete(route: Route, messages: list[dict], *, api_key: str | None,
     logger.debug("chameleon_llm openai %s: route=%s model=%s base_url=%s "
                  "timeout=%s max_retries=%s",
                  "responses" if use_responses else "chat", route.route,
-                 route.model, base_url, timeout, max_retries)
+                 route.model, display_url(base_url), timeout, max_retries)
     if use_responses:
         return _send_responses(client, route, request)
     try:
