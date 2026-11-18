@@ -47,15 +47,39 @@ _MSGS = [{"role": "user", "content": "Reply with the single word: ok"}]
 _TIMEOUT = 90
 
 
-@pytest.fixture(scope="module")
-def keys():
-    from core.config import ConfigManager
-    config = ConfigManager()
+def _stored_google_key(config):
+    """The Google API key saved in Settings, or None. Never an access token.
+
+    With Google Cloud login selected, ``get_api_key("google")`` answers with an
+    OAuth access token from ``gcloud``. That token is not a Gemini API key, and
+    the ``gemini/`` route would send it as one. The stored key is read through
+    the same ``get_api_key`` with the auth mode set to "api-key" on this
+    in-memory config for the duration of the call; nothing is saved.
+    """
+    if config.get_auth_mode("google") != "gcloud":
+        return config.get_api_key("google")
+    previous = config.config.get("auth_mode")
+    config.config["auth_mode"] = "api-key"
+    try:
+        return config.get_api_key("google")
+    finally:
+        config.config["auth_mode"] = previous
+
+
+def _load_keys(config):
+    """Stored API keys per provider. ``google`` is the key for the ``gemini/``
+    route only; the ``vertex`` route signs in with Google Cloud and takes none."""
     return {
         "anthropic": config.get_api_key("anthropic"),
         "openai": config.get_api_key("openai"),
-        "google": config.get_api_key("google"),
+        "google": _stored_google_key(config),
     }
+
+
+@pytest.fixture(scope="module")
+def keys():
+    from core.config import ConfigManager
+    return _load_keys(ConfigManager())
 
 
 def _need(keys, provider):

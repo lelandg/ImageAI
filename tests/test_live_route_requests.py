@@ -123,3 +123,92 @@ def test_sdk_sends_skips_exactly_when_the_sdk_drops_the_param():
     else:
         with pytest.raises(pytest.skip.Exception, match="drops sampling parameters"):
             live._sdk_sends("temperature")
+
+
+# --- the gemini/ route uses a stored API key, never a Google Cloud token ------
+
+class _FakeConfig:
+    """ConfigManager.get_api_key as the app implements it: in gcloud mode the
+    Google lookup answers with an OAuth access token before any stored key."""
+
+    def __init__(self, auth_mode, stored):
+        self.config = {"auth_mode": auth_mode}
+        self._stored = stored
+        self.saved = False
+
+    def get_auth_mode(self, provider="google"):
+        return self.config.get("auth_mode", "api-key") if provider == "google" else "api-key"
+
+    def get_api_key(self, provider):
+        if provider == "google" and self.get_auth_mode("google") == "gcloud":
+            return "oauth-access-token"
+        return self._stored.get(provider)
+
+    def save(self):
+        self.saved = True
+
+
+def test_stored_google_key_in_api_key_mode():
+    config = _FakeConfig("api-key", {"google": "stored-key"})
+    assert live._stored_google_key(config) == "stored-key"
+
+
+def test_stored_google_key_in_gcloud_mode_is_the_stored_key_not_the_token():
+    config = _FakeConfig("gcloud", {"google": "stored-key"})
+    assert live._stored_google_key(config) == "stored-key"
+    assert config.config["auth_mode"] == "gcloud"  # left as it was
+    assert not config.saved
+
+
+def test_stored_google_key_in_gcloud_mode_without_a_stored_key_is_none():
+    config = _FakeConfig("gcloud", {})
+    assert live._stored_google_key(config) is None
+    assert config.config["auth_mode"] == "gcloud"
+    assert not config.saved
+
+
+def test_stored_google_key_restores_the_mode_when_the_lookup_raises():
+    class _Boom(_FakeConfig):
+        def get_api_key(self, provider):
+            if self.get_auth_mode("google") != "gcloud":
+                raise RuntimeError("keyring unavailable")
+            return "oauth-access-token"
+
+    config = _Boom("gcloud", {})
+    with pytest.raises(RuntimeError):
+        live._stored_google_key(config)
+    assert config.config["auth_mode"] == "gcloud"
+
+
+def test_load_keys_never_holds_a_google_cloud_token():
+    keys = live._load_keys(_FakeConfig("gcloud", {"openai": "o", "anthropic": "a"}))
+    assert keys == {"anthropic": "a", "openai": "o", "google": None}
+
+
+def test_gemini_api_key_route_skips_in_gcloud_mode_without_a_stored_key():
+    keys = live._load_keys(_FakeConfig("gcloud", {}))
+    (param,) = [p for p in live._ROUTES if p.id == "gemini-api-key"]
+    _name, provider, key_provider, resolver, auth_mode = param.values
+    with pytest.raises(pytest.skip.Exception, match="no google API key"):
+        live._route_request(keys, provider, key_provider, resolver, auth_mode,
+                            live._MSGS, {"max_tokens": 16})
+
+
+def test_gemini_api_key_route_uses_the_stored_key_in_gcloud_mode():
+    keys = live._load_keys(_FakeConfig("gcloud", {"google": "stored-key"}))
+    (param,) = [p for p in live._ROUTES if p.id == "gemini-api-key"]
+    _name, provider, key_provider, resolver, auth_mode = param.values
+    kwargs = live._route_request(keys, provider, key_provider, resolver, auth_mode,
+                                 live._MSGS, {"max_tokens": 16})
+    assert kwargs["model"] == "gemini/gemini-test-lite"
+    assert kwargs["api_key"] == "stored-key"
+
+
+def test_vertex_route_sends_no_key_in_gcloud_mode():
+    keys = live._load_keys(_FakeConfig("gcloud", {"google": "stored-key"}))
+    (param,) = [p for p in live._ROUTES if p.id == "vertex"]
+    _name, provider, key_provider, resolver, auth_mode = param.values
+    kwargs = live._route_request(keys, provider, key_provider, resolver, auth_mode,
+                                 live._MSGS, {"max_tokens": 16})
+    assert kwargs["model"] == "vertex_ai/gemini-test-lite"
+    assert "api_key" not in kwargs
