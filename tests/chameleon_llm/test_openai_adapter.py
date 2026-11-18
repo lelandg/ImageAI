@@ -1,0 +1,199 @@
+import logging
+
+import pytest
+
+from core.chameleon_llm import openai_adapter
+from core.chameleon_llm.errors import (
+    AuthError, BadRequestError, LLMError, RateLimitError,
+)
+from core.chameleon_llm.routing import Route
+from tests.chameleon_llm.conftest import make_chat_reply
+
+MSGS = [{"role": "user", "content": "hi"}]
+OPENAI = Route("openai", "openai", "test-model")
+OLLAMA = Route("openai", "ollama", "test-model")
+LMSTUDIO = Route("openai", "lm_studio", "test-model")
+
+
+def call(route=OPENAI, messages=MSGS, *, api_key="k", api_base=None, params=None,
+         timeout=600, max_retries=0):
+    return openai_adapter.complete(
+        route, messages, api_key=api_key, api_base=api_base,
+        params=params or {}, timeout=timeout, max_retries=max_retries)
+
+
+def test_accepted_params():
+    assert openai_adapter.ACCEPTED_PARAMS == {
+        "temperature", "top_p", "top_k", "max_tokens", "max_completion_tokens",
+        "reasoning_effort", "verbosity", "response_format", "seed", "stop"}
+
+
+def test_plain_call_builds_client_and_request(fake_openai):
+    resp = call(params={"temperature": 0.2})
+    assert fake_openai.client_kwargs == [
+        {"api_key": "k", "base_url": None, "timeout": 600, "max_retries": 0}]
+    assert fake_openai.chat_calls == [
+        {"model": "test-model", "messages": MSGS, "temperature": 0.2}]
+    assert resp.model == "test-model"
+    assert resp.choices[0].message.role == "assistant"
+    assert resp.choices[0].message.content == "hello"
+    assert resp.choices[0].finish_reason == "stop"
+    assert (resp.usage.prompt_tokens, resp.usage.completion_tokens,
+            resp.usage.total_tokens) == (3, 4, 7)
+
+
+def test_caller_max_retries_passed_through(fake_openai):
+    call(max_retries=3, timeout=12.5)
+    assert fake_openai.client_kwargs[0]["max_retries"] == 3
+    assert fake_openai.client_kwargs[0]["timeout"] == 12.5
+
+
+def test_one_client_per_call(fake_openai):
+    call()
+    call()
+    assert fake_openai.clients_built == 2
+
+
+def test_key_from_env(fake_openai, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+    call(api_key=None)
+    assert fake_openai.client_kwargs[0]["api_key"] == "env-key"
+
+
+def test_argument_key_beats_env(fake_openai, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "env-key")
+    call(api_key="arg-key")
+    assert fake_openai.client_kwargs[0]["api_key"] == "arg-key"
+
+
+def test_ollama_base_url_default_and_v1_suffix(fake_openai, monkeypatch):
+    call(OLLAMA, api_key=None)
+    assert fake_openai.client_kwargs[-1]["base_url"] == "http://localhost:11434/v1"
+    assert fake_openai.client_kwargs[-1]["api_key"] == "not-needed"
+    monkeypatch.setenv("OLLAMA_API_BASE", "http://h:1")
+    call(OLLAMA, api_key=None)
+    assert fake_openai.client_kwargs[-1]["base_url"] == "http://h:1/v1"
+    call(OLLAMA, api_key=None, api_base="http://x:2/")
+    assert fake_openai.client_kwargs[-1]["base_url"] == "http://x:2/v1"
+    call(OLLAMA, api_key=None, api_base="http://x:2/v1/")
+    assert fake_openai.client_kwargs[-1]["base_url"] == "http://x:2/v1"
+
+
+def test_lm_studio_requires_base(fake_openai):
+    with pytest.raises(BadRequestError):
+        call(LMSTUDIO, api_key=None)
+    assert fake_openai.clients_built == 0
+
+
+def test_lm_studio_uses_base_and_placeholder_key(fake_openai, monkeypatch):
+    call(LMSTUDIO, api_key=None, api_base="http://lm:1234/v1")
+    assert fake_openai.client_kwargs[0]["base_url"] == "http://lm:1234/v1"
+    assert fake_openai.client_kwargs[0]["api_key"] == "not-needed"
+    monkeypatch.setenv("OPENAI_API_BASE", "http://env:9/v1")
+    call(LMSTUDIO, api_key=None)
+    assert fake_openai.client_kwargs[1]["base_url"] == "http://env:9/v1"
+
+
+def test_openai_api_base_env_used(fake_openai, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_BASE", "http://proxy/v1")
+    call()
+    assert fake_openai.client_kwargs[0]["base_url"] == "http://proxy/v1"
+
+
+def test_api_base_argument_beats_env_and_allows_missing_key(fake_openai, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_BASE", "http://env/v1")
+    call(api_key=None, api_base="http://arg/v1")
+    assert fake_openai.client_kwargs[0]["base_url"] == "http://arg/v1"
+    assert fake_openai.client_kwargs[0]["api_key"] == "not-needed"
+
+
+def test_top_k_in_extra_body_for_local_and_dropped_for_cloud(fake_openai, caplog):
+    call(OLLAMA, api_key=None, params={"top_k": 40, "temperature": 0.1})
+    assert fake_openai.chat_calls[-1]["extra_body"] == {"top_k": 40}
+    assert "top_k" not in fake_openai.chat_calls[-1]
+    call(api_base="http://proxy/v1", params={"top_k": 5})
+    assert fake_openai.chat_calls[-1]["extra_body"] == {"top_k": 5}
+    with caplog.at_level(logging.WARNING, logger="chameleon_llm"):
+        call(params={"top_k": 40})
+    assert "top_k" not in fake_openai.chat_calls[-1]
+    assert "extra_body" not in fake_openai.chat_calls[-1]
+    warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert len(warnings) == 1 and "top_k" in warnings[0].getMessage()
+
+
+def test_missing_key_raises_auth_error_before_network(fake_openai):
+    with pytest.raises(AuthError) as info:
+        call(api_key=None)
+    assert "OPENAI_API_KEY" in str(info.value)
+    assert fake_openai.clients_built == 0
+    assert fake_openai.chat_calls == []
+
+
+def test_empty_key_counts_as_missing(fake_openai):
+    with pytest.raises(AuthError):
+        call(api_key="")
+
+
+def test_key_never_logged(fake_openai, caplog):
+    with caplog.at_level(logging.DEBUG):
+        call(api_key="sk-test-123", params={"temperature": 0.1})
+        fake_openai.raises = RuntimeError("boom")
+        with pytest.raises(LLMError):
+            call(api_key="sk-test-123")
+    assert "sk-test-123" not in caplog.text
+    assert all("sk-test-123" not in str(r.args) for r in caplog.records)
+
+
+def test_none_content_becomes_empty_string(fake_openai):
+    fake_openai.chat_reply = make_chat_reply(content=None)
+    assert call().choices[0].message.content == ""
+
+
+def test_empty_choices_gives_empty_reply(fake_openai):
+    fake_openai.chat_reply.choices = []
+    resp = call()
+    assert resp.choices[0].message.content == ""
+    assert resp.choices[0].finish_reason == "stop"
+
+
+def test_none_finish_reason_becomes_stop_and_others_pass_through(fake_openai):
+    fake_openai.chat_reply = make_chat_reply(finish_reason=None)
+    assert call().choices[0].finish_reason == "stop"
+    fake_openai.chat_reply = make_chat_reply(finish_reason="length")
+    assert call().choices[0].finish_reason == "length"
+
+
+def test_missing_usage_becomes_zeros(fake_openai):
+    fake_openai.chat_reply = make_chat_reply(usage=None)
+    u = call().usage
+    assert (u.prompt_tokens, u.completion_tokens, u.total_tokens) == (0, 0, 0)
+
+
+def test_list_content_and_image_parts_pass_through_unchanged(fake_openai):
+    msgs = [{"role": "user", "content": [
+        {"type": "text", "text": "what is this"},
+        {"type": "image_url", "image_url": {"url": "data:image/png;base64,AAAA"}},
+    ]}]
+    call(messages=msgs)
+    assert fake_openai.chat_calls[0]["messages"] == msgs
+
+
+def test_params_forwarded_verbatim(fake_openai):
+    params = {"max_completion_tokens": 50, "reasoning_effort": "low", "seed": 1,
+              "stop": ["x"], "response_format": {"type": "json_object"}}
+    call(params=params)
+    sent = fake_openai.chat_calls[0]
+    for k, v in params.items():
+        assert sent[k] == v
+
+
+def test_sdk_error_wrapped(fake_openai):
+    class FakeRateLimit(Exception):
+        status_code = 429
+    err = FakeRateLimit("slow down")
+    fake_openai.raises = err
+    with pytest.raises(RateLimitError) as info:
+        call()
+    assert info.value.__cause__ is err
+    assert info.value.provider == "openai"
+    assert info.value.status_code == 429
