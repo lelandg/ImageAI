@@ -22,7 +22,9 @@ ACCEPTED_PARAMS = frozenset({
     "stop", "vertex_project", "vertex_location",
 })
 
-DEFAULT_VERTEX_LOCATION = "us-central1"
+# "global": recent Gemini models answer 404 NOT_FOUND in us-central1 (live run
+# 2026-11-18) and are served from the global endpoint.
+DEFAULT_VERTEX_LOCATION = "global"
 
 # FinishReason names that mean the reply was blocked or withheld.
 _CONTENT_FILTER = frozenset({

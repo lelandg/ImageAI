@@ -75,7 +75,7 @@ def test_vertex_route_builds_vertex_client_with_defaults(fake_genai):
     kwargs = fake_genai.client_kwargs[0]
     assert kwargs["vertexai"] is True
     assert kwargs["project"] is None
-    assert kwargs["location"] == "us-central1"
+    assert kwargs["location"] == "global"  # newer models are served only there
     assert "api_key" not in kwargs
 
 
