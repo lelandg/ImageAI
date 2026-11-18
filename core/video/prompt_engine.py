@@ -16,8 +16,11 @@ from jinja2 import Template, Environment, FileSystemLoader
 
 from .project import Scene
 from core import chameleon_llm
-from core.llm_models import get_provider_models, get_provider_prefix
+from core.llm_models import get_provider_models
+# _route_kwargs: chameleon_llm.completion kwargs from a provider alias
+# ("google", "claude", "LM Studio"); one shared copy lives in core.llm_params.
 from core.llm_params import normalize_provider
+from core.llm_params import route_completion_kwargs as _route_kwargs
 
 
 class PromptStyle(Enum):
@@ -59,27 +62,6 @@ class PromptTemplate:
         context.update(kwargs)
         
         return template.render(**context)
-
-
-def _route_kwargs(provider, model, messages, params, *, api_key=None,
-                  api_base=None, on_warning=None):
-    """Build ``chameleon_llm.completion`` kwargs with the right route prefix.
-
-    ``provider`` may be an alias ("google", "claude", "LM Studio"). A Gemini
-    model uses the API-key route when a key is configured (argument or
-    GEMINI_API_KEY / GOOGLE_API_KEY), otherwise the Vertex (Google Cloud
-    login) route.
-    """
-    import os
-    from core.llm_params import build_completion_kwargs, normalize_provider
-    provider_id = normalize_provider(provider)
-    has_key = bool(api_key or os.environ.get('GEMINI_API_KEY')
-                   or os.environ.get('GOOGLE_API_KEY'))
-    return build_completion_kwargs(
-        provider_id, model, messages, params,
-        api_key=api_key or None, api_base=api_base,
-        auth_mode=('api-key' if provider_id == 'gemini' and has_key else None),
-        on_warning=on_warning)
 
 
 class UnifiedLLMProvider:

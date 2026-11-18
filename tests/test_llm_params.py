@@ -311,3 +311,59 @@ def test_curated_ceiling_caps_max_tokens():
         "anthropic", "claude-opus-4-20250514", {"max_tokens": 10_000_000})
     assert out["max_tokens"] == 32000
     assert warnings
+
+
+# --- I3: the vertex_ai route never carries api_key ----------------------------
+
+def test_build_kwargs_vertex_route_omits_api_key():
+    forced_vertex = build_completion_kwargs(
+        "Google", "gemini-test-model", _MSGS, api_key="stored-key",
+        auth_mode="gcloud")
+    assert forced_vertex["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in forced_vertex
+    prefixed = build_completion_kwargs(
+        "gemini", "vertex_ai/gemini-test-model", _MSGS, api_key="stored-key")
+    assert "api_key" not in prefixed
+    api_key_route = build_completion_kwargs(
+        "Google", "gemini-test-model", _MSGS, api_key="stored-key")
+    assert api_key_route["api_key"] == "stored-key"
+
+
+# --- route_completion_kwargs: display names + Gemini key from the environment -
+
+@pytest.fixture
+def _no_gemini_env(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+
+@pytest.mark.parametrize("provider,model,expected", [
+    ("OpenAI", "gpt-test-model", "gpt-test-model"),
+    ("Anthropic", "claude-test-model", "anthropic/claude-test-model"),
+    ("claude", "claude-test-model", "anthropic/claude-test-model"),
+    ("Ollama", "local-test-model", "ollama/local-test-model"),
+    ("LM Studio", "local-test-model", "local-test-model"),
+])
+def test_route_kwargs_display_names(_no_gemini_env, provider, model, expected):
+    from core.llm_params import route_completion_kwargs
+    assert route_completion_kwargs(provider, model, _MSGS)["model"] == expected
+
+
+def test_route_kwargs_google_uses_env_key(_no_gemini_env, monkeypatch):
+    from core.llm_params import route_completion_kwargs
+    assert route_completion_kwargs(
+        "Google", "gemini-test-model", _MSGS)["model"] == "vertex_ai/gemini-test-model"
+    monkeypatch.setenv("GEMINI_API_KEY", "env-key")
+    assert route_completion_kwargs(
+        "Google", "gemini-test-model", _MSGS)["model"] == "gemini/gemini-test-model"
+    assert route_completion_kwargs(
+        "Google", "gemini-test-model", _MSGS,
+        auth_mode="gcloud")["model"] == "vertex_ai/gemini-test-model"
+
+
+def test_route_kwargs_google_argument_key(_no_gemini_env):
+    from core.llm_params import route_completion_kwargs
+    kwargs = route_completion_kwargs("google", "gemini-test-model", _MSGS,
+                                     api_key="k")
+    assert kwargs["model"] == "gemini/gemini-test-model"
+    assert kwargs["api_key"] == "k"

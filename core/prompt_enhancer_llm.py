@@ -10,7 +10,7 @@ from pathlib import Path
 
 from core.prompt_enhancer import PromptEnhancer, EnhancementLevel
 from core.llm_models import resolve_model
-from core.llm_params import validate_params
+from core.llm_params import normalize_provider, route_completion_kwargs
 from core.llm_parsing import LLMResponseParser
 
 
@@ -134,10 +134,14 @@ class PromptEnhancerLLM:
             return response
 
         except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse LLM response as JSON: {e}")
+            self.logger.error(
+                f"Failed to parse LLM response as JSON (provider={actual_llm_provider}, "
+                f"model={model}): {e}; using the non-LLM fallback")
             return self._create_fallback_response(prompt, provider, enhancement_level)
         except Exception as e:
-            self.logger.error(f"Failed to enhance prompt with LLM: {e}")
+            self.logger.error(
+                f"Failed to enhance prompt with LLM (provider={actual_llm_provider}, "
+                f"model={model}): {type(e).__name__}: {e}; using the non-LLM fallback")
             return self._create_fallback_response(prompt, provider, enhancement_level)
 
     def _call_with_llm(self, provider: str, model: Optional[str],
@@ -155,40 +159,30 @@ class PromptEnhancerLLM:
         Returns:
             Parsed JSON response from LLM
         """
-        # Prepare model identifier
-        if provider == 'google':
+        # The provider may be a display name ("Anthropic", "Google", "LM Studio")
+        provider_id = normalize_provider(provider)
+        if provider_id == 'gemini':
             model_id = model or resolve_model('google', 'flash', static_default='gemini-2.0-flash-exp')
-        elif provider == 'openai':
-            model_id = model or resolve_model('openai', 'gpt-mini', static_default='gpt-4o-mini')
-        elif provider == 'anthropic':
+        elif provider_id == 'anthropic':
             model_id = model or resolve_model('anthropic', 'haiku', static_default='claude-3-haiku-20240307')
         else:
             model_id = model or resolve_model('openai', 'gpt-mini', static_default='gpt-4o-mini')
 
-        # Add the chameleon_llm route prefix if needed
-        provider_prefixes = {
-            'google': 'gemini/',
-            'anthropic': 'anthropic/',
-        }
-
-        if provider in provider_prefixes and not model_id.startswith(provider_prefixes[provider]):
-            model_id = f"{provider_prefixes[provider]}{model_id}"
-
-        # Validate params against what this provider/model actually accepts
-        # (handles max_tokens vs max_completion_tokens renaming, clamping, drops).
-        param_kwargs, _ = validate_params(
-            provider, model_id,
-            {"temperature": temperature, "max_tokens": max_tokens},
-        )
-
-        kwargs = {
-            "model": model_id,
-            "messages": [
+        # Route prefix (anthropic/, gemini/ or vertex_ai/, ollama/, LM Studio
+        # endpoint) and per-model params (max_tokens vs max_completion_tokens,
+        # clamping, drops) are built centrally. API keys reach the adapters
+        # through the environment UnifiedLLMProvider configured.
+        kwargs = route_completion_kwargs(
+            provider_id, model_id,
+            [
                 {"role": "system", "content": self.enhancer.SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt}
             ],
-            **param_kwargs
-        }
+            {"temperature": temperature, "max_tokens": max_tokens},
+            api_base=(getattr(self.llm_provider, 'lmstudio_base', None)
+                      if provider_id == 'lmstudio' else None),
+        )
+        model_id = kwargs["model"]
 
         # Check if LLM logging is enabled
         from core.config import ConfigManager

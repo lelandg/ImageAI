@@ -133,12 +133,10 @@ Rules:
         else:
             os.environ['OLLAMA_API_BASE'] = 'http://localhost:11434'
 
-        # LM Studio endpoint
-        if 'lmstudio_endpoint' in self.config and self.config['lmstudio_endpoint']:
-            os.environ['OPENAI_API_BASE'] = self.config['lmstudio_endpoint']  # LM Studio uses OpenAI-compatible API
-        else:
-            # Default LM Studio endpoint
-            pass  # Only set if explicitly provided
+        # LM Studio endpoint: kept on the object and passed as api_base for
+        # LM Studio calls only. Setting OPENAI_API_BASE process-wide would
+        # also redirect every cloud OpenAI call to the local server.
+        self.lmstudio_base = self.config.get('lmstudio_endpoint') or None
 
     def generate(
         self,
@@ -190,7 +188,10 @@ Rules:
 
         try:
             # Validate params against what this provider/model actually accepts.
-            provider_id = infer_provider_from_model(model)
+            # With an LM Studio endpoint configured, an id that names no cloud
+            # model family (e.g. "qwen3-8b") is an LM Studio model.
+            provider_id = infer_provider_from_model(
+                model, default='lmstudio' if self.lmstudio_base else 'openai')
             # build_completion_kwargs adds the route prefix a bare Claude or
             # Gemini id needs (chameleon_llm never guesses a provider).
             provider_key = self.config.get(
@@ -205,6 +206,7 @@ Rules:
                 ],
                 {"temperature": temperature, "max_tokens": 4096},
                 api_key=provider_key or None,
+                api_base=self.lmstudio_base if provider_id == 'lmstudio' else None,
                 auth_mode=('api-key' if provider_id == 'gemini' and (
                     provider_key or os.environ.get('GEMINI_API_KEY')
                     or os.environ.get('GOOGLE_API_KEY')) else None),

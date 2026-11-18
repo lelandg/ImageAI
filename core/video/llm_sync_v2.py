@@ -179,23 +179,19 @@ class LLMSyncAssistant:
             import time
             api_start = time.time()
             
-            model_id = self.model
-
-            from core.llm_params import validate_params
-            param_kwargs, _ = validate_params(
-                'openai', model_id,
-                {'temperature': 0.1,  # Very low temperature for consistent timing
-                 'response_format': {"type": "json_object"}})
-
-            self.logger.info(f"Making LLM API call with model: {model_id}")
-            response = self.llm_provider.llm.completion(
-                model=model_id,
-                messages=[
+            from core.llm_params import route_completion_kwargs
+            completion_kwargs = route_completion_kwargs(
+                'openai', self.model,
+                [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                **param_kwargs
-            )
+                {'temperature': 0.1,  # Very low temperature for consistent timing
+                 'response_format': {"type": "json_object"}})
+            model_id = completion_kwargs["model"]
+
+            self.logger.info(f"Making LLM API call with model: {model_id}")
+            response = self.llm_provider.llm.completion(**completion_kwargs)
             
             api_elapsed = time.time() - api_start
             self.logger.info(f"LLM API call completed in {api_elapsed:.1f} seconds")
@@ -404,27 +400,20 @@ class LLMSyncAssistant:
             import time
             api_start = time.time()
 
-            # Route via the canonical provider prefix (chameleon_llm: 'anthropic/<model>')
-            from core.llm_models import get_provider_prefix
-            from core.llm_params import validate_params
-
-            prefix = get_provider_prefix('anthropic')
-            model_id = f"{prefix}{self.model}" if prefix else self.model
-
-            param_kwargs, _ = validate_params(
+            # Route prefix ('anthropic/<model>') and params built centrally
+            from core.llm_params import route_completion_kwargs
+            completion_kwargs = route_completion_kwargs(
                 'anthropic', self.model,
-                {'temperature': 0.1,  # Low temperature for consistent timing
-                 'max_tokens': 4000})
-
-            self.logger.info(f"Making LLM API call with model: {model_id}")
-            response = self.llm_provider.llm.completion(
-                model=model_id,
-                messages=[
+                [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                **param_kwargs
-            )
+                {'temperature': 0.1,  # Low temperature for consistent timing
+                 'max_tokens': 4000})
+            model_id = completion_kwargs["model"]
+
+            self.logger.info(f"Making LLM API call with model: {model_id}")
+            response = self.llm_provider.llm.completion(**completion_kwargs)
 
             api_elapsed = time.time() - api_start
             self.logger.info(f"LLM API call completed in {api_elapsed:.1f} seconds")
@@ -646,26 +635,20 @@ class LLMSyncAssistant:
             import time
             api_start = time.time()
             
-            # Use gemini prefix
-            from core.llm_models import get_provider_prefix
-            from core.llm_params import validate_params
-
-            prefix = get_provider_prefix('gemini')
-            model_id = f"{prefix}{self.model}" if prefix else self.model
-
-            param_kwargs, _ = validate_params(
+            # 'gemini/' when a key is configured (UnifiedLLMProvider puts it
+            # in GEMINI_API_KEY), otherwise 'vertex_ai/' (Google Cloud login)
+            from core.llm_params import route_completion_kwargs
+            completion_kwargs = route_completion_kwargs(
                 'gemini', self.model,
-                {'temperature': 0.1})  # Low temperature for consistent timing
-
-            self.logger.info(f"Making LLM API call with model: {model_id}")
-            response = self.llm_provider.llm.completion(
-                model=model_id,
-                messages=[
+                [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                **param_kwargs
-            )
+                {'temperature': 0.1})  # Low temperature for consistent timing
+            model_id = completion_kwargs["model"]
+
+            self.logger.info(f"Making LLM API call with model: {model_id}")
+            response = self.llm_provider.llm.completion(**completion_kwargs)
             
             api_elapsed = time.time() - api_start
             self.logger.info(f"LLM API call completed in {api_elapsed:.1f} seconds")

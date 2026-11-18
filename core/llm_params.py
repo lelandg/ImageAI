@@ -22,6 +22,7 @@ model"). The rules below are verified by the live boundary tests in
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -540,8 +541,40 @@ def build_completion_kwargs(
 
     kwargs["model"] = routed_model
     kwargs["messages"] = messages
-    if api_key:
+    # The vertex_ai route signs in with the Google Cloud login; a stored API
+    # key would only be dropped (with a warning) by the adapter.
+    if api_key and not routed_model.startswith("vertex_ai/"):
         kwargs["api_key"] = api_key
     if api_base:
         kwargs["api_base"] = api_base
     return kwargs
+
+
+def route_completion_kwargs(
+    provider: str,
+    model: str,
+    messages: List[Dict[str, Any]],
+    params: "LLMParams | Dict[str, Any] | None" = None,
+    *,
+    api_key: Optional[str] = None,
+    api_base: Optional[str] = None,
+    auth_mode: Optional[str] = None,
+    on_warning: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """:func:`build_completion_kwargs` for callers that hold a provider alias
+    or display name ("Google", "Anthropic", "LM Studio") and may rely on a
+    Gemini key in the environment.
+
+    Without an explicit ``auth_mode``, a Gemini model uses the API-key route
+    when a key is configured (``api_key`` or ``GEMINI_API_KEY`` /
+    ``GOOGLE_API_KEY``), otherwise the Vertex AI (Google Cloud login) route.
+    """
+    provider_id = normalize_provider(provider)
+    if provider_id == "gemini" and not auth_mode:
+        has_key = bool(api_key or os.environ.get("GEMINI_API_KEY")
+                       or os.environ.get("GOOGLE_API_KEY"))
+        auth_mode = "api-key" if has_key else "gcloud"
+    return build_completion_kwargs(
+        provider_id, model, messages, params,
+        api_key=api_key or None, api_base=api_base, auth_mode=auth_mode,
+        on_warning=on_warning)

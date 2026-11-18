@@ -40,7 +40,8 @@ except ImportError:
 from core import chameleon_llm
 from core.prompt_data_loader import PromptDataLoader
 from core.config import ConfigManager
-from core.llm_params import normalize_provider, strip_route_prefix
+from core.llm_params import (build_completion_kwargs, infer_provider_from_model,
+                             normalize_provider, strip_route_prefix)
 
 # Setup logging to both file and console
 log_filename = f"generate_tags_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -254,17 +255,18 @@ class TagGenerator:
                 # GPT-5 and O1 models require temperature=1.0
                 temperature = 1.0 if any(x in self.model.lower() for x in ["gpt-5", "o1", "o3"]) else 0.3
 
-                completion_params = {
-                    "model": self.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": temperature,
-                    "max_tokens": 500
-                }
-
-                # The Vertex AI route authenticates with the Google Cloud
-                # login (ADC) and ignores api_key, so only other routes get one.
-                if not self.model.startswith("vertex_ai/"):
-                    completion_params["api_key"] = self.api_key
+                # self.model already carries its route (route_model), so the
+                # provider is read from it; params are corralled per model
+                # (GPT-5 temperature lock, max_tokens -> max_completion_tokens).
+                # The vertex_ai route signs in with the Google Cloud login, so
+                # build_completion_kwargs gives it no api_key.
+                completion_params = build_completion_kwargs(
+                    infer_provider_from_model(self.model, default=self.provider),
+                    self.model,
+                    [{"role": "user", "content": prompt}],
+                    {"temperature": temperature, "max_tokens": 500},
+                    api_key=self.api_key,
+                )
 
                 # Add vertex_project for Vertex AI models
                 if self.model.startswith("vertex_ai/"):

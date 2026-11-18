@@ -113,3 +113,36 @@ def test_google_alias_uses_api_key_route_when_key_set(completion, gemini_key, si
 def test_google_alias_uses_vertex_route_without_key(completion, no_gemini_key, site):
     site("google", "gemini-test-model")
     assert completion.call_args.kwargs["model"] == "vertex_ai/gemini-test-model"
+
+
+# --- I5b: an LM Studio endpoint stays on the object, never in OPENAI_API_BASE -
+
+@pytest.fixture
+def no_openai_base(monkeypatch):
+    # set-then-delete so monkeypatch also undoes a value the app writes
+    monkeypatch.setenv("OPENAI_API_BASE", "x")
+    monkeypatch.delenv("OPENAI_API_BASE")
+
+
+def test_lyrics_lmstudio_endpoint_not_set_process_wide(completion, no_openai_base):
+    import os
+    LyricsToPromptsGenerator({"lmstudio_endpoint": "http://lm-host:1234/v1"})
+    assert "OPENAI_API_BASE" not in os.environ
+
+
+def test_lyrics_local_model_goes_to_configured_lmstudio(completion, no_openai_base):
+    completion.return_value = _fake_response('{"prompts": []}')
+    gen = LyricsToPromptsGenerator({"lmstudio_endpoint": "http://lm-host:1234/v1"})
+    gen.generate(["line one"], model="local-test-model")
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == "local-test-model"
+    assert kwargs["api_base"] == "http://lm-host:1234/v1"
+
+
+def test_lyrics_cloud_model_ignores_lmstudio_endpoint(completion, no_openai_base):
+    completion.return_value = _fake_response('{"prompts": []}')
+    gen = LyricsToPromptsGenerator({"lmstudio_endpoint": "http://lm-host:1234/v1"})
+    gen.generate(["line one"], model="gpt-test-model")
+    kwargs = completion.call_args.kwargs
+    assert kwargs["model"] == "gpt-test-model"
+    assert "api_base" not in kwargs
