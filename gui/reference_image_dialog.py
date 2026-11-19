@@ -327,7 +327,11 @@ class ImageAnalysisWorker(QObject):
             if provider_lower == "openai":
                 api_config['openai_api_key'] = self.api_key
             elif provider_lower in ["google", "gemini"]:
-                api_config['google_api_key'] = self.api_key
+                # Key and auth mode travel together (the key is dropped with
+                # Google Cloud login); the dialog read both from one config.
+                from core.llm_params import google_provider_part
+                api_config.update(google_provider_part(
+                    self.auth_mode, self.api_key, None))
             elif provider_lower in ["claude", "anthropic"]:
                 api_config['anthropic_api_key'] = self.api_key
 

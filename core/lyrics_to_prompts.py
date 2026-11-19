@@ -7,11 +7,14 @@ Based on the Lyrics-to-Image-Prompt-Guide.md specification.
 
 import json
 import logging
+import os
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 
 from core.llm_models import resolve_model
-from core.llm_params import infer_provider_from_model, validate_params
+from core import chameleon_llm
+from core.llm_params import (build_completion_kwargs, google_credentials,
+                             infer_provider_from_model)
 
 logger = logging.getLogger(__name__)
 console = logging.getLogger("console")
@@ -55,7 +58,7 @@ class LyricsToPromptsGenerator:
     """
     Generates image prompts from lyrics using LLMs.
 
-    Supports multiple LLM providers through LiteLLM:
+    Supports multiple LLM providers through chameleon_llm:
     - OpenAI (GPT-5, GPT-4)
     - Google (Gemini)
     - Anthropic (Claude)
@@ -90,27 +93,13 @@ Rules:
             config: Configuration dictionary with API keys
         """
         self.config = config or {}
-        self.litellm = None
-        self._setup_litellm()
+        self.llm = chameleon_llm
+        logger.info("chameleon_llm initialized for lyrics-to-prompts")
+        console.info("✅ LLM client initialized")
         self._setup_providers()
 
-    def _setup_litellm(self):
-        """Set up LiteLLM if available"""
-        try:
-            import litellm
-            self.litellm = litellm
-            self.litellm.drop_params = True
-            logger.info("LiteLLM initialized for lyrics-to-prompts")
-            console.info("✅ LiteLLM initialized")
-        except ImportError:
-            logger.warning("LiteLLM not installed. Install with: pip install litellm")
-            console.error("❌ LiteLLM not installed. Install with: pip install litellm")
-
     def _setup_providers(self):
-        """Set up API keys as environment variables for LiteLLM"""
-        if not self.litellm:
-            return
-
+        """Set up API keys as environment variables for chameleon_llm"""
         import os
 
         logger.debug(f"Setting up LLM providers with config keys: {list(self.config.keys())}")
@@ -131,11 +120,23 @@ Rules:
         else:
             logger.debug("No Anthropic API key available")
 
-        # Google Gemini
-        if 'google_api_key' in self.config and self.config['google_api_key']:
-            os.environ['GEMINI_API_KEY'] = self.config['google_api_key']
+        # Google Gemini. The key, auth mode and project stay on this object
+        # and travel with every request; nothing is written to GEMINI_API_KEY,
+        # so two objects with different Google settings cannot change each
+        # other's routing. With Google Cloud login ("gcloud") the configured
+        # Google value is an OAuth access token, not an API key: it is never
+        # sent, and Gemini models take vertex_ai/.
+        # A config that names an auth mode supplies its own key. Only a
+        # config with no auth mode has the mode, and in API-key mode the key,
+        # read once from Settings.
+        (self.google_auth_mode, self.google_api_key,
+         self.vertex_project) = google_credentials(self.config)
+        if self.google_api_key:
             logger.info("Google Gemini API key configured")
             console.info("✅ Google Gemini API key configured")
+        elif self.google_auth_mode == 'gcloud':
+            logger.info("Google Cloud login configured (Vertex AI)")
+            console.info("✅ Google Cloud login configured (Vertex AI)")
         else:
             logger.debug("No Google API key available")
 
@@ -145,12 +146,10 @@ Rules:
         else:
             os.environ['OLLAMA_API_BASE'] = 'http://localhost:11434'
 
-        # LM Studio endpoint
-        if 'lmstudio_endpoint' in self.config and self.config['lmstudio_endpoint']:
-            os.environ['OPENAI_API_BASE'] = self.config['lmstudio_endpoint']  # LM Studio uses OpenAI-compatible API
-        else:
-            # Default LM Studio endpoint
-            pass  # Only set if explicitly provided
+        # LM Studio endpoint: kept on the object and passed as api_base for
+        # LM Studio calls only. Setting OPENAI_API_BASE process-wide would
+        # also redirect every cloud OpenAI call to the local server.
+        self.lmstudio_base = self.config.get('lmstudio_endpoint') or None
 
     def generate(
         self,
@@ -177,11 +176,6 @@ Rules:
         Returns:
             LyricsToPromptsResult with generated prompts (one per input lyric line)
         """
-        if not self.litellm:
-            error = "LiteLLM not available"
-            logger.error(error)
-            return LyricsToPromptsResult(prompts=[], raw_response="", success=False, error=error)
-
         if not lyrics:
             error = "No lyrics provided"
             logger.error(error)
@@ -207,22 +201,39 @@ Rules:
 
         try:
             # Validate params against what this provider/model actually accepts.
-            provider_id = infer_provider_from_model(model)
-            param_kwargs, _ = validate_params(
+            # With an LM Studio endpoint configured, an id that names no cloud
+            # model family (e.g. "qwen3-8b") is an LM Studio model.
+            provider_id = infer_provider_from_model(
+                model, default='lmstudio' if self.lmstudio_base else 'openai')
+            # build_completion_kwargs adds the route prefix a bare Claude or
+            # Gemini id needs (chameleon_llm never guesses a provider).
+            provider_key = self.config.get(
+                {"openai": "openai_api_key", "anthropic": "anthropic_api_key",
+                 "gemini": "google_api_key"}.get(provider_id, "")
+            )
+            if provider_id == 'gemini':
+                # This object's own key; None with Google Cloud login (the
+                # configured value is then an access token, not an API key).
+                provider_key = self.google_api_key
+            kwargs = build_completion_kwargs(
                 provider_id, model,
+                [
+                    {"role": "system", "content": self.SYSTEM_PROMPT},
+                    {"role": "user", "content": user_prompt}
+                ],
                 {"temperature": temperature, "max_tokens": 4096},
+                api_key=provider_key or None,
+                api_base=self.lmstudio_base if provider_id == 'lmstudio' else None,
+                # Always explicit for Gemini: API-key mode stays on gemini/
+                # even without a key; only Google Cloud login uses Vertex.
+                auth_mode=(self.google_auth_mode if provider_id == 'gemini'
+                           else None),
+                vertex_project=self.vertex_project,
                 on_warning=console.warning,
             )
 
             # Call LLM
-            response = self.litellm.completion(
-                model=model,
-                messages=[
-                    {"role": "system", "content": self.SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt}
-                ],
-                **param_kwargs
-            )
+            response = self.llm.completion(**kwargs)
 
             raw_content = response.choices[0].message.content
             logger.debug(f"Raw LLM response: {raw_content[:200]}...")

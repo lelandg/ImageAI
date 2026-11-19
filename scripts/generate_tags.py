@@ -14,7 +14,8 @@ Options:
     --test          Test mode: only process first 10 items from each category
     --limit N       Process only N items from each category (default: all)
     --provider      LLM provider to use (default: google, options: google, openai)
-    --model         Model to use (default: gemini-2.0-flash-exp for google)
+    --model         Model to use (default: gemini/gemini-2.0-flash-exp for google;
+                    a bare id gets the provider's route automatically)
 """
 
 import json
@@ -36,14 +37,11 @@ except ImportError:
     print("Error: tqdm not installed. Install with: pip install tqdm")
     sys.exit(1)
 
-try:
-    import litellm
-except ImportError:
-    print("Error: litellm not installed. Install with: pip install litellm")
-    sys.exit(1)
-
+from core import chameleon_llm
 from core.prompt_data_loader import PromptDataLoader
 from core.config import ConfigManager
+from core.llm_params import (build_completion_kwargs, infer_provider_from_model,
+                             normalize_provider, strip_route_prefix)
 
 # Setup logging to both file and console
 log_filename = f"generate_tags_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -59,9 +57,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-# Disable litellm's verbose logging
-litellm.set_verbose = False
 
 # Global flag for clean shutdown
 shutdown_requested = False
@@ -81,6 +76,27 @@ if hasattr(signal, 'SIGTERM'):
     signal.signal(signal.SIGTERM, signal_handler)
 
 
+def route_model(provider: str, model: str, auth_mode: Optional[str] = None) -> str:
+    """Give a bare model id the route chameleon_llm needs for ``provider``.
+
+    The package never guesses a provider from a model name, so a bare
+    ``--model`` override would otherwise go to OpenAI. An id that already
+    carries a route prefix, and any OpenAI id, is returned unchanged.
+    """
+    if strip_route_prefix(model) != model:
+        return model
+    provider_id = normalize_provider(provider)
+    if provider_id == "gemini":
+        if (auth_mode or "").strip().lower() == "gcloud":
+            return f"vertex_ai/{model}"
+        return f"gemini/{model}"
+    if provider_id == "anthropic":
+        return f"anthropic/{model}"
+    if provider_id == "ollama":
+        return f"ollama/{model}"
+    return model
+
+
 class TagGenerator:
     """Generates semantic tags and metadata for prompt builder items."""
 
@@ -96,7 +112,7 @@ class TagGenerator:
 
         # Set default models by provider
         if model:
-            self.model = model
+            self.model = route_model(provider, model, self.config.get_auth_mode("google"))
         elif provider == "google":
             # Check auth mode to determine which endpoint to use
             auth_mode = self.config.get_auth_mode("google")
@@ -239,13 +255,18 @@ class TagGenerator:
                 # GPT-5 and O1 models require temperature=1.0
                 temperature = 1.0 if any(x in self.model.lower() for x in ["gpt-5", "o1", "o3"]) else 0.3
 
-                completion_params = {
-                    "model": self.model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "api_key": self.api_key,
-                    "temperature": temperature,
-                    "max_tokens": 500
-                }
+                # self.model already carries its route (route_model), so the
+                # provider is read from it; params are corralled per model
+                # (GPT-5 temperature lock, max_tokens -> max_completion_tokens).
+                # The vertex_ai route signs in with the Google Cloud login, so
+                # build_completion_kwargs gives it no api_key.
+                completion_params = build_completion_kwargs(
+                    infer_provider_from_model(self.model, default=self.provider),
+                    self.model,
+                    [{"role": "user", "content": prompt}],
+                    {"temperature": temperature, "max_tokens": 500},
+                    api_key=self.api_key,
+                )
 
                 # Add vertex_project for Vertex AI models
                 if self.model.startswith("vertex_ai/"):
@@ -257,7 +278,7 @@ class TagGenerator:
                         logger.warning("No Google Cloud project ID found. Set with: gcloud config set project PROJECT_ID")
 
                 # Call LLM
-                response = litellm.completion(**completion_params)
+                response = chameleon_llm.completion(**completion_params)
 
                 # Extract response
                 content = response.choices[0].message.content.strip()

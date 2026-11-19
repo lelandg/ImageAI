@@ -13,8 +13,6 @@ from pathlib import Path
 
 from core.video.project import Scene, ReferenceImage
 from core.video.prompt_engine import UnifiedLLMProvider, PromptStyle
-from core.llm_models import get_provider_prefix
-from core.llm_params import normalize_provider, validate_params
 import re
 import uuid
 
@@ -359,28 +357,23 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                 self.logger.error("LLM provider not available for Veo batch generation")
                 return None
 
-            import litellm
+            from core import chameleon_llm
 
-            # Prepare the model string (anthropic/gemini need LiteLLM prefixes)
-            provider_id = normalize_provider(provider)
-            prefix = get_provider_prefix(provider_id)
-            model_id = f"{prefix}{model}" if prefix else model
+            # Route and params are built centrally: LM Studio gets its
+            # endpoint (cloud requests never do), Gemini takes gemini/ or
+            # vertex_ai/ by sign-in, and params are corralled per model.
+            llm_kwargs = self.llm_provider.route_kwargs(
+                provider, model,
+                [
+                    {"role": "system", "content": "You are a music video director. Respond only with valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                {"temperature": 0.7, "max_tokens": 3000})
 
             self.logger.info(f"Generating Veo batched prompts with {provider}/{model}...")
             self.logger.info(f"Prompt sent to LLM:\n{'-'*80}\n{prompt}\n{'-'*80}")
 
-            llm_kwargs, _ = validate_params(
-                provider_id, model,
-                {"temperature": 0.7, "max_tokens": 3000}
-            )
-            response = litellm.completion(
-                model=model_id,
-                messages=[
-                    {"role": "system", "content": "You are a music video director. Respond only with valid JSON."},
-                    {"role": "user", "content": prompt}
-                ],
-                **llm_kwargs
-            )
+            response = chameleon_llm.completion(**llm_kwargs)
 
             # Extract response text
             response_text = response.choices[0].message.content
@@ -537,25 +530,20 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                 return None, []
             
             # Call the LLM directly for structured output
-            import litellm
+            from core import chameleon_llm
 
-            # Prepare the model string (anthropic/gemini need LiteLLM prefixes)
-            provider_id = normalize_provider(provider)
-            prefix = get_provider_prefix(provider_id)
-            model_id = f"{prefix}{model}" if prefix else model
-
-            llm_kwargs, _ = validate_params(
-                provider_id, model,
-                {"temperature": 0.7, "max_tokens": 4000}
-            )
-            response = litellm.completion(
-                model=model_id,
-                messages=[
+            # Route and params are built centrally: LM Studio gets its
+            # endpoint (cloud requests never do), Gemini takes gemini/ or
+            # vertex_ai/ by sign-in, and params are corralled per model.
+            llm_kwargs = self.llm_provider.route_kwargs(
+                provider, model,
+                [
                     {"role": "system", "content": "You are a senior film editor. Respond only with valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
-                **llm_kwargs
-            )
+                {"temperature": 0.7, "max_tokens": 4000})
+
+            response = chameleon_llm.completion(**llm_kwargs)
             
             # Extract response text
             response_text = response.choices[0].message.content
@@ -617,25 +605,20 @@ CRITICAL: The video_prompt MUST include explicit time ranges (e.g., "0-3s:", "3-
                 self.logger.error("LLM provider not available")
                 return None, []
             
-            import litellm
+            from core import chameleon_llm
 
-            # Prepare the model string (anthropic/gemini need LiteLLM prefixes)
-            provider_id = normalize_provider(provider)
-            prefix = get_provider_prefix(provider_id)
-            model_id = f"{prefix}{model}" if prefix else model
-
-            llm_kwargs, _ = validate_params(
-                provider_id, model,
-                {"temperature": 0.7, "max_tokens": 4000}
-            )
-            response = litellm.completion(
-                model=model_id,
-                messages=[
+            # Route and params are built centrally: LM Studio gets its
+            # endpoint (cloud requests never do), Gemini takes gemini/ or
+            # vertex_ai/ by sign-in, and params are corralled per model.
+            llm_kwargs = self.llm_provider.route_kwargs(
+                provider, model,
+                [
                     {"role": "system", "content": "You are a music video director. Respond only with valid JSON."},
                     {"role": "user", "content": prompt}
                 ],
-                **llm_kwargs
-            )
+                {"temperature": 0.7, "max_tokens": 4000})
+
+            response = chameleon_llm.completion(**llm_kwargs)
             
             # Extract response text
             response_text = response.choices[0].message.content

@@ -63,6 +63,42 @@ class VideoGenerationThread(QThread):
         except Exception as e:
             self.generation_complete.emit(False, str(e))
     
+    def _google_llm_config(self) -> dict:
+        """Google entries for a chat/LLM provider config, from the generation
+        parameters. The parameters carry the auth mode of the workspace's live
+        config; with Google Cloud login their ``google_api_key`` is an OAuth
+        access token (the video providers use it), which a chat call must not
+        send as an API key, so it is dropped here."""
+        from core.llm_params import google_provider_part
+        return google_provider_part(
+            self.kwargs.get('auth_mode'), self.kwargs.get('google_api_key'),
+            self.kwargs.get('gcloud_project_id'))
+
+    def _style_analysis_credentials(self, provider, config):
+        """``(api_key, google_llm, google_cloud_login)`` for the continuity
+        style analysis.
+
+        The Google key comes from the same snapshot as the auth mode (the
+        generation parameters). ``config`` is a separately loaded
+        ``ConfigManager``: when the saved mode is Google Cloud login its
+        ``get_api_key('google')`` answers with an OAuth access token, which
+        must not be sent as an API key because the live mode says API key.
+        It is asked for a Google key only when the parameters carry no auth
+        mode at all. With Google Cloud login there is no key; the analyzer
+        signs in on Vertex AI."""
+        google_llm = self._google_llm_config()
+        google_cloud_login = (provider == 'google'
+                              and google_llm.get('auth_mode') == 'gcloud')
+        api_key = None
+        if provider == 'google':
+            if not google_cloud_login:
+                api_key = google_llm.get('google_api_key')
+                if not api_key and 'auth_mode' not in google_llm:
+                    api_key = config.get_api_key('google')
+        elif provider == 'openai':
+            api_key = config.get_api_key('openai')
+        return api_key, google_llm, google_cloud_login
+
     def _generate_storyboard(self):
         """Generate storyboard from text"""
         # Implementation moved from original file
@@ -86,7 +122,7 @@ class VideoGenerationThread(QThread):
             llm_config = {
                 'openai_api_key': self.kwargs.get('openai_api_key'),
                 'anthropic_api_key': self.kwargs.get('anthropic_api_key'),
-                'google_api_key': self.kwargs.get('google_api_key'),
+                **self._google_llm_config(),
             }
 
             llm = UnifiedLLMProvider(llm_config)
@@ -175,7 +211,7 @@ class VideoGenerationThread(QThread):
             llm_config = {
                 'openai_api_key': self.kwargs.get('openai_api_key'),
                 'anthropic_api_key': self.kwargs.get('anthropic_api_key'),
-                'google_api_key': self.kwargs.get('google_api_key'),
+                **self._google_llm_config(),
             }
 
             llm = UnifiedLLMProvider(llm_config)
@@ -397,17 +433,16 @@ class VideoGenerationThread(QThread):
                         self.progress_update.emit(progress, f"Analyzing previous frame for continuity...")
 
                         # Get API key for style analysis
-                        llm_api_key = None
-                        if provider == 'google':
-                            llm_api_key = config.get_api_key('google')
-                        elif provider == 'openai':
-                            llm_api_key = config.get_api_key('openai')
+                        llm_api_key, google_llm, google_cloud_login = (
+                            self._style_analysis_credentials(provider, config))
 
-                        if llm_api_key:
+                        if llm_api_key or google_cloud_login:
                             analyzer = StyleAnalyzer(
                                 api_key=llm_api_key,
                                 llm_provider=provider,
-                                llm_model=model
+                                llm_model=model,
+                                auth_mode=google_llm.get('auth_mode'),
+                                vertex_project=google_llm.get('gcloud_project_id')
                             )
 
                             try:

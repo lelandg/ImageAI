@@ -12,6 +12,10 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
 from enum import Enum
 
+from core import chameleon_llm
+from core.llm_params import (build_completion_kwargs, google_auth_settings,
+                             infer_provider_from_model, normalize_provider)
+
 logger = logging.getLogger(__name__)
 
 
@@ -25,7 +29,9 @@ class ContinuityMode(Enum):
 class StyleAnalyzer:
     """Analyzes video frames to extract style and content information for continuity."""
 
-    def __init__(self, api_key: str, llm_provider: str = "google", llm_model: str = None):
+    def __init__(self, api_key: str, llm_provider: str = "google", llm_model: str = None,
+                 *, auth_mode: Optional[str] = None,
+                 vertex_project: Optional[str] = None):
         """
         Initialize style analyzer.
 
@@ -33,10 +39,27 @@ class StyleAnalyzer:
             api_key: API key for the LLM provider
             llm_provider: LLM provider name (google, openai, anthropic)
             llm_model: Specific model to use (optional)
+            auth_mode: Google only: "api-key" or "gcloud" (Google Cloud
+                login). Read from the saved Settings when not given.
+            vertex_project: Google Cloud project for the Vertex route. Read
+                from the saved Settings when not given.
         """
         self.api_key = api_key
         self.llm_provider = llm_provider.lower()
         self.llm_model = llm_model or self._get_default_model()
+        self.auth_mode = "api-key"
+        self.vertex_project = None
+        if self.llm_provider in ("google", "gemini"):
+            # With Google Cloud login the caller's api_key is absent or is an
+            # OAuth access token; neither is a Gemini API key.
+            # Only what the caller gave is passed on: a value it did not give
+            # is read from the saved Settings.
+            given = {}
+            if auth_mode:
+                given["auth_mode"] = auth_mode
+            if vertex_project:
+                given["gcloud_project_id"] = vertex_project
+            self.auth_mode, self.vertex_project = google_auth_settings(given)
 
     def _get_default_model(self) -> str:
         """Get default vision model for the provider (resolved from the registry)."""
@@ -175,42 +198,56 @@ Focus on CONTINUITY - the viewer should feel this is one continuous video."""
             logger.error(f"Image analysis failed: {e}")
             return None
 
+    def _own_key(self, routed_provider: str) -> Optional[str]:
+        """This analyzer's single API key, or None when the request is routed
+        to another provider than the one the key belongs to (a model id such
+        as ``ollama/llava`` under provider "openai"): one provider's key is
+        never handed to another."""
+        api_key = getattr(self, "api_key", None) or None
+        owner = getattr(self, "llm_provider", None)
+        if api_key and owner and normalize_provider(owner) != routed_provider:
+            logger.warning(
+                f"Style analysis: API key for provider '{owner}' not sent; the "
+                f"model id routes the request to '{routed_provider}'")
+            return None
+        return api_key
+
     def _analyze_with_google(self, image_data: bytes, mime_type: str, prompt: str) -> str:
-        """Analyze image using Google Gemini vision API."""
+        """Analyze image using Google Gemini (API key) or Vertex AI (Google
+        Cloud login), through the shared request builder."""
         try:
-            import google.genai as genai
-            from google.genai import types
-
-            # Create client
-            client = genai.Client(api_key=self.api_key)
-
-            # Create content with image
-            content = types.Content(
-                parts=[
-                    types.Part(text=prompt),
-                    types.Part(
-                        inline_data=types.Blob(
-                            mime_type=mime_type,
-                            data=image_data
-                        )
-                    )
-                ]
+            image_base64 = base64.b64encode(image_data).decode('utf-8')
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{image_base64}"
+                            }
+                        }
+                    ]
+                }
+            ]
+            gcloud = getattr(self, "auth_mode", "api-key") == "gcloud"
+            kwargs = build_completion_kwargs(
+                "gemini", self.llm_model, messages,
+                {"temperature": 0.7, "max_tokens": 1000},
+                # Google Cloud login: vertex_ai/ with no key (an access token
+                # is not a Gemini API key). Otherwise gemini/ with the key.
+                api_key=None if gcloud else (self.api_key or None),
+                auth_mode="gcloud" if gcloud else "api-key",
+                vertex_project=getattr(self, "vertex_project", None),
             )
+            logger.info(f"Style analysis request: route={kwargs['model']}")
+            response = chameleon_llm.completion(**kwargs)
 
-            # Generate response
-            response = client.models.generate_content(
-                model=self.llm_model,
-                contents=content,
-                config=types.GenerateContentConfig(
-                    temperature=0.7,
-                    max_output_tokens=1000
-                )
-            )
-
-            if response and response.text:
-                return response.text.strip()
-            else:
-                raise ValueError("Empty response from Google Gemini")
+            text = response.choices[0].message.content if response.choices else ""
+            if text and text.strip():
+                return text.strip()
+            raise ValueError("Empty response from Google Gemini")
 
         except Exception as e:
             logger.error(f"Google Gemini analysis failed: {e}")
@@ -222,58 +259,29 @@ Focus on CONTINUITY - the viewer should feel this is one continuous video."""
             # Encode to base64
             image_base64 = base64.b64encode(image_data).decode('utf-8')
 
-            # Try litellm first for better compatibility
-            try:
-                import litellm
-                litellm.drop_params = True
-
-                response = litellm.completion(
-                    model=self.llm_model,
-                    messages=[
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
                         {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:{mime_type};base64,{image_base64}"
-                                    }
-                                }
-                            ]
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:{mime_type};base64,{image_base64}"
+                            }
                         }
-                    ],
-                    temperature=0.7,
-                    api_key=self.api_key
-                )
+                    ]
+                }
+            ]
+            routed_provider = infer_provider_from_model(self.llm_model)
+            kwargs = build_completion_kwargs(
+                routed_provider, self.llm_model,
+                messages, {"temperature": 0.7},
+                api_key=self._own_key(routed_provider)
+            )
+            response = chameleon_llm.completion(**kwargs)
 
-                return response.choices[0].message.content.strip()
-
-            except ImportError:
-                # Fall back to direct OpenAI SDK
-                import openai
-                client = openai.OpenAI(api_key=self.api_key)
-
-                response = client.chat.completions.create(
-                    model=self.llm_model,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url",
-                                    "image_url": {
-                                        "url": f"data:{mime_type};base64,{image_base64}"
-                                    }
-                                }
-                            ]
-                        }
-                    ],
-                    temperature=0.7
-                )
-
-                return response.choices[0].message.content.strip()
+            return response.choices[0].message.content.strip()
 
         except Exception as e:
             logger.error(f"OpenAI analysis failed: {e}")
@@ -290,62 +298,31 @@ Focus on CONTINUITY - the viewer should feel this is one continuous video."""
             if media_type == "jpg":
                 media_type = "jpeg"  # Claude uses "jpeg" not "jpg"
 
-            # Try litellm first
-            try:
-                import litellm
-                litellm.drop_params = True
-
-                response = litellm.completion(
-                    model=self.llm_model,
-                    messages=[
+            messages = [
+                {
+                    "role": "user",
+                    "content": [
                         {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": mime_type,
-                                        "data": image_base64
-                                    }
-                                },
-                                {"type": "text", "text": prompt}
-                            ]
-                        }
-                    ],
-                    temperature=0.7,
-                    api_key=self.api_key
-                )
-
-                return response.choices[0].message.content.strip()
-
-            except ImportError:
-                # Fall back to direct Anthropic SDK
-                import anthropic
-                client = anthropic.Anthropic(api_key=self.api_key)
-
-                response = client.messages.create(
-                    model=self.llm_model,
-                    max_tokens=1000,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": mime_type,
-                                        "data": image_base64
-                                    }
-                                },
-                                {"type": "text", "text": prompt}
-                            ]
-                        }
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": mime_type,
+                                "data": image_base64
+                            }
+                        },
+                        {"type": "text", "text": prompt}
                     ]
-                )
+                }
+            ]
+            routed_provider = infer_provider_from_model(self.llm_model)
+            kwargs = build_completion_kwargs(
+                routed_provider, self.llm_model,
+                messages, {"temperature": 0.7},
+                api_key=self._own_key(routed_provider)
+            )
+            response = chameleon_llm.completion(**kwargs)
 
-                return response.content[0].text.strip()
+            return response.choices[0].message.content.strip()
 
         except Exception as e:
             logger.error(f"Anthropic analysis failed: {e}")

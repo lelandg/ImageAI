@@ -10,7 +10,6 @@ fsspec>=2026.9.0  # CVE-2026-104851 (via huggingface-hub)
 idna>=3.20
 jaraco.context>=6.1.2
 jinja2>=3.1.6  # 10 advisories; 3.1.6 is the lowest clearing GHSA-cpwx-vrp4-4pq7
-litellm>=1.101.3,<1.102  # Later minor lines contain separately affected releases
 multidict>=6.9.1
 nltk>=3.10.4
 pillow>=13.0.0
@@ -52,19 +51,20 @@ protobuf>=5.29.6,<6
 #                  nothing. Not in this repo's resolved tree either.
 #   opentelemetry-api
 #                  1.9.1 -> 1.45.1 (GHSA-xcq7-p3pf-p88h) is the lowest clearing
-#                  release, but it arrives transitively under the version-boxed
-#                  litellm>=1.101.3,<1.102 line, so the floor needs a resolve
-#                  test before it is safe to assert.
+#                  release, but it arrives transitively through the AI SDKs, so
+#                  the floor needs a resolve test before it is safe to assert.
 # httpx2 / httpcore2 are DIRECT requirements here, deliberately, and
 # `pip install -r` of this file DOES install them. That is the accepted cost of
 # the only placement that works -- it is not an oversight, so do not "move them
 # to a constraints file" and do not collapse them into plain httpx.
 #
-# WHY THEY ARE NEEDED: litellm >= 1.103.0 declares `httpx2<3,>=2.5.0` under its
-# `proxy` and `mcp` EXTRAS, httpx2 pulls a matching httpcore2, and
-# osv-scanner's resolver expands those extras. Without these floors it resolves
-# httpx2 2.9.1 / httpcore2 2.9.1 and reports their advisories. Removing them
-# turned this repo's scan from green to 6 findings (3 High) -- 2026-11-01.
+# WHY THEY ARE NEEDED: the openai and anthropic SDKs require `httpx2<3`
+# (openai requires httpx2>=2.12.0), httpx2 pulls a matching httpcore2, and google-genai
+# offers an `httpx2` extra that osv-scanner's resolver expands. Without these
+# floors the resolver can pick an older httpx2 / httpcore2 and report their
+# advisories. Re-checked 2026-11-18 after the old LLM wrapper was removed: a
+# resolve of requirements.txt with the pins removed still installs httpx2 and
+# httpcore2 through openai and anthropic, so the pins stay.
 #
 # WHY THEY CANNOT BE MOVED: osv-scanner scans each file as its own target and
 # does NOT apply a `-c` constraints file to the requirements file that includes
@@ -75,7 +75,7 @@ protobuf>=5.29.6,<6
 # returning. Restoring the direct pair returned it to 114.
 #
 # Plain httpx is a SEPARATE distribution (latest 0.28.1) with only 2
-# advisories, both fixed in 0.23.0, already satisfied via litellm's own
-# `httpx>=0.28.0`.
+# advisories, both fixed in 0.23.0, already satisfied by the 0.28.x release the
+# AI SDKs resolve to.
 httpcore2>=2.16.0  # PYSEC-2026-3844, GHSA-7mj9-2mp8-4m2p (httpx 2.x line)
 httpx2>=2.16.0  # 10 advisories; 2.12.0 is the lowest clearing GHSA-8xx6-hgc6-gc2m

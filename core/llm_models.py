@@ -86,7 +86,7 @@ class LLMProvider:
     enabled_by_default: bool = True
     requires_api_key: bool = True
     endpoint: Optional[str] = None
-    prefix: str = ''  # LiteLLM prefix (e.g., 'gemini/', 'ollama/')
+    prefix: str = ''  # route prefix (e.g., 'gemini/', 'ollama/')
 
 
 # Define all LLM providers and their models
@@ -130,7 +130,7 @@ LLM_PROVIDERS = {
         ]),
         enabled_by_default=True,
         requires_api_key=True,
-        prefix='anthropic/'  # LiteLLM requires "anthropic/" prefix
+        prefix='anthropic/'  # route prefix required for Anthropic models
     ),
 
     'gemini': LLMProvider(
@@ -237,13 +237,13 @@ def get_provider_config(provider_id: str) -> Optional[LLMProvider]:
 
 def get_provider_prefix(provider_id: str) -> str:
     """
-    Get LiteLLM prefix for a provider.
+    Get the route prefix for a provider.
 
     Args:
         provider_id: Provider identifier
 
     Returns:
-        LiteLLM prefix string (e.g., 'gemini/', 'ollama/')
+        Route prefix string (e.g., 'gemini/', 'ollama/')
     """
     provider_id_lower = provider_id.lower()
     return LLM_PROVIDERS[provider_id_lower].prefix if provider_id_lower in LLM_PROVIDERS else ''

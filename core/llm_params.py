@@ -2,7 +2,7 @@
 Unified LLM parameter population, validation, and corralling.
 
 Single source of truth for which chat-completion parameters each provider/model
-accepts. Every LiteLLM call site builds its kwargs through this module instead
+accepts. Every completion call site builds its kwargs through this module instead
 of hand-rolling ``temperature``/``max_tokens`` dicts and per-model hacks.
 
 Contract (see Plans/LLM-Params-Standardization.md):
@@ -13,15 +13,16 @@ Contract (see Plans/LLM-Params-Standardization.md):
     nonsense values, unknown reasoning effort), or for *any* correction when
     ``strict=True``.
 
-Why curated rules instead of LiteLLM's tables: LiteLLM 1.89.0 claims
-``temperature`` is supported on ``anthropic/claude-opus-5``, but the live API
-rejects it with a 400 ("`temperature` is deprecated for this model"), so
-``litellm.drop_params`` does not protect us. The rules below are verified by
-the live boundary tests in ``tests/test_live_llm_params.py``.
+Why curated rules: third-party capability tables lag the live APIs (one
+table claimed ``temperature`` was supported on ``anthropic/claude-opus-5``,
+but the live API rejects it with a 400, "`temperature` is deprecated for this
+model"). The rules below are verified by the live boundary tests in
+``tests/test_live_llm_params.py``.
 """
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -31,7 +32,7 @@ from core.model_registry import FALLBACK_PATH
 
 logger = logging.getLogger(__name__)
 
-# Known LiteLLM route prefixes that may arrive glued onto a model id.
+# Known route prefixes that may arrive glued onto a model id.
 _ROUTE_PREFIXES = (
     "anthropic/", "gemini/", "vertex_ai/", "openai/", "ollama/", "ollama_chat/",
     "lm_studio/", "azure/", "bedrock/",
@@ -122,11 +123,13 @@ class _FamilyRule:
 
 
 _FAMILY_RULES: List[_FamilyRule] = [
-    # Anthropic — Claude Opus 4.7/4.8, Opus/Sonnet 5, Fable/Mythos: sampling
-    # params removed entirely (400 if sent).
+    # Anthropic — Claude Opus 4.7/4.8, every Opus/Sonnet/Haiku of generation
+    # 5 and later, Fable/Mythos: sampling params removed entirely (400 if
+    # sent; live: "temperature is deprecated for this model" on Haiku 5).
+    # claude-haiku-4-5-*, claude-opus-4-2025* and claude-3-* do not match.
     _FamilyRule(
         provider="anthropic",
-        pattern=r"^claude-(opus-4-[78]|opus-5|sonnet-5|fable|mythos)",
+        pattern=r"^claude-(opus-4-[78]|(?:opus|sonnet|haiku)-(?:[5-9]|\d{2,})|fable|mythos)",
         rules=ModelParamRules(
             temperature_range=None,
             top_p_supported=False,
@@ -135,6 +138,36 @@ _FAMILY_RULES: List[_FamilyRule] = [
             supports_reasoning_effort=False,
             supports_seed=False,
             description="Claude 5-line (no sampling params)",
+        ),
+    ),
+    # Anthropic — dated releases the model registry snapshot has no output
+    # ceiling for. Limits are Anthropic's published per-model maximum output.
+    _FamilyRule(
+        provider="anthropic",
+        pattern=r"^claude-opus-4-2025",
+        rules=ModelParamRules(
+            temperature_range=(0.0, 1.0),
+            top_p_supported=True,
+            top_k_supported=True,
+            temp_top_p_exclusive=True,
+            tokens_param="max_tokens",
+            max_output_tokens=32000,  # unconfirmed (not found in Context7 docs)
+            supports_seed=False,
+            description="Claude Opus 4 (temperature 0-1)",
+        ),
+    ),
+    _FamilyRule(
+        provider="anthropic",
+        pattern=r"^claude-3-7-sonnet",
+        rules=ModelParamRules(
+            temperature_range=(0.0, 1.0),
+            top_p_supported=True,
+            top_k_supported=True,
+            temp_top_p_exclusive=True,
+            tokens_param="max_tokens",
+            max_output_tokens=64000,  # unconfirmed (not found in Context7 docs)
+            supports_seed=False,
+            description="Claude 3.7 Sonnet (temperature 0-1)",
         ),
     ),
     # Anthropic — everything older: temperature 0..1, top_p exclusive with
@@ -152,11 +185,14 @@ _FAMILY_RULES: List[_FamilyRule] = [
             description="Claude 4.x/3.x (temperature 0-1)",
         ),
     ),
-    # OpenAI — reasoning models (gpt-5.x, o-series, chat-latest): temperature
-    # locked to the default, top_p rejected, max_completion_tokens required.
+    # OpenAI — reasoning models (gpt-5 and every later generation, every
+    # o-series number, chat-latest): max_completion_tokens required (the live
+    # API rejects max_tokens for GPT-6), top_p rejected, temperature locked to
+    # the default. The temperature lock is proven for gpt-5; for GPT-6 and
+    # later it is assumed by analogy until the live tier proves it.
     _FamilyRule(
         provider="openai",
-        pattern=r"^(gpt-5|o1|o3|o4|chat-latest)",
+        pattern=r"^(gpt-(?:[5-9]|\d{2,})|o\d|chat-latest)",
         rules=ModelParamRules(
             temperature_range=(1.0, 1.0),
             temperature_fixed=1.0,
@@ -237,7 +273,7 @@ def normalize_provider(provider: str) -> str:
 
 
 def strip_route_prefix(model: str) -> str:
-    """Remove a LiteLLM route prefix ('anthropic/', 'gemini/', ...) if present."""
+    """Remove a route prefix ('anthropic/', 'gemini/', ...) if present."""
     for prefix in _ROUTE_PREFIXES:
         if model.startswith(prefix):
             return model[len(prefix):]
@@ -256,21 +292,31 @@ _PREFIX_TO_PROVIDER = {
 }
 
 
+# Open-weight OpenAI models (gpt-oss-20b, gpt-oss:120b). Local servers host
+# them; the OpenAI API does not, so the name is not evidence of cloud OpenAI.
+_OPEN_WEIGHT_GPT = re.compile(r"^gpt-oss(?:[-:._]|$)")
+
+
 def infer_provider_from_model(model: str, default: str = "openai") -> str:
     """Best-effort provider id from a (possibly prefixed) model string.
 
     For call sites that only receive a model name (e.g. analyze_image).
+    An open-weight ``gpt-oss`` id returns ``default``: it is a local model.
     """
     m = (model or "").strip().lower()
+    bare = strip_route_prefix(m)
+    if _OPEN_WEIGHT_GPT.match(bare) and (bare == m or m.startswith("openai/")):
+        # Local servers list it as "gpt-oss-20b", "gpt-oss:20b" or
+        # "openai/gpt-oss-20b" (publisher name, not a route).
+        return normalize_provider(default)
     for prefix, provider in _PREFIX_TO_PROVIDER.items():
         if m.startswith(prefix):
             return provider
-    bare = strip_route_prefix(m)
     if bare.startswith("claude"):
         return "anthropic"
     if bare.startswith("gemini"):
         return "gemini"
-    if re.match(r"^(gpt|o[134]|chat-latest|davinci)", bare):
+    if re.match(r"^(gpt|o\d|chat-latest|davinci)", bare):
         return "openai"
     return normalize_provider(default)
 
@@ -282,23 +328,11 @@ def _registry_max_output_tokens(model_id: str) -> Optional[int]:
     return None
 
 
-def _litellm_max_output_tokens(provider_id: str, model_id: str) -> Optional[int]:
-    try:
-        import litellm
-        prefix = get_provider_prefix(provider_id)
-        info = litellm.get_model_info(f"{prefix}{model_id}" if prefix else model_id)
-        # Only trust the explicit output cap: in older LiteLLM table entries
-        # 'max_tokens' means the total context window, not the output ceiling.
-        return info.get("max_output_tokens")
-    except Exception:
-        return None
-
-
 def get_param_rules(provider: str, model: str) -> ModelParamRules:
     """Resolve the parameter rules for a provider/model.
 
-    Curated family rules are authoritative; the model registry (then LiteLLM's
-    tables) fill in ``max_output_tokens``. Unknown providers get permissive
+    Curated family rules are authoritative; the model registry fills in
+    ``max_output_tokens`` when a rule does not set one. Unknown providers get permissive
     defaults so local/custom endpoints keep working.
     """
     provider_id = normalize_provider(provider)
@@ -315,10 +349,7 @@ def get_param_rules(provider: str, model: str) -> ModelParamRules:
         rules = ModelParamRules(description=f"unknown provider '{provider_id}' (permissive)")
 
     if rules.max_output_tokens is None:
-        rules.max_output_tokens = (
-            _registry_max_output_tokens(model_id)
-            or _litellm_max_output_tokens(provider_id, model_id)
-        )
+        rules.max_output_tokens = _registry_max_output_tokens(model_id)
     return rules
 
 
@@ -340,7 +371,7 @@ def validate_params(
 ) -> Tuple[Dict[str, Any], List[str]]:
     """Validate and corral chat params for one provider/model.
 
-    Returns ``(litellm_kwargs, warnings)`` where ``litellm_kwargs`` contains
+    Returns ``(kwargs, warnings)`` where ``kwargs`` contains
     only parameters the model accepts (already renamed, clamped, capped).
 
     Corralling (logged + reported via ``on_warning``):
@@ -470,6 +501,12 @@ def validate_params(
     return out, warnings
 
 
+def _is_api_key_mode(auth_mode: str) -> bool:
+    """True for the API-key spellings of the Google auth mode; every other
+    value (gcloud, adc, "Google Cloud Account") means Google Cloud login."""
+    return auth_mode.strip().lower().replace("_", "-").replace(" ", "-") == "api-key"
+
+
 def build_completion_kwargs(
     provider: str,
     model: str,
@@ -479,25 +516,45 @@ def build_completion_kwargs(
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,
     auth_mode: Optional[str] = None,
+    vertex_project: Optional[str] = None,
     strict: bool = False,
     on_warning: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Any]:
-    """Build a complete, validated kwargs dict for ``litellm.completion()``.
+    """Build a complete, validated kwargs dict for ``chameleon_llm.completion()``.
 
     Handles route prefixing per provider (``anthropic/``, ``gemini/`` vs
     ``vertex_ai/`` by auth mode, bare model + ``api_base`` for LM Studio) and
     merges the corralled parameters from :func:`validate_params`.
 
     Gemini routing: ``auth_mode`` ('api-key' -> ``gemini/``, 'gcloud'/'adc' ->
-    ``vertex_ai/``) wins when given; otherwise the presence of ``api_key``
-    decides (present -> Google AI Studio, absent -> Vertex AI/ADC). Callers
-    relying on the ``GEMINI_API_KEY`` env var must pass ``auth_mode='api-key'``.
+    ``vertex_ai/``) wins when given, also over a ``gemini/`` or ``vertex_ai/``
+    prefix already on the model id (the id is re-routed, with a warning), so
+    Google Cloud login never sends a key. Without ``auth_mode`` a Google
+    prefix is honoured, and for a bare id the presence of ``api_key`` decides
+    (present -> Google AI Studio, absent -> Vertex AI/ADC). Callers relying on
+    the ``GEMINI_API_KEY`` env var must pass ``auth_mode='api-key'``.
+
+    ``api_key`` is the key of ``provider``. When ``model`` carries the route
+    prefix of another provider (``ollama/...`` under Google, ``anthropic/...``
+    under OpenAI), the prefix is honoured but the key is not sent (WARNING and
+    ``on_warning``; ``LLMParamError`` when ``strict``). A local provider's own
+    token still passes on its own route.
+
+    ``vertex_project`` is the Google Cloud project saved in Settings (see
+    :func:`saved_vertex_project`). It is sent on the ``vertex_ai/`` route only;
+    without it the adapter falls back to ``GOOGLE_CLOUD_PROJECT`` and then to
+    the project of the Application Default Credentials, which may be another
+    project than the one the user configured.
     """
     if not model or not str(model).strip():
         raise LLMParamError(f"no model specified for provider {provider!r}")
 
     provider_id = normalize_provider(provider)
     model_id = str(model).strip()
+    # Set when the model id carries the route prefix of another provider.
+    foreign_route = None
+    # Set when an explicit Google auth mode overrides a Google route prefix.
+    reroute_message = None
 
     if provider_id == "lmstudio":
         # OpenAI-compatible local server via api_base. Checked before the
@@ -509,9 +566,24 @@ def build_completion_kwargs(
             api_base = config.endpoint if config else None
     elif any(model_id.startswith(p) for p in _ROUTE_PREFIXES):
         routed_model = model_id  # caller already prefixed — honor it
+        prefix = next(p for p in _ROUTE_PREFIXES if model_id.startswith(p))
+        owner = _PREFIX_TO_PROVIDER.get(prefix)
+        if owner and owner != provider_id:
+            foreign_route = prefix
+        elif provider_id == "gemini" and auth_mode:
+            # An explicit auth mode decides between the two Google routes,
+            # also for an id that already names one: "gemini/x" with Google
+            # Cloud login is a Vertex request (and must not carry a key), and
+            # "vertex_ai/x" in API-key mode is a Gemini API request.
+            target = "gemini/" if _is_api_key_mode(auth_mode) else "vertex_ai/"
+            if prefix != target:
+                routed_model = target + model_id[len(prefix):]
+                reroute_message = (
+                    f"model '{model_id}' sent on the '{target}' route: the "
+                    f"Google auth mode is '{auth_mode}'")
     elif provider_id == "gemini":
         if auth_mode:
-            use_api_key_route = auth_mode.strip().lower() in ("api-key", "api_key")
+            use_api_key_route = _is_api_key_mode(auth_mode)
         else:
             use_api_key_route = bool(api_key)
         routed_model = (f"gemini/{model_id}" if use_api_key_route
@@ -525,8 +597,244 @@ def build_completion_kwargs(
 
     kwargs["model"] = routed_model
     kwargs["messages"] = messages
-    if api_key:
+    if reroute_message:
+        if strict:
+            raise LLMParamError(reroute_message)
+        logger.warning(f"LLM request re-routed: {reroute_message}")
+        if on_warning:
+            on_warning(reroute_message)
+    if api_key and foreign_route:
+        # The key belongs to ``provider_id``; the prefix sends the request to
+        # another provider (a local server, or a different cloud). Sending it
+        # would hand one provider's credential to another.
+        message = (f"API key for provider '{provider_id}' not sent: the model "
+                   f"id selects the '{foreign_route}' route, which belongs to "
+                   f"another provider")
+        if strict:
+            raise LLMParamError(message)
+        logger.warning(f"LLM request for {routed_model}: {message}")
+        if on_warning:
+            on_warning(message)
+        api_key = None
+    # The vertex_ai route signs in with the Google Cloud login; a stored API
+    # key would only be dropped (with a warning) by the adapter.
+    if api_key and not routed_model.startswith("vertex_ai/"):
         kwargs["api_key"] = api_key
     if api_base:
         kwargs["api_base"] = api_base
+    if routed_model.startswith("vertex_ai/"):
+        project = vertex_project.strip() if isinstance(vertex_project, str) else ""
+        if project:
+            kwargs["vertex_project"] = project
     return kwargs
+
+
+def saved_vertex_project(config: Any) -> Optional[str]:
+    """The Google Cloud project saved in Settings (``gcloud_project_id``).
+
+    ``config`` is a ``ConfigManager`` or a plain dict; anything else, a
+    missing entry or a non-string value gives ``None``.
+    """
+    getter = getattr(config, "get", None)
+    if getter is None:
+        return None
+    try:
+        value = getter("gcloud_project_id")
+    except Exception:
+        return None
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+_GCLOUD_AUTH_MODES = frozenset({"gcloud", "adc", "google cloud account"})
+
+
+def _normalize_google_auth_mode(value: Any) -> Optional[str]:
+    """'gcloud', 'api-key', or None when ``value`` is not a usable setting."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return "gcloud" if value.strip().lower() in _GCLOUD_AUTH_MODES else "api-key"
+
+
+def _saved_settings() -> Any:
+    """The app's saved Settings (a ``ConfigManager``), or None when they
+    cannot be read. A separate function so tests can replace it."""
+    try:
+        from core.config import ConfigManager
+        return ConfigManager()
+    except Exception as exc:  # never let a settings problem break a request
+        logger.debug(f"saved Settings unavailable for Google auth lookup: {exc}")
+        return None
+
+
+def google_provider_part(auth_mode: Any, api_key: Optional[str],
+                         project: Optional[str]) -> Dict[str, Any]:
+    """The Google entries of a provider config, from values the caller holds.
+
+    With a known ``auth_mode`` the result is complete (``google_api_key``,
+    ``auth_mode``, ``gcloud_project_id``), and in Google Cloud login mode the
+    key is dropped: there it is an OAuth access token, not a Gemini API key.
+    With no usable ``auth_mode`` only the key is returned, so the consumer
+    falls back to the saved Settings for the rest.
+    """
+    mode = _normalize_google_auth_mode(auth_mode)
+    key = api_key.strip() if isinstance(api_key, str) and api_key.strip() else None
+    if mode is None:
+        return {"google_api_key": key}
+    project = project.strip() if isinstance(project, str) and project.strip() else None
+    return {"google_api_key": None if mode == "gcloud" else key,
+            "auth_mode": mode, "gcloud_project_id": project}
+
+
+def google_provider_config(config: Any) -> Dict[str, Any]:
+    """The Google entries of a provider config, all from ONE live config.
+
+    ``config`` is the caller's ``ConfigManager``. Auth mode and project are
+    read from that instance (never re-read from disk: the user may have
+    changed Settings without saving), and the key is fetched through
+    ``get_api_key('google')`` in API-key mode only. In Google Cloud login mode
+    no lookup is made: it would answer with an OAuth access token and start a
+    ``gcloud`` subprocess for a value no chat call may use.
+
+    Every GUI builder of a chat/LLM provider config uses this, so the
+    credential and the mode it belongs to cannot come from different places.
+    """
+    try:
+        raw_mode = config.get("auth_mode")
+    except Exception:
+        raw_mode = None
+    mode = _normalize_google_auth_mode(raw_mode) or "api-key"
+    key = None
+    if mode == "api-key":
+        try:
+            key = config.get_api_key("google")
+        except Exception as exc:
+            logger.debug(f"Google API key lookup failed: {exc}")
+    return google_provider_part(mode, key, saved_vertex_project(config))
+
+
+def _has_entry(config: Any, name: str) -> bool:
+    """Whether a dict-like ``config`` has an entry ``name`` (even None)."""
+    try:
+        return name in config
+    except TypeError:
+        return False
+
+
+def _google_settings(config: Any, want_key: bool
+                     ) -> Tuple[str, Optional[str], Optional[str]]:
+    """``(auth_mode, api_key, project)``; the saved Settings are opened at
+    most once. See :func:`google_auth_settings` and :func:`google_credentials`.
+
+    Dict first: when ``config`` carries an auth mode, the saved Settings are
+    never consulted for the mode or for a key (the caller supplied the
+    credential that belongs to that mode). Only a project the config has no
+    entry for may still come from Settings.
+    """
+    mode = None
+    key = None
+    getter = getattr(config, "get", None)
+    if callable(getter):
+        try:
+            mode = _normalize_google_auth_mode(getter("auth_mode"))
+        except Exception:
+            mode = None
+        if want_key:
+            try:
+                value = getter("google_api_key")
+            except Exception:
+                value = None
+            key = value.strip() if isinstance(value, str) and value.strip() else None
+    project = saved_vertex_project(config)
+
+    mode_given = mode is not None
+    needs_project = project is None and not _has_entry(config, "gcloud_project_id")
+    needs_key = want_key and key is None and not mode_given
+    if not mode_given or needs_project:
+        saved = _saved_settings()
+        if saved is not None:
+            try:
+                saved_mode = _normalize_google_auth_mode(saved.get("auth_mode"))
+            except Exception:
+                saved_mode = None
+            if not mode_given:
+                mode = saved_mode
+            if needs_project:
+                project = saved_vertex_project(saved)
+            # get_api_key is the only way keys are read. Only for a config
+            # that carried no mode, and never when the saved mode is Google
+            # Cloud login: there it answers with an OAuth access token.
+            if needs_key and saved_mode != "gcloud":
+                try:
+                    value = saved.get_api_key("google")
+                except Exception as exc:
+                    logger.debug(f"Google API key lookup failed: {exc}")
+                    value = None
+                key = value.strip() if isinstance(value, str) and value.strip() else None
+    mode = mode or "api-key"
+    if mode == "gcloud":
+        key = None  # whatever was handed in: a token is not a Gemini API key
+    return mode, key, project
+
+
+def google_auth_settings(config: Any = None) -> Tuple[str, Optional[str]]:
+    """``(auth_mode, project)`` for Google: 'gcloud' (Google Cloud login) or
+    'api-key', and the Google Cloud project saved in Settings.
+
+    ``config`` is whatever the caller holds: a ``ConfigManager`` or a
+    provider-config dict. Values it carries (``auth_mode``,
+    ``gcloud_project_id``) win. The provider-config dicts the GUI builds carry
+    neither, so anything missing is read from the saved Settings.
+    """
+    mode, _key, project = _google_settings(config, want_key=False)
+    return mode, project
+
+
+def google_credentials(config: Any = None) -> Tuple[str, Optional[str], Optional[str]]:
+    """``(auth_mode, api_key, project)`` for an object that sends Google
+    requests and keeps its own settings.
+
+    As :func:`google_auth_settings`, plus the Gemini API key: ``config``'s
+    ``google_api_key``. A config that carries no auth mode at all gets mode,
+    project and (in 'api-key' mode) key from the saved Settings, the key read
+    once through ``ConfigManager.get_api_key``. A config that carries a mode
+    is taken at its word: no key is looked up for it. In 'gcloud' mode the
+    key is always None, whatever was handed in.
+
+    Callers pass the returned mode to the kwargs builder on every request, so
+    'api-key' mode with no key stays on ``gemini/`` and fails with an
+    authentication error; only 'gcloud' goes to ``vertex_ai/``.
+    """
+    return _google_settings(config, want_key=True)
+
+
+def route_completion_kwargs(
+    provider: str,
+    model: str,
+    messages: List[Dict[str, Any]],
+    params: "LLMParams | Dict[str, Any] | None" = None,
+    *,
+    api_key: Optional[str] = None,
+    api_base: Optional[str] = None,
+    auth_mode: Optional[str] = None,
+    vertex_project: Optional[str] = None,
+    on_warning: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """:func:`build_completion_kwargs` for callers that hold a provider alias
+    or display name ("Google", "Anthropic", "LM Studio") and may rely on a
+    Gemini key in the environment.
+
+    Without an explicit ``auth_mode``, a Gemini model uses the API-key route
+    when a key is configured (``api_key`` or ``GEMINI_API_KEY`` /
+    ``GOOGLE_API_KEY``), otherwise the Vertex AI (Google Cloud login) route.
+    """
+    provider_id = normalize_provider(provider)
+    if provider_id == "gemini" and not auth_mode:
+        has_key = bool(api_key or os.environ.get("GEMINI_API_KEY")
+                       or os.environ.get("GOOGLE_API_KEY"))
+        auth_mode = "api-key" if has_key else "gcloud"
+    return build_completion_kwargs(
+        provider_id, model, messages, params,
+        api_key=api_key or None, api_base=api_base, auth_mode=auth_mode,
+        vertex_project=vertex_project, on_warning=on_warning)

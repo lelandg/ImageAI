@@ -13,7 +13,8 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
 from core.llm_models import resolve_model
-from core.llm_params import LLMParams, build_completion_kwargs, normalize_provider
+from core.llm_params import (LLMParams, build_completion_kwargs,
+                             google_auth_settings, normalize_provider)
 from core.llm_parsing import LLMResponseParser
 from core.sprite.generation._common import emit
 from core.sprite.generation.errors import ProviderError, classify_provider_error
@@ -269,7 +270,7 @@ def generate_action_cards(brief: str, genre: str, *, provider: str, model: Optio
                           token: Optional[CancelToken] = None) -> List[ActionCardDraft]:
     """Run the contract against a chat model and return validated drafts.
 
-    ``completion_fn`` defaults to ``litellm.completion``. Kwargs come from
+    ``completion_fn`` defaults to ``chameleon_llm.completion``. Kwargs come from
     ``build_completion_kwargs`` (temperature 0.2, max_tokens 4000, JSON mode
     where the model supports it). The model defaults to
     ``default_chat_model(provider)``.
@@ -283,8 +284,13 @@ def generate_action_cards(brief: str, genre: str, *, provider: str, model: Optio
     messages = build_messages(brief, genre, plate_color, character_notes)
     params = LLMParams(temperature=0.2, max_tokens=4000,
                        response_format={"type": "json_object"})
+    # Google Cloud login takes the vertex_ai/ route; it needs the project
+    # saved in Settings (the builder sends it on that route only).
+    vertex_project = (google_auth_settings({"auth_mode": auth_mode})[1]
+                      if provider_id == "gemini" else None)
     kwargs = build_completion_kwargs(provider_id, model_id, messages, params,
                                      api_key=api_key, auth_mode=auth_mode,
+                                     vertex_project=vertex_project,
                                      on_warning=lambda m: emit(logger, log, m, level="warning"))
 
     shown = {k: v for k, v in kwargs.items() if k not in ("messages", "api_key")}
@@ -295,9 +301,8 @@ def generate_action_cards(brief: str, genre: str, *, provider: str, model: Optio
     emit(logger, log, "=== END LLM REQUEST ===")
 
     if completion_fn is None:
-        import litellm
-        litellm.drop_params = True
-        completion_fn = litellm.completion
+        from core import chameleon_llm
+        completion_fn = chameleon_llm.completion
 
     if token is not None:
         token.raise_if_cancelled()

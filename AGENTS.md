@@ -12,7 +12,7 @@ is in `core/`, GUI in `gui/`, CLI in `cli/`, provider backends in `providers/`.
 - **Log every LLM interaction in full** — request (provider, model, params,
   prompts) and complete response — to both the file logger and the status
   console. Use the shared helpers in `gui/llm_utils.py` (`LLMResponseParser`,
-  `DialogStatusConsole`, `LiteLLMHandler`) and handle empty/malformed LLM
+  `DialogStatusConsole`, `LLMHandler`) and handle empty/malformed LLM
   responses with fallbacks. Details: `Docs/LLM-Contracts.md`,
   `Docs/LLM-Logging-Full-Content.md`.
 - Resolve cloud LLM model IDs at runtime via `resolve_model()` in
@@ -59,7 +59,8 @@ is in `core/`, GUI in `gui/`, CLI in `cli/`, provider backends in `providers/`.
 
 - Dialogs that call LLMs get a status console at the bottom (splitter),
   real-time progress, Ctrl+Enter = primary action, Escape = close.
-- Prefer LiteLLM for chat calls (it handles model parameter quirks).
+- Use the vendored `core/chameleon_llm` for chat calls; build kwargs via
+  `core.llm_params.build_completion_kwargs`.
 - Conventional Commits (`feat:`, `fix:`, `docs:`, …), subject <72 chars.
 - Plan files in `Plans/` / `Notes/` track progress; update them as tasks start
   and finish. If interrupted, read the plan file first to resume.
@@ -71,6 +72,7 @@ is in `core/`, GUI in `gui/`, CLI in `cli/`, provider backends in `providers/`.
 - `Docs/CodeMap.md` — `file.py:line` for all symbols (regenerate with
   `tools/generate_code_map.py` when stale).
 - `Docs/Storage-Locations-Known-Issues.md` — storage-root history and traps.
+- `Docs/Testing-LLM.md` — how the LLM tests are run (offline, local and live).
 
 ## Scanning & review
 

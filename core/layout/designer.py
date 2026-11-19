@@ -308,13 +308,15 @@ def run_design(messages: List[Dict], page_px: Tuple[int, int],
 
 def run_completion(config, provider: str, model: str, messages: List[Dict],
                    temperature: float = 0.4) -> str:
-    """Real LLM call (mirrors TextGenerationWorker). Not unit-tested (network)."""
-    from gui.llm_utils import LiteLLMHandler
-    from core.llm_models import get_provider_models, get_provider_prefix
-    from core.llm_params import validate_params
-    ok, litellm = LiteLLMHandler.setup_litellm(enable_console_logging=True)
-    if not ok or litellm is None:
-        raise RuntimeError("Failed to initialize LiteLLM")
+    """Real LLM call (mirrors TextGenerationWorker). The request is built by
+    ``build_completion_kwargs``: Google Cloud login selects ``vertex_ai/`` (with
+    the project saved in Settings) and LM Studio gets its endpoint."""
+    from gui.llm_utils import LLMHandler
+    from core.llm_models import get_provider_models
+    from core.llm_params import build_completion_kwargs, saved_vertex_project
+    ok, llm = LLMHandler.setup_llm(enable_console_logging=True)
+    if not ok or llm is None:
+        raise RuntimeError("Failed to initialize the LLM client")
     provider = provider or (config.get_layout_llm_provider() if config else "google")
     pid_api, pid = resolve_provider_ids(provider)
     api_key = None
@@ -328,15 +330,22 @@ def run_completion(config, provider: str, model: str, messages: List[Dict],
     model_name = model or (models[0] if models else None)
     if not model_name:
         raise RuntimeError(f"No models available for provider {provider!r}")
-    prefix = get_provider_prefix(pid)
-    full_model = f"{prefix}{model_name}" if prefix else model_name
+    # Only LM Studio takes the local endpoint; a cloud request never does.
+    # With none configured the builder uses the LM Studio default.
+    api_base = None
+    if pid == "lmstudio" and config is not None:
+        endpoint = config.get("lmstudio_endpoint")
+        if isinstance(endpoint, str) and endpoint.strip():
+            api_base = endpoint.strip()
+    kwargs = build_completion_kwargs(
+        pid, model_name, messages, {"temperature": temperature},
+        api_key=api_key or None, api_base=api_base,
+        auth_mode=auth_mode if pid == "gemini" else None,
+        vertex_project=saved_vertex_project(config))
     logger.info("Designer LLM request: provider=%s model=%s temperature=%s\nmessages=%s",
-                provider, full_model, temperature, messages)
-    param_kwargs, _ = validate_params(pid, full_model, {"temperature": temperature})
-    kwargs = {"model": full_model, "messages": messages, **param_kwargs}
-    if api_key:
-        kwargs["api_key"] = api_key
-    resp = litellm.completion(**kwargs)
+                provider, kwargs["model"], kwargs.get("temperature", "default"),
+                messages)
+    resp = llm.completion(**kwargs)
     if not resp or not resp.choices:
         raise RuntimeError("Empty LLM response")
     content = resp.choices[0].message.content or ""

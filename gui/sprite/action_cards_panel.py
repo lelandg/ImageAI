@@ -377,7 +377,7 @@ class ActionCardsPanel(WorkerHost, QGroupBox):
         chat caller maps the name before the lookup
         (``gui/layout/text_gen_dialog.py``, ``CharacterPanel._provider_config``);
         this panel did not, so an API-key Google user got ``api_key=None`` and
-        LiteLLM fell to the ``vertex_ai/`` route (final review, Important 2).
+        the LLM client fell to the ``vertex_ai/`` route (final review, Important 2).
         """
         return CONFIG_KEY_BY_PROVIDER_ID.get(provider_id, provider_id)
 

@@ -227,7 +227,7 @@ def test_build_kwargs_requires_model():
 
 
 def test_build_kwargs_lmstudio_slash_model_id():
-    # LM Studio ids often contain slashes that are NOT litellm route prefixes;
+    # LM Studio ids often contain slashes that are NOT route prefixes;
     # api_base must still be wired (PR #40 review, suggestion 1).
     kwargs = build_completion_kwargs(
         "lmstudio", "lmstudio-community/Meta-Llama-3-8B-GGUF", _MSGS)
@@ -278,3 +278,472 @@ def test_unknown_dict_keys_warn_but_do_not_crash(caplog):
             "openai", "gpt-4o", {"temperature": 0.3, "max_completion_tokens": 99})
     assert kwargs == {"temperature": 0.3}
     assert any("unknown LLM params" in r.message for r in caplog.records)
+
+
+# --- LiteLLM removal: curated rules + registry are the only ceiling sources ---
+
+def test_no_litellm_reference_in_llm_params():
+    from pathlib import Path
+    assert "litellm" not in Path("core/llm_params.py").read_text(encoding="utf-8").lower()
+
+
+def test_every_cloud_model_has_an_output_ceiling():
+    from core.llm_models import LLM_PROVIDERS
+    from core.llm_params import get_param_rules
+    missing = []
+    for provider in ("openai", "anthropic", "gemini"):
+        for model in LLM_PROVIDERS[provider].models:
+            model_id = model if isinstance(model, str) else getattr(model, "id", model)
+            if not get_param_rules(provider, model_id).max_output_tokens:
+                missing.append(f"{provider}/{model_id}")
+    assert missing == []
+
+
+def test_unknown_local_model_has_no_ceiling():
+    from core.llm_params import get_param_rules
+    assert get_param_rules("ollama", "some-local-model").max_output_tokens is None
+    assert get_param_rules("lmstudio", "some-local-model").max_output_tokens is None
+
+
+def test_curated_ceiling_caps_max_tokens():
+    from core.llm_params import validate_params
+    out, warnings = validate_params(
+        "anthropic", "claude-opus-4-20250514", {"max_tokens": 10_000_000})
+    assert out["max_tokens"] == 32000
+    assert warnings
+
+
+# --- I3: the vertex_ai route never carries api_key ----------------------------
+
+def test_build_kwargs_vertex_route_omits_api_key():
+    forced_vertex = build_completion_kwargs(
+        "Google", "gemini-test-model", _MSGS, api_key="stored-key",
+        auth_mode="gcloud")
+    assert forced_vertex["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in forced_vertex
+    prefixed = build_completion_kwargs(
+        "gemini", "vertex_ai/gemini-test-model", _MSGS, api_key="stored-key")
+    assert "api_key" not in prefixed
+    api_key_route = build_completion_kwargs(
+        "Google", "gemini-test-model", _MSGS, api_key="stored-key")
+    assert api_key_route["api_key"] == "stored-key"
+
+
+# --- route_completion_kwargs: display names + Gemini key from the environment -
+
+@pytest.fixture
+def _no_gemini_env(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+
+
+@pytest.mark.parametrize("provider,model,expected", [
+    ("OpenAI", "gpt-test-model", "gpt-test-model"),
+    ("Anthropic", "claude-test-model", "anthropic/claude-test-model"),
+    ("claude", "claude-test-model", "anthropic/claude-test-model"),
+    ("Ollama", "local-test-model", "ollama/local-test-model"),
+    ("LM Studio", "local-test-model", "local-test-model"),
+])
+def test_route_kwargs_display_names(_no_gemini_env, provider, model, expected):
+    from core.llm_params import route_completion_kwargs
+    assert route_completion_kwargs(provider, model, _MSGS)["model"] == expected
+
+
+def test_route_kwargs_google_uses_env_key(_no_gemini_env, monkeypatch):
+    from core.llm_params import route_completion_kwargs
+    assert route_completion_kwargs(
+        "Google", "gemini-test-model", _MSGS)["model"] == "vertex_ai/gemini-test-model"
+    monkeypatch.setenv("GEMINI_API_KEY", "env-key")
+    assert route_completion_kwargs(
+        "Google", "gemini-test-model", _MSGS)["model"] == "gemini/gemini-test-model"
+    assert route_completion_kwargs(
+        "Google", "gemini-test-model", _MSGS,
+        auth_mode="gcloud")["model"] == "vertex_ai/gemini-test-model"
+
+
+def test_route_kwargs_google_argument_key(_no_gemini_env):
+    from core.llm_params import route_completion_kwargs
+    kwargs = route_completion_kwargs("google", "gemini-test-model", _MSGS,
+                                     api_key="k")
+    assert kwargs["model"] == "gemini/gemini-test-model"
+    assert kwargs["api_key"] == "k"
+
+
+# --- L2: every GPT generation from 5 on, and every o-series number ------------
+
+@pytest.mark.parametrize("model", [
+    "gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-7-test", "gpt-10-test",
+    "o5-test", "gpt-5-test", "o3-test",
+])
+def test_later_generations_use_reasoning_rules(model):
+    kwargs, warnings = validate_params(
+        "openai", model, {"temperature": 0.5, "max_tokens": 256})
+    assert kwargs == {"max_completion_tokens": 256}
+    assert warnings  # the non-default temperature was dropped, with a warning
+
+
+@pytest.mark.parametrize("model", ["gpt-4.1", "gpt-4o", "gpt-4-turbo",
+                                   "gpt-3.5-turbo", "local-test-model"])
+def test_classic_models_keep_max_tokens(model):
+    kwargs, _ = validate_params("openai", model, {"temperature": 0.5, "max_tokens": 256})
+    assert kwargs == {"temperature": 0.5, "max_tokens": 256}
+
+
+# --- Claude Haiku 5 and every later generation take no sampling params --------
+
+@pytest.mark.parametrize("model", [
+    "claude-haiku-5-5", "claude-haiku-5", "claude-sonnet-5-5", "claude-opus-5-5",
+    "claude-opus-6-test", "claude-haiku-10-test",
+])
+def test_claude_5_and_later_drop_sampling_params(model):
+    kwargs, warnings = validate_params(
+        "anthropic", model, {"temperature": 0.5, "top_p": 0.9, "top_k": 5,
+                             "max_tokens": 64})
+    assert kwargs == {"max_tokens": 64}
+    assert len(warnings) == 3
+
+
+@pytest.mark.parametrize("model", [
+    "claude-haiku-4-5-20251001", "claude-opus-4-20250514", "claude-3-7-sonnet-20250219",
+])
+def test_claude_4_and_older_keep_temperature(model):
+    kwargs, _ = validate_params("anthropic", model, {"temperature": 1.5})
+    assert kwargs == {"temperature": 1.0}
+
+
+@pytest.mark.parametrize("model", [
+    "gpt-oss-20b", "gpt-oss:20b", "gpt-oss-120b", "GPT-OSS-20B", "gpt-oss",
+    "openai/gpt-oss-20b",  # LM Studio lists it under the publisher name
+])
+def test_open_weight_gpt_oss_is_not_inferred_as_cloud_openai(model):
+    """gpt-oss is an open-weight model served by local servers, never by the
+    OpenAI API: the name must fall through to the caller's default."""
+    assert infer_provider_from_model(model, default="lmstudio") == "lmstudio"
+    assert infer_provider_from_model(model, default="ollama") == "ollama"
+
+
+@pytest.mark.parametrize("model", [
+    "gpt-4o", "gpt-4o-mini", "gpt-5", "gpt-5.5", "gpt-6", "gpt-6-pro",
+    "gpt-4.1", "o3", "o4-mini", "chat-latest", "openai/gpt-5.5",
+    "gpt-ossified",  # not the gpt-oss family: no separator after "oss"
+])
+def test_cloud_openai_names_stay_on_openai_whatever_the_default(model):
+    assert infer_provider_from_model(model, default="lmstudio") == "openai"
+
+
+def test_explicit_local_route_prefix_wins_for_gpt_oss():
+    assert infer_provider_from_model("ollama/gpt-oss:20b") == "ollama"
+    assert infer_provider_from_model("lm_studio/gpt-oss-20b") == "lmstudio"
+
+
+# --- vertex_project: the saved Google Cloud project reaches Vertex calls ------
+
+_MSGS = [{"role": "user", "content": "hi"}]
+
+
+def test_vertex_project_sent_on_the_vertex_route():
+    kwargs = build_completion_kwargs(
+        "gemini", "gemini-test-model", _MSGS, auth_mode="gcloud",
+        vertex_project="saved-project")
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert kwargs["vertex_project"] == "saved-project"
+
+
+def test_vertex_project_sent_when_the_caller_prefixed_the_route():
+    kwargs = build_completion_kwargs(
+        "gemini", "vertex_ai/gemini-test-model", _MSGS,
+        vertex_project="saved-project")
+    assert kwargs["vertex_project"] == "saved-project"
+
+
+@pytest.mark.parametrize("provider,model,extra", [
+    ("gemini", "gemini-test-model", {"auth_mode": "api-key", "api_key": "k"}),
+    ("openai", "gpt-test-model", {"api_key": "k"}),
+    ("anthropic", "claude-test-model", {"api_key": "k"}),
+    ("ollama", "llama-test", {}),
+    ("lmstudio", "local-test", {"api_base": "http://localhost:1234/v1"}),
+])
+def test_vertex_project_never_sent_off_the_vertex_route(provider, model, extra):
+    """Only the vertex_ai route uses it; elsewhere the adapter would drop it
+    with a warning (gemini/) or the dispatcher would (other adapters)."""
+    kwargs = build_completion_kwargs(
+        provider, model, _MSGS, vertex_project="saved-project", **extra)
+    assert "vertex_project" not in kwargs
+
+
+@pytest.mark.parametrize("empty", [None, "", "   "])
+def test_empty_vertex_project_is_not_sent(empty):
+    kwargs = build_completion_kwargs(
+        "gemini", "gemini-test-model", _MSGS, auth_mode="gcloud",
+        vertex_project=empty)
+    assert "vertex_project" not in kwargs
+
+
+def test_route_completion_kwargs_passes_vertex_project(monkeypatch):
+    from core.llm_params import route_completion_kwargs
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+    kwargs = route_completion_kwargs(
+        "Google", "gemini-test-model", _MSGS, vertex_project="saved-project")
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert kwargs["vertex_project"] == "saved-project"
+
+
+def test_saved_vertex_project_reads_config_objects_and_dicts():
+    from unittest.mock import MagicMock
+    from core.llm_params import saved_vertex_project
+
+    class _Config:
+        def __init__(self, value):
+            self._value = value
+
+        def get(self, key, default=None):
+            return self._value if key == "gcloud_project_id" else default
+
+    assert saved_vertex_project(_Config("my-project")) == "my-project"
+    assert saved_vertex_project({"gcloud_project_id": " my-project "}) == "my-project"
+    assert saved_vertex_project(_Config("")) is None
+    assert saved_vertex_project(_Config(None)) is None
+    assert saved_vertex_project({}) is None
+    assert saved_vertex_project(None) is None
+    # A mock config answers every lookup with another mock: not a project id.
+    assert saved_vertex_project(MagicMock()) is None
+
+
+# --- a key never follows a route prefix to another provider -------------------
+
+@pytest.mark.parametrize("provider,model", [
+    ("gemini", "ollama/gemma-test"),          # Google selected, local model id
+    ("gemini", "ollama_chat/gemma-test"),
+    ("gemini", "lm_studio/gemma-test"),
+    ("openai", "ollama/gpt-oss:20b"),
+    ("anthropic", "lm_studio/claude-style-local"),
+    ("openai", "anthropic/claude-test-model"),  # cloud X key -> cloud Y
+    ("anthropic", "openai/gpt-test-model"),
+    ("openai", "gemini/gemini-test-model"),
+    ("anthropic", "gemini/gemini-test-model"),
+    ("gemini", "openai/gpt-test-model"),
+    ("ollama", "openai/gpt-test-model"),
+])
+def test_key_is_dropped_when_the_route_prefix_names_another_provider(
+        provider, model, caplog):
+    import logging
+    seen = []
+    with caplog.at_level(logging.WARNING, logger="core.llm_params"):
+        kwargs = build_completion_kwargs(
+            provider, model, _MSGS, api_key="provider-secret-key",
+            auth_mode="api-key" if provider == "gemini" else None,
+            on_warning=seen.append)
+    assert kwargs["model"] == model          # the prefix is still honoured
+    assert "api_key" not in kwargs
+    assert len(seen) == 1 and model.split("/")[0] in seen[0]
+    assert "provider-secret-key" not in caplog.text
+    assert "provider-secret-key" not in seen[0]
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+@pytest.mark.parametrize("provider,model", [
+    ("openai", "openai/gpt-test-model"),
+    ("openai", "gpt-test-model"),
+    ("anthropic", "anthropic/claude-test-model"),
+    ("gemini", "gemini/gemini-test-model"),
+    ("ollama", "ollama/llama-test"),          # a local provider's own token
+    ("ollama", "ollama_chat/llama-test"),
+    ("lmstudio", "local-test-model"),
+    ("lmstudio", "lm_studio/local-test-model"),
+    ("lmstudio", "lmstudio-community/Some-Model-GGUF"),
+    ("lmstudio", "openai/gpt-oss-20b"),       # publisher name, LM Studio endpoint
+])
+def test_key_passes_when_the_route_belongs_to_the_provider(provider, model):
+    seen = []
+    kwargs = build_completion_kwargs(
+        provider, model, _MSGS, api_key="own-key",
+        auth_mode="api-key" if provider == "gemini" else None,
+        on_warning=seen.append)
+    assert kwargs["api_key"] == "own-key"
+    assert seen == []
+
+
+def test_foreign_route_without_a_key_logs_nothing(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="core.llm_params"):
+        kwargs = build_completion_kwargs("gemini", "ollama/gemma-test", _MSGS)
+    assert "api_key" not in kwargs
+    assert not caplog.records
+
+
+def test_foreign_route_with_a_key_raises_in_strict_mode():
+    with pytest.raises(LLMParamError, match="ollama"):
+        build_completion_kwargs("gemini", "ollama/gemma-test", _MSGS,
+                                api_key="k", strict=True)
+
+
+# --- an explicit Google auth mode decides the route, whatever the prefix ------
+
+@pytest.mark.parametrize("auth_mode", ["gcloud", "adc", "Google Cloud Account"])
+@pytest.mark.parametrize("model", ["gemini/gemini-test-model",
+                                   "vertex_ai/gemini-test-model",
+                                   "gemini-test-model"])
+def test_gcloud_mode_always_takes_vertex_and_never_sends_a_key(auth_mode, model):
+    seen = []
+    kwargs = build_completion_kwargs(
+        "gemini", model, _MSGS, api_key="oauth-access-token",
+        auth_mode=auth_mode, vertex_project="saved-project",
+        on_warning=seen.append)
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in kwargs
+    assert kwargs["vertex_project"] == "saved-project"
+    # only a re-routed prefix is worth a message
+    assert len(seen) == (1 if model.startswith("gemini/") else 0)
+    assert all("oauth-access-token" not in message for message in seen)
+
+
+@pytest.mark.parametrize("auth_mode", ["api-key", "api_key", "API Key"])
+@pytest.mark.parametrize("model", ["gemini/gemini-test-model",
+                                   "vertex_ai/gemini-test-model",
+                                   "gemini-test-model"])
+def test_api_key_mode_always_takes_the_gemini_route(auth_mode, model):
+    seen = []
+    kwargs = build_completion_kwargs(
+        "gemini", model, _MSGS, api_key="stored-key", auth_mode=auth_mode,
+        vertex_project="saved-project", on_warning=seen.append)
+    assert kwargs["model"] == "gemini/gemini-test-model"
+    assert kwargs["api_key"] == "stored-key"
+    assert "vertex_project" not in kwargs
+    assert len(seen) == (1 if model.startswith("vertex_ai/") else 0)
+
+
+def test_google_prefix_is_honoured_when_no_auth_mode_is_given():
+    kwargs = build_completion_kwargs("gemini", "gemini/gemini-test-model", _MSGS,
+                                     api_key="k")
+    assert kwargs["model"] == "gemini/gemini-test-model" and kwargs["api_key"] == "k"
+    kwargs = build_completion_kwargs("gemini", "vertex_ai/gemini-test-model", _MSGS,
+                                     api_key="k")
+    assert kwargs["model"] == "vertex_ai/gemini-test-model"
+    assert "api_key" not in kwargs
+
+
+def test_auth_mode_reroute_raises_in_strict_mode():
+    with pytest.raises(LLMParamError, match="vertex_ai"):
+        build_completion_kwargs("gemini", "gemini/gemini-test-model", _MSGS,
+                                auth_mode="gcloud", strict=True)
+
+
+@pytest.mark.parametrize("provider,model", [
+    ("openai", "gpt-test-model"), ("anthropic", "anthropic/claude-test-model"),
+    ("ollama", "ollama/llama-test"),
+])
+def test_google_auth_mode_does_not_touch_other_providers(provider, model):
+    kwargs = build_completion_kwargs(provider, model, _MSGS, api_key="own-key",
+                                     auth_mode="gcloud")
+    assert kwargs["api_key"] == "own-key"
+    assert not kwargs["model"].startswith("vertex_ai/")
+
+
+def test_gcloud_mode_does_not_reroute_a_foreign_local_prefix():
+    kwargs = build_completion_kwargs("gemini", "ollama/gemma-test", _MSGS,
+                                     api_key="oauth-access-token", auth_mode="gcloud")
+    assert kwargs["model"] == "ollama/gemma-test"
+    assert "api_key" not in kwargs
+
+
+# --- google_provider_config: one live config supplies mode, project and key ---
+
+class _LiveConfig:
+    """A ConfigManager as the GUI holds it: in gcloud mode the Google key
+    lookup answers with an OAuth access token."""
+
+    def __init__(self, auth_mode, project=None, stored_key="stored-key"):
+        self._values = {"auth_mode": auth_mode, "gcloud_project_id": project}
+        self._stored_key = stored_key
+        self.key_lookups = []
+
+    def get(self, key, default=None):
+        value = self._values.get(key)
+        return default if value is None else value
+
+    def get_api_key(self, provider):
+        self.key_lookups.append(provider)
+        if provider == "google" and self._values["auth_mode"] in (
+                "gcloud", "Google Cloud Account"):
+            return "oauth-access-token"
+        return self._stored_key
+
+
+@pytest.fixture
+def no_saved_settings(monkeypatch):
+    from core import llm_params
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: pytest.fail(
+        "the saved Settings must not be opened"))
+
+
+@pytest.mark.parametrize("raw", ["gcloud", "Google Cloud Account"])
+def test_google_provider_config_in_gcloud_mode_fetches_no_key(raw, no_saved_settings):
+    from core.llm_params import google_provider_config
+    config = _LiveConfig(raw, project="live-project")
+    assert google_provider_config(config) == {
+        "google_api_key": None, "auth_mode": "gcloud",
+        "gcloud_project_id": "live-project"}
+    assert config.key_lookups == []   # no token, no gcloud subprocess
+
+
+@pytest.mark.parametrize("raw", ["api-key", "api_key", "API Key", None])
+def test_google_provider_config_in_api_key_mode_fetches_the_key(raw, no_saved_settings):
+    from core.llm_params import google_provider_config
+    config = _LiveConfig(raw, project="live-project")
+    assert google_provider_config(config) == {
+        "google_api_key": "stored-key", "auth_mode": "api-key",
+        "gcloud_project_id": "live-project"}
+    assert config.key_lookups == ["google"]
+
+
+def test_google_provider_part_drops_a_key_in_gcloud_mode():
+    from core.llm_params import google_provider_part
+    assert google_provider_part("gcloud", "oauth-access-token", "p") == {
+        "google_api_key": None, "auth_mode": "gcloud", "gcloud_project_id": "p"}
+    assert google_provider_part("api-key", "k", None) == {
+        "google_api_key": "k", "auth_mode": "api-key", "gcloud_project_id": None}
+    # no mode known: only the key, so the consumer falls back to saved Settings
+    assert google_provider_part(None, "k", None) == {"google_api_key": "k"}
+
+
+class _Persisted:
+    """Saved Settings whose values must lose against a dict that has a mode."""
+
+    def __init__(self, auth_mode, project="persisted-project"):
+        self._values = {"auth_mode": auth_mode, "gcloud_project_id": project}
+        self.key_lookups = []
+
+    def get(self, key, default=None):
+        return self._values.get(key, default)
+
+    def get_api_key(self, provider):
+        self.key_lookups.append(provider)
+        return "persisted-key"
+
+
+@pytest.mark.parametrize("dict_mode,persisted_mode", [("gcloud", "api-key"),
+                                                      ("api-key", "gcloud")])
+def test_a_dict_with_a_mode_never_takes_mode_or_key_from_saved_settings(
+        monkeypatch, dict_mode, persisted_mode):
+    from core import llm_params
+    persisted = _Persisted(persisted_mode)
+    monkeypatch.setattr(llm_params, "_saved_settings", lambda: persisted)
+    mode, key, project = llm_params.google_credentials({"auth_mode": dict_mode})
+    assert mode == dict_mode
+    assert key is None
+    assert persisted.key_lookups == []
+    # the project alone may still come from Settings when the dict has no entry
+    assert project == "persisted-project"
+
+
+def test_a_complete_dict_never_opens_saved_settings(no_saved_settings):
+    from core import llm_params
+    assert llm_params.google_credentials(
+        {"auth_mode": "api-key", "google_api_key": "k", "gcloud_project_id": None}
+    ) == ("api-key", "k", None)
+    assert llm_params.google_credentials(
+        {"auth_mode": "gcloud", "google_api_key": "oauth-access-token",
+         "gcloud_project_id": None}) == ("gcloud", None, None)
+    assert llm_params.google_auth_settings(
+        {"auth_mode": "gcloud", "gcloud_project_id": None}) == ("gcloud", None)

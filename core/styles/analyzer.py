@@ -238,8 +238,17 @@ def build_completion_fn(config, provider=None, model=None, max_retries=None):
     """
     provider = normalize_llm_provider(provider or config.get("llm_provider", None))
     reg, _family, _static, cfg_key = _PROVIDER_SPECS[provider]
-    api_key = config.get_api_key(provider)
-    if not api_key:
+    # Google follows the auth mode in Settings. With Google Cloud login there
+    # is no API key to require (get_api_key would answer with an OAuth access
+    # token, which is not one): the request goes to Vertex AI.
+    google_settings = {}
+    if provider == "google":
+        from core.llm_params import google_auth_settings
+        auth_mode, project = google_auth_settings(config)
+        google_settings = {"auth_mode": auth_mode, "gcloud_project_id": project}
+    gcloud = google_settings.get("auth_mode") == "gcloud"
+    api_key = None if gcloud else config.get_api_key(provider)
+    if not api_key and not gcloud:
         raise StyleAnalysisError(
             f"No {provider} API key configured. Set one in Settings (GUI) or "
             f"with --set-key --provider {provider} (CLI) before creating a style.")
@@ -249,7 +258,7 @@ def build_completion_fn(config, provider=None, model=None, max_retries=None):
     full_model = model if model.startswith(prefix) else f"{prefix}{model}"
 
     from core.video.prompt_engine import UnifiedLLMProvider
-    llm = UnifiedLLMProvider({cfg_key: api_key})
+    llm = UnifiedLLMProvider({cfg_key: api_key, **google_settings})
 
     def fn(messages):
         logger.info(f"Style LLM request -> {full_model} "

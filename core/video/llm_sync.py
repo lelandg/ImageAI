@@ -542,31 +542,25 @@ Lyrics:
             import time
             api_start = time.time()
             
-            # Use litellm through the UnifiedLLMProvider
-            from core.llm_models import get_provider_prefix
-            from core.llm_params import normalize_provider, validate_params
-
-            provider_id = normalize_provider(self.provider)
-            if provider_id == 'lmstudio':
-                model_id = self.model
-            else:
-                prefix = get_provider_prefix(provider_id)
-                model_id = f"{prefix}{self.model}" if prefix else self.model
+            # Use chameleon_llm through the UnifiedLLMProvider. Route and
+            # params are built centrally: LM Studio gets its endpoint, Gemini
+            # takes gemini/ or vertex_ai/ by sign-in.
+            from core.llm_params import normalize_provider
 
             params = {'temperature': 0.3}  # Lower temperature for more consistent timing
-            if provider_id == 'openai':
+            if normalize_provider(self.provider) == 'openai':
                 params['response_format'] = {"type": "json_object"}
-            param_kwargs, _ = validate_params(provider_id, self.model, params)
-
-            self.logger.info(f"Making LLM API call with model: {model_id}")
-            response = self.llm_provider.litellm.completion(
-                model=model_id,
-                messages=[
+            completion_kwargs = self.llm_provider.route_kwargs(
+                self.provider, self.model,
+                [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_message}
                 ],
-                **param_kwargs
-            )
+                params)
+            model_id = completion_kwargs["model"]
+
+            self.logger.info(f"Making LLM API call with model: {model_id}")
+            response = self.llm_provider.llm.completion(**completion_kwargs)
             
             api_elapsed = time.time() - api_start
             self.logger.info(f"LLM API call completed in {api_elapsed:.1f} seconds")

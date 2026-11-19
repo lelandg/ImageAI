@@ -9,6 +9,9 @@ import logging
 from typing import Optional
 from dataclasses import dataclass
 
+# Providers served by a local endpoint: no API key needed.
+_LOCAL_PROVIDERS = ("ollama", "lmstudio")
+
 
 @dataclass
 class VideoPromptContext:
@@ -167,6 +170,48 @@ Add camera movement (pan, zoom, dolly, tilt, etc.) and subtle motion over time.
         """Check if LLM provider and model are configured"""
         return bool(self.llm_provider and self.llm_model)
 
+    def _endpoint_for(self, provider_id: str) -> Optional[str]:
+        """The configured endpoint for a local provider, else None.
+
+        Keys as in the video workspace's ``get_provider_config()``:
+        ``lmstudio_endpoint`` and ``ollama_endpoint``.
+        """
+        key = {"lmstudio": "lmstudio_endpoint",
+               "ollama": "ollama_endpoint"}.get(provider_id)
+        getter = getattr(self.config, "get", None) if self.config else None
+        if not key or not callable(getter):
+            return None
+        value = getter(key, None)
+        return value.strip() if isinstance(value, str) and value.strip() else None
+
+    def _auth_for(self, provider_id: str):
+        """Return ``(auth_mode, api_key)`` for a canonical provider id.
+
+        Google honors the configured auth mode ("gcloud" = Google Cloud
+        login, no key). Keys come from a ConfigManager or a provider-config
+        dict; local providers have none.
+        """
+        auth_mode = "api-key"
+        if self.config and provider_id == "gemini":
+            auth_mode = self.config.get("auth_mode", "api-key")
+            # Normalize auth mode values
+            if auth_mode in ["api_key", "API Key"]:
+                auth_mode = "api-key"
+            elif auth_mode == "Google Cloud Account":
+                auth_mode = "gcloud"
+
+        api_key = None
+        key_name = {"gemini": "google", "openai": "openai",
+                    "anthropic": "anthropic"}.get(provider_id)
+        if auth_mode == "api-key" and self.config and key_name:
+            if hasattr(self.config, 'get_api_key'):
+                # ConfigManager instance
+                api_key = self.config.get_api_key(key_name)
+            elif isinstance(self.config, dict):
+                # Dict config from get_provider_config()
+                api_key = self.config.get(f"{key_name}_api_key")
+        return auth_mode, api_key
+
     def generate_video_prompt(
         self,
         context: VideoPromptContext,
@@ -299,82 +344,52 @@ IMPORTANT:
 - PRESERVE all style descriptors from the start frame description (e.g., "hi-res cartoon", "photorealistic", "cinematic", etc.)"""
 
         try:
-            # Call LLM provider using LiteLLM
-            import litellm
+            # Call LLM provider using chameleon_llm
+            from core import chameleon_llm
+            from core.llm_params import (build_completion_kwargs,
+                                         normalize_provider, saved_vertex_project)
 
-            # Map provider names to LiteLLM format
-            # LiteLLM uses "gemini" not "google" for Google Gemini models
-            litellm_provider = "gemini" if provider == "google" else provider
+            # The provider may be a display name ("Google", "LM Studio")
+            provider_id = normalize_provider(provider)
+            auth_mode, api_key = self._auth_for(provider_id)
 
-            # Prepare model string for LiteLLM
-            model_id = f"{litellm_provider}/{model}" if litellm_provider else model
+            # Get API key (only required for cloud providers in api-key mode)
+            if auth_mode == "api-key":
+                if provider_id not in _LOCAL_PROVIDERS and not api_key:
+                    self.logger.error(f"No API key found for provider '{provider}'")
+                    return self._fallback_prompt(context)
+                if api_key:
+                    self.logger.info(f"Using API key authentication: {'***' + api_key[-4:] if len(api_key) > 4 else '***'}")
+            else:
+                self.logger.info(f"Using gcloud authentication (Application Default Credentials)")
 
-            self.logger.info(f"Generating video prompt with {provider}/{model} (LiteLLM: {model_id})")
+            # Route prefix (anthropic/, gemini/ or vertex_ai/ by auth mode,
+            # ollama/, LM Studio endpoint) and per-model params (GPT-5
+            # temperature lock, max_tokens -> max_completion_tokens) are built
+            # centrally. The vertex_ai route signs in with Google Cloud login.
+            request_params = build_completion_kwargs(
+                provider_id, model,
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                {"temperature": temperature,
+                 "max_tokens": 500},  # Increased from 200 to avoid truncation
+                api_key=api_key,
+                api_base=self._endpoint_for(provider_id),
+                auth_mode=auth_mode if provider_id == "gemini" else None,
+                vertex_project=saved_vertex_project(self.config))
+            model_id = request_params["model"]
+
+            self.logger.info(f"Generating video prompt with {provider}/{model} (route: {model_id})")
             self.logger.debug(f"Context: start='{context.start_prompt[:50]}...', camera={context.enable_camera_movements}, flow={context.enable_prompt_flow}")
 
             # Log the full user prompt for debugging
             self.logger.info(f"User prompt sent to LLM:\n{'-'*80}\n{user_prompt}\n{'-'*80}")
 
-            # Check auth mode for Google/Gemini providers
-            auth_mode = "api-key"  # Default
-            if self.config and provider == "google":
-                auth_mode = self.config.get("auth_mode", "api-key")
-                # Normalize auth mode values
-                if auth_mode in ["api_key", "API Key"]:
-                    auth_mode = "api-key"
-                elif auth_mode == "Google Cloud Account":
-                    auth_mode = "gcloud"
+            response = chameleon_llm.completion(**request_params)
 
-            # Get API key (only required for api-key mode)
-            api_key = None
-            if auth_mode == "api-key":
-                if self.config:
-                    # Handle both ConfigManager object and dict config
-                    if hasattr(self.config, 'get_api_key'):
-                        # ConfigManager instance
-                        if provider == "google":
-                            api_key = self.config.get_api_key('google')
-                        elif provider == "openai":
-                            api_key = self.config.get_api_key('openai')
-                        elif provider in ["anthropic", "claude"]:
-                            api_key = self.config.get_api_key('anthropic')
-                    elif isinstance(self.config, dict):
-                        # Dict config from get_provider_config()
-                        if provider == "google":
-                            api_key = self.config.get('google_api_key')
-                        elif provider == "openai":
-                            api_key = self.config.get('openai_api_key')
-                        elif provider in ["anthropic", "claude"]:
-                            api_key = self.config.get('anthropic_api_key')
-
-                if not api_key:
-                    self.logger.error(f"No API key found for provider '{provider}'")
-                    return self._fallback_prompt(context)
-
-                self.logger.info(f"Using API key authentication: {'***' + api_key[-4:] if api_key and len(api_key) > 4 else 'None'}")
-            else:
-                self.logger.info(f"Using gcloud authentication (Application Default Credentials)")
-
-            # Prepare request parameters
-            request_params = {
-                "model": model_id,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                "temperature": temperature,
-                "max_tokens": 500  # Increased from 200 to avoid truncation
-            }
-
-            # Only add API key if provided (for API key auth mode)
-            # For gcloud auth, LiteLLM will use Application Default Credentials
-            if api_key:
-                request_params['api_key'] = api_key
-
-            response = litellm.completion(**request_params)
-
-            # CRITICAL: Check if content is None (known LiteLLM+Gemini bug)
-            # See: https://github.com/BerriAI/litellm/issues/10721
+            # CRITICAL: Check if content is None (defensive; the client normally returns a str)
             message_content = response.choices[0].message.content
             finish_reason = response.choices[0].finish_reason if response.choices else "unknown"
 
@@ -382,7 +397,7 @@ IMPORTANT:
             self.logger.info(f"LLM Response (finish_reason={finish_reason}):\n{'-'*80}\n{message_content}\n{'-'*80}")
 
             if message_content is None:
-                self.logger.error(f"❌ LLM returned None content (finish_reason: {finish_reason}). This is a known LiteLLM+Gemini bug.")
+                self.logger.error(f"❌ LLM returned None content (finish_reason: {finish_reason}).")
                 self.logger.error("Falling back to basic prompt. Consider using Anthropic/OpenAI instead.")
                 return self._fallback_prompt(context)
 
@@ -550,31 +565,40 @@ CRITICAL REQUIREMENTS:
 - PRESERVE all style descriptors from start frame descriptions (e.g., "hi-res cartoon", "photorealistic", "cinematic", etc.)"""
 
         try:
-            import litellm
+            from core import chameleon_llm
+            from core.llm_params import (normalize_provider,
+                                         route_completion_kwargs,
+                                         saved_vertex_project)
 
-            # Map provider names to LiteLLM format
-            # LiteLLM uses "gemini" not "google" for Google Gemini models
-            litellm_provider = "gemini" if provider == "google" else provider
+            # Display names ("Google", "LM Studio") route centrally, and the
+            # params are corralled per model (GPT-5 temperature lock,
+            # max_tokens -> max_completion_tokens).
+            provider_id = normalize_provider(provider)
+            auth_mode, api_key = self._auth_for(provider_id)
+            request_params = route_completion_kwargs(
+                provider_id, model,
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": batch_prompt}
+                ],
+                {"temperature": temperature,
+                 # Increased from 200 to 500 tokens per video prompt
+                 "max_tokens": 500 * len(contexts)},
+                api_key=api_key,
+                api_base=self._endpoint_for(provider_id),
+                auth_mode=(auth_mode if provider_id == "gemini" and self.config
+                           else None),
+                vertex_project=saved_vertex_project(self.config))
+            model_id = request_params["model"]
 
-            model_id = f"{litellm_provider}/{model}" if litellm_provider else model
-
-            self.logger.info(f"Batch generating {len(contexts)} video prompts with {provider}/{model} (LiteLLM: {model_id})")
+            self.logger.info(f"Batch generating {len(contexts)} video prompts with {provider}/{model} (route: {model_id})")
 
             # Log the full batch prompt for debugging
             self.logger.info(f"Batch prompt sent to LLM ({len(batch_prompt)} chars):\n{'-'*80}\n{batch_prompt[:1000]}...\n{'-'*80}")
 
-            response = litellm.completion(
-                model=model_id,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": batch_prompt}
-                ],
-                temperature=temperature,
-                max_tokens=500 * len(contexts)  # Increased from 200 to 500 tokens per video prompt
-            )
+            response = chameleon_llm.completion(**request_params)
 
-            # CRITICAL: Check if content is None (known LiteLLM+Gemini bug)
-            # See: https://github.com/BerriAI/litellm/issues/10721
+            # CRITICAL: Check if content is None (defensive; the client normally returns a str)
             message_content = response.choices[0].message.content
             finish_reason = response.choices[0].finish_reason if response.choices else "unknown"
 
@@ -582,7 +606,7 @@ CRITICAL REQUIREMENTS:
             self.logger.info(f"Batch LLM Response (finish_reason={finish_reason}, {len(message_content) if message_content else 0} chars):\n{'-'*80}\n{message_content}\n{'-'*80}")
 
             if message_content is None:
-                self.logger.error(f"❌ LLM returned None content (finish_reason: {finish_reason}). This is a known LiteLLM+Gemini bug.")
+                self.logger.error(f"❌ LLM returned None content (finish_reason: {finish_reason}).")
                 self.logger.error("Falling back to individual generation. Consider using Anthropic/OpenAI instead.")
                 # Fallback to individual generation
                 results = []

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.51.0] - 2026-11-18
+
+- Chat and prompt features no longer depend on LiteLLM. They call OpenAI, Anthropic, Google Gemini, Ollama and LM Studio through a small built-in adapter.
+- Fixed OpenAI calls with current GPT models, which were sent a parameter those models reject.
+- Vertex AI now defaults to the global location, where current Gemini models are served.
+- Prompt enhancement and video prompt generation now work with Anthropic, Google, Ollama and LM Studio where they previously fell back without an error.
+- Google Cloud login now works across the chat features: requests go to Vertex AI in the project saved in Settings, and the login token is no longer sent as an API key.
+- An API key is never sent to a different provider than the one it belongs to, and a warning is logged when a key would travel over plain http to another machine.
+- New automated tests for local LM Studio and Ollama servers; see Docs/Testing-LLM.md.
+
 ## [0.50.2] - 2026-11-12
 
 - File > Save, Save As and Open now work on the Video tab, and no longer do nothing on the Layout tab.

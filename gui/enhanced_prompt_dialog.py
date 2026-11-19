@@ -14,6 +14,7 @@ from PySide6.QtGui import QKeySequence, QShortcut
 from .llm_utils import DialogStatusConsole
 from .history_widget import DialogHistoryWidget
 from .dialog_utils import OperationGuardMixin, guard_operation
+from core.llm_params import saved_vertex_project
 from core.prompt_enhancer import EnhancementLevel
 from core.discord_rpc import discord_rpc, ActivityState
 
@@ -32,8 +33,13 @@ class EnhanceWorker(QObject):
                  enhancement_level: EnhancementLevel, style_preset: Optional[str] = None,
                  image_provider: str = "google", temperature: float = 0.7,
                  max_tokens: int = 1000, reasoning_effort: str = "medium",
-                 verbosity: str = "medium"):
+                 verbosity: str = "medium", auth_mode: Optional[str] = None,
+                 vertex_project: Optional[str] = None):
         super().__init__()
+        # Google only: the auth mode and project of the dialog's live config.
+        # None leaves the choice to the saved Settings.
+        self.auth_mode = auth_mode
+        self.vertex_project = vertex_project
         self.prompt = prompt
         self.llm_provider = llm_provider
         self.llm_model = llm_model
@@ -92,7 +98,11 @@ class EnhanceWorker(QObject):
             if provider_lower == "openai":
                 api_config['openai_api_key'] = self.api_key
             elif provider_lower in ["google", "gemini"]:
-                api_config['google_api_key'] = self.api_key
+                # Mode, project and key travel together; with Google Cloud
+                # login the key is dropped (Vertex AI needs none).
+                from core.llm_params import google_provider_part
+                api_config.update(google_provider_part(
+                    self.auth_mode, self.api_key, self.vertex_project))
             elif provider_lower in ["claude", "anthropic"]:
                 api_config['anthropic_api_key'] = self.api_key
 
@@ -616,7 +626,12 @@ class EnhancedPromptDialog(QDialog, OperationGuardMixin):
             temperature,
             max_tokens,
             reasoning,
-            verbosity
+            verbosity,
+            # Google: the mode and project of this dialog's live config, the
+            # same one the key above came from
+            auth_mode=(auth_mode if llm_provider.lower() in ["gemini", "google"]
+                       else None),
+            vertex_project=saved_vertex_project(self.config)
         )
         self.worker.moveToThread(self.thread)
 

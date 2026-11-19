@@ -10,7 +10,7 @@ from pathlib import Path
 
 from core.prompt_enhancer import PromptEnhancer, EnhancementLevel
 from core.llm_models import resolve_model
-from core.llm_params import validate_params
+from core.llm_params import normalize_provider, route_completion_kwargs
 from core.llm_parsing import LLMResponseParser
 
 
@@ -99,11 +99,11 @@ class PromptEnhancerLLM:
             self.logger.debug(f"Original prompt: {prompt}")
             self.logger.debug(f"Enhancement level: {enhancement_level}, style: {style_preset}")
 
-            # Check if we're using litellm or need direct API calls
-            if hasattr(self.llm_provider, 'litellm') and self.llm_provider.litellm:
-                self.logger.info("Using litellm for enhancement")
-                # Use litellm for the call
-                response = self._call_with_litellm(
+            # Check if the provider exposes the LLM client or we need the fallback
+            if hasattr(self.llm_provider, 'llm') and self.llm_provider.llm:
+                self.logger.info("Using chameleon_llm for enhancement")
+                # Use chameleon_llm for the call
+                response = self._call_with_llm(
                     actual_llm_provider, model, user_prompt, temperature, max_tokens
                 )
             elif hasattr(self.llm_provider, 'enhance_prompt'):
@@ -134,16 +134,20 @@ class PromptEnhancerLLM:
             return response
 
         except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse LLM response as JSON: {e}")
+            self.logger.error(
+                f"Failed to parse LLM response as JSON (provider={actual_llm_provider}, "
+                f"model={model}): {e}; using the non-LLM fallback")
             return self._create_fallback_response(prompt, provider, enhancement_level)
         except Exception as e:
-            self.logger.error(f"Failed to enhance prompt with LLM: {e}")
+            self.logger.error(
+                f"Failed to enhance prompt with LLM (provider={actual_llm_provider}, "
+                f"model={model}): {type(e).__name__}: {e}; using the non-LLM fallback")
             return self._create_fallback_response(prompt, provider, enhancement_level)
 
-    def _call_with_litellm(self, provider: str, model: Optional[str],
+    def _call_with_llm(self, provider: str, model: Optional[str],
                           user_prompt: str, temperature: float, max_tokens: int = 4000) -> Dict[str, Any]:
         """
-        Call LLM using litellm library.
+        Call LLM using the chameleon_llm client.
 
         Args:
             provider: LLM provider name
@@ -155,40 +159,37 @@ class PromptEnhancerLLM:
         Returns:
             Parsed JSON response from LLM
         """
-        # Prepare model identifier
-        if provider == 'google':
+        # The provider may be a display name ("Anthropic", "Google", "LM Studio")
+        provider_id = normalize_provider(provider)
+        if provider_id == 'gemini':
             model_id = model or resolve_model('google', 'flash', static_default='gemini-2.0-flash-exp')
-        elif provider == 'openai':
-            model_id = model or resolve_model('openai', 'gpt-mini', static_default='gpt-4o-mini')
-        elif provider == 'anthropic':
+        elif provider_id == 'anthropic':
             model_id = model or resolve_model('anthropic', 'haiku', static_default='claude-3-haiku-20240307')
         else:
             model_id = model or resolve_model('openai', 'gpt-mini', static_default='gpt-4o-mini')
 
-        # Add LiteLLM provider prefix if needed
-        provider_prefixes = {
-            'google': 'gemini/',
-            'anthropic': 'anthropic/',
-        }
-
-        if provider in provider_prefixes and not model_id.startswith(provider_prefixes[provider]):
-            model_id = f"{provider_prefixes[provider]}{model_id}"
-
-        # Validate params against what this provider/model actually accepts
-        # (handles max_tokens vs max_completion_tokens renaming, clamping, drops).
-        param_kwargs, _ = validate_params(
-            provider, model_id,
-            {"temperature": temperature, "max_tokens": max_tokens},
-        )
-
-        kwargs = {
-            "model": model_id,
-            "messages": [
-                {"role": "system", "content": self.enhancer.SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt}
-            ],
-            **param_kwargs
-        }
+        # Route prefix (anthropic/, gemini/ or vertex_ai/, ollama/, LM Studio
+        # endpoint) and per-model params (max_tokens vs max_completion_tokens,
+        # clamping, drops) are built centrally. API keys reach the adapters
+        # through the environment UnifiedLLMProvider configured.
+        messages = [
+            {"role": "system", "content": self.enhancer.SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}
+        ]
+        params = {"temperature": temperature, "max_tokens": max_tokens}
+        builder = getattr(self.llm_provider, 'route_kwargs', None)
+        if callable(builder):
+            # UnifiedLLMProvider applies its own settings: the LM Studio
+            # endpoint, and Google Cloud login (vertex_ai/ with the saved
+            # project, never an access token as an API key).
+            kwargs = builder(provider_id, model_id, messages, params)
+        else:
+            kwargs = route_completion_kwargs(
+                provider_id, model_id, messages, params,
+                api_base=(getattr(self.llm_provider, 'lmstudio_base', None)
+                          if provider_id == 'lmstudio' else None),
+            )
+        model_id = kwargs["model"]
 
         # Check if LLM logging is enabled
         from core.config import ConfigManager
@@ -221,12 +222,12 @@ class PromptEnhancerLLM:
         self.logger.info(f"  User prompt: {clean_user}")
         console.info(f"  User prompt: {clean_user}")
 
-        # Call litellm
+        # Call the LLM
         try:
-            response = self.llm_provider.litellm.completion(**kwargs)
+            response = self.llm_provider.llm.completion(**kwargs)
         except Exception as e:
-            self.logger.error(f"LiteLLM call failed: {e}")
-            console.error(f"LiteLLM call failed: {e}")
+            self.logger.error(f"LLM call failed: {e}")
+            console.error(f"LLM call failed: {e}")
             raise
 
         # Always log response for debugging

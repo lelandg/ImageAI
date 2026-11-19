@@ -1,7 +1,7 @@
 """Per-region AI prompt help: draft an image-generation prompt from the project.
 
 Phase 5a, spec §9 (F-AI) first bullet. Pure prompt-building + response parsing;
-the production LLM call reuses ``core.layout.designer.run_completion`` (LiteLLM,
+the production LLM call reuses ``core.layout.designer.run_completion`` (chameleon_llm,
 key resolution, logging) injected as ``completion_fn`` — so this module is fully
 unit-testable headless with a fake completion.
 """

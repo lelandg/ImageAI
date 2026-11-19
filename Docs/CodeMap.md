@@ -652,7 +652,6 @@ ImageAI/
 │   ├── prompt_builder.py  # 1839 lines
 │   ├── prompt_generation_dialog.py  # 1611 lines
 │   ├── prompt_question_dialog.py  # 949 lines
-│   ├── prompt_question_dialog_old.py  # 1077 lines
 │   ├── reference_image_dialog.py  # 1186 lines
 │   ├── reference_selection_dialog.py  # 286 lines
 │   ├── refine_image_dialog.py  # 549 lines
