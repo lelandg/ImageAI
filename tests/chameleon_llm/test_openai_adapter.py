@@ -113,7 +113,8 @@ def test_top_k_in_extra_body_for_lm_studio_and_dropped_for_cloud(fake_openai, ca
          params={"top_k": 40, "temperature": 0.1})
     assert fake_openai.chat_calls[-1]["extra_body"] == {"top_k": 40}
     assert "top_k" not in fake_openai.chat_calls[-1]
-    call(api_base="http://proxy/v1", params={"top_k": 5})
+    # No key: a key sent to this plain-http host would log its own WARNING.
+    call(api_key=None, api_base="http://proxy/v1", params={"top_k": 5})
     assert fake_openai.chat_calls[-1]["extra_body"] == {"top_k": 5}
     with caplog.at_level(logging.WARNING, logger="chameleon_llm"):
         call(params={"top_k": 40})

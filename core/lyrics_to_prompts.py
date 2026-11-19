@@ -126,7 +126,9 @@ Rules:
         # other's routing. With Google Cloud login ("gcloud") the configured
         # Google value is an OAuth access token, not an API key: it is never
         # sent, and Gemini models take vertex_ai/.
-        # In API-key mode a key the config lacks is read once from Settings.
+        # A config that names an auth mode supplies its own key. Only a
+        # config with no auth mode has the mode, and in API-key mode the key,
+        # read once from Settings.
         (self.google_auth_mode, self.google_api_key,
          self.vertex_project) = google_credentials(self.config)
         if self.google_api_key:

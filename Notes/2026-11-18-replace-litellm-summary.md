@@ -96,6 +96,9 @@ Known issues left in the code, all older than this work:
   sites) where `EndPromptGenerator` expects a provider object.
 - Settings also writes API keys to `config.json` in plain text when the
   keyring works.
+- Continuity analysis in the video tab passes the selected image-generation
+  model to `StyleAnalyzer` as its chat model
+  (`gui/video/video_project_tab.py`).
 - `core/video/veo_client.py` and `providers/google.py` still suggest
   `pip install google-generativeai`.
 - `Docs/CodeMap.md` was not regenerated; its generator indexes scratch

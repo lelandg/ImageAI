@@ -72,8 +72,9 @@ test can never overwrite your real settings. A key that exists only in
 `config.json` is therefore invisible to the tests, and that provider's tests
 skip with `no <provider> API key configured`. Settings stores a key in the
 keyring whenever the `keyring` package is installed and the system has a
-keyring service. It falls back to `config.json` only when the keyring is not
-available.
+keyring service. Settings also writes a plain-text copy of each key to
+`config.json` every time, for older code that reads it there, so a backup of
+that file contains your keys whether or not the keyring works.
 
 To give the cloud tier a key:
 

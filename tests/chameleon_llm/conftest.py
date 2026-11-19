@@ -35,6 +35,16 @@ def make_chat_reply(content="hello", finish_reason="stop", usage=(3, 4, 7)):
     return SimpleNamespace(model="echoed-model", choices=[choice], usage=use)
 
 
+@pytest.fixture(autouse=True)
+def _fresh_cleartext_warnings():
+    """The cleartext-key warning is logged once per base URL per process.
+    Forget the reported URLs before every test, so no test's log records
+    depend on which tests ran before it."""
+    from core.chameleon_llm import endpoint
+    endpoint._reset_cleartext_warnings()
+    yield
+
+
 @pytest.fixture
 def fake_openai(monkeypatch):
     openai = pytest.importorskip("openai")

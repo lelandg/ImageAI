@@ -325,6 +325,18 @@ def test_other_providers_are_untouched_in_gcloud_mode(completion):
     assert os.environ["OPENAI_API_KEY"] == "openai-key"
 
 
+def test_analyze_image_sends_lm_studio_endpoint_to_lm_studio_only(completion):
+    provider = _provider({"lmstudio_endpoint": "http://lm-host:4321/v1",
+                          "openai_api_key": "openai-key"})
+    messages = [{"role": "user", "content": "describe"}]
+    provider.analyze_image(messages, model="lm_studio/llava", max_retries=0)
+    kwargs = completion.call_args.kwargs
+    assert kwargs["api_base"] == "http://lm-host:4321/v1"
+    assert "api_key" not in kwargs
+    provider.analyze_image(messages, model="gpt-4-test", max_retries=0)
+    assert "api_base" not in completion.call_args.kwargs
+
+
 def test_token_is_never_logged(completion, caplog):
     import logging
     with caplog.at_level(logging.DEBUG):

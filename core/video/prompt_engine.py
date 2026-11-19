@@ -125,10 +125,11 @@ class UnifiedLLMProvider:
         # The auth mode is always passed to the builder: 'gcloud' is Vertex
         # AI; 'api-key' is the gemini/ route, also when no key is found (the
         # request then fails with an authentication error; a missing key
-        # never moves a request to Vertex). In api-key mode a key the config
-        # dict lacks is read once from Settings (get_api_key); in gcloud mode
-        # the configured Google value is an OAuth access token and is never
-        # sent or looked up.
+        # never moves a request to Vertex). A config dict that names an auth
+        # mode supplies its own key: Settings are not consulted for one. Only
+        # a dict with no auth mode has the mode, and in api-key mode the key,
+        # read once from Settings (get_api_key). In gcloud mode the configured
+        # Google value is an OAuth access token and is never sent or looked up.
         (self.google_auth_mode, self.google_api_key,
          self.vertex_project) = google_credentials(self.config)
         self.gemini_auth_mode = self.google_auth_mode
@@ -1029,6 +1030,9 @@ Format: Just return numbered prompts (1. ... 2. ... etc.), no other text."""
              "reasoning_effort": reasoning_effort,
              "response_format": response_format},
             api_key=api_key,
+            # The configured LM Studio endpoint, for an LM Studio model only.
+            api_base=(self.lmstudio_base if provider_id == "lmstudio"
+                      else None),
             auth_mode=self.gemini_auth_mode,
             vertex_project=self.vertex_project,
             on_warning=(lambda msg: console_callback(msg, "WARNING"))
