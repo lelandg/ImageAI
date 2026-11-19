@@ -15,7 +15,11 @@ from .errors import (
 from .routing import Route, resolve_route
 from .types import Choice, Completion, Message, Usage
 
-__version__ = "0.1.0"
+# This package's own version, separate from ImageAI's (core/constants.py).
+# Kept as a tuple so release tooling that looks for a literal
+# __version__ string does not take it for the application version.
+__version_info__ = (0, 1, 0)
+__version__ = ".".join(str(part) for part in __version_info__)
 
 __all__ = [
     "completion", "Completion", "Choice", "Message", "Usage", "Route",
