@@ -5,7 +5,7 @@ anyio>=4.16.0  # CVE-2026-64847, CVE-2026-63374 (via httpx)
 certifi>=2026.10.23  # GHSA-6q48-6c7w-9gw2 (critical): drops the compromised emSign ECC G3 root
 click>=8.5.1
 cryptography>=50.0.2
-filelock>=4.2.9  # 17 lock-handling CVEs fixed in 4.2.1, incl. GHSA-v4x8-3wr5-3wq8 (high)
+filelock>=4.2.10  # 17 lock-handling CVEs fixed in 4.2.1, incl. GHSA-v4x8-3wr5-3wq8 (high)
 fsspec>=2026.9.0  # CVE-2026-104851 (via huggingface-hub)
 idna>=3.20
 jaraco.context>=6.1.2
@@ -17,7 +17,7 @@ pyasn1>=0.6.5
 pygments>=2.21.0  # Transitive via transformers > typer > rich; CVE-2026-4539 (AdlLexer ReDoS)
 pyjwt>=2.15.1
 python-dotenv>=1.2.4
-python-multipart>=0.0.33
+python-multipart>=0.0.34
 requests>=2.34.2
 setuptools>=84.2.1
 tqdm>=4.70.1  # Transitive via nltk; 4.66.3 clears GHSA-g7vv-2v7x-gj9p + 3 more
@@ -27,7 +27,7 @@ virtualenv>=21.15.6,<22  # 21.14.9 is still affected; 21.14.13 clears GHSA-cx6f-
 # floor here whose dependency tree makes osv-scanner's transitive resolver
 # abort with "resolution aborted after too many iterations" on this file.
 pretty-midi>=0.2.11.post0
-mediapipe>=1.2.2,<2
+mediapipe>=1.2.3,<2
 protobuf>=5.29.6,<6
 
 # ---------------------------------------------------------------------------
@@ -77,5 +77,5 @@ protobuf>=5.29.6,<6
 # Plain httpx is a SEPARATE distribution (latest 0.28.1) with only 2
 # advisories, both fixed in 0.23.0, already satisfied by the 0.28.x release the
 # AI SDKs resolve to.
-httpcore2>=2.16.0  # PYSEC-2026-3844, GHSA-7mj9-2mp8-4m2p (httpx 2.x line)
-httpx2>=2.16.0  # 10 advisories; 2.12.0 is the lowest clearing GHSA-8xx6-hgc6-gc2m
+httpcore2>=2.16.2  # PYSEC-2026-3844, GHSA-7mj9-2mp8-4m2p (httpx 2.x line)
+httpx2>=2.16.2  # 10 advisories; 2.12.0 is the lowest clearing GHSA-8xx6-hgc6-gc2m
