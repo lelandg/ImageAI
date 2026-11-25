@@ -244,7 +244,9 @@ python main.py --video --extend fox.mp4 -p "the fox leaps over a log" -o fox2.mp
 # Frame-to-frame interpolation (Veo only: end frame via --last-frame)
 # Known gap: the CLI sends --ref-image as a subject reference, not as the start
 # frame (cli/commands/video.py sets no start image), so this request carries an
-# end frame only. True start-to-end interpolation needs a code change.
+# end frame only. Veo expects an end frame together with a start frame, so the
+# API may reject this command. True start-to-end interpolation needs a code
+# change; until then treat this example as unsupported.
 python main.py --video -p "sunrise timelapse" -o sunrise.mp4 \
     --ref-image start.png --last-frame end.png
 
@@ -385,15 +387,19 @@ any off-center subject (symptom: "this panel looks cropped weird").
   so the renderer's crop can't cut anything that matters. This is a *where to
   put content* instruction, distinct from the sizing footgun below.
 - **Repair without regenerating:** pre-crop the source to exactly the bbox
-  aspect — full source height, width = height × (w/h), slide the x-window to
-  protect the subject — save as a **new** file and point `image_ref` at it.
+  aspect, keeping the subject inside the window. Source wider than the bbox
+  aspect: full source height, width = height × (w/h), slide the x-window.
+  Source narrower: full source width, height = width ÷ (w/h), slide the
+  y-window. Save as a **new** file and point `image_ref` at it.
   The renderer's center-crop then becomes a no-op. Never overwrite the
   original art.
 
 ### Verify visually, headless
 
 After any placement change: `--layout-export proj.json -o page.png`, crop the
-area of interest with PIL, and look at it. Edit JSON → export → inspect is a
+area of interest with PIL, and look at it. A project with more than one page
+writes `page-001.png`, `page-002.png`, … instead of `page.png`; open the
+numbered file for the page you changed. Edit JSON → export → inspect is a
 cheap loop; don't trust coordinates alone.
 
 ### `.iaibundle` is GUI-only

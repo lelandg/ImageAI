@@ -44,7 +44,9 @@ is in `core/`, GUI in `gui/`, CLI in `cli/`, provider backends in `providers/`.
 - Gemini images: use `gemini-2.5-flash-image`; avoid
   `gemini-2.5-flash-image-preview` (deprecated, broken aspect ratio). Set the
   ratio with `image_config={'aspect_ratio': '4:3'}` and log it — do not put
-  dimensions or ratios in the prompt text (they render as literal text).
+  dimensions or ratios in the prompt text as a size request (they render as
+  literal text). The one exception is the fill-area composition instruction
+  in the `imageai-cli` skill ("Region images are cover-cropped").
   Supported: 1:1, 3:2, 2:3, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9.
 - Targets >1024px: generate at max dimension 1024, then upscale. Reference
   images with a mismatched aspect: center on a transparent canvas of the

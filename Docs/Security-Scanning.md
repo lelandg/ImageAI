@@ -34,7 +34,11 @@ Dependabot configuration (`.github/dependabot.yml`) and the `zizmor` job in
   confirm `gh api repos/lelandg/ImageAI --jq .permissions.admin` prints
   `true`; only then does 404 mean off. Enable: same path with `-X PUT`.
 - Alerts and automatic security **updates** are two switches, not one. Alerts
-  only report; the half that opens PRs is `automated-security-fixes` (same API
-  shape). It is deliberately OFF here: this repo took its first scan with a
+  only report; the half that opens PRs is `automated-security-fixes` (same
+  path shape and `-X PUT` to enable, but a different status answer: its GET
+  returns 200 with a JSON body whether it is on or off, so read the body, not
+  the status. It is on only when `enabled` is `true` and `paused` is `false`;
+  this repo answers `{"enabled":false,"paused":false}`). It is deliberately
+  OFF here: this repo took its first scan with a
   pre-existing advisory backlog, and enabling it would open that backlog as
   PRs at once. Turn it on per repo once the backlog is cleared.

@@ -293,7 +293,9 @@ python main.py --video --extend whale.mp4 \
 # Veo frame-to-frame interpolation (end frame)
 # Known gap: the CLI sends --ref-image as a subject reference, not as the start
 # frame (cli/commands/video.py sets no start image), so this request carries an
-# end frame only. True start-to-end interpolation needs a code change.
+# end frame only. Veo expects an end frame together with a start frame, so the
+# API may reject this command. True start-to-end interpolation needs a code
+# change; until then treat this example as unsupported.
 python main.py --video -p "an acorn becomes an oak, four seasons in eight seconds" \
     -o oak.mp4 --ref-image acorn.png --last-frame oak.png
 
