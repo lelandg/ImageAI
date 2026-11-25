@@ -82,8 +82,8 @@ restated here; read it there. What is specific to this repo:
 
 - CI runs `gitleaks`, `osv-scanner` and `zizmor` on every PR, every push to `main`, and
   weekly (`.github/workflows/security.yml`). There is no committed
-  `package-lock.json`, so the npm jobs from the shared posture are absent on
-  purpose.
+  `package-lock.json`, so the npm jobs in that workflow skip themselves with
+  a notice; that is expected, not a failure.
 - Dependabot config is committed, with grouped security PRs (`.github/dependabot.yml`).
 - Dependabot/zizmor specifics for this repo (pinned actions get no alerts,
   how to check the alerts switch, why automated-security-fixes is off):

@@ -352,8 +352,10 @@ references > 3s, negative-prompt configs, temperature/system instructions.
 ### Output & reporting contract
 
 - Writes the `.mp4` to `-o` (or a prompt-derived name if omitted), plus a
-  `<output>.json` **sidecar** (prompt, provider, resolved model, aspect,
-  status, operation/interaction id, timestamps).
+  `<stem>.json` **sidecar** next to it (`fox.mp4` → `fox.json`) holding the
+  same fields as the `--json` object below (status, output path, provider,
+  resolved model, aspect ratio, operation/interaction id, error). It does not
+  record the prompt.
 - **Human/progress text always goes to stderr.**
 - With `--json`, **stdout carries exactly one JSON object and nothing else**, so
   a parser never trips on log lines:
@@ -496,8 +498,10 @@ This is the part that makes the CLI safe to drive from another program.
 | `2` | User / validation error (bad flags, missing key, unsupported combo) |
 | `3` | Unexpected exception |
 
-**Sidecars everywhere.** Images and videos both write a `<output>.json` next to
+**Sidecars everywhere.** Images and videos both write a JSON sidecar next to
 the artifact — a durable record an agent can read later even without `--json`.
+An image's is `<file>.<ext>.json` (`out.png.json`); a video's is `<stem>.json`
+(`fox.json`).
 
 **Logging goes to stderr.** Console diagnostics (warnings/errors) are routed to
 stderr specifically so `stdout` stays clean for `--json` consumers.
@@ -667,7 +671,7 @@ prompt suite, and diff outputs across model/prompt changes as a regression test.
 
 - Prefer `--json` for video and parse **stdout only**; treat **stderr** as logs.
 - Branch on **exit codes** (`0/1/2/3`), not on stdout text.
-- Read the `.json` **sidecar** for durable metadata (prompt, model, ids).
+- Read the `.json` **sidecar** for durable metadata (model and ids; image sidecars also hold the prompt, video sidecars do not).
 - Pass keys via env vars or `-K <file>` — never inline secrets in a logged command.
 - For headless CI/agents, always supply an action flag so the GUI never launches.
 - Respect **model↔provider** pairing and per-provider aspect/size rules to avoid

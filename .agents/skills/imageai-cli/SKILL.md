@@ -406,8 +406,11 @@ stay in sync.
   all logs/progress go to **stderr**. Parse stdout only.
 - **Exit codes (video):** `0` success, `1` generation failed, `2` validation /
   user error (bad flag combo, missing key), `3` unexpected exception.
-- **Sidecars:** every image and video gets a `<output>.json` sidecar with
-  prompt, resolved model, and ids — durable metadata even without `--json`.
+- **Sidecars:** durable metadata even without `--json`. An image writes
+  `<file>.<ext>.json` (`out.png` → `out.png.json`) with the prompt and
+  generation details. A video writes `<stem>.json` (`fox.mp4` → `fox.json`)
+  with the same fields as the `--json` object above; it has no `prompt`
+  field, so keep the prompt yourself if you need it later.
 
 ## Keys, testing & auth
 
@@ -470,7 +473,7 @@ Key resolution order: **CLI flag (`-k`/`-K`) > stored config > environment**.
 | `--style` | NAME | Apply a saved style (image gen, `--video`, `--layout-fill`). |
 | `--style-smart` | flag | Smart-merge prompt+style via LLM (image gen only; falls back to plain concat). |
 | `--style-create` | NAME | Derive a new style (needs `--style-images`). |
-| `--style-images` | PATH ... (repeatable) | Files/dirs/globs for `--style-create`. |
+| `--style-images` | PATH ... (one flag, all paths after it) | Files/dirs/globs for `--style-create`. Repeating the flag keeps only the last one. |
 | `--style-llm-provider` / `--style-llm-model` | provider / model id | Vision LLM override for `--style-create`. |
 | `--style-list` | flag | List saved styles. |
 | `--style-show` | NAME | Print one style's full JSON record. |
