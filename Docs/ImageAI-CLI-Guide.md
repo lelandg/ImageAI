@@ -129,7 +129,10 @@ python main.py --auth-mode gcloud -p "aurora borealis reflected in a wolf's eye,
 
 - **Aspect ratio, not pixels in the prompt.** Set sizing via `--size`; Gemini
   converts to an aspect ratio internally. Never bake `"(1024x768)"` into the
-  prompt — Gemini renders it as literal text in the image.
+  prompt — Gemini renders it as literal text in the image. One exception: the
+  fill-area composition instruction in the `imageai-cli` skill ("Region images
+  are cover-cropped"), which tells the model where to put content, not what
+  size to render.
 - **Supported aspect ratios:** `1:1, 3:2, 2:3, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9`.
 - **Scaling:** Nano Banana caps at 1024px (app scales max-edge to 1024 then
   upscales); NB2 → 2K native; NBP → 4K native.
@@ -579,7 +582,9 @@ fi
 - **Provider/model must match.** `dall-e-3` needs `--provider openai`; `gemini-*`
   needs `--provider google` (or default). Video: `--extend`/`--last-frame` need
   `--video-provider veo`.
-- **Google sizing:** never put pixel dimensions in the prompt text; use `--size`.
+- **Google sizing:** never put pixel dimensions in the prompt text as a size
+  request; use `--size`. The fill-area composition instruction above is the
+  one exception.
 - **gpt-image-2 custom-size:** the #1 mistake is non-multiple-of-16 edges —
   pre-flight validation rejects it.
 - **gpt-image-2 reasoning is just `--quality`** (`auto/low/medium/high`); there is
