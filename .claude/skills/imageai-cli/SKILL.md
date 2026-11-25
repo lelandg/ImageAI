@@ -69,7 +69,9 @@ python main.py --auth-mode gcloud -p "..." -o out.png
 
 - **Aspect ratio, not pixels in the prompt.** Set sizing via `--size`; the
   provider converts to an aspect ratio (`image_config`). Never bake dimensions
-  like "(1024x768)" into prompt text — Gemini renders them as literal text.
+  like "(1024x768)" into prompt text as a size request — Gemini renders them
+  as literal text. The one exception is the fill-area composition instruction
+  under "Region images are cover-cropped".
 - **Supported aspect ratios:** 1:1, 3:2, 2:3, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9.
 - **Scaling:** NB caps at 1024px; the app scales proportionally (max edge 1024)
   then upscales. NB2 → 2K native, NBP → 4K native.
@@ -241,7 +243,12 @@ python main.py --video --video-provider omni -p "the cat bats the yarn ball" \
 # Extend an existing clip (Veo only; extensions render at 720p)
 python main.py --video --extend fox.mp4 -p "the fox leaps over a log" -o fox2.mp4
 
-# Frame-to-frame interpolation (Veo only: start ref + end frame)
+# Frame-to-frame interpolation (Veo only: end frame via --last-frame)
+# Known gap: the CLI sends --ref-image as a subject reference, not as the start
+# frame (cli/commands/video.py sets no start image), so this request carries an
+# end frame only. Veo expects an end frame together with a start frame, so the
+# API may reject this command. True start-to-end interpolation needs a code
+# change; until then treat this example as unsupported.
 python main.py --video -p "sunrise timelapse" -o sunrise.mp4 \
     --ref-image start.png --last-frame end.png
 
@@ -382,15 +389,19 @@ any off-center subject (symptom: "this panel looks cropped weird").
   so the renderer's crop can't cut anything that matters. This is a *where to
   put content* instruction, distinct from the sizing footgun below.
 - **Repair without regenerating:** pre-crop the source to exactly the bbox
-  aspect — full source height, width = height × (w/h), slide the x-window to
-  protect the subject — save as a **new** file and point `image_ref` at it.
+  aspect, keeping the subject inside the window. Source wider than the bbox
+  aspect: full source height, width = height × (w/h), slide the x-window.
+  Source narrower: full source width, height = width ÷ (w/h), slide the
+  y-window. Save as a **new** file and point `image_ref` at it.
   The renderer's center-crop then becomes a no-op. Never overwrite the
   original art.
 
 ### Verify visually, headless
 
 After any placement change: `--layout-export proj.json -o page.png`, crop the
-area of interest with PIL, and look at it. Edit JSON → export → inspect is a
+area of interest with PIL, and look at it. A project with more than one page
+writes `page-001.png`, `page-002.png`, … instead of `page.png`; open the
+numbered file for the page you changed. Edit JSON → export → inspect is a
 cheap loop; don't trust coordinates alone.
 
 ### `.iaibundle` is GUI-only
@@ -406,8 +417,11 @@ stay in sync.
   all logs/progress go to **stderr**. Parse stdout only.
 - **Exit codes (video):** `0` success, `1` generation failed, `2` validation /
   user error (bad flag combo, missing key), `3` unexpected exception.
-- **Sidecars:** every image and video gets a `<output>.json` sidecar with
-  prompt, resolved model, and ids — durable metadata even without `--json`.
+- **Sidecars:** durable metadata even without `--json`. An image writes
+  `<file>.<ext>.json` (`out.png` → `out.png.json`) with the prompt and
+  generation details. A video writes `<stem>.json` (`fox.mp4` → `fox.json`)
+  with the same fields as the `--json` object above; it has no `prompt`
+  field, so keep the prompt yourself if you need it later.
 
 ## Keys, testing & auth
 
@@ -470,7 +484,7 @@ Key resolution order: **CLI flag (`-k`/`-K`) > stored config > environment**.
 | `--style` | NAME | Apply a saved style (image gen, `--video`, `--layout-fill`). |
 | `--style-smart` | flag | Smart-merge prompt+style via LLM (image gen only; falls back to plain concat). |
 | `--style-create` | NAME | Derive a new style (needs `--style-images`). |
-| `--style-images` | PATH ... (repeatable) | Files/dirs/globs for `--style-create`. |
+| `--style-images` | PATH ... (one flag, all paths after it) | Files/dirs/globs for `--style-create`. Repeating the flag keeps only the last one. |
 | `--style-llm-provider` / `--style-llm-model` | provider / model id | Vision LLM override for `--style-create`. |
 | `--style-list` | flag | List saved styles. |
 | `--style-show` | NAME | Print one style's full JSON record. |

@@ -129,7 +129,10 @@ python main.py --auth-mode gcloud -p "aurora borealis reflected in a wolf's eye,
 
 - **Aspect ratio, not pixels in the prompt.** Set sizing via `--size`; Gemini
   converts to an aspect ratio internally. Never bake `"(1024x768)"` into the
-  prompt — Gemini renders it as literal text in the image.
+  prompt — Gemini renders it as literal text in the image. One exception: the
+  fill-area composition instruction in the `imageai-cli` skill ("Region images
+  are cover-cropped"), which tells the model where to put content, not what
+  size to render.
 - **Supported aspect ratios:** `1:1, 3:2, 2:3, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9`.
 - **Scaling:** Nano Banana caps at 1024px (app scales max-edge to 1024 then
   upscales); NB2 → 2K native; NBP → 4K native.
@@ -291,6 +294,11 @@ python main.py --video --extend whale.mp4 \
     -p "the whale dives, clouds cascading off its brass fins" -o whale2.mp4
 
 # Veo frame-to-frame interpolation (end frame)
+# Known gap: the CLI sends --ref-image as a subject reference, not as the start
+# frame (cli/commands/video.py sets no start image), so this request carries an
+# end frame only. Veo expects an end frame together with a start frame, so the
+# API may reject this command. True start-to-end interpolation needs a code
+# change; until then treat this example as unsupported.
 python main.py --video -p "an acorn becomes an oak, four seasons in eight seconds" \
     -o oak.mp4 --ref-image acorn.png --last-frame oak.png
 
@@ -352,8 +360,10 @@ references > 3s, negative-prompt configs, temperature/system instructions.
 ### Output & reporting contract
 
 - Writes the `.mp4` to `-o` (or a prompt-derived name if omitted), plus a
-  `<output>.json` **sidecar** (prompt, provider, resolved model, aspect,
-  status, operation/interaction id, timestamps).
+  `<stem>.json` **sidecar** next to it (`fox.mp4` → `fox.json`) holding the
+  same fields as the `--json` object below (status, output path, provider,
+  resolved model, aspect ratio, operation/interaction id, error). It does not
+  record the prompt.
 - **Human/progress text always goes to stderr.**
 - With `--json`, **stdout carries exactly one JSON object and nothing else**, so
   a parser never trips on log lines:
@@ -496,8 +506,10 @@ This is the part that makes the CLI safe to drive from another program.
 | `2` | User / validation error (bad flags, missing key, unsupported combo) |
 | `3` | Unexpected exception |
 
-**Sidecars everywhere.** Images and videos both write a `<output>.json` next to
+**Sidecars everywhere.** Images and videos both write a JSON sidecar next to
 the artifact — a durable record an agent can read later even without `--json`.
+An image's is `<file>.<ext>.json` (`out.png.json`); a video's is `<stem>.json`
+(`fox.json`).
 
 **Logging goes to stderr.** Console diagnostics (warnings/errors) are routed to
 stderr specifically so `stdout` stays clean for `--json` consumers.
@@ -570,7 +582,9 @@ fi
 - **Provider/model must match.** `dall-e-3` needs `--provider openai`; `gemini-*`
   needs `--provider google` (or default). Video: `--extend`/`--last-frame` need
   `--video-provider veo`.
-- **Google sizing:** never put pixel dimensions in the prompt text; use `--size`.
+- **Google sizing:** never put pixel dimensions in the prompt text as a size
+  request; use `--size`. The fill-area composition instruction above is the
+  one exception.
 - **gpt-image-2 custom-size:** the #1 mistake is non-multiple-of-16 edges —
   pre-flight validation rejects it.
 - **gpt-image-2 reasoning is just `--quality`** (`auto/low/medium/high`); there is
@@ -667,7 +681,7 @@ prompt suite, and diff outputs across model/prompt changes as a regression test.
 
 - Prefer `--json` for video and parse **stdout only**; treat **stderr** as logs.
 - Branch on **exit codes** (`0/1/2/3`), not on stdout text.
-- Read the `.json` **sidecar** for durable metadata (prompt, model, ids).
+- Read the `.json` **sidecar** for durable metadata (model and ids; image sidecars also hold the prompt, video sidecars do not).
 - Pass keys via env vars or `-K <file>` — never inline secrets in a logged command.
 - For headless CI/agents, always supply an action flag so the GUI never launches.
 - Respect **model↔provider** pairing and per-provider aspect/size rules to avoid

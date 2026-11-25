@@ -41,10 +41,12 @@ is in `core/`, GUI in `gui/`, CLI in `cli/`, provider backends in `providers/`.
   first when you investigate an error. The log directory follows the Settings
   storage root, which the user can move; resolve it with
   `core.paths.get_data_paths().logs()`.
-- Gemini images: use `gemini-2.5-flash-image`; **avoid**
+- Gemini images: use `gemini-2.5-flash-image`; avoid
   `gemini-2.5-flash-image-preview` (deprecated, broken aspect ratio). Set the
-  ratio with `image_config={'aspect_ratio': '4:3'}` and log it — **never** put
-  dimensions or ratios in the prompt text (they render as literal text).
+  ratio with `image_config={'aspect_ratio': '4:3'}` and log it — do not put
+  dimensions or ratios in the prompt text as a size request (they render as
+  literal text). The one exception is the fill-area composition instruction
+  in the `imageai-cli` skill ("Region images are cover-cropped").
   Supported: 1:1, 3:2, 2:3, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9.
 - Targets >1024px: generate at max dimension 1024, then upscale. Reference
   images with a mismatched aspect: center on a transparent canvas of the
@@ -76,50 +78,28 @@ is in `core/`, GUI in `gui/`, CLI in `cli/`, provider backends in `providers/`.
 
 ## Scanning & review
 
-Policy lives in `~/.config/agents/AGENTS.md` -> "Dependency, code, and secret
-scanning" and "Model delegation & cross-provider review". It is not restated
-here; read it there. What is specific to this repo:
+Policy lives in `~/.config/agents/AGENTS.md` -> "Dependencies, advisories,
+and scanning" and "Model delegation & cross-provider review". It is not
+restated here; read it there. What is specific to this repo:
 
 - CI runs `gitleaks`, `osv-scanner` and `zizmor` on every PR, every push to `main`, and
   weekly (`.github/workflows/security.yml`). There is no committed
-  `package-lock.json`, so the npm jobs from the shared posture are absent on
-  purpose.
+  `package-lock.json`, so the npm jobs in that workflow skip themselves with
+  a notice; that is expected, not a failure.
 - Dependabot config is committed, with grouped security PRs (`.github/dependabot.yml`).
-- SHA-pinned actions get **no Dependabot alerts**: GitHub generates them only
-  for actions on semantic versions (docs: "About Dependabot alerts"). So no
-  security-update PR can ever fire for a pinned action, an
-  `applies-to: security-updates` group over github-actions is dead config, and
-  the weekly version update is their only automatic remediation -- which is why
-  the github-actions block carries no semver-major ignore. DETECTION comes
-  from the `zizmor` job in `security.yml`: it maps each SHA pin to its
-  release tag and fails on a known-vulnerable, impostor or unpinned action.
-  osv-scanner's `github/actions` plugin only lists the pinned actions: with
-  osv-scanner 2.7.0 it did not flag `tj-actions/changed-files`
-  (GHSA-mrrh-fwg8-r2c3) at a vulnerable SHA or tag. zizmor looks up a SHA
-  pin by one tag: for a root action (owner/repo@sha) the longest tag
-  without a `/`, for a sub-action the longest tag under its path or its
-  last directory (else the longest of all). The job fails unless that tag, and any tag tied
-  with it, is a plain release version (v1, v1.2.3): an untagged commit,
-  a non-version tag or a path-prefixed tag matches no advisory. Pin
-  released versions.
-- Dependabot **alerts** are a per-repo GitHub setting; a config file does not
-  turn them on. Without them the config above governs version updates only.
-  Check it by HTTP STATUS, not by exit code -- `gh api` exits 0 on success
-  and 1 on any failure, and never exits 404 or 403:
-  `gh api -i -X GET repos/lelandg/ImageAI/vulnerability-alerts | head -1`
-  204 = on, 404 = off, 403 = the token has no admin on this repo, which is
-  NOT the same as off. A token without admin can also get 404, so first
-  confirm `gh api repos/lelandg/ImageAI --jq .permissions.admin` prints
-  `true`; only then does 404 mean off. Enable: same path with `-X PUT`.
-- Alerts and automatic security **updates** are two switches, not one. Alerts
-  only report; the half that opens PRs is `automated-security-fixes` (same API
-  shape). It is deliberately OFF here: this repo took its first scan with a
-  pre-existing advisory backlog, and enabling it would open that backlog as
-  PRs at once. Turn it on per repo once the backlog is cleared.
-- PR reviewers configured for this repo: **Codex** (run locally against the
-  committed branch before opening the PR), **CodeRabbit**
-  (`coderabbitai[bot]`) and **GrepTile** (`greptile-apps[bot]`, tuned in
-  `.greptile/config.json`). How to read their checks -- which one re-reviews
-  a push, why a green check does not mean "no findings", and which label
-  skips which bot -- is in the global policy cited above and is deliberately
-  not repeated here.
+- Dependabot/zizmor specifics for this repo (pinned actions get no alerts,
+  how to check the alerts switch, why automated-security-fixes is off):
+  `Docs/Security-Scanning.md`.
+- **PR reviewers.** The review council in the global rules applies here; its
+  members are whatever `~/.config/agents/council.toml` seats, and the runner
+  and commands are in `~/.claude/instructions/model-delegation.md`. This repo
+  adds two automated reviewers: **CodeRabbit** (`coderabbitai[bot]`,
+  `.coderabbit.yaml`), which re-reviews every push, and **GrepTile**
+  (`greptile-apps[bot]`, `.greptile/config.json`), which reviews when the PR
+  opens and not again on a push. Neither reviews a draft or a
+  `dependabot[bot]` / `renovate[bot]` PR. A PR opened with the `no-ai-review`
+  label skips both bots; `no-greptile` skips GrepTile alone; neither label
+  touches the council. The list is additive, not closed: nothing named here
+  replaces a council member. A green bot check does not mean "no findings";
+  how to read the checks is in
+  `~/.claude/instructions/pr-review-automation.md`.

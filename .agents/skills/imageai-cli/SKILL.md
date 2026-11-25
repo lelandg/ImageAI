@@ -1,17 +1,21 @@
 ---
 name: imageai-cli
-description: Use when generating, editing, batching, or scripting images with the ImageAI CLI (`python main.py ...`) from inside the ImageAI repo, across any provider — Google Gemini / Nano Banana, OpenAI (gpt-image-2/1.5/1, DALL·E), Stability AI, or local Stable Diffusion. Covers model selection, sizing/aspect, references & masks, streaming, Batch API, lyrics-to-prompts, gcloud auth, and key management. Trigger whenever the user wants to make or edit an image (or set up/test a provider key) from the command line in this working directory.
+description: Use when generating, editing, batching, or scripting images, videos, or page layouts with the ImageAI CLI (`python main.py ...`) from inside the ImageAI repo, across any provider — Google Gemini / Nano Banana, OpenAI (gpt-image-2/1.5/1, DALL·E), Stability AI, or local Stable Diffusion. Covers model selection, sizing/aspect, references & masks, streaming, Batch API, lyrics-to-prompts, gcloud auth, key management, video generation (Gemini Omni + Veo: refs, extend, frame interpolation, conversational refine, edit-your-own-video, --json output contract), and the publication layout engine (--layout-design/--layout-fill/--layout-export for comics, magazines, PDFs). Trigger whenever the user wants to make or edit an image, video, or layout (or set up/test a provider key) from the command line in this working directory.
 ---
 
 # imageai-cli
 
 The cheat-sheet for driving **everything** the ImageAI CLI can do from
-`python main.py`. Four image providers, the lyrics-to-prompts pipeline, the
-OpenAI Batch API, and key/auth management — all from one entry point.
+`python main.py`. Four image providers, two video providers, the publication
+layout engine, the lyrics-to-prompts pipeline, the OpenAI Batch API, and
+key/auth management — all from one entry point.
 
 > GUI is the default when no action flag is given. Add `--gui` to force it, or
-> pass `-p/--prompt`, `-t/--test`, `-s/--set-key`, or `--lyrics-to-prompts` to
-> stay in the CLI.
+> pass `-p/--prompt`, `--video`, `-t/--test`, `-s/--set-key`,
+> `--lyrics-to-prompts`, or any `--layout-*` action to stay in the CLI.
+
+Full documentation (agent recipes, output contracts, exit codes):
+`Docs/ImageAI-CLI-Guide.md`.
 
 ## Pick a provider first
 
@@ -65,7 +69,9 @@ python main.py --auth-mode gcloud -p "..." -o out.png
 
 - **Aspect ratio, not pixels in the prompt.** Set sizing via `--size`; the
   provider converts to an aspect ratio (`image_config`). Never bake dimensions
-  like "(1024x768)" into prompt text — Gemini renders them as literal text.
+  like "(1024x768)" into prompt text as a size request — Gemini renders them
+  as literal text. The one exception is the fill-area composition instruction
+  under "Region images are cover-cropped".
 - **Supported aspect ratios:** 1:1, 3:2, 2:3, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9.
 - **Scaling:** NB caps at 1024px; the app scales proportionally (max edge 1024)
   then upscales. NB2 → 2K native, NBP → 4K native.
@@ -216,7 +222,206 @@ python main.py --lyrics-to-prompts song.txt \
 ```
 
 `--lyrics-model` accepts any model id the built-in `chameleon_llm` adapter understands (`gpt-4o`, `gemini/gemini-2.0-flash-exp`,
-`Codex-sonnet-4-6`, …). Feed the resulting prompts back into image generation.
+`claude-sonnet-4-6`, …). Feed the resulting prompts back into image generation.
+
+## Video generation (`--video`)
+
+Two providers: `--video-provider omni` (Gemini Omni, conversational, audio
+baked in) and `veo` (default). Reuses `-p/--prompt` and `-o/--out`.
+
+```bash
+# Veo text-to-video (default provider)
+python main.py --video -p "a fox running through snow" -o fox.mp4
+
+# Omni text-to-video (16:9 default; audio auto-generated)
+python main.py --video --video-provider omni -p "a marble run, smooth shot" -o marble.mp4
+
+# Subject references (up to 3 images for either provider)
+python main.py --video --video-provider omni -p "the cat bats the yarn ball" \
+    --ref-image cat.png --ref-image yarn.png -o cat.mp4
+
+# Extend an existing clip (Veo only; extensions render at 720p)
+python main.py --video --extend fox.mp4 -p "the fox leaps over a log" -o fox2.mp4
+
+# Frame-to-frame interpolation (Veo only: end frame via --last-frame)
+# Known gap: the CLI sends --ref-image as a subject reference, not as the start
+# frame (cli/commands/video.py sets no start image), so this request carries an
+# end frame only. Veo expects an end frame together with a start frame, so the
+# API may reject this command. True start-to-end interpolation needs a code
+# change; until then treat this example as unsupported.
+python main.py --video -p "sunrise timelapse" -o sunrise.mp4 \
+    --ref-image start.png --last-frame end.png
+
+# Conversationally refine the previous clip (Omni; id = operation_id in the sidecar)
+python main.py --video --video-provider omni --refine-from int_abc123 \
+    -p "make the violin invisible" -o v2.mp4
+
+# Edit your own footage (Omni; uploads via the Files API first)
+python main.py --video --video-provider omni --edit-video input.mp4 \
+    -p "make the mirror ripple like liquid" -o edited.mp4
+
+# Large/720p clips: ask for URI delivery (Omni only)
+python main.py --video --video-provider omni --delivery uri -p "city timelapse" -o city.mp4
+
+# Machine-readable result (exactly one JSON object on stdout; logs on stderr)
+python main.py --video -p "a fox in snow" -o fox.mp4 --json
+```
+
+### Provider capability split
+
+| Capability | Omni | Veo (default) |
+|------------|------|---------------|
+| `--ref-image` (≤3) | ✅ | ✅ |
+| `--last-frame` interpolation | ❌ | ✅ |
+| `--extend` existing clip | ❌ | ✅ (720p) |
+| `--refine-from` / `--edit-video` / `--delivery uri` | ✅ | ❌ |
+| Audio in output | ✅ always | ✅ (Veo 3) |
+| Aspect ratios | 16:9, 9:16 | 16:9, 9:16, 1:1 |
+| `--auth-mode gcloud` | ❌ (API key only) | ✅ |
+
+Clip length is model-fixed (~8 s) — no `--duration` knob; chain `--extend`
+(Veo) for longer sequences. `--video-model` overrides the resolved default
+model. Wrong provider/flag pairings fail fast with exit code 2.
+
+### Omni prompt superpowers (in the prompt text, not flags)
+
+- **Image roles**: `<FIRST_FRAME>` (start frame) vs `<IMAGE_REF_N>` (subject refs,
+  N=0,1,2); declare with `[# Sources <FIRST_FRAME>@Image1]`.
+- **Timing**: natural language ("after 3 seconds, ...") or timecodes
+  (`[0-3s] a woman enters`, "every 2s cut to a new angle").
+- **Audio direction**: describe music/sound design in the prompt — Omni
+  soundtracks every clip by default.
+- **On-screen text**: Omni renders readable/animated text ("a neon sign that
+  reads OPEN").
+- Aspect ratio goes in `--aspect` (16:9 or 9:16), **never** in the prompt.
+
+Omni does **not** support: video extension (`--extend` is Veo-only), video
+references > 3s, negative-prompt configs, temperature/system instructions.
+
+## Custom styles (`--style*`)
+
+Derive a reusable named style from your own reference images (vision-LLM
+analysis), then apply it text-only or with attached exemplar images across
+image generation, video, and layout fill. Full guide: `Docs/CustomStyles.md`.
+
+```bash
+# Create from a folder/files/globs; prints the new style id on stdout
+python main.py --style-create "Watercolor" --style-images ./refs/watercolor/
+python main.py --style-create "Neon Noir" --style-images shot1.png "refs/noir_*.jpg" \
+    --style-llm-provider openai --style-llm-model gpt-4o
+
+# Manage
+python main.py --style-list
+python main.py --style-show "Watercolor"
+python main.py --style-delete "Watercolor"
+
+# Apply (image gen, video, layout fill)
+python main.py -p "a lighthouse at dusk" --style "Watercolor" -o lighthouse.png
+python main.py -p "a lighthouse at dusk" --style "Watercolor" --style-smart -o lighthouse.png
+python main.py --video -p "waves rolling in" --style "Watercolor" -o waves.mp4
+python main.py --layout-fill comic.json --style "Neon Noir"
+
+# Share
+python main.py --style-export "Watercolor" -o watercolor.zip
+python main.py --style-import watercolor.zip
+```
+
+- Google/OpenAI `gpt-image-*` image generation additionally attaches the
+  style's starred exemplar images as references (after any of your own —
+  yours always win, on limit or when you already have an active reference).
+  Stability AI, Local SD, video, and layout fill are text-only.
+- `--style-smart` (fuse prompt+style via one LLM call, falls back to plain
+  concat on any failure) is image-generation only; ignored elsewhere.
+- Unknown `--style NAME` exits 2 and lists available styles.
+
+## Publication layout engine (`--layout-*`)
+
+Design a page from a text description, fill its image regions, export to
+PDF/PNG — fully headless.
+
+```bash
+# Design a layout project (.json) from a description (requires -o)
+python main.py --layout-design "3-panel comic, action scene" -o comic.json \
+    --content-kind comic --page-size "US Comic" --orientation portrait --dpi 300
+
+# Generate images for every prompted region in the project
+python main.py --layout-fill comic.json
+
+# Render to PDF or PNG (the -o extension picks the format)
+python main.py --layout-export comic.json -o comic.pdf
+```
+
+- `--content-kind`: `children | comic | comic_strip | magazine | newspaper |
+  scientific | custom` (default custom).
+- `--page-size` (Letter, A4, A5, Tabloid, US Comic, …), `--orientation`
+  (portrait/landscape), `--dpi` (default 300).
+- `--layout-design` uses a **text** LLM; override with `--layout-llm-provider`
+  (`openai | anthropic | google | ollama | lmstudio`) and `--layout-llm-model`.
+- `--layout-fill` uses the normal image `--provider`/`-m` selection.
+
+### The project JSON is hand-editable (schema 2.0)
+
+For fine placement fixes, edit the project file directly and re-export — no
+GUI needed. Layout: `pages[N].regions[]` and `pages[N].overlays[]`.
+
+- Page pixels = inches × dpi (e.g. 6.625×10.25 in @ 300 → 1988×3075).
+- Region `bbox` is `[x, y, w, h]` in page pixels.
+- Regions carry `image_ref` (absolute path to the art; fills land in the
+  platform images dir, e.g. `~/.config/ImageAI/images/`), `prompt`, `z`.
+- Overlays (caption/speech/sfx) place by `anchor` `[x, y]` + `anchor_mode`:
+  `center` centers the whole text block on the anchor (so "move the title" =
+  set the anchor to the midpoint of the space it should occupy); `topleft`
+  pins the block's corner. Text look lives in `text_style`; box look and
+  `max_width_px` in `style`.
+
+### Region images are cover-cropped — match aspect or lose art
+
+`--layout-export` fills each region by scaling + **center-cropping** the art
+to the region's aspect. Art whose aspect ≠ bbox aspect silently loses its
+edges — 16:9 art in a ~6:5 comic panel loses ~35% of its width, amputating
+any off-center subject (symptom: "this panel looks cropped weird").
+
+- **Prevent:** before filling, compute each region's `w/h` and generate its
+  art at the closest supported ratio (Google: 1:1, 3:2, 4:3, 5:4, 16:9, …).
+- **Prevent (Nano Banana):** alternatively, tell the model the target
+  resolution in the prompt as a composition instruction — e.g. "compose the
+  scene to fill an 858×720 area" — and it confines the content to that area,
+  so the renderer's crop can't cut anything that matters. This is a *where to
+  put content* instruction, distinct from the sizing footgun below.
+- **Repair without regenerating:** pre-crop the source to exactly the bbox
+  aspect, keeping the subject inside the window. Source wider than the bbox
+  aspect: full source height, width = height × (w/h), slide the x-window.
+  Source narrower: full source width, height = width ÷ (w/h), slide the
+  y-window. Save as a **new** file and point `image_ref` at it.
+  The renderer's center-crop then becomes a no-op. Never overwrite the
+  original art.
+
+### Verify visually, headless
+
+After any placement change: `--layout-export proj.json -o page.png`, crop the
+area of interest with PIL, and look at it. A project with more than one page
+writes `page-001.png`, `page-002.png`, … instead of `page.png`; open the
+numbered file for the page you changed. Edit JSON → export → inspect is a
+cheap loop; don't trust coordinates alone.
+
+### `.iaibundle` is GUI-only
+
+The CLI exports PNG/PDF only. A project's `.iaibundle` is saved from the GUI
+and goes stale when the CLI edits the project — re-save it there if it must
+stay in sync.
+
+## Agent output contract
+
+- **`--json` (video):** stdout carries exactly one JSON object
+  (`status, output_path, provider, model, aspect_ratio, operation_id, error`);
+  all logs/progress go to **stderr**. Parse stdout only.
+- **Exit codes (video):** `0` success, `1` generation failed, `2` validation /
+  user error (bad flag combo, missing key), `3` unexpected exception.
+- **Sidecars:** durable metadata even without `--json`. An image writes
+  `<file>.<ext>.json` (`out.png` → `out.png.json`) with the prompt and
+  generation details. A video writes `<stem>.json` (`fox.mp4` → `fox.json`)
+  with the same fields as the `--json` object above; it has no `prompt`
+  field, so keep the prompt yourself if you need it later.
 
 ## Keys, testing & auth
 
@@ -260,8 +465,36 @@ Key resolution order: **CLI flag (`-k`/`-K`) > stored config > environment**.
 | `--stream-partials` | flag | gpt-image-2 only; writes `out.pN.png`. |
 | `--batch` / `--batch-status` / `--batch-fetch` | flag / JOB_ID | OpenAI Batch API. |
 | `--lyrics-to-prompts` | LYRICS_FILE | Plus `--lyrics-model/-temperature/-style/-output`. |
-| `--auth-mode` | `api-key` \| `gcloud` | `gcloud` is Google-only. |
+| `--video` | flag | Video mode; reuses `-p`/`-o`. |
+| `--video-provider` | `omni` \| `veo` | Default `veo`. |
+| `--video-model` | model id | Optional override of the resolved default. |
+| `--aspect` | e.g. `16:9`, `9:16` | Validated per video provider. |
+| `--ref-image` | path (repeatable ≤3) | Video reference images. |
+| `--last-frame` | path | Veo-only end frame (interpolation). |
+| `--extend` | path | Veo-only: extend this existing clip. |
+| `--delivery` | `inline` \| `uri` | Omni-only; `uri` for large/720p clips. |
+| `--refine-from` | INTERACTION_ID | Omni-only conversational refine. |
+| `--edit-video` | path | Omni-only: upload + edit your own footage. |
+| `--json` | flag | Video: one JSON object on stdout. |
+| `--layout-design` | DESCRIPTION | New layout project (requires `-o`). |
+| `--layout-fill` | PROJECT | Generate images for prompted regions. |
+| `--layout-export` | PROJECT | Render to PDF/PNG (requires `-o`). |
+| `--content-kind` / `--page-size` / `--orientation` / `--dpi` | see layout section | `--layout-design` options. |
+| `--layout-llm-provider` / `--layout-llm-model` | see layout section | Text-LLM override for design. |
+| `--style` | NAME | Apply a saved style (image gen, `--video`, `--layout-fill`). |
+| `--style-smart` | flag | Smart-merge prompt+style via LLM (image gen only; falls back to plain concat). |
+| `--style-create` | NAME | Derive a new style (needs `--style-images`). |
+| `--style-images` | PATH ... (one flag, all paths after it) | Files/dirs/globs for `--style-create`. Repeating the flag keeps only the last one. |
+| `--style-llm-provider` / `--style-llm-model` | provider / model id | Vision LLM override for `--style-create`. |
+| `--style-list` | flag | List saved styles. |
+| `--style-show` | NAME | Print one style's full JSON record. |
+| `--style-delete` | NAME | Delete a style (and its reference images). |
+| `--style-export` | NAME | Export to a zip (use `-o FILE.zip`). |
+| `--style-import` | FILE | Import a style zip. |
+| `--auth-mode` | `api-key` \| `gcloud` | Google-only (images + Veo; not Omni). |
 | `-k`/`-K`/`-s`/`-t` | — | Key inline / from file / store / test. |
+| `--help-api-key` | flag | API-key setup instructions. |
+| `--version` | flag | Print version and exit. |
 | `--gui` | flag | Force the GUI. |
 
 ## Anti-footguns
@@ -278,11 +511,23 @@ Key resolution order: **CLI flag (`-k`/`-K`) > stored config > environment**.
 - **Org Verification gate:** gpt-image-2 requires OpenAI Organization Verification.
   If `--provider openai -t` returns a verification message, complete it at
   https://platform.openai.com/settings/organization/general.
-- **Google sizing:** never put pixel dimensions in the prompt text; use `--size`.
+- **Google sizing:** never put pixel dimensions in the prompt text as a size
+  request ("(1024x768)" renders as literal text in the image); use `--size`.
+  The one sanctioned use of dimensions in a prompt is the Nano Banana
+  fill-area composition instruction in the layout section.
 - **`--quality standard/hd`** are DALL·E values; `--quality auto/low/medium/high`
   are gpt-image-2 values. Don't cross them.
 - **local_sd first run** downloads multi-GB weights and may need GPU extras — warn
   the user; don't `pip install` system deps without asking.
+- **Video flag/provider pairing:** `--extend`/`--last-frame` need `veo`;
+  `--refine-from`/`--edit-video`/`--delivery` need `omni`. Mismatches exit 2.
+- **In `--json` mode, parse stdout only** — logs and progress are on stderr by
+  design; never grep stdout for progress text.
+- **Layout art is cover-cropped to the region's bbox aspect.** Generate panel
+  art at a matching ratio (or pre-crop and swap `image_ref`) — a mismatch
+  silently cuts content off the panel edges.
+- **`--layout-design` and `--layout-export` require `-o`**; `--layout-fill`
+  writes into the project file in place.
 
 ## GUI entry points
 
