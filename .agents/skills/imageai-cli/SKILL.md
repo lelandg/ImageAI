@@ -241,7 +241,10 @@ python main.py --video --video-provider omni -p "the cat bats the yarn ball" \
 # Extend an existing clip (Veo only; extensions render at 720p)
 python main.py --video --extend fox.mp4 -p "the fox leaps over a log" -o fox2.mp4
 
-# Frame-to-frame interpolation (Veo only: start ref + end frame)
+# Frame-to-frame interpolation (Veo only: end frame via --last-frame)
+# Known gap: the CLI sends --ref-image as a subject reference, not as the start
+# frame (cli/commands/video.py sets no start image), so this request carries an
+# end frame only. True start-to-end interpolation needs a code change.
 python main.py --video -p "sunrise timelapse" -o sunrise.mp4 \
     --ref-image start.png --last-frame end.png
 
