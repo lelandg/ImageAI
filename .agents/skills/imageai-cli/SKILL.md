@@ -69,7 +69,9 @@ python main.py --auth-mode gcloud -p "..." -o out.png
 
 - **Aspect ratio, not pixels in the prompt.** Set sizing via `--size`; the
   provider converts to an aspect ratio (`image_config`). Never bake dimensions
-  like "(1024x768)" into prompt text — Gemini renders them as literal text.
+  like "(1024x768)" into prompt text as a size request — Gemini renders them
+  as literal text. The one exception is the fill-area composition instruction
+  under "Region images are cover-cropped".
 - **Supported aspect ratios:** 1:1, 3:2, 2:3, 3:4, 4:3, 4:5, 5:4, 9:16, 16:9, 21:9.
 - **Scaling:** NB caps at 1024px; the app scales proportionally (max edge 1024)
   then upscales. NB2 → 2K native, NBP → 4K native.
